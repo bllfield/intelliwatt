@@ -87,6 +87,95 @@ function low10Average(values: number[]): number | null {
   return Number.isFinite(avg) ? round2(avg) : null;
 }
 
+type BaseloadOptions = {
+  excludedDateKeys?: Set<string>;
+  minDayKwhFloor?: number;
+  baseloadDayMultiplier?: number;
+  percentile?: number;
+};
+
+function dateKeyUtcFromIso(tsIso: string): string {
+  return tsIso.slice(0, 10);
+}
+
+function percentileCont(sorted: number[], p: number): number | null {
+  if (!sorted.length) return null;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo]!;
+  const w = idx - lo;
+  return sorted[lo]! * (1 - w) + sorted[hi]! * w;
+}
+
+function computeNormalLifeBaseloadKw(
+  intervals: Array<{ tsIso: string; kwh: number }>,
+  options: BaseloadOptions = {}
+): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
+  const minDayKwhFloor = Number.isFinite(options.minDayKwhFloor) ? Number(options.minDayKwhFloor) : 4;
+  const baseloadDayMultiplier = Number.isFinite(options.baseloadDayMultiplier)
+    ? Number(options.baseloadDayMultiplier)
+    : 1.3;
+  const percentile = Number.isFinite(options.percentile) ? Number(options.percentile) : 0.1;
+  const excluded = options.excludedDateKeys;
+
+  const kept: Array<{ tsIso: string; kwh: number; dayKey: string }> = [];
+  for (const row of intervals ?? []) {
+    const tsIso = String(row?.tsIso ?? "");
+    const kwh = Number(row?.kwh);
+    if (!tsIso || !Number.isFinite(kwh)) continue;
+    const dayKey = dateKeyUtcFromIso(tsIso);
+    if (excluded?.has(dayKey)) continue;
+    kept.push({ tsIso, kwh, dayKey });
+  }
+
+  const dayTotals = new Map<string, number>();
+  for (const row of kept) dayTotals.set(row.dayKey, (dayTotals.get(row.dayKey) ?? 0) + row.kwh);
+  const positiveDayTotals = Array.from(dayTotals.values())
+    .filter((v) => Number.isFinite(v) && v > 1e-6)
+    .sort((a, b) => a - b);
+  const lowCount = Math.max(1, Math.floor(positiveDayTotals.length * 0.2));
+  const lowSlice = positiveDayTotals.slice(0, lowCount);
+  const avgLowDayKwh =
+    lowSlice.length > 0 ? lowSlice.reduce((a, b) => a + b, 0) / lowSlice.length : null;
+  const baseloadKwhPerDayCandidate = avgLowDayKwh ?? 0;
+  const minDayKwh = Math.max(minDayKwhFloor, baseloadKwhPerDayCandidate * baseloadDayMultiplier);
+
+  const qualityDays = new Set<string>();
+  dayTotals.forEach((total, dayKey) => {
+    if ((Number(total) || 0) >= minDayKwh) qualityDays.add(dayKey);
+  });
+  const qualityRows = kept.filter((row) => qualityDays.has(row.dayKey));
+  const filteredKwSamples = qualityRows
+    .map((row) => (Number(row.kwh) || 0) * 4)
+    .filter((kw) => Number.isFinite(kw) && kw > 1e-6)
+    .sort((a, b) => a - b);
+
+  if (filteredKwSamples.length < 500) {
+    const fallbackKw = kept
+      .map((row) => (Number(row.kwh) || 0) * 4)
+      .filter((kw) => Number.isFinite(kw) && kw > 1e-6)
+      .sort((a, b) => a - b);
+    const p10Fallback = percentileCont(fallbackKw, percentile);
+    const fallbackSlice =
+      p10Fallback == null ? [] : fallbackKw.filter((kw) => kw <= p10Fallback);
+    const fallbackAvg =
+      fallbackSlice.length > 0
+        ? fallbackSlice.reduce((a, b) => a + b, 0) / fallbackSlice.length
+        : null;
+    return {
+      baseloadKw: fallbackAvg == null ? null : round2(fallbackAvg),
+      fallbackUsed: true,
+      debugNote: "Baseload fallback used: fewer than 500 filtered interval samples.",
+    };
+  }
+
+  const p10 = percentileCont(filteredKwSamples, percentile);
+  const pool = p10 == null ? [] : filteredKwSamples.filter((kw) => kw <= p10);
+  const avg = pool.length > 0 ? pool.reduce((a, b) => a + b, 0) / pool.length : null;
+  return { baseloadKw: avg == null ? null : round2(avg), fallbackUsed: false, debugNote: null };
+}
+
 function toSeriesPoint(rows: Array<{ bucket: Date; kwh: number }>): UsageSeriesPoint[] {
   return rows
     .map((row) => ({
@@ -186,6 +275,9 @@ async function computeInsightsFromDb(args: {
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
+  baseloadMethod?: "SQL_P10_V1";
+  baseloadFallbackUsed?: boolean;
+  baseloadDebugNote?: string | null;
   baseloadDaily: number | null;
   baseloadMonthly: number | null;
   weekdayVsWeekend: { weekday: number; weekend: number };
@@ -270,7 +362,8 @@ async function computeInsightsFromDb(args: {
              p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
         SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh > 0 AND t.kwh <= p.p10
       `);
-      const baseload = baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload));
+      const baseload =
+        baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload) * 4);
       const baseloadDaily = low10Average(dailyTotals.map((d) => Number(d.kwh) || 0));
       const baseloadMonthly = low10Average(monthlyTotals.map((m) => Number(m.kwh) || 0));
       const dowRows = await prisma.$queryRaw<Array<{ weekdaykwh: number; weekendkwh: number }>>(Prisma.sql`
@@ -288,6 +381,9 @@ async function computeInsightsFromDb(args: {
         peakDay,
         peakHour,
         baseload,
+        baseloadMethod: "SQL_P10_V1",
+        baseloadFallbackUsed: false,
+        baseloadDebugNote: null,
         baseloadDaily,
         baseloadMonthly,
         weekdayVsWeekend: { weekday, weekend },
@@ -344,7 +440,8 @@ async function computeInsightsFromDb(args: {
            p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
       SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh > 0 AND t.kwh <= p.p10
     `)) as Array<{ baseload: number | null }>;
-    const baseload = baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload));
+    const baseload =
+      baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload) * 4);
     const baseloadDaily = low10Average(dailyTotals.map((d) => Number(d.kwh) || 0));
     const baseloadMonthly = low10Average(monthlyTotals.map((m) => Number(m.kwh) || 0));
     const dowRows = (await usageClient.$queryRaw(Prisma.sql`
@@ -362,6 +459,9 @@ async function computeInsightsFromDb(args: {
       peakDay,
       peakHour,
       baseload,
+      baseloadMethod: "SQL_P10_V1",
+      baseloadFallbackUsed: false,
+      baseloadDebugNote: null,
       baseloadDaily,
       baseloadMonthly,
       weekdayVsWeekend: { weekday, weekend },
@@ -620,7 +720,8 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
  */
 export async function getActualUsageDatasetForHouse(
   houseId: string,
-  esiid: string | null
+  esiid: string | null,
+  args?: { cutoff?: Date; excludedDateKeys?: Set<string> }
 ): Promise<{ dataset: ActualHouseDataset | null; alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null } }> {
   let smtDataset: UsageDatasetResult | null = null;
   let greenDataset: UsageDatasetResult | null = null;
@@ -685,7 +786,10 @@ export async function getActualUsageDatasetForHouse(
     const latestIso = selected?.summary?.latest ?? null;
     const latest = latestIso ? new Date(latestIso) : null;
     if (selected?.summary?.source && latest && Number.isFinite(latest.getTime())) {
-      const cutoff = new Date(latest.getTime() - 365 * DAY_MS);
+      const cutoff =
+        args?.cutoff && Number.isFinite(args.cutoff.getTime())
+          ? new Date(args.cutoff.getTime())
+          : new Date(latest.getTime() - 365 * DAY_MS);
       let rawId: string | null = null;
       if (selected.summary.source === "GREEN_BUTTON") {
         const usageClient = usagePrisma as any;
@@ -693,6 +797,25 @@ export async function getActualUsageDatasetForHouse(
         rawId = latestRaw?.id ?? null;
       }
       const computed = await computeInsightsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff });
+      const rangeStart = cutoff.toISOString().slice(0, 10);
+      const rangeEnd = latest.toISOString().slice(0, 10);
+      const intervalRows = await getActualIntervalsForRange({
+        houseId,
+        esiid,
+        startDate: rangeStart,
+        endDate: rangeEnd,
+      });
+      const baseloadFiltered = computeNormalLifeBaseloadKw(
+        intervalRows.map((r) => ({ tsIso: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
+        { excludedDateKeys: args?.excludedDateKeys }
+      );
+      const baseload = baseloadFiltered.baseloadKw ?? computed.baseload;
+      const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" =
+        baseloadFiltered.baseloadKw == null
+          ? "SQL_P10_V1"
+          : baseloadFiltered.fallbackUsed
+            ? "FALLBACK_V1"
+            : "FILTERED_NORMAL_LIFE_V1";
       dailyTotals = computed.dailyTotals;
       monthlyTotals = computed.monthlyTotals;
       totals = await computeImportExportTotalsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff });
@@ -702,7 +825,10 @@ export async function getActualUsageDatasetForHouse(
         ...(stitchedMonthMeta ? { stitchedMonth: stitchedMonthMeta } : {}),
         peakDay: computed.peakDay,
         peakHour: computed.peakHour,
-        baseload: computed.baseload,
+        baseload,
+        baseloadMethod,
+        baseloadFallbackUsed: baseloadFiltered.fallbackUsed,
+        baseloadDebugNote: baseloadFiltered.debugNote,
         baseloadDaily: computed.baseloadDaily,
         baseloadMonthly: computed.baseloadMonthly,
         weekdayVsWeekend: computed.weekdayVsWeekend,

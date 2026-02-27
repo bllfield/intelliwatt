@@ -190,3 +190,15 @@ Weather DB supports:
 
 Future engine will switch between these depending on scenario.
 
+## Insights / Baseload (Normal-Life V1)
+
+Baseload is computed as a normal-life always-on metric and now excludes low-signal windows that can artificially push it toward zero.
+
+- Excluded days: when excluded date keys are available (for travel/vacant windows), those intervals are removed from baseload sampling.
+- Day-quality filter: days below a computed minimum day-kWh floor are excluded from the baseload sample pool to prevent zero-day poisoning.
+  - Floor uses `max(minDayKwhFloor, avg(lowest 20% positive day totals) * baseloadDayMultiplier)`.
+- Sampling and percentile: remaining interval samples are converted `kWh -> kW` (`kW = kWh * 4`), then baseload is the average of samples at or below p10.
+- Fallback safety: if filtering leaves too few samples, the system falls back to prior p10 behavior and marks `baseloadFallbackUsed` (with a debug note) in insights.
+
+This logic is used consistently for Actual and Simulated insight baseloads. It does not modify intervals, totals, or pricing inputs.
+

@@ -21,6 +21,94 @@ function low10Average(values: number[]): number | null {
   return Number.isFinite(avg) ? round2(avg) : null;
 }
 
+type BaseloadOptions = {
+  excludedDateKeys?: Set<string>;
+  minDayKwhFloor?: number;
+  baseloadDayMultiplier?: number;
+  percentile?: number;
+};
+
+function dateKeyUtcFromIso(tsIso: string): string {
+  return tsIso.slice(0, 10);
+}
+
+function percentileCont(sorted: number[], p: number): number | null {
+  if (!sorted.length) return null;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo]!;
+  const w = idx - lo;
+  return sorted[lo]! * (1 - w) + sorted[hi]! * w;
+}
+
+function computeNormalLifeBaseloadKw(
+  intervals: Array<{ tsIso: string; kwh: number }>,
+  options: BaseloadOptions = {}
+): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
+  const minDayKwhFloor = Number.isFinite(options.minDayKwhFloor) ? Number(options.minDayKwhFloor) : 4;
+  const baseloadDayMultiplier = Number.isFinite(options.baseloadDayMultiplier)
+    ? Number(options.baseloadDayMultiplier)
+    : 1.3;
+  const percentile = Number.isFinite(options.percentile) ? Number(options.percentile) : 0.1;
+  const excluded = options.excludedDateKeys;
+
+  const kept: Array<{ tsIso: string; kwh: number; dayKey: string }> = [];
+  for (const row of intervals ?? []) {
+    const tsIso = String(row?.tsIso ?? "");
+    const kwh = Number(row?.kwh);
+    if (!tsIso || !Number.isFinite(kwh)) continue;
+    const dayKey = dateKeyUtcFromIso(tsIso);
+    if (excluded?.has(dayKey)) continue;
+    kept.push({ tsIso, kwh, dayKey });
+  }
+
+  const dayTotals = new Map<string, number>();
+  for (const row of kept) dayTotals.set(row.dayKey, (dayTotals.get(row.dayKey) ?? 0) + row.kwh);
+  const positiveDayTotals = Array.from(dayTotals.values())
+    .filter((v) => Number.isFinite(v) && v > 1e-6)
+    .sort((a, b) => a - b);
+  const lowCount = Math.max(1, Math.floor(positiveDayTotals.length * 0.2));
+  const lowSlice = positiveDayTotals.slice(0, lowCount);
+  const avgLowDayKwh =
+    lowSlice.length > 0 ? lowSlice.reduce((a, b) => a + b, 0) / lowSlice.length : null;
+  const baseloadKwhPerDayCandidate = avgLowDayKwh ?? 0;
+  const minDayKwh = Math.max(minDayKwhFloor, baseloadKwhPerDayCandidate * baseloadDayMultiplier);
+
+  const qualityDays = new Set<string>();
+  dayTotals.forEach((total, dayKey) => {
+    if ((Number(total) || 0) >= minDayKwh) qualityDays.add(dayKey);
+  });
+  const qualityRows = kept.filter((row) => qualityDays.has(row.dayKey));
+  const filteredKwSamples = qualityRows
+    .map((row) => (Number(row.kwh) || 0) * 4)
+    .filter((kw) => Number.isFinite(kw) && kw > 1e-6)
+    .sort((a, b) => a - b);
+
+  if (filteredKwSamples.length < 500) {
+    const fallbackKw = kept
+      .map((row) => (Number(row.kwh) || 0) * 4)
+      .filter((kw) => Number.isFinite(kw) && kw > 1e-6)
+      .sort((a, b) => a - b);
+    const p10Fallback = percentileCont(fallbackKw, percentile);
+    const fallbackSlice = p10Fallback == null ? [] : fallbackKw.filter((kw) => kw <= p10Fallback);
+    const fallbackAvg =
+      fallbackSlice.length > 0
+        ? fallbackSlice.reduce((a, b) => a + b, 0) / fallbackSlice.length
+        : null;
+    return {
+      baseloadKw: fallbackAvg == null ? null : round2(fallbackAvg),
+      fallbackUsed: true,
+      debugNote: "Baseload fallback used: fewer than 500 filtered interval samples.",
+    };
+  }
+
+  const p10 = percentileCont(filteredKwSamples, percentile);
+  const pool = p10 == null ? [] : filteredKwSamples.filter((kw) => kw <= p10);
+  const avg = pool.length > 0 ? pool.reduce((a, b) => a + b, 0) / pool.length : null;
+  return { baseloadKw: avg == null ? null : round2(avg), fallbackUsed: false, debugNote: null };
+}
+
 function toDateKey(tsIso: string): string {
   return tsIso.slice(0, 10);
 }
@@ -206,6 +294,27 @@ function computeTimeOfDayBuckets(intervals: Array<{ timestamp: string; consumpti
   ];
 }
 
+function excludedDateKeysFromTravelRanges(
+  ranges: Array<{ startDate: string; endDate: string }> | undefined
+): Set<string> {
+  const out = new Set<string>();
+  for (const r of ranges ?? []) {
+    const start = String(r?.startDate ?? "").slice(0, 10);
+    const end = String(r?.endDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
+    const a = new Date(start + "T12:00:00.000Z");
+    const b = new Date(end + "T12:00:00.000Z");
+    if (!Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime())) continue;
+    let ms = Math.min(a.getTime(), b.getTime());
+    const last = Math.max(a.getTime(), b.getTime());
+    while (ms <= last) {
+      out.add(new Date(ms).toISOString().slice(0, 10));
+      ms += 24 * 60 * 60 * 1000;
+    }
+  }
+  return out;
+}
+
 export type SimulatorBuildInputsV1 = {
   version: 1;
   mode: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
@@ -288,6 +397,9 @@ export type SimulatedUsageDataset = {
     peakDay: { date: string; kwh: number } | null;
     peakHour: any;
     baseload: any;
+    baseloadMethod?: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1";
+    baseloadFallbackUsed?: boolean;
+    baseloadDebugNote?: string | null;
     baseloadDaily?: any;
     baseloadMonthly?: any;
     weekdayVsWeekend: { weekday: number; weekend: number };
@@ -302,7 +414,10 @@ export type SimulatedUsageDataset = {
   usageBucketsByMonth: Record<string, Record<string, number>>;
 };
 
-export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: SimulatorBuildInputsV1): SimulatedUsageDataset {
+export function buildSimulatedUsageDatasetFromBuildInputs(
+  buildInputs: SimulatorBuildInputsV1,
+  options?: { excludedDateKeys?: Set<string> }
+): SimulatedUsageDataset {
   const curve = generateSimulatedCurve({
     canonicalMonths: buildInputs.canonicalMonths,
     periods: (buildInputs as any).canonicalPeriods ?? undefined,
@@ -345,19 +460,16 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
 
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
-  // Baseload from the built curve (lowest 10% of 15-min kWh samples), so Past/Future reflect overlay/upgrades/vacant fill.
-  // Use positive samples first so always-on load is not diluted by zeros; fall back to all samples if result would be 0.
-  const allKwh = curve.intervals
-    .map((i) => Number(i.consumption_kwh) || 0)
-    .filter((kwh) => Number.isFinite(kwh));
-  const positiveKwh = allKwh.filter((kwh) => kwh > 1e-6).sort((a, b) => a - b);
-  const count10 = Math.max(1, Math.floor((positiveKwh.length || allKwh.length) * 0.1));
-  const baseSlice =
-    positiveKwh.length >= count10
-      ? positiveKwh.slice(0, count10)
-      : allKwh.sort((a, b) => a - b).slice(0, Math.max(1, Math.floor(allKwh.length * 0.1)));
-  const baseloadRaw = baseSlice.length > 0 ? baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length : null;
-  const baseload = baseloadRaw != null && baseloadRaw > 0 ? round2(baseloadRaw) : null;
+  const excludedDateKeys = options?.excludedDateKeys ?? excludedDateKeysFromTravelRanges(buildInputs.travelRanges);
+  const baseloadComputed = computeNormalLifeBaseloadKw(
+    curve.intervals.map((i) => ({ tsIso: String(i.timestamp ?? ""), kwh: Number(i.consumption_kwh) || 0 })),
+    { excludedDateKeys: excludedDateKeys.size > 0 ? excludedDateKeys : undefined }
+  );
+  const baseload = baseloadComputed.baseloadKw;
+  const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = baseloadComputed
+    .fallbackUsed
+    ? "FALLBACK_V1"
+    : "FILTERED_NORMAL_LIFE_V1";
   const baseloadDaily = low10Average(daily.map((d) => Number(d.kwh) || 0));
   const baseloadMonthly = low10Average(monthly.map((m) => Number(m.kwh) || 0));
 
@@ -388,6 +500,9 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
       baseload,
+      baseloadMethod,
+      baseloadFallbackUsed: baseloadComputed.fallbackUsed,
+      baseloadDebugNote: baseloadComputed.debugNote,
       baseloadDaily,
       baseloadMonthly,
       weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
@@ -420,7 +535,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     canonicalEndMonth: string;
     notes?: string[];
     filledMonths?: string[];
-  }
+  },
+  options?: { excludedDateKeys?: Set<string> }
 ): SimulatedUsageDataset {
   const dailyMap = new Map<string, number>();
   for (let j = 0; j < curve.intervals.length; j++) {
@@ -459,18 +575,15 @@ export function buildSimulatedUsageDatasetFromCurve(
 
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
-  // Baseload = lowest 10% of 15-min kWh; prefer positive-only, fall back to all samples so we don't show 0 when there is load.
-  const allKwh = curve.intervals
-    .map((i) => Number(i.consumption_kwh) || 0)
-    .filter((kwh) => Number.isFinite(kwh));
-  const positiveKwh = allKwh.filter((kwh) => kwh > 1e-6).sort((a, b) => a - b);
-  const count10 = Math.max(1, Math.floor((positiveKwh.length || allKwh.length) * 0.1));
-  const baseSlice =
-    positiveKwh.length >= count10
-      ? positiveKwh.slice(0, count10)
-      : allKwh.sort((a, b) => a - b).slice(0, Math.max(1, Math.floor(allKwh.length * 0.1)));
-  const baseloadRaw = baseSlice.length > 0 ? baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length : null;
-  const baseload = baseloadRaw != null && baseloadRaw > 0 ? round2(baseloadRaw) : null;
+  const baseloadComputed = computeNormalLifeBaseloadKw(
+    curve.intervals.map((i) => ({ tsIso: String(i.timestamp ?? ""), kwh: Number(i.consumption_kwh) || 0 })),
+    { excludedDateKeys: options?.excludedDateKeys }
+  );
+  const baseload = baseloadComputed.baseloadKw;
+  const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = baseloadComputed
+    .fallbackUsed
+    ? "FALLBACK_V1"
+    : "FILTERED_NORMAL_LIFE_V1";
   const baseloadDaily = low10Average(daily.map((d) => Number(d.kwh) || 0));
   const baseloadMonthly = low10Average(monthly.map((m) => Number(m.kwh) || 0));
 
@@ -506,6 +619,9 @@ export function buildSimulatedUsageDatasetFromCurve(
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
       baseload,
+      baseloadMethod,
+      baseloadFallbackUsed: baseloadComputed.fallbackUsed,
+      baseloadDebugNote: baseloadComputed.debugNote,
       baseloadDaily,
       baseloadMonthly,
       weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
