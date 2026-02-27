@@ -65,9 +65,8 @@ export async function GET(_request: NextRequest) {
       },
       {
         headers: {
-          // Browser/private caching only; user-specific (cookie auth). This just reduces repeated fetches.
-          // Usage changes infrequently; keep this fairly "sticky" so re-entering the page doesn't feel like recomputation.
-          'Cache-Control': 'private, max-age=900, stale-while-revalidate=86400',
+          // User-scoped usage must reflect latest simulator/baseline changes immediately.
+          "Cache-Control": "private, no-store, max-age=0, must-revalidate",
         },
       },
     );

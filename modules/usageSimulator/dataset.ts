@@ -18,6 +18,126 @@ function dayOfWeekUtc(dateKey: string): number {
   return d.getUTCDay();
 }
 
+function daysInMonth(year: number, month1: number): number {
+  if (!Number.isFinite(year) || !Number.isFinite(month1) || month1 < 1 || month1 > 12) return 31;
+  return new Date(Date.UTC(year, month1, 0)).getUTCDate();
+}
+
+function chicagoParts(ts: Date): { year: number; month: number; day: number; yearMonth: string } | null {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = fmt.formatToParts(ts);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const year = Number(get("year"));
+    const month = Number(get("month"));
+    const day = Number(get("day"));
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return { year, month, day, yearMonth: `${String(year)}-${String(month).padStart(2, "0")}` };
+  } catch {
+    return null;
+  }
+}
+
+function lastNYearMonthsFrom(year: number, month1: number, n: number): string[] {
+  const out: string[] = [];
+  const count = Math.max(1, Math.floor(n));
+  for (let i = count - 1; i >= 0; i--) {
+    const idx = month1 - i;
+    const y = idx >= 1 ? year : year - Math.ceil((1 - idx) / 12);
+    const m = ((idx - 1) % 12 + 12) % 12 + 1;
+    out.push(`${String(y)}-${String(m).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+function buildDisplayMonthlyFromIntervals(args: {
+  intervals: Array<{ timestamp: string; consumption_kwh: number }>;
+  endDate: string;
+}): {
+  monthly: Array<{ month: string; kwh: number }>;
+  stitchedMonth:
+    | {
+        mode: "PRIOR_YEAR_TAIL";
+        yearMonth: string;
+        haveDaysThrough: number;
+        missingDaysFrom: number;
+        missingDaysTo: number;
+        borrowedFromYearMonth: string;
+        completenessRule: string;
+      }
+    | null;
+} {
+  const monthTotals = new Map<string, number>();
+  const dayTotals = new Map<string, number>(); // `${YYYY-MM}-${DD}`
+  for (const iv of args.intervals ?? []) {
+    const ts = new Date(String(iv?.timestamp ?? ""));
+    if (!Number.isFinite(ts.getTime())) continue;
+    const p = chicagoParts(ts);
+    if (!p) continue;
+    const kwh = Number(iv?.consumption_kwh) || 0;
+    monthTotals.set(p.yearMonth, (monthTotals.get(p.yearMonth) ?? 0) + kwh);
+    const dayKey = `${p.yearMonth}-${String(p.day).padStart(2, "0")}`;
+    dayTotals.set(dayKey, (dayTotals.get(dayKey) ?? 0) + kwh);
+  }
+
+  const endAnchor = new Date(`${String(args.endDate).slice(0, 10)}T23:59:59.999Z`);
+  const endParts = chicagoParts(endAnchor);
+  if (!endParts) {
+    const fallback = Array.from(monthTotals.entries())
+      .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
+      .sort((a, b) => (a.month < b.month ? -1 : 1));
+    return { monthly: fallback, stitchedMonth: null };
+  }
+
+  const yearMonths = lastNYearMonthsFrom(endParts.year, endParts.month, 12);
+  const displayTotals = new Map<string, number>();
+  for (const ym of yearMonths) displayTotals.set(ym, monthTotals.get(ym) ?? 0);
+
+  const dim = daysInMonth(endParts.year, endParts.month);
+  const haveDaysThrough = Math.max(0, Math.min(dim, endParts.day));
+  let stitchedMonth: {
+    mode: "PRIOR_YEAR_TAIL";
+    yearMonth: string;
+    haveDaysThrough: number;
+    missingDaysFrom: number;
+    missingDaysTo: number;
+    borrowedFromYearMonth: string;
+    completenessRule: string;
+  } | null = null;
+
+  if (haveDaysThrough < dim) {
+    const borrowedFromYearMonth = `${String(endParts.year - 1)}-${String(endParts.month).padStart(2, "0")}`;
+    let stitchedKwh = 0;
+    for (let d = 1; d <= haveDaysThrough; d++) {
+      const k = `${endParts.yearMonth}-${String(d).padStart(2, "0")}`;
+      stitchedKwh += dayTotals.get(k) ?? 0;
+    }
+    for (let d = haveDaysThrough + 1; d <= dim; d++) {
+      const k = `${borrowedFromYearMonth}-${String(d).padStart(2, "0")}`;
+      stitchedKwh += dayTotals.get(k) ?? 0;
+    }
+    displayTotals.set(endParts.yearMonth, stitchedKwh);
+    stitchedMonth = {
+      mode: "PRIOR_YEAR_TAIL",
+      yearMonth: endParts.yearMonth,
+      haveDaysThrough,
+      missingDaysFrom: haveDaysThrough + 1,
+      missingDaysTo: dim,
+      borrowedFromYearMonth,
+      completenessRule: "SIMULATED_INTERVALS",
+    };
+  }
+
+  const monthly = yearMonths.map((month) => ({ month, kwh: round2(displayTotals.get(month) ?? 0) }));
+  return { monthly, stitchedMonth };
+}
+
 function computeFifteenMinuteAverages(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
   const buckets = new Map<string, { sumKw: number; count: number }>();
   for (let i = 0; i < intervals.length; i++) {
@@ -148,9 +268,11 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
     .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-  const monthly = curve.monthlyTotals
-    .map((m) => ({ month: m.month, kwh: round2(m.kwh) }))
-    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const monthlyBuild = buildDisplayMonthlyFromIntervals({
+    intervals: curve.intervals,
+    endDate: curve.end,
+  });
+  const monthly = monthlyBuild.monthly;
   const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
@@ -206,7 +328,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
     insights: {
       fifteenMinuteAverages,
       timeOfDayBuckets: [],
-      stitchedMonth: null,
+      stitchedMonth: monthlyBuild.stitchedMonth,
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
       baseload,
@@ -251,9 +373,11 @@ export function buildSimulatedUsageDatasetFromCurve(
     .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-  const monthly = curve.monthlyTotals
-    .map((m) => ({ month: m.month, kwh: round2(m.kwh) }))
-    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const monthlyBuild = buildDisplayMonthlyFromIntervals({
+    intervals: curve.intervals,
+    endDate: curve.end,
+  });
+  const monthly = monthlyBuild.monthly;
   const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
@@ -317,7 +441,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     insights: {
       fifteenMinuteAverages,
       timeOfDayBuckets: [],
-      stitchedMonth: null,
+      stitchedMonth: monthlyBuild.stitchedMonth,
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
       baseload,

@@ -432,12 +432,21 @@ export const UsageDashboard: React.FC<Props> = ({
     });
 
     const totalsFromApi = dataset?.totals;
-    const totals = totalsFromApi
-      ?? (fallbackDaily.length
+    const totalsFromSeries =
+      fallbackDaily.length
         ? deriveTotalsFromRows(fallbackDaily)
         : intervals.length
           ? deriveTotalsFromRows(intervals.map((i) => ({ kwh: i.kwh })))
-          : { importKwh: 0, exportKwh: 0, netKwh: 0 });
+          : { importKwh: 0, exportKwh: 0, netKwh: 0 };
+    const totalsFromMonthly = monthly.length
+      ? deriveTotalsFromRows(monthly.map((m) => ({ kwh: Number(m?.kwh) || 0 })))
+      : null;
+    const totals =
+      totalsFromApi != null
+        ? totalsFromMonthly != null && Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
+          ? totalsFromMonthly
+          : totalsFromApi
+        : totalsFromMonthly ?? totalsFromSeries;
 
     const totalKwh = totals.netKwh;
 
