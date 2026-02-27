@@ -561,6 +561,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     timestamp: i.timestamp,
     kwh: Number(i.consumption_kwh) || 0,
   }));
+  // Summary must reflect the exact post-patch intervals returned to clients.
+  const totalFromIntervals = round2(seriesIntervals15.reduce((s, r) => s + (Number(r.kwh) || 0), 0));
 
   const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
   const timeOfDayBuckets = computeTimeOfDayBuckets(curve.intervals);
@@ -593,12 +595,21 @@ export function buildSimulatedUsageDatasetFromCurve(
   const endDateOnly = curve.end.slice(0, 10);
   const summaryStart = /^\d{4}-\d{2}-\d{2}$/.test(startDateOnly) ? startDateOnly : curve.start;
   const summaryEnd = /^\d{4}-\d{2}-\d{2}$/.test(endDateOnly) ? endDateOnly : curve.end;
+  if (process.env.NODE_ENV !== "production" && process.env.DEBUG_SIM_USAGE_SUMMARY === "1") {
+    const delta = round2(totalFromIntervals - totalFromMonthly);
+    console.debug("[usageSimulator.summary]", {
+      intervalsCount: seriesIntervals15.length,
+      summaryTotalKwh: totalFromIntervals,
+      sumIntervalsKwh: totalFromIntervals,
+      deltaFromMonthly: delta,
+    });
+  }
 
   return {
     summary: {
       source: "SIMULATED" as const,
-      intervalsCount: curve.intervals.length,
-      totalKwh: totalFromMonthly,
+      intervalsCount: seriesIntervals15.length,
+      totalKwh: totalFromIntervals,
       start: summaryStart,
       end: summaryEnd,
       latest: summaryEnd,
