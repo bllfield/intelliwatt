@@ -76,6 +76,7 @@ type ManualEntryPayload = {
   earlyTerminationFee?: number | null;
   esiId?: string | null;
   accountNumberLast4?: string | null;
+  switchingServiceFeeMonthly?: number | null;
   notes?: string | null;
   billUploaded?: boolean;
 };
@@ -105,6 +106,7 @@ type SavedPlanDetails = {
   earlyTerminationFee: number | null;
   esiId: string | null;
   accountNumberLast4: string | null;
+  switchingServiceFeeMonthly?: number | null;
   notes: string | null;
   rateStructure: any;
   normalizedAt: string | null;
@@ -128,6 +130,7 @@ type ParsedPlanDetails = {
   earlyTerminationFee: number | null;
   esiId: string | null;
   accountNumberLast4: string | null;
+  switchingServiceFeeMonthly?: number | null;
   notes: string | null;
   rateStructure: any;
   parserVersion?: string | null;
@@ -157,6 +160,8 @@ type CurrentRateDetailsFormProps = {
   onContinue?: (data: ManualEntryPayload) => void;
   onSkip?: () => void;
 };
+
+const CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY = "current_plan_switching_service_fee_monthly_v1";
 
 const RATE_TYPE_OPTIONS: Array<{ value: RateType; label: string }> = [
   { value: "FIXED", label: "Fixed rate" },
@@ -278,6 +283,7 @@ export function CurrentRateDetailsForm({
   const [billCreditRules, setBillCreditRules] = useState<BillCreditRuleForm[]>([createEmptyBillCreditRule()]);
   const [termLengthMonths, setTermLengthMonths] = useState("");
   const [earlyTerminationFee, setEarlyTerminationFee] = useState("");
+  const [switchingServiceFeeMonthly, setSwitchingServiceFeeMonthly] = useState("");
   const [contractExpiration, setContractExpiration] = useState("");
   const [meterNumber, setMeterNumber] = useState("");
   const [esiId, setEsiId] = useState("");
@@ -495,6 +501,21 @@ export function CurrentRateDetailsForm({
     if (earlyTerminationFee === "" && pickedEarlyTermination !== null) {
       setEarlyTerminationFee(String(pickedEarlyTermination));
     }
+    const pickedSwitchingServiceFee = pickNumber(
+      saved?.switchingServiceFeeMonthly,
+      parsed?.switchingServiceFeeMonthly,
+    );
+    if (switchingServiceFeeMonthly === "" && pickedSwitchingServiceFee !== null) {
+      setSwitchingServiceFeeMonthly(String(pickedSwitchingServiceFee));
+      try {
+        window.localStorage.setItem(
+          CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY,
+          String(pickedSwitchingServiceFee),
+        );
+      } catch {
+        // ignore
+      }
+    }
 
     const pickedEsiId = pickString(saved?.esiId, parsed?.esiId);
     if (!esiId && pickedEsiId) {
@@ -610,6 +631,7 @@ export function CurrentRateDetailsForm({
     contractExpiration,
     meterNumber,
     earlyTerminationFee,
+    switchingServiceFeeMonthly,
     esiId,
     accountNumberLast4,
     notes,
@@ -646,7 +668,28 @@ export function CurrentRateDetailsForm({
         setContractExpiration(d.slice(0, 10));
       }
     }
-  }, [parsedPlan, savedPlan, earlyTerminationFee, contractExpiration]);
+    if (switchingServiceFeeMonthly.trim() === "") {
+      const v =
+        typeof saved?.switchingServiceFeeMonthly === "number"
+          ? saved.switchingServiceFeeMonthly
+          : typeof parsed?.switchingServiceFeeMonthly === "number"
+            ? parsed.switchingServiceFeeMonthly
+            : null;
+      if (v != null && Number.isFinite(v)) {
+        setSwitchingServiceFeeMonthly(String(v));
+      } else {
+        try {
+          const raw = window.localStorage.getItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY);
+          const n = raw == null ? null : Number(raw);
+          if (n != null && Number.isFinite(n) && n >= 0) {
+            setSwitchingServiceFeeMonthly(String(n));
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [parsedPlan, savedPlan, earlyTerminationFee, contractExpiration, switchingServiceFeeMonthly]);
 
   function applyParsedPlanToForm(p: any) {
     if (!p || typeof p !== "object") return;
@@ -666,6 +709,13 @@ export function CurrentRateDetailsForm({
     }
     if (typeof p?.earlyTerminationFee === "number" && Number.isFinite(p.earlyTerminationFee)) {
       setEarlyTerminationFee(String(p.earlyTerminationFee));
+    }
+    if (
+      typeof p?.switchingServiceFeeMonthly === "number" &&
+      Number.isFinite(p.switchingServiceFeeMonthly) &&
+      switchingServiceFeeMonthly.trim() === ""
+    ) {
+      setSwitchingServiceFeeMonthly(String(p.switchingServiceFeeMonthly));
     }
     if (typeof p?.esiId === "string" && p.esiId.trim()) setEsiId(p.esiId);
     if (typeof p?.accountNumberLast4 === "string" && p.accountNumberLast4.trim()) setAccountNumberLast4(p.accountNumberLast4);
@@ -767,6 +817,21 @@ export function CurrentRateDetailsForm({
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   };
+
+  useEffect(() => {
+    try {
+      if (switchingServiceFeeMonthly.trim() === "") {
+        window.localStorage.removeItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(
+          CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY,
+          switchingServiceFeeMonthly.trim(),
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }, [switchingServiceFeeMonthly]);
 
   const toMonthlyFeeCents = (value: number | null) => {
     if (value === null || Number.isNaN(value)) {
@@ -1199,6 +1264,7 @@ export function CurrentRateDetailsForm({
     const baseCharge = parseNumber(baseFeeDollars);
     const termLength = parseNumber(termLengthMonths);
     const earlyTermination = parseNumber(earlyTerminationFee);
+    const switchingServiceFee = parseNumber(switchingServiceFeeMonthly);
     const contractDate = contractExpiration.trim().length > 0 ? new Date(contractExpiration) : null;
     const meterNumberValue = meterNumber.trim().length > 0 ? meterNumber.trim() : null;
     let formattedNotes = notes.trim().length > 0 ? notes.trim() : null;
@@ -1294,6 +1360,11 @@ export function CurrentRateDetailsForm({
     if (earlyTerminationFee.trim().length > 0) {
       if (earlyTermination === null || earlyTermination < 0) {
         validationErrors.push("Early termination fee must be zero or a positive number.");
+      }
+    }
+    if (switchingServiceFeeMonthly.trim().length > 0) {
+      if (switchingServiceFee === null || switchingServiceFee < 0) {
+        validationErrors.push("Switching service fee must be zero or a positive number.");
       }
     }
     if (contractDate && Number.isNaN(contractDate.getTime())) {
@@ -1441,6 +1512,7 @@ export function CurrentRateDetailsForm({
         termLengthMonths.trim().length > 0 ? Number(Math.round(termLength ?? 0)) : null,
       contractEndDate: contractDate ? contractDate.toISOString() : null,
       earlyTerminationFee: earlyTermination ?? null,
+      switchingServiceFeeMonthly: switchingServiceFee ?? null,
       esiId: esiIdValue,
       accountNumberLast4: accountLast4Value,
       notes: formattedNotes,
@@ -2722,6 +2794,23 @@ export function CurrentRateDetailsForm({
               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
               placeholder="e.g., 150"
             />
+          </label>
+
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Switching service subscription ($/month, optional)
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={switchingServiceFeeMonthly}
+              onChange={(e) => setSwitchingServiceFeeMonthly(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="e.g., 10"
+            />
+            <span className="block text-xs text-brand-slate">
+              Optional. Added only to your current-plan comparison costs (never added to recommended plans).
+            </span>
           </label>
 
           <label className="block space-y-1 text-sm text-brand-navy">

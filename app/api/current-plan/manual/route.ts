@@ -85,7 +85,19 @@ type ManualEntryPayload = {
   accountNumberLast4?: unknown;
   notes?: unknown;
   houseId?: unknown;
+  switchingServiceFeeMonthly?: unknown;
 };
+
+function readSwitchingServiceFeeMonthlyFromRateStructure(rateStructure: unknown): number | null {
+  const rs = rateStructure as any;
+  const v =
+    rs?.comparisonAdjustments?.switchingServiceFeeMonthlyDollars ??
+    rs?.switchingServiceFeeMonthlyDollars ??
+    null;
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 const decimalToNumber = (value: unknown): number | null => {
   if (value === null || value === undefined) {
@@ -249,6 +261,7 @@ export async function GET() {
           earlyTerminationFee: decimalToNumber(latestPlan.earlyTerminationFee),
           esiId: latestPlan.esiId ?? null,
           accountNumberLast4: latestPlan.accountNumberLast4 ?? null,
+          switchingServiceFeeMonthly: readSwitchingServiceFeeMonthlyFromRateStructure(latestPlan.rateStructure),
           notes: latestPlan.notes ?? null,
           rateStructure: latestPlan.rateStructure ?? null,
           normalizedAt: latestPlan.normalizedAt
@@ -789,6 +802,14 @@ export async function POST(request: NextRequest) {
       typeof body.notes === 'string' && body.notes.trim().length > 0
         ? body.notes.trim().slice(0, 2000)
         : null;
+    const switchingServiceFeeMonthlyInput = parseNumber(body.switchingServiceFeeMonthly);
+    const switchingServiceFeeMonthly =
+      switchingServiceFeeMonthlyInput !== null && switchingServiceFeeMonthlyInput >= 0
+        ? Number(switchingServiceFeeMonthlyInput.toFixed(2))
+        : null;
+    if (switchingServiceFeeMonthlyInput !== null && switchingServiceFeeMonthlyInput < 0) {
+      errors.push('switchingServiceFeeMonthly cannot be negative.');
+    }
 
     const houseId =
       typeof body.houseId === 'string' && body.houseId.trim().length > 0
@@ -837,6 +858,13 @@ export async function POST(request: NextRequest) {
 
     if (errors.length > 0 || !rateType) {
       return NextResponse.json({ error: 'Validation failed', details: errors }, { status: 400 });
+    }
+
+    if (rateStructure && typeof rateStructure === 'object') {
+      (rateStructure as any).comparisonAdjustments = {
+        ...((rateStructure as any).comparisonAdjustments ?? {}),
+        switchingServiceFeeMonthlyDollars: switchingServiceFeeMonthly,
+      };
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();

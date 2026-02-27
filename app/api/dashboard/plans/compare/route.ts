@@ -42,6 +42,17 @@ function decimalToNumber(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function readSwitchingServiceFeeMonthlyFromRateStructure(rateStructure: unknown): number | null {
+  const rs = rateStructure as any;
+  const v =
+    rs?.comparisonAdjustments?.switchingServiceFeeMonthlyDollars ??
+    rs?.switchingServiceFeeMonthlyDollars ??
+    null;
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 const MATERIALIZED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function isRateStructurePresent(rs: any): boolean {
@@ -82,6 +93,11 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const offerId = (url.searchParams.get("offerId") ?? "").trim();
+    const switchingServiceFeeMonthlyOverrideRaw = url.searchParams.get("switchingServiceFeeMonthly");
+    const switchingServiceFeeMonthlyOverride =
+      switchingServiceFeeMonthlyOverrideRaw == null || switchingServiceFeeMonthlyOverrideRaw.trim() === ""
+        ? null
+        : Number(switchingServiceFeeMonthlyOverrideRaw);
     if (!offerId) return NextResponse.json({ ok: false, error: "offerId_required" }, { status: 400 });
 
     const cookieStore = cookies();
@@ -517,9 +533,17 @@ export async function GET(req: NextRequest) {
       return payload as any;
     })();
 
+    const currentSwitchingServiceFeeMonthly =
+      switchingServiceFeeMonthlyOverride != null &&
+      Number.isFinite(switchingServiceFeeMonthlyOverride) &&
+      switchingServiceFeeMonthlyOverride >= 0
+        ? Number(switchingServiceFeeMonthlyOverride.toFixed(2))
+        : readSwitchingServiceFeeMonthlyFromRateStructure(mergedCurrent?.rateStructure ?? null);
+
     const buildVariablesList = (args: {
       rateStructure: any;
       tdspApplied: any | null;
+      switchingServiceFeeMonthly?: number | null;
     }): Array<{ key: string; label: string; value: string }> => {
       const out: Array<{ key: string; label: string; value: string }> = [];
       const rs = args.rateStructure;
@@ -606,6 +630,17 @@ export async function GET(req: NextRequest) {
           label: "REP fixed",
           value: typeof repFixedMonthly === "number" && Number.isFinite(repFixedMonthly) ? `$${repFixedMonthly.toFixed(2)}/mo` : "—/mo",
         });
+        if (
+          typeof args.switchingServiceFeeMonthly === "number" &&
+          Number.isFinite(args.switchingServiceFeeMonthly) &&
+          args.switchingServiceFeeMonthly >= 0
+        ) {
+          out.push({
+            key: "current.switching_service_fee_monthly",
+            label: "Switching service fee",
+            value: `$${Number(args.switchingServiceFeeMonthly).toFixed(2)}/mo`,
+          });
+        }
 
         if (creditsMaybe?.ok && Array.isArray((creditsMaybe as any).credits) && (creditsMaybe as any).credits.length > 0) {
           out.push({ key: "rep.credits", label: "Bill credits", value: `${(creditsMaybe as any).credits.length} rule(s)` });
@@ -894,6 +929,11 @@ export async function GET(req: NextRequest) {
         planCalcReasonCode: currentSource ?? null,
       },
     });
+    currentDetail.variablesList = buildVariablesList({
+      rateStructure: currentRateStructure,
+      tdspApplied,
+      switchingServiceFeeMonthly: currentSwitchingServiceFeeMonthly,
+    });
 
     // Best-effort: persist a per-home savings snapshot so admin + landing can use real numbers
     // without re-running the compare calculation for every user.
@@ -1027,6 +1067,7 @@ export async function GET(req: NextRequest) {
           switchWithoutEtfWindowDays,
           canSwitchWithoutEtf,
           wouldIncurEtfIfSwitchNow,
+          switchingServiceFeeMonthlyDollars: currentSwitchingServiceFeeMonthly,
         },
         tdspApplied,
         usage: {

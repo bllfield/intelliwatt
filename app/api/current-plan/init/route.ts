@@ -29,6 +29,17 @@ const decimalToNumber = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+function readSwitchingServiceFeeMonthlyFromRateStructure(rateStructure: unknown): number | null {
+  const rs = rateStructure as any;
+  const v =
+    rs?.comparisonAdjustments?.switchingServiceFeeMonthlyDollars ??
+    rs?.switchingServiceFeeMonthlyDollars ??
+    null;
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 type ManualEntry = {
   id: string;
   userId: string;
@@ -92,6 +103,7 @@ const serializeManualPlan = (entry: ManualEntry | null) => {
     earlyTerminationFee: decimalToNumber(entry.earlyTerminationFee),
     esiId: entry.esiId,
     accountNumberLast4: entry.accountNumberLast4,
+    switchingServiceFeeMonthly: readSwitchingServiceFeeMonthlyFromRateStructure(entry.rateStructure),
     notes: entry.notes,
     rateStructure: entry.rateStructure,
     normalizedAt: entry.normalizedAt ? entry.normalizedAt.toISOString() : null,
@@ -119,6 +131,7 @@ const serializeParsedPlan = (entry: ParsedEntry | null) => {
     earlyTerminationFee: decimalToNumber(entry.earlyTerminationFee),
     esiId: entry.esiId,
     accountNumberLast4: entry.accountNumberLast4,
+    switchingServiceFeeMonthly: readSwitchingServiceFeeMonthlyFromRateStructure(entry.rateStructure),
     notes: entry.notes,
     rateStructure: entry.rateStructure,
     parserVersion: entry.parserVersion,
@@ -454,6 +467,9 @@ export async function GET(request: NextRequest) {
       rateStructure: effectivePlan?.rateStructure ?? null,
       baseMonthlyFee: effectivePlan?.baseMonthlyFee ?? null,
     });
+    const switchingServiceFeeMonthly = readSwitchingServiceFeeMonthlyFromRateStructure(
+      effectivePlan?.rateStructure ?? null,
+    );
 
     const planVariablesList: Array<{ key: string; label: string; value: string }> = [];
     const rs: any = effectivePlan?.rateStructure ?? null;
@@ -527,6 +543,13 @@ export async function GET(request: NextRequest) {
       label: 'REP fixed',
       value: repFixedMonthlyDollars != null ? `$${Number(repFixedMonthlyDollars).toFixed(2)}/mo` : '—/mo',
     });
+    if (switchingServiceFeeMonthly != null) {
+      planVariablesList.push({
+        key: 'current.switching_service_fee_monthly',
+        label: 'Switching service fee',
+        value: `$${Number(switchingServiceFeeMonthly).toFixed(2)}/mo`,
+      });
+    }
 
     const creditsRules = rs?.billCredits?.hasBillCredit && Array.isArray(rs?.billCredits?.rules) ? rs.billCredits.rules : [];
     if (creditsRules.length > 0) {

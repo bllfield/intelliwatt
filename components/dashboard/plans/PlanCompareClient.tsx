@@ -27,6 +27,7 @@ type ApiResp = {
     switchWithoutEtfWindowDays?: number;
     canSwitchWithoutEtf?: boolean | null;
     wouldIncurEtfIfSwitchNow?: boolean | null;
+    switchingServiceFeeMonthlyDollars?: number | null;
   };
   tdspApplied?: {
     perKwhDeliveryChargeCents: number;
@@ -49,6 +50,14 @@ type ApiResp = {
     offer?: any;
   };
 };
+
+const CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY = "current_plan_switching_service_fee_monthly_v1";
+
+function parseNonNegativeNumberOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 function fmtDollars2(n: number | null | undefined): string {
   const x = typeof n === "number" && Number.isFinite(n) ? n : 0;
@@ -137,6 +146,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [includeEtf, setIncludeEtf] = useState<boolean>(true);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [switchingFeeInput, setSwitchingFeeInput] = useState("");
+  const [appliedSwitchingFeeMonthly, setAppliedSwitchingFeeMonthly] = useState<number>(0);
+  const [appliedFromServer, setAppliedFromServer] = useState(false);
 
   // Persist the last compared offer so the Dashboard "Compare" nav can jump straight here.
   useEffect(() => {
@@ -148,7 +160,10 @@ export default function PlanCompareClient(props: { offerId: string }) {
   }, [offerId]);
 
   // Bump when response semantics change so we don't pin users to stale/partial cached payloads.
-  const cacheKey = useMemo(() => `dashboard_plans_compare_resp_v2:${offerId}`, [offerId]);
+  const cacheKey = useMemo(
+    () => `dashboard_plans_compare_resp_v3:${offerId}:fee=${appliedSwitchingFeeMonthly.toFixed(2)}`,
+    [offerId, appliedSwitchingFeeMonthly],
+  );
   const cacheTtlMs = 15 * 60 * 1000; // 15 minutes
 
   useEffect(() => {
@@ -176,7 +191,11 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
     async function run() {
       try {
-        const r = await fetch(`/api/dashboard/plans/compare?offerId=${encodeURIComponent(offerId)}`, {
+        const params = new URLSearchParams({ offerId: String(offerId) });
+        if (appliedSwitchingFeeMonthly > 0) {
+          params.set("switchingServiceFeeMonthly", appliedSwitchingFeeMonthly.toFixed(2));
+        }
+        const r = await fetch(`/api/dashboard/plans/compare?${params.toString()}`, {
           signal: controller.signal,
           cache: "no-store",
         });
@@ -206,7 +225,35 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
     run();
     return () => controller.abort();
-  }, [offerId, cacheKey, cacheTtlMs]);
+  }, [offerId, cacheKey, cacheTtlMs, appliedSwitchingFeeMonthly]);
+
+  useEffect(() => {
+    if (appliedFromServer) return;
+    const fromApi = parseNonNegativeNumberOrNull(data?.currentPlan?.switchingServiceFeeMonthlyDollars);
+    if (fromApi != null) {
+      const normalized = Number(fromApi.toFixed(2));
+      setAppliedSwitchingFeeMonthly(normalized);
+      setSwitchingFeeInput(String(normalized));
+      setAppliedFromServer(true);
+      try {
+        window.localStorage.setItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY, String(normalized));
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY);
+      const parsed = parseNonNegativeNumberOrNull(raw);
+      if (parsed != null) {
+        const normalized = Number(parsed.toFixed(2));
+        setAppliedSwitchingFeeMonthly(normalized);
+        setSwitchingFeeInput(String(normalized));
+      }
+    } catch {
+      // ignore
+    }
+  }, [data?.currentPlan?.switchingServiceFeeMonthlyDollars, appliedFromServer]);
 
   // If the offerId is no longer available (WattBuy rotates offers), fall back to the compare landing
   // page which will auto-pick a best offer. Also clear the remembered offer id so the user won't get
@@ -245,6 +292,14 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const offerAnnual = pickAnnual(data?.estimates?.offer);
   const currentMonthly = pickMonthly(data?.estimates?.current);
   const offerMonthly = pickMonthly(data?.estimates?.offer);
+  const currentMonthlyWithSwitchingFee =
+    typeof currentMonthly === "number" && Number.isFinite(currentMonthly)
+      ? currentMonthly + appliedSwitchingFeeMonthly
+      : null;
+  const currentAnnualWithSwitchingFee =
+    typeof currentAnnual === "number" && Number.isFinite(currentAnnual)
+      ? currentAnnual + appliedSwitchingFeeMonthly * 12
+      : null;
   const etfDollars = (data?.currentPlan?.earlyTerminationFeeCents ?? 0) / 100;
 
   const monthsRemaining = data?.currentPlan?.monthsRemainingOnContract ?? null;
@@ -264,8 +319,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
     (wouldIncurEtfNow == null && data?.currentPlan?.isInContract === true && etfCents > 0);
 
   const monthlyDelta =
-    typeof currentMonthly === "number" && typeof offerMonthly === "number"
-      ? offerMonthly - currentMonthly
+    typeof currentMonthlyWithSwitchingFee === "number" && typeof offerMonthly === "number"
+      ? offerMonthly - currentMonthlyWithSwitchingFee
       : null;
 
   const canSignup = Boolean(data?.offer?.enrollLink);
@@ -331,17 +386,19 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
   const comparisonTotals = useMemo(() => {
     const fallbackCurrent =
-      typeof currentMonthly === "number" && Number.isFinite(currentMonthly)
-        ? currentMonthly * comparisonMonths
+      typeof currentMonthlyWithSwitchingFee === "number" && Number.isFinite(currentMonthlyWithSwitchingFee)
+        ? currentMonthlyWithSwitchingFee * comparisonMonths
         : null;
     const fallbackOfferBase =
       typeof offerMonthly === "number" && Number.isFinite(offerMonthly)
         ? offerMonthly * comparisonMonths
         : null;
 
-    const projectedCurrent = Array.isArray(projection?.currentRowsProjected)
+    const projectedCurrentRaw = Array.isArray(projection?.currentRowsProjected)
       ? sumNums((projection.currentRowsProjected as any[]).map((r) => r?.totalDollars))
       : null;
+    const projectedCurrent =
+      projectedCurrentRaw != null ? projectedCurrentRaw + appliedSwitchingFeeMonthly * comparisonMonths : null;
     const projectedOfferBase = Array.isArray(projection?.offerRowsProjected)
       ? sumNums((projection.offerRowsProjected as any[]).map((r) => r?.totalDollars))
       : null;
@@ -355,13 +412,36 @@ export default function PlanCompareClient(props: { offerId: string }) {
       typeof currentTotal === "number" && typeof newTotal === "number" ? newTotal - currentTotal : null;
 
     return { currentTotal, newTotal, delta };
-  }, [projection, currentMonthly, offerMonthly, comparisonMonths, includeEtf, etfAppliesNow, etfDollars]);
+  }, [
+    projection,
+    currentMonthlyWithSwitchingFee,
+    offerMonthly,
+    comparisonMonths,
+    includeEtf,
+    etfAppliesNow,
+    etfDollars,
+    appliedSwitchingFeeMonthly,
+  ]);
 
-  // For month-by-month deltas in the "New plan" monthly table, align by yearMonth (not index) so comparisons are correct when row lengths/order differ.
+  const handleApplySwitchingFee = () => {
+    const parsed = switchingFeeInput.trim() === "" ? 0 : parseNonNegativeNumberOrNull(switchingFeeInput);
+    if (parsed == null) return;
+    const normalized = Number(parsed.toFixed(2));
+    setAppliedSwitchingFeeMonthly(normalized);
+    try {
+      if (normalized > 0) {
+        window.localStorage.setItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY, String(normalized));
+      } else {
+        window.localStorage.removeItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // For month-by-month deltas in the "New plan" monthly table, align by yearMonth against the current plan's rows.
   const currentMonthlyRowsByYm = useMemo(() => {
-    const rows = Array.isArray(projection?.currentRowsProjected)
-      ? (projection.currentRowsProjected as any[])
-      : (currentDetail?.monthlyBreakdown?.rows ?? []);
+    const rows = Array.isArray(projection?.currentRowsProjected) ? (projection.currentRowsProjected as any[]) : [];
     const m = new Map<string, any>();
     for (const r of rows) {
       const ym = String(r?.yearMonth ?? "").trim();
@@ -369,7 +449,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
       m.set(ym, r);
     }
     return m;
-  }, [projection, currentDetail?.monthlyBreakdown?.rows]);
+  }, [projection]);
 
   // Unified REP bucket list so both monthly tables use the same columns (current first, then offer-only keys).
   const unifiedRepBuckets = useMemo(() => {
@@ -488,11 +568,20 @@ export default function PlanCompareClient(props: { offerId: string }) {
                 <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
                   <div className="text-xs text-brand-cyan/70">Estimate</div>
                   <div className="mt-1 text-xl font-semibold text-brand-white/90">
-                    {currentMonthly != null ? `${fmtDollars2(currentMonthly)}/mo` : "—"}
+                    {currentMonthlyWithSwitchingFee != null
+                      ? `${fmtDollars2(currentMonthlyWithSwitchingFee)}/mo`
+                      : "—"}
                   </div>
                   <div className="mt-1 text-sm text-brand-cyan/70">
-                    {currentAnnual != null ? `${fmtDollars2(currentAnnual)}/yr` : "—"}
+                    {currentAnnualWithSwitchingFee != null
+                      ? `${fmtDollars2(currentAnnualWithSwitchingFee)}/yr`
+                      : "—"}
                   </div>
+                  {appliedSwitchingFeeMonthly > 0 ? (
+                    <div className="mt-1 text-[11px] text-brand-cyan/60">
+                      Includes switching service fee: {fmtDollars2(appliedSwitchingFeeMonthly)}/mo
+                    </div>
+                  ) : null}
                   {useContractWindow ? (
                     <div className="mt-1 text-xs text-brand-cyan/60">
                       Next {comparisonMonths} mo:{" "}
@@ -563,6 +652,28 @@ export default function PlanCompareClient(props: { offerId: string }) {
                         : `Outside the ${data.currentPlan.switchWithoutEtfWindowDays ?? 14}-day ETF-free switch window.`}
                     </div>
                   ) : null}
+                  <div className="mt-3 border-t border-brand-cyan/10 pt-3">
+                    <div className="text-xs text-brand-cyan/70">Current-plan switching service fee</div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        value={switchingFeeInput}
+                        onChange={(e) => setSwitchingFeeInput(e.target.value)}
+                        placeholder="e.g., 10"
+                        className="w-full rounded-lg border border-brand-cyan/30 bg-brand-white/10 px-3 py-2 text-sm text-brand-white placeholder:text-brand-cyan/50 focus:border-brand-cyan focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplySwitchingFee}
+                        className="rounded-lg border border-brand-cyan/30 bg-brand-white/10 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/20"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -944,7 +1055,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
                                   <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
                                   <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
-                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(r?.totalDollars)}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">
+                                    {fmtDollars((numOrNull(r?.totalDollars) ?? 0) + appliedSwitchingFeeMonthly)}
+                                  </td>
                                 </tr>
                               );
                             })}
@@ -968,7 +1081,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   repCostByKey.set(key, (repCostByKey.get(key) ?? 0) + (numOrNull(x?.repCostDollars) ?? 0));
                                 }
                               }
-                              const totalMonthTotal = sumNums(rows.map((r: any) => numOrNull(r?.totalDollars) ?? 0));
+                              const totalMonthTotal =
+                                sumNums(rows.map((r: any) => numOrNull(r?.totalDollars) ?? 0)) +
+                                appliedSwitchingFeeMonthly * rows.length;
                               return (
                                 <tr className="border-t border-brand-cyan/20">
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">Total (sum of rows)</td>
@@ -1030,8 +1145,12 @@ export default function PlanCompareClient(props: { offerId: string }) {
                               const byKey = new Map(repLines.map((x) => [String(x.bucketKey), x]));
                               const etfThisMonth = idx === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
                               const monthTotalAdjusted = (numOrNull(r?.totalDollars) ?? 0) + etfThisMonth;
-                              const currentRow = currentRowsRaw[idx];
-                              const currentMonthTotal = currentRow != null ? numOrNull(currentRow?.totalDollars) : null;
+                              const ymKey = String(r?.yearMonth ?? "").trim();
+                              const currentRow = ymKey ? currentMonthlyRowsByYm.get(ymKey) : null;
+                              const currentMonthTotal =
+                                currentRow != null
+                                  ? (numOrNull(currentRow?.totalDollars) ?? 0) + appliedSwitchingFeeMonthly
+                                  : null;
                               const deltaVsCurrent = currentMonthTotal != null ? monthTotalAdjusted - currentMonthTotal : null;
                               return (
                                 <tr key={`off-${String(r?.yearMonth ?? idx)}-${idx}`} className="border-t border-brand-cyan/10">
@@ -1096,7 +1215,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                 const r = rows[i];
                                 const ym = String(r?.yearMonth ?? "").trim();
                                 const cur = ym ? currentMonthlyRowsByYm.get(ym) : null;
-                                const curTotal = cur != null ? numOrNull(cur?.totalDollars) : null;
+                                const curTotal =
+                                  cur != null ? (numOrNull(cur?.totalDollars) ?? 0) + appliedSwitchingFeeMonthly : null;
                                 if (curTotal == null) continue;
                                 const base = numOrNull(r?.totalDollars) ?? 0;
                                 const etf = i === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
@@ -1189,4 +1309,3 @@ export default function PlanCompareClient(props: { offerId: string }) {
     </div>
   );
 }
-
