@@ -19,6 +19,47 @@ type InspectResponse = {
   [k: string]: unknown;
 };
 
+type VerificationLine = {
+  ok: boolean;
+  title: string;
+  detail: string;
+};
+
+function safeUtcDateMs(dateStr: unknown): number | null {
+  const s = String(dateStr ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return Number.isFinite(t) ? t : null;
+}
+
+function sumTravelInclusiveDays(travelRanges: Array<{ startDate?: string; endDate?: string }>): {
+  totalDays: number;
+  invalidRanges: number;
+} {
+  let totalDays = 0;
+  let invalidRanges = 0;
+  for (const range of travelRanges) {
+    const startMs = safeUtcDateMs(range?.startDate);
+    const endMs = safeUtcDateMs(range?.endDate);
+    if (startMs === null || endMs === null || endMs < startMs) {
+      invalidRanges += 1;
+      continue;
+    }
+    totalDays += Math.floor((endMs - startMs) / 86400000) + 1;
+  }
+  return { totalDays, invalidRanges };
+}
+
+function formatNum(value: number): string {
+  if (!Number.isFinite(value)) return "NaN";
+  return String(value);
+}
+
+function formatMoney(value: number): string {
+  if (!Number.isFinite(value)) return "NaN";
+  return value.toFixed(6);
+}
+
 export default function SimulationEnginesPage() {
   const [adminToken, setAdminToken] = useState("");
   const [email, setEmail] = useState("");
@@ -37,6 +78,8 @@ export default function SimulationEnginesPage() {
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<InspectResponse | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [verifyNotice, setVerifyNotice] = useState<string | null>(null);
+  const [verificationReport, setVerificationReport] = useState<string>("");
 
   useEffect(() => {
     const token = window.localStorage.getItem("iw_admin_token");
@@ -146,6 +189,117 @@ export default function SimulationEnginesPage() {
     a.remove();
     URL.revokeObjectURL(url);
     setExportNotice(`Saved ${a.download}`);
+  }
+
+  function runVerification() {
+    if (!payload) {
+      setVerificationReport("");
+      setVerifyNotice("Run inspect first.");
+      return;
+    }
+
+    const data = payload as any;
+    const lines: VerificationLine[] = [];
+
+    const travelRanges = Array.isArray(data?.build?.selected?.travelRanges) ? data.build.selected.travelRanges : [];
+    const excludedDateKeysCount = Number(data?.engineContext?.pastPatchPayload?.excludedDateKeysCount);
+    const travelResult = sumTravelInclusiveDays(travelRanges);
+    const travelOk =
+      Number.isFinite(excludedDateKeysCount) &&
+      travelResult.invalidRanges === 0 &&
+      travelResult.totalDays === excludedDateKeysCount;
+    lines.push({
+      ok: travelOk,
+      title: "travelRanges inclusive days equals excludedDateKeysCount",
+      detail: `travelRanges=${travelRanges.length}, inclusiveDays=${travelResult.totalDays}, excludedDateKeysCount=${formatNum(excludedDateKeysCount)}, invalidRanges=${travelResult.invalidRanges}`,
+    });
+
+    const intervals15 = Array.isArray(data?.result?.dataset?.series?.intervals15) ? data.result.dataset.series.intervals15 : [];
+    const intervalsCount = Number(data?.result?.dataset?.summary?.intervalsCount);
+    const countOk = Number.isFinite(intervalsCount) && intervalsCount === intervals15.length;
+    lines.push({
+      ok: countOk,
+      title: "intervalsCount equals intervals15.length",
+      detail: `intervalsCount=${formatNum(intervalsCount)}, intervals15.length=${intervals15.length}`,
+    });
+
+    const canonicalDaysRaw =
+      data?.engineContext?.pastPatchPayload?.canonicalDays ??
+      data?.engineContext?.weather?.canonicalDateKeys ??
+      null;
+    const canonicalDays = Number(canonicalDaysRaw);
+    const divisibleBy96 = Number.isFinite(intervalsCount) && intervalsCount % 96 === 0;
+    const daysFromIntervals = divisibleBy96 ? intervalsCount / 96 : NaN;
+    const daysMatchCanonical = Number.isFinite(canonicalDays) ? daysFromIntervals === canonicalDays : true;
+    lines.push({
+      ok: divisibleBy96 && daysMatchCanonical,
+      title: "intervalsCount divisible by 96 and day count matches canonical",
+      detail: `intervalsCount=${formatNum(intervalsCount)}, divisibleBy96=${String(divisibleBy96)}, daysFromIntervals=${formatNum(daysFromIntervals)}, canonicalDays=${Number.isFinite(canonicalDays) ? canonicalDays : "n/a"}`,
+    });
+
+    const totalKwh = Number(data?.result?.dataset?.summary?.totalKwh);
+    const sumIntervalsKwh = intervals15.reduce((acc: number, row: any) => acc + (Number(row?.kwh) || 0), 0);
+    const rawDiff = Math.abs(sumIntervalsKwh - totalKwh);
+    const roundedDiff = Math.abs(Number(sumIntervalsKwh.toFixed(2)) - totalKwh);
+    const kwhOk = roundedDiff <= 1e-6;
+    lines.push({
+      ok: kwhOk,
+      title: "sum(intervals15.kwh) aligns with summary.totalKwh (2dp export)",
+      detail: `sumKwhRaw=${formatMoney(sumIntervalsKwh)}, sumKwh2dp=${Number(sumIntervalsKwh.toFixed(2)).toFixed(2)}, summary.totalKwh=${formatMoney(totalKwh)}, rawDiff=${formatMoney(rawDiff)}, diffAt2dp=${formatMoney(roundedDiff)}`,
+    });
+
+    const dayDiagnosticsSample = Array.isArray(data?.engineContext?.pastPatchPayload?.dayDiagnosticsSample)
+      ? data.engineContext.pastPatchPayload.dayDiagnosticsSample
+      : [];
+    const actualRows = dayDiagnosticsSample.filter(
+      (row: any) => String(row?.dayType ?? "").trim().toUpperCase() === "ACTUAL",
+    );
+    const badActualRows = actualRows.filter((row: any) => {
+      const candidates = Number(row?.referenceCandidateCount ?? 0);
+      const picked = Number(row?.referencePickedCount ?? 0);
+      return candidates !== 0 || picked !== 0;
+    });
+    lines.push({
+      ok: badActualRows.length === 0,
+      title: "ACTUAL dayDiagnostics rows have zero reference counts",
+      detail: `actualRows=${actualRows.length}, violations=${badActualRows.length}`,
+    });
+
+    const simulatedRows = dayDiagnosticsSample.filter(
+      (row: any) => String(row?.dayType ?? "").trim().toUpperCase() === "SIMULATED",
+    );
+    const badSimulatedRows = simulatedRows.filter((row: any) => Number(row?.referencePickedCount ?? 0) <= 0);
+    lines.push({
+      ok: badSimulatedRows.length === 0,
+      title: "SIMULATED dayDiagnostics rows have referencePickedCount > 0",
+      detail: `simulatedRows=${simulatedRows.length}, violations=${badSimulatedRows.length}`,
+    });
+
+    const allOk = lines.every((line) => line.ok);
+    const passCount = lines.filter((line) => line.ok).length;
+    const failCount = lines.length - passCount;
+    const header = [
+      "Simulation Verifier Report",
+      `GeneratedAtUTC: ${new Date().toISOString()}`,
+      `Email: ${String((data?.selection?.email ?? email.trim()) || "n/a")}`,
+      `Scenario: ${String(data?.selection?.scenarioName ?? data?.selection?.scenario ?? "n/a")}`,
+      `HouseId: ${String((data?.selection?.houseId ?? houseId) || "n/a")}`,
+      `Overall: ${allOk ? "PASS" : "FAIL"} (${passCount} pass, ${failCount} fail)`,
+      "",
+    ];
+    const body = lines.map((line, idx) => `${line.ok ? "PASS" : "FAIL"} ${idx + 1}. ${line.title}\n  ${line.detail}`);
+    setVerificationReport([...header, ...body].join("\n"));
+    setVerifyNotice(allOk ? "Verification complete: PASS." : "Verification complete: FAIL. Review report.");
+  }
+
+  async function copyVerificationReport() {
+    if (!verificationReport) return;
+    try {
+      await navigator.clipboard.writeText(verificationReport);
+      setVerifyNotice("Copied verification report to clipboard.");
+    } catch {
+      setVerifyNotice("Copy failed. Your browser blocked clipboard access.");
+    }
   }
 
   return (
@@ -307,6 +461,22 @@ export default function SimulationEnginesPage() {
                 <div className="text-sm font-semibold text-brand-navy">Engine payload + response</div>
                 <button
                   type="button"
+                  onClick={() => runVerification()}
+                  disabled={!payload}
+                  className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+                >
+                  Run verification
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyVerificationReport()}
+                  disabled={!verificationReport}
+                  className="rounded border border-emerald-300 bg-white px-3 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-50 disabled:opacity-60"
+                >
+                  Copy verify report
+                </button>
+                <button
+                  type="button"
                   onClick={() => copyOutput()}
                   disabled={!prettyJson}
                   className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-slate-50 disabled:opacity-60"
@@ -330,7 +500,15 @@ export default function SimulationEnginesPage() {
                   Save compact JSON
                 </button>
                 {exportNotice ? <span className="text-xs text-slate-600">{exportNotice}</span> : null}
+                {verifyNotice ? <span className="text-xs text-emerald-700">{verifyNotice}</span> : null}
               </div>
+              {verificationReport ? (
+                <textarea
+                  readOnly
+                  value={verificationReport}
+                  className="mb-3 h-64 w-full rounded border border-emerald-300 bg-emerald-950 p-3 font-mono text-xs text-emerald-100"
+                />
+              ) : null}
               <textarea
                 readOnly
                 value={prettyJson}
