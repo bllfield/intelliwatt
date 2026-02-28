@@ -126,7 +126,8 @@ export async function POST(request: Request) {
     const houseAddressId = authorization.houseAddressId ?? null;
 
     if (status === 'approved') {
-      const refreshResult = await refreshSmtAuthorizationStatus(authorization.id);
+      // User explicitly confirmed approval; bypass cooldown so we do a real SMT check now.
+      const refreshResult = await refreshSmtAuthorizationStatus(authorization.id, { force: true });
 
       if (!refreshResult.ok) {
         const message =

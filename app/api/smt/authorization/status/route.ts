@@ -122,7 +122,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const refreshResult = await refreshSmtAuthorizationStatus(auth.id);
+    // This endpoint is user-invoked for immediate re-checks (confirmation blocker/actions),
+    // so force a live SMT refresh instead of serving a cooldown-cached pending status.
+    const refreshResult = await refreshSmtAuthorizationStatus(auth.id, { force: true });
 
     if (!refreshResult.ok) {
       if (refreshResult.reason === "network-error") {

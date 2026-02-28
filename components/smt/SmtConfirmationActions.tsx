@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type ActionState = "idle" | "approved" | "declined" | "refresh";
@@ -11,6 +11,7 @@ interface Props {
 
 export function SmtConfirmationActions({ homeId }: Props) {
   const router = useRouter();
+  const didAutoRefreshRef = useRef(false);
   const [state, setState] = useState<ActionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -125,6 +126,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ status: choice }),
+        cache: "no-store",
       });
 
       let payload: any = null;
@@ -136,8 +138,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
 
       if (!confirmation.ok || (payload && payload.ok === false)) {
         const message =
-          payload?.error ||
           payload?.message ||
+          payload?.error ||
           "Could not record your response. Please try again.";
         throw new Error(message);
       }
@@ -168,6 +170,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ homeId }),
+        cache: "no-store",
       });
       const payload = (await res.json().catch(() => null)) as any;
       const statusRaw =
@@ -198,6 +201,12 @@ export function SmtConfirmationActions({ homeId }: Props) {
     }
     setState("idle");
   }
+
+  useEffect(() => {
+    if (!homeId || didAutoRefreshRef.current) return;
+    didAutoRefreshRef.current = true;
+    void refreshAuthorizationStatus();
+  }, [homeId]);
 
   return (
     <div className="space-y-4">
