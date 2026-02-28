@@ -138,6 +138,18 @@ export function SmtConfirmationActions({ homeId }: Props) {
       }
 
       if (!confirmation.ok || (payload && payload.ok === false)) {
+        const shouldFallbackToOrchestrate =
+          choice === "approved" &&
+          (payload?.error === "smt_not_active" ||
+            String(payload?.message ?? "").toLowerCase().includes("still shows this authorization as pending"));
+        if (shouldFallbackToOrchestrate) {
+          setStatusMessage(
+            payload?.message ??
+              "Smart Meter Texas still shows this authorization as pending. Rechecking status and usage now.",
+          );
+          await triggerUsageRefreshFlow();
+          return;
+        }
         const message =
           payload?.message ||
           payload?.error ||
