@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
-import { createAgreementAndSubscription } from "@/lib/smt/agreements";
+import { createAgreementAndSubscription, findAgreementForEsiid, mapSmtAgreementStatus } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
 import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/promote";
 import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
@@ -318,6 +318,30 @@ export async function POST(req: NextRequest) {
     let smtResult: Awaited<ReturnType<typeof createAgreementAndSubscription>> | null = null;
 
     try {
+      // Guard against duplicate submissions: if SMT already has an ACTIVE agreement for this
+      // ESIID/email, reuse it instead of creating another pending authorization.
+      const existingAgreement = await findAgreementForEsiid(houseEsiid, {
+        retailCustomerEmail: user.email,
+      });
+      const existingRawStatus =
+        existingAgreement?.match?.statusReason ??
+        existingAgreement?.match?.status ??
+        null;
+      const existingLocalStatus = mapSmtAgreementStatus(existingRawStatus);
+      if (existingAgreement?.match && existingLocalStatus === "ACTIVE") {
+        smtResult = {
+          ok: true,
+          agreementId:
+            existingAgreement.match.agreementNumber != null
+              ? String(existingAgreement.match.agreementNumber)
+              : undefined,
+          status: "active",
+          message: typeof existingRawStatus === "string" && existingRawStatus.trim().length > 0
+            ? existingRawStatus
+            : "Active - Authorization Confirmed",
+          subscriptionAlreadyActive: true,
+        };
+      } else {
       const serviceAddressParts = [
         house.addressLine1,
         house.addressLine2,
@@ -337,6 +361,7 @@ export async function POST(req: NextRequest) {
         meterNumber,
         repPuctNumber,
       });
+      }
 
       const agreementId =
         smtResult.agreementId !== undefined && smtResult.agreementId !== null

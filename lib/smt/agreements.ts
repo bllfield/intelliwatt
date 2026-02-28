@@ -649,25 +649,6 @@ async function maybeTriggerUsagePullIfMissing(args: {
     return;
   }
 
-  // Claim this retry window atomically so concurrent invocations don't race and spam SMT.
-  // We do this *before* making any network calls.
-  const claimedAt = new Date();
-  const cutoff = new Date(Date.now() - retryAfterMs);
-  const claim = await prisma.smtAuthorization
-    .updateMany({
-      where: {
-        id: args.authorizationId,
-        OR: [{ smtBackfillRequestedAt: null }, { smtBackfillRequestedAt: { lt: cutoff } }],
-      },
-      data: { smtBackfillRequestedAt: claimedAt },
-    })
-    .catch(() => ({ count: 0 }));
-
-  if (!claim || (claim as any).count !== 1) {
-    // Another request already claimed this window (or DB write failed); treat as throttled.
-    return;
-  }
-
   // 1) Best-effort request an SMT interval backfill (only if the proxy supports it).
   try {
     const enableBackfill =
@@ -710,7 +691,13 @@ async function maybeTriggerUsagePullIfMissing(args: {
     // ignore
   }
 
-  // NOTE: We already recorded `smtBackfillRequestedAt` via the atomic claim above.
+  // Record an attempt timestamp so we can throttle subsequent triggers.
+  prisma.smtAuthorization
+    .update({
+      where: { id: args.authorizationId },
+      data: { smtBackfillRequestedAt: new Date() },
+    })
+    .catch(() => null);
 }
 
 /**
@@ -1165,16 +1152,37 @@ export async function findAgreementForEsiid(
   const response = await getSmtAgreementStatus(sanitized, opts);
   const agreements = extractAgreementSummaries(response);
   const normalizedTarget = normalizeEsiid(sanitized);
+  const requestedAgreementNumber =
+    opts?.agreementNumber !== undefined && opts?.agreementNumber !== null
+      ? Number.parseInt(String(opts.agreementNumber).trim(), 10)
+      : Number.NaN;
+
+  const sameEsiid = agreements.filter((agreement) => {
+    if (!agreement.esiid) return false;
+    try {
+      return normalizeEsiid(agreement.esiid) === normalizedTarget;
+    } catch {
+      return false;
+    }
+  });
+
+  // When multiple SMT agreements exist for the same ESIID, prefer ACTIVE so we don't
+  // get stuck on a newer pending duplicate while an older approved authorization exists.
+  const activeForEsiid =
+    sameEsiid.find((agreement) => {
+      const raw = agreement.statusReason ?? agreement.status ?? null;
+      return mapSmtAgreementStatus(raw) === "ACTIVE";
+    }) ?? null;
+
+  const requestedForEsiid =
+    Number.isFinite(requestedAgreementNumber)
+      ? sameEsiid.find((agreement) => Number(agreement.agreementNumber) === requestedAgreementNumber) ?? null
+      : null;
 
   const matched =
-    agreements.find((agreement) => {
-      if (!agreement.esiid) return false;
-      try {
-        return normalizeEsiid(agreement.esiid) === normalizedTarget;
-      } catch {
-        return false;
-      }
-    }) ??
+    activeForEsiid ??
+    requestedForEsiid ??
+    sameEsiid[0] ??
     agreements.find((agreement) => agreement.agreementNumber !== null) ??
     null;
 
@@ -1483,4 +1491,3 @@ export async function createAgreementAndSubscription(
 // NOTE: Field names and enum values above are derived from the SMT
 // Data Access Interface Guide v2. Adjust payloads as SMT validation errors
 // are observed, without changing the function signature or proxy wiring.
-
