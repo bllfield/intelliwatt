@@ -239,13 +239,15 @@ export default function SimulationEnginesPage() {
 
     const totalKwh = Number(data?.result?.dataset?.summary?.totalKwh);
     const sumIntervalsKwh = intervals15.reduce((acc: number, row: any) => acc + (Number(row?.kwh) || 0), 0);
+    const sumIntervalsKwh2dp = Number(sumIntervalsKwh.toFixed(2));
+    const totalKwh2dp = Number(totalKwh.toFixed(2));
     const rawDiff = Math.abs(sumIntervalsKwh - totalKwh);
-    const roundedDiff = Math.abs(Number(sumIntervalsKwh.toFixed(2)) - totalKwh);
+    const roundedDiff = Math.abs(sumIntervalsKwh2dp - totalKwh2dp);
     const kwhOk = roundedDiff <= 1e-6;
     lines.push({
       ok: kwhOk,
       title: "sum(intervals15.kwh) aligns with summary.totalKwh (2dp export)",
-      detail: `sumKwhRaw=${formatMoney(sumIntervalsKwh)}, sumKwh2dp=${Number(sumIntervalsKwh.toFixed(2)).toFixed(2)}, summary.totalKwh=${formatMoney(totalKwh)}, rawDiff=${formatMoney(rawDiff)}, diffAt2dp=${formatMoney(roundedDiff)}`,
+      detail: `sumKwhRaw=${formatMoney(sumIntervalsKwh)}, sumKwh2dp=${sumIntervalsKwh2dp.toFixed(2)}, summary.totalKwhRaw=${formatMoney(totalKwh)}, summary.totalKwh2dp=${totalKwh2dp.toFixed(2)}, rawDiff=${formatMoney(rawDiff)}, diffAt2dp=${formatMoney(roundedDiff)}`,
     });
 
     const dayDiagnosticsSample = Array.isArray(data?.engineContext?.pastPatchPayload?.dayDiagnosticsSample)
