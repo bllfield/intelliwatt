@@ -5,6 +5,7 @@ import { refreshSmtAuthorizationStatus } from "@/lib/smt/agreements";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 
 export const dynamic = "force-dynamic";
+const ACTIVE_STATUSES = new Set(["ACTIVE", "ALREADY_ACTIVE", "ACT"]);
 
 type SerializedAuth = {
   id: string;
@@ -44,6 +45,7 @@ async function findAllAuthorizationCandidates(homeId: string) {
   return prisma.smtAuthorization.findMany({
     where: {
       OR: [{ houseId: homeId }, { houseAddressId: homeId }],
+      archivedAt: null,
     },
     orderBy: {
       createdAt: "desc",
@@ -155,7 +157,7 @@ export async function POST(req: NextRequest) {
       }
       refreshResult = res;
       const statusNow = String(res.status ?? (res as any)?.authorization?.smtStatus ?? "").toUpperCase();
-      if (statusNow === "ACTIVE" || statusNow === "ALREADY_ACTIVE" || statusNow === "ACT") break;
+      if (ACTIVE_STATUSES.has(statusNow)) break;
     }
 
     if (!refreshResult?.ok) {

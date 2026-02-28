@@ -700,6 +700,65 @@ async function maybeTriggerUsagePullIfMissing(args: {
     .catch(() => null);
 }
 
+async function cleanupDuplicateAuthorizationsForActive(args: {
+  keepAuthorizationId: string;
+  userId: string;
+  houseAddressId: string | null | undefined;
+  fallbackRetailEmail: string | null | undefined;
+}): Promise<void> {
+  const houseId = String(args.houseAddressId ?? "").trim();
+  if (!houseId) return;
+
+  const duplicates = await prisma.smtAuthorization.findMany({
+    where: {
+      userId: args.userId,
+      archivedAt: null,
+      id: { not: args.keepAuthorizationId },
+      OR: [{ houseAddressId: houseId }, { houseId }],
+    },
+    select: {
+      id: true,
+      smtAgreementId: true,
+      contactEmail: true,
+    },
+    take: 100,
+  });
+
+  for (const duplicate of duplicates) {
+    const agreementRaw = String(duplicate.smtAgreementId ?? "").trim();
+    const agreementNumber = Number.parseInt(agreementRaw, 10);
+    const retailEmail =
+      String(duplicate.contactEmail ?? "").trim() ||
+      String(args.fallbackRetailEmail ?? "").trim();
+
+    // If we have a known agreement ID, terminate that duplicate agreement first.
+    if (Number.isFinite(agreementNumber) && agreementNumber > 0 && retailEmail) {
+      try {
+        await terminateSmtAgreement(agreementNumber, retailEmail);
+      } catch (error) {
+        console.warn(
+          "[SMT] Failed to terminate duplicate agreement during active reconciliation",
+          { duplicateAuthorizationId: duplicate.id, agreementNumber, message: (error as any)?.message ?? String(error) },
+        );
+        // Keep it unarchived so the next refresh can retry termination.
+        continue;
+      }
+    }
+
+    await prisma.smtAuthorization
+      .update({
+        where: { id: duplicate.id },
+        data: {
+          archivedAt: new Date(),
+          smtStatus: "archived",
+          smtStatusMessage: "Superseded by active SMT authorization",
+          revokedReason: "replaced_by_active_authorization",
+        },
+      })
+      .catch(() => null);
+  }
+}
+
 /**
  * Refresh SMT agreement status for a given SmtAuthorization by calling
  * the SMT droplet and normalizing the result into local status fields.
@@ -951,6 +1010,14 @@ export async function refreshSmtAuthorizationStatus(
       meterNumber: updated.meterNumber ?? auth.meterNumber,
       lastAttemptAt: updated.smtBackfillRequestedAt ?? auth.smtBackfillRequestedAt,
       trigger: triggerUsagePullIfActive,
+    });
+
+    // Keep a single live authorization per user/home once SMT confirms ACTIVE.
+    await cleanupDuplicateAuthorizationsForActive({
+      keepAuthorizationId: updated.id,
+      userId: auth.userId,
+      houseAddressId: updated.houseAddressId,
+      fallbackRetailEmail: auth.contactEmail,
     });
   }
 

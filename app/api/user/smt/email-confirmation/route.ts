@@ -12,7 +12,7 @@ import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVE_STATUSES = new Set(['ACTIVE', 'ALREADY_ACTIVE']);
+const ACTIVE_STATUSES = new Set(['ACTIVE', 'ALREADY_ACTIVE', 'ACT']);
 
 async function markAuthorizationDeclined(params: {
   authorizationId: string;
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
       select: { id: true, houseAddressId: true, smtStatus: true, smtStatusMessage: true, createdAt: true },
     });
     const allAuthorizations = await prisma.smtAuthorization.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, archivedAt: null },
       orderBy: { createdAt: 'desc' },
       take: 100,
       select: { id: true },

@@ -390,6 +390,7 @@ export async function POST(req: NextRequest) {
   const allAuthorizationRows = await prisma.smtAuthorization.findMany({
     where: {
       userId: user.id,
+      archivedAt: null,
       OR: [{ houseAddressId: house.id }, { houseId: house.id }],
     },
     orderBy: { createdAt: "desc" },
