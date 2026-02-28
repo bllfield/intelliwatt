@@ -516,7 +516,9 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
           </div>
 
           <div>
-            <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Summer temp (°F)</label>
+            <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
+              Thermostat setpoint - summer (°F)
+            </label>
             <input
               type="number"
               min={60}
@@ -525,10 +527,13 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
               onChange={(e) => setState((s) => ({ ...s, summerTemp: e.target.value === "" ? "" : Number(e.target.value) }))}
               className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
             />
+            <p className="mt-1 text-[11px] text-brand-cyan/60">Default 73°F. Used as your typical summer thermostat setting.</p>
           </div>
 
           <div>
-            <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Winter temp (°F)</label>
+            <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
+              Thermostat setpoint - winter (°F)
+            </label>
             <input
               type="number"
               min={50}
@@ -537,6 +542,7 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
               onChange={(e) => setState((s) => ({ ...s, winterTemp: e.target.value === "" ? "" : Number(e.target.value) }))}
               className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
             />
+            <p className="mt-1 text-[11px] text-brand-cyan/60">Default 70°F. Used as your typical winter thermostat setting.</p>
           </div>
         </div>
 
