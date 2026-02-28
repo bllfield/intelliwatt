@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { refreshSmtAuthorizationStatus } from "@/lib/smt/agreements";
+import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ function serializeAuthorization(auth: any | null): SerializedAuth | null {
 }
 
 async function findLatestAuthorization(homeId: string) {
-  return prisma.smtAuthorization.findFirst({
+  const rows = await prisma.smtAuthorization.findMany({
     where: {
       OR: [{ houseId: homeId }, { houseAddressId: homeId }],
       archivedAt: null,
@@ -35,7 +36,9 @@ async function findLatestAuthorization(homeId: string) {
     orderBy: {
       createdAt: "desc",
     },
+    take: 25,
   });
+  return pickBestSmtAuthorization(rows);
 }
 
 /**

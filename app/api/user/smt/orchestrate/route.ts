@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
 
 export const runtime = "nodejs";
@@ -365,13 +366,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const authorization = await prisma.smtAuthorization.findFirst({
+  const authorizationCandidates = await prisma.smtAuthorization.findMany({
     where: {
       userId: user.id,
       archivedAt: null,
       OR: [{ houseAddressId: house.id }, { houseId: house.id }],
     },
     orderBy: { createdAt: "desc" },
+    take: 25,
     select: {
       id: true,
       esiid: true,
@@ -385,6 +387,7 @@ export async function POST(req: NextRequest) {
       authorizationEndDate: true,
     },
   });
+  const authorization = pickBestSmtAuthorization(authorizationCandidates as any[]);
 
   if (!authorization) {
     return NextResponse.json(

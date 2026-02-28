@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
+import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { normalizeEmail } from "@/lib/utils/email";
 import { SmtConfirmationActions } from "@/components/smt/SmtConfirmationActions";
 
@@ -50,13 +51,14 @@ export default async function SmtConfirmationPage() {
     redirect("/dashboard/api");
   }
 
-  const authorization = await prisma.smtAuthorization.findFirst({
+  const authorizationCandidates = await prisma.smtAuthorization.findMany({
     where: {
       userId: user.id,
       houseAddressId: house.id,
       archivedAt: null,
     },
     orderBy: { createdAt: "desc" },
+    take: 25,
     select: {
       id: true,
       smtStatus: true,
@@ -66,6 +68,7 @@ export default async function SmtConfirmationPage() {
       authorizationEndDate: true,
     },
   });
+  const authorization = pickBestSmtAuthorization(authorizationCandidates);
 
   if (!authorization) {
     redirect("/dashboard/api");

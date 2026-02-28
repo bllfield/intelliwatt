@@ -7,6 +7,7 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
+import { pickBestSmtAuthorization } from '@/lib/smt/authorizationSelection';
 import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 
 export const dynamic = 'force-dynamic';
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User missing' }, { status: 404 });
     }
 
-    const authorization = await prisma.smtAuthorization.findFirst({
+    const candidateAuthorizations = await prisma.smtAuthorization.findMany({
       where: {
         userId: user.id,
         archivedAt: null,
@@ -115,8 +116,10 @@ export async function POST(request: Request) {
       orderBy: {
         createdAt: 'desc',
       },
-      select: { id: true, houseAddressId: true },
+      take: 25,
+      select: { id: true, houseAddressId: true, smtStatus: true, smtStatusMessage: true, createdAt: true },
     });
+    const authorization = pickBestSmtAuthorization(candidateAuthorizations);
 
     if (!authorization) {
       return NextResponse.json({ error: 'No SMT authorization found to confirm' }, { status: 400 });

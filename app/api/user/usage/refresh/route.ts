@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/db";
+import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { normalizeEmail } from "@/lib/utils/email";
 import { refreshSmtAuthorizationStatus, getRollingBackfillRange, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
 
@@ -150,11 +151,13 @@ export async function POST(req: NextRequest) {
     };
 
     // Refresh authorization status (if exists)
-    const latestAuth = await prisma.smtAuthorization.findFirst({
+    const authCandidates = await prisma.smtAuthorization.findMany({
       where: { houseAddressId: house.id, archivedAt: null },
       orderBy: { createdAt: "desc" },
+      take: 25,
       select: { id: true },
     });
+    const latestAuth = pickBestSmtAuthorization(authCandidates as any[]);
 
     if (latestAuth) {
       try {
@@ -227,8 +230,10 @@ export async function POST(req: NextRequest) {
     // Also keep this best-effort (timeboxed) to avoid user-facing timeouts.
     let backfillOutcome: { homeId: string; ok: boolean; message?: string } | null = null;
     try {
-      const auth = await prisma.smtAuthorization.findFirst({
+      const authCandidates = await prisma.smtAuthorization.findMany({
         where: { houseAddressId: house.id, archivedAt: null },
+        orderBy: { createdAt: "desc" },
+        take: 25,
         select: {
           id: true,
           esiid: true,
@@ -237,6 +242,7 @@ export async function POST(req: NextRequest) {
           smtBackfillRequestedAt: true,
         },
       });
+      const auth = pickBestSmtAuthorization(authCandidates as any[]);
 
       const statusNorm = String((auth as any)?.smtStatus ?? "")
         .trim()

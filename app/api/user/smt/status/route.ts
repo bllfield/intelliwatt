@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/db';
+import { pickBestSmtAuthorization } from '@/lib/smt/authorizationSelection';
 import { refreshSmtAuthorizationStatus } from '@/lib/smt/agreements';
 import { normalizeEmail } from '@/lib/utils/email';
 
@@ -46,13 +47,14 @@ export async function GET() {
       return NextResponse.json({ connected: false });
     }
 
-    const authorization = await prismaAny.smtAuthorization.findFirst({
+    const authorizationCandidates = await prismaAny.smtAuthorization.findMany({
       where: {
         userId: user.id,
         archivedAt: null,
         OR: [{ houseAddressId: activeHouse.id }, { houseId: activeHouse.id }],
       },
       orderBy: { createdAt: 'desc' },
+      take: 25,
       select: {
         id: true,
         esiid: true,
@@ -77,6 +79,7 @@ export async function GET() {
         },
       },
     });
+    const authorization = pickBestSmtAuthorization(authorizationCandidates as any[]);
 
     if (!authorization) {
       return NextResponse.json({ connected: false });

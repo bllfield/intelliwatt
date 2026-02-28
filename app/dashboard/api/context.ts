@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { normalizeEmail } from "@/lib/utils/email";
 
 type UserSummary = { id: string; email: string };
@@ -110,13 +111,14 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
 
     let existingAuthorization: UsageEntryContext["existingAuthorization"] = null;
     if (user && houseAddress) {
-      existingAuthorization = await prismaAny.smtAuthorization.findFirst({
+      const authorizationCandidates = await prismaAny.smtAuthorization.findMany({
         where: {
           userId: user.id,
           houseAddressId: houseAddress.id,
           archivedAt: null,
         },
         orderBy: { createdAt: "desc" },
+        take: 25,
         select: {
           id: true,
           createdAt: true,
@@ -132,6 +134,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
           archivedAt: true,
         },
       });
+      existingAuthorization = pickBestSmtAuthorization(authorizationCandidates as any[]) as any;
     }
 
     // SMT "Updated" should reflect the latest ingested interval timestamp when available.

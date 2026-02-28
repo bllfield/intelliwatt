@@ -7,6 +7,7 @@ import DashboardPlanPipelineBootstrapper from '@/components/dashboard/DashboardP
 import DashboardSmtOrchestratorBootstrapper from '@/components/dashboard/DashboardSmtOrchestratorBootstrapper';
 import ImpersonationBanner from '@/components/dashboard/ImpersonationBanner';
 import { prisma } from '@/lib/db';
+import { pickBestSmtAuthorization } from '@/lib/smt/authorizationSelection';
 import { refreshSmtAuthorizationStatus } from '@/lib/smt/agreements';
 import { normalizeEmail } from '@/lib/utils/email';
 
@@ -49,15 +50,17 @@ async function isSmtConfirmationRequired(): Promise<boolean> {
       return false;
     }
 
-    let authorization = await prisma.smtAuthorization.findFirst({
+    const authorizationCandidates = await prisma.smtAuthorization.findMany({
       where: {
         userId: user.id,
         houseAddressId: targetHouseId,
         archivedAt: null,
       },
       orderBy: { createdAt: 'desc' },
+      take: 25,
       select: { id: true, smtStatus: true, smtStatusMessage: true, smtLastSyncAt: true },
     });
+    let authorization = pickBestSmtAuthorization(authorizationCandidates);
 
     if (!authorization) {
       return false;
