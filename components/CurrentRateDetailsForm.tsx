@@ -648,48 +648,42 @@ export function CurrentRateDetailsForm({
     const saved = savedPlan;
     if (!parsed && !saved) return;
 
-    // Early termination fee
-    if (earlyTerminationFee.trim() === "") {
+    setEarlyTerminationFee((prev) => {
+      if (prev.trim() !== "") return prev;
       const v =
         typeof saved?.earlyTerminationFee === "number"
           ? saved.earlyTerminationFee
           : typeof parsed?.earlyTerminationFee === "number"
             ? parsed.earlyTerminationFee
             : null;
-      if (v != null && Number.isFinite(v)) {
-        setEarlyTerminationFee(String(v));
-      }
-    }
+      return v != null && Number.isFinite(v) ? String(v) : prev;
+    });
 
-    // Contract expiration date
-    if (contractExpiration.trim() === "") {
+    setContractExpiration((prev) => {
+      if (prev.trim() !== "") return prev;
       const d = saved?.contractEndDate ?? parsed?.contractEndDate ?? null;
-      if (typeof d === "string" && d.trim()) {
-        setContractExpiration(d.slice(0, 10));
-      }
-    }
-    if (switchingServiceFeeMonthly.trim() === "") {
+      return typeof d === "string" && d.trim() ? d.slice(0, 10) : prev;
+    });
+
+    setSwitchingServiceFeeMonthly((prev) => {
+      if (prev.trim() !== "") return prev;
       const v =
         typeof saved?.switchingServiceFeeMonthly === "number"
           ? saved.switchingServiceFeeMonthly
           : typeof parsed?.switchingServiceFeeMonthly === "number"
             ? parsed.switchingServiceFeeMonthly
             : null;
-      if (v != null && Number.isFinite(v)) {
-        setSwitchingServiceFeeMonthly(String(v));
-      } else {
-        try {
-          const raw = window.localStorage.getItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY);
-          const n = raw == null ? null : Number(raw);
-          if (n != null && Number.isFinite(n) && n >= 0) {
-            setSwitchingServiceFeeMonthly(String(n));
-          }
-        } catch {
-          // ignore
-        }
+      if (v != null && Number.isFinite(v)) return String(v);
+      try {
+        const raw = window.localStorage.getItem(CURRENT_PLAN_SWITCH_FEE_STORAGE_KEY);
+        const n = raw == null ? null : Number(raw);
+        if (n != null && Number.isFinite(n) && n >= 0) return String(n);
+      } catch {
+        // ignore
       }
-    }
-  }, [parsedPlan, savedPlan, earlyTerminationFee, contractExpiration, switchingServiceFeeMonthly]);
+      return prev;
+    });
+  }, [parsedPlan, savedPlan]);
 
   function applyParsedPlanToForm(p: any) {
     if (!p || typeof p !== "object") return;
