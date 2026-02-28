@@ -385,12 +385,18 @@ function parseCentsPerKwhToken(s: string): number | null {
 function pickBestTdspPerKwhLine(
   lines: string[],
 ): { value: number | null; line: string | null } {
+  const isUtilityChargesLine = (l: string): boolean =>
+    /\b(?:Oncor|CenterPoint|AEP|TNMP)\s+Charges?\b/i.test(l) ||
+    /\b(?:TDU|TDSP)\b[\s\S]{0,40}\bCharges?\b/i.test(l);
+
   const isTdspTokenLine = (l: string): boolean => {
     // Never treat the "Average price per kWh" table as a TDSP charge source.
     if (/Average\s+price\s+per\s*kWh/i.test(l) || /Average\s+monthly\s+use/i.test(l)) return false;
 
-    if (!/(TDU|TDSP)/i.test(l)) return false;
-    if (!/Delivery/i.test(l)) return false;
+    const hasTdspContext =
+      (/(TDU|TDSP)/i.test(l) && /Delivery/i.test(l)) ||
+      isUtilityChargesLine(l);
+    if (!hasTdspContext) return false;
     // Accept either cents-form or dollars-form per-kWh tokens.
     const hasToken =
       /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) ||
@@ -412,7 +418,7 @@ function pickBestTdspPerKwhLine(
 
   const next = lines.find(
     (l) =>
-      /Delivery/i.test(l) &&
+      (/Delivery/i.test(l) || isUtilityChargesLine(l)) &&
       /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
       !(/Energy\s*Charge/i.test(l) &&
         Array.from(
@@ -422,6 +428,7 @@ function pickBestTdspPerKwhLine(
   if (next) return { value: parseCentsPerKwhFromLine(next), line: next };
 
   const any = lines.find((l) =>
+    !(/Average\s+price\s+per\s*kWh/i.test(l) || /Average\s+monthly\s+use/i.test(l)) &&
     /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
     !(/Energy\s*Charge/i.test(l) &&
       Array.from(
@@ -436,14 +443,17 @@ function pickBestTdspPerKwhLine(
 function pickBestTdspMonthlyLine(
   lines: string[],
 ): { dollars: number | null; line: string | null } {
+  const isUtilityChargesLine = (l: string): boolean =>
+    /\b(?:Oncor|CenterPoint|AEP|TNMP)\s+Charges?\b/i.test(l) ||
+    /\b(?:TDU|TDSP)\b[\s\S]{0,40}\bCharges?\b/i.test(l);
+
   const isBadUsageChargeLine = (l: string): boolean =>
     /Usage\s*Charge/i.test(l) || /Energy\s*Charge/i.test(l);
 
   const best = lines.find(
     (l) =>
       !isBadUsageChargeLine(l) &&
-      /(TDU|TDSP)/i.test(l) &&
-      /Delivery/i.test(l) &&
+      ((/(TDU|TDSP)/i.test(l) && /Delivery/i.test(l)) || isUtilityChargesLine(l)) &&
       (
         /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) ||
         /[0-9]+(?:\.[0-9]+)?\s*\$\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l)
@@ -455,7 +465,7 @@ function pickBestTdspMonthlyLine(
   const next = lines.find(
     (l) =>
       !isBadUsageChargeLine(l) &&
-      /Delivery/i.test(l) &&
+      (/Delivery/i.test(l) || isUtilityChargesLine(l)) &&
       (
         /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) ||
         /[0-9]+(?:\.[0-9]+)?\s*\$\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l)
@@ -469,7 +479,7 @@ function pickBestTdspMonthlyLine(
   const headerLike = lines.find(
     (l) =>
       !isBadUsageChargeLine(l) &&
-      /(TDU|TDSP|Delivery)/i.test(l) &&
+      (/(TDU|TDSP|Delivery)/i.test(l) || isUtilityChargesLine(l)) &&
       /per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) &&
       (/\$\s*[0-9]+(?:\.[0-9]+)?/i.test(l) || /[0-9]+(?:\.[0-9]+)?\s*\$/i.test(l)),
   );
@@ -490,7 +500,7 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   // includes keyword lines plus their neighbors.
   const hitIdx: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (/(TDU|TDSP|Delivery)/i.test(lines[i] ?? "")) {
+    if (/(TDU|TDSP|Delivery)/i.test(lines[i] ?? "") || /\b(?:Oncor|CenterPoint|AEP|TNMP)\s+Charges?\b/i.test(lines[i] ?? "")) {
       hitIdx.push(i);
     }
   }
@@ -535,15 +545,15 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   if (monthlyDollars == null) {
     const perMonthIdx = lines.findIndex(
       (l) =>
-        /per\s*month/i.test(l) &&
-        (/Delivery/i.test(l) || /TDSP/i.test(l) || /TDU/i.test(l) || /per\s*kwh/i.test(l)),
+        /per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) &&
+        (/Delivery/i.test(l) || /TDSP/i.test(l) || /TDU/i.test(l) || /\b(?:Oncor|CenterPoint|AEP|TNMP)\s+Charges?\b/i.test(l) || /per\s*kwh/i.test(l)),
     );
 
     if (perMonthIdx >= 0) {
       // Scan forward a few lines for a dollar amount; choose the last $ token
       // on the first line that contains any $ amount (to avoid picking $0.00
       // base charge when present earlier on the same row).
-      for (let j = 1; j <= 6; j++) {
+      for (let j = 0; j <= 6; j++) {
         const candidate = lines[perMonthIdx + j];
         if (!candidate) continue;
         if (/Usage\s*Charge/i.test(candidate)) continue;
@@ -568,13 +578,12 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   if (perKwhCents == null) {
     const perKwhIdx = lines.findIndex(
       (l) =>
-        /per\s*kwh/i.test(l) && (/per\s*month/i.test(l) || /billing\s*cycle/i.test(l) || /month/i.test(l)),
+        /per\s*kwh/i.test(l) && (/per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) || /month/i.test(l)),
     );
     if (perKwhIdx >= 0) {
-      for (let j = 1; j <= 6; j++) {
+      for (let j = 0; j <= 6; j++) {
         const candidate = lines[perKwhIdx + j];
         if (!candidate) continue;
-        if (!/¢/.test(candidate)) continue;
         const parsed = parseCentsPerKwhFromLine(candidate);
         if (parsed != null) {
           perKwhCents = parsed;
