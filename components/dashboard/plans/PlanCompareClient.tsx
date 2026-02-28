@@ -994,6 +994,10 @@ export default function PlanCompareClient(props: { offerId: string }) {
                       <span className="font-mono text-brand-white/90">
                         {String(addMonthsToYearMonth(String(projection.startYm), (projection.monthsToShow ?? 1) - 1))}
                       </span>
+                      {" · "}
+                      {useContractWindow
+                        ? `math window through current plan expiration (${comparisonMonths} month${comparisonMonths === 1 ? "" : "s"})`
+                        : "12-month math window (no remaining contract term detected)"}
                       {" · "}based on last 12 months usage pattern
                       {typeof data?.offer?.termMonths === "number" && projection.monthsToShow > data.offer.termMonths
                         ? ` · note: offer term is ${data.offer.termMonths} months (months beyond term assume same rate for illustration)`
@@ -1001,7 +1005,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                     </div>
                   ) : null}
                   <div className="mt-2 text-xs text-brand-cyan/60 font-mono">
-                    rows={String((projection?.monthsToShow ?? currentRowsRaw.length) || offerRowsRaw.length || "—")}
+                    projectedRows={String((projection?.monthsToShow ?? currentRowsRaw.length) || offerRowsRaw.length || "—")}
                     {currentBreakdown?.totals ? ` · current annualFromRows=${fmtNum(currentBreakdown.totals.annualFromRows, 2)}` : ""}
                     {offerBreakdown?.totals ? ` · offer annualFromRows=${fmtNum(offerBreakdown.totals.annualFromRows, 2)}` : ""}
                   </div>
@@ -1181,7 +1185,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
                                   <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
                                   <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
-                                  <td className="px-3 py-2">{fmtDollars(0)}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(monthTotalAdjusted)}</td>
                                   {showDelta ? (
                                     <td
@@ -1218,7 +1221,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                 }
                               }
                               const totalEtf = includeEtf && etfAppliesNow && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
-                              const totalSubscriptionFee = 0;
                               const totalMonthTotal = sumNums(rows.map((r: any) => numOrNull(r?.totalDollars) ?? 0)) + totalEtf;
                               let totalDelta: number | null = null;
                               const deltas: number[] = [];
@@ -1252,7 +1254,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.creditsDollars)))}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumUsageFeeDollars)))}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumBillTopUpDollars)))}</td>
-                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(totalSubscriptionFee)}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(totalMonthTotal)}</td>
                                   {showDelta ? (
                                     <td className={`px-3 py-2 font-semibold ${typeof totalDelta === "number" && totalDelta < 0 ? "text-emerald-200" : "text-amber-200"}`}>

@@ -11,7 +11,7 @@ interface Props {
 
 export function SmtConfirmationActions({ homeId }: Props) {
   const router = useRouter();
-  const didAutoRefreshRef = useRef(false);
+  const lastAutoRefreshHomeIdRef = useRef<string | null>(null);
   const [state, setState] = useState<ActionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -203,8 +203,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
   }
 
   useEffect(() => {
-    if (!homeId || didAutoRefreshRef.current) return;
-    didAutoRefreshRef.current = true;
+    if (!homeId || lastAutoRefreshHomeIdRef.current === homeId) return;
+    lastAutoRefreshHomeIdRef.current = homeId;
     void refreshAuthorizationStatus();
   }, [homeId]);
 
