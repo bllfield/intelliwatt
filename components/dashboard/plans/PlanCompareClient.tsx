@@ -599,6 +599,33 @@ export default function PlanCompareClient(props: { offerId: string }) {
                   <div className="mt-1 text-sm text-brand-cyan/70">
                     ETF: {data.currentPlan?.earlyTerminationFeeCents ? fmtDollars2(etfDollars) : "—"}
                   </div>
+                  <div className="mt-3 border-t border-brand-cyan/10 pt-3">
+                    <div className="text-xs text-brand-cyan/70">Current-subscription monthly fee</div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="relative w-full">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-brand-cyan/70">
+                          $
+                        </span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          value={switchingFeeInput}
+                          onChange={(e) => setSwitchingFeeInput(e.target.value)}
+                          placeholder="10"
+                          className="w-full rounded-lg border border-brand-cyan/30 bg-brand-white/10 pl-7 pr-3 py-2 text-sm text-brand-white placeholder:text-brand-cyan/50 focus:border-brand-cyan focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleApplySwitchingFee}
+                        className="rounded-lg border border-brand-cyan/30 bg-brand-white/10 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/20"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -652,28 +679,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                         : `Outside the ${data.currentPlan.switchWithoutEtfWindowDays ?? 14}-day ETF-free switch window.`}
                     </div>
                   ) : null}
-                  <div className="mt-3 border-t border-brand-cyan/10 pt-3">
-                    <div className="text-xs text-brand-cyan/70">Current-plan switching service fee</div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
-                        value={switchingFeeInput}
-                        onChange={(e) => setSwitchingFeeInput(e.target.value)}
-                        placeholder="e.g., 10"
-                        className="w-full rounded-lg border border-brand-cyan/30 bg-brand-white/10 px-3 py-2 text-sm text-brand-white placeholder:text-brand-cyan/50 focus:border-brand-cyan focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleApplySwitchingFee}
-                        className="rounded-lg border border-brand-cyan/30 bg-brand-white/10 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/20"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -1027,6 +1032,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                               <th className="px-3 py-2 text-left whitespace-nowrap">Credits $</th>
                               <th className="px-3 py-2 text-left whitespace-nowrap">Min usage $</th>
                               <th className="px-3 py-2 text-left whitespace-nowrap">Min bill $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Subscription fee $</th>
                               <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
                             </tr>
                           </thead>
@@ -1055,6 +1061,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
                                   <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
                                   <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(appliedSwitchingFeeMonthly)}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">
                                     {fmtDollars((numOrNull(r?.totalDollars) ?? 0) + appliedSwitchingFeeMonthly)}
                                   </td>
@@ -1084,6 +1091,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                               const totalMonthTotal =
                                 sumNums(rows.map((r: any) => numOrNull(r?.totalDollars) ?? 0)) +
                                 appliedSwitchingFeeMonthly * rows.length;
+                              const totalSubscriptionFee = appliedSwitchingFeeMonthly * rows.length;
                               return (
                                 <tr className="border-t border-brand-cyan/20">
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">Total (sum of rows)</td>
@@ -1102,6 +1110,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.creditsDollars)))}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumUsageFeeDollars)))}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumBillTopUpDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(totalSubscriptionFee)}</td>
                                   <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(totalMonthTotal)}</td>
                                 </tr>
                               );
