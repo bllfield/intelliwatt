@@ -387,6 +387,15 @@ export async function POST(req: NextRequest) {
       authorizationEndDate: true,
     },
   });
+  const allAuthorizationRows = await prisma.smtAuthorization.findMany({
+    where: {
+      userId: user.id,
+      OR: [{ houseAddressId: house.id }, { houseId: house.id }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: { id: true },
+  });
   const authorization = pickBestSmtAuthorization(authorizationCandidates as any[]);
 
   if (!authorization) {
@@ -490,7 +499,11 @@ export async function POST(req: NextRequest) {
   let effectiveMeterNumber = authorization.meterNumber;
   let effectiveBackfillRequestedAt = authorization.smtBackfillRequestedAt;
   const refreshCandidateIds = Array.from(
-    new Set([authorization.id, ...authorizationCandidates.map((a: any) => String(a.id))]),
+    new Set([
+      authorization.id,
+      ...authorizationCandidates.map((a: any) => String(a.id)),
+      ...allAuthorizationRows.map((a: any) => String(a.id)),
+    ]),
   );
 
   // 1) Status refresh until ACTIVE (hard cooldown inside refreshSmtAuthorizationStatus).

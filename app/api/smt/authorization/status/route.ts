@@ -40,6 +40,19 @@ async function findAuthorizationCandidates(homeId: string) {
   });
 }
 
+async function findAllAuthorizationCandidates(homeId: string) {
+  return prisma.smtAuthorization.findMany({
+    where: {
+      OR: [{ houseId: homeId }, { houseAddressId: homeId }],
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: 100,
+    select: { id: true },
+  });
+}
+
 /**
  * GET /api/smt/authorization/status?homeId=<homeId>
  */
@@ -128,7 +141,10 @@ export async function POST(req: NextRequest) {
 
     // This endpoint is user-invoked for immediate re-checks (confirmation blocker/actions),
     // so force live SMT refreshes. Try all local candidates to handle stale duplicate rows.
-    const refreshCandidateIds = Array.from(new Set([auth.id, ...rows.map((r) => String((r as any).id))]));
+    const allRows = await findAllAuthorizationCandidates(homeId);
+    const refreshCandidateIds = Array.from(
+      new Set([auth.id, ...rows.map((r) => String((r as any).id)), ...allRows.map((r) => String((r as any).id))]),
+    );
     let refreshResult: any = null;
     let sawNetworkError = false;
     for (const candidateId of refreshCandidateIds) {

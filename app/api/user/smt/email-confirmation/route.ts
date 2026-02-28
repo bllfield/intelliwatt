@@ -12,7 +12,7 @@ import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVE_STATUSES = new Set(['ACTIVE', 'ALREADY_ACTIVE', 'ACT']);
+const ACTIVE_STATUSES = new Set(['ACTIVE', 'ALREADY_ACTIVE']);
 
 async function markAuthorizationDeclined(params: {
   authorizationId: string;
@@ -119,6 +119,12 @@ export async function POST(request: Request) {
       take: 25,
       select: { id: true, houseAddressId: true, smtStatus: true, smtStatusMessage: true, createdAt: true },
     });
+    const allAuthorizations = await prisma.smtAuthorization.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { id: true },
+    });
     const authorization = pickBestSmtAuthorization(candidateAuthorizations);
 
     if (!authorization) {
@@ -128,7 +134,7 @@ export async function POST(request: Request) {
     const now = new Date();
     const houseAddressId = authorization.houseAddressId ?? null;
     const refreshCandidateIds = Array.from(
-      new Set([authorization.id, ...candidateAuthorizations.map((a) => String(a.id))]),
+      new Set([authorization.id, ...candidateAuthorizations.map((a) => String(a.id)), ...allAuthorizations.map((a) => String(a.id))]),
     );
 
     if (status === 'approved') {
