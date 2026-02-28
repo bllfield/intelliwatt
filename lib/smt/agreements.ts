@@ -557,6 +557,29 @@ export function mapSmtAgreementStatus(
   return "ERROR";
 }
 
+function resolveAgreementStatus(
+  status: string | null | undefined,
+  statusReason: string | null | undefined,
+): { localStatus: LocalSmtStatus; displayStatus: string | null } {
+  const fromStatus = mapSmtAgreementStatus(status);
+  const fromReason = mapSmtAgreementStatus(statusReason);
+
+  // SMT can return mixed payloads (e.g., status=ACT with stale pending reason).
+  // If either field indicates ACTIVE, treat the agreement as ACTIVE.
+  if (fromStatus === "ACTIVE" || fromReason === "ACTIVE") {
+    const display =
+      fromStatus === "ACTIVE"
+        ? (status ?? statusReason ?? null)
+        : (statusReason ?? status ?? null);
+    return { localStatus: "ACTIVE", displayStatus: display };
+  }
+
+  if (fromStatus !== "ERROR") {
+    return { localStatus: fromStatus, displayStatus: status ?? statusReason ?? null };
+  }
+  return { localStatus: fromReason, displayStatus: statusReason ?? status ?? null };
+}
+
 export interface SmtAgreementSummary {
   agreementNumber?: number | null;
   status?: string | null;
@@ -938,12 +961,10 @@ export async function refreshSmtAuthorizationStatus(
     };
   }
 
-  const rawStatus =
-    match.statusReason ??
-    match.status ??
-    null;
-
-  const localStatus = mapSmtAgreementStatus(rawStatus);
+  const { localStatus, displayStatus: rawStatus } = resolveAgreementStatus(
+    match.status ?? null,
+    match.statusReason ?? null,
+  );
 
   const updateData: Record<string, unknown> = {
     smtStatus: localStatus,
@@ -1239,8 +1260,11 @@ export async function findAgreementForEsiid(
     // get stuck on a newer pending duplicate while an older approved authorization exists.
     const activeForEsiid =
       sameEsiid.find((agreement) => {
-        const raw = agreement.statusReason ?? agreement.status ?? null;
-        return mapSmtAgreementStatus(raw) === "ACTIVE";
+        const resolved = resolveAgreementStatus(
+          agreement.status ?? null,
+          agreement.statusReason ?? null,
+        );
+        return resolved.localStatus === "ACTIVE";
       }) ?? null;
 
     const requestedForEsiid =
@@ -1262,7 +1286,10 @@ export async function findAgreementForEsiid(
   // If we queried with a pinned agreement number and got a non-active result, re-query without
   // agreementNumber so we can detect another ACTIVE agreement for this ESIID.
   if (Number.isFinite(requestedAgreementNumber)) {
-    const matchedStatus = mapSmtAgreementStatus(matched?.statusReason ?? matched?.status ?? null);
+    const matchedStatus = resolveAgreementStatus(
+      matched?.status ?? null,
+      matched?.statusReason ?? null,
+    ).localStatus;
     if (matchedStatus !== "ACTIVE") {
       const broadResponse = await getSmtAgreementStatus(sanitized, {
         retailCustomerEmail: opts?.retailCustomerEmail ?? null,

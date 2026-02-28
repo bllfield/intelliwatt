@@ -11,7 +11,7 @@ interface Props {
 
 export function SmtConfirmationActions({ homeId }: Props) {
   const router = useRouter();
-  const lastAutoRefreshHomeIdRef = useRef<string | null>(null);
+  const didAutoRefreshRef = useRef(false);
   const [state, setState] = useState<ActionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -48,7 +48,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
           setIsProcessing(false);
           setStatusMessage("Your full SMT history has been ingested and your dashboard has been updated.");
           setState("idle");
-          router.push("/dashboard/api");
+          router.replace("/dashboard/smt-confirmation");
+          router.refresh();
           return;
         }
         if (payload.phase === "active_waiting_usage" || payload?.usage?.status === "processing" || (payload?.usage?.rawFiles > 0 && !payload?.usage?.ready)) {
@@ -180,12 +181,15 @@ export function SmtConfirmationActions({ homeId }: Props) {
       const statusMessage = payload?.authorization?.smtStatusMessage?.toLowerCase?.() ?? "";
       const isActive =
         statusRaw === "active" ||
+        statusRaw === "act" ||
         statusRaw === "already_active" ||
         statusMessage.includes("already active");
 
       if (isActive) {
+        setStatusMessage("Your Smart Meter Texas authorization is active. We’ll keep pulling usage automatically.");
         setState("idle");
-        router.push("/dashboard/api");
+        router.replace("/dashboard/smt-confirmation");
+        router.refresh();
         return;
       }
 
@@ -203,8 +207,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
   }
 
   useEffect(() => {
-    if (!homeId || lastAutoRefreshHomeIdRef.current === homeId) return;
-    lastAutoRefreshHomeIdRef.current = homeId;
+    if (!homeId || didAutoRefreshRef.current) return;
+    didAutoRefreshRef.current = true;
     void refreshAuthorizationStatus();
   }, [homeId]);
 

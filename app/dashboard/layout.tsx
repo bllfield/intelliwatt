@@ -123,8 +123,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (!isSmtConfirmationRoute) {
       redirect('/dashboard/smt-confirmation');
     }
-  } else if (isSmtConfirmationRoute) {
-    redirect('/dashboard');
   }
 
   if (isSmtConfirmationRoute) {

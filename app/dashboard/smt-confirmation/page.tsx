@@ -78,7 +78,7 @@ export default async function SmtConfirmationPage() {
   const isPending = status === "pending" || status === "";
   const isDeclined = status === "declined";
   const isError = status === "error";
-  const isActive = status === "active" || status === "already_active";
+  const isActive = status === "active" || status === "already_active" || status === "act";
 
   const statusMessage = authorization.smtStatusMessage?.trim().length
     ? authorization.smtStatusMessage!
