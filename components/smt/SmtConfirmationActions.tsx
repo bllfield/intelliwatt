@@ -75,7 +75,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
     }, pollDelayMs(attempts));
   }
 
-  async function triggerUsageRefreshFlow() {
+  async function triggerUsageRefreshFlow(options?: { preserveStatusMessage?: boolean }) {
     try {
       // Trigger the orchestrator: refresh status (cooldown), request backfill, and kick droplet pulls.
       const usageResponse = await fetch("/api/user/smt/orchestrate", {
@@ -101,9 +101,11 @@ export function SmtConfirmationActions({ homeId }: Props) {
 
       setIsWaitingOnSmt(true);
       setIsProcessing(false);
-      setStatusMessage(
-        "We’re processing your Smart Meter Texas data. Once a full 12‑month window is present, refresh will be limited to once every 30 days unless gaps are detected.",
-      );
+      if (!options?.preserveStatusMessage) {
+        setStatusMessage(
+          "We’re processing your Smart Meter Texas data. Once a full 12‑month window is present, refresh will be limited to once every 30 days unless gaps are detected.",
+        );
+      }
       void pollUsageReady(homeId);
     } catch (err) {
       const message =
@@ -147,7 +149,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
             payload?.message ??
               "Smart Meter Texas still shows this authorization as pending. Rechecking status and usage now.",
           );
-          await triggerUsageRefreshFlow();
+          await triggerUsageRefreshFlow({ preserveStatusMessage: true });
           return;
         }
         const message =

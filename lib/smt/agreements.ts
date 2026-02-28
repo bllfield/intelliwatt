@@ -1260,8 +1260,9 @@ export async function findAgreementForEsiid(
     // get stuck on a newer pending duplicate while an older approved authorization exists.
     const activeForEsiid =
       sameEsiid.find((agreement) => {
-        const raw = agreement.statusReason ?? agreement.status ?? null;
-        return mapSmtAgreementStatus(raw) === "ACTIVE";
+        const statusActive = mapSmtAgreementStatus(agreement.status ?? null) === "ACTIVE";
+        const reasonActive = mapSmtAgreementStatus(agreement.statusReason ?? null) === "ACTIVE";
+        return statusActive || reasonActive;
       }) ?? null;
 
     const requestedForEsiid =
