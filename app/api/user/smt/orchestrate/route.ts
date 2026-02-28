@@ -81,7 +81,7 @@ function normStatus(s: string | null | undefined): string {
 
 function isActiveStatus(s: string | null | undefined): boolean {
   const v = normStatus(s);
-  return v === "ACTIVE" || v === "ALREADY_ACTIVE";
+  return v === "ACTIVE" || v === "ALREADY_ACTIVE" || v === "ACT";
 }
 
 type UsageCoverage = {

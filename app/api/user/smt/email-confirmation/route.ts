@@ -12,7 +12,7 @@ import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVE_STATUSES = new Set(['ACTIVE', 'ALREADY_ACTIVE']);
+const ACTIVE_STATUSES = new Set(['ACTIVE', 'ALREADY_ACTIVE', 'ACT']);
 
 async function markAuthorizationDeclined(params: {
   authorizationId: string;
