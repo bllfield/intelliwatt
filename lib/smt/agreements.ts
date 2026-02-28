@@ -1260,11 +1260,8 @@ export async function findAgreementForEsiid(
     // get stuck on a newer pending duplicate while an older approved authorization exists.
     const activeForEsiid =
       sameEsiid.find((agreement) => {
-        const resolved = resolveAgreementStatus(
-          agreement.status ?? null,
-          agreement.statusReason ?? null,
-        );
-        return resolved.localStatus === "ACTIVE";
+        const raw = agreement.statusReason ?? agreement.status ?? null;
+        return mapSmtAgreementStatus(raw) === "ACTIVE";
       }) ?? null;
 
     const requestedForEsiid =
@@ -1272,10 +1269,26 @@ export async function findAgreementForEsiid(
         ? sameEsiid.find((agreement) => Number(agreement.agreementNumber) === requestedAgreementNumber) ?? null
         : null;
 
+    // Some SMT payloads omit ESIID fields in list records; still prefer an ACTIVE agreement
+    // globally before falling back to a pending agreement number.
+    const activeAny =
+      list.find((agreement) => {
+        const statusActive = mapSmtAgreementStatus(agreement.status ?? null) === "ACTIVE";
+        const reasonActive = mapSmtAgreementStatus(agreement.statusReason ?? null) === "ACTIVE";
+        return statusActive || reasonActive;
+      }) ?? null;
+
+    const requestedAny =
+      Number.isFinite(requestedAgreementNumber)
+        ? list.find((agreement) => Number(agreement.agreementNumber) === requestedAgreementNumber) ?? null
+        : null;
+
     return (
       activeForEsiid ??
+      activeAny ??
       requestedForEsiid ??
       sameEsiid[0] ??
+      requestedAny ??
       list.find((agreement) => agreement.agreementNumber !== null) ??
       null
     );
