@@ -127,15 +127,31 @@ export async function POST(request: Request) {
 
     const now = new Date();
     const houseAddressId = authorization.houseAddressId ?? null;
+    const refreshCandidateIds = Array.from(
+      new Set([authorization.id, ...candidateAuthorizations.map((a) => String(a.id))]),
+    );
 
     if (status === 'approved') {
       // User explicitly confirmed approval; bypass cooldown so we do a real SMT check now.
-      const refreshResult = await refreshSmtAuthorizationStatus(authorization.id, { force: true });
+      // Try all candidate local authorizations for this user in case one row is stale/pending
+      // while another row already maps to an ACTIVE SMT agreement.
+      let refreshResult: any = null;
+      let sawNetworkError = false;
+      for (const candidateId of refreshCandidateIds) {
+        const res = await refreshSmtAuthorizationStatus(candidateId, { force: true });
+        if (!res.ok) {
+          if (res.reason === 'network-error') sawNetworkError = true;
+          continue;
+        }
+        refreshResult = res;
+        const statusNow = String(res.status ?? (res as any)?.authorization?.smtStatus ?? '').toUpperCase();
+        if (ACTIVE_STATUSES.has(statusNow)) break;
+      }
 
-      if (!refreshResult.ok) {
-        const message =
-          refreshResult.message ??
-          'Unable to reach Smart Meter Texas right now. Please try again in a moment.';
+      if (!refreshResult?.ok) {
+        const message = sawNetworkError
+          ? 'Unable to reach Smart Meter Texas right now. Please try again in a moment.'
+          : 'Unable to verify Smart Meter Texas agreement status right now. Please try again in a moment.';
         return NextResponse.json(
           {
             ok: false,
@@ -154,13 +170,19 @@ export async function POST(request: Request) {
       ).toUpperCase();
 
       const isActive = ACTIVE_STATUSES.has(normalizedStatus);
+      const resolvedAuthorizationId = String(refreshResult.authorization?.id ?? authorization.id);
+      const resolvedAuthorization = await prisma.smtAuthorization.findUnique({
+        where: { id: resolvedAuthorizationId },
+        select: { id: true, houseAddressId: true, smtStatus: true, smtStatusMessage: true },
+      });
+      const resolvedHouseAddressId = resolvedAuthorization?.houseAddressId ?? houseAddressId;
 
       if (!isActive) {
         if (normalizedStatus === 'DECLINED') {
           await markAuthorizationDeclined({
-            authorizationId: authorization.id,
+            authorizationId: resolvedAuthorizationId,
             userId: user.id,
-            houseAddressId,
+            houseAddressId: resolvedHouseAddressId,
             message:
               refreshedAuth?.smtStatusMessage ??
               'Smart Meter Texas reported this authorization as declined.',
@@ -199,7 +221,7 @@ export async function POST(request: Request) {
         const txAny = tx as any;
 
         await txAny.smtAuthorization.update({
-          where: { id: authorization.id },
+          where: { id: resolvedAuthorizationId },
           data: {
             emailConfirmationStatus: 'APPROVED',
             emailConfirmationAt: now,
@@ -208,7 +230,7 @@ export async function POST(request: Request) {
           },
         });
 
-        await ensureSmartMeterEntry(user.id, houseAddressId, now);
+        await ensureSmartMeterEntry(user.id, resolvedHouseAddressId, now);
 
         await tx.userProfile.updateMany({
           where: { userId: user.id },
@@ -224,7 +246,7 @@ export async function POST(request: Request) {
       // IMPORTANT: SMT guidance is a 365-day window ending "yesterday" (not "now").
       try {
         const latestAuth = await prisma.smtAuthorization.findUnique({
-          where: { id: authorization.id },
+          where: { id: resolvedAuthorizationId },
           select: {
             id: true,
             esiid: true,

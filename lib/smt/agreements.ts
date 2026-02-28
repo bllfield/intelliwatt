@@ -1150,44 +1150,68 @@ export async function findAgreementForEsiid(
   }
 
   const response = await getSmtAgreementStatus(sanitized, opts);
-  const agreements = extractAgreementSummaries(response);
+  let rawResponse = response;
+  let agreements = extractAgreementSummaries(response);
   const normalizedTarget = normalizeEsiid(sanitized);
   const requestedAgreementNumber =
     opts?.agreementNumber !== undefined && opts?.agreementNumber !== null
       ? Number.parseInt(String(opts.agreementNumber).trim(), 10)
       : Number.NaN;
 
-  const sameEsiid = agreements.filter((agreement) => {
-    if (!agreement.esiid) return false;
-    try {
-      return normalizeEsiid(agreement.esiid) === normalizedTarget;
-    } catch {
-      return false;
+  const pickMatch = (list: SmtAgreementSummary[]): SmtAgreementSummary | null => {
+    const sameEsiid = list.filter((agreement) => {
+      if (!agreement.esiid) return false;
+      try {
+        return normalizeEsiid(agreement.esiid) === normalizedTarget;
+      } catch {
+        return false;
+      }
+    });
+
+    // When multiple SMT agreements exist for the same ESIID, prefer ACTIVE so we don't
+    // get stuck on a newer pending duplicate while an older approved authorization exists.
+    const activeForEsiid =
+      sameEsiid.find((agreement) => {
+        const raw = agreement.statusReason ?? agreement.status ?? null;
+        return mapSmtAgreementStatus(raw) === "ACTIVE";
+      }) ?? null;
+
+    const requestedForEsiid =
+      Number.isFinite(requestedAgreementNumber)
+        ? sameEsiid.find((agreement) => Number(agreement.agreementNumber) === requestedAgreementNumber) ?? null
+        : null;
+
+    return (
+      activeForEsiid ??
+      requestedForEsiid ??
+      sameEsiid[0] ??
+      list.find((agreement) => agreement.agreementNumber !== null) ??
+      null
+    );
+  };
+
+  let matched = pickMatch(agreements);
+
+  // If we queried with a pinned agreement number and got a non-active result, re-query without
+  // agreementNumber so we can detect another ACTIVE agreement for this ESIID.
+  if (Number.isFinite(requestedAgreementNumber)) {
+    const matchedStatus = mapSmtAgreementStatus(matched?.statusReason ?? matched?.status ?? null);
+    if (matchedStatus !== "ACTIVE") {
+      const broadResponse = await getSmtAgreementStatus(sanitized, {
+        retailCustomerEmail: opts?.retailCustomerEmail ?? null,
+        statusReason: opts?.statusReason ?? null,
+      });
+      const broadAgreements = extractAgreementSummaries(broadResponse);
+      if (broadAgreements.length > 0) {
+        rawResponse = broadResponse;
+        agreements = broadAgreements;
+        matched = pickMatch(agreements);
+      }
     }
-  });
-
-  // When multiple SMT agreements exist for the same ESIID, prefer ACTIVE so we don't
-  // get stuck on a newer pending duplicate while an older approved authorization exists.
-  const activeForEsiid =
-    sameEsiid.find((agreement) => {
-      const raw = agreement.statusReason ?? agreement.status ?? null;
-      return mapSmtAgreementStatus(raw) === "ACTIVE";
-    }) ?? null;
-
-  const requestedForEsiid =
-    Number.isFinite(requestedAgreementNumber)
-      ? sameEsiid.find((agreement) => Number(agreement.agreementNumber) === requestedAgreementNumber) ?? null
-      : null;
-
-  const matched =
-    activeForEsiid ??
-    requestedForEsiid ??
-    sameEsiid[0] ??
-    agreements.find((agreement) => agreement.agreementNumber !== null) ??
-    null;
+  }
 
   return {
-    raw: response,
+    raw: rawResponse,
     agreements,
     match: matched ?? null,
   };

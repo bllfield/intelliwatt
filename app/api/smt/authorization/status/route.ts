@@ -27,8 +27,8 @@ function serializeAuthorization(auth: any | null): SerializedAuth | null {
   };
 }
 
-async function findLatestAuthorization(homeId: string) {
-  const rows = await prisma.smtAuthorization.findMany({
+async function findAuthorizationCandidates(homeId: string) {
+  return prisma.smtAuthorization.findMany({
     where: {
       OR: [{ houseId: homeId }, { houseAddressId: homeId }],
       archivedAt: null,
@@ -38,7 +38,6 @@ async function findLatestAuthorization(homeId: string) {
     },
     take: 25,
   });
-  return pickBestSmtAuthorization(rows);
 }
 
 /**
@@ -60,7 +59,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const auth = await findLatestAuthorization(homeId);
+    const rows = await findAuthorizationCandidates(homeId);
+    const auth = pickBestSmtAuthorization(rows);
     return NextResponse.json(
       {
         ok: true,
@@ -112,7 +112,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const auth = await findLatestAuthorization(homeId);
+    const rows = await findAuthorizationCandidates(homeId);
+    const auth = pickBestSmtAuthorization(rows);
 
     if (!auth) {
       return NextResponse.json(
@@ -126,21 +127,30 @@ export async function POST(req: NextRequest) {
     }
 
     // This endpoint is user-invoked for immediate re-checks (confirmation blocker/actions),
-    // so force a live SMT refresh instead of serving a cooldown-cached pending status.
-    const refreshResult = await refreshSmtAuthorizationStatus(auth.id, { force: true });
+    // so force live SMT refreshes. Try all local candidates to handle stale duplicate rows.
+    const refreshCandidateIds = Array.from(new Set([auth.id, ...rows.map((r) => String((r as any).id))]));
+    let refreshResult: any = null;
+    let sawNetworkError = false;
+    for (const candidateId of refreshCandidateIds) {
+      const res = await refreshSmtAuthorizationStatus(candidateId, { force: true });
+      if (!res.ok) {
+        if (res.reason === "network-error") sawNetworkError = true;
+        continue;
+      }
+      refreshResult = res;
+      const statusNow = String(res.status ?? (res as any)?.authorization?.smtStatus ?? "").toUpperCase();
+      if (statusNow === "ACTIVE" || statusNow === "ALREADY_ACTIVE" || statusNow === "ACT") break;
+    }
 
-    if (!refreshResult.ok) {
-      if (refreshResult.reason === "network-error") {
-        const updatedAuth = await prisma.smtAuthorization.findUnique({
-          where: { id: auth.id },
-        });
-
+    if (!refreshResult?.ok) {
+      const latestRows = await findAuthorizationCandidates(homeId);
+      const latestAuth = pickBestSmtAuthorization(latestRows);
+      if (sawNetworkError) {
         return NextResponse.json(
           {
             ok: true,
-            authorization: serializeAuthorization(updatedAuth),
+            authorization: serializeAuthorization(latestAuth),
             warning:
-              refreshResult.message ??
               "We’ll keep monitoring your Smart Meter Texas status. The SMT proxy did not respond to the latest check.",
           },
           { status: 200 },
@@ -150,27 +160,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: refreshResult.reason ?? "status-refresh-failed",
-          message:
-            refreshResult.message ??
-            "Failed to refresh SMT authorization status",
+          error: "status-refresh-failed",
+          message: "Failed to refresh SMT authorization status",
         },
         { status: 502 },
       );
     }
 
-    const updated =
-      (refreshResult as any)?.authorization ??
-      (await prisma.smtAuthorization.findUnique({ where: { id: auth.id } }));
+    const latestRows = await findAuthorizationCandidates(homeId);
+    const updated = pickBestSmtAuthorization(latestRows);
 
     return NextResponse.json(
       {
         ok: true,
         authorization: serializeAuthorization(updated),
-        throttled: Boolean((refreshResult as any)?.throttled),
+        throttled: Boolean(refreshResult?.throttled),
         cooldownMs:
-          typeof (refreshResult as any)?.cooldownMs === "number"
-            ? (refreshResult as any).cooldownMs
+          typeof refreshResult?.cooldownMs === "number"
+            ? refreshResult.cooldownMs
             : null,
       },
       { status: 200 },

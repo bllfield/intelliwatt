@@ -486,16 +486,29 @@ export async function POST(req: NextRequest) {
 
   let effectiveStatus = normStatus(authorization.smtStatus);
   let effectiveMessage = authorization.smtStatusMessage ?? null;
+  let effectiveAuthorizationId = authorization.id;
+  let effectiveMeterNumber = authorization.meterNumber;
+  let effectiveBackfillRequestedAt = authorization.smtBackfillRequestedAt;
+  const refreshCandidateIds = Array.from(
+    new Set([authorization.id, ...authorizationCandidates.map((a: any) => String(a.id))]),
+  );
 
   // 1) Status refresh until ACTIVE (hard cooldown inside refreshSmtAuthorizationStatus).
   if (!isExpired && (!recentlySynced || force) && !isActiveStatus(effectiveStatus)) {
-    const refresh = await refreshSmtAuthorizationStatus(authorization.id);
-    actions.statusRefreshed = Boolean((refresh as any)?.ok);
-    actions.statusThrottled = Boolean((refresh as any)?.throttled);
-    const updated = (refresh as any)?.authorization ?? null;
-    if (updated) {
-      effectiveStatus = normStatus(updated.smtStatus);
-      effectiveMessage = updated.smtStatusMessage ?? effectiveMessage;
+    for (const candidateId of refreshCandidateIds) {
+      const refresh = await refreshSmtAuthorizationStatus(candidateId, { force: Boolean(force) });
+      actions.statusRefreshed = Boolean(refresh?.ok);
+      actions.statusThrottled = Boolean(refresh?.throttled);
+      const updated = refresh?.authorization ?? null;
+      if (updated) {
+        effectiveAuthorizationId = String(updated.id ?? effectiveAuthorizationId);
+        effectiveMeterNumber = updated.meterNumber ?? effectiveMeterNumber;
+        effectiveBackfillRequestedAt =
+          (updated as any)?.smtBackfillRequestedAt ?? effectiveBackfillRequestedAt;
+        effectiveStatus = normStatus(updated.smtStatus);
+        effectiveMessage = updated.smtStatusMessage ?? effectiveMessage;
+      }
+      if (isActiveStatus(effectiveStatus)) break;
     }
   }
 
@@ -508,8 +521,8 @@ export async function POST(req: NextRequest) {
 
   if (shouldWork && (!recentlySynced || force)) {
     const backfillRange = getRollingBackfillRange(12);
-    const requestedAt = authorization.smtBackfillRequestedAt
-      ? new Date(authorization.smtBackfillRequestedAt)
+    const requestedAt = effectiveBackfillRequestedAt
+      ? new Date(effectiveBackfillRequestedAt)
       : null;
 
     const retryAfterMs =
@@ -528,9 +541,9 @@ export async function POST(req: NextRequest) {
 
     if (enableBackfill && allowForceBackfill && (force || !requestedAt || allowRetry)) {
       const res = await requestSmtBackfillForAuthorization({
-        authorizationId: authorization.id,
+        authorizationId: effectiveAuthorizationId,
         esiid: effectiveEsiid,
-        meterNumber: authorization.meterNumber,
+        meterNumber: effectiveMeterNumber,
         startDate: backfillRange.startDate,
         endDate: backfillRange.endDate,
       });
@@ -539,7 +552,7 @@ export async function POST(req: NextRequest) {
       // Record attempt timestamp (even if SMT returns non-ok) to avoid spamming.
       await prisma.smtAuthorization
         .update({
-          where: { id: authorization.id },
+          where: { id: effectiveAuthorizationId },
           data: {
             smtBackfillRequestedAt: new Date(),
             smtLastSyncAt: new Date(),
