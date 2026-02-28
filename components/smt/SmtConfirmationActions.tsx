@@ -11,7 +11,7 @@ interface Props {
 
 export function SmtConfirmationActions({ homeId }: Props) {
   const router = useRouter();
-  const didAutoRefreshRef = useRef(false);
+  const lastAutoRefreshHomeIdRef = useRef<string | null>(null);
   const [state, setState] = useState<ActionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -48,7 +48,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
           setIsProcessing(false);
           setStatusMessage("Your full SMT history has been ingested and your dashboard has been updated.");
           setState("idle");
-          router.replace("/dashboard/smt-confirmation");
+          router.replace("/dashboard");
           router.refresh();
           return;
         }
@@ -188,7 +188,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
       if (isActive) {
         setStatusMessage("Your Smart Meter Texas authorization is active. We’ll keep pulling usage automatically.");
         setState("idle");
-        router.replace("/dashboard/smt-confirmation");
+        router.replace("/dashboard");
         router.refresh();
         return;
       }
@@ -207,8 +207,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
   }
 
   useEffect(() => {
-    if (!homeId || didAutoRefreshRef.current) return;
-    didAutoRefreshRef.current = true;
+    if (!homeId || lastAutoRefreshHomeIdRef.current === homeId) return;
+    lastAutoRefreshHomeIdRef.current = homeId;
     void refreshAuthorizationStatus();
   }, [homeId]);
 
