@@ -99,6 +99,12 @@ Notes:
 - Scenario deltas (EV, occupants, upgrades, solar) beyond baseline flat distribution.
 - More realistic load-shaping (weather/HVAC/occupancy) beyond baseline.
 
+### Usage Layer Map (Canonical)
+
+- Canonical interval-series layer definitions and route/function mapping live in `docs/USAGE_LAYER_MAP.md`.
+- Code-level enum source of truth is `modules/usageSimulator/kinds.ts` (`IntervalSeriesKind`).
+- Any new usage/simulation route, repository function, or persistence path added under this plan must map explicitly to one of the five canonical layer names.
+
 ## Phase: Usage Simulator Workspace + Scenarios (V1)
 
 ### Phase‑1 canonical spec (authoritative)

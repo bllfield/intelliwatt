@@ -64,6 +64,16 @@ Do Not Do:
 - **Manual usage**: user-entered monthly kWh (optionally with bill totals for calibration).
 - **Simulated usage**: machine-generated usage for months with missing observed data.
 
+### Canonical Interval Layer Names
+
+Use canonical layer names from `docs/USAGE_LAYER_MAP.md` and `modules/usageSimulator/kinds.ts`:
+
+- `ACTUAL_USAGE_INTERVALS`
+- `BASELINE_INTERVALS`
+- `PAST_SIM_BASELINE`
+- `FUTURE_SIM_BASELINE`
+- `FUTURE_SIM_USAGE`
+
 ## Target outputs (contract)
 For each home, we need a “calculation-ready” annual profile with:
 - **12 months of monthly totals** (`kwh.m.all.total` per month)

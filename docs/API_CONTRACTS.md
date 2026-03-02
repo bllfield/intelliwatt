@@ -14,6 +14,26 @@
 - **Deprecated**: 6-month sunset period
 - **Removed**: No longer supported
 
+## Usage Interval Layer Contract
+
+Canonical interval-series layer names are defined in:
+
+- `docs/USAGE_LAYER_MAP.md` (route/function mapping + keep/deprecate guidance)
+- `modules/usageSimulator/kinds.ts` (`IntervalSeriesKind` enum)
+
+Current canonical kinds:
+
+- `ACTUAL_USAGE_INTERVALS`
+- `BASELINE_INTERVALS`
+- `PAST_SIM_BASELINE`
+- `FUTURE_SIM_BASELINE`
+- `FUTURE_SIM_USAGE`
+
+Contract rule:
+
+- New usage/simulation endpoints must document which single `IntervalSeriesKind` they return or persist.
+- Avoid route semantics that change implicitly based only on optional params (for example, `scenarioId` toggling meaning) without an explicit documented layer contract.
+
 ## Example Contract: House Profile
 
 ### Endpoint

@@ -8,6 +8,12 @@
 - Raw data is stored separately and transformed before UI consumption
 - No direct database queries in UI components
 
+### Usage Layer Naming Contract
+- Usage/simulation contracts must use canonical layer names from `docs/USAGE_LAYER_MAP.md`.
+- Code-level layer naming must use `modules/usageSimulator/kinds.ts` (`IntervalSeriesKind`).
+- Avoid ambiguous terms like "baseline" without an explicit layer mapping.
+- New endpoints must declare which single layer they return or persist.
+
 ### RAW Storage Before Normalization
 - **Always store raw payloads before processing**
 - Preserve original data in `rawGoogleJson`, `rawWattbuyJson`, etc.

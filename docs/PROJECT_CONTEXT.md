@@ -61,6 +61,8 @@
 
 - ERCOT daily pull system: `docs/DEPLOY_ERCOT.md` (complete guide including migration, deployment, and troubleshooting)
 
+- Usage layer contract map: `docs/USAGE_LAYER_MAP.md` (canonical interval-series layer meanings + endpoint/function mapping)
+
 ## Where To Start
 
 1. Open `docs/QUICK_START.md` and follow the workflow steps.
@@ -338,6 +340,7 @@ components/             # React components
 - `docs/ARCHITECTURE_STANDARDS.md` - Core architecture principles
 - `docs/PROJECT_PLAN.md` - Authoritative project plan
 - `docs/API_CONTRACTS.md` - API versioning and contracts
+- `docs/USAGE_LAYER_MAP.md` - Canonical usage interval-series layer mapping
 - `docs/ENV_VARS.md` - Environment variables
 - `docs/OBSERVABILITY.md` - Logging and monitoring
 - `docs/STANDARDS_COMPONENTS.md` - Component-specific standards
@@ -452,6 +455,7 @@ For detailed information about specific areas, see:
 - **[Architecture Standards](./ARCHITECTURE_STANDARDS.md)** - Core principles and patterns
 - **[Project Plan](./PROJECT_PLAN.md)** - Authoritative project guardrails
 - **[API Contracts](./API_CONTRACTS.md)** - API versioning strategy
+- **[Usage Layer Map](./USAGE_LAYER_MAP.md)** - Canonical interval-series layer map and route/function mapping
 - **[Environment Variables](./ENV_VARS.md)** - Required env vars
 - **[Observability](./OBSERVABILITY.md)** - Logging and monitoring
 - **[Component Standards](./STANDARDS_COMPONENTS.md)** - Component implementations
