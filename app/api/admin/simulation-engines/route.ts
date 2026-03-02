@@ -184,6 +184,7 @@ export async function GET(req: NextRequest) {
         mode: mode as any,
         scenarioId,
         weatherPreference: weatherPreference as any,
+        persistPastSimBaseline: false,
       });
     }
 

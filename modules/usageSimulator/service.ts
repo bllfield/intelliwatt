@@ -22,6 +22,8 @@ import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from 
 import { listLedgerRows } from "@/modules/upgradesLedger/repo";
 import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/overlayEntries";
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
+import { saveIntervalSeries15m } from "@/modules/usageSimulator/intervalSeriesRepo";
+import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
@@ -218,6 +220,7 @@ export async function recalcSimulatorBuild(args: {
   mode: SimulatorMode;
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;
+  persistPastSimBaseline?: boolean;
   now?: Date;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
@@ -734,6 +737,41 @@ export async function recalcSimulatorBuild(args: {
       scenarioId: scenarioId ?? null,
       usageBucketsByMonth: dataset.usageBucketsByMonth,
     }).catch(() => {});
+  }
+
+  const shouldPersistPastSeries =
+    args.persistPastSimBaseline === true &&
+    mode === "SMT_BASELINE" &&
+    scenario?.name === WORKSPACE_PAST_NAME;
+  if (shouldPersistPastSeries) {
+    const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+    if (intervals15.length > 0) {
+      const timestamps = intervals15
+        .map((row: any) => new Date(String(row?.timestamp ?? "")))
+        .filter((d: Date) => Number.isFinite(d.getTime()))
+        .sort((a: Date, b: Date) => a.getTime() - b.getTime());
+      if (timestamps.length > 0) {
+        const derivationVersion = String(
+          (buildInputs as any)?.versions?.smtShapeDerivationVersion ??
+            (buildInputs as any)?.versions?.intradayTemplateVersion ??
+            "v1"
+        );
+        await saveIntervalSeries15m({
+          userId,
+          houseId,
+          kind: IntervalSeriesKind.PAST_SIM_BASELINE,
+          scenarioId,
+          anchorStartUtc: timestamps[0],
+          anchorEndUtc: timestamps[timestamps.length - 1],
+          derivationVersion,
+          buildInputsHash,
+          intervals15: intervals15.map((row: any) => ({
+            tsUtc: String(row?.timestamp ?? ""),
+            kwh: Number(row?.kwh ?? 0),
+          })),
+        });
+      }
+    }
   }
 
   return { ok: true, houseId, buildInputsHash, dataset };

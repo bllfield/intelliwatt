@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
       mode,
       scenarioId,
       weatherPreference,
+      persistPastSimBaseline: true,
     });
     if (!out.ok) return NextResponse.json(out, { status: 400 });
     return NextResponse.json(out);

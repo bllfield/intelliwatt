@@ -6,3 +6,7 @@ export enum IntervalSeriesKind {
   FUTURE_SIM_USAGE = "FUTURE_SIM_USAGE",
 }
 
+export function isIntervalSeriesKind(value: unknown): value is IntervalSeriesKind {
+  return typeof value === "string" && Object.values(IntervalSeriesKind).includes(value as IntervalSeriesKind);
+}
+
