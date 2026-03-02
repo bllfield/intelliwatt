@@ -746,11 +746,20 @@ export async function recalcSimulatorBuild(args: {
   if (shouldPersistPastSeries) {
     const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
     if (intervals15.length > 0) {
-      const timestamps = intervals15
-        .map((row: any) => new Date(String(row?.timestamp ?? "")))
-        .filter((d: Date) => Number.isFinite(d.getTime()))
-        .sort((a: Date, b: Date) => a.getTime() - b.getTime());
-      if (timestamps.length > 0) {
+      const validIntervals = intervals15
+        .map((row: any) => {
+          const tsUtc = String(row?.timestamp ?? "");
+          const tsDate = new Date(tsUtc);
+          if (!Number.isFinite(tsDate.getTime())) return null;
+          return {
+            tsUtc,
+            tsDate,
+            kwh: Number(row?.kwh ?? 0),
+          };
+        })
+        .filter((row: { tsUtc: string; tsDate: Date; kwh: number } | null): row is { tsUtc: string; tsDate: Date; kwh: number } => row != null)
+        .sort((a, b) => a.tsDate.getTime() - b.tsDate.getTime());
+      if (validIntervals.length > 0) {
         const derivationVersion = String(
           (buildInputs as any)?.versions?.smtShapeDerivationVersion ??
             (buildInputs as any)?.versions?.intradayTemplateVersion ??
@@ -761,14 +770,11 @@ export async function recalcSimulatorBuild(args: {
           houseId,
           kind: IntervalSeriesKind.PAST_SIM_BASELINE,
           scenarioId,
-          anchorStartUtc: timestamps[0],
-          anchorEndUtc: timestamps[timestamps.length - 1],
+          anchorStartUtc: validIntervals[0].tsDate,
+          anchorEndUtc: validIntervals[validIntervals.length - 1].tsDate,
           derivationVersion,
           buildInputsHash,
-          intervals15: intervals15.map((row: any) => ({
-            tsUtc: String(row?.timestamp ?? ""),
-            kwh: Number(row?.kwh ?? 0),
-          })),
+          intervals15: validIntervals.map((row) => ({ tsUtc: row.tsUtc, kwh: row.kwh })),
         });
       }
     }
