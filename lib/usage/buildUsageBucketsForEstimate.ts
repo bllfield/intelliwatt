@@ -260,10 +260,10 @@ export async function buildUsageBucketsForEstimate(args: {
   const windowEndParts = chicagoParts(args.windowEnd);
   const windowEndYearMonth = windowEndParts?.yearMonth ?? null;
   const completeDay = lastCompleteChicagoDay(args.windowEnd, { maxStepDays: args.maxStepDays ?? 2 });
-  const stitchYm = windowEndYearMonth ?? completeDay?.yearMonth ?? null;
+  const stitchYm = windowEndYearMonth;
 
-  const yearMonths = (stitchYm
-    ? lastNYearMonthsChicagoFrom(new Date(`${stitchYm}-15T12:00:00Z`), monthsCount)
+  const yearMonths = (windowEndYearMonth
+    ? lastNYearMonthsChicagoFrom(new Date(`${windowEndYearMonth}-15T12:00:00Z`), monthsCount)
     : lastNYearMonthsChicagoFrom(args.windowEnd, monthsCount))
     .slice()
     .reverse();
@@ -370,6 +370,17 @@ export async function buildUsageBucketsForEstimate(args: {
     }
 
     shouldCompute = missingAny || mismatchAny;
+
+    // When windowEnd has moved into a new month, the previous month's bucket may have been computed
+    // with partial data (e.g. Feb was computed when we only had data through Feb 10). Force recompute
+    // so Usage, Simulated Usage, and Past all show the same full-month value (no stale partial Feb).
+    if (!shouldCompute && windowEndYearMonth && yearMonths.length >= 2) {
+      const lastYm = yearMonths[yearMonths.length - 1];
+      const prevYm = yearMonths[yearMonths.length - 2];
+      if (prevYm && windowEndYearMonth > prevYm) {
+        shouldCompute = true;
+      }
+    }
   } catch {
     // If coverage check fails, default to computing (best-effort) to avoid false "missing buckets" stalls.
     shouldCompute = true;

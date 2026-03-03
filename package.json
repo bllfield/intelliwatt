@@ -30,6 +30,7 @@
     "admin:rateengine:inventory": "node scripts/admin/rate-engine-inventory.mjs",
     "admin:usage:buckets:audit": "tsx scripts/admin/usage-bucket-audit.ts",
     "admin:usage:buckets:backfill": "tsx scripts/admin/usage-bucket-backfill.ts",
+    "usage:raw-month": "tsx scripts/usage/print-raw-month.ts",
     "house:backfill-esiids": "tsx ./scripts/admin/backfill-house-esiids.ts",
     "ercot:migrate:dev": "prisma migrate dev --name ercot_models",
     "ercot:migrate:deploy": "prisma migrate deploy",
