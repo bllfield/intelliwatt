@@ -257,13 +257,14 @@ export async function buildUsageBucketsForEstimate(args: {
   const monthsCount = Math.max(1, Math.floor(args.monthsCount ?? 12));
   const stitchMode = args.stitchMode ?? "DAILY_OR_INTERVAL";
   const computeMissing = args.computeMissing !== false;
+  const windowEndParts = chicagoParts(args.windowEnd);
+  const windowEndYearMonth = windowEndParts?.yearMonth ?? null;
   const completeDay = lastCompleteChicagoDay(args.windowEnd, { maxStepDays: args.maxStepDays ?? 2 });
-  const stitchYm = completeDay?.yearMonth ?? null;
+  const stitchYm = windowEndYearMonth;
 
-  const yearMonths = (stitchYm
-    ? lastNYearMonthsChicagoFrom(new Date(`${stitchYm}-15T12:00:00Z`), monthsCount)
-    : lastNYearMonthsChicagoFrom(args.windowEnd, monthsCount)
-  )
+  const yearMonths = (windowEndYearMonth
+    ? lastNYearMonthsChicagoFrom(new Date(`${windowEndYearMonth}-15T12:00:00Z`), monthsCount)
+    : lastNYearMonthsChicagoFrom(args.windowEnd, monthsCount))
     .slice()
     .reverse();
 
@@ -412,10 +413,13 @@ export async function buildUsageBucketsForEstimate(args: {
 
   // Stitch newest month to full calendar month.
   const stitchedMonth =
-    completeDay && stitchYm && yearMonths.length && yearMonths[yearMonths.length - 1] === stitchYm
+    stitchYm && yearMonths.length && yearMonths[yearMonths.length - 1] === stitchYm
       ? (() => {
-          const lastDay = completeDay.day;
-          const monthDays = daysInMonth(completeDay.year, completeDay.month);
+          const endYear = windowEndParts?.year ?? completeDay?.year ?? null;
+          const endMonth = windowEndParts?.month ?? completeDay?.month ?? null;
+          const lastDay = windowEndParts?.day ?? completeDay?.day ?? null;
+          if (!endYear || !endMonth || !lastDay) return null;
+          const monthDays = daysInMonth(endYear, endMonth);
           const missingStartDay = lastDay + 1;
           if (missingStartDay > monthDays) return null;
           return {
@@ -424,27 +428,32 @@ export async function buildUsageBucketsForEstimate(args: {
             haveDaysThrough: lastDay,
             missingDaysFrom: missingStartDay,
             missingDaysTo: monthDays,
-            borrowedFromYearMonth: `${String(completeDay.year - 1)}-${String(completeDay.month).padStart(2, "0")}`,
-            completenessRule: "Uses last complete local day (>=23:45) and may step back up to 2 days if SMT/GB is late.",
+            borrowedFromYearMonth: `${String(endYear - 1)}-${String(endMonth).padStart(2, "0")}`,
+            completenessRule:
+              "Anchors to the window-end month/day and fills missing remainder from prior-year same month tail.",
           };
         })()
       : null;
 
   if (stitchedMonth && stitchMode !== "NONE") {
+    const [stitchYear, stitchMonth] = (() => {
+      const m = stitchedMonth.yearMonth.match(/^(\d{4})-(\d{2})$/);
+      return m ? [Number(m[1]), Number(m[2])] : [completeDay?.year ?? 0, completeDay?.month ?? 0];
+    })();
     // Preferred: stitch using DAILY buckets (fast, no interval scans).
     try {
       const ym = stitchedMonth.yearMonth;
       const byBucket: Record<string, number> = {};
       for (const k of keysToLoad) byBucket[k] = 0;
 
-      const monthDays = daysInMonth(completeDay!.year, completeDay!.month);
+      const monthDays = daysInMonth(stitchYear, stitchMonth);
       const mkDay = (y: number, m: number, d: number) => `${String(y)}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
       const curDays: string[] = [];
-      for (let d = 1; d <= stitchedMonth.haveDaysThrough; d++) curDays.push(mkDay(completeDay!.year, completeDay!.month, d));
+      for (let d = 1; d <= stitchedMonth.haveDaysThrough; d++) curDays.push(mkDay(stitchYear, stitchMonth, d));
       const priorDays: string[] = [];
       for (let d = stitchedMonth.missingDaysFrom; d <= stitchedMonth.missingDaysTo; d++) {
-        priorDays.push(mkDay(completeDay!.year - 1, completeDay!.month, d));
+        priorDays.push(mkDay(stitchYear - 1, stitchMonth, d));
       }
 
       const loadDays = async (days: string[]) => {
@@ -535,8 +544,8 @@ export async function buildUsageBucketsForEstimate(args: {
       } else if (stitchMode === "DAILY_OR_INTERVAL") {
         // Fall back to interval stitching when DAILY coverage is incomplete.
         try {
-          const currentRange = monthToUtcRange(completeDay!.year, completeDay!.month);
-          const priorRange = monthToUtcRange(completeDay!.year - 1, completeDay!.month);
+          const currentRange = monthToUtcRange(stitchYear, stitchMonth);
+          const priorRange = monthToUtcRange(stitchYear - 1, stitchMonth);
 
           const currentRows: Array<{ ts: Date; kwh: number }> = [];
           const priorRows2: Array<{ ts: Date; kwh: number }> = [];
@@ -635,10 +644,13 @@ export async function buildUsageBucketsForEstimate(args: {
       }
     } catch {
       // If daily table isn't deployed yet, optionally fall back to interval stitching (detail page only).
-      if (stitchMode === "DAILY_OR_INTERVAL") {
+      if (stitchMode === "DAILY_OR_INTERVAL" && stitchedMonth) {
         try {
-          const currentRange = monthToUtcRange(completeDay!.year, completeDay!.month);
-          const priorRange = monthToUtcRange(completeDay!.year - 1, completeDay!.month);
+          const m = stitchedMonth.yearMonth.match(/^(\d{4})-(\d{2})$/);
+          const sy = m ? Number(m[1]) : completeDay?.year ?? 0;
+          const sm = m ? Number(m[2]) : completeDay?.month ?? 0;
+          const currentRange = monthToUtcRange(sy, sm);
+          const priorRange = monthToUtcRange(sy - 1, sm);
 
           const currentRows: Array<{ ts: Date; kwh: number }> = [];
           const priorRows: Array<{ ts: Date; kwh: number }> = [];
