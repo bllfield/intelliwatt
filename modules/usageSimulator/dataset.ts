@@ -565,8 +565,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     intervals: curve.intervals,
     endDate: curve.end,
   });
-  // Keep stitched metadata for diagnostics, but align reported monthly totals to the final returned intervals.
-  const monthly = buildMonthlyTotalsFromIntervals(curve.intervals);
+  // Use stitched display-monthly output so boundary month windows don't show duplicate current month rows.
+  const monthly = monthlyBuild.monthly;
   const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));

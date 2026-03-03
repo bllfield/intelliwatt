@@ -49,4 +49,30 @@ describe("usageSimulator dataset summary invariants", () => {
     const totalDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
     expect(dataset.summary.intervalsCount).toBe(totalDays * 96);
   });
+
+  it("does not emit duplicate boundary month rows for past stitched windows", () => {
+    const intervals = [
+      ...makeUtcDayIntervals("2025-02-28", 0.1),
+      ...makeUtcDayIntervals("2025-03-01", 0.1),
+      ...makeUtcDayIntervals("2026-02-28", 0.1),
+    ];
+    const curve: SimulatedCurve = {
+      start: "2025-02-28",
+      end: "2026-02-28",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+
+    const dataset = buildSimulatedUsageDatasetFromCurve(curve, {
+      baseKind: "SMT_ACTUAL_BASELINE",
+      mode: "SMT_BASELINE",
+      canonicalEndMonth: "2026-02",
+    });
+
+    const months = (dataset.monthly ?? []).map((m) => m.month);
+    expect(months).toContain("2026-02");
+    expect(months).not.toContain("2025-02");
+  });
 });
