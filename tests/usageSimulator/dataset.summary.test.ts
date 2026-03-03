@@ -74,5 +74,46 @@ describe("usageSimulator dataset summary invariants", () => {
     const months = (dataset.monthly ?? []).map((m) => m.month);
     expect(months).toContain("2026-02");
     expect(months).not.toContain("2025-02");
+    const monthlySum = (dataset.monthly ?? []).reduce((s, m) => s + (Number(m.kwh) || 0), 0);
+    expect(Math.abs(monthlySum - dataset.summary.totalKwh)).toBeLessThanOrEqual(0.01);
+  });
+
+  it("keeps monthly totals aligned to full curve for spans beyond rolling-year windows", () => {
+    const monthStarts = [
+      "2024-01-01",
+      "2024-02-01",
+      "2024-03-01",
+      "2024-04-01",
+      "2024-05-01",
+      "2024-06-01",
+      "2024-07-01",
+      "2024-08-01",
+      "2024-09-01",
+      "2024-10-01",
+      "2024-11-01",
+      "2024-12-01",
+      "2025-01-01",
+      "2025-02-01",
+    ];
+    const intervals = monthStarts.flatMap((dayIso) => makeUtcDayIntervals(dayIso, 0.1));
+
+    const curve: SimulatedCurve = {
+      start: "2024-01-01",
+      end: "2025-02-01",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+
+    const dataset = buildSimulatedUsageDatasetFromCurve(curve, {
+      baseKind: "SMT_ACTUAL_BASELINE",
+      mode: "SMT_BASELINE",
+      canonicalEndMonth: "2025-02",
+    });
+
+    const monthlySum = (dataset.monthly ?? []).reduce((s, m) => s + (Number(m.kwh) || 0), 0);
+    expect(Math.abs(monthlySum - dataset.summary.totalKwh)).toBeLessThanOrEqual(0.01);
+    expect((dataset.monthly ?? []).length).toBeGreaterThan(12);
   });
 });

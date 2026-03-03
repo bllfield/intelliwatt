@@ -254,6 +254,30 @@ function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; c
     .sort((a, b) => (a.month < b.month ? -1 : 1));
 }
 
+function daySpanInclusive(startDate: string, endDate: string): number | null {
+  const start = new Date(`${String(startDate).slice(0, 10)}T12:00:00.000Z`);
+  const end = new Date(`${String(endDate).slice(0, 10)}T12:00:00.000Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null;
+  return Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function collapseBoundaryMonthForRollingYear(
+  monthly: Array<{ month: string; kwh: number }>,
+  startDate: string,
+  endDate: string
+): Array<{ month: string; kwh: number }> {
+  if (!Array.isArray(monthly) || monthly.length <= 1) return monthly;
+  const spanDays = daySpanInclusive(startDate, endDate);
+  if (spanDays == null || spanDays < 365 || spanDays > 366) return monthly;
+  const first = monthly[0];
+  const last = monthly[monthly.length - 1];
+  if (!first || !last) return monthly;
+  if (first.month.slice(5, 7) !== last.month.slice(5, 7)) return monthly;
+  const mergedLast = { ...last, kwh: round2((Number(last.kwh) || 0) + (Number(first.kwh) || 0)) };
+  const middle = monthly.slice(1, -1);
+  return [...middle, mergedLast];
+}
+
 function computeFifteenMinuteAverages(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
   const buckets = new Map<string, { sumKw: number; count: number }>();
   for (let i = 0; i < intervals.length; i++) {
@@ -565,8 +589,10 @@ export function buildSimulatedUsageDatasetFromCurve(
     intervals: curve.intervals,
     endDate: curve.end,
   });
-  // Use stitched display-monthly output so boundary month windows don't show duplicate current month rows.
-  const monthly = monthlyBuild.monthly;
+  // Keep monthly totals aligned to all returned intervals, but collapse rolling-year boundary duplicates
+  // (e.g. 02/25 + 02/26) into a single current-month display row.
+  const monthlyRaw = buildMonthlyTotalsFromIntervals(curve.intervals);
+  const monthly = collapseBoundaryMonthForRollingYear(monthlyRaw, curve.start, curve.end);
   const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
