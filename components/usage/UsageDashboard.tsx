@@ -271,8 +271,11 @@ export const UsageDashboard: React.FC<Props> = ({
           return;
         }
 
-        // Show cached payload when appropriate. Use REAL cache when showing Usage (same as main dashboard).
-        const skipCache = effectiveFetchMode === "SIMULATED" && simulatedHousesOverride === null;
+        // Skip cache for REAL so Usage dashboard and Simulated page Usage always show same fresh data (no stale partial-month).
+        // Skip cache for SIMULATED when no override so we refetch baseline from server.
+        const skipCache =
+          effectiveFetchMode === "REAL" ||
+          (effectiveFetchMode === "SIMULATED" && simulatedHousesOverride === null);
         const cached = skipCache ? null : readSessionCache(effectiveFetchMode);
         const cachedPayload = cached?.payload ?? null;
         if (cachedPayload && (cachedPayload as any).ok !== false && (cachedPayload as any).houses) {
@@ -401,7 +404,7 @@ export const UsageDashboard: React.FC<Props> = ({
         smtPollTimerRef.current = null;
       }
     };
-  }, [datasetMode, fetchModeOverride, loading, selectedHouseId, houses]);
+  }, [effectiveFetchMode, loading, selectedHouseId, houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
