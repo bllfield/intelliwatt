@@ -271,8 +271,8 @@ export const UsageDashboard: React.FC<Props> = ({
           return;
         }
 
-        // Skip cache for REAL so Usage dashboard and Simulated page Usage always show same fresh data (no stale partial-month).
-        // Skip cache for SIMULATED when no override so we refetch baseline from server.
+        // Never use cache for REAL so Usage page and Simulated Usage tab always show same fresh data (no stale Feb etc).
+        // For SIMULATED with no override, skip cache so we refetch from server.
         const skipCache =
           effectiveFetchMode === "REAL" ||
           (effectiveFetchMode === "SIMULATED" && simulatedHousesOverride === null);
@@ -299,7 +299,10 @@ export const UsageDashboard: React.FC<Props> = ({
           throw new Error((json as any).error || `Failed with status ${res.status}`);
         }
         if (cancelled) return;
-        writeSessionCache(effectiveFetchMode, json);
+        // Don't write REAL to cache so no stale usage data can ever be shown when switching views.
+        if (effectiveFetchMode !== "REAL") {
+          writeSessionCache(effectiveFetchMode, json);
+        }
         setHouses(json.houses || []);
         const firstWithData = json.houses.find((h) => h.dataset);
         setSelectedHouseId(firstWithData?.houseId ?? json.houses[0]?.houseId ?? null);
@@ -404,7 +407,7 @@ export const UsageDashboard: React.FC<Props> = ({
         smtPollTimerRef.current = null;
       }
     };
-  }, [effectiveFetchMode, loading, selectedHouseId, houses]);
+  }, [datasetMode, fetchModeOverride, loading, selectedHouseId, houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
