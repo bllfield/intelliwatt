@@ -401,7 +401,7 @@ export const UsageDashboard: React.FC<Props> = ({
         smtPollTimerRef.current = null;
       }
     };
-  }, [effectiveFetchMode, loading, selectedHouseId, houses]);
+  }, [datasetMode, fetchModeOverride, loading, selectedHouseId, houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
