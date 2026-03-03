@@ -748,7 +748,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     if (recalcBusy) return;
     if (autoBaselineAttemptedRef.current) return;
     autoBaselineAttemptedRef.current = true;
-    enqueueRecalc({ scenarioId: null, note: "Generating baseline…" });
+    enqueueRecalc({ scenarioId: null, note: "Generating usage…" });
     void drainRecalcQueue();
   }, [baselineReady, canRecalc, recalcBusy, mode, weatherPreference]);
 
@@ -758,7 +758,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     lastWeatherPreferenceRef.current = weatherPreference;
     if (!canRecalc) return;
     void (async () => {
-      enqueueRecalc({ scenarioId: null, note: "Updating baseline…" });
+      enqueueRecalc({ scenarioId: null, note: "Updating usage…" });
       if (pastScenario?.id && pastEventCount > 0) enqueueRecalc({ scenarioId: pastScenario.id, note: "Updating Past…" });
       if (futureScenario?.id && futureEventCount > 0) enqueueRecalc({ scenarioId: futureScenario.id, note: "Updating Future…" });
       await drainRecalcQueue();
@@ -773,7 +773,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Start here</div>
             <h2 className="mt-2 text-2xl font-semibold text-brand-white">Usage Simulator</h2>
             <p className="mt-2 text-sm text-brand-cyan/75">
-              Complete the required details and save changes. Saving automatically updates the Baseline/Past/Future curves for viewing below.
+              Complete the required details and save changes. Saving automatically updates the Usage/Past/Future curves for viewing below.
             </p>
             {wiringIssues.length ? (
               <div className="mt-4 rounded-2xl border border-amber-300/30 bg-amber-200/10 px-4 py-3 text-sm text-amber-100">
@@ -828,7 +828,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               <div className="mt-2 text-sm text-brand-cyan/80">
                 {hasActualIntervals ? (
                   <>
-                    Your <span className="font-semibold">baseline is Actual usage</span> (read-only). Complete the required
+                    Your <span className="font-semibold">Usage is Actual usage</span> (read-only). Complete the required
                     details below to unlock Past/Future simulations.
                   </>
                 ) : (
@@ -998,7 +998,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                 </div>
                 <div className="md:col-span-4">
                   <div className="text-xs text-brand-cyan/80">
-                    Last year is the default baseline assumption. We store this choice so the simulator stays deterministic as we roll out weather adjustments.
+                    Last year is the default usage assumption. We store this choice so the simulator stays deterministic as we roll out weather adjustments.
                   </div>
                 </div>
                 <div className="md:col-span-3">
@@ -1034,7 +1034,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       {scenarioBanner}
                     </div>
                   ) : (
-                    <div className="text-xs text-brand-cyan/70">Baseline is generated automatically when requirements are met.</div>
+                    <div className="text-xs text-brand-cyan/70">Usage is generated automatically when requirements are met.</div>
                   )}
                 </div>
                 <div className="md:col-span-3">
@@ -1052,7 +1052,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                             : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
                       ].join(" ")}
                     >
-                      Baseline
+                      Usage
                     </button>
                     <button
                       type="button"
@@ -1123,7 +1123,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         <ManualUsageEntry
           houseId={houseId}
           onSaved={async () => {
-            await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+            await recalcNow({ scenarioId: null, note: "Updating usage…" });
           }}
         />
       </Modal>
@@ -1138,7 +1138,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         <HomeDetailsClient
           houseId={houseId}
           onSaved={async () => {
-            await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+            await recalcNow({ scenarioId: null, note: "Updating usage…" });
             if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
             if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
           }}
@@ -1155,7 +1155,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         <AppliancesClient
           houseId={houseId}
           onSaved={async () => {
-            await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+            await recalcNow({ scenarioId: null, note: "Updating usage…" });
             if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
             if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
           }}
@@ -1193,7 +1193,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   Travel/Vacant
                 </div>
                 <div className="mt-2 text-xs text-brand-navy/70">
-                  Add date ranges when the home was vacant or you were away. Those days are excluded from baseline shape
+                  Add date ranges when the home was vacant or you were away. Those days are excluded from the usage shape
                   derivation and shown as Travel/Vacant on the Past curve.
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
