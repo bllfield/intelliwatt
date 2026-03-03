@@ -74,6 +74,13 @@ describe("usageSimulator dataset summary invariants", () => {
     const months = (dataset.monthly ?? []).map((m) => m.month);
     expect(months).toContain("2026-02");
     expect(months).not.toContain("2025-02");
+    const stitched = dataset.insights.stitchedMonth as
+      | { yearMonth: string; borrowedFromYearMonth: string }
+      | null;
+    if (stitched) {
+      expect(months).toContain(stitched.yearMonth);
+      expect(months).not.toContain(stitched.borrowedFromYearMonth);
+    }
     const monthlySum = (dataset.monthly ?? []).reduce((s, m) => s + (Number(m.kwh) || 0), 0);
     expect(Math.abs(monthlySum - dataset.summary.totalKwh)).toBeLessThanOrEqual(0.01);
   });
