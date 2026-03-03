@@ -262,8 +262,10 @@ export async function buildUsageBucketsForEstimate(args: {
   const completeDay = lastCompleteChicagoDay(args.windowEnd, { maxStepDays: args.maxStepDays ?? 2 });
   const stitchYm = windowEndYearMonth ?? completeDay?.yearMonth ?? null;
 
-  const yearMonths = (windowEndYearMonth
-    ? lastNYearMonthsChicagoFrom(new Date(`${windowEndYearMonth}-15T12:00:00Z`), monthsCount)
+  // Build yearMonths from stitchYm when set so the trailing month matches (avoids bypassing stitching
+  // when windowEndYearMonth is null but completeDay?.yearMonth is from a previous month).
+  const yearMonths = (stitchYm
+    ? lastNYearMonthsChicagoFrom(new Date(`${stitchYm}-15T12:00:00Z`), monthsCount)
     : lastNYearMonthsChicagoFrom(args.windowEnd, monthsCount))
     .slice()
     .reverse();
