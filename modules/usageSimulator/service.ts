@@ -765,17 +765,27 @@ export async function recalcSimulatorBuild(args: {
             (buildInputs as any)?.versions?.intradayTemplateVersion ??
             "v1"
         );
-        await saveIntervalSeries15m({
-          userId,
-          houseId,
-          kind: IntervalSeriesKind.PAST_SIM_BASELINE,
-          scenarioId,
-          anchorStartUtc: validIntervals[0].tsDate,
-          anchorEndUtc: validIntervals[validIntervals.length - 1].tsDate,
-          derivationVersion,
-          buildInputsHash,
-          intervals15: validIntervals.map((row) => ({ tsUtc: row.tsUtc, kwh: row.kwh })),
-        });
+        try {
+          await saveIntervalSeries15m({
+            userId,
+            houseId,
+            kind: IntervalSeriesKind.PAST_SIM_BASELINE,
+            scenarioId,
+            anchorStartUtc: validIntervals[0].tsDate,
+            anchorEndUtc: validIntervals[validIntervals.length - 1].tsDate,
+            derivationVersion,
+            buildInputsHash,
+            intervals15: validIntervals.map((row) => ({ tsUtc: row.tsUtc, kwh: row.kwh })),
+          });
+        } catch (e) {
+          // Persistence of derived interval artifacts must not block recalc responses.
+          console.error("[usageSimulator/service] failed to persist PAST_SIM_BASELINE interval series", {
+            userId,
+            houseId,
+            scenarioId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
       }
     }
   }
