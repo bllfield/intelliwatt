@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
+import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,6 +30,32 @@ export async function GET(request: NextRequest) {
     const scenarioId = scenarioIdRaw == null ? null : String(scenarioIdRaw).trim();
 
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
+
+    // Baseline alias path: scenarioId omitted/null resolves to ACTUAL_USAGE_INTERVALS.
+    if (!scenarioId) {
+      const house = await prisma.houseAddress.findFirst({
+        where: { id: houseId, userId: u.user.id, archivedAt: null },
+        select: { id: true, esiid: true },
+      });
+      if (!house) {
+        return NextResponse.json(
+          { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" },
+          { status: 403 }
+        );
+      }
+      const resolved = await resolveIntervalsLayer({
+        userId: u.user.id,
+        houseId: house.id,
+        layerKind: IntervalSeriesKind.BASELINE_INTERVALS,
+        scenarioId: null,
+        esiid: house.esiid ?? null,
+      });
+      const dataset = resolved?.dataset ?? null;
+      return NextResponse.json(
+        { ok: true, houseId: house.id, scenarioKey: "BASELINE", scenarioId: null, dataset },
+        { headers: { "Cache-Control": "private, max-age=30" } }
+      );
+    }
 
     const out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
     // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).

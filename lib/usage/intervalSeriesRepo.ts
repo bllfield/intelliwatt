@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { usagePrisma } from "@/lib/db/usageClient";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 type IntervalInput = { tsUtc: string | Date; kwh: number | string };
@@ -47,7 +47,7 @@ export async function saveIntervalSeries15m(params: {
     };
   });
 
-  return prisma.$transaction(async (tx) => {
+  return usagePrisma.$transaction(async (tx) => {
     const existing = await (tx as any).intervalSeries.findFirst({
       where: {
         userId: params.userId,
@@ -121,7 +121,7 @@ export async function getIntervalSeries15m(params: {
   points: Array<{ tsUtc: Date; kwh: string }>;
 } | null> {
   const scenarioId = params.scenarioId ?? null;
-  const series = await (prisma as any).intervalSeries.findFirst({
+  const series = await (usagePrisma as any).intervalSeries.findFirst({
     where: {
       userId: params.userId,
       houseId: params.houseId,

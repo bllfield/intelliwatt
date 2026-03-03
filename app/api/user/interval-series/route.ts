@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
-import { getIntervalSeries15m } from "@/modules/usageSimulator/intervalSeriesRepo";
+import { getIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { isIntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 export const dynamic = "force-dynamic";

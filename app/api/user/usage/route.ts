@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
-import { getActualUsageDatasetForHouse } from '@/lib/usage/actualDatasetForHouse';
+import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
+import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -37,9 +38,15 @@ export async function GET(_request: NextRequest) {
 
     const results = [];
     for (const house of houses) {
-      let result: Awaited<ReturnType<typeof getActualUsageDatasetForHouse>>;
+      let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
       try {
-        result = await getActualUsageDatasetForHouse(house.id, house.esiid ?? null);
+        const resolved = await resolveIntervalsLayer({
+          userId: user.id,
+          houseId: house.id,
+          layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+          esiid: house.esiid ?? null,
+        });
+        result = resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } };
       } catch (err) {
         console.warn('[user/usage] actual dataset fetch failed for house', house.id, err);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };

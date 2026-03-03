@@ -35,6 +35,14 @@ enum OvernightAttribution {
   START_DAY
 }
 
+enum IntervalSeriesKind {
+  ACTUAL_USAGE_INTERVALS
+  BASELINE_INTERVALS
+  PAST_SIM_BASELINE
+  FUTURE_SIM_BASELINE
+  FUTURE_SIM_USAGE
+}
+
 model UsageModuleBootstrap {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -165,4 +173,38 @@ model HomeSimulatedUsageBucket {
   @@unique([homeId, scenarioKey, yearMonth, bucketKey])
   @@index([homeId, scenarioKey])
   @@index([bucketKey])
+}
+
+model IntervalSeries {
+  id                String             @id @default(uuid())
+  userId            String
+  houseId           String
+  kind              IntervalSeriesKind
+  scenarioId        String?
+  anchorStartUtc    DateTime
+  anchorEndUtc      DateTime
+  derivationVersion String
+  buildInputsHash   String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  points IntervalPoint15m[]
+
+  @@index([userId])
+  @@index([houseId])
+  @@index([kind])
+  @@index([scenarioId])
+  @@index([userId, houseId, kind])
+  @@index([userId, houseId, kind, scenarioId])
+}
+
+model IntervalPoint15m {
+  seriesId String
+  tsUtc    DateTime
+  kwh      Decimal @usageDb.Decimal(12, 6)
+
+  series IntervalSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@id([seriesId, tsUtc])
+  @@index([tsUtc])
 }

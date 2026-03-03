@@ -50,16 +50,6 @@ CREATE UNIQUE INDEX "IntervalSeries_unique_scenario_kind_per_house"
   WHERE "scenarioId" IS NOT NULL;
 
 -- AddForeignKey
-ALTER TABLE "IntervalSeries"
-  ADD CONSTRAINT "IntervalSeries_userId_fkey"
-  FOREIGN KEY ("userId") REFERENCES "User"("id")
-  ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE "IntervalSeries"
-  ADD CONSTRAINT "IntervalSeries_houseId_fkey"
-  FOREIGN KEY ("houseId") REFERENCES "HouseAddress"("id")
-  ON DELETE CASCADE ON UPDATE CASCADE;
-
 ALTER TABLE "IntervalPoint15m"
   ADD CONSTRAINT "IntervalPoint15m_seriesId_fkey"
   FOREIGN KEY ("seriesId") REFERENCES "IntervalSeries"("id")

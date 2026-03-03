@@ -41,13 +41,15 @@ Current behavior is overloaded:
 
 Canonical definition:
 
-- `BASELINE_INTERVALS` is the canonical 12-month starting curve used by downstream layers and shown to users as baseline.
+- `BASELINE_INTERVALS` is an alias/view layer by default and resolves to `ACTUAL_USAGE_INTERVALS` unless a derived baseline override is explicitly available.
+- `BASELINE_INTERVALS` should not be persisted as its own first-class interval-series store.
+- Corrected/derived baseline curves must be persisted under derived kinds (for example `PAST_SIM_BASELINE`), not as `BASELINE_INTERVALS`.
 
 Current route with baseline semantics:
 
 - `GET /api/user/usage/simulated/house` with `scenarioId=null`
   - Target layer: `BASELINE_INTERVALS`
-  - Note: today this can be ACTUAL-derived depending on mode/source.
+  - Note: baseline should resolve through the same underlying actual loader as `/api/user/usage` unless a derived baseline override is explicitly selected.
 
 Current function mapped to this behavior:
 
@@ -62,7 +64,7 @@ Persistence status today:
 
 - `/api/user/simulator/recalc` persists `UsageSimulatorBuild` and
   `usagePrisma.HomeSimulatedUsageBucket` for non-baseline scenarios.
-- It does not yet persist a first-class 15-minute interval series for this layer.
+- Corrected baseline persistence belongs to this derived layer (`PAST_SIM_BASELINE`) when enabled, not to `BASELINE_INTERVALS`.
 
 ### `FUTURE_SIM_BASELINE`
 

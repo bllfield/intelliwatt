@@ -138,9 +138,9 @@ const mockState = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/db", () => ({ prisma: mockState.prismaMock }));
+vi.mock("@/lib/db/usageClient", () => ({ usagePrisma: mockState.prismaMock }));
 
-import { getIntervalSeries15m, saveIntervalSeries15m } from "@/modules/usageSimulator/intervalSeriesRepo";
+import { getIntervalSeries15m, saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 
 function makeIntervals(startIso: string, count: number, kwh = 0.25) {
   const out: Array<{ tsUtc: string; kwh: number }> = [];

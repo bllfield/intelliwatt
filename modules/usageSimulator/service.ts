@@ -22,7 +22,7 @@ import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from 
 import { listLedgerRows } from "@/modules/upgradesLedger/repo";
 import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/overlayEntries";
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
-import { saveIntervalSeries15m } from "@/modules/usageSimulator/intervalSeriesRepo";
+import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
