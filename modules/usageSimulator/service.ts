@@ -853,7 +853,8 @@ export async function getSimulatedUsageForUser(args: {
                   actualSource,
                 },
               };
-              ensureBaselineMonthlyFromBuild(dataset, buildInputs);
+              // Keep actual monthly as source of truth so simulation page Usage matches Usage dashboard.
+              // Do not overwrite with build's curve-based monthly (ensureBaselineMonthlyFromBuild).
             }
           }
           if (!dataset) {
@@ -1011,7 +1012,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
             actualSource,
           },
         };
-        ensureBaselineMonthlyFromBuild(dataset, buildInputs);
+        // Keep actual monthly as source of truth so simulation page Usage matches Usage dashboard.
+        // Do not call ensureBaselineMonthlyFromBuild when we have actual data.
       } else {
         // Actual fetch failed; for SMT_BASELINE BASELINE, use filledSet: unfilled ACTUAL, filled SIMULATED (aligns with else-branch).
         dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
@@ -1209,6 +1211,31 @@ export async function getSimulatedUsageForHouseScenario(args: {
             notes: buildInputs.notes,
             filledMonths: buildInputs.filledMonths,
           });
+          // Non-travel months must match Usage exactly: overlay actual monthly for those months.
+          const actualForOverlay = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+          if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {
+            const travelMonthsSet = monthsIntersectingTravelRanges(
+              (canonicalMonths ?? []) as string[],
+              ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>
+            );
+            const actualByMonth = new Map<string, number>();
+            for (const row of actualForOverlay.dataset.monthly as Array<{ month?: string; kwh?: number }>) {
+              const ym = String(row?.month ?? "").trim();
+              if (/^\d{4}-\d{2}$/.test(ym)) actualByMonth.set(ym, Number(row?.kwh) || 0);
+            }
+            dataset.monthly = dataset.monthly.map((m: { month?: string; kwh?: number }) => {
+              const ym = String(m?.month ?? "").trim();
+              if (!/^\d{4}-\d{2}$/.test(ym)) return m;
+              if (travelMonthsSet.has(ym)) return m;
+              const actualKwh = actualByMonth.get(ym);
+              if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return m;
+              return { ...m, kwh: actualKwh };
+            });
+            const overlaySum = (dataset.monthly as Array<{ kwh?: number }>).reduce((s, r) => s + (Number(r?.kwh) || 0), 0);
+            if (dataset.summary && typeof dataset.summary === "object") {
+              (dataset.summary as any).totalKwh = Math.round(overlaySum * 100) / 100;
+            }
+          }
         }
       }
       if (!dataset) {

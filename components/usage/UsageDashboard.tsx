@@ -210,6 +210,12 @@ type Props = {
   allowModeToggle?: boolean;
   refreshToken?: string | number;
   simulatedHousesOverride?: HouseUsage[] | null;
+  /**
+   * When set, this mode is used for the data fetch (and cache key) instead of datasetMode.
+   * Use "REAL" when showing Usage/baseline on the simulation page so it uses the same
+   * API as the main Usage dashboard — one source of truth. Scenarios (Past/Future) use SIMULATED.
+   */
+  fetchModeOverride?: "REAL" | "SIMULATED";
   /** When set (simulator context), show this as the dashboard label and optionally list variables. */
   dashboardVariant?: "USAGE" | "PAST_SIMULATED_USAGE" | "FUTURE_SIMULATED_USAGE";
   pastVariables?: ScenarioVariable[];
@@ -228,6 +234,7 @@ export const UsageDashboard: React.FC<Props> = ({
   allowModeToggle = true,
   refreshToken,
   simulatedHousesOverride = null,
+  fetchModeOverride,
   dashboardVariant,
   pastVariables = [],
   futureVariables = [],
@@ -251,9 +258,11 @@ export const UsageDashboard: React.FC<Props> = ({
       try {
         setError(null);
 
-        // When the simulator supplies a scenario-specific simulated dataset,
-        // bypass the baseline simulated endpoint and use the override as-is.
-        if (datasetMode === "SIMULATED" && simulatedHousesOverride && simulatedHousesOverride.length) {
+        // Effective mode for fetch: when simulator shows Usage tab, use REAL so we hit the same API as the main Usage page (one source).
+        const effectiveFetchMode = fetchModeOverride ?? datasetMode;
+
+        // When the simulator supplies a scenario-specific dataset (Past/Future only), use it as-is. No scenario on Usage tab.
+        if (effectiveFetchMode === "SIMULATED" && simulatedHousesOverride && simulatedHousesOverride.length) {
           const hs = simulatedHousesOverride;
           setHouses(hs);
           const firstWithData = hs.find((h) => h.dataset);
@@ -262,10 +271,9 @@ export const UsageDashboard: React.FC<Props> = ({
           return;
         }
 
-        // Show cached payload instantly (back/forward nav), then refresh in the background.
-        // Skip cache when on simulator baseline (simulatedHousesOverride === null) so baseline always shows canonical dates + SIMULATED source.
-        const skipCache = datasetMode === "SIMULATED" && simulatedHousesOverride === null;
-        const cached = skipCache ? null : readSessionCache(datasetMode);
+        // Show cached payload when appropriate. Use REAL cache when showing Usage (same as main dashboard).
+        const skipCache = effectiveFetchMode === "SIMULATED" && simulatedHousesOverride === null;
+        const cached = skipCache ? null : readSessionCache(effectiveFetchMode);
         const cachedPayload = cached?.payload ?? null;
         if (cachedPayload && (cachedPayload as any).ok !== false && (cachedPayload as any).houses) {
           const c = cachedPayload as { ok: true; houses: HouseUsage[] };
@@ -277,11 +285,9 @@ export const UsageDashboard: React.FC<Props> = ({
           setLoading(true);
         }
 
-        // Always refresh in the background so SMT pulls/backfills show up immediately
-        // (even if the user recently visited this page and has sessionStorage cached).
-        // Use no-store + cache-bust to avoid browser cache keeping an old payload around.
+        // Single source: Usage/baseline always fetches /api/user/usage (REAL). Past/Future use /api/user/usage/simulated.
         const url =
-          datasetMode === "SIMULATED"
+          effectiveFetchMode === "SIMULATED"
             ? `/api/user/usage/simulated?ts=${Date.now()}`
             : `/api/user/usage?ts=${Date.now()}`;
         const res = await fetch(url, { cache: "no-store" });
@@ -290,7 +296,7 @@ export const UsageDashboard: React.FC<Props> = ({
           throw new Error((json as any).error || `Failed with status ${res.status}`);
         }
         if (cancelled) return;
-        writeSessionCache(datasetMode, json);
+        writeSessionCache(effectiveFetchMode, json);
         setHouses(json.houses || []);
         const firstWithData = json.houses.find((h) => h.dataset);
         setSelectedHouseId(firstWithData?.houseId ?? json.houses[0]?.houseId ?? null);
@@ -304,12 +310,14 @@ export const UsageDashboard: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [datasetMode, refreshToken, simulatedHousesOverride]);
+  }, [datasetMode, fetchModeOverride, refreshToken, simulatedHousesOverride]);
 
   // If usage isn't available yet (common immediately after SMT backfill request),
   // keep checking until it lands by polling the SMT orchestrator and reloading usage.
+  // Only poll when we're actually showing REAL data (main Usage or simulator Usage tab).
+  const effectiveFetchMode = fetchModeOverride ?? datasetMode;
   useEffect(() => {
-    if (datasetMode === "SIMULATED") {
+    if (effectiveFetchMode === "SIMULATED") {
       if (smtPollTimerRef.current) {
         window.clearTimeout(smtPollTimerRef.current);
         smtPollTimerRef.current = null;
@@ -393,7 +401,7 @@ export const UsageDashboard: React.FC<Props> = ({
         smtPollTimerRef.current = null;
       }
     };
-  }, [datasetMode, loading, selectedHouseId, houses]);
+  }, [effectiveFetchMode, loading, selectedHouseId, houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;

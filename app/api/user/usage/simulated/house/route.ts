@@ -27,11 +27,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const houseId = String(searchParams.get("houseId") ?? "").trim();
     const scenarioIdRaw = searchParams.get("scenarioId");
-    const scenarioId = scenarioIdRaw == null ? null : String(scenarioIdRaw).trim();
+    const scenarioIdTrimmed = scenarioIdRaw == null ? null : String(scenarioIdRaw).trim();
+    // Treat "baseline" (client string) same as null so both dashboard and simulation page use same actual data.
+    const scenarioId = scenarioIdTrimmed === "baseline" ? null : scenarioIdTrimmed;
 
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
 
-    // Baseline alias path: scenarioId omitted/null resolves to ACTUAL_USAGE_INTERVALS.
+    // Baseline alias path: scenarioId omitted/null/"baseline" resolves to ACTUAL_USAGE_INTERVALS.
     if (!scenarioId) {
       const house = await prisma.houseAddress.findFirst({
         where: { id: houseId, userId: u.user.id, archivedAt: null },

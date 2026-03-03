@@ -1105,6 +1105,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           initialMode="SIMULATED"
           refreshToken={refreshToken}
           simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
+          fetchModeOverride={curveView === "BASELINE" ? "REAL" : undefined}
           dashboardVariant={
             curveView === "BASELINE" ? "USAGE" : curveView === "PAST" ? "PAST_SIMULATED_USAGE" : "FUTURE_SIMULATED_USAGE"
           }
