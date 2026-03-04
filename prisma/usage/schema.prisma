@@ -208,3 +208,28 @@ model IntervalPoint15m {
   @@id([seriesId, tsUtc])
   @@index([tsUtc])
 }
+
+/// Versioned usage shape derived from actual 15-min intervals (canonical 12-month window). houseId references HouseAddress.id in main DB.
+model UsageShapeProfile {
+  id                        String    @id @default(cuid())
+  houseId                   String
+  version                   String
+  derivedAt                 DateTime  @default(now())
+  windowStartUtc            DateTime
+  windowEndUtc              DateTime
+  baseloadKwhPer15m         Float?
+  baseloadKwhPerDay         Float?
+  shapeAll96                Json?
+  shapeWeekday96            Json?
+  shapeWeekend96            Json?
+  shapeByMonth96            Json?
+  avgKwhPerDayWeekdayByMonth Json?
+  avgKwhPerDayWeekendByMonth Json?
+  peakHourByMonth           Json?
+  p95KwByMonth              Json?
+  timeOfDayShares           Json?
+  configHash                String
+
+  @@unique([houseId, version])
+  @@index([houseId])
+}
