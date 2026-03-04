@@ -10,6 +10,8 @@ import { type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { getPastSimulatedDatasetForHouse } from "@/modules/usageSimulator/service";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { getLatestUsageShapeProfile, upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
+import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
   canonicalIntervalKey,
@@ -164,6 +166,7 @@ function buildFullReport(args: {
     canonicalMonthsLen: number;
     reasonNotUsed: string | null;
   } | null;
+  profileAutoBuilt?: boolean;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -226,6 +229,7 @@ function buildFullReport(args: {
       weekdayWeekendSplitUsed: j.modelAssumptions?.intradayShape?.weekdayWeekendSplit ?? false,
       dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
+      profileAutoBuilt: j.profileAutoBuilt ?? false,
       canonicalMonths: j.buildInputs.canonicalMonths,
       excludedDateKeysCount: j.excludedDateKeysCount,
       excludedDateKeysSample: j.excludedDateKeysSample,
@@ -341,6 +345,7 @@ function buildFullReport(args: {
     } else {
       lines.push("usageShapeProfile: (no diag)");
     }
+    kv("profileAutoBuilt", fullReportJson.engine.profileAutoBuilt);
     lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
@@ -489,6 +494,29 @@ export async function POST(req: NextRequest) {
 
   const startDate = summary.start.slice(0, 10);
   const endDate = summary.end.slice(0, 10);
+
+  let profileAutoBuilt = false;
+  const existingProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
+  if (!existingProfile) {
+    try {
+      const fullWindowIntervals = await getActualIntervalsForRange({
+        houseId: house.id,
+        esiid,
+        startDate,
+        endDate,
+      });
+      if (fullWindowIntervals?.length) {
+        const windowStartUtc = `${startDate}T00:00:00.000Z`;
+        const windowEndUtc = `${endDate}T23:59:59.999Z`;
+        const intervalsForDerive = fullWindowIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
+        const profile = deriveUsageShapeProfile(intervalsForDerive, timezone, windowStartUtc, windowEndUtc);
+        await upsertUsageShapeProfile(house.id, "v1", profile);
+        profileAutoBuilt = true;
+      }
+    } catch {
+      // non-fatal: continue without profile; diag will show profile_not_found
+    }
+  }
 
   if (rangesToMask.length === 0) {
     return NextResponse.json({
@@ -833,6 +861,7 @@ export async function POST(req: NextRequest) {
     },
     poolHoursLens,
     usageShapeProfileDiag: (dataset as any)?.meta?.usageShapeProfileDiag ?? null,
+    profileAutoBuilt,
   });
 
   const pasteLines = [
@@ -901,6 +930,7 @@ export async function POST(req: NextRequest) {
       windowStartUtc: dataset.summary.start ?? null,
       windowEndUtc: dataset.summary.end ?? null,
     },
+    profileAutoBuilt,
     pasteSummary,
     fullReportText,
     fullReportJson,
