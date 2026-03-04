@@ -8,6 +8,7 @@ import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 300; // Past scenario may hit cache; cold path uses canonical builder (can be slow)
 
 async function requireUser() {
   const cookieStore = cookies();

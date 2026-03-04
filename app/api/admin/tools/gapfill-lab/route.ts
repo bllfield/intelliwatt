@@ -8,6 +8,17 @@ import { monthsEndingAt } from "@/modules/manualUsage/anchor";
 import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
 import { type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { getPastSimulatedDatasetForHouse } from "@/modules/usageSimulator/service";
+import {
+  computePastInputHash,
+  getCachedPastDataset,
+  saveCachedPastDataset,
+  PAST_ENGINE_VERSION,
+} from "@/modules/usageSimulator/pastCache";
+import {
+  encodeIntervalsV1,
+  decodeIntervalsV1,
+  INTERVAL_CODEC_V1,
+} from "@/modules/usageSimulator/intervalCodec";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getLatestUsageShapeProfile, upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
@@ -168,6 +179,11 @@ function buildFullReport(args: {
     reasonNotUsed: string | null;
   } | null;
   profileAutoBuilt?: boolean;
+  cacheHit?: boolean;
+  inputHash?: string;
+  engineVersion?: string;
+  intervalsCodec?: string;
+  compressedBytesLength?: number;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -227,6 +243,11 @@ function buildFullReport(args: {
       simVersion: j.modelAssumptions?.meta?.simVersion ?? "production_builder",
       derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
       configHash: j.configHash,
+      cacheHit: j.cacheHit ?? false,
+      inputHash: j.inputHash ?? null,
+      engineVersion: j.engineVersion ?? null,
+      intervalsCodec: j.intervalsCodec ?? null,
+      compressedBytesLength: j.compressedBytesLength ?? null,
       weekdayWeekendSplitUsed: j.modelAssumptions?.intradayShape?.weekdayWeekendSplit ?? false,
       dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
@@ -334,6 +355,11 @@ function buildFullReport(args: {
   section("F) Simulator engine path + config", () => {
     kv("enginePath", "production_past_stitched");
     lines.push("functionsUsed: getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve");
+    kv("cacheHit", fullReportJson.engine.cacheHit);
+    kv("inputHash", fullReportJson.engine.inputHash ?? "—");
+    kv("engineVersion", fullReportJson.engine.engineVersion ?? "—");
+    kv("intervalsCodec", fullReportJson.engine.intervalsCodec ?? "—");
+    kv("compressedBytesLength", fullReportJson.engine.compressedBytesLength ?? "—");
     kv("simVersion", fullReportJson.engine.simVersion);
     kv("derivationVersion", fullReportJson.engine.derivationVersion);
     kv("configHash", j.configHash);
@@ -673,28 +699,78 @@ export async function POST(req: NextRequest) {
     filledMonths: buildResult.filledMonths ?? [],
   };
 
-  // Use same production path as "Past simulated usage" UI (stitched actual + simulated fill for travel days).
-  const pastResult = await getPastSimulatedDatasetForHouse({
-    userId: user.id,
-    houseId: house.id,
-    esiid,
-    travelRanges: travelRangesForEngine,
-    buildInputs,
-    startDate,
-    endDate,
+  // Same canonical builder + cache as user "Past simulated usage" (scenarioId = gapfill_lab for cache key).
+  const inputHash = computePastInputHash({
+    engineVersion: PAST_ENGINE_VERSION,
+    windowStartUtc: startDate,
+    windowEndUtc: endDate,
     timezone,
+    travelRanges: travelRangesForEngine,
+    buildInputs: buildInputs as Record<string, unknown>,
   });
-  if (!pastResult.dataset) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "past_dataset_failed",
-        message: pastResult.error ?? "Could not build Past stitched dataset (same as production UI). Check house has actual data and weather stubbed.",
+  const LAB_SCENARIO_ID = "gapfill_lab";
+  let cacheHit = false;
+  let compressedBytesLength = 0;
+  const cached = await getCachedPastDataset({
+    houseId: house.id,
+    scenarioId: LAB_SCENARIO_ID,
+    inputHash,
+  });
+  let dataset: NonNullable<Awaited<ReturnType<typeof getPastSimulatedDatasetForHouse>>["dataset"]>;
+  if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
+    cacheHit = true;
+    compressedBytesLength = cached.intervalsCompressed.length;
+    const decoded = decodeIntervalsV1(cached.intervalsCompressed);
+    dataset = {
+      ...cached.datasetJson,
+      series: {
+        ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series),
+        intervals15: decoded,
       },
-      { status: 500 }
-    );
+    } as any;
+  } else {
+    const pastResult = await getPastSimulatedDatasetForHouse({
+      userId: user.id,
+      houseId: house.id,
+      esiid,
+      travelRanges: travelRangesForEngine,
+      buildInputs,
+      startDate,
+      endDate,
+      timezone,
+    });
+    if (!pastResult.dataset) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "past_dataset_failed",
+          message: pastResult.error ?? "Could not build Past stitched dataset (same as production UI). Check house has actual data and weather stubbed.",
+          inputHash,
+          engineVersion: PAST_ENGINE_VERSION,
+        },
+        { status: 500 }
+      );
+    }
+    dataset = pastResult.dataset;
+    const intervals15 = dataset.series?.intervals15 ?? [];
+    const { bytes } = encodeIntervalsV1(intervals15);
+    compressedBytesLength = bytes.length;
+    const datasetJsonForStorage = {
+      ...dataset,
+      series: { ...(dataset.series ?? {}), intervals15: [] },
+    };
+    await saveCachedPastDataset({
+      houseId: house.id,
+      scenarioId: LAB_SCENARIO_ID,
+      inputHash,
+      engineVersion: PAST_ENGINE_VERSION,
+      windowStartUtc: startDate,
+      windowEndUtc: endDate,
+      datasetJson: datasetJsonForStorage as Record<string, unknown>,
+      intervalsCodec: INTERVAL_CODEC_V1,
+      intervalsCompressed: bytes,
+    });
   }
-  let dataset = pastResult.dataset;
 
   const intervals15m = dataset.series?.intervals15 ?? [];
   const simulatedByTs = new Map<string, number>();
@@ -869,6 +945,11 @@ export async function POST(req: NextRequest) {
     poolHoursLens,
     usageShapeProfileDiag: (dataset as any)?.meta?.usageShapeProfileDiag ?? null,
     profileAutoBuilt,
+    cacheHit,
+    inputHash,
+    engineVersion: PAST_ENGINE_VERSION,
+    intervalsCodec: INTERVAL_CODEC_V1,
+    compressedBytesLength,
   });
 
   const pasteLines = [

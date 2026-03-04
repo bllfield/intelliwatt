@@ -233,3 +233,22 @@ model UsageShapeProfile {
   @@unique([houseId, version])
   @@index([houseId])
 }
+
+/// Cache for Past simulated dataset (one canonical builder; avoid full rebuild on every GET).
+model PastSimulatedDatasetCache {
+  id                  String   @id @default(cuid())
+  houseId             String
+  scenarioId          String   // scenario UUID for Past, or "gapfill_lab"
+  windowStartUtc      String   // YYYY-MM-DD
+  windowEndUtc        String   // YYYY-MM-DD
+  inputHash           String   // hash of buildInputs + travelRanges + timezone + window + engineVersion
+  engineVersion       String   // e.g. "production_past_stitched_v1"
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  datasetJson         Json     // summary + monthly + metadata (no full intervals)
+  intervalsCodec      String   // "v1_delta_varint"
+  intervalsCompressed Bytes    // compressed packed intervals
+
+  @@unique([houseId, scenarioId, inputHash])
+  @@index([houseId, scenarioId])
+}

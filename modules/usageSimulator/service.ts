@@ -24,6 +24,13 @@ import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/ov
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
 import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
+import {
+  computePastInputHash,
+  getCachedPastDataset,
+  saveCachedPastDataset,
+  PAST_ENGINE_VERSION,
+} from "@/modules/usageSimulator/pastCache";
+import { encodeIntervalsV1, decodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/intervalCodec";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
@@ -1075,7 +1082,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
   scenarioId?: string | null;
 }): Promise<
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
-  | { ok: false; code: "NO_BUILD" | "SCENARIO_NOT_FOUND" | "HOUSE_NOT_FOUND" | "INTERNAL_ERROR"; message: string }
+  | {
+      ok: false;
+      code: "NO_BUILD" | "SCENARIO_NOT_FOUND" | "HOUSE_NOT_FOUND" | "INTERNAL_ERROR";
+      message: string;
+      inputHash?: string;
+      engineVersion?: string;
+    }
 > {
   try {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
@@ -1338,86 +1351,69 @@ export async function getSimulatedUsageForHouseScenario(args: {
         const startDate = periodsForStitch?.[0]?.startDate ?? window?.start;
         const endDate = periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
         if (startDate && endDate) {
-          const actualIntervals = await getActualIntervalsForRange({
+          const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
+          const timezone = (buildInputs as any).timezone ?? "America/Chicago";
+          const inputHash = computePastInputHash({
+            engineVersion: PAST_ENGINE_VERSION,
+            windowStartUtc: startDate,
+            windowEndUtc: endDate,
+            timezone,
+            travelRanges,
+            buildInputs: buildInputs as Record<string, unknown>,
+          });
+          const scenarioIdForCache = scenarioId ?? "BASELINE";
+          const cached = await getCachedPastDataset({
             houseId: args.houseId,
-            esiid: house.esiid ?? null,
-            startDate,
-            endDate,
+            scenarioId: scenarioIdForCache,
+            inputHash,
           });
-          const excludedDateKeys = new Set(
-            travelRangesToExcludeDateKeys((buildInputs as any).travelRanges ?? [])
-          );
-          const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
-          const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-          await ensureHouseWeatherStubbed({ houseId: args.houseId, dateKeys: canonicalDateKeys });
-          const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-            getHouseWeatherDays({ houseId: args.houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-            getHouseWeatherDays({ houseId: args.houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-          ]);
-          const [homeRecForPast, applianceRecForPast] = await Promise.all([
-            getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
-            getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
-          ]);
-          const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
-          const applianceProfileForPast =
-            normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
-              ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
-              : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
-          const patchedIntervals = buildPastSimulatedBaselineV1({
-            actualIntervals,
-            canonicalDayStartsMs,
-            excludedDateKeys,
-            dateKeyFromTimestamp,
-            getDayGridTimestamps,
-            homeProfile: homeProfileForPast,
-            applianceProfile: applianceProfileForPast,
-            actualWxByDateKey,
-            _normalWxByDateKey: normalWxByDateKey,
-          });
-          const stitchedCurve = buildCurveFromPatchedIntervals({
-            startDate,
-            endDate,
-            intervals: patchedIntervals,
-          });
-          dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
-            baseKind: buildInputs.baseKind,
-            mode: buildInputs.mode,
-            canonicalEndMonth: canonicalEndMonthForMeta,
-            notes: buildInputs.notes,
-            filledMonths: buildInputs.filledMonths,
-          });
-          // Non-travel months must match Usage exactly: overlay actual monthly for those months.
-          try {
-            const actualForOverlay = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
-            if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {
-              const travelMonthsSet = monthsIntersectingTravelRanges(
-                (canonicalMonths ?? []) as string[],
-                ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>
-              );
-              const actualByMonth = new Map<string, number>();
-              const actualMonthly = actualForOverlay.dataset.monthly as Array<{ month?: string; kwh?: number }>;
-              for (const row of actualMonthly) {
-                const ym = String(row?.month ?? "").trim();
-                if (/^\d{4}-\d{2}$/.test(ym)) actualByMonth.set(ym, Number(row?.kwh) || 0);
-              }
-              dataset.monthly = dataset.monthly.map((m: { month?: string; kwh?: number }) => {
-                const ym = String(m?.month ?? "").trim();
-                if (!/^\d{4}-\d{2}$/.test(ym)) return m;
-                if (travelMonthsSet.has(ym)) return m;
-                const actualKwh = actualByMonth.get(ym);
-                if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return m;
-                return { ...m, kwh: actualKwh };
-              });
-              const overlaySum = (dataset.monthly as Array<{ kwh?: number }>).reduce((s, r) => s + (Number(r?.kwh) || 0), 0);
-              if (dataset.summary && typeof dataset.summary === "object") {
-                (dataset.summary as any).totalKwh = Math.round(overlaySum * 100) / 100;
-              }
-            }
-          } catch (overlayErr) {
-            console.warn("[usageSimulator/service] Past overlay actual monthly failed, returning curve without overlay", {
+          if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
+            const decoded = decodeIntervalsV1(cached.intervalsCompressed);
+            const restored = {
+              ...cached.datasetJson,
+              series: {
+                ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series),
+                intervals15: decoded,
+              },
+            };
+            dataset = restored;
+          } else {
+            const pastResult = await getPastSimulatedDatasetForHouse({
+              userId: args.userId,
               houseId: args.houseId,
-              scenarioId: args.scenarioId,
-              err: overlayErr,
+              esiid: house.esiid ?? null,
+              travelRanges,
+              buildInputs,
+              startDate,
+              endDate,
+              timezone,
+            });
+            if (pastResult.dataset === null) {
+              return {
+                ok: false,
+                code: "INTERNAL_ERROR",
+                message: pastResult.error ?? "past_sim_build_failed",
+                inputHash,
+                engineVersion: PAST_ENGINE_VERSION,
+              };
+            }
+            dataset = pastResult.dataset;
+            const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+            const { bytes } = encodeIntervalsV1(intervals15);
+            const datasetJsonForStorage = {
+              ...dataset,
+              series: { ...(dataset.series ?? {}), intervals15: [] },
+            };
+            await saveCachedPastDataset({
+              houseId: args.houseId,
+              scenarioId: scenarioIdForCache,
+              inputHash,
+              engineVersion: PAST_ENGINE_VERSION,
+              windowStartUtc: startDate,
+              windowEndUtc: endDate,
+              datasetJson: datasetJsonForStorage as Record<string, unknown>,
+              intervalsCodec: INTERVAL_CODEC_V1,
+              intervalsCompressed: bytes,
             });
           }
         }
