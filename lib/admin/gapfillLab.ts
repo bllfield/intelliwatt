@@ -130,20 +130,37 @@ export function computeGapFillMetrics(args: {
   };
 }
 
-/** Enumerate local date keys (YYYY-MM-DD) in timezone for a range (start/end are YYYY-MM-DD). */
-export function localDateKeysInRange(startDate: string, endDate: string, _tz: string): string[] {
-  const start = String(startDate).slice(0, 10);
-  const end = String(endDate).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return [];
+/** Return the next calendar date (YYYY-MM-DD) after the given one. */
+function nextCalendarDay(ymd: string): string {
+  const d = new Date(ymd + "T12:00:00.000Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Enumerate local date keys (YYYY-MM-DD) for a range. start/end are treated as calendar dates.
+ * If they are full ISO strings, they are converted to local date keys in tz first. Returns the
+ * list of calendar date strings from start to end inclusive, matching dateKeyInTimezone(ts, tz). */
+export function localDateKeysInRange(startDate: string, endDate: string, tz: string): string[] {
+  const rawStart = String(startDate).trim();
+  const rawEnd = String(endDate).trim();
+  const startKey =
+    !rawStart.includes("T") && /^\d{4}-\d{2}-\d{2}$/.test(rawStart.slice(0, 10))
+      ? rawStart.slice(0, 10)
+      : dateKeyInTimezone(rawStart, tz);
+  const endKey =
+    !rawEnd.includes("T") && /^\d{4}-\d{2}-\d{2}$/.test(rawEnd.slice(0, 10))
+      ? rawEnd.slice(0, 10)
+      : dateKeyInTimezone(rawEnd, tz);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey)) return [];
   const out: string[] = [];
-  const a = new Date(start + "T12:00:00.000Z").getTime();
-  const b = new Date(end + "T12:00:00.000Z").getTime();
-  let t = Math.min(a, b);
-  const last = Math.max(a, b);
-  const dayMs = 24 * 60 * 60 * 1000;
-  while (t <= last) {
-    out.push(new Date(t).toISOString().slice(0, 10));
-    t += dayMs;
+  let cur = startKey;
+  while (cur <= endKey) {
+    out.push(cur);
+    if (cur === endKey) break;
+    cur = nextCalendarDay(cur);
   }
   return out;
 }
