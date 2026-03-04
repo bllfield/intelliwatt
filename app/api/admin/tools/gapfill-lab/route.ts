@@ -4,9 +4,13 @@ import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
-import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96 } from "@/modules/realUsageAdapter/actual";
+import { monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
+import {
+  buildSimulatedUsageDatasetFromBuildInputs,
+  type SimulatorBuildInputsV1,
+} from "@/modules/usageSimulator/dataset";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
-import { getGenericWeekdayShape96 } from "@/modules/simulatedUsage/intradayTemplates";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -212,6 +216,7 @@ export async function POST(req: NextRequest) {
       worstDays: [],
       diagnostics: null,
       pasteSummary: "",
+      parity: null,
     });
   }
 
@@ -266,8 +271,24 @@ export async function POST(req: NextRequest) {
       worstDays: [],
       diagnostics: null,
       pasteSummary: "",
+      parity: null,
     });
   }
+
+  if (!homeProfileRec || !applianceProfileRec?.appliancesJson) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "profile_required",
+        message: "Production builder requires home and appliance profile for this house.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const normalizedAppliance = normalizeStoredApplianceProfile(applianceProfileRec.appliancesJson as any);
+  const endMonth = endDate.slice(0, 7);
+  const canonicalMonths12 = monthsEndingAt(endMonth, 12);
 
   const utcExcludeSet = new Set<string>();
   const windowStart = new Date(startDate + "T00:00:00.000Z").getTime();
@@ -283,27 +304,39 @@ export async function POST(req: NextRequest) {
     .sort()
     .map((d) => ({ startDate: d, endDate: d }));
 
-  const excludeDateKeys = Array.from(utcExcludeSet);
-  const { monthlyKwhByMonth } = await fetchActualCanonicalMonthlyTotals({
-    houseId: house.id,
-    esiid,
-    canonicalMonths,
-    excludeDateKeys,
+  const buildResult = await buildSimulatorInputs({
+    mode: "SMT_BASELINE",
+    manualUsagePayload: null,
+    homeProfile: homeProfileRec as any,
+    applianceProfile: normalizedAppliance,
+    houseIdForActual: house.id,
+    esiidForSmt: esiid,
+    travelRanges: travelRangesForEngine,
+    canonicalMonths: canonicalMonths12,
   });
 
-  const { shape96 } = await fetchActualIntradayShape96({
-    houseId: house.id,
-    esiid,
-    canonicalMonths,
-    excludeDateKeys,
-  });
-  const intradayShape96 = shape96 && shape96.length === 96 ? shape96 : getGenericWeekdayShape96();
+  const buildInputs: SimulatorBuildInputsV1 = {
+    version: 1,
+    mode: "SMT_BASELINE",
+    baseKind: buildResult.baseKind,
+    canonicalMonths: buildResult.canonicalMonths,
+    canonicalEndMonth: buildResult.canonicalMonths[buildResult.canonicalMonths.length - 1] ?? "",
+    monthlyTotalsKwhByMonth: buildResult.monthlyTotalsKwhByMonth,
+    intradayShape96: buildResult.intradayShape96,
+    weekdayWeekendShape96: buildResult.weekdayWeekendShape96,
+    travelRanges: travelRangesForEngine,
+    notes: buildResult.notes ?? [],
+    filledMonths: buildResult.filledMonths ?? [],
+  };
+
+  const dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
 
   const curve = generateSimulatedCurve({
-    canonicalMonths,
-    monthlyTotalsKwhByMonth: monthlyKwhByMonth,
-    intradayShape96,
-    travelRanges: travelRangesForEngine,
+    canonicalMonths: buildInputs.canonicalMonths,
+    monthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
+    intradayShape96: buildInputs.intradayShape96,
+    weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
+    travelRanges: buildInputs.travelRanges,
   });
 
   const simulatedByTs = new Map<string, number>();
@@ -318,12 +351,12 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
   });
 
-  const shapeSource = shape96 && shape96.length === 96 ? "actual_excluding_masked" : "generic_weekday";
+  const shapeSource = buildResult.source?.actualIntradayShape96 ? "actual_excluding_masked" : "generic_weekday";
   const modelAssumptions = {
     baseload: {
       used: false,
       method: "monthly_totals_from_actual",
-      params: { excludeDateKeys: excludeDateKeys.length },
+      params: { excludeDateKeys: utcExcludeSet.size },
       valueKwhPer15m: null,
       valueKwhPerDay: null,
     },
@@ -358,12 +391,12 @@ export async function POST(req: NextRequest) {
       smoothing: "none",
     },
     meta: {
-      simVersion: "gapfill_v1",
+      simVersion: "production_builder",
       shapeDerivationVersion: "v1",
       seed: null,
       maskMode: "travel_ranges",
       holdoutN: maskedActual.length,
-      configHash: `months=${canonicalMonths.length},shape=${shapeSource}`,
+      configHash: `months=${buildInputs.canonicalMonths.length},shape=${shapeSource}`,
     },
   };
 
@@ -383,6 +416,9 @@ export async function POST(req: NextRequest) {
     "",
     "--- Primary metrics ---",
     `WAPE: ${metrics.wape}% | MAE: ${metrics.mae} kWh | RMSE: ${metrics.rmse} | MAPE: ${metrics.mape}% | MaxAbs: ${metrics.maxAbs} kWh`,
+    "",
+    "--- Parity (production builder) ---",
+    `intervalCount: ${dataset.summary.intervalsCount} | annualKwh: ${dataset.totals.netKwh} | baseload15mKw: ${dataset.insights.baseload} | baseloadDailyKwh: ${dataset.insights.baseloadDaily}`,
     "",
     "--- Assumptions ---",
     `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend split: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
@@ -430,6 +466,12 @@ export async function POST(req: NextRequest) {
       hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
       seasonalSplit: metrics.diagnostics.seasonalSplit,
       poolHoursErrorSplit,
+    },
+    parity: {
+      intervalCount: dataset.summary.intervalsCount,
+      annualKwh: dataset.totals.netKwh,
+      baseload15mKw: dataset.insights.baseload,
+      baseloadDailyKwh: dataset.insights.baseloadDaily,
     },
     pasteSummary,
   });
