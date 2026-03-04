@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
+  try {
   const email = normalizeEmailSafe(body?.email ?? "");
   if (!email) {
     return NextResponse.json({ ok: false, error: "email_required" }, { status: 400 });
