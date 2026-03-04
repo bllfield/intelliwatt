@@ -266,13 +266,14 @@ export function localDateKeysInRange(startDate: string, endDate: string, tz: str
 }
 
 /**
- * Default pool window: centered on midday, spread across runHoursPerDay.
+ * Default pool window: centered on midday, span of exactly runHoursPerDay hours.
  * Returns inclusive [startHour, endHour] in 0-23 local time.
  */
 export function getPoolHourRange(runHoursPerDay: number): { startHour: number; endHour: number } {
-  const half = runHoursPerDay / 2;
-  const startHour = Math.max(0, Math.floor(12 - half));
-  const endHour = Math.min(23, Math.ceil(12 + half) - 1);
+  const n = Math.max(0, Math.min(24, Math.floor(runHoursPerDay)));
+  const halfSpan = Math.floor(n / 2);
+  const startHour = Math.max(0, 12 - halfSpan);
+  const endHour = Math.min(23, 12 - halfSpan + n - 1);
   return { startHour, endHour };
 }
 
