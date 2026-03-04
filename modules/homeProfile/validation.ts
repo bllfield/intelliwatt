@@ -1,3 +1,16 @@
+/** EV block (behavioral load); stored in Home Details, not Appliance Profile. */
+export type HomeProfileEv = {
+  hasVehicle: boolean;
+  count?: number;
+  chargerType?: "level1" | "level2" | "fast";
+  avgMilesPerDay?: number;
+  avgKwhPerDay?: number;
+  chargingBehavior?: "every_night" | "weekdays_only" | "weekend_heavy" | "random";
+  preferredStartHr?: number;
+  preferredEndHr?: number;
+  smartCharger?: boolean;
+};
+
 export type HomeProfileInput = {
   homeAge: number;
   homeStyle: string;
@@ -23,6 +36,16 @@ export type HomeProfileInput = {
   poolWinterRunHoursPerDay?: number | null;
   hasPoolHeater?: boolean;
   poolHeaterType?: string | null;
+  /** EV: flat fields for DB; also exposed as ev?: HomeProfileEv in API responses. */
+  evHasVehicle?: boolean;
+  evCount?: number | null;
+  evChargerType?: string | null;
+  evAvgMilesPerDay?: number | null;
+  evAvgKwhPerDay?: number | null;
+  evChargingBehavior?: string | null;
+  evPreferredStartHr?: number | null;
+  evPreferredEndHr?: number | null;
+  evSmartCharger?: boolean | null;
 };
 
 function clampInt(n: unknown, lo: number, hi: number): number {
@@ -41,6 +64,8 @@ const HVAC_TYPES = new Set(["central", "heat_pump", "mini_split", "window", "por
 const HEATING_TYPES = new Set(["electric", "gas", "heat_pump", "other"]);
 const POOL_PUMP_TYPES = new Set(["single_speed", "dual_speed", "variable_speed"]);
 const POOL_HEATER_TYPES = new Set(["gas", "electric", "heat_pump", "solar"]);
+const EV_CHARGER_TYPES = new Set(["level1", "level2", "fast"]);
+const EV_CHARGING_BEHAVIORS = new Set(["every_night", "weekdays_only", "weekend_heavy", "random"]);
 
 function clampFloat(n: unknown, lo: number, hi: number): number {
   const x = typeof n === "number" && Number.isFinite(n) ? n : Number(n);
@@ -109,6 +134,45 @@ export function validateHomeProfile(
     }
   }
 
+  const evNested = input?.ev;
+  const evHasVehicle = typeof input?.evHasVehicle === "boolean" ? input.evHasVehicle : Boolean(evNested?.hasVehicle);
+  const evCount =
+    input?.evCount != null && input?.evCount !== ""
+      ? clampInt(input.evCount, 0, 10)
+      : evNested?.count != null
+        ? clampInt(evNested.count, 0, 10)
+        : null;
+  const evChargerTypeRaw = requireNonEmptyString(input?.evChargerType ?? evNested?.chargerType);
+  const evChargerType = evChargerTypeRaw && EV_CHARGER_TYPES.has(evChargerTypeRaw) ? evChargerTypeRaw : null;
+  const evAvgMilesPerDay =
+    input?.evAvgMilesPerDay != null && input?.evAvgMilesPerDay !== ""
+      ? clampFloat(input.evAvgMilesPerDay, 0, 500)
+      : evNested?.avgMilesPerDay != null
+        ? clampFloat(evNested.avgMilesPerDay, 0, 500)
+        : null;
+  const evAvgKwhPerDay =
+    input?.evAvgKwhPerDay != null && input?.evAvgKwhPerDay !== ""
+      ? clampFloat(input.evAvgKwhPerDay, 0, 200)
+      : evNested?.avgKwhPerDay != null
+        ? clampFloat(evNested.avgKwhPerDay, 0, 200)
+        : null;
+  const evChargingBehaviorRaw = requireNonEmptyString(input?.evChargingBehavior ?? evNested?.chargingBehavior);
+  const evChargingBehavior = evChargingBehaviorRaw && EV_CHARGING_BEHAVIORS.has(evChargingBehaviorRaw) ? evChargingBehaviorRaw : null;
+  const evPreferredStartHr =
+    input?.evPreferredStartHr != null && input?.evPreferredStartHr !== ""
+      ? clampInt(input.evPreferredStartHr, 0, 23)
+      : evNested?.preferredStartHr != null
+        ? clampInt(evNested.preferredStartHr, 0, 23)
+        : null;
+  const evPreferredEndHr =
+    input?.evPreferredEndHr != null && input?.evPreferredEndHr !== ""
+      ? clampInt(input.evPreferredEndHr, 0, 23)
+      : evNested?.preferredEndHr != null
+        ? clampInt(evNested.preferredEndHr, 0, 23)
+        : null;
+  const evSmartCharger =
+    typeof input?.evSmartCharger === "boolean" ? input.evSmartCharger : typeof evNested?.smartCharger === "boolean" ? evNested.smartCharger : null;
+
   return {
     ok: true,
     value: {
@@ -136,6 +200,15 @@ export function validateHomeProfile(
       poolWinterRunHoursPerDay,
       hasPoolHeater,
       poolHeaterType,
+      evHasVehicle,
+      evCount,
+      evChargerType,
+      evAvgMilesPerDay,
+      evAvgKwhPerDay,
+      evChargingBehavior,
+      evPreferredStartHr,
+      evPreferredEndHr,
+      evSmartCharger,
     },
   };
 }

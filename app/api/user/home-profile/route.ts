@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
 import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { normalizeEmail } from "@/lib/utils/email";
-import { validateHomeProfile, type HomeProfileInput } from "@/modules/homeProfile/validation";
+import { validateHomeProfile, type HomeProfileInput, type HomeProfileEv } from "@/modules/homeProfile/validation";
 import { normalizeStoredApplianceProfile, validateApplianceProfile } from "@/modules/applianceProfile/validation";
 
 export const dynamic = "force-dynamic";
@@ -114,8 +114,6 @@ async function syncHomeDetailsToAppliances(args: { userId: string; houseId: stri
     } else {
       appliances.push({ id: uid(), type: "hvac", data: hvacData });
     }
-  } else if (hvacIdx >= 0) {
-    appliances.splice(hvacIdx, 1);
   }
 
   const validated = validateApplianceProfile({
@@ -157,6 +155,64 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, houseId, profile: null, updatedAt: null });
     }
 
+    if (!rec.evHasVehicle) {
+      const appRead = await (appliancesPrisma as any).applianceProfileSimulated
+        .findUnique({
+          where: { userId_houseId: { userId: u.user.id, houseId } },
+          select: { appliancesJson: true },
+        })
+        .catch(() => null);
+      const normalized = normalizeStoredApplianceProfile((appRead?.appliancesJson as any) ?? null);
+      const evAppliance = normalized?.appliances?.find((a: any) => String(a?.type ?? "").toLowerCase() === "ev");
+      if (evAppliance?.data) {
+        const data = evAppliance.data as Record<string, any>;
+        const charger = String(data?.charger_type ?? data?.chargerType ?? "").toLowerCase();
+        const evChargerType = [ "level1", "level2", "fast" ].includes(charger) ? charger : null;
+        const evChargingBehavior = [ "every_night", "weekdays_only", "weekend_heavy", "random" ].includes(String(data?.charging_behavior ?? data?.chargingBehavior ?? ""))
+          ? (data?.charging_behavior ?? data?.chargingBehavior)
+          : null;
+        const flat = {
+          evHasVehicle: true,
+          evCount: typeof data?.count === "number" ? data.count : 1,
+          evChargerType,
+          evAvgMilesPerDay: typeof data?.miles_per_day === "number" ? data.miles_per_day : (typeof data?.avgMilesPerDay === "number" ? data.avgMilesPerDay : null),
+          evAvgKwhPerDay: typeof data?.avg_kwh_per_day === "number" ? data.avg_kwh_per_day : (typeof data?.avgKwhPerDay === "number" ? data.avgKwhPerDay : null),
+          evChargingBehavior,
+          evPreferredStartHr: typeof data?.preferred_start_hr === "number" ? data.preferred_start_hr : (typeof data?.preferredStartHr === "number" ? data.preferredStartHr : null),
+          evPreferredEndHr: typeof data?.preferred_end_hr === "number" ? data.preferred_end_hr : (typeof data?.preferredEndHr === "number" ? data.preferredEndHr : null),
+          evSmartCharger: typeof data?.smart_charger === "boolean" ? data.smart_charger : (typeof data?.smartCharger === "boolean" ? data.smartCharger : null),
+        };
+        try {
+          await (homeDetailsPrisma as any).homeProfileSimulated.update({
+            where: { userId_houseId: { userId: u.user.id, houseId } },
+            data: flat,
+          });
+          if (process.env.NODE_ENV === "development" || process.env.VERCEL) {
+            console.warn("[user/home-profile] EV appliance detected — migrated to HomeDetails");
+          }
+          rec = { ...rec, ...flat };
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    const evNested: HomeProfileEv | undefined = rec.evHasVehicle
+      ? {
+          hasVehicle: true,
+          count: rec.evCount != null ? Number(rec.evCount) : undefined,
+          chargerType: [ "level1", "level2", "fast" ].includes(String(rec.evChargerType ?? "")) ? (rec.evChargerType as "level1" | "level2" | "fast") : undefined,
+          avgMilesPerDay: rec.evAvgMilesPerDay != null ? Number(rec.evAvgMilesPerDay) : undefined,
+          avgKwhPerDay: rec.evAvgKwhPerDay != null ? Number(rec.evAvgKwhPerDay) : undefined,
+          chargingBehavior: [ "every_night", "weekdays_only", "weekend_heavy", "random" ].includes(String(rec.evChargingBehavior ?? ""))
+            ? (rec.evChargingBehavior as "every_night" | "weekdays_only" | "weekend_heavy" | "random")
+            : undefined,
+          preferredStartHr: rec.evPreferredStartHr != null ? Number(rec.evPreferredStartHr) : undefined,
+          preferredEndHr: rec.evPreferredEndHr != null ? Number(rec.evPreferredEndHr) : undefined,
+          smartCharger: rec.evSmartCharger != null ? Boolean(rec.evSmartCharger) : undefined,
+        }
+      : undefined;
+
     return NextResponse.json({
       ok: true,
       houseId,
@@ -185,7 +241,8 @@ export async function GET(request: NextRequest) {
         poolWinterRunHoursPerDay: rec.poolWinterRunHoursPerDay ?? null,
         hasPoolHeater: Boolean(rec.hasPoolHeater),
         poolHeaterType: rec.poolHeaterType ?? null,
-      } satisfies HomeProfileInput,
+        ev: evNested,
+      } satisfies HomeProfileInput & { ev?: HomeProfileEv },
       provenance: rec.provenanceJson ?? null,
       prefill: rec.prefillJson ?? null,
       updatedAt: rec.updatedAt ? new Date(rec.updatedAt).toISOString() : null,
@@ -243,4 +300,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
   }
 }
-

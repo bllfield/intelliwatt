@@ -52,6 +52,17 @@ type LoadResp =
         poolWinterRunHoursPerDay: number | null;
         hasPoolHeater: boolean;
         poolHeaterType: string | null;
+        ev?: {
+          hasVehicle: boolean;
+          count?: number;
+          chargerType?: string;
+          avgMilesPerDay?: number;
+          avgKwhPerDay?: number;
+          chargingBehavior?: string;
+          preferredStartHr?: number;
+          preferredEndHr?: number;
+          smartCharger?: boolean;
+        };
       };
       provenance?: any;
       prefill?: any;
@@ -94,6 +105,8 @@ const HVAC_TYPES = ["central", "heat_pump", "mini_split", "window", "portable", 
 const HEATING_TYPES = ["electric", "gas", "heat_pump", "other"] as const;
 const POOL_PUMP_TYPES = ["single_speed", "dual_speed", "variable_speed"] as const;
 const POOL_HEATER_TYPES = ["gas", "electric", "heat_pump", "solar"] as const;
+const EV_CHARGER_TYPES = ["level1", "level2", "fast"] as const;
+const EV_CHARGING_BEHAVIORS = ["every_night", "weekdays_only", "weekend_heavy", "random"] as const;
 
 function clampInt(n: unknown, lo: number, hi: number): number {
   const x = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : Number(n);
@@ -126,6 +139,15 @@ type FormState = {
   poolWinterRunHoursPerDay: number | "";
   hasPoolHeater: boolean;
   poolHeaterType: string;
+  hasEv: boolean;
+  evCount: number | "";
+  evChargerType: string;
+  evAvgMilesPerDay: number | "";
+  evAvgKwhPerDay: number | "";
+  evChargingBehavior: string;
+  evPreferredStartHr: number | "";
+  evPreferredEndHr: number | "";
+  evSmartCharger: boolean;
 };
 
 function emptyState(): FormState {
@@ -154,6 +176,15 @@ function emptyState(): FormState {
     poolWinterRunHoursPerDay: "",
     hasPoolHeater: false,
     poolHeaterType: "",
+    hasEv: false,
+    evCount: "",
+    evChargerType: "",
+    evAvgMilesPerDay: "",
+    evAvgKwhPerDay: "",
+    evChargingBehavior: "",
+    evPreferredStartHr: "",
+    evPreferredEndHr: "",
+    evSmartCharger: false,
   };
 }
 
@@ -218,6 +249,15 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
             poolWinterRunHoursPerDay: profileJson.profile.poolWinterRunHoursPerDay ?? "",
             hasPoolHeater: Boolean(profileJson.profile.hasPoolHeater),
             poolHeaterType: profileJson.profile.poolHeaterType ?? "",
+            hasEv: Boolean(profileJson.profile.ev?.hasVehicle),
+            evCount: profileJson.profile.ev?.count ?? "",
+            evChargerType: profileJson.profile.ev?.chargerType ?? "",
+            evAvgMilesPerDay: profileJson.profile.ev?.avgMilesPerDay ?? "",
+            evAvgKwhPerDay: profileJson.profile.ev?.avgKwhPerDay ?? "",
+            evChargingBehavior: profileJson.profile.ev?.chargingBehavior ?? "",
+            evPreferredStartHr: profileJson.profile.ev?.preferredStartHr ?? "",
+            evPreferredEndHr: profileJson.profile.ev?.preferredEndHr ?? "",
+            evSmartCharger: Boolean(profileJson.profile.ev?.smartCharger),
           });
           setProvenance((profileJson as any).provenance ?? {});
         } else if (prefillJson && (prefillJson as any).ok === true) {
@@ -283,6 +323,19 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
           : null,
         hasPoolHeater: state.hasPool ? Boolean(state.hasPoolHeater) : false,
         poolHeaterType: state.hasPool && state.hasPoolHeater ? state.poolHeaterType || null : null,
+        ev: state.hasEv
+          ? {
+              hasVehicle: true,
+              count: state.evCount === "" ? undefined : clampInt(state.evCount, 0, 10),
+              chargerType: state.evChargerType || undefined,
+              avgMilesPerDay: state.evAvgMilesPerDay === "" ? undefined : Number(state.evAvgMilesPerDay),
+              avgKwhPerDay: state.evAvgKwhPerDay === "" ? undefined : Number(state.evAvgKwhPerDay),
+              chargingBehavior: state.evChargingBehavior || undefined,
+              preferredStartHr: state.evPreferredStartHr === "" ? undefined : clampInt(state.evPreferredStartHr, 0, 23),
+              preferredEndHr: state.evPreferredEndHr === "" ? undefined : clampInt(state.evPreferredEndHr, 0, 23),
+              smartCharger: state.evSmartCharger,
+            }
+          : undefined,
       };
 
       const res = await fetch("/api/user/home-profile", {
@@ -659,6 +712,132 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
                   </select>
                 </div>
               ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-brand-cyan/15 bg-brand-navy px-5 py-5">
+          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Electric Vehicle</p>
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              id="hasEv"
+              type="checkbox"
+              checked={state.hasEv}
+              onChange={(e) =>
+                setState((s) => ({
+                  ...s,
+                  hasEv: e.target.checked,
+                  ...(e.target.checked ? {} : { evCount: "", evChargerType: "", evAvgMilesPerDay: "", evAvgKwhPerDay: "", evChargingBehavior: "", evPreferredStartHr: "", evPreferredEndHr: "", evSmartCharger: false }),
+                }))
+              }
+              className="h-4 w-4 accent-brand-blue"
+            />
+            <label htmlFor="hasEv" className="text-sm text-brand-cyan/85">
+              This home has an electric vehicle
+            </label>
+          </div>
+
+          {state.hasEv ? (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Number of EVs</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={state.evCount}
+                  onChange={(e) => setState((s) => ({ ...s, evCount: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Charger type</label>
+                <select
+                  value={state.evChargerType}
+                  onChange={(e) => setState((s) => ({ ...s, evChargerType: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                >
+                  <option value="">Select…</option>
+                  {EV_CHARGER_TYPES.map((v) => (
+                    <option key={v} value={v}>
+                      {v.replace("level", "Level ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Avg miles per day</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={500}
+                  step={1}
+                  value={state.evAvgMilesPerDay}
+                  onChange={(e) => setState((s) => ({ ...s, evAvgMilesPerDay: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Avg kWh per day (optional)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  step={0.1}
+                  value={state.evAvgKwhPerDay}
+                  onChange={(e) => setState((s) => ({ ...s, evAvgKwhPerDay: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Charging behavior</label>
+                <select
+                  value={state.evChargingBehavior}
+                  onChange={(e) => setState((s) => ({ ...s, evChargingBehavior: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                >
+                  <option value="">Select…</option>
+                  {EV_CHARGING_BEHAVIORS.map((v) => (
+                    <option key={v} value={v}>
+                      {v.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Preferred start hour (0–23)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={state.evPreferredStartHr}
+                  onChange={(e) => setState((s) => ({ ...s, evPreferredStartHr: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Preferred end hour (0–23)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={state.evPreferredEndHr}
+                  onChange={(e) => setState((s) => ({ ...s, evPreferredEndHr: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  id="evSmartCharger"
+                  type="checkbox"
+                  checked={state.evSmartCharger}
+                  onChange={(e) => setState((s) => ({ ...s, evSmartCharger: e.target.checked }))}
+                  className="h-4 w-4 accent-brand-blue"
+                />
+                <label htmlFor="evSmartCharger" className="text-sm text-brand-cyan/85">
+                  Smart charger
+                </label>
+              </div>
             </div>
           ) : null}
         </div>

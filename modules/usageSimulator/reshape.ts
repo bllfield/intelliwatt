@@ -44,8 +44,9 @@ export function reshapeMonthlyTotalsFromBaseline(args: {
   const occRatio = occ(currentHome) / occ(baselineHome);
   let global = Math.pow(clamp(sfRatio, 0.6, 1.8), 0.85) * Math.pow(clamp(occRatio, 0.6, 2.0), 0.35);
 
-  // Appliance presence deltas.
-  const evDelta = (hasType(currentAppliances, "ev") ? 1 : 0) - (hasType(baselineAppliances, "ev") ? 1 : 0);
+  // Appliance presence deltas. EV is now on Home Details (homeProfile.ev), not appliances.
+  const hasEV = (home: HomeProfileInput) => (home as any).ev?.hasVehicle === true || (home as any).evHasVehicle === true;
+  const evDelta = (hasEV(currentHome) ? 1 : 0) - (hasEV(baselineHome) ? 1 : 0);
   const poolDelta = (hasType(currentAppliances, "pool") ? 1 : 0) - (hasType(baselineAppliances, "pool") ? 1 : 0);
   const hvacDelta = (hasType(currentAppliances, "hvac") ? 1 : 0) - (hasType(baselineAppliances, "hvac") ? 1 : 0);
   if (evDelta !== 0) global *= evDelta > 0 ? 1.10 : 0.93;

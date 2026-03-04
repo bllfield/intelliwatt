@@ -673,6 +673,7 @@ export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSave
 
       {CATEGORIES.map((cat) => {
         const units = rows.filter((r) => r.type === cat.type);
+        const evMovedToHomeDetails = cat.type === "ev";
         return (
           <div
             key={cat.type}
@@ -682,16 +683,20 @@ export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSave
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-cyan/60">{cat.title}</p>
                 <p className="mt-2 text-sm text-brand-cyan/75">
-                  Add one or more {cat.title.toLowerCase()} units. All fields optional.
+                  {evMovedToHomeDetails
+                    ? "EV is now configured in Home Details. Use the Home details form to add or edit EV."
+                    : `Add one or more ${cat.title.toLowerCase()} units. All fields optional.`}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => addUnit(cat.type)}
-                className="rounded-full border border-brand-cyan/30 bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80 transition hover:bg-brand-cyan/5"
-              >
-                {cat.addLabel}
-              </button>
+              {!evMovedToHomeDetails && (
+                <button
+                  type="button"
+                  onClick={() => addUnit(cat.type)}
+                  className="rounded-full border border-brand-cyan/30 bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80 transition hover:bg-brand-cyan/5"
+                >
+                  {cat.addLabel}
+                </button>
+              )}
             </div>
 
             {units.length === 0 ? (

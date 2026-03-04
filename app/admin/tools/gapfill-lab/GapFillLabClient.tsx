@@ -23,6 +23,8 @@ type ApiResponse =
       worstDays: any[];
       diagnostics: any;
       pasteSummary: string;
+      fullReportText?: string;
+      fullReportJson?: object | null;
       message?: string;
     }
   | { ok: false; error: string; message?: string };
@@ -147,6 +149,17 @@ export default function GapFillLabClient() {
     if (!result || !result.ok || !result.pasteSummary) return;
     try {
       await navigator.clipboard.writeText(result.pasteSummary);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function copyFullReport() {
+    if (!result || !result.ok) return;
+    const text = (result as any).fullReportText ?? "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
     } catch {
       // ignore
     }
@@ -314,6 +327,24 @@ export default function GapFillLabClient() {
                     className="mt-2 px-3 py-1.5 bg-brand-blue/20 text-brand-navy rounded hover:bg-brand-blue/30 text-sm"
                   >
                     Copy
+                  </button>
+                </div>
+              )}
+              {(result as any).fullReportText && (
+                <div className="mt-4">
+                  <div className="font-semibold text-brand-navy mb-2">FULL COPY/PASTE REPORT (for ChatGPT/Cursor)</div>
+                  <textarea
+                    readOnly
+                    value={(result as any).fullReportText}
+                    rows={24}
+                    className="w-full border border-brand-blue/20 rounded p-3 font-mono text-sm resize-y"
+                  />
+                  <button
+                    type="button"
+                    onClick={copyFullReport}
+                    className="mt-2 px-3 py-1.5 bg-brand-navy text-white rounded hover:bg-brand-blue text-sm"
+                  >
+                    Copy Full Report
                   </button>
                 </div>
               )}

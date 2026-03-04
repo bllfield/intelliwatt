@@ -74,8 +74,9 @@ function annualFromHomeAppliances(home: HomeProfileInput, appliances: ApplianceP
     });
     if (anyElectric) annual *= 1.05;
   }
-  // EV can be a large driver.
-  if (hasAppliance(appliances, "ev")) annual *= 1.10;
+  // EV can be a large driver. EV is now on Home Details (home.ev), not appliances.
+  const hasEV = (home as any)?.ev?.hasVehicle === true || (home as any)?.evHasVehicle === true || hasAppliance(appliances, "ev");
+  if (hasEV) annual *= 1.10;
   // Pool pumps can be large.
   if (hasAppliance(appliances, "pool")) annual *= 1.08;
 

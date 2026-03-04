@@ -14,7 +14,9 @@ import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/vali
 import {
   computeGapFillMetrics,
   dateKeyInTimezone,
+  getPoolHourRange,
   localDateKeysInRange,
+  localHourInTimezone,
 } from "@/lib/admin/gapfillLab";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +86,7 @@ function homeProfileSnapshot(rec: Awaited<ReturnType<typeof getHomeProfileSimula
       homeAllDay: o.occupantsHomeAllDay,
       total: Number(o.occupantsWork ?? 0) + Number(o.occupantsSchool ?? 0) + Number(o.occupantsHomeAllDay ?? 0),
     },
+    ev: o.ev ?? undefined,
   };
 }
 
@@ -97,6 +100,266 @@ function applianceProfileSnapshot(rec: Awaited<ReturnType<typeof getAppliancePro
     appliances: normalized.appliances,
     applianceCount: normalized.appliances?.length ?? 0,
   };
+}
+
+const REPORT_VERSION = "gapfill_lab_report_v2";
+const TRUNCATE_LIST = 30;
+
+function buildFullReport(args: {
+  reportVersion: string;
+  generatedAt: string;
+  env: string;
+  houseId: string;
+  userId: string | null;
+  email: string;
+  houseLabel: string;
+  timezone: string;
+  rangesToMask: Array<{ startDate: string; endDate: string }>;
+  travelRangesNormalized: Array<{ startDate: string; endDate: string }>;
+  listMaskedDateKeys: string[];
+  maskedIntervalsCount: number;
+  maskedDaysCount: number;
+  dataset: { summary: any; totals: any; insights: any; monthly?: Array<{ month?: string; kwh?: number }> };
+  buildInputs: { canonicalMonths: string[] };
+  configHash: string;
+  excludedDateKeysCount: number;
+  excludedDateKeysSample: string[];
+  homeProfile: any;
+  applianceProfile: any;
+  modelAssumptions: any;
+  metrics: {
+    mae: number;
+    rmse: number;
+    maxAbs: number;
+    wape: number;
+    mape: number;
+    totalActualKwhMasked: number;
+    totalSimKwhMasked: number;
+    deltaKwhMasked: number;
+    mapeFiltered: number | null;
+    mapeFilteredCount: number;
+    byMonth: Array<{ month: string; count: number; totalActual: number; totalSim: number; wape: number; mae: number }>;
+    byHour: Array<{ hour: number; actualMeanKwh?: number; simMeanKwh?: number; deltaMeanKwh?: number; sumAbs: number }>;
+    worst10Abs: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+  };
+  diagnostics: {
+    dailyTotalsMasked: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+    top10Under: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+    top10Over: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+    hourlyProfileMasked: Array<{ hour: number; actualMeanKwh: number; simMeanKwh: number; deltaMeanKwh: number }>;
+  };
+  poolHoursLens: { poolHours: { wape: number | null; mae: number | null }; nonPoolHours: { wape: number | null; mae: number | null }; rule: string } | null;
+}): { fullReportJson: object; fullReportText: string } {
+  const j = args;
+  const round2 = (x: number) => Math.round(x * 100) / 100;
+  const monthlyTotals: Record<string, number> = {};
+  for (const m of j.dataset.monthly ?? []) {
+    const month = String(m?.month ?? "").slice(0, 7);
+    if (month) monthlyTotals[month] = round2(Number(m?.kwh) || 0);
+  }
+  const baseloadKwhPer15m = j.dataset.insights?.baseload != null ? round2(j.dataset.insights.baseload / 4) : null;
+  const timeOfDay = (j.dataset.insights?.timeOfDayBuckets ?? []).map((b: any) => ({ key: b.key, label: b.label, kwh: b.kwh }));
+  const weekdayWeekend = j.dataset.insights?.weekdayVsWeekend ?? { weekday: 0, weekend: 0 };
+  const totalWw = (weekdayWeekend.weekday ?? 0) + (weekdayWeekend.weekend ?? 0);
+  const peakDay = j.dataset.insights?.peakDay ?? null;
+  const peakHour = j.dataset.insights?.peakHour ?? null;
+
+  const fullReportJson = {
+    reportVersion: j.reportVersion,
+    generatedAt: j.generatedAt,
+    env: j.env,
+    identifiers: { houseId: j.houseId, userId: j.userId, email: j.email, houseLabel: j.houseLabel, timezone: j.timezone },
+    scenario: {
+      travelRangesInput: j.rangesToMask,
+      travelRangesNormalized: j.travelRangesNormalized,
+      maskedIntervalsCount: j.maskedIntervalsCount,
+      maskedDaysCount: j.maskedDaysCount,
+      listMaskedDateKeys: j.listMaskedDateKeys,
+    },
+    parity: {
+      windowStartUtc: j.dataset.summary?.start ?? null,
+      windowEndUtc: j.dataset.summary?.end ?? null,
+      intervalCount: j.dataset.summary?.intervalsCount ?? null,
+      annualKwh: j.dataset.totals?.netKwh ?? null,
+      monthlyTotals,
+      baseloadKwhPer15m,
+      baseloadDailyKwh: j.dataset.insights?.baseloadDaily ?? null,
+      baseloadMonthlyKwh: j.dataset.insights?.baseloadMonthly ?? null,
+      weekdayWeekendSplit: { weekdayKwh: weekdayWeekend.weekday, weekendKwh: weekdayWeekend.weekend, weekdayPct: totalWw > 0 ? round2((Number(weekdayWeekend.weekday) / totalWw) * 100) : null, weekendPct: totalWw > 0 ? round2((Number(weekdayWeekend.weekend) / totalWw) * 100) : null },
+      timeOfDaySplit: timeOfDay,
+      peakDay,
+      peakHour,
+    },
+    homeProfile: j.homeProfile,
+    applianceProfile: j.applianceProfile,
+    engine: {
+      enginePath: "production_past_stitched",
+      functionsUsed: "getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve",
+      simVersion: j.modelAssumptions?.meta?.simVersion ?? "production_builder",
+      derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
+      configHash: j.configHash,
+      canonicalMonths: j.buildInputs.canonicalMonths,
+      excludedDateKeysCount: j.excludedDateKeysCount,
+      excludedDateKeysSample: j.excludedDateKeysSample,
+      weatherUsed: false,
+      weatherNote: "Weather not integrated in gap-fill lab path.",
+    },
+    accuracy: {
+      MAE_kwhPer15m: j.metrics.mae,
+      RMSE_kwhPer15m: j.metrics.rmse,
+      MaxAbs_kwhPer15m: j.metrics.maxAbs,
+      WAPE_pct: j.metrics.wape,
+      MAPE_pct: j.metrics.mape,
+      MAPE_unsafe_near_zero: "MAPE is unstable when actual is near zero; prefer WAPE.",
+      MAPE_filtered_pct: j.metrics.mapeFiltered,
+      MAPE_filtered_count: j.metrics.mapeFilteredCount,
+      totalActualKwhMasked: j.metrics.totalActualKwhMasked,
+      totalSimKwhMasked: j.metrics.totalSimKwhMasked,
+      deltaKwhMasked: j.metrics.deltaKwhMasked,
+    },
+    dailyTotalsComparison: {
+      top10Under: j.diagnostics.top10Under,
+      top10Over: j.diagnostics.top10Over,
+      worst10Abs: j.metrics.worst10Abs,
+    },
+    hourlyProfileComparison: {
+      rows: j.diagnostics.hourlyProfileMasked,
+      peakHoursWorst: (() => {
+        const withSumAbs = j.metrics.byHour.map((h) => ({ hour: h.hour, sumAbs: (h as any).sumAbs ?? 0 }));
+        return withSumAbs.sort((a, b) => b.sumAbs - a.sumAbs).slice(0, 8).map((x) => x.hour);
+      })(),
+    },
+    poolHoursLens: j.poolHoursLens,
+    byMonthLens: j.metrics.byMonth.map((m) => ({ month: m.month, count: m.count, totalActual: m.totalActual, totalSim: m.totalSim, wape: m.wape, mae: m.mae })),
+    notes: [] as string[],
+  };
+
+  if ((j.dataset.summary?.intervalsCount ?? 0) !== 35136) fullReportJson.notes.push(`intervalCount ${j.dataset.summary?.intervalsCount} differs from expected 35136.`);
+  const baseloadDaily = Number(j.dataset.insights?.baseloadDaily);
+  if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
+  const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
+  if (highWapeMonth) fullReportJson.notes.push(`Masked month ${highWapeMonth.month} WAPE ${highWapeMonth.wape}% is much higher than others.`);
+
+  const lines: string[] = [];
+  const section = (title: string, block: () => void) => {
+    lines.push(`\n=== ${title} ===`);
+    block();
+  };
+  const kv = (k: string, v: unknown) => lines.push(`${k}: ${v === null || v === undefined ? "—" : String(v)}`);
+  const listTrunc = (arr: string[], max: number) => (arr.length <= max ? arr : [...arr.slice(0, max), `...(${arr.length - max} more)`]);
+
+  section("A) Header / identifiers", () => {
+    kv("reportVersion", j.reportVersion);
+    kv("generatedAt", j.generatedAt);
+    kv("env", j.env);
+    kv("houseId", j.houseId);
+    kv("userId", j.userId ?? "—");
+    kv("email", j.email);
+    kv("houseLabel", j.houseLabel);
+    kv("timezone", j.timezone);
+  });
+
+  section("B) Scenario + masking", () => {
+    lines.push("travelRanges input: " + JSON.stringify(j.rangesToMask));
+    lines.push("travelRanges normalized: " + JSON.stringify(j.travelRangesNormalized));
+    kv("maskedIntervalsCount", j.maskedIntervalsCount);
+    kv("maskedDaysCount", j.maskedDaysCount);
+    lines.push("listMaskedDateKeys: " + listTrunc(j.listMaskedDateKeys, TRUNCATE_LIST).join(", "));
+  });
+
+  section("C) Production parity (Past simulated usage)", () => {
+    kv("windowStartUtc", j.dataset.summary?.start);
+    kv("windowEndUtc", j.dataset.summary?.end);
+    kv("intervalCount", j.dataset.summary?.intervalsCount);
+    kv("annualKwh", j.dataset.totals?.netKwh != null ? round2(j.dataset.totals.netKwh) : null);
+    lines.push("monthlyTotals (YYYY-MM => kWh): " + JSON.stringify(monthlyTotals));
+    kv("baseloadKwhPer15m", baseloadKwhPer15m);
+    kv("baseloadDailyKwh", j.dataset.insights?.baseloadDaily);
+    kv("baseloadMonthlyKwh", j.dataset.insights?.baseloadMonthly);
+    lines.push(`weekdayWeekendSplit: weekday ${round2(Number(weekdayWeekend.weekday))} kWh (${totalWw > 0 ? round2((Number(weekdayWeekend.weekday) / totalWw) * 100) : "—"}%) | weekend ${round2(Number(weekdayWeekend.weekend))} kWh (${totalWw > 0 ? round2((Number(weekdayWeekend.weekend) / totalWw) * 100) : "—"}%)`);
+    timeOfDay.forEach((b: any) => lines.push(`  ${b.label}: ${b.kwh} kWh`));
+    if (peakDay) lines.push(`peakDay: ${peakDay.date} ${peakDay.kwh} kWh`);
+    if (peakHour != null) lines.push("peakHour: " + JSON.stringify(peakHour));
+  });
+
+  section("D) Home Profile", () => lines.push(JSON.stringify(j.homeProfile, null, 2)));
+
+  section("E) Appliance Profile", () => {
+    kv("applianceCount", j.applianceProfile?.applianceCount ?? 0);
+    const apps = j.applianceProfile?.appliances ?? [];
+    apps.slice(0, TRUNCATE_LIST).forEach((a: any, i: number) => lines.push(`  [${i}] type=${a?.type} data=${JSON.stringify(a?.data ?? {}).slice(0, 120)}${(JSON.stringify(a?.data ?? {}).length > 120 ? "…" : "")}`));
+    if (apps.length > TRUNCATE_LIST) lines.push(`  ...(${apps.length - TRUNCATE_LIST} more appliances)`);
+    const hasPool = j.homeProfile?.pool?.hasPool ?? apps.some((a: any) => a?.type === "pool");
+    const hasEV = apps.some((a: any) => a?.type === "ev" || a?.type === "electric_vehicle");
+    const hasElectricWH = apps.some((a: any) => a?.type === "water_heater" || a?.type === "electric_water_heater");
+    lines.push(`flags: hasPool=${hasPool} hasEV=${hasEV} hasElectricWH=${hasElectricWH}`);
+  });
+
+  section("F) Simulator engine path + config", () => {
+    kv("enginePath", "production_past_stitched");
+    lines.push("functionsUsed: getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve");
+    kv("simVersion", fullReportJson.engine.simVersion);
+    kv("derivationVersion", fullReportJson.engine.derivationVersion);
+    kv("configHash", j.configHash);
+    lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
+    kv("excludedDateKeysCount", j.excludedDateKeysCount);
+    lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
+    kv("weatherUsed", false);
+    lines.push("weatherNote: Weather not integrated in gap-fill lab path.");
+  });
+
+  section("G) Accuracy metrics (masked intervals only)", () => {
+    kv("MAE_kwhPer15m", j.metrics.mae);
+    kv("RMSE_kwhPer15m", j.metrics.rmse);
+    kv("MaxAbs_kwhPer15m", j.metrics.maxAbs);
+    kv("WAPE_pct", j.metrics.wape);
+    kv("MAPE_pct", j.metrics.mape);
+    lines.push("MAPE_unsafe_near_zero: MAPE is unstable when actual is near zero; prefer WAPE.");
+    kv("MAPE_filtered_pct (actual>=0.05 kWh)", j.metrics.mapeFiltered);
+    kv("MAPE_filtered_count", j.metrics.mapeFilteredCount);
+    kv("totalActualKwhMasked", j.metrics.totalActualKwhMasked);
+    kv("totalSimKwhMasked", j.metrics.totalSimKwhMasked);
+    kv("deltaKwhMasked", j.metrics.deltaKwhMasked);
+  });
+
+  section("H) Daily totals comparison (masked days)", () => {
+    lines.push("top10Under (most negative delta):");
+    j.diagnostics.top10Under.forEach((r) => lines.push(`  ${r.date} | actual=${r.actualKwh} sim=${r.simKwh} delta=${r.deltaKwh}`));
+    lines.push("top10Over (most positive delta):");
+    j.diagnostics.top10Over.forEach((r) => lines.push(`  ${r.date} | actual=${r.actualKwh} sim=${r.simKwh} delta=${r.deltaKwh}`));
+    lines.push("worst10Abs:");
+    j.metrics.worst10Abs.forEach((r) => lines.push(`  ${r.date} | actual=${r.actualKwh} sim=${r.simKwh} delta=${r.deltaKwh}`));
+  });
+
+  section("I) Hourly profile comparison (masked)", () => {
+    lines.push("hour | actualMeanKwh | simMeanKwh | deltaMeanKwh");
+    j.diagnostics.hourlyProfileMasked.forEach((r) => lines.push(`  ${r.hour} | ${r.actualMeanKwh} | ${r.simMeanKwh} | ${r.deltaMeanKwh}`));
+    const peakHoursWorst = (fullReportJson.hourlyProfileComparison as any).peakHoursWorst;
+    lines.push("peakHoursWorst (top 8 hours by abs error sum): " + (peakHoursWorst ?? []).join(", "));
+  });
+
+  section("J) Pool hours lens", () => {
+    if (j.poolHoursLens) {
+      lines.push("poolHours: WAPE=" + (j.poolHoursLens.poolHours.wape ?? "—") + "% MAE=" + (j.poolHoursLens.poolHours.mae ?? "—"));
+      lines.push("nonPoolHours: WAPE=" + (j.poolHoursLens.nonPoolHours.wape ?? "—") + "% MAE=" + (j.poolHoursLens.nonPoolHours.mae ?? "—"));
+      lines.push("rule: " + j.poolHoursLens.rule);
+    } else {
+      lines.push("poolHoursLens: unavailable or no pool.");
+    }
+  });
+
+  section("K) Seasonal/month lens (masked intervals)", () => {
+    lines.push("month | count | totalActual | totalSim | WAPE | MAE");
+    j.metrics.byMonth.forEach((m) => lines.push(`  ${m.month} | ${m.count} | ${m.totalActual} | ${m.totalSim} | ${m.wape}% | ${m.mae}`));
+  });
+
+  section("L) Notes / next-action hints", () => {
+    fullReportJson.notes.forEach((n) => lines.push("- " + n));
+    if (fullReportJson.notes.length === 0) lines.push("- No automatic flags.");
+  });
+
+  const fullReportText = lines.join("\n").trimStart();
+  return { fullReportJson, fullReportText };
 }
 
 export async function POST(req: NextRequest) {
@@ -276,6 +539,8 @@ export async function POST(req: NextRequest) {
       diagnostics: null,
       pasteSummary: "",
       parity: null,
+      fullReportText: "",
+      fullReportJson: null,
     });
   }
 
@@ -425,6 +690,97 @@ export async function POST(req: NextRequest) {
       }
     : null;
 
+  const runHours = Number(homeProfile?.pool?.summerRunHoursPerDay) || 12;
+  const poolRange = getPoolHourRange(runHours);
+  let poolHoursLens: { poolHours: { wape: number | null; mae: number | null }; nonPoolHours: { wape: number | null; mae: number | null }; rule: string } | null = null;
+  if (hasPool) {
+    let poolSumActual = 0, poolSumSim = 0, poolSumAbs = 0, poolN = 0;
+    let nonSumActual = 0, nonSumSim = 0, nonSumAbs = 0, nonN = 0;
+    for (const p of maskedActual) {
+      const ts = String(p?.timestamp ?? "").trim();
+      const actualKwh = Number(p?.kwh) || 0;
+      const simKwh = simulatedByTs.get(ts) ?? 0;
+      const hour = localHourInTimezone(ts, timezone);
+      const inPool = hour >= poolRange.startHour && hour <= poolRange.endHour;
+      if (inPool) {
+        poolSumActual += actualKwh;
+        poolSumSim += simKwh;
+        poolSumAbs += Math.abs(simKwh - actualKwh);
+        poolN++;
+      } else {
+        nonSumActual += actualKwh;
+        nonSumSim += simKwh;
+        nonSumAbs += Math.abs(simKwh - actualKwh);
+        nonN++;
+      }
+    }
+    const round2 = (x: number) => Math.round(x * 100) / 100;
+    poolHoursLens = {
+      poolHours: {
+        wape: poolSumActual > 1e-6 ? round2((poolSumAbs / poolSumActual) * 100) : null,
+        mae: poolN > 0 ? round2(poolSumAbs / poolN) : null,
+      },
+      nonPoolHours: {
+        wape: nonSumActual > 1e-6 ? round2((nonSumAbs / nonSumActual) * 100) : null,
+        mae: nonN > 0 ? round2(nonSumAbs / nonN) : null,
+      },
+      rule: `Pool window: local hours ${poolRange.startHour}-${poolRange.endHour} (centered midday, runHoursPerDay=${runHours}).`,
+    };
+  }
+
+  const listMaskedDateKeys = Array.from(maskedLocalDates).sort();
+  const excludedDateKeysSample = Array.from(utcExcludeSet).sort().slice(0, 10);
+  const { fullReportJson, fullReportText } = buildFullReport({
+    reportVersion: REPORT_VERSION,
+    generatedAt: new Date().toISOString(),
+    env: process.env.VERCEL ? "vercel" : "local",
+    houseId: house.id,
+    userId: user.id,
+    email: user.email ?? "",
+    houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+    timezone,
+    rangesToMask,
+    travelRangesNormalized: travelRangesForEngine,
+    listMaskedDateKeys,
+    maskedIntervalsCount: maskedActual.length,
+    maskedDaysCount: listMaskedDateKeys.length,
+    dataset: {
+      summary: dataset.summary,
+      totals: dataset.totals,
+      insights: dataset.insights,
+      monthly: dataset.monthly,
+    },
+    buildInputs: { canonicalMonths: buildInputs.canonicalMonths },
+    configHash: modelAssumptions.meta.configHash,
+    excludedDateKeysCount: utcExcludeSet.size,
+    excludedDateKeysSample,
+    homeProfile,
+    applianceProfile,
+    modelAssumptions,
+    metrics: {
+      mae: metrics.mae,
+      rmse: metrics.rmse,
+      maxAbs: metrics.maxAbs,
+      wape: metrics.wape,
+      mape: metrics.mape,
+      totalActualKwhMasked: metrics.totalActualKwhMasked,
+      totalSimKwhMasked: metrics.totalSimKwhMasked,
+      deltaKwhMasked: metrics.deltaKwhMasked,
+      mapeFiltered: metrics.mapeFiltered,
+      mapeFilteredCount: metrics.mapeFilteredCount,
+      byMonth: metrics.byMonth,
+      byHour: metrics.byHour,
+      worst10Abs: metrics.worst10Abs,
+    },
+    diagnostics: {
+      dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
+      top10Under: metrics.diagnostics.top10Under,
+      top10Over: metrics.diagnostics.top10Over,
+      hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
+    },
+    poolHoursLens,
+  });
+
   const pasteLines = [
     "=== Simulation Audit Report (Gap-Fill Lab) ===",
     `House: ${house.addressLine1 ?? ""} ${house.addressCity ?? ""} ${house.addressState ?? ""}`.trim() || house.id,
@@ -492,6 +848,8 @@ export async function POST(req: NextRequest) {
       windowEndUtc: dataset.summary.end ?? null,
     },
     pasteSummary,
+    fullReportText,
+    fullReportJson,
   });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

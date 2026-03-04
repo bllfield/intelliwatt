@@ -45,6 +45,16 @@ model HomeProfileSimulated {
   hasPoolHeater       Boolean  @default(false)
   poolHeaterType      String?
 
+  evHasVehicle        Boolean  @default(false)
+  evCount             Int?
+  evChargerType       String?
+  evAvgMilesPerDay    Float?
+  evAvgKwhPerDay      Float?
+  evChargingBehavior  String?
+  evPreferredStartHr  Int?
+  evPreferredEndHr    Int?
+  evSmartCharger      Boolean?
+
   provenanceJson Json?
   prefillJson    Json?
 
