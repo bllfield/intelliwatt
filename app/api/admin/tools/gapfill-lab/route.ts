@@ -6,11 +6,8 @@ import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { monthsEndingAt } from "@/modules/manualUsage/anchor";
 import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
-import {
-  buildSimulatedUsageDatasetFromBuildInputs,
-  type SimulatorBuildInputsV1,
-} from "@/modules/usageSimulator/dataset";
-import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
+import { type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
+import { getPastSimulatedDatasetForHouse } from "@/modules/usageSimulator/service";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -336,25 +333,37 @@ export async function POST(req: NextRequest) {
     filledMonths: buildResult.filledMonths ?? [],
   };
 
-  const dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
-
-  const curve = generateSimulatedCurve({
-    canonicalMonths: buildInputs.canonicalMonths,
-    monthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
-    intradayShape96: buildInputs.intradayShape96,
-    weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
-    travelRanges: buildInputs.travelRanges,
+  // Use same production path as "Past simulated usage" UI (stitched actual + simulated fill for travel days).
+  let dataset = await getPastSimulatedDatasetForHouse({
+    userId: user.id,
+    houseId: house.id,
+    esiid,
+    travelRanges: travelRangesForEngine,
+    buildInputs,
+    startDate,
+    endDate,
   });
+  if (!dataset) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "past_dataset_failed",
+        message: "Could not build Past stitched dataset (same as production UI). Check house has actual data and weather stubbed.",
+      },
+      { status: 500 }
+    );
+  }
 
+  const intervals15m = dataset.series?.intervals15 ?? [];
   const simulatedByTs = new Map<string, number>();
-  for (const i of curve.intervals ?? []) {
-    const ts = String((i as any)?.timestamp ?? "").trim();
-    if (ts) simulatedByTs.set(ts, Number((i as any)?.consumption_kwh) || 0);
+  for (const i of intervals15m) {
+    const ts = String(i?.timestamp ?? "").trim();
+    if (ts) simulatedByTs.set(ts, Number(i?.kwh) || 0);
   }
 
   const metrics = computeGapFillMetrics({
     actual: maskedActual,
-    simulated: (curve.intervals ?? []).map((i: any) => ({ timestamp: i.timestamp, kwh: Number(i.consumption_kwh) || 0 })),
+    simulated: intervals15m,
     simulatedByTs,
   });
 
@@ -424,8 +433,8 @@ export async function POST(req: NextRequest) {
     "--- Primary metrics ---",
     `WAPE: ${metrics.wape}% | MAE: ${metrics.mae} kWh | RMSE: ${metrics.rmse} | MAPE: ${metrics.mape}% | MaxAbs: ${metrics.maxAbs} kWh`,
     "",
-    "--- Parity (production builder) ---",
-    `intervalCount: ${dataset.summary.intervalsCount} | annualKwh: ${dataset.totals.netKwh} | baseload15mKw: ${dataset.insights.baseload} | baseloadDailyKwh: ${dataset.insights.baseloadDaily}`,
+    "--- Parity (production Past simulated usage) ---",
+    `intervalCount: ${dataset.summary.intervalsCount} | annualKwh: ${dataset.totals.netKwh} | baseloadKwhPer15m: ${dataset.insights.baseload != null ? Math.round((dataset.insights.baseload / 4) * 100) / 100 : "—"} | baseloadDailyKwh: ${dataset.insights.baseloadDaily ?? "—"} | window: ${dataset.summary.start ?? "—"} → ${dataset.summary.end ?? "—"}`,
     "",
     "--- Assumptions ---",
     `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend split: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
@@ -477,8 +486,10 @@ export async function POST(req: NextRequest) {
     parity: {
       intervalCount: dataset.summary.intervalsCount,
       annualKwh: dataset.totals.netKwh,
-      baseload15mKw: dataset.insights.baseload,
-      baseloadDailyKwh: dataset.insights.baseloadDaily,
+      baseloadKwhPer15m: dataset.insights.baseload != null ? Math.round((dataset.insights.baseload / 4) * 100) / 100 : null,
+      baseloadDailyKwh: dataset.insights.baseloadDaily ?? null,
+      windowStartUtc: dataset.summary.start ?? null,
+      windowEndUtc: dataset.summary.end ?? null,
     },
     pasteSummary,
   });

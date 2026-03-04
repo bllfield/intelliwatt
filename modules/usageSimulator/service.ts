@@ -802,6 +802,105 @@ export type SimulatedUsageHouseRow = {
   alternatives: { smt: null; greenButton: null };
 };
 
+/**
+ * Builds the same Past stitched dataset that production "Past simulated usage" UI uses.
+ * Uses actual intervals for the window and simulated fill only for excluded (travel/vacant) days.
+ * Single canonical source for lab parity: lab must call this (not buildSimulatedUsageDatasetFromBuildInputs).
+ */
+export async function getPastSimulatedDatasetForHouse(args: {
+  userId: string;
+  houseId: string;
+  esiid: string | null;
+  travelRanges: Array<{ startDate: string; endDate: string }>;
+  buildInputs: SimulatorBuildInputsV1;
+  startDate: string;
+  endDate: string;
+}): Promise<Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>> | null> {
+  const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate } = args;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return null;
+  try {
+    const actualIntervals = await getActualIntervalsForRange({
+      houseId,
+      esiid,
+      startDate,
+      endDate,
+    });
+    const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(travelRanges));
+    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+    await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+    const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+    ]);
+    const [homeRecForPast, applianceRecForPast] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
+      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
+    ]);
+    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
+    const applianceProfileForPast =
+      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
+        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
+        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+    const patchedIntervals = buildPastSimulatedBaselineV1({
+      actualIntervals: actualIntervals.map((p) => ({ timestamp: p.timestamp, kwh: p.kwh })),
+      canonicalDayStartsMs,
+      excludedDateKeys,
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      homeProfile: homeProfileForPast,
+      applianceProfile: applianceProfileForPast,
+      actualWxByDateKey,
+      _normalWxByDateKey: normalWxByDateKey,
+    });
+    const stitchedCurve = buildCurveFromPatchedIntervals({
+      startDate,
+      endDate,
+      intervals: patchedIntervals,
+    });
+    const dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
+      baseKind: buildInputs.baseKind,
+      mode: buildInputs.mode,
+      canonicalEndMonth: buildInputs.canonicalEndMonth,
+      notes: buildInputs.notes ?? [],
+      filledMonths: buildInputs.filledMonths ?? [],
+    });
+    try {
+      const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid);
+      if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {
+        const travelMonthsSet = monthsIntersectingTravelRanges(
+          ((buildInputs as any).canonicalMonths ?? []) as string[],
+          travelRanges
+        );
+        const actualByMonth = new Map<string, number>();
+        const actualMonthly = actualForOverlay.dataset.monthly as Array<{ month?: string; kwh?: number }>;
+        for (const row of actualMonthly) {
+          const ym = String(row?.month ?? "").trim();
+          if (/^\d{4}-\d{2}$/.test(ym)) actualByMonth.set(ym, Number(row?.kwh) || 0);
+        }
+        dataset.monthly = dataset.monthly.map((m: { month?: string; kwh?: number }) => {
+          const ym = String(m?.month ?? "").trim();
+          if (!/^\d{4}-\d{2}$/.test(ym)) return { month: m?.month ?? "", kwh: Number(m?.kwh) || 0 };
+          if (travelMonthsSet.has(ym)) return { month: ym, kwh: Number(m?.kwh) || 0 };
+          const actualKwh = actualByMonth.get(ym);
+          if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return { month: ym, kwh: Number(m?.kwh) || 0 };
+          return { month: ym, kwh: actualKwh };
+        });
+        const overlaySum = (dataset.monthly as Array<{ kwh?: number }>).reduce((s, r) => s + (Number(r?.kwh) || 0), 0);
+        if (dataset.summary && typeof dataset.summary === "object") {
+          (dataset.summary as any).totalKwh = Math.round(overlaySum * 100) / 100;
+        }
+      }
+    } catch {
+      /* keep curve without overlay */
+    }
+    return dataset;
+  } catch (e) {
+    console.warn("[usageSimulator/service] getPastSimulatedDatasetForHouse failed", { houseId, err: e });
+    return null;
+  }
+}
+
 export async function getSimulatedUsageForUser(args: {
   userId: string;
 }): Promise<{ ok: true; houses: SimulatedUsageHouseRow[] } | { ok: false; error: string }> {
