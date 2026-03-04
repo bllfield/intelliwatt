@@ -221,11 +221,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Fetch actual intervals only for the masked range to avoid loading 12 months (timeout).
+  const maskedRangeStart = rangesToMask.reduce((min, r) => (r.startDate < min ? r.startDate : min), rangesToMask[0].startDate);
+  const maskedRangeEnd = rangesToMask.reduce((max, r) => (r.endDate > max ? r.endDate : max), rangesToMask[0].endDate);
+  const fetchStart = maskedRangeStart < startDate ? startDate : maskedRangeStart;
+  const fetchEnd = maskedRangeEnd > endDate ? endDate : maskedRangeEnd;
+
   const actualIntervals = await getActualIntervalsForRange({
     houseId: house.id,
     esiid,
-    startDate,
-    endDate,
+    startDate: fetchStart,
+    endDate: fetchEnd,
   });
 
   if (!actualIntervals?.length) {

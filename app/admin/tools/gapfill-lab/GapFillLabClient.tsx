@@ -88,7 +88,7 @@ export default function GapFillLabClient() {
       }
       setResult(data);
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setError(e?.name === "AbortError" ? "Request timed out." : (e?.message ?? String(e)));
       setResult(null);
     } finally {
       setLoading(false);
@@ -109,6 +109,8 @@ export default function GapFillLabClient() {
     }
     setLoading(true);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -118,7 +120,9 @@ export default function GapFillLabClient() {
           rangesToMask: validRanges,
           houseId: houseId || undefined,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
         setError((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
@@ -128,7 +132,10 @@ export default function GapFillLabClient() {
       setResult(data);
       if (data.ok && data.houses?.length) setHouses(data.houses);
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      const msg = e?.name === "AbortError"
+        ? "Request took too long (2 min). Try a shorter travel range."
+        : (e?.message ?? String(e));
+      setError(msg);
       setResult(null);
     } finally {
       setLoading(false);
@@ -232,15 +239,16 @@ export default function GapFillLabClient() {
             </button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleRunCompare}
             disabled={loading}
             className="px-4 py-2 bg-brand-navy text-white rounded hover:bg-brand-blue disabled:opacity-50"
           >
-            Run Compare
+            {loading ? "Running…" : "Run Compare"}
           </button>
+          <span className="text-sm text-brand-navy/60">May take 30–60 seconds.</span>
         </div>
       </div>
 
