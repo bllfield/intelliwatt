@@ -108,9 +108,10 @@ export default function GapFillLabClient() {
       return;
     }
     setLoading(true);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min
+      timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -122,7 +123,6 @@ export default function GapFillLabClient() {
         }),
         signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
         setError((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
