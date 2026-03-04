@@ -617,7 +617,7 @@ export async function POST(req: NextRequest) {
   };
 
   // Use same production path as "Past simulated usage" UI (stitched actual + simulated fill for travel days).
-  let dataset = await getPastSimulatedDatasetForHouse({
+  const pastResult = await getPastSimulatedDatasetForHouse({
     userId: user.id,
     houseId: house.id,
     esiid,
@@ -627,16 +627,17 @@ export async function POST(req: NextRequest) {
     endDate,
     timezone,
   });
-  if (!dataset) {
+  if (!pastResult.dataset) {
     return NextResponse.json(
       {
         ok: false,
         error: "past_dataset_failed",
-        message: "Could not build Past stitched dataset (same as production UI). Check house has actual data and weather stubbed.",
+        message: pastResult.error ?? "Could not build Past stitched dataset (same as production UI). Check house has actual data and weather stubbed.",
       },
       { status: 500 }
     );
   }
+  let dataset = pastResult.dataset;
 
   const intervals15m = dataset.series?.intervals15 ?? [];
   const simulatedByTs = new Map<string, number>();

@@ -818,9 +818,14 @@ export async function getPastSimulatedDatasetForHouse(args: {
   endDate: string;
   /** When set, excluded days use weekday/weekend avg from UsageShapeProfile (local timezone). */
   timezone?: string;
-}): Promise<Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>> | null> {
+}): Promise<
+  | { dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>; error?: undefined }
+  | { dataset: null; error: string }
+> {
   const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate, timezone } = args;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
+  }
   try {
     const actualIntervals = await getActualIntervalsForRange({
       houseId,
@@ -839,7 +844,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
     const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-      getLatestUsageShapeProfile(houseId),
+      getLatestUsageShapeProfile(houseId).catch(() => null),
     ]);
     const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
     const applianceProfileForPast =
@@ -919,10 +924,11 @@ export async function getPastSimulatedDatasetForHouse(args: {
     } catch {
       /* keep curve without overlay */
     }
-    return dataset;
+    return { dataset };
   } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
     console.warn("[usageSimulator/service] getPastSimulatedDatasetForHouse failed", { houseId, err: e });
-    return null;
+    return { dataset: null, error: err.message };
   }
 }
 
