@@ -12,6 +12,14 @@
     "app/api/admin/smt/normalize/route.ts": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "app/api/user/usage/simulated/house/route.ts": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "app/api/admin/tools/prime-past-cache/route.ts": {
+      "maxDuration": 300,
+      "memory": 1024
     }
   },
   "crons": [

@@ -116,6 +116,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [builds, setBuilds] = useState<BuildsResp extends { ok: true } ? BuildsResp["builds"] : any[]>([]);
   const [scenarioSimHouseOverride, setScenarioSimHouseOverride] = useState<any[] | null>(null);
   const [scenarioBanner, setScenarioBanner] = useState<string | null>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
 
   const WORKSPACE_PAST_NAME = "Past (Corrected)";
   const WORKSPACE_FUTURE_NAME = "Future (What-if)";
@@ -388,7 +389,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     (async () => {
       setScenarioBanner(null);
       setScenarioSimHouseOverride(null);
-      if (!viewScenarioId || viewScenarioId === "baseline") return;
+      if (!viewScenarioId || viewScenarioId === "baseline") {
+        setScenarioLoading(false);
+        return;
+      }
+      setScenarioLoading(true);
       try {
         const r = await fetch(
           `/api/user/usage/simulated/house?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(viewScenarioId)}`,
@@ -427,6 +432,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           setScenarioBanner("Unable to load scenario dataset. Try saving again to recompute.");
           setScenarioSimHouseOverride(null);
         }
+      } finally {
+        if (!cancelled) setScenarioLoading(false);
       }
     })();
     return () => {
@@ -1029,7 +1036,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   <div className="mt-1 text-xs text-brand-cyan/70">Select which curve to display below.</div>
                 </div>
                 <div className="md:col-span-4">
-                  {curveView !== "BASELINE" && scenarioBanner ? (
+                  {curveView !== "BASELINE" && scenarioLoading ? (
+                    <div className="rounded-xl border border-brand-cyan/20 bg-brand-cyan/5 px-3 py-2 text-xs text-brand-cyan flex items-center gap-2">
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-cyan/40 border-t-brand-cyan" aria-hidden />
+                      {curveView === "PAST" ? "Calculating Past simulated usage…" : "Calculating Future simulated usage…"}
+                    </div>
+                  ) : curveView !== "BASELINE" && scenarioBanner ? (
                     <div className="rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-cyan/80">
                       {scenarioBanner}
                     </div>
@@ -1099,6 +1111,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       </div>
 
       <div id="preview">
+        {curveView !== "BASELINE" && scenarioLoading ? (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-brand-cyan/30 bg-brand-cyan/10 px-3 py-2 text-xs text-brand-cyan">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-cyan/40 border-t-brand-cyan" aria-hidden />
+            Showing baseline while {curveView === "PAST" ? "Past" : "Future"} simulated usage is calculated…
+          </div>
+        ) : null}
         <UsageDashboard
           forcedMode="SIMULATED"
           allowModeToggle={false}

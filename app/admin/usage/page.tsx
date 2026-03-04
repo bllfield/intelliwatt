@@ -90,6 +90,10 @@ export default function AdminUsageProduction() {
   const [lastResponse, setLastResponse] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
   const [normalizing, setNormalizing] = useState(false);
   const [lastNormalize, setLastNormalize] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
+  const [primeHouseId, setPrimeHouseId] = useState("");
+  const [primeScenarioId, setPrimeScenarioId] = useState("");
+  const [priming, setPriming] = useState(false);
+  const [lastPrime, setLastPrime] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -186,6 +190,48 @@ export default function AdminUsageProduction() {
       setNormalizing(false);
     }
   }, [adminToken, fetchDebug]);
+
+  const runPrimePastCache = useCallback(async () => {
+    const token = adminToken.trim();
+    if (!token) {
+      setError("Set x-admin-token to prime cache.");
+      return;
+    }
+    const houseId = primeHouseId.trim();
+    const scenarioId = primeScenarioId.trim();
+    if (!houseId || !scenarioId) {
+      setError("Enter houseId and scenarioId (Past scenario UUID).");
+      return;
+    }
+    setPriming(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/tools/prime-past-cache", {
+        method: "POST",
+        headers: {
+          "x-admin-token": token,
+          "Content-Type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({ houseId, scenarioId }),
+      });
+      const text = await res.text().catch(() => "");
+      let parsed: unknown = null;
+      try {
+        parsed = text ? JSON.parse(text) : null;
+      } catch {
+        parsed = null;
+      }
+      setLastPrime({ status: res.status, body: parsed ?? text, rawText: text });
+      if (!res.ok) {
+        throw new Error(`Prime cache failed: ${res.status} ${text}`.trim());
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to prime cache");
+    } finally {
+      setPriming(false);
+    }
+  }, [adminToken, primeHouseId, primeScenarioId]);
 
   useEffect(() => {
     fetchDebug();
@@ -393,6 +439,61 @@ export default function AdminUsageProduction() {
                 <div className="text-neutral-400">No usage rows found.</div>
               )}
             </div>
+          </section>
+
+          <section className="space-y-2 rounded border border-neutral-200 bg-white p-4 shadow-sm">
+            <div>
+              <h2 className="text-lg font-semibold text-neutral-900">3. Manually priming the cache</h2>
+              <p className="text-sm text-neutral-600 mt-1">
+                If usage was already pulled but the house never had a successful Past load (e.g. request timed out before save),
+                the Past simulated dataset cache was never written. Use this to build and save it so the next user request is a cache hit.
+              </p>
+              <p className="text-xs text-neutral-500 mt-1">
+                <strong>Endpoint:</strong> <code className="rounded bg-neutral-100 px-1">POST /api/admin/tools/prime-past-cache</code> with body{" "}
+                <code className="rounded bg-neutral-100 px-1">{`{ "houseId", "scenarioId" }`}</code>. Use the Past scenario UUID for that house (e.g. from simulator builds or dashboard).
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs font-medium text-neutral-700 mb-1">houseId</label>
+                <input
+                  type="text"
+                  value={primeHouseId}
+                  onChange={(e) => setPrimeHouseId(e.target.value)}
+                  placeholder="e.g. 147bce59-b0f5-48bf-8b3b-4f07ed27ac75"
+                  className="w-80 rounded border border-neutral-300 px-3 py-2 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-700 mb-1">scenarioId (Past UUID)</label>
+                <input
+                  type="text"
+                  value={primeScenarioId}
+                  onChange={(e) => setPrimeScenarioId(e.target.value)}
+                  placeholder="e.g. aad5f05b-e116-43af-8a16-29f25b2ad5f1"
+                  className="w-80 rounded border border-neutral-300 px-3 py-2 text-sm font-mono"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={runPrimePastCache}
+                disabled={priming}
+                className="rounded bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {priming ? "Priming…" : "Prime Past cache"}
+              </button>
+            </div>
+            {lastPrime ? (
+              <div className="rounded border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-800 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">Last prime-past-cache response</span>
+                  <span className="font-mono text-[11px] text-neutral-600">status {lastPrime.status}</span>
+                </div>
+                <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-white p-2 text-[11px] text-neutral-700">
+                  {typeof lastPrime.body === "object" ? JSON.stringify(lastPrime.body, null, 2) : String(lastPrime.body ?? lastPrime.rawText ?? "")}
+                </pre>
+              </div>
+            ) : null}
           </section>
         </div>
       )}

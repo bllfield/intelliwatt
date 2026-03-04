@@ -57,12 +57,24 @@ export type CachedPastDataset = {
   intervalsCompressed: Buffer;
 };
 
+/** Guard: usage client may not have cache table (e.g. old generate or no USAGE_DATABASE_URL). */
+function getCacheModel(): { findUnique: (args: any) => Promise<any>; upsert: (args: any) => Promise<any> } | null {
+  try {
+    const model = (usagePrisma as any).pastSimulatedDatasetCache;
+    return model && typeof model.findUnique === "function" && typeof model.upsert === "function" ? model : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getCachedPastDataset(args: {
   houseId: string;
   scenarioId: string;
   inputHash: string;
 }): Promise<CachedPastDataset | null> {
-  const row = await (usagePrisma as any).pastSimulatedDatasetCache
+  const model = getCacheModel();
+  if (!model) return null;
+  const row = await model
     .findUnique({
       where: {
         houseId_scenarioId_inputHash: {
@@ -95,30 +107,36 @@ export async function saveCachedPastDataset(args: {
   intervalsCodec: string;
   intervalsCompressed: Buffer;
 }): Promise<void> {
-  await (usagePrisma as any).pastSimulatedDatasetCache.upsert({
-    where: {
-      houseId_scenarioId_inputHash: {
+  const model = getCacheModel();
+  if (!model) return;
+  try {
+    await model.upsert({
+      where: {
+        houseId_scenarioId_inputHash: {
+          houseId: args.houseId,
+          scenarioId: args.scenarioId,
+          inputHash: args.inputHash,
+        },
+      },
+      create: {
         houseId: args.houseId,
         scenarioId: args.scenarioId,
         inputHash: args.inputHash,
+        engineVersion: args.engineVersion,
+        windowStartUtc: args.windowStartUtc,
+        windowEndUtc: args.windowEndUtc,
+        datasetJson: args.datasetJson,
+        intervalsCodec: args.intervalsCodec,
+        intervalsCompressed: args.intervalsCompressed,
       },
-    },
-    create: {
-      houseId: args.houseId,
-      scenarioId: args.scenarioId,
-      inputHash: args.inputHash,
-      engineVersion: args.engineVersion,
-      windowStartUtc: args.windowStartUtc,
-      windowEndUtc: args.windowEndUtc,
-      datasetJson: args.datasetJson,
-      intervalsCodec: args.intervalsCodec,
-      intervalsCompressed: args.intervalsCompressed,
-    },
-    update: {
-      updatedAt: new Date(),
-      datasetJson: args.datasetJson,
-      intervalsCodec: args.intervalsCodec,
-      intervalsCompressed: args.intervalsCompressed,
-    },
-  });
+      update: {
+        updatedAt: new Date(),
+        datasetJson: args.datasetJson,
+        intervalsCodec: args.intervalsCodec,
+        intervalsCompressed: args.intervalsCompressed,
+      },
+    });
+  } catch {
+    // Cache unavailable (e.g. no USAGE_DATABASE_URL, table missing, or connection failed). Non-fatal.
+  }
 }
