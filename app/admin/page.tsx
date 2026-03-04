@@ -830,6 +830,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/tools/gapfill-lab"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">📊 Gap-Fill Lab</div>
+              <div className="text-sm text-brand-navy/60">
+                Compare gap-fill simulation vs actual usage on masked (travel/vacant) intervals by email
+              </div>
+            </a>
+            <a
               href="/admin/helpdesk/impersonate"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
