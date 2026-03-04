@@ -721,7 +721,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
 export async function getActualUsageDatasetForHouse(
   houseId: string,
   esiid: string | null,
-  args?: { cutoff?: Date; excludedDateKeys?: Set<string> }
+  args?: { cutoff?: Date; excludedDateKeys?: Set<string>; /** When true, skip full-year getActualIntervalsForRange (e.g. lab only needs window). Production never passes this. */ skipFullYearIntervalFetch?: boolean }
 ): Promise<{ dataset: ActualHouseDataset | null; alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null } }> {
   let smtDataset: UsageDatasetResult | null = null;
   let greenDataset: UsageDatasetResult | null = null;
@@ -799,23 +799,30 @@ export async function getActualUsageDatasetForHouse(
       const computed = await computeInsightsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff });
       const rangeStart = cutoff.toISOString().slice(0, 10);
       const rangeEnd = latest.toISOString().slice(0, 10);
-      const intervalRows = await getActualIntervalsForRange({
-        houseId,
-        esiid,
-        startDate: rangeStart,
-        endDate: rangeEnd,
-      });
-      const baseloadFiltered = computeNormalLifeBaseloadKw(
-        intervalRows.map((r) => ({ tsIso: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
-        { excludedDateKeys: args?.excludedDateKeys }
-      );
-      const baseload = baseloadFiltered.baseloadKw ?? computed.baseload;
-      const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" =
-        baseloadFiltered.baseloadKw == null
-          ? "SQL_P10_V1"
-          : baseloadFiltered.fallbackUsed
-            ? "FALLBACK_V1"
-            : "FILTERED_NORMAL_LIFE_V1";
+      let baseload: number | null = computed.baseload;
+      let baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = "SQL_P10_V1";
+      let baseloadFiltered: { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null };
+      if (!args?.skipFullYearIntervalFetch) {
+        const intervalRows = await getActualIntervalsForRange({
+          houseId,
+          esiid,
+          startDate: rangeStart,
+          endDate: rangeEnd,
+        });
+        baseloadFiltered = computeNormalLifeBaseloadKw(
+          intervalRows.map((r) => ({ tsIso: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
+          { excludedDateKeys: args?.excludedDateKeys }
+        );
+        baseload = baseloadFiltered.baseloadKw ?? computed.baseload;
+        baseloadMethod =
+          baseloadFiltered.baseloadKw == null
+            ? "SQL_P10_V1"
+            : baseloadFiltered.fallbackUsed
+              ? "FALLBACK_V1"
+              : "FILTERED_NORMAL_LIFE_V1";
+      } else {
+        baseloadFiltered = { baseloadKw: null, fallbackUsed: true, debugNote: "Skipped full-year interval fetch (lightweight window only)." };
+      }
       dailyTotals = computed.dailyTotals;
       monthlyTotals = computed.monthlyTotals;
       totals = await computeImportExportTotalsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff });

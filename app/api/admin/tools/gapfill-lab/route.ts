@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await getActualUsageDatasetForHouse(house.id, esiid);
+  const result = await getActualUsageDatasetForHouse(house.id, esiid, { skipFullYearIntervalFetch: true });
   const summary = result?.dataset?.summary;
   if (!summary?.start || !summary?.end) {
     return NextResponse.json(
