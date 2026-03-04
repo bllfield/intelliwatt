@@ -12,6 +12,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
+  canonicalIntervalKey,
   computeGapFillMetrics,
   dateKeyInTimezone,
   getPoolHourRange,
@@ -157,7 +158,16 @@ function buildFullReport(args: {
     const month = String(m?.month ?? "").slice(0, 7);
     if (month) monthlyTotals[month] = round2(Number(m?.kwh) || 0);
   }
-  const baseloadKwhPer15m = j.dataset.insights?.baseload != null ? round2(j.dataset.insights.baseload / 4) : null;
+  // Prefer daily-derived per-15m so parity matches baseloadDaily; else convert kW→kWh/15m when dataset provides kW.
+  const baseloadDailyNum = j.dataset.insights?.baseloadDaily != null ? Number(j.dataset.insights.baseloadDaily) : null;
+  const baseloadRaw = j.dataset.insights?.baseload != null ? Number(j.dataset.insights.baseload) : null;
+  const useDailyForBaseload = baseloadDailyNum != null && Number.isFinite(baseloadDailyNum) && baseloadDailyNum >= 0;
+  const baseloadKwhPer15m = useDailyForBaseload
+    ? round2(baseloadDailyNum / 96)
+    : baseloadRaw != null && Number.isFinite(baseloadRaw)
+      ? round2(baseloadRaw / 4)
+      : null;
+  const baseloadUnit = useDailyForBaseload ? "kwh_per_15m_from_daily" : baseloadRaw != null ? "kw" : null;
   const timeOfDay = (j.dataset.insights?.timeOfDayBuckets ?? []).map((b: any) => ({ key: b.key, label: b.label, kwh: b.kwh }));
   const weekdayWeekend = j.dataset.insights?.weekdayVsWeekend ?? { weekday: 0, weekend: 0 };
   const totalWw = (weekdayWeekend.weekday ?? 0) + (weekdayWeekend.weekend ?? 0);
@@ -183,6 +193,7 @@ function buildFullReport(args: {
       annualKwh: j.dataset.totals?.netKwh ?? null,
       monthlyTotals,
       baseloadKwhPer15m,
+      baseloadUnit: baseloadUnit ?? undefined,
       baseloadDailyKwh: j.dataset.insights?.baseloadDaily ?? null,
       baseloadMonthlyKwh: j.dataset.insights?.baseloadMonthly ?? null,
       weekdayWeekendSplit: { weekdayKwh: weekdayWeekend.weekday, weekendKwh: weekdayWeekend.weekend, weekdayPct: totalWw > 0 ? round2((Number(weekdayWeekend.weekday) / totalWw) * 100) : null, weekendPct: totalWw > 0 ? round2((Number(weekdayWeekend.weekend) / totalWw) * 100) : null },
@@ -239,6 +250,9 @@ function buildFullReport(args: {
   if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
   const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
   if (highWapeMonth) fullReportJson.notes.push(`Masked month ${highWapeMonth.month} WAPE ${highWapeMonth.wape}% is much higher than others.`);
+  if (j.metrics.totalActualKwhMasked > 0 && j.metrics.totalSimKwhMasked === 0) {
+    fullReportJson.notes.push("ERROR: simulated intervals did not join to actual timestamps; check timestamp keying.");
+  }
 
   const lines: string[] = [];
   const section = (title: string, block: () => void) => {
@@ -623,7 +637,7 @@ export async function POST(req: NextRequest) {
   const simulatedByTs = new Map<string, number>();
   for (const i of intervals15m) {
     const ts = String(i?.timestamp ?? "").trim();
-    if (ts) simulatedByTs.set(ts, Number(i?.kwh) || 0);
+    if (ts) simulatedByTs.set(canonicalIntervalKey(ts), Number(i?.kwh) || 0);
   }
 
   const metrics = computeGapFillMetrics({
@@ -631,6 +645,16 @@ export async function POST(req: NextRequest) {
     simulated: intervals15m,
     simulatedByTs,
   });
+
+  const baseloadDailyVal = dataset.insights?.baseloadDaily != null ? Number(dataset.insights.baseloadDaily) : null;
+  const baseloadRawVal = dataset.insights?.baseload != null ? Number(dataset.insights.baseload) : null;
+  const useDailyForParityBaseload =
+    baseloadDailyVal != null && Number.isFinite(baseloadDailyVal) && baseloadDailyVal >= 0;
+  const parityBaseloadKwhPer15m = useDailyForParityBaseload && baseloadDailyVal != null
+    ? Math.round((baseloadDailyVal / 96) * 100) / 100
+    : baseloadRawVal != null && Number.isFinite(baseloadRawVal)
+      ? Math.round((baseloadRawVal / 4) * 100) / 100
+      : null;
 
   const shapeSource = buildResult.source?.actualIntradayShape96 ? "actual_excluding_masked" : "generic_weekday";
   const modelAssumptions = {
@@ -740,7 +764,7 @@ export async function POST(req: NextRequest) {
     houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     timezone,
     rangesToMask,
-    travelRangesNormalized: travelRangesForEngine,
+    travelRangesNormalized: listMaskedDateKeys.map((d) => ({ startDate: d, endDate: d })),
     listMaskedDateKeys,
     maskedIntervalsCount: maskedActual.length,
     maskedDaysCount: listMaskedDateKeys.length,
@@ -790,7 +814,7 @@ export async function POST(req: NextRequest) {
     `WAPE: ${metrics.wape}% | MAE: ${metrics.mae} kWh | RMSE: ${metrics.rmse} | MAPE: ${metrics.mape}% | MaxAbs: ${metrics.maxAbs} kWh`,
     "",
     "--- Parity (production Past simulated usage) ---",
-    `intervalCount: ${dataset.summary.intervalsCount} | annualKwh: ${dataset.totals.netKwh} | baseloadKwhPer15m: ${dataset.insights.baseload != null ? Math.round((dataset.insights.baseload / 4) * 100) / 100 : "—"} | baseloadDailyKwh: ${dataset.insights.baseloadDaily ?? "—"} | window: ${dataset.summary.start ?? "—"} → ${dataset.summary.end ?? "—"}`,
+    `intervalCount: ${dataset.summary.intervalsCount} | annualKwh: ${dataset.totals.netKwh} | baseloadKwhPer15m: ${parityBaseloadKwhPer15m ?? "—"} | baseloadDailyKwh: ${dataset.insights.baseloadDaily ?? "—"} | window: ${dataset.summary.start ?? "—"} → ${dataset.summary.end ?? "—"}`,
     "",
     "--- Assumptions ---",
     `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend split: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
@@ -842,7 +866,7 @@ export async function POST(req: NextRequest) {
     parity: {
       intervalCount: dataset.summary.intervalsCount,
       annualKwh: dataset.totals.netKwh,
-      baseloadKwhPer15m: dataset.insights.baseload != null ? Math.round((dataset.insights.baseload / 4) * 100) / 100 : null,
+      baseloadKwhPer15m: parityBaseloadKwhPer15m,
       baseloadDailyKwh: dataset.insights.baseloadDaily ?? null,
       windowStartUtc: dataset.summary.start ?? null,
       windowEndUtc: dataset.summary.end ?? null,

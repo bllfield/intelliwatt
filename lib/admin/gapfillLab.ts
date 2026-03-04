@@ -5,6 +5,16 @@
 
 export type IntervalPoint = { timestamp: string; kwh: number };
 
+/** Canonical timestamp key for joining actual and simulated intervals (UTC ISO string). */
+export function canonicalIntervalKey(tsIso: string): string {
+  try {
+    const d = new Date(String(tsIso).trim());
+    return Number.isFinite(d.getTime()) ? d.toISOString() : String(tsIso).trim();
+  } catch {
+    return String(tsIso).trim();
+  }
+}
+
 export type GapFillDiagnostics = {
   dailyTotalsMasked: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
   top10Under: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
@@ -53,8 +63,9 @@ export function computeGapFillMetrics(args: {
 
   for (const p of actual) {
     const ts = String(p?.timestamp ?? "").trim();
+    const key = canonicalIntervalKey(ts);
     const actualKwh = Number(p?.kwh) || 0;
-    const simKwh = simulatedByTs.get(ts) ?? 0;
+    const simKwh = simulatedByTs.get(key) ?? 0;
     const err = simKwh - actualKwh;
     const absErr = Math.abs(err);
     errors.push(err);
@@ -65,6 +76,12 @@ export function computeGapFillMetrics(args: {
     const hour = new Date(ts).getUTCHours();
     const dow = new Date(ts).getUTCDay();
     const dayType: "weekday" | "weekend" = dow === 0 || dow === 6 ? "weekend" : "weekday";
+
+    const prevDay = byDateActualSim.get(date) ?? { actualKwh: 0, simKwh: 0 };
+    byDateActualSim.set(date, {
+      actualKwh: prevDay.actualKwh + actualKwh,
+      simKwh: prevDay.simKwh + simKwh,
+    });
 
     byDate.set(date, (byDate.get(date) ?? 0) + absErr);
     byMonth.set(month, {
@@ -266,14 +283,13 @@ export function localDateKeysInRange(startDate: string, endDate: string, tz: str
 }
 
 /**
- * Default pool window: centered on midday, span of exactly runHoursPerDay hours.
+ * Default pool window: centered on midday, spread across runHoursPerDay.
  * Returns inclusive [startHour, endHour] in 0-23 local time.
  */
 export function getPoolHourRange(runHoursPerDay: number): { startHour: number; endHour: number } {
-  const n = Math.max(0, Math.min(24, Math.floor(runHoursPerDay)));
-  const halfSpan = Math.floor(n / 2);
-  const startHour = Math.max(0, 12 - halfSpan);
-  const endHour = Math.min(23, 12 - halfSpan + n - 1);
+  const half = runHoursPerDay / 2;
+  const startHour = Math.max(0, Math.floor(12 - half));
+  const endHour = Math.min(23, Math.ceil(12 + half) - 1);
   return { startHour, endHour };
 }
 
