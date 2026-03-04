@@ -86,7 +86,7 @@ function homeProfileSnapshot(rec: Awaited<ReturnType<typeof getHomeProfileSimula
       school: o.occupantsSchool,
       homeAllDay: o.occupantsHomeAllDay,
       total: Number(o.occupantsWork ?? 0) + Number(o.occupantsSchool ?? 0) + Number(o.occupantsHomeAllDay ?? 0),
- 000   },
+    },
     ev: o.ev ?? undefined,
   };
 }
