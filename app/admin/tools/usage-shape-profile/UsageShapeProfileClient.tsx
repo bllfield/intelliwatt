@@ -86,9 +86,14 @@ export default function UsageShapeProfileClient() {
           timezone,
         }),
       });
-      const data = (await res.json().catch(() => null)) as RebuildResponse;
+      const data = (await res.json().catch(() => null)) as RebuildResponse | null;
       if (!res.ok) {
         setError((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
+        setResult(null);
+        return;
+      }
+      if (data == null || typeof data !== "object") {
+        setError("Invalid response from server.");
         setResult(null);
         return;
       }
