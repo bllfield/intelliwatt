@@ -7,6 +7,9 @@ import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96 } from "@/modules/realUsageAdapter/actual";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { getGenericWeekdayShape96 } from "@/modules/simulatedUsage/intradayTemplates";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
   computeGapFillMetrics,
   dateKeyInTimezone,
@@ -40,6 +43,59 @@ function yearMonthsFromRange(startDate: string, endDate: string): string[] {
     t += dayMs;
   }
   return Array.from(seen).sort();
+}
+
+/** Build Home Profile snapshot for audit (fields as stored; add spec aliases where needed). */
+function homeProfileSnapshot(rec: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>) {
+  if (!rec) return null;
+  const o = rec as Record<string, unknown>;
+  return {
+    homeAge: o.homeAge,
+    homeStyle: o.homeStyle,
+    squareFeet: o.squareFeet,
+    stories: o.stories,
+    insulation: o.insulationType,
+    insulationType: o.insulationType,
+    windows: o.windowType,
+    windowType: o.windowType,
+    foundation: o.foundation,
+    fuelConfiguration: o.fuelConfiguration,
+    hvacType: o.hvacType,
+    heatingType: o.heatingType,
+    thermostatSummerF: o.summerTemp,
+    thermostatWinterF: o.winterTemp,
+    summerTemp: o.summerTemp,
+    winterTemp: o.winterTemp,
+    ledLights: o.ledLights,
+    smartThermostat: o.smartThermostat,
+    pool: {
+      hasPool: o.hasPool,
+      pumpType: o.poolPumpType,
+      pumpHp: o.poolPumpHp,
+      summerRunHoursPerDay: o.poolSummerRunHoursPerDay,
+      winterRunHoursPerDay: o.poolWinterRunHoursPerDay,
+      heaterInstalled: o.hasPoolHeater,
+      poolHeaterType: o.poolHeaterType,
+    },
+    occupants: {
+      work: o.occupantsWork,
+      school: o.occupantsSchool,
+      homeAllDay: o.occupantsHomeAllDay,
+      total: Number(o.occupantsWork ?? 0) + Number(o.occupantsSchool ?? 0) + Number(o.occupantsHomeAllDay ?? 0),
+    },
+  };
+}
+
+/** Build Appliance Profile snapshot for audit. */
+function applianceProfileSnapshot(rec: Awaited<ReturnType<typeof getApplianceProfileSimulatedByUserHouse>>) {
+  if (!rec?.appliancesJson) return null;
+  const normalized = normalizeStoredApplianceProfile(rec.appliancesJson as any);
+  return {
+    version: normalized.version,
+    fuelConfiguration: normalized.fuelConfiguration,
+    appliances: normalized.appliances,
+    applianceCount: normalized.appliances?.length ?? 0,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -101,6 +157,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "house_not_found", message: "House not found or not owned by user." }, { status: 404 });
   }
 
+  const [homeProfileRec, applianceProfileRec] = await Promise.all([
+    getHomeProfileSimulatedByUserHouse({ userId: user.id, houseId: house.id }),
+    getApplianceProfileSimulatedByUserHouse({ userId: user.id, houseId: house.id }),
+  ]);
+  const homeProfile = homeProfileSnapshot(homeProfileRec);
+  const applianceProfile = applianceProfileSnapshot(applianceProfileRec);
+
   const esiid = house.esiid ? String(house.esiid) : null;
   const source = await chooseActualSource({ houseId: house.id, esiid });
   if (!source) {
@@ -136,13 +199,18 @@ export async function POST(req: NextRequest) {
         label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
       })),
       timezone,
+      homeProfile,
+      applianceProfile,
+      modelAssumptions: null,
       maskedIntervals: 0,
       message: "Add travel/vacant ranges and click Run Compare to see metrics.",
       metrics: null,
+      primaryPercentMetric: null,
       byMonth: [],
       byHour: [],
       byDayType: [],
       worstDays: [],
+      diagnostics: null,
       pasteSummary: "",
     });
   }
@@ -185,13 +253,18 @@ export async function POST(req: NextRequest) {
         label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
       })),
       timezone,
+      homeProfile,
+      applianceProfile,
+      modelAssumptions: null,
       maskedIntervals: 0,
       message: "No intervals fall inside the masked ranges; add ranges and try again.",
       metrics: null,
+      primaryPercentMetric: null,
       byMonth: [],
       byHour: [],
       byDayType: [],
       worstDays: [],
+      diagnostics: null,
       pasteSummary: "",
     });
   }
@@ -245,6 +318,82 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
   });
 
+  const shapeSource = shape96 && shape96.length === 96 ? "actual_excluding_masked" : "generic_weekday";
+  const modelAssumptions = {
+    baseload: {
+      used: false,
+      method: "monthly_totals_from_actual",
+      params: { excludeDateKeys: excludeDateKeys.length },
+      valueKwhPer15m: null,
+      valueKwhPerDay: null,
+    },
+    pool: {
+      used: false,
+      pumpType: homeProfile?.pool?.pumpType ?? null,
+      pumpHp: homeProfile?.pool?.pumpHp ?? null,
+      assumedKw: null,
+      runHoursPerDaySummer: homeProfile?.pool?.summerRunHoursPerDay ?? null,
+      runHoursPerDayWinter: homeProfile?.pool?.winterRunHoursPerDay ?? null,
+      scheduleRule: "Gap-fill lab does not model pool; monthly totals exclude masked days only.",
+    },
+    hvac: {
+      used: false,
+      hvacType: homeProfile?.hvacType ?? null,
+      heatingType: homeProfile?.heatingType ?? null,
+      setpointSummerF: homeProfile?.thermostatSummerF ?? homeProfile?.summerTemp ?? null,
+      setpointWinterF: homeProfile?.thermostatWinterF ?? homeProfile?.winterTemp ?? null,
+      weatherUsed: false,
+      rule: "Gap-fill lab uses single intraday shape; no HVAC model.",
+    },
+    occupancy: {
+      used: false,
+      occupantsWork: homeProfile?.occupants?.work ?? null,
+      occupantsSchool: homeProfile?.occupants?.school ?? null,
+      occupantsHomeAllDay: homeProfile?.occupants?.homeAllDay ?? null,
+      rule: "Gap-fill lab uses monthly totals × shape; no occupancy model.",
+    },
+    intradayShape: {
+      source: shapeSource,
+      weekdayWeekendSplit: false,
+      smoothing: "none",
+    },
+    meta: {
+      simVersion: "gapfill_v1",
+      shapeDerivationVersion: "v1",
+      seed: null,
+      maskMode: "travel_ranges",
+      holdoutN: maskedActual.length,
+      configHash: `months=${canonicalMonths.length},shape=${shapeSource}`,
+    },
+  };
+
+  const hasPool = Boolean(homeProfile?.pool?.hasPool);
+  const poolHoursErrorSplit = hasPool
+    ? {
+        poolHours: { wape: null as number | null, mae: null as number | null },
+        nonPoolHours: { wape: null as number | null, mae: null as number | null },
+        scheduleRuleUsed: "Pool schedule not implemented in gap-fill lab; used: false.",
+      }
+    : null;
+
+  const pasteLines = [
+    "=== Simulation Audit Report (Gap-Fill Lab) ===",
+    `House: ${house.addressLine1 ?? ""} ${house.addressCity ?? ""} ${house.addressState ?? ""}`.trim() || house.id,
+    `Masked intervals: ${maskedActual.length} | Timezone: ${timezone}`,
+    "",
+    "--- Primary metrics ---",
+    `WAPE: ${metrics.wape}% | MAE: ${metrics.mae} kWh | RMSE: ${metrics.rmse} | MAPE: ${metrics.mape}% | MaxAbs: ${metrics.maxAbs} kWh`,
+    "",
+    "--- Assumptions ---",
+    `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend split: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
+    `Baseload/Pool/HVAC/Occupancy models: not used (monthly totals × shape only)`,
+    "",
+    "--- Diagnostics ---",
+    `Seasonal: Summer WAPE ${metrics.diagnostics.seasonalSplit.summer.wape}% MAE ${metrics.diagnostics.seasonalSplit.summer.mae} | Winter WAPE ${metrics.diagnostics.seasonalSplit.winter.wape}% MAE ${metrics.diagnostics.seasonalSplit.winter.mae} | Shoulder WAPE ${metrics.diagnostics.seasonalSplit.shoulder.wape}% MAE ${metrics.diagnostics.seasonalSplit.shoulder.mae}`,
+    `Worst days: ${metrics.worstDays.slice(0, 5).map((d) => `${d.date}: ${d.absErrorKwh} kWh`).join(" | ")}`,
+  ];
+  const pasteSummary = pasteLines.join("\n");
+
   return NextResponse.json({
     ok: true,
     email: user.email,
@@ -258,17 +407,30 @@ export async function POST(req: NextRequest) {
       label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
     })),
     timezone,
+    homeProfile,
+    applianceProfile,
+    modelAssumptions,
     maskedIntervals: maskedActual.length,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
       mape: metrics.mape,
+      wape: metrics.wape,
       maxAbs: metrics.maxAbs,
     },
+    primaryPercentMetric: metrics.wape,
     byMonth: metrics.byMonth,
     byHour: metrics.byHour,
     byDayType: metrics.byDayType,
     worstDays: metrics.worstDays,
-    pasteSummary: metrics.pasteSummary,
+    diagnostics: {
+      dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
+      top10Under: metrics.diagnostics.top10Under,
+      top10Over: metrics.diagnostics.top10Over,
+      hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
+      seasonalSplit: metrics.diagnostics.seasonalSplit,
+      poolHoursErrorSplit,
+    },
+    pasteSummary,
   });
 }

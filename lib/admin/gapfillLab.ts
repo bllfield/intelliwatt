@@ -5,6 +5,18 @@
 
 export type IntervalPoint = { timestamp: string; kwh: number };
 
+export type GapFillDiagnostics = {
+  dailyTotalsMasked: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+  top10Under: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+  top10Over: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
+  hourlyProfileMasked: Array<{ hour: number; actualMeanKwh: number; simMeanKwh: number; deltaMeanKwh: number }>;
+  seasonalSplit: {
+    summer: { wape: number; mae: number; count: number };
+    winter: { wape: number; mae: number; count: number };
+    shoulder: { wape: number; mae: number; count: number };
+  };
+};
+
 export function computeGapFillMetrics(args: {
   actual: IntervalPoint[];
   simulated: IntervalPoint[];
@@ -14,20 +26,24 @@ export function computeGapFillMetrics(args: {
   mae: number;
   rmse: number;
   mape: number;
+  wape: number;
   maxAbs: number;
   byMonth: Array<{ month: string; mae: number; mape: number; count: number }>;
   byHour: Array<{ hour: number; mae: number; mape: number; count: number }>;
   byDayType: Array<{ dayType: "weekday" | "weekend"; mae: number; mape: number; count: number }>;
   worstDays: Array<{ date: string; absErrorKwh: number }>;
+  diagnostics: GapFillDiagnostics;
   pasteSummary: string;
 } {
   const { actual, simulatedByTs } = args;
   const errors: number[] = [];
   const absErrors: number[] = [];
   const byMonth = new Map<string, { sumAbs: number; sumAbsPct: number; sumActual: number; count: number }>();
-  const byHour = new Map<number, { sumAbs: number; sumAbsPct: number; sumActual: number; count: number }>();
+  const byHour = new Map<number, { sumAbs: number; sumAbsPct: number; sumActual: number; sumSim: number; count: number }>();
   const byDayType = new Map<"weekday" | "weekend", { sumAbs: number; sumAbsPct: number; sumActual: number; count: number }>();
   const byDate = new Map<string, number>();
+  const byDateActualSim = new Map<string, { actualKwh: number; simKwh: number }>();
+  const bySeason = new Map<"summer" | "winter" | "shoulder", { sumAbs: number; sumActual: number; count: number }>();
 
   for (const p of actual) {
     const ts = String(p?.timestamp ?? "").trim();
@@ -51,11 +67,13 @@ export function computeGapFillMetrics(args: {
       sumActual: (byMonth.get(month)?.sumActual ?? 0) + actualKwh,
       count: (byMonth.get(month)?.count ?? 0) + 1,
     });
+    const prevH = byHour.get(hour);
     byHour.set(hour, {
-      sumAbs: (byHour.get(hour)?.sumAbs ?? 0) + absErr,
-      sumAbsPct: (byHour.get(hour)?.sumAbsPct ?? 0) + (actualKwh > 1e-6 ? absErr / actualKwh : 0),
-      sumActual: (byHour.get(hour)?.sumActual ?? 0) + actualKwh,
-      count: (byHour.get(hour)?.count ?? 0) + 1,
+      sumAbs: (prevH?.sumAbs ?? 0) + absErr,
+      sumAbsPct: (prevH?.sumAbsPct ?? 0) + (actualKwh > 1e-6 ? absErr / actualKwh : 0),
+      sumActual: (prevH?.sumActual ?? 0) + actualKwh,
+      sumSim: (prevH?.sumSim ?? 0) + simKwh,
+      count: (prevH?.count ?? 0) + 1,
     });
     byDayType.set(dayType, {
       sumAbs: (byDayType.get(dayType)?.sumAbs ?? 0) + absErr,
@@ -70,6 +88,7 @@ export function computeGapFillMetrics(args: {
   const rmse = n > 0 ? Math.sqrt(errors.reduce((a, e) => a + e * e, 0) / n) : 0;
   const sumActual = actual.reduce((s, p) => s + (Number(p.kwh) || 0), 0);
   const mape = sumActual > 1e-6 ? (absErrors.reduce((a, b) => a + b, 0) / sumActual) * 100 : 0;
+  const wape = sumActual > 1e-6 ? (absErrors.reduce((a, b) => a + b, 0) / sumActual) * 100 : 0;
   const maxAbs = absErrors.length > 0 ? Math.max(...absErrors) : 0;
 
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -111,9 +130,55 @@ export function computeGapFillMetrics(args: {
     };
   });
 
+  const dailyTotalsMasked = Array.from(byDateActualSim.entries())
+    .map(([date, { actualKwh, simKwh }]) => ({
+      date,
+      actualKwh: round2(actualKwh),
+      simKwh: round2(simKwh),
+      deltaKwh: round2(simKwh - actualKwh),
+    }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const withDelta = dailyTotalsMasked.map((r) => ({ ...r, deltaKwh: r.simKwh - r.actualKwh }));
+  const top10Under = [...withDelta].filter((r) => r.deltaKwh < 0).sort((a, b) => a.deltaKwh - b.deltaKwh).slice(0, 10);
+  const top10Over = [...withDelta].filter((r) => r.deltaKwh > 0).sort((a, b) => b.deltaKwh - a.deltaKwh).slice(0, 10);
+
+  const hourlyProfileMasked = Array.from({ length: 24 }, (_, hour) => {
+    const v = byHour.get(hour);
+    const count = v?.count ?? 0;
+    const actualMeanKwh = count > 0 ? (v!.sumActual / count) : 0;
+    const simMeanKwh = count > 0 ? v!.sumSim / count : 0;
+    return {
+      hour,
+      actualMeanKwh: round2(actualMeanKwh),
+      simMeanKwh: round2(simMeanKwh),
+      deltaMeanKwh: round2(simMeanKwh - actualMeanKwh),
+    };
+  });
+
+  const seasonStats = (key: "summer" | "winter" | "shoulder") => {
+    const v = bySeason.get(key);
+    const count = v?.count ?? 0;
+    const mae = count > 0 ? (v!.sumAbs / count) : 0;
+    const wape = v && v.sumActual > 1e-6 ? (v.sumAbs / v.sumActual) * 100 : 0;
+    return { wape: round2(wape), mae: round2(mae), count };
+  };
+  const seasonalSplit = {
+    summer: seasonStats("summer"),
+    winter: seasonStats("winter"),
+    shoulder: seasonStats("shoulder"),
+  };
+
+  const diagnostics: GapFillDiagnostics = {
+    dailyTotalsMasked,
+    top10Under,
+    top10Over,
+    hourlyProfileMasked,
+    seasonalSplit,
+  };
+
   const pasteSummary = [
     `Gap-Fill Lab | masked intervals: ${n}`,
-    `MAE: ${round2(mae)} kWh | RMSE: ${round2(rmse)} | MAPE: ${round2(mape)}% | MaxAbs: ${round2(maxAbs)} kWh`,
+    `WAPE: ${round2(wape)}% | MAE: ${round2(mae)} kWh | RMSE: ${round2(rmse)} | MAPE: ${round2(mape)}% | MaxAbs: ${round2(maxAbs)} kWh`,
     `Worst days: ${worstDays.map((d) => `${d.date}: ${round2(d.absErrorKwh)}`).join(" | ")}`,
   ].join("\n");
 
@@ -121,11 +186,13 @@ export function computeGapFillMetrics(args: {
     mae: round2(mae),
     rmse: round2(rmse),
     mape: round2(mape),
+    wape: round2(wape),
     maxAbs: round2(maxAbs),
     byMonth: byMonthArr,
     byHour: byHourArr,
     byDayType: byDayTypeArr,
     worstDays: worstDays.map((d) => ({ ...d, absErrorKwh: round2(d.absErrorKwh) })),
+    diagnostics,
     pasteSummary,
   };
 }
