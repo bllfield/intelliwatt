@@ -140,26 +140,27 @@ function nextCalendarDay(ymd: string): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Enumerate local date keys (YYYY-MM-DD) for a range. start/end are treated as calendar dates.
- * If they are full ISO strings, they are converted to local date keys in tz first. Returns the
- * list of calendar date strings from start to end inclusive, matching dateKeyInTimezone(ts, tz). */
+/** Enumerate local date keys (YYYY-MM-DD) for a range. start/end are treated as calendar dates
+ * (YYYY-MM-DD). If they are full ISO strings, they are converted to local date keys in tz first.
+ * Returns the list of calendar date strings from start to end inclusive, so they match
+ * dateKeyInTimezone(ts, tz) when filtering masked intervals. */
 export function localDateKeysInRange(startDate: string, endDate: string, tz: string): string[] {
   const rawStart = String(startDate).trim();
   const rawEnd = String(endDate).trim();
-  const startKey =
-    !rawStart.includes("T") && /^\d{4}-\d{2}-\d{2}$/.test(rawStart.slice(0, 10))
-      ? rawStart.slice(0, 10)
-      : dateKeyInTimezone(rawStart, tz);
-  const endKey =
-    !rawEnd.includes("T") && /^\d{4}-\d{2}-\d{2}$/.test(rawEnd.slice(0, 10))
-      ? rawEnd.slice(0, 10)
-      : dateKeyInTimezone(rawEnd, tz);
+  const startKey = /^\d{4}-\d{2}-\d{2}$/.test(rawStart.slice(0, 10))
+    ? rawStart.slice(0, 10)
+    : dateKeyInTimezone(rawStart, tz);
+  const endKey = /^\d{4}-\d{2}-\d{2}$/.test(rawEnd.slice(0, 10))
+    ? rawEnd.slice(0, 10)
+    : dateKeyInTimezone(rawEnd, tz);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey)) return [];
+  const first = startKey <= endKey ? startKey : endKey;
+  const last = startKey <= endKey ? endKey : startKey;
   const out: string[] = [];
-  let cur = startKey;
-  while (cur <= endKey) {
+  let cur = first;
+  while (cur <= last) {
     out.push(cur);
-    if (cur === endKey) break;
+    if (cur === last) break;
     cur = nextCalendarDay(cur);
   }
   return out;
