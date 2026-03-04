@@ -589,7 +589,7 @@ export function completeActualIntervalsV1(args: {
   return out;
 }
 
-export type PastFallbackLevel = "NEAREST_WEATHER" | "MONTH_DOW" | "MONTH" | "GLOBAL" | "UNIFORM" | "ZERO";
+export type PastFallbackLevel = "NEAREST_WEATHER" | "USAGE_SHAPE_PROFILE" | "MONTH_DOW" | "MONTH" | "GLOBAL" | "UNIFORM" | "ZERO";
 
 export type PastSimulatedDayDiagnostic = {
   dateKey: string;
@@ -751,6 +751,29 @@ function applyWeatherTiltHourWeights(args: {
   return base.map((w) => w / s);
 }
 
+/** Local date key (YYYY-MM-DD) and dow (0–6, 0=Sun) for a UTC day-start in the given timezone. */
+function getLocalDateKeyAndDow(dayStartMs: number, timezone: string): { dateKey: string; monthKey: string; dow: number } {
+  const d = new Date(dayStartMs);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const y = get("year");
+  const m = get("month");
+  const day = get("day");
+  const weekday = get("weekday");
+  const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    dateKey: `${y}-${m}-${day}`,
+    monthKey: `${y}-${m}`,
+    dow: dowMap[weekday] ?? 0,
+  };
+}
+
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
@@ -759,6 +782,14 @@ export function buildPastSimulatedBaselineV1(args: {
   getDayGridTimestamps: (dayStartMs: number) => string[];
   homeProfile?: any;
   applianceProfile?: any;
+  /** When set, daily total for excluded days (no weather) uses weekday/weekend avg from profile. */
+  usageShapeProfile?: {
+    avgKwhPerDayWeekdayByMonth: number[];
+    avgKwhPerDayWeekendByMonth: number[];
+    monthKeysOrder: string[];
+  };
+  /** Timezone for local date/dow when using usageShapeProfile (e.g. America/Chicago). */
+  timezoneForProfile?: string;
   actualWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>;
   _normalWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>;
   debug?: {
@@ -1116,10 +1147,29 @@ export function buildPastSimulatedBaselineV1(args: {
           hourFallbackLevel = "UNIFORM";
         }
 
-        let baseNonHvac = avgTotal[ym]?.[dow];
+        let baseNonHvac: number | null = null;
+        const profile = args.usageShapeProfile;
+        const tzProfile = args.timezoneForProfile;
+        if (profile && tzProfile && profile.monthKeysOrder?.length === profile.avgKwhPerDayWeekdayByMonth?.length && profile.avgKwhPerDayWeekendByMonth?.length === profile.avgKwhPerDayWeekdayByMonth?.length) {
+          const local = getLocalDateKeyAndDow(dayStartMs, tzProfile);
+          const monthIndex = profile.monthKeysOrder.indexOf(local.monthKey);
+          if (monthIndex >= 0) {
+            const isWeekend = local.dow === 0 || local.dow === 6;
+            const v = isWeekend
+              ? profile.avgKwhPerDayWeekendByMonth[monthIndex]
+              : profile.avgKwhPerDayWeekdayByMonth[monthIndex];
+            if (v != null && Number.isFinite(v) && v > 0) {
+              baseNonHvac = v;
+              totalFallbackLevel = "USAGE_SHAPE_PROFILE";
+            }
+          }
+        }
+        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+          baseNonHvac = avgTotal[ym]?.[dow];
+        }
         if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
           baseNonHvac = avgTotalMonth[ym];
-          totalFallbackLevel = "MONTH";
+          if (totalFallbackLevel === "MONTH_DOW") totalFallbackLevel = "MONTH";
         }
         if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
           baseNonHvac = globalTotal;

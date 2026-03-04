@@ -383,6 +383,10 @@ export type SimulatedUsageDatasetMeta = {
   buildInputsHash?: string;
   lastBuiltAt?: string | null;
   scenarioKey?: string;
+  /** Past gap-fill: daily total for excluded days used weekday/weekend avg from UsageShapeProfile. */
+  weekdayWeekendSplitUsed?: boolean;
+  /** Past gap-fill: source of daily total for excluded days. */
+  dayTotalSource?: "usageShapeProfile_avgKwhPerDayByMonth" | "fallback_month_avg";
   scenarioId?: string | null;
 };
 

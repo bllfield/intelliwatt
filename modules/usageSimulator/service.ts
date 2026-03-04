@@ -22,6 +22,7 @@ import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from 
 import { listLedgerRows } from "@/modules/upgradesLedger/repo";
 import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/overlayEntries";
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
+import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
@@ -815,8 +816,10 @@ export async function getPastSimulatedDatasetForHouse(args: {
   buildInputs: SimulatorBuildInputsV1;
   startDate: string;
   endDate: string;
+  /** When set, excluded days use weekday/weekend avg from UsageShapeProfile (local timezone). */
+  timezone?: string;
 }): Promise<Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>> | null> {
-  const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate } = args;
+  const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate, timezone } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return null;
   try {
     const actualIntervals = await getActualIntervalsForRange({
@@ -833,15 +836,28 @@ export async function getPastSimulatedDatasetForHouse(args: {
       getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
       getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
     ]);
-    const [homeRecForPast, applianceRecForPast] = await Promise.all([
+    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
+      getLatestUsageShapeProfile(houseId),
     ]);
     const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
     const applianceProfileForPast =
       normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
         ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
         : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+
+    let usageShapeProfileSnap: { avgKwhPerDayWeekdayByMonth: number[]; avgKwhPerDayWeekendByMonth: number[]; monthKeysOrder: string[] } | null = null;
+    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
+      const shapeByMonth = shapeProfileRow.shapeByMonth96 as Record<string, unknown>;
+      const monthKeysOrder = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+      const wd = Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRow.avgKwhPerDayWeekdayByMonth as number[]) : [];
+      const we = Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? (shapeProfileRow.avgKwhPerDayWeekendByMonth as number[]) : [];
+      if (monthKeysOrder.length > 0 && wd.length === monthKeysOrder.length && we.length === monthKeysOrder.length) {
+        usageShapeProfileSnap = { avgKwhPerDayWeekdayByMonth: wd, avgKwhPerDayWeekendByMonth: we, monthKeysOrder };
+      }
+    }
+
     const patchedIntervals = buildPastSimulatedBaselineV1({
       actualIntervals: actualIntervals.map((p) => ({ timestamp: p.timestamp, kwh: p.kwh })),
       canonicalDayStartsMs,
@@ -850,6 +866,8 @@ export async function getPastSimulatedDatasetForHouse(args: {
       getDayGridTimestamps,
       homeProfile: homeProfileForPast,
       applianceProfile: applianceProfileForPast,
+      usageShapeProfile: usageShapeProfileSnap ?? undefined,
+      timezoneForProfile: timezone ?? undefined,
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
     });
@@ -865,6 +883,13 @@ export async function getPastSimulatedDatasetForHouse(args: {
       notes: buildInputs.notes ?? [],
       filledMonths: buildInputs.filledMonths ?? [],
     });
+    if (dataset && typeof dataset.meta === "object") {
+      dataset.meta = {
+        ...dataset.meta,
+        weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
+        dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
+      };
+    }
     try {
       const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid);
       if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {

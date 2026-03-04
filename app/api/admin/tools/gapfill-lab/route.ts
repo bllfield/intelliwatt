@@ -86,7 +86,7 @@ function homeProfileSnapshot(rec: Awaited<ReturnType<typeof getHomeProfileSimula
       school: o.occupantsSchool,
       homeAllDay: o.occupantsHomeAllDay,
       total: Number(o.occupantsWork ?? 0) + Number(o.occupantsSchool ?? 0) + Number(o.occupantsHomeAllDay ?? 0),
-    },
+ 000   },
     ev: o.ev ?? undefined,
   };
 }
@@ -209,6 +209,8 @@ function buildFullReport(args: {
       simVersion: j.modelAssumptions?.meta?.simVersion ?? "production_builder",
       derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
       configHash: j.configHash,
+      weekdayWeekendSplitUsed: j.modelAssumptions?.intradayShape?.weekdayWeekendSplit ?? false,
+      dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
       canonicalMonths: j.buildInputs.canonicalMonths,
       excludedDateKeysCount: j.excludedDateKeysCount,
       excludedDateKeysSample: j.excludedDateKeysSample,
@@ -315,6 +317,8 @@ function buildFullReport(args: {
     kv("simVersion", fullReportJson.engine.simVersion);
     kv("derivationVersion", fullReportJson.engine.derivationVersion);
     kv("configHash", j.configHash);
+    kv("weekdayWeekendSplitUsed", fullReportJson.engine.weekdayWeekendSplitUsed);
+    kv("dayTotalSource", fullReportJson.engine.dayTotalSource);
     lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
@@ -621,6 +625,7 @@ export async function POST(req: NextRequest) {
     buildInputs,
     startDate,
     endDate,
+    timezone,
   });
   if (!dataset) {
     return NextResponse.json(
@@ -692,9 +697,10 @@ export async function POST(req: NextRequest) {
     },
     intradayShape: {
       source: shapeSource,
-      weekdayWeekendSplit: false,
+      weekdayWeekendSplit: Boolean((dataset as any)?.meta?.weekdayWeekendSplitUsed),
       smoothing: "none",
     },
+    dayTotalSource: (dataset as any)?.meta?.dayTotalSource ?? "fallback_month_avg",
     meta: {
       simVersion: "production_builder",
       shapeDerivationVersion: "v1",
