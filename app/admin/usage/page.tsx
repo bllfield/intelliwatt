@@ -211,16 +211,28 @@ export default function AdminUsageProduction() {
         `/api/admin/tools/prime-past-cache/lookup?email=${encodeURIComponent(email)}`,
         { headers: { "x-admin-token": token }, cache: "no-store" }
       );
-      const j = (await res.json().catch(() => null)) as { ok?: boolean; houseId?: string; scenarioId?: string; houseLabel?: string; message?: string } | null;
+      let j: { ok?: boolean; houseId?: string; scenarioId?: string; houseLabel?: string; message?: string } | null = null;
+      try {
+        const text = await res.text();
+        j = text ? (JSON.parse(text) as typeof j) : null;
+      } catch {
+        j = null;
+      }
       if (!res.ok) {
         setError(j?.message ?? `Lookup failed: ${res.status}`);
         return;
       }
-      if (j?.ok && j.houseId) {
+      if (!j || typeof j !== "object") {
+        setError("Lookup returned invalid response.");
+        return;
+      }
+      if (j.ok && j.houseId) {
         setPrimeHouseId(j.houseId ?? "");
         setPrimeScenarioId((j.scenarioId ?? "").trim());
         if (j.scenarioId) setError(null);
         else if (j.message) setError(j.message);
+      } else {
+        setError(j.message ?? "Lookup returned no house.");
       }
     } catch (err: any) {
       setError(err?.message ?? "Lookup failed");

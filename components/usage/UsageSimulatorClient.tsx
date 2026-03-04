@@ -1112,8 +1112,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
       <div id="preview">
         {curveView !== "BASELINE" && scenarioLoading ? (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-brand-cyan/30 bg-brand-cyan/10 px-3 py-2 text-xs text-brand-cyan">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-cyan/40 border-t-brand-cyan" aria-hidden />
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-brand-navy/30 bg-brand-navy/10 px-3 py-2 text-xs text-brand-navy">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-navy/40 border-t-brand-navy" aria-hidden />
             Showing baseline while {curveView === "PAST" ? "Past" : "Future"} simulated usage is calculated…
           </div>
         ) : null}
