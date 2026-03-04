@@ -84,7 +84,7 @@ export async function getHomeProfileSimulatedByUserHouse(args: {
   houseId: string;
 }): Promise<HomeProfileSimulatedForSimulator | null> {
   try {
-    const rec = await homeDetailsPrisma.homeProfileSimulated.findUnique({
+    let rec = await homeDetailsPrisma.homeProfileSimulated.findUnique({
       where: { userId_houseId: { userId: args.userId, houseId: args.houseId } },
       select: {
         homeAge: true,
