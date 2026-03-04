@@ -138,6 +138,7 @@ export default function GapFillLabClient() {
       setError(msg);
       setResult(null);
     } finally {
+      if (timeoutId != null) clearTimeout(timeoutId);
       setLoading(false);
     }
   }
