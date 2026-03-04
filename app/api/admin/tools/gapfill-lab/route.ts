@@ -495,29 +495,6 @@ export async function POST(req: NextRequest) {
   const startDate = summary.start.slice(0, 10);
   const endDate = summary.end.slice(0, 10);
 
-  let profileAutoBuilt = false;
-  const existingProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
-  if (!existingProfile) {
-    try {
-      const fullWindowIntervals = await getActualIntervalsForRange({
-        houseId: house.id,
-        esiid,
-        startDate,
-        endDate,
-      });
-      if (fullWindowIntervals?.length) {
-        const windowStartUtc = `${startDate}T00:00:00.000Z`;
-        const windowEndUtc = `${endDate}T23:59:59.999Z`;
-        const intervalsForDerive = fullWindowIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
-        const profile = deriveUsageShapeProfile(intervalsForDerive, timezone, windowStartUtc, windowEndUtc);
-        await upsertUsageShapeProfile(house.id, "v1", profile);
-        profileAutoBuilt = true;
-      }
-    } catch {
-      // non-fatal: continue without profile; diag will show profile_not_found
-    }
-  }
-
   if (rangesToMask.length === 0) {
     return NextResponse.json({
       ok: true,
@@ -547,6 +524,29 @@ export async function POST(req: NextRequest) {
       pasteSummary: "",
       parity: null,
     });
+  }
+
+  let profileAutoBuilt = false;
+  const existingProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
+  if (!existingProfile) {
+    try {
+      const fullWindowIntervals = await getActualIntervalsForRange({
+        houseId: house.id,
+        esiid,
+        startDate,
+        endDate,
+      });
+      if (fullWindowIntervals?.length) {
+        const windowStartUtc = `${startDate}T00:00:00.000Z`;
+        const windowEndUtc = `${endDate}T23:59:59.999Z`;
+        const intervalsForDerive = fullWindowIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
+        const profile = deriveUsageShapeProfile(intervalsForDerive, timezone, windowStartUtc, windowEndUtc);
+        await upsertUsageShapeProfile(house.id, "v1", profile);
+        profileAutoBuilt = true;
+      }
+    } catch {
+      // non-fatal: continue without profile; diag will show profile_not_found
+    }
   }
 
   // Fetch actual intervals only for the masked range to avoid loading 12 months (timeout).
