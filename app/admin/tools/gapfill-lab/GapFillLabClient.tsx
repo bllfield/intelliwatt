@@ -113,7 +113,7 @@ export default function GapFillLabClient() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min
+      timeoutId = setTimeout(() => controller.abort(), 270_000); // 4.5 min (server maxDuration 300s)
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,7 +135,7 @@ export default function GapFillLabClient() {
       if (data.ok && data.houses?.length) setHouses(data.houses);
     } catch (e: any) {
       const msg = e?.name === "AbortError"
-        ? "Request took too long (2 min). Try a shorter travel range."
+        ? "Request took too long (4.5 min). Try a shorter travel range or run Usage Shape Profile rebuild first."
         : (e?.message ?? String(e));
       setError(msg);
       setResult(null);
@@ -262,7 +262,7 @@ export default function GapFillLabClient() {
           >
             {loading ? "Running…" : "Run Compare"}
           </button>
-          <span className="text-sm text-brand-navy/60">May take 30–60 seconds.</span>
+          <span className="text-sm text-brand-navy/60">May take 1–4 minutes.</span>
         </div>
       </div>
 
