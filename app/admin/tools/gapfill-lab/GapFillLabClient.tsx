@@ -83,7 +83,8 @@ export default function GapFillLabClient() {
       }
       if (data.ok && data.houses?.length) {
         setHouses(data.houses);
-        if (!houseId && data.houses[0]) setHouseId(data.houses[0].id);
+        const currentInList = houseId && data.houses.some((h) => h.id === houseId);
+        setHouseId(currentInList ? houseId : data.houses[0].id);
       }
       setResult(data);
     } catch (e: any) {
