@@ -852,7 +852,18 @@ export async function getPastSimulatedDatasetForHouse(args: {
         ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
         : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
 
+    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
+    let reasonNotUsed: string | null = null;
+    if (!shapeProfileRow) {
+      reasonNotUsed = "profile_not_found";
+    } else if (!timezone) {
+      reasonNotUsed = "missing_timezone";
+    } else if (!shapeProfileRow.shapeByMonth96) {
+      reasonNotUsed = "no_shapeByMonth96";
+    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
+      reasonNotUsed = "missing_arrays";
+    }
     if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
       const shapeByMonth = shapeProfileRow.shapeByMonth96 as Record<string, unknown>;
       const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
@@ -870,8 +881,31 @@ export async function getPastSimulatedDatasetForHouse(args: {
       }
       if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
         usageShapeProfileSnap = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
+        reasonNotUsed = null;
+      } else {
+        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
       }
     }
+    const usageShapeProfileDiag = {
+      found: !!shapeProfileRow,
+      id: shapeProfileRow?.id ?? null,
+      version: shapeProfileRow?.version ?? null,
+      derivedAt: shapeProfileRow?.derivedAt != null ? String(shapeProfileRow.derivedAt) : null,
+      windowStartUtc: shapeProfileRow?.windowStartUtc != null ? String(shapeProfileRow.windowStartUtc) : null,
+      windowEndUtc: shapeProfileRow?.windowEndUtc != null ? String(shapeProfileRow.windowEndUtc) : null,
+      profileMonthKeys: shapeProfileRow?.shapeByMonth96
+        ? Object.keys((shapeProfileRow.shapeByMonth96 as Record<string, unknown>) ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort()
+        : [],
+      weekdayAvgLen: shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null
+        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length : null)
+        : null,
+      weekendAvgLen: shapeProfileRow?.avgKwhPerDayWeekendByMonth != null
+        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length : null)
+        : null,
+      canonicalMonths,
+      canonicalMonthsLen: canonicalMonths.length,
+      reasonNotUsed,
+    };
 
     const patchedIntervals = buildPastSimulatedBaselineV1({
       actualIntervals: actualIntervals.map((p) => ({ timestamp: p.timestamp, kwh: p.kwh })),
@@ -903,6 +937,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
         ...dataset.meta,
         weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
         dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
+        usageShapeProfileDiag,
       };
     }
     try {

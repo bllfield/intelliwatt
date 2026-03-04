@@ -150,6 +150,20 @@ function buildFullReport(args: {
     hourlyProfileMasked: Array<{ hour: number; actualMeanKwh: number; simMeanKwh: number; deltaMeanKwh: number }>;
   };
   poolHoursLens: { poolHours: { wape: number | null; mae: number | null }; nonPoolHours: { wape: number | null; mae: number | null }; rule: string } | null;
+  usageShapeProfileDiag?: {
+    found: boolean;
+    id: string | null;
+    version: string | null;
+    derivedAt: string | null;
+    windowStartUtc: string | null;
+    windowEndUtc: string | null;
+    profileMonthKeys: string[];
+    weekdayAvgLen: number | null;
+    weekendAvgLen: number | null;
+    canonicalMonths: string[];
+    canonicalMonthsLen: number;
+    reasonNotUsed: string | null;
+  } | null;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -211,6 +225,7 @@ function buildFullReport(args: {
       configHash: j.configHash,
       weekdayWeekendSplitUsed: j.modelAssumptions?.intradayShape?.weekdayWeekendSplit ?? false,
       dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
+      usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
       canonicalMonths: j.buildInputs.canonicalMonths,
       excludedDateKeysCount: j.excludedDateKeysCount,
       excludedDateKeysSample: j.excludedDateKeysSample,
@@ -319,6 +334,13 @@ function buildFullReport(args: {
     kv("configHash", j.configHash);
     kv("weekdayWeekendSplitUsed", fullReportJson.engine.weekdayWeekendSplitUsed);
     kv("dayTotalSource", fullReportJson.engine.dayTotalSource);
+    const diag = fullReportJson.engine.usageShapeProfileDiag as typeof j.usageShapeProfileDiag | undefined;
+    if (diag) {
+      lines.push("usageShapeProfile: found=" + diag.found + " reasonNotUsed=" + (diag.reasonNotUsed ?? "(used)"));
+      lines.push("usageShapeProfileDiag: " + JSON.stringify(diag, null, 2));
+    } else {
+      lines.push("usageShapeProfile: (no diag)");
+    }
     lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
@@ -810,6 +832,7 @@ export async function POST(req: NextRequest) {
       hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
     },
     poolHoursLens,
+    usageShapeProfileDiag: (dataset as any)?.meta?.usageShapeProfileDiag ?? null,
   });
 
   const pasteLines = [

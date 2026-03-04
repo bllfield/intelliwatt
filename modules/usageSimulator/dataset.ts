@@ -387,6 +387,21 @@ export type SimulatedUsageDatasetMeta = {
   weekdayWeekendSplitUsed?: boolean;
   /** Past gap-fill: source of daily total for excluded days. */
   dayTotalSource?: "usageShapeProfile_avgKwhPerDayByMonth" | "fallback_month_avg";
+  /** Gap-fill lab: why UsageShapeProfile was or wasn't used. */
+  usageShapeProfileDiag?: {
+    found: boolean;
+    id: string | null;
+    version: string | null;
+    derivedAt: string | null;
+    windowStartUtc: string | null;
+    windowEndUtc: string | null;
+    profileMonthKeys: string[];
+    weekdayAvgLen: number | null;
+    weekendAvgLen: number | null;
+    canonicalMonths: string[];
+    canonicalMonthsLen: number;
+    reasonNotUsed: string | null;
+  };
   scenarioId?: string | null;
 };
 
