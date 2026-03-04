@@ -67,7 +67,7 @@ export default function DashboardHeader() {
                 key={href}
                 href={href}
                 onClick={closeMenu}
-                className="rounded-md px-2 py-2 transition hover:bg-brand-blue/10 hover:text-brand-white"
+                className="link-brand rounded-md px-2 py-2 transition hover:bg-brand-blue/10 hover:text-brand-cyan"
               >
                 {label}
               </Link>

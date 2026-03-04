@@ -206,7 +206,7 @@ export default function Header() {
                 target={external ? '_blank' : undefined}
                 rel={external ? 'noopener noreferrer' : undefined}
                 onClick={handleClose}
-                className="rounded-md px-2 py-2 transition hover:bg-brand-blue/10 hover:text-brand-white"
+                className="link-brand rounded-md px-2 py-2 transition hover:bg-brand-blue/10 hover:text-brand-cyan"
               >
                 {label}
               </Link>
@@ -218,7 +218,7 @@ export default function Header() {
                   handleLogout();
                 }}
                 disabled={isLoggingOut}
-                className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white disabled:opacity-60 disabled:cursor-not-allowed"
+                className="mt-2 rounded-md px-2 py-2 text-center font-semibold text-brand-blue transition hover:bg-brand-blue/10 hover:text-brand-cyan disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isLoggingOut ? 'Logging out…' : 'Logout'}
               </button>
@@ -227,14 +227,14 @@ export default function Header() {
                 <Link
                   href={JOIN_PATH}
                   onClick={handleClose}
-                  className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
+                  className="link-brand mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-cyan"
                 >
                   Join
                 </Link>
               <Link
                 href={AUTH_PATH}
                 onClick={handleClose}
-                  className="rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
+                className="link-brand rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-cyan"
               >
                   User Dashboard
               </Link>
