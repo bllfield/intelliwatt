@@ -254,7 +254,7 @@ export default function AdminUsageProduction() {
           "Content-Type": "application/json",
           accept: "application/json",
         },
-        body: JSON.stringify(hasEmail ? { email } : { houseId, scenarioId }),
+        body: JSON.stringify(hasIds ? { houseId, scenarioId } : { email }),
       });
       const text = await res.text().catch(() => "");
       let parsed: unknown = null;
