@@ -852,14 +852,24 @@ export async function getPastSimulatedDatasetForHouse(args: {
         ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
         : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
 
-    let usageShapeProfileSnap: { avgKwhPerDayWeekdayByMonth: number[]; avgKwhPerDayWeekendByMonth: number[]; monthKeysOrder: string[] } | null = null;
+    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
     if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
       const shapeByMonth = shapeProfileRow.shapeByMonth96 as Record<string, unknown>;
-      const monthKeysOrder = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+      const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
       const wd = Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRow.avgKwhPerDayWeekdayByMonth as number[]) : [];
       const we = Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? (shapeProfileRow.avgKwhPerDayWeekendByMonth as number[]) : [];
-      if (monthKeysOrder.length > 0 && wd.length === monthKeysOrder.length && we.length === monthKeysOrder.length) {
-        usageShapeProfileSnap = { avgKwhPerDayWeekdayByMonth: wd, avgKwhPerDayWeekendByMonth: we, monthKeysOrder };
+      const weekdayAvgByMonthKey: Record<string, number> = {};
+      const weekendAvgByMonthKey: Record<string, number> = {};
+      for (let i = 0; i < profileMonthKeys.length; i++) {
+        const ym = profileMonthKeys[i];
+        if (!ym) continue;
+        const vWd = wd[i];
+        const vWe = we[i];
+        if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
+        if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
+      }
+      if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
+        usageShapeProfileSnap = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
       }
     }
 

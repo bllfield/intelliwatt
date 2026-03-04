@@ -782,11 +782,10 @@ export function buildPastSimulatedBaselineV1(args: {
   getDayGridTimestamps: (dayStartMs: number) => string[];
   homeProfile?: any;
   applianceProfile?: any;
-  /** When set, daily total for excluded days (no weather) uses weekday/weekend avg from profile. */
+  /** When set, daily total for excluded days (no weather) uses weekday/weekend avg from profile (lookup by YYYY-MM). */
   usageShapeProfile?: {
-    avgKwhPerDayWeekdayByMonth: number[];
-    avgKwhPerDayWeekendByMonth: number[];
-    monthKeysOrder: string[];
+    weekdayAvgByMonthKey?: Record<string, number>;
+    weekendAvgByMonthKey?: Record<string, number>;
   };
   /** Timezone for local date/dow when using usageShapeProfile (e.g. America/Chicago). */
   timezoneForProfile?: string;
@@ -1150,18 +1149,15 @@ export function buildPastSimulatedBaselineV1(args: {
         let baseNonHvac: number | null = null;
         const profile = args.usageShapeProfile;
         const tzProfile = args.timezoneForProfile;
-        if (profile && tzProfile && profile.monthKeysOrder?.length === profile.avgKwhPerDayWeekdayByMonth?.length && profile.avgKwhPerDayWeekendByMonth?.length === profile.avgKwhPerDayWeekdayByMonth?.length) {
+        if (profile && tzProfile && (Object.keys(profile.weekdayAvgByMonthKey ?? {}).length > 0 || Object.keys(profile.weekendAvgByMonthKey ?? {}).length > 0)) {
           const local = getLocalDateKeyAndDow(dayStartMs, tzProfile);
-          const monthIndex = profile.monthKeysOrder.indexOf(local.monthKey);
-          if (monthIndex >= 0) {
-            const isWeekend = local.dow === 0 || local.dow === 6;
-            const v = isWeekend
-              ? profile.avgKwhPerDayWeekendByMonth[monthIndex]
-              : profile.avgKwhPerDayWeekdayByMonth[monthIndex];
-            if (v != null && Number.isFinite(v) && v > 0) {
-              baseNonHvac = v;
-              totalFallbackLevel = "USAGE_SHAPE_PROFILE";
-            }
+          const isWeekend = local.dow === 0 || local.dow === 6;
+          const v = isWeekend
+            ? profile.weekendAvgByMonthKey?.[local.monthKey]
+            : profile.weekdayAvgByMonthKey?.[local.monthKey];
+          if (v != null && Number.isFinite(v) && v > 0) {
+            baseNonHvac = v;
+            totalFallbackLevel = "USAGE_SHAPE_PROFILE";
           }
         }
         if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
