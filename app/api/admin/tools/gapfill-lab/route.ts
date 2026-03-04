@@ -475,4 +475,17 @@ export async function POST(req: NextRequest) {
     },
     pasteSummary,
   });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[gapfill-lab]", message, err);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "server_error",
+        message: "The request took too long or failed. Try a shorter date range or try again.",
+        detail: process.env.NODE_ENV === "development" ? message : undefined,
+      },
+      { status: 500 }
+    );
+  }
 }
