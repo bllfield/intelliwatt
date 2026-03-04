@@ -19,18 +19,62 @@ export async function POST(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
-  let body: { houseId?: string; scenarioId?: string };
+  let body: { houseId?: string; scenarioId?: string; email?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
-  const houseId = String(body?.houseId ?? "").trim();
-  const scenarioId = String(body?.scenarioId ?? "").trim();
+  let houseId = String(body?.houseId ?? "").trim();
+  let scenarioId = String(body?.scenarioId ?? "").trim();
+  const email = String(body?.email ?? "").trim().toLowerCase();
+
+  if (email) {
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "user_not_found", message: "No user with that email." },
+        { status: 404 }
+      );
+    }
+    const houses = await (prisma as any).houseAddress.findMany({
+      where: { userId: user.id, archivedAt: null },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true },
+    });
+    if (!houses?.length) {
+      return NextResponse.json(
+        { ok: false, error: "no_houses", message: "User has no houses." },
+        { status: 404 }
+      );
+    }
+    const houseRow = houses[0];
+    houseId = houseRow.id;
+    const scenario = await (prisma as any).usageSimulatorScenario.findFirst({
+      where: {
+        userId: user.id,
+        houseId: houseRow.id,
+        name: "Past (Corrected)",
+        archivedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!scenario) {
+      return NextResponse.json(
+        { ok: false, error: "no_past_scenario", message: "No Past (Corrected) scenario for this house. Create it in the simulator first." },
+        { status: 404 }
+      );
+    }
+    scenarioId = scenario.id;
+  }
+
   if (!houseId || !scenarioId) {
     return NextResponse.json(
-      { ok: false, error: "houseId and scenarioId required", message: "Provide houseId and scenarioId (Past scenario UUID)." },
+      { ok: false, error: "houseId and scenarioId required", message: "Provide email or both houseId and scenarioId (Past scenario UUID)." },
       { status: 400 }
     );
   }

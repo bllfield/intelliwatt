@@ -90,9 +90,11 @@ export default function AdminUsageProduction() {
   const [lastResponse, setLastResponse] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
   const [normalizing, setNormalizing] = useState(false);
   const [lastNormalize, setLastNormalize] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
+  const [primeEmail, setPrimeEmail] = useState("");
   const [primeHouseId, setPrimeHouseId] = useState("");
   const [primeScenarioId, setPrimeScenarioId] = useState("");
   const [priming, setPriming] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
   const [lastPrime, setLastPrime] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
 
   useEffect(() => {
@@ -191,16 +193,55 @@ export default function AdminUsageProduction() {
     }
   }, [adminToken, fetchDebug]);
 
+  const runLookup = useCallback(async () => {
+    const token = adminToken.trim();
+    if (!token) {
+      setError("Set x-admin-token to lookup.");
+      return;
+    }
+    const email = primeEmail.trim();
+    if (!email) {
+      setError("Enter email to lookup.");
+      return;
+    }
+    setLookupLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/tools/prime-past-cache/lookup?email=${encodeURIComponent(email)}`,
+        { headers: { "x-admin-token": token }, cache: "no-store" }
+      );
+      const j = (await res.json().catch(() => null)) as { ok?: boolean; houseId?: string; scenarioId?: string; houseLabel?: string; message?: string } | null;
+      if (!res.ok) {
+        setError(j?.message ?? `Lookup failed: ${res.status}`);
+        return;
+      }
+      if (j?.ok && j.houseId) {
+        setPrimeHouseId(j.houseId ?? "");
+        setPrimeScenarioId((j.scenarioId ?? "").trim());
+        if (j.scenarioId) setError(null);
+        else if (j.message) setError(j.message);
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Lookup failed");
+    } finally {
+      setLookupLoading(false);
+    }
+  }, [adminToken, primeEmail]);
+
   const runPrimePastCache = useCallback(async () => {
     const token = adminToken.trim();
     if (!token) {
       setError("Set x-admin-token to prime cache.");
       return;
     }
+    const email = primeEmail.trim();
     const houseId = primeHouseId.trim();
     const scenarioId = primeScenarioId.trim();
-    if (!houseId || !scenarioId) {
-      setError("Enter houseId and scenarioId (Past scenario UUID).");
+    const hasEmail = email.length > 0;
+    const hasIds = houseId.length > 0 && scenarioId.length > 0;
+    if (!hasEmail && !hasIds) {
+      setError("Enter email (then click Lookup or Prime) or both houseId and scenarioId.");
       return;
     }
     setPriming(true);
@@ -213,7 +254,7 @@ export default function AdminUsageProduction() {
           "Content-Type": "application/json",
           accept: "application/json",
         },
-        body: JSON.stringify({ houseId, scenarioId }),
+        body: JSON.stringify(hasEmail ? { email } : { houseId, scenarioId }),
       });
       const text = await res.text().catch(() => "");
       let parsed: unknown = null;
@@ -231,7 +272,7 @@ export default function AdminUsageProduction() {
     } finally {
       setPriming(false);
     }
-  }, [adminToken, primeHouseId, primeScenarioId]);
+  }, [adminToken, primeEmail, primeHouseId, primeScenarioId]);
 
   useEffect(() => {
     fetchDebug();
@@ -450,17 +491,35 @@ export default function AdminUsageProduction() {
               </p>
               <p className="text-xs text-neutral-500 mt-1">
                 <strong>Endpoint:</strong> <code className="rounded bg-neutral-100 px-1">POST /api/admin/tools/prime-past-cache</code> with body{" "}
-                <code className="rounded bg-neutral-100 px-1">{`{ "houseId", "scenarioId" }`}</code>. Use the Past scenario UUID for that house (e.g. from simulator builds or dashboard).
+                <code className="rounded bg-neutral-100 px-1">{`{ "email" }`}</code> or <code className="rounded bg-neutral-100 px-1">{`{ "houseId", "scenarioId" }`}</code>.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs font-medium text-neutral-700 mb-1">Email (lookup to prefill)</label>
+                <input
+                  type="text"
+                  value={primeEmail}
+                  onChange={(e) => setPrimeEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  className="w-56 rounded border border-neutral-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={runLookup}
+                disabled={lookupLoading}
+                className="rounded border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {lookupLoading ? "Looking up…" : "Lookup"}
+              </button>
               <div>
                 <label className="block text-xs font-medium text-neutral-700 mb-1">houseId</label>
                 <input
                   type="text"
                   value={primeHouseId}
                   onChange={(e) => setPrimeHouseId(e.target.value)}
-                  placeholder="e.g. 147bce59-b0f5-48bf-8b3b-4f07ed27ac75"
+                  placeholder="Prefilled by Lookup or paste"
                   className="w-80 rounded border border-neutral-300 px-3 py-2 text-sm font-mono"
                 />
               </div>
@@ -470,7 +529,7 @@ export default function AdminUsageProduction() {
                   type="text"
                   value={primeScenarioId}
                   onChange={(e) => setPrimeScenarioId(e.target.value)}
-                  placeholder="e.g. aad5f05b-e116-43af-8a16-29f25b2ad5f1"
+                  placeholder="Prefilled by Lookup or paste"
                   className="w-80 rounded border border-neutral-300 px-3 py-2 text-sm font-mono"
                 />
               </div>
