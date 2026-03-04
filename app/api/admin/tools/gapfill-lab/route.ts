@@ -23,6 +23,7 @@ import {
 } from "@/lib/admin/gapfillLab";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // Run Compare can take 1–3 min (auto-build + past dataset + metrics)
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
@@ -526,16 +527,22 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const AUTO_BUILD_TIMEOUT_MS = 55_000; // avoid burning most of maxDuration on full-window fetch
   let profileAutoBuilt = false;
   const existingProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
   if (!existingProfile) {
     try {
-      const fullWindowIntervals = await getActualIntervalsForRange({
-        houseId: house.id,
-        esiid,
-        startDate,
-        endDate,
-      });
+      const fullWindowIntervals = await Promise.race([
+        getActualIntervalsForRange({
+          houseId: house.id,
+          esiid,
+          startDate,
+          endDate,
+        }),
+        new Promise<undefined>((_, reject) =>
+          setTimeout(() => reject(new Error("auto_build_timeout")), AUTO_BUILD_TIMEOUT_MS)
+        ),
+      ]);
       if (fullWindowIntervals?.length) {
         const windowStartUtc = `${startDate}T00:00:00.000Z`;
         const windowEndUtc = `${endDate}T23:59:59.999Z`;
@@ -545,7 +552,7 @@ export async function POST(req: NextRequest) {
         profileAutoBuilt = true;
       }
     } catch {
-      // non-fatal: continue without profile; diag will show profile_not_found
+      // non-fatal: continue without profile; diag will show profile_not_found (or run rebuild tool first)
     }
   }
 
