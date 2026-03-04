@@ -138,9 +138,8 @@ export function computeGapFillMetrics(args: {
       deltaKwh: round2(simKwh - actualKwh),
     }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const withDelta = dailyTotalsMasked.map((r) => ({ ...r, deltaKwh: r.simKwh - r.actualKwh }));
-  const top10Under = [...withDelta].filter((r) => r.deltaKwh < 0).sort((a, b) => a.deltaKwh - b.deltaKwh).slice(0, 10);
-  const top10Over = [...withDelta].filter((r) => r.deltaKwh > 0).sort((a, b) => b.deltaKwh - a.deltaKwh).slice(0, 10);
+  const top10Under = dailyTotalsMasked.filter((r) => r.deltaKwh < 0).sort((a, b) => a.deltaKwh - b.deltaKwh).slice(0, 10);
+  const top10Over = dailyTotalsMasked.filter((r) => r.deltaKwh > 0).sort((a, b) => b.deltaKwh - a.deltaKwh).slice(0, 10);
 
   const hourlyProfileMasked = Array.from({ length: 24 }, (_, hour) => {
     const v = byHour.get(hour);
