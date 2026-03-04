@@ -724,7 +724,9 @@ export async function POST(req: NextRequest) {
     dataset = {
       ...cached.datasetJson,
       series: {
-        ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series),
+        ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series !== null
+          ? (cached.datasetJson as any).series
+          : {}),
         intervals15: decoded,
       },
     } as any;

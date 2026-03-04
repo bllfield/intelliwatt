@@ -1372,7 +1372,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
             const restored = {
               ...cached.datasetJson,
               series: {
-                ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series),
+                ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series !== null
+                  ? (cached.datasetJson as any).series
+                  : {}),
                 intervals15: decoded,
               },
             };
