@@ -75,11 +75,13 @@ The migration is already in the repo:
    npx prisma db execute --schema prisma/home-details/schema.prisma --file prisma/home-details/migrations/20260227200000_home_profile_ev_fields/migration.sql
    ```
 
-3. Verify:
+3. Verify (see note if psql fails):
 
    ```bash
    psql "$HOME_DETAILS_DATABASE_URL" -c '\d+ "HomeProfileSimulated"' | grep ev
    ```
+
+   If you see `psql: error: invalid URI query parameter: "pgbouncer"`, the URL has a driver-only query param. Use a URL without it for psql (e.g. same URL but drop `&pgbouncer=true` or `?pgbouncer=true`), or rely on **Script executed successfully** from step 2.
 
 Do **not** run `prisma migrate reset` or `prisma migrate dev` on home-details PROD.
 
@@ -98,6 +100,24 @@ If you see **P3005** (“The database schema is not empty”) or a list of **47 
 - **Right for main app:** Use `DATABASE_URL` pointing at the **main** DB (e.g. `intelliwatt` or `intelliwatt_dev`) and `--schema prisma/schema.prisma` when you run main-app migrations.
 
 For an **existing** home-details DB that already has tables, do **not** use `prisma migrate deploy` for home-details (it may try to baseline). Use **Step B** above: `prisma db execute` with the single migration file.
+
+---
+
+## Troubleshooting: psql "invalid URI query parameter: pgbouncer"
+
+If `HOME_DETAILS_DATABASE_URL` (or `DATABASE_URL`) includes a query parameter like `?pgbouncer=true` or `&pgbouncer=true`, **psql** will reject it. Prisma and other drivers accept it for connection pooling; psql does not.
+
+**Workaround for verification:** Use a copy of the URL without the pgbouncer param, e.g. in bash:
+
+```bash
+# Strip query string and re-add only sslmode so psql accepts the URL
+export PSQL_URL="${HOME_DETAILS_DATABASE_URL%%\?*}"
+psql "$PSQL_URL?sslmode=require" -c '\d+ "HomeProfileSimulated"' | grep ev
+```
+
+Or set a separate env var (e.g. `HOME_DETAILS_DIRECT_URL` or a manual URL) that has no pgbouncer param and use that for ad-hoc psql checks.
+
+**Do not paste example URLs literally.** Placeholders like `user`, `pass`, `host` in docs must be replaced with your real database host (e.g. `db-postgresql-nyc3-...ondigitalocean.com`), username, and password.
 
 ---
 
