@@ -15,6 +15,7 @@ import {
   getPoolHourRange,
   localHourInTimezone,
   simulateIntervalsForTestDaysFromUsageShapeProfile,
+  type UsageShapeProfileRowForSim,
 } from "@/lib/admin/gapfillLab";
 
 export const dynamic = "force-dynamic";
@@ -768,7 +769,7 @@ export async function POST(req: NextRequest) {
   const simIntervals = simulateIntervalsForTestDaysFromUsageShapeProfile({
     timezone,
     testIntervals: actualTestIntervals,
-    usageShapeProfileRowOrNull: usageShapeProfile,
+    usageShapeProfileRowOrNull: usageShapeProfile as UsageShapeProfileRowForSim,
   });
   const simulatedByTs = new Map<string, number>();
   for (const p of simIntervals) {
@@ -780,7 +781,6 @@ export async function POST(req: NextRequest) {
     actual: actualTestIntervals,
     simulated: simIntervals,
     simulatedByTs,
-    timezone,
   });
 
   const onlyDb = setDiff(dbTravelDateKeysLocal, testDateKeysLocal);
