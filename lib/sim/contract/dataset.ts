@@ -16,19 +16,19 @@ export function buildJoinMapByTsIso(points: IntervalPoint[]): Map<string, number
   return out;
 }
 
-/** Coverage diagnostic: expected (from days × 96), actual count, pct, missingCount. */
+/** Coverage diagnostic: expected (from days × 96), actual count, pct, missingCount. Uses only points with valid YYYY-MM-DD prefix so actual and expected are comparable. */
 export function computeCoverage(points: IntervalPoint[]): {
   expected: number;
   actual: number;
   pct: number;
   missingCount: number;
 } {
-  const actual = points.length;
   const byDay = new Map<string, number>();
   for (const p of points) {
     const dk = String(p?.tsIso ?? "").slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) byDay.set(dk, (byDay.get(dk) ?? 0) + 1);
   }
+  const actual = Array.from(byDay.values()).reduce((s, n) => s + n, 0);
   const dayCount = byDay.size;
   const expected = dayCount * INTERVALS_PER_DAY;
   const pct = expected > 0 ? actual / expected : 0;

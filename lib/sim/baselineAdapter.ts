@@ -4,8 +4,9 @@
  * See docs/SIM_PLATFORM_CONTRACT.md and Phase 2 Baseline Builder plan.
  */
 
-import type { IntervalDataset, DatasetMeta } from "./contract/types";
 import {
+  type IntervalDataset,
+  type DatasetMeta,
   DATASET_KIND_PAST_BASELINE_RAW,
   DATASET_KIND_BASELINE_CORRECTED,
 } from "./contract/types";

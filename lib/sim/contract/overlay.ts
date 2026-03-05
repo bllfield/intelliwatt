@@ -16,8 +16,9 @@ export function applyOverlays(
 ): { dataset: IntervalDataset; clampedCount: number; clampedSample: string[] } {
   const deltaByTs = new Map<string, number>();
   for (const p of base.points) {
-    const key = canonicalIntervalKey(p?.tsIso ?? "");
-    if (key) deltaByTs.set(key, Number(p?.kwh) ?? 0);
+    const tsIso = p?.tsIso ?? "";
+    const key = canonicalIntervalKey(tsIso);
+    deltaByTs.set(key || tsIso, Number(p?.kwh) ?? 0);
   }
   for (const ov of overlays) {
     for (const d of ov.deltas ?? []) {

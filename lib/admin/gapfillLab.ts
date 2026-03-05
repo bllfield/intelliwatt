@@ -3,20 +3,15 @@
  * Vacant/Travel (DB) are separate; scoring uses only admin-entered Test Dates.
  */
 
+import { canonicalIntervalKey } from "@/lib/sim/contract/time";
+
 export type IntervalPoint = { timestamp: string; kwh: number };
 
 /** Local calendar date key YYYY-MM-DD (timezone-dependent when derived from timestamp). */
 export type LocalDateKey = string;
 
-/** Canonical timestamp key for joining actual and simulated intervals (UTC ISO string). */
-export function canonicalIntervalKey(tsIso: string): string {
-  try {
-    const d = new Date(String(tsIso).trim());
-    return Number.isFinite(d.getTime()) ? d.toISOString() : String(tsIso).trim();
-  } catch {
-    return String(tsIso).trim();
-  }
-}
+/** Canonical timestamp key for joining actual and simulated intervals (UTC ISO string). Re-exported from sim contract. */
+export { canonicalIntervalKey };
 
 export type GapFillDiagnostics = {
   dailyTotalsMasked: Array<{ date: string; actualKwh: number; simKwh: number; deltaKwh: number }>;
