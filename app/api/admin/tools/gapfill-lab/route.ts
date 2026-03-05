@@ -955,8 +955,11 @@ export async function POST(req: NextRequest) {
   let labCacheHit = false;
   let cached: Awaited<ReturnType<typeof getCachedPastDataset>> = null;
   if (userPastScenarioId) {
-    cached = await getCachedPastDataset({ houseId: house.id, scenarioId: userPastScenarioId, inputHash });
-    if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) userCacheHit = true;
+    const userCached = await getCachedPastDataset({ houseId: house.id, scenarioId: userPastScenarioId, inputHash });
+    if (userCached && userCached.intervalsCodec === INTERVAL_CODEC_V1) {
+      userCacheHit = true;
+      cached = userCached;
+    }
   }
   if (!cached) {
     cached = await getCachedPastDataset({
@@ -965,6 +968,7 @@ export async function POST(req: NextRequest) {
       inputHash,
     });
     if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) labCacheHit = true;
+    else if (cached) cached = null; // wrong codec: treat as miss so we rebuild (and will re-save with V1)
   }
   const cacheSource: "user" | "lab" | "rebuilt" = userCacheHit ? "user" : labCacheHit ? "lab" : "rebuilt";
   const cacheHit = userCacheHit || labCacheHit;
