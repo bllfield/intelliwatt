@@ -722,7 +722,12 @@ export async function getActualUsageDatasetForHouse(
   houseId: string,
   esiid: string | null,
   args?: { cutoff?: Date; excludedDateKeys?: Set<string>; /** When true, skip full-year getActualIntervalsForRange (e.g. lab only needs window). Production never passes this. */ skipFullYearIntervalFetch?: boolean }
-): Promise<{ dataset: ActualHouseDataset | null; alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null } }> {
+): Promise<{
+  dataset: ActualHouseDataset | null;
+  alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null };
+  /** True when skipFullYearIntervalFetch was true and we did not call getActualIntervalsForRange. */
+  skippedFullYearIntervalFetch?: boolean;
+}> {
   let smtDataset: UsageDatasetResult | null = null;
   let greenDataset: UsageDatasetResult | null = null;
   try {
@@ -767,6 +772,8 @@ export async function getActualUsageDatasetForHouse(
     stitchedMonthlyTotals = null;
     stitchedMonthMeta = null;
   }
+
+  const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
 
   const emptyInsights = {
     fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
@@ -821,6 +828,9 @@ export async function getActualUsageDatasetForHouse(
               ? "FALLBACK_V1"
               : "FILTERED_NORMAL_LIFE_V1";
       } else {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[getActualUsageDatasetForHouse] skipFullYearIntervalFetch=true: did not call getActualIntervalsForRange");
+        }
         baseloadFiltered = { baseloadKw: null, fallbackUsed: true, debugNote: "Skipped full-year interval fetch (lightweight window only)." };
       }
       dailyTotals = computed.dailyTotals;
@@ -888,6 +898,7 @@ export async function getActualUsageDatasetForHouse(
       smt: smtDataset?.summary ?? null,
       greenButton: greenDataset?.summary ?? null,
     },
+    ...(skippedFullYearIntervalFetch ? { skippedFullYearIntervalFetch: true } : {}),
   };
 }
 

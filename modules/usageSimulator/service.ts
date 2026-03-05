@@ -1285,9 +1285,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
         isPastScenario &&
         isSmtBaselineMode;
       if (isPastStitched) {
-        // Prefer actual dataset month keys so Past uses the same month window/order as Usage (e.g. 03/25..02/26).
+        // Use buildInputs.canonicalMonths for window so we avoid getActualUsageDatasetForHouse (and its full-year
+        // getActualIntervalsForRange) before the cache check. One full-year fetch in getPastSimulatedDatasetForHouse is enough.
         let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
         let canonicalEndMonthForMeta = buildInputs.canonicalEndMonth;
+        let sourceOfWindow: "buildInputs" | "baselineBuild" | "actualSummaryFallback" = "buildInputs";
         let periodsForStitch: Array<{ id: string; startDate: string; endDate: string }> | undefined =
           Array.isArray((buildInputs as any).canonicalPeriods) &&
           (buildInputs as any).canonicalPeriods.length > 0
@@ -1299,57 +1301,55 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 }))
                 .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate))
             : undefined;
-        try {
-          const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
-          const summaryStart = String(actualResult?.dataset?.summary?.start ?? "").slice(0, 10);
-          const summaryEnd = String(actualResult?.dataset?.summary?.end ?? "").slice(0, 10);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(summaryStart) && /^\d{4}-\d{2}-\d{2}$/.test(summaryEnd)) {
-            periodsForStitch = [{ id: "anchor", startDate: summaryStart, endDate: summaryEnd }];
-          }
-          const actualMonths = Array.isArray(actualResult?.dataset?.monthly)
-            ? (actualResult!.dataset.monthly as Array<{ month?: string }>)
-                .map((m) => String(m?.month ?? "").trim())
-                .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
-            : [];
-          if (actualMonths.length > 0) {
-            const uniqueSorted = Array.from(new Set(actualMonths)).sort((a, b) => (a < b ? -1 : 1));
-            canonicalMonths = uniqueSorted;
-            canonicalEndMonthForMeta = uniqueSorted[uniqueSorted.length - 1] ?? canonicalEndMonthForMeta;
-          } else if (scenarioKey !== "BASELINE") {
-            const baselineBuild = await (prisma as any).usageSimulatorBuild
-              .findUnique({
-                where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
-                select: { buildInputs: true },
-              })
-              .catch(() => null);
-            const baselineInputs = baselineBuild?.buildInputs as any;
-            if (Array.isArray(baselineInputs?.canonicalMonths) && baselineInputs.canonicalMonths.length > 0) {
-              canonicalMonths = baselineInputs.canonicalMonths;
-              if (typeof baselineInputs.canonicalEndMonth === "string") {
-                canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
-              }
+        if (canonicalMonths.length === 0 && scenarioKey !== "BASELINE") {
+          const baselineBuild = await (prisma as any).usageSimulatorBuild
+            .findUnique({
+              where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
+              select: { buildInputs: true },
+            })
+            .catch(() => null);
+          const baselineInputs = baselineBuild?.buildInputs as any;
+          if (Array.isArray(baselineInputs?.canonicalMonths) && baselineInputs.canonicalMonths.length > 0) {
+            canonicalMonths = baselineInputs.canonicalMonths;
+            if (typeof baselineInputs.canonicalEndMonth === "string") {
+              canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
             }
+            sourceOfWindow = "baselineBuild";
           }
-        } catch {
-          if (scenarioKey !== "BASELINE") {
-            const baselineBuild = await (prisma as any).usageSimulatorBuild
-              .findUnique({
-                where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
-                select: { buildInputs: true },
-              })
-              .catch(() => null);
-            const baselineInputs = baselineBuild?.buildInputs as any;
-            if (Array.isArray(baselineInputs?.canonicalMonths) && baselineInputs.canonicalMonths.length > 0) {
-              canonicalMonths = baselineInputs.canonicalMonths;
-              if (typeof baselineInputs.canonicalEndMonth === "string") {
-                canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
-              }
+        }
+        if (canonicalMonths.length === 0) {
+          try {
+            const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, { skipFullYearIntervalFetch: true });
+            const summaryStart = String(actualResult?.dataset?.summary?.start ?? "").slice(0, 10);
+            const summaryEnd = String(actualResult?.dataset?.summary?.end ?? "").slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(summaryStart) && /^\d{4}-\d{2}-\d{2}$/.test(summaryEnd)) {
+              periodsForStitch = [{ id: "anchor", startDate: summaryStart, endDate: summaryEnd }];
             }
+            const actualMonths = Array.isArray(actualResult?.dataset?.monthly)
+              ? (actualResult!.dataset.monthly as Array<{ month?: string }>)
+                  .map((m) => String(m?.month ?? "").trim())
+                  .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
+              : [];
+            if (actualMonths.length > 0) {
+              canonicalMonths = Array.from(new Set(actualMonths)).sort((a, b) => (a < b ? -1 : 1));
+              canonicalEndMonthForMeta = canonicalMonths[canonicalMonths.length - 1] ?? canonicalEndMonthForMeta;
+              sourceOfWindow = "actualSummaryFallback";
+            }
+          } catch {
+            /* keep canonicalMonths from build or baseline */
           }
         }
         const window = canonicalWindowDateRange(canonicalMonths);
         const startDate = periodsForStitch?.[0]?.startDate ?? window?.start;
         const endDate = periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
+        const pastWindowDiag = {
+          canonicalMonthsLen: canonicalMonths.length,
+          firstMonth: canonicalMonths[0] ?? null,
+          lastMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
+          windowStartUtc: startDate ?? null,
+          windowEndUtc: endDate ?? null,
+          sourceOfWindow,
+        };
         if (startDate && endDate) {
           const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
           const timezone = (buildInputs as any).timezone ?? "America/Chicago";
@@ -1386,6 +1386,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
             };
             dataset = restored;
+            if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+            (dataset.meta as any).pastWindowDiag = pastWindowDiag;
+            (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
           } else {
             const pastResult = await getPastSimulatedDatasetForHouse({
               userId: args.userId,
@@ -1407,6 +1410,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
               };
             }
             dataset = pastResult.dataset;
+            if (dataset) {
+              if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+              (dataset.meta as any).pastWindowDiag = pastWindowDiag;
+              (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
+            }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);
             const datasetJsonForStorage = {

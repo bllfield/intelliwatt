@@ -335,6 +335,15 @@ function buildFullReport(args: {
   engineVersion?: string;
   intervalsCodec?: string;
   compressedBytesLength?: number;
+  pastWindowDiag?: {
+    canonicalMonthsLen: number;
+    firstMonth: string | null;
+    lastMonth: string | null;
+    windowStartUtc: string | null;
+    windowEndUtc: string | null;
+    sourceOfWindow: "buildInputs" | "baselineBuild" | "actualSummaryFallback";
+  };
+  pastBuildIntervalsFetchCount?: number;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -417,6 +426,8 @@ function buildFullReport(args: {
       compressedBytesLength: j.compressedBytesLength ?? null,
       weekdayWeekendSplitUsed: j.modelAssumptions?.intradayShape?.weekdayWeekendSplit ?? false,
       dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
+      ...(j.pastWindowDiag ? { pastWindowDiag: j.pastWindowDiag } : {}),
+      pastBuildIntervalsFetchCount: j.pastBuildIntervalsFetchCount ?? undefined,
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
       profileAutoBuilt: j.profileAutoBuilt ?? false,
       canonicalMonths: j.buildInputs.canonicalMonths,
@@ -576,6 +587,11 @@ function buildFullReport(args: {
       lines.push("usageShapeProfile: (no diag)");
     }
     kv("profileAutoBuilt", fullReportJson.engine.profileAutoBuilt);
+    const pastWindowDiag = (fullReportJson.engine as any).pastWindowDiag;
+    if (pastWindowDiag) {
+      lines.push("pastWindowDiag: canonicalMonthsLen=" + pastWindowDiag.canonicalMonthsLen + " firstMonth=" + (pastWindowDiag.firstMonth ?? "—") + " lastMonth=" + (pastWindowDiag.lastMonth ?? "—") + " windowStartUtc=" + (pastWindowDiag.windowStartUtc ?? "—") + " windowEndUtc=" + (pastWindowDiag.windowEndUtc ?? "—") + " sourceOfWindow=" + (pastWindowDiag.sourceOfWindow ?? "—"));
+    }
+    kv("pastBuildIntervalsFetchCount", (fullReportJson.engine as any).pastBuildIntervalsFetchCount ?? "—");
     lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
@@ -1218,6 +1234,15 @@ export async function POST(req: NextRequest) {
     engineVersion: PAST_ENGINE_VERSION,
     intervalsCodec: INTERVAL_CODEC_V1,
     compressedBytesLength,
+    pastWindowDiag: {
+      canonicalMonthsLen: buildInputs.canonicalMonths.length,
+      firstMonth: buildInputs.canonicalMonths[0] ?? null,
+      lastMonth: buildInputs.canonicalMonths.length > 0 ? buildInputs.canonicalMonths[buildInputs.canonicalMonths.length - 1] ?? null : null,
+      windowStartUtc: startDate,
+      windowEndUtc: endDate,
+      sourceOfWindow: "actualSummaryFallback",
+    },
+    pastBuildIntervalsFetchCount: cacheHit ? 0 : 1,
   });
 
   const pasteLines = [

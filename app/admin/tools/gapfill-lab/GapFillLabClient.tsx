@@ -124,21 +124,37 @@ export default function GapFillLabClient() {
       return;
     }
     setPrimeLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
     try {
       const res = await fetch("/api/admin/tools/prime-past-cache", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
+        signal: controller.signal,
+        credentials: "include",
       });
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string };
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
       if (res.ok && data?.ok) {
         setPrimeMessage("Past cache primed. Run Compare can reuse it and finish in seconds.");
       } else {
-        setPrimeMessage((data as any)?.message ?? (data as any)?.error ?? `Failed (${res.status})`);
+        const msg =
+          (data as any)?.message ??
+          (data as any)?.error ??
+          (res.status === 503
+            ? "Build timed out (4 min). Prime from Admin → Usage (droplet) or try Run Compare."
+            : res.status === 500
+              ? "Server error or timeout. Try Run Compare (cache may exist) or prime from Admin → Usage."
+              : `Failed (${res.status})`);
+        setPrimeMessage(msg);
       }
     } catch (e: any) {
-      setPrimeMessage(e?.message ?? String(e));
+      const msg = e?.name === "AbortError"
+        ? "Prime hit the 5 min limit. Try again or run Compare (it will build and then you can prime next time)."
+        : (e?.message ?? String(e));
+      setPrimeMessage(msg);
     } finally {
+      clearTimeout(timeoutId);
       setPrimeLoading(false);
     }
   }
@@ -274,7 +290,7 @@ export default function GapFillLabClient() {
         <div className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5">
           <div className="text-sm font-medium text-brand-navy mb-1">Prime Past cache (optional)</div>
           <p className="text-sm text-brand-navy/70 mb-2">
-            Prime the cache for this customer so Run Compare can reuse it and finish in seconds instead of hitting the 5 min limit. Do this after Lookup, then run Compare.
+            Prime the cache so Run Compare can reuse it. Do this after Lookup, then run Compare. Same build as the user Past page (1–5 min).
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
