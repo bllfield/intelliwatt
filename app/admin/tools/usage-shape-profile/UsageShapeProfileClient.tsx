@@ -52,6 +52,11 @@ export default function UsageShapeProfileClient() {
         setHouses([]);
         return;
       }
+      if (data == null || typeof data !== "object") {
+        setError("Invalid response from server.");
+        setHouses([]);
+        return;
+      }
       if (data.ok && data.houses?.length) {
         setHouses(data.houses);
         const currentInList = houseId && data.houses.some((h: HouseOption) => h.id === houseId);
@@ -86,14 +91,9 @@ export default function UsageShapeProfileClient() {
           timezone,
         }),
       });
-      const data = (await res.json().catch(() => null)) as RebuildResponse | null;
+      const data = (await res.json().catch(() => null)) as RebuildResponse;
       if (!res.ok) {
         setError((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
-        setResult(null);
-        return;
-      }
-      if (data == null || typeof data !== "object") {
-        setError("Invalid response from server.");
         setResult(null);
         return;
       }

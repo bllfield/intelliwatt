@@ -46,6 +46,8 @@ export default function GapFillLabClient() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [rangesAutofilledFromDb, setRangesAutofilledFromDb] = useState(false);
+  const [primeLoading, setPrimeLoading] = useState(false);
+  const [primeMessage, setPrimeMessage] = useState<string | null>(null);
 
   function addRange() {
     setRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -70,6 +72,7 @@ export default function GapFillLabClient() {
   async function handleLookup() {
     setError(null);
     setResult(null);
+    setPrimeMessage(null);
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setError("Enter an email address.");
@@ -113,6 +116,33 @@ export default function GapFillLabClient() {
     }
   }
 
+  async function handlePrimePastCache() {
+    setPrimeMessage(null);
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) {
+      setPrimeMessage("Enter an email and run Lookup first.");
+      return;
+    }
+    setPrimeLoading(true);
+    try {
+      const res = await fetch("/api/admin/tools/prime-past-cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
+      });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string };
+      if (res.ok && data?.ok) {
+        setPrimeMessage("Past cache primed. Run Compare can reuse it and finish in seconds.");
+      } else {
+        setPrimeMessage((data as any)?.message ?? (data as any)?.error ?? `Failed (${res.status})`);
+      }
+    } catch (e: any) {
+      setPrimeMessage(e?.message ?? String(e));
+    } finally {
+      setPrimeLoading(false);
+    }
+  }
+
   async function handleRunCompare() {
     setError(null);
     const trimmed = email.trim().toLowerCase();
@@ -151,7 +181,7 @@ export default function GapFillLabClient() {
       if (data.ok && data.houses?.length) setHouses(data.houses);
     } catch (e: any) {
       const msg = e?.name === "AbortError"
-        ? "Request took too long (4.5 min). Try a shorter travel range or run Usage Shape Profile rebuild first."
+        ? "Request hit the 5 min limit. Prime the Past cache first (open Past in the dashboard or use Admin → Usage → Prime Past cache), then run again for a cache hit. Or use a shorter travel range."
         : (e?.message ?? String(e));
       setError(msg);
       setResult(null);
@@ -241,6 +271,28 @@ export default function GapFillLabClient() {
           </div>
         )}
 
+        <div className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5">
+          <div className="text-sm font-medium text-brand-navy mb-1">Prime Past cache (optional)</div>
+          <p className="text-sm text-brand-navy/70 mb-2">
+            Prime the cache for this customer so Run Compare can reuse it and finish in seconds instead of hitting the 5 min limit. Do this after Lookup, then run Compare.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePrimePastCache}
+              disabled={!email.trim() || primeLoading}
+              className="px-3 py-1.5 bg-brand-blue text-white rounded text-sm hover:bg-brand-navy disabled:opacity-50"
+            >
+              {primeLoading ? "Priming…" : "Prime Past cache"}
+            </button>
+            {primeMessage && (
+              <span className={`text-sm ${primeMessage.startsWith("Past cache primed") ? "text-green-700" : "text-rose-700"}`}>
+                {primeMessage}
+              </span>
+            )}
+          </div>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-brand-navy mb-2">Travel/Vacant ranges (start – end date, YYYY-MM-DD)</label>
           {rangesAutofilledFromDb && (
@@ -284,7 +336,7 @@ export default function GapFillLabClient() {
           >
             {loading ? "Running…" : "Run Compare"}
           </button>
-          <span className="text-sm text-brand-navy/60">May take 1–4 minutes.</span>
+          <span className="text-sm text-brand-navy/60">May take 1–5 min (server limit 5 min). Tip: prime Past cache first (Admin → Usage) so the lab can reuse it and finish in seconds.</span>
         </div>
       </div>
 

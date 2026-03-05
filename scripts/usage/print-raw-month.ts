@@ -77,14 +77,12 @@ async function main() {
 
   const house = await resolveHouse(identifier);
   if (!house) {
-    console.error(
-      JSON.stringify({
-        ok: false,
-        error: "user_or_house_not_found",
-        identifier: identifier.includes("@") ? "(email)" : identifier,
-        message: "No user with that email, or no house with that esiid/homeId, or house has no esiid.",
-      })
-    );
+    console.error({
+      ok: false,
+      error: "user_or_house_not_found",
+      identifier: identifier.includes("@") ? "(email)" : identifier,
+      message: "No user with that email, or no house with that esiid/homeId, or house has no esiid.",
+    });
     process.exit(1);
   }
 

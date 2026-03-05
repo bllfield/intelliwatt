@@ -114,9 +114,8 @@ async function syncHomeDetailsToAppliances(args: { userId: string; houseId: stri
     } else {
       appliances.push({ id: uid(), type: "hvac", data: hvacData });
     }
-  } else {
-    const idx = appliances.findIndex((a: any) => a?.type === "hvac" && String(a?.data?._autoSource ?? "") === AUTO_HVAC_SOURCE);
-    if (idx >= 0) appliances.splice(idx, 1);
+  } else if (hvacIdx >= 0) {
+    appliances.splice(hvacIdx, 1);
   }
 
   const validated = validateApplianceProfile({
