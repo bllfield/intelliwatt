@@ -64,11 +64,6 @@ function yearMonthsFromRange(startDate: string, endDate: string): string[] {
 
 type DateRange = { startDate: string; endDate: string };
 
-/**
- * Eval date keys: we treat inputs as local calendar dates for eval key generation; timezone is
- * applied only when mapping local excluded days to engine UTC excluded date keys (see
- * buildExcludedUtcDateKeySetFromLocalKeys).
- */
 /** Normalize ranges to local date keys (YYYY-MM-DD), inclusive. Inputs are local calendar dates (e.g. from HTML date inputs). We iterate in calendar-day space (no UTC) so output keys match dateKeyInTimezone(ts, timezone) when filtering actual intervals. */
 function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone: string): Set<string> {
   const out = new Set<string>();
@@ -330,6 +325,11 @@ function buildFullReport(args: {
   } | null;
   profileAutoBuilt?: boolean;
   cacheHit?: boolean;
+  userCacheTried?: boolean;
+  userCacheHit?: boolean;
+  userScenarioIdUsed?: string | null;
+  labCacheHit?: boolean;
+  cacheSource?: "user" | "lab" | "rebuilt";
   inputHash?: string;
   intervalDataFingerprint?: string;
   engineVersion?: string;
@@ -405,6 +405,11 @@ function buildFullReport(args: {
       derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
       configHash: j.configHash,
       cacheHit: j.cacheHit ?? false,
+      userCacheTried: j.userCacheTried ?? false,
+      userCacheHit: j.userCacheHit ?? false,
+      userScenarioIdUsed: j.userScenarioIdUsed ?? null,
+      labCacheHit: j.labCacheHit ?? false,
+      cacheSource: j.cacheSource ?? "rebuilt",
       inputHash: j.inputHash ?? null,
       intervalDataFingerprint: j.intervalDataFingerprint ?? null,
       engineVersion: j.engineVersion ?? null,
@@ -543,6 +548,11 @@ function buildFullReport(args: {
   section("F) Simulator engine path + config", () => {
     kv("enginePath", "production_past_stitched");
     lines.push("functionsUsed: getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve");
+    kv("userCacheTried", (fullReportJson.engine as any).userCacheTried ?? false);
+    kv("userCacheHit", (fullReportJson.engine as any).userCacheHit ?? false);
+    kv("userScenarioIdUsed", (fullReportJson.engine as any).userScenarioIdUsed ?? "—");
+    kv("labCacheHit", (fullReportJson.engine as any).labCacheHit ?? false);
+    kv("cacheSource", (fullReportJson.engine as any).cacheSource ?? "rebuilt");
     kv("cacheHit", fullReportJson.engine.cacheHit);
     kv("inputHash", fullReportJson.engine.inputHash ?? "—");
     kv("intervalDataFingerprint", fullReportJson.engine.intervalDataFingerprint ?? "—");
@@ -916,7 +926,14 @@ export async function POST(req: NextRequest) {
   };
 
   // Build exclusions (dataset + cache): DB ∪ Eval. Scoring mask (metrics): Eval only.
-  const scenarioIdForCache = "gapfill_lab";
+  // Try user's Past scenario cache first so we get a hit when they've already loaded Past with same inputs; else use lab cache.
+  const userPastScenario = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: { userId: user.id, houseId: house.id, name: "Past (Corrected)", archivedAt: null },
+      select: { id: true },
+    })
+    .catch(() => null);
+  const userPastScenarioId = userPastScenario?.id ?? null;
 
   const intervalDataFingerprint = await getIntervalDataFingerprint({
     houseId: house.id,
@@ -933,16 +950,27 @@ export async function POST(req: NextRequest) {
     buildInputs: buildInputs as Record<string, unknown>,
     intervalDataFingerprint,
   });
-  let cacheHit = false;
+  const userCacheTried = Boolean(userPastScenarioId);
+  let userCacheHit = false;
+  let labCacheHit = false;
+  let cached: Awaited<ReturnType<typeof getCachedPastDataset>> = null;
+  if (userPastScenarioId) {
+    cached = await getCachedPastDataset({ houseId: house.id, scenarioId: userPastScenarioId, inputHash });
+    if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) userCacheHit = true;
+  }
+  if (!cached) {
+    cached = await getCachedPastDataset({
+      houseId: house.id,
+      scenarioId: "gapfill_lab",
+      inputHash,
+    });
+    if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) labCacheHit = true;
+  }
+  const cacheSource: "user" | "lab" | "rebuilt" = userCacheHit ? "user" : labCacheHit ? "lab" : "rebuilt";
+  const cacheHit = userCacheHit || labCacheHit;
   let compressedBytesLength = 0;
-  const cached = await getCachedPastDataset({
-    houseId: house.id,
-    scenarioId: scenarioIdForCache,
-    inputHash,
-  });
   let dataset: NonNullable<Awaited<ReturnType<typeof getPastSimulatedDatasetForHouse>>["dataset"]>;
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
-    cacheHit = true;
     compressedBytesLength = cached.intervalsCompressed.length;
     const decoded = decodeIntervalsV1(cached.intervalsCompressed);
     dataset = {
@@ -987,7 +1015,7 @@ export async function POST(req: NextRequest) {
     };
     await saveCachedPastDataset({
       houseId: house.id,
-      scenarioId: scenarioIdForCache,
+      scenarioId: "gapfill_lab",
       inputHash,
       engineVersion: PAST_ENGINE_VERSION,
       windowStartUtc: startDate,
@@ -1179,6 +1207,11 @@ export async function POST(req: NextRequest) {
     usageShapeProfileDiag: (dataset as any)?.meta?.usageShapeProfileDiag ?? null,
     profileAutoBuilt,
     cacheHit,
+    userCacheTried,
+    userCacheHit,
+    userScenarioIdUsed: userPastScenarioId ?? null,
+    labCacheHit,
+    cacheSource,
     inputHash,
     intervalDataFingerprint,
     engineVersion: PAST_ENGINE_VERSION,

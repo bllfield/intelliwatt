@@ -129,7 +129,7 @@ export default function GapFillLabClient() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 270_000); // 4.5 min (server maxDuration 300s)
+      timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

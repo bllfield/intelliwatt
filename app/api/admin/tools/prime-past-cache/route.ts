@@ -6,6 +6,9 @@
  *
  * Use when usage was already pulled but the house never had a successful Past load
  * (e.g. request timed out before save). Requires x-admin-token header.
+ *
+ * If the cache is already filled, this still returns 200 (cache hit; no re-save). Running again
+ * with the same inputs is a no-op; if build inputs changed, the cache is upserted (replaced).
  */
 
 import { NextRequest, NextResponse } from "next/server";
