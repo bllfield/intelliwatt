@@ -952,3 +952,57 @@ export async function getActualIntervalsForRange(args: {
     return [];
   }
 }
+
+/**
+ * Lightweight fingerprint of actual interval data for a house in a date range.
+ * Used to invalidate Past simulated cache when new intervals are backfilled:
+ * when count or latest ts changes, cache key changes so we rebuild and re-cache.
+ */
+export async function getIntervalDataFingerprint(args: {
+  houseId: string;
+  esiid: string | null;
+  startDate: string;
+  endDate: string;
+}): Promise<string> {
+  const start = new Date(args.startDate + "T00:00:00.000Z");
+  const end = new Date(args.endDate + "T23:59:59.999Z");
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
+    return "";
+  }
+  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  if (!source) return "";
+  try {
+    if (source === "SMT") {
+      if (!args.esiid) return "";
+      const rows = await prisma.$queryRaw<Array<{ count: string; max_ts: Date | null }>>(Prisma.sql`
+        SELECT COUNT(*)::text AS count, MAX("ts") AS max_ts
+        FROM "SmtInterval"
+        WHERE "esiid" = ${args.esiid} AND "ts" >= ${start} AND "ts" <= ${end}
+      `);
+      const r = rows?.[0];
+      const count = r?.count ?? "0";
+      const maxTs = r?.max_ts ? String(r.max_ts.getTime()) : "";
+      return `${count}:${maxTs}`;
+    }
+    if (!USAGE_DB_ENABLED) return "";
+    const usageClient = usagePrisma as any;
+    const latestRaw = await usageClient.rawGreenButton.findFirst({
+      where: { homeId: args.houseId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (!latestRaw?.id) return "";
+    const rows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT COUNT(*)::text AS count, MAX("timestamp") AS max_ts
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
+        AND "timestamp" >= ${start} AND "timestamp" <= ${end}
+    `)) as Array<{ count: string; max_ts: Date | null }>;
+    const r = rows?.[0];
+    const count = r?.count ?? "0";
+    const maxTs = r?.max_ts ? String((r.max_ts instanceof Date ? r.max_ts : new Date(r.max_ts)).getTime()) : "";
+    return `${count}:${maxTs}`;
+  } catch {
+    return "";
+  }
+}

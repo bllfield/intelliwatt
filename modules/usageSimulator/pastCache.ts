@@ -15,6 +15,8 @@ export type PastInputHashPayload = {
   timezone: string;
   travelRanges: Array<{ startDate: string; endDate: string }>;
   buildInputs: Record<string, unknown>;
+  /** Fingerprint of actual interval data (count:maxTs). When backfills add data, this changes so cache key changes and we rebuild. */
+  intervalDataFingerprint?: string;
 };
 
 /** Stable hash of buildInputs + travelRanges + timezone + window + engineVersion (base64url). */
@@ -30,6 +32,7 @@ export function computePastInputHash(payload: PastInputHashPayload): string {
       return sa < sb ? -1 : sa > sb ? 1 : 0;
     }),
     buildInputsHash: stableHashObject(payload.buildInputs),
+    intervalDataFingerprint: payload.intervalDataFingerprint ?? "",
   };
   const json = JSON.stringify(canonical);
   const digest = createHash("sha256").update(json, "utf8").digest();

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRange, getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { monthsEndingAt } from "@/modules/manualUsage/anchor";
 import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
@@ -700,6 +700,13 @@ export async function POST(req: NextRequest) {
   };
 
   // Same canonical builder + cache as user "Past simulated usage" (scenarioId = gapfill_lab for cache key).
+  // Fingerprint ensures cache invalidates when new interval backfills arrive.
+  const intervalDataFingerprint = await getIntervalDataFingerprint({
+    houseId: house.id,
+    esiid: house.esiid ?? null,
+    startDate,
+    endDate,
+  });
   const inputHash = computePastInputHash({
     engineVersion: PAST_ENGINE_VERSION,
     windowStartUtc: startDate,
@@ -707,6 +714,7 @@ export async function POST(req: NextRequest) {
     timezone,
     travelRanges: travelRangesForEngine,
     buildInputs: buildInputs as Record<string, unknown>,
+    intervalDataFingerprint,
   });
   const LAB_SCENARIO_ID = "gapfill_lab";
   let cacheHit = false;

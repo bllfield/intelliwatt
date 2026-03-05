@@ -7,7 +7,7 @@ import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, typ
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
-import { getActualUsageDatasetForHouse, getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { getActualUsageDatasetForHouse, getActualIntervalsForRange, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
@@ -1353,6 +1353,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
         if (startDate && endDate) {
           const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
           const timezone = (buildInputs as any).timezone ?? "America/Chicago";
+          const intervalDataFingerprint = await getIntervalDataFingerprint({
+            houseId: args.houseId,
+            esiid: house.esiid ?? null,
+            startDate,
+            endDate,
+          });
           const inputHash = computePastInputHash({
             engineVersion: PAST_ENGINE_VERSION,
             windowStartUtc: startDate,
@@ -1360,6 +1366,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             timezone,
             travelRanges,
             buildInputs: buildInputs as Record<string, unknown>,
+            intervalDataFingerprint,
           });
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cached = await getCachedPastDataset({

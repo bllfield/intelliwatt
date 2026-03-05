@@ -39,6 +39,15 @@ So whenever the house endpoint returns a successful Past response, that response
 
 We do **not** skip cache: we always try cache first and always attempt to save after a successful build.
 
+## Cache freshness: new interval backfills
+
+The cache key includes an **interval data fingerprint** (count + latest timestamp of actual intervals in the window). When new intervals are backfilled (e.g. SMT or Green Button data arrives later), the fingerprint changes, so the cache key changes:
+
+- **Cache miss** → full Past build runs, then the new result is written to cache.
+- Subsequent requests use the new cached dataset.
+
+So cached intervals are never stale: new backfills automatically cause a rebuild and re-cache. No TTL or manual invalidation is required. The fingerprint is computed by `getIntervalDataFingerprint` in `lib/usage/actualDatasetForHouse.ts` and passed into `computePastInputHash` by both the user house route (via `getSimulatedUsageForHouseScenario`) and the Gap-Fill Lab.
+
 ## Manually priming the cache (admin)
 
 If usage was already pulled but the house never had a successful Past load (e.g. the request timed out before save), the cache was never written. You can prime it without relying on the UI:
