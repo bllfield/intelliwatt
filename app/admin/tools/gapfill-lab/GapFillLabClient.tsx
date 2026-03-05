@@ -119,15 +119,18 @@ export default function GapFillLabClient() {
   async function primeRequest(payload: { email: string; rangesToMask?: RangeRow[]; timezone?: string }) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
-    const res = await fetch("/api/admin/tools/prime-past-cache", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-      credentials: "include",
-    });
-    clearTimeout(timeoutId);
-    return res;
+    try {
+      const res = await fetch("/api/admin/tools/prime-past-cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+        credentials: "include",
+      });
+      return res;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async function handlePrimePastCache() {
