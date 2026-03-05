@@ -22,14 +22,16 @@ export function applyOverlays(
   }
   for (const ov of overlays) {
     for (const d of ov.deltas ?? []) {
-      const key = canonicalIntervalKey(d?.tsIso ?? "");
-      if (key) deltaByTs.set(key, (deltaByTs.get(key) ?? 0) + (Number(d?.deltaKwh) ?? 0));
+      const tsIso = d?.tsIso ?? "";
+      const key = canonicalIntervalKey(tsIso);
+      const mapKey = key || tsIso;
+      deltaByTs.set(mapKey, (deltaByTs.get(mapKey) ?? 0) + (Number(d?.deltaKwh) ?? 0));
     }
   }
   const points: IntervalPoint[] = [];
   let clampedCount = 0;
   const clampedSample: string[] = [];
-  for (const [tsIso, kwh] of deltaByTs) {
+  for (const [tsIso, kwh] of Array.from(deltaByTs.entries())) {
     const clamped = Math.max(0, kwh);
     if (kwh < 0) {
       clampedCount++;

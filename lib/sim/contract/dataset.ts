@@ -6,12 +6,13 @@ import { canonicalIntervalKey } from "./time";
 import type { IntervalPoint } from "./types";
 import { INTERVALS_PER_DAY } from "./types";
 
-/** Build a map tsIso -> kwh for join/lookup. Uses canonical key per point. */
+/** Build a map tsIso -> kwh for join/lookup. Uses canonical key per point; fallback to raw tsIso when unparseable so no point is dropped. */
 export function buildJoinMapByTsIso(points: IntervalPoint[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const p of points) {
-    const key = canonicalIntervalKey(p?.tsIso ?? "");
-    if (key) out.set(key, Number(p?.kwh) ?? 0);
+    const tsIso = p?.tsIso ?? "";
+    const key = canonicalIntervalKey(tsIso);
+    out.set(key || tsIso, Number(p?.kwh) ?? 0);
   }
   return out;
 }
