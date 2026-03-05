@@ -69,30 +69,32 @@ type DateRange = { startDate: string; endDate: string };
  * applied only when mapping local excluded days to engine UTC excluded date keys (see
  * buildExcludedUtcDateKeySetFromLocalKeys).
  */
-/** Normalize ranges to local date keys (YYYY-MM-DD), inclusive. Inputs are local calendar dates (e.g. from HTML date inputs); we iterate in calendar-date space so June 13–July 1 always yields 19 keys regardless of timezone. */
+/** Normalize ranges to local date keys (YYYY-MM-DD), inclusive. Inputs are local calendar dates (e.g. from HTML date inputs). We iterate in calendar-day space (no UTC) so output keys match dateKeyInTimezone(ts, timezone) when filtering actual intervals. */
 function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone: string): Set<string> {
   const out = new Set<string>();
-  const dayMs = 24 * 60 * 60 * 1000;
   for (const r of ranges ?? []) {
     const start = (r?.startDate ?? "").slice(0, 10);
     const end = (r?.endDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
     if (end < start) continue;
-    let t = Date.UTC(
-      Number(start.slice(0, 4)),
-      Number(start.slice(5, 7)) - 1,
-      Number(start.slice(8, 10))
-    );
-    const endMs = Date.UTC(
-      Number(end.slice(0, 4)),
-      Number(end.slice(5, 7)) - 1,
-      Number(end.slice(8, 10))
-    );
-    for (; t <= endMs; t += dayMs) {
-      const d = new Date(t);
-      out.add(
-        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
-      );
+    let y = Number(start.slice(0, 4));
+    let m = Number(start.slice(5, 7));
+    let d = Number(start.slice(8, 10));
+    const endY = Number(end.slice(0, 4));
+    const endM = Number(end.slice(5, 7));
+    const endD = Number(end.slice(8, 10));
+    while (y < endY || (y === endY && m < endM) || (y === endY && m === endM && d <= endD)) {
+      out.add(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+      const daysInMonth = new Date(y, m, 0).getDate();
+      d += 1;
+      if (d > daysInMonth) {
+        d = 1;
+        m += 1;
+      }
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
     }
   }
   return out;
