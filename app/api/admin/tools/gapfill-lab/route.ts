@@ -2,27 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
-import { monthsEndingAt } from "@/modules/manualUsage/anchor";
-import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
-import { type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
-import { getPastSimulatedDatasetForHouse } from "@/modules/usageSimulator/service";
-import {
-  computePastInputHash,
-  getCachedPastDataset,
-  saveCachedPastDataset,
-  PAST_ENGINE_VERSION,
-} from "@/modules/usageSimulator/pastCache";
-import {
-  encodeIntervalsV1,
-  decodeIntervalsV1,
-  INTERVAL_CODEC_V1,
-} from "@/modules/usageSimulator/intervalCodec";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
-import { getLatestUsageShapeProfile, upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
-import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
+import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
   canonicalIntervalKey,
@@ -30,10 +14,11 @@ import {
   dateKeyInTimezone,
   getPoolHourRange,
   localHourInTimezone,
+  simulateIntervalsForTestDaysFromUsageShapeProfile,
 } from "@/lib/admin/gapfillLab";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // Run Compare can take 1–3 min (auto-build + past dataset + metrics)
+export const maxDuration = 60; // Run Compare uses test-days only (no full Past build)
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
@@ -42,24 +27,6 @@ function hasAdminSessionCookie(request: NextRequest): boolean {
   const email = normalizeEmailSafe(raw);
   if (!email) return false;
   return ADMIN_EMAILS.includes(email);
-}
-
-function yearMonthsFromRange(startDate: string, endDate: string): string[] {
-  const start = String(startDate).slice(0, 10);
-  const end = String(endDate).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return [];
-  const seen = new Set<string>();
-  const a = new Date(start + "T12:00:00.000Z").getTime();
-  const b = new Date(end + "T12:00:00.000Z").getTime();
-  let t = Math.min(a, b);
-  const last = Math.max(a, b);
-  const dayMs = 24 * 60 * 60 * 1000;
-  while (t <= last) {
-    const ym = new Date(t).toISOString().slice(0, 7);
-    seen.add(ym);
-    t += dayMs;
-  }
-  return Array.from(seen).sort();
 }
 
 type DateRange = { startDate: string; endDate: string };
@@ -91,54 +58,6 @@ function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone:
         y += 1;
       }
     }
-  }
-  return out;
-}
-
-function utcDateKeyFromUtcMs(utcMs: number): string {
-  const d = new Date(utcMs);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
-function localDateKeyFromUtcMs(utcMs: number, timezone: string): string {
-  const dt = new Date(utcMs);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(dt);
-  const y = parts.find((p) => p.type === "year")?.value ?? "";
-  const m = parts.find((p) => p.type === "month")?.value ?? "";
-  const d = parts.find((p) => p.type === "day")?.value ?? "";
-  return `${y}-${m}-${d}`;
-}
-
-/** Map local date keys to UTC excluded date keys (YYYY-MM-DD) for the window. Same convention as Past engine. */
-function buildExcludedUtcDateKeySetFromLocalKeys(
-  localDateKeys: Set<string>,
-  windowStartUtc: string,
-  windowEndUtc: string,
-  timezone: string
-): Set<string> {
-  const out = new Set<string>();
-  if (!localDateKeys || localDateKeys.size === 0) return out;
-  const startMs = Date.UTC(
-    Number(windowStartUtc.slice(0, 4)),
-    Number(windowStartUtc.slice(5, 7)) - 1,
-    Number(windowStartUtc.slice(8, 10)),
-    0, 0, 0
-  );
-  const endMs = Date.UTC(
-    Number(windowEndUtc.slice(0, 4)),
-    Number(windowEndUtc.slice(5, 7)) - 1,
-    Number(windowEndUtc.slice(8, 10)),
-    0, 0, 0
-  );
-  const dayMs = 24 * 60 * 60 * 1000;
-  for (let dayStart = startMs; dayStart <= endMs; dayStart += dayMs) {
-    const localKey = localDateKeyFromUtcMs(dayStart + 12 * 60 * 60 * 1000, timezone);
-    if (localDateKeys.has(localKey)) out.add(utcDateKeyFromUtcMs(dayStart));
   }
   return out;
 }
@@ -241,7 +160,7 @@ function applianceProfileSnapshot(rec: Awaited<ReturnType<typeof getAppliancePro
   };
 }
 
-const REPORT_VERSION = "gapfill_lab_report_v2";
+const REPORT_VERSION = "gapfill_lab_report_v3";
 const TRUNCATE_LIST = 30;
 
 function buildFullReport(args: {
@@ -350,12 +269,16 @@ function buildFullReport(args: {
     intervalDataFingerprint: string | null;
     scenarioId: string | null;
   };
+  enginePath?: "production_past_stitched" | "gapfill_test_days_profile";
+  expectedTestIntervals?: number;
+  coveragePct?: number | null;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
-  const expectedMaskedIntervals = j.evalMaskedDateKeysCount * 96;
+  const enginePath = j.enginePath ?? "production_past_stitched";
+  const expectedMaskedIntervals = j.expectedTestIntervals ?? j.evalMaskedDateKeysCount * 96;
   const missingMaskedIntervals = expectedMaskedIntervals - j.maskedIntervalsCount;
-  const coveragePct: number | null = expectedMaskedIntervals > 0 ? j.maskedIntervalsCount / expectedMaskedIntervals : null;
+  const coveragePct: number | null = j.coveragePct ?? (expectedMaskedIntervals > 0 ? j.maskedIntervalsCount / expectedMaskedIntervals : null);
   const monthlyTotals: Record<string, number> = {};
   for (const m of j.dataset.monthly ?? []) {
     const month = String(m?.month ?? "").slice(0, 7);
@@ -414,8 +337,8 @@ function buildFullReport(args: {
     homeProfile: j.homeProfile,
     applianceProfile: j.applianceProfile,
     engine: {
-      enginePath: "production_past_stitched",
-      functionsUsed: "getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve",
+      enginePath: enginePath,
+      functionsUsed: enginePath === "gapfill_test_days_profile" ? "getActualIntervalsForRange(test window only) -> simulateIntervalsForTestDaysFromUsageShapeProfile -> computeGapFillMetrics" : "getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve",
       simVersion: j.modelAssumptions?.meta?.simVersion ?? "production_builder",
       derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
       configHash: j.configHash,
@@ -437,13 +360,15 @@ function buildFullReport(args: {
       ...(j.cacheKeyDiag ? { cacheKeyDiag: j.cacheKeyDiag } : {}),
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
       profileAutoBuilt: j.profileAutoBuilt ?? false,
-      canonicalMonths: j.buildInputs.canonicalMonths,
-      buildExcludedDateKeysCount: j.buildExcludedDateKeysCount,
-      buildExcludedDateKeysSample: j.buildExcludedDateKeysSample,
+      canonicalMonths: j.buildInputs?.canonicalMonths ?? [],
+      buildExcludedDateKeysCount: j.buildExcludedDateKeysCount ?? 0,
+      buildExcludedDateKeysSample: j.buildExcludedDateKeysSample ?? [],
       evalMaskedDateKeysCount: j.evalMaskedDateKeysCount,
       evalMaskedDateKeysSample: j.evalMaskedDateKeysSample,
-      excludedDateKeysCount: j.excludedDateKeysCount,
-      excludedDateKeysSample: j.excludedDateKeysSample,
+      excludedDateKeysCount: j.excludedDateKeysCount ?? 0,
+      excludedDateKeysSample: j.excludedDateKeysSample ?? [],
+      expectedTestIntervals: j.expectedTestIntervals ?? undefined,
+      coveragePct: j.coveragePct ?? undefined,
       weatherUsed: false,
       weatherNote: "Weather not integrated in gap-fill lab path.",
     },
@@ -477,7 +402,7 @@ function buildFullReport(args: {
     notes: [] as string[],
   };
 
-  if ((j.dataset.summary?.intervalsCount ?? 0) !== 35136) fullReportJson.notes.push(`intervalCount ${j.dataset.summary?.intervalsCount} differs from expected 35136.`);
+  if ((j.enginePath ?? "production_past_stitched") !== "gapfill_test_days_profile" && (j.dataset.summary?.intervalsCount ?? 0) !== 35136) fullReportJson.notes.push(`intervalCount ${j.dataset.summary?.intervalsCount} differs from expected 35136.`);
   const baseloadDaily = Number(j.dataset.insights?.baseloadDaily);
   if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
   const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
@@ -506,9 +431,14 @@ function buildFullReport(args: {
   });
 
   section("B) Scenario + masking", () => {
-    lines.push("evalRanges input (entered ranges; used for accuracy): " + JSON.stringify(j.evalRanges));
-    lines.push("buildExcludedRanges (DB ∪ eval; used to build dataset): " + JSON.stringify(j.buildExcludedRanges));
-    lines.push("maskedIntervalsCount / maskedDaysCount / listMaskedDateKeys are based on evalRanges only.");
+    if (enginePath === "gapfill_test_days_profile") {
+      lines.push("testRangesInput (entered; ONLY dates scored): " + JSON.stringify(j.evalRanges));
+      lines.push("travelRangesFromDb (for transparency; not used in build): shown in dateKeyDiag.");
+    } else {
+      lines.push("evalRanges input (entered ranges; used for accuracy): " + JSON.stringify(j.evalRanges));
+      lines.push("buildExcludedRanges (DB ∪ eval; used to build dataset): " + JSON.stringify(j.buildExcludedRanges));
+    }
+    lines.push("maskedIntervalsCount / maskedDaysCount / listMaskedDateKeys are based on " + (enginePath === "gapfill_test_days_profile" ? "test dates only." : "evalRanges only."));
     kv("maskedIntervalsCount", j.maskedIntervalsCount);
     kv("maskedDaysCount", j.maskedDaysCount);
     lines.push("listMaskedDateKeys (eval only): " + listTrunc(j.listMaskedDateKeys, TRUNCATE_LIST).join(", "));
@@ -564,19 +494,34 @@ function buildFullReport(args: {
   });
 
   section("F) Simulator engine path + config", () => {
-    kv("enginePath", "production_past_stitched");
-    lines.push("functionsUsed: getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve");
-    kv("userCacheTried", (fullReportJson.engine as any).userCacheTried ?? false);
-    kv("userCacheHit", (fullReportJson.engine as any).userCacheHit ?? false);
-    kv("userScenarioIdUsed", (fullReportJson.engine as any).userScenarioIdUsed ?? "—");
-    kv("labCacheHit", (fullReportJson.engine as any).labCacheHit ?? false);
-    kv("cacheSource", (fullReportJson.engine as any).cacheSource ?? "rebuilt");
-    kv("cacheHit", fullReportJson.engine.cacheHit);
-    kv("inputHash", fullReportJson.engine.inputHash ?? "—");
-    kv("intervalDataFingerprint", fullReportJson.engine.intervalDataFingerprint ?? "—");
-    kv("engineVersion", fullReportJson.engine.engineVersion ?? "—");
-    kv("intervalsCodec", fullReportJson.engine.intervalsCodec ?? "—");
-    kv("compressedBytesLength", fullReportJson.engine.compressedBytesLength ?? "—");
+    kv("enginePath", fullReportJson.engine.enginePath);
+    lines.push("functionsUsed: " + (fullReportJson.engine as any).functionsUsed);
+    if (enginePath === "gapfill_test_days_profile") {
+      kv("expectedTestIntervals", j.expectedTestIntervals ?? "—");
+      kv("coveragePct", j.coveragePct != null ? round2((j.coveragePct as number) * 100) + "%" : "—");
+      lines.push("No Past cache; sim from UsageShapeProfile (or uniform fallback).");
+    } else {
+      kv("userCacheTried", (fullReportJson.engine as any).userCacheTried ?? false);
+      kv("userCacheHit", (fullReportJson.engine as any).userCacheHit ?? false);
+      kv("userScenarioIdUsed", (fullReportJson.engine as any).userScenarioIdUsed ?? "—");
+      kv("labCacheHit", (fullReportJson.engine as any).labCacheHit ?? false);
+      kv("cacheSource", (fullReportJson.engine as any).cacheSource ?? "rebuilt");
+      kv("cacheHit", fullReportJson.engine.cacheHit);
+      kv("inputHash", fullReportJson.engine.inputHash ?? "—");
+      kv("intervalDataFingerprint", fullReportJson.engine.intervalDataFingerprint ?? "—");
+      kv("engineVersion", fullReportJson.engine.engineVersion ?? "—");
+      kv("intervalsCodec", fullReportJson.engine.intervalsCodec ?? "—");
+      kv("compressedBytesLength", fullReportJson.engine.compressedBytesLength ?? "—");
+      const pastWindowDiag = (fullReportJson.engine as any).pastWindowDiag;
+      if (pastWindowDiag) {
+        lines.push("pastWindowDiag: canonicalMonthsLen=" + pastWindowDiag.canonicalMonthsLen + " firstMonth=" + (pastWindowDiag.firstMonth ?? "—") + " lastMonth=" + (pastWindowDiag.lastMonth ?? "—") + " windowStartUtc=" + (pastWindowDiag.windowStartUtc ?? "—") + " windowEndUtc=" + (pastWindowDiag.windowEndUtc ?? "—") + " sourceOfWindow=" + (pastWindowDiag.sourceOfWindow ?? "—"));
+      }
+      kv("pastBuildIntervalsFetchCount", (fullReportJson.engine as any).pastBuildIntervalsFetchCount ?? "—");
+      const cacheKeyDiag = (fullReportJson.engine as any).cacheKeyDiag;
+      if (cacheKeyDiag) {
+        lines.push("cacheKeyDiag: inputHash=" + (cacheKeyDiag.inputHash ?? "—") + " engineVersion=" + (cacheKeyDiag.engineVersion ?? "—") + " intervalDataFingerprint=" + (cacheKeyDiag.intervalDataFingerprint ?? "—") + " scenarioId=" + (cacheKeyDiag.scenarioId ?? "—"));
+      }
+    }
     kv("simVersion", fullReportJson.engine.simVersion);
     kv("derivationVersion", fullReportJson.engine.derivationVersion);
     kv("configHash", j.configHash);
@@ -594,16 +539,7 @@ function buildFullReport(args: {
       lines.push("usageShapeProfile: (no diag)");
     }
     kv("profileAutoBuilt", fullReportJson.engine.profileAutoBuilt);
-    const pastWindowDiag = (fullReportJson.engine as any).pastWindowDiag;
-    if (pastWindowDiag) {
-      lines.push("pastWindowDiag: canonicalMonthsLen=" + pastWindowDiag.canonicalMonthsLen + " firstMonth=" + (pastWindowDiag.firstMonth ?? "—") + " lastMonth=" + (pastWindowDiag.lastMonth ?? "—") + " windowStartUtc=" + (pastWindowDiag.windowStartUtc ?? "—") + " windowEndUtc=" + (pastWindowDiag.windowEndUtc ?? "—") + " sourceOfWindow=" + (pastWindowDiag.sourceOfWindow ?? "—"));
-    }
-    kv("pastBuildIntervalsFetchCount", (fullReportJson.engine as any).pastBuildIntervalsFetchCount ?? "—");
-    const cacheKeyDiag = (fullReportJson.engine as any).cacheKeyDiag;
-    if (cacheKeyDiag) {
-      lines.push("cacheKeyDiag: inputHash=" + (cacheKeyDiag.inputHash ?? "—") + " engineVersion=" + (cacheKeyDiag.engineVersion ?? "—") + " intervalDataFingerprint=" + (cacheKeyDiag.intervalDataFingerprint ?? "—") + " scenarioId=" + (cacheKeyDiag.scenarioId ?? "—"));
-    }
-    lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
+    lines.push("canonicalMonths: " + (j.buildInputs?.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
     kv("weatherUsed", false);
@@ -740,18 +676,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await getActualUsageDatasetForHouse(house.id, esiid, { skipFullYearIntervalFetch: true });
-  const summary = result?.dataset?.summary;
-  if (!summary?.start || !summary?.end) {
-    return NextResponse.json(
-      { ok: false, error: "no_actual_data", message: "No actual interval data for baseline window." },
-      { status: 400 }
-    );
-  }
-
-  const startDate = summary.start.slice(0, 10);
-  const endDate = summary.end.slice(0, 10);
-
   if (rangesToMask.length === 0) {
     const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
     return NextResponse.json({
@@ -771,7 +695,7 @@ export async function POST(req: NextRequest) {
       applianceProfile,
       modelAssumptions: null,
       maskedIntervals: 0,
-      message: "Add travel/vacant ranges and click Run Compare to see metrics.",
+      message: "Add Test date ranges (and ensure they do not overlap saved Travel dates) and click Run Compare to see metrics.",
       metrics: null,
       primaryPercentMetric: null,
       byMonth: [],
@@ -785,42 +709,37 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const AUTO_BUILD_TIMEOUT_MS = 55_000; // avoid burning most of maxDuration on full-window fetch
-  let profileAutoBuilt = false;
-  // UsageShapeProfile lives in the usage DB (USAGE_DATABASE_URL). If missing, we get null and continue (non-fatal).
-  const existingProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
-  if (!existingProfile) {
-    try {
-      const fullWindowIntervals = await Promise.race([
-        getActualIntervalsForRange({
-          houseId: house.id,
-          esiid,
-          startDate,
-          endDate,
-        }),
-        new Promise<undefined>((_, reject) =>
-          setTimeout(() => reject(new Error("auto_build_timeout")), AUTO_BUILD_TIMEOUT_MS)
-        ),
-      ]);
-      if (fullWindowIntervals?.length) {
-        const windowStartUtc = `${startDate}T00:00:00.000Z`;
-        const windowEndUtc = `${endDate}T23:59:59.999Z`;
-        const intervalsForDerive = fullWindowIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
-        const profile = deriveUsageShapeProfile(intervalsForDerive, timezone, windowStartUtc, windowEndUtc);
-        await upsertUsageShapeProfile(house.id, "v1", profile);
-        profileAutoBuilt = true;
-      }
-    } catch {
-      // non-fatal: continue without profile; diag will show profile_not_found (or run rebuild tool first)
-    }
+  // Test dates = ranges entered in lab UI (only these are scored). Must not overlap saved travel dates.
+  const testRanges = rangesToMask;
+  const testDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(testRanges, timezone);
+  if (testDateKeysLocal.size === 0) {
+    return NextResponse.json(
+      { ok: false, error: "test_ranges_required", message: "At least one valid Test date range is required." },
+      { status: 400 }
+    );
   }
 
-  // Fetch actual intervals only for the masked range to avoid loading 12 months (timeout).
-  const maskedRangeStart = rangesToMask.reduce((min, r) => (r.startDate < min ? r.startDate : min), rangesToMask[0].startDate);
-  const maskedRangeEnd = rangesToMask.reduce((max, r) => (r.endDate > max ? r.endDate : max), rangesToMask[0].endDate);
-  const fetchStart = maskedRangeStart < startDate ? startDate : maskedRangeStart;
-  const fetchEnd = maskedRangeEnd > endDate ? endDate : maskedRangeEnd;
+  const dbTravelRanges = await getTravelRangesFromDb(user.id, house.id);
+  const dbTravelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(dbTravelRanges, timezone);
+  const overlap = setIntersect(testDateKeysLocal, dbTravelDateKeysLocal);
+  if (overlap.size > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "test_overlaps_travel",
+        message: "Test dates overlap saved Travel dates. Remove overlap and retry.",
+        overlapCount: overlap.size,
+        overlapSample: sortedSample(overlap),
+        testDateKeysCount: testDateKeysLocal.size,
+        dbTravelDateKeysCount: dbTravelDateKeysLocal.size,
+      },
+      { status: 400 }
+    );
+  }
 
+  const testDateKeysSorted = Array.from(testDateKeysLocal).sort();
+  const fetchStart = testDateKeysSorted[0] ?? "";
+  const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
   const actualIntervals = await getActualIntervalsForRange({
     houseId: house.id,
     esiid,
@@ -830,262 +749,62 @@ export async function POST(req: NextRequest) {
 
   if (!actualIntervals?.length) {
     return NextResponse.json(
-      { ok: false, error: "no_actual_data", message: "No actual interval data." },
+      { ok: false, error: "no_actual_data", message: "No actual interval data for the test date window." },
       { status: 400 }
     );
   }
 
-  const canonicalMonths = yearMonthsFromRange(startDate, endDate);
-  if (!canonicalMonths.length) {
-    return NextResponse.json({ ok: false, error: "invalid_range" }, { status: 400 });
-  }
-
-  const evalRanges = rangesToMask;
-  const evalDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(evalRanges, timezone);
-  if (evalDateKeysLocal.size === 0) {
+  const actualTestIntervals = actualIntervals.filter((p) =>
+    testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+  );
+  if (actualTestIntervals.length === 0) {
     return NextResponse.json(
-      { ok: false, error: "eval_ranges_required", message: "Add at least one valid travel/vacant range (start and end date, YYYY-MM-DD) to run the comparison." },
+      { ok: false, error: "no_actual_data", message: "No actual interval data found for Test dates in this window." },
       { status: 400 }
     );
   }
 
-  const dbTravelRanges = await getTravelRangesFromDb(user.id, house.id);
-  const dbLocal = normalizeRangesToLocalDateKeysInclusive(dbTravelRanges, timezone);
-  const buildExcludedDateKeysLocal = new Set<string>(Array.from(dbLocal).concat(Array.from(evalDateKeysLocal)));
-  const onlyDb = setDiff(dbLocal, evalDateKeysLocal);
-  const onlyEval = setDiff(evalDateKeysLocal, dbLocal);
-  const overlap = setIntersect(dbLocal, evalDateKeysLocal);
+  const usageShapeProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
+  const simIntervals = simulateIntervalsForTestDaysFromUsageShapeProfile({
+    timezone,
+    testIntervals: actualTestIntervals,
+    usageShapeProfileRowOrNull: usageShapeProfile,
+  });
+  const simulatedByTs = new Map<string, number>();
+  for (const p of simIntervals) {
+    const ts = String(p?.timestamp ?? "").trim();
+    if (ts) simulatedByTs.set(canonicalIntervalKey(ts), Number(p?.kwh) || 0);
+  }
+
+  const metrics = computeGapFillMetrics({
+    actual: actualTestIntervals,
+    simulated: simIntervals,
+    simulatedByTs,
+  });
+
+  const onlyDb = setDiff(dbTravelDateKeysLocal, testDateKeysLocal);
+  const onlyTest = setDiff(testDateKeysLocal, dbTravelDateKeysLocal);
+  const expectedTestIntervals = testDateKeysLocal.size * 96;
+  const coveragePctNum = expectedTestIntervals > 0 ? actualTestIntervals.length / expectedTestIntervals : null;
   const dateKeyDiag = {
-    dbTravelDateKeysCount: dbLocal.size,
-    dbTravelDateKeysSample: sortedSample(dbLocal),
-    evalDateKeysCount: evalDateKeysLocal.size,
-    evalDateKeysSample: sortedSample(evalDateKeysLocal),
-    buildExcludedDateKeysCount: buildExcludedDateKeysLocal.size,
-    buildExcludedDateKeysSample: sortedSample(buildExcludedDateKeysLocal),
+    dbTravelDateKeysCount: dbTravelDateKeysLocal.size,
+    dbTravelDateKeysSample: sortedSample(dbTravelDateKeysLocal),
+    evalDateKeysCount: testDateKeysLocal.size,
+    evalDateKeysSample: sortedSample(testDateKeysLocal),
+    buildExcludedDateKeysCount: 0,
+    buildExcludedDateKeysSample: [] as string[],
     setArithmetic: {
       onlyDbCount: onlyDb.size,
       onlyDbSample: sortedSample(onlyDb),
-      onlyEvalCount: onlyEval.size,
-      onlyEvalSample: sortedSample(onlyEval),
+      onlyEvalCount: onlyTest.size,
+      onlyEvalSample: sortedSample(onlyTest),
       overlapCount: overlap.size,
       overlapSample: sortedSample(overlap),
     },
   };
 
-  const buildExcludedUtcSet = buildExcludedUtcDateKeySetFromLocalKeys(
-    buildExcludedDateKeysLocal,
-    startDate,
-    endDate,
-    timezone
-  );
-  const buildExcludedRanges = Array.from(buildExcludedUtcSet)
-    .sort()
-    .map((d) => ({ startDate: d, endDate: d }));
-
-  const maskedActual = actualIntervals.filter((p) => evalDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
-  if (maskedActual.length === 0) {
-    return NextResponse.json({
-      ok: true,
-      email: user.email,
-      userId: user.id,
-      house: { id: house.id, label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id },
-      houses: houses.map((h: any) => ({
-        id: h.id,
-        label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
-      })),
-      timezone,
-      homeProfile,
-      applianceProfile,
-      modelAssumptions: null,
-      maskedIntervals: 0,
-      message: "No intervals fall inside the masked ranges; add ranges and try again.",
-      metrics: null,
-      primaryPercentMetric: null,
-      byMonth: [],
-      byHour: [],
-      byDayType: [],
-      worstDays: [],
-      diagnostics: null,
-      pasteSummary: "",
-      parity: null,
-      fullReportText: "",
-      fullReportJson: null,
-    });
-  }
-
-  if (!homeProfileRec || !applianceProfileRec?.appliancesJson) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "profile_required",
-        message: "Production builder requires home and appliance profile for this house.",
-      },
-      { status: 400 }
-    );
-  }
-
-  const normalizedAppliance = normalizeStoredApplianceProfile(applianceProfileRec.appliancesJson as any);
-  const endMonth = endDate.slice(0, 7);
-  const canonicalMonths12 = monthsEndingAt(endMonth, 12);
-
-  const buildResult = await buildSimulatorInputs({
-    mode: "SMT_BASELINE",
-    manualUsagePayload: null,
-    homeProfile: homeProfileRec as any,
-    applianceProfile: normalizedAppliance,
-    houseIdForActual: house.id,
-    esiidForSmt: esiid,
-    travelRanges: buildExcludedRanges,
-    canonicalMonths: canonicalMonths12,
-  });
-
-  const buildInputs: SimulatorBuildInputsV1 = {
-    version: 1,
-    mode: "SMT_BASELINE",
-    baseKind: buildResult.baseKind,
-    canonicalMonths: buildResult.canonicalMonths,
-    canonicalEndMonth: buildResult.canonicalMonths[buildResult.canonicalMonths.length - 1] ?? "",
-    monthlyTotalsKwhByMonth: buildResult.monthlyTotalsKwhByMonth,
-    intradayShape96: buildResult.intradayShape96,
-    weekdayWeekendShape96: buildResult.weekdayWeekendShape96,
-    travelRanges: buildExcludedRanges,
-    notes: buildResult.notes ?? [],
-    filledMonths: buildResult.filledMonths ?? [],
-  };
-
-  // Build exclusions (dataset + cache): DB ∪ Eval. Scoring mask (metrics): Eval only.
-  // Try user's Past scenario cache first so we get a hit when they've already loaded Past with same inputs; else use lab cache.
-  const userPastScenario = await (prisma as any).usageSimulatorScenario
-    .findFirst({
-      where: { userId: user.id, houseId: house.id, name: "Past (Corrected)", archivedAt: null },
-      select: { id: true },
-    })
-    .catch(() => null);
-  const userPastScenarioId = userPastScenario?.id ?? null;
-
-  const intervalDataFingerprint = await getIntervalDataFingerprint({
-    houseId: house.id,
-    esiid: house.esiid ?? null,
-    startDate,
-    endDate,
-  });
-  const inputHash = computePastInputHash({
-    engineVersion: PAST_ENGINE_VERSION,
-    windowStartUtc: startDate,
-    windowEndUtc: endDate,
-    timezone,
-    travelRanges: buildExcludedRanges,
-    buildInputs: buildInputs as Record<string, unknown>,
-    intervalDataFingerprint,
-  });
-  const userCacheTried = Boolean(userPastScenarioId);
-  let userCacheHit = false;
-  let labCacheHit = false;
-  let cached: Awaited<ReturnType<typeof getCachedPastDataset>> = null;
-  if (userPastScenarioId) {
-    cached = await getCachedPastDataset({ houseId: house.id, scenarioId: userPastScenarioId, inputHash });
-    if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) userCacheHit = true;
-  }
-  if (!cached) {
-    cached = await getCachedPastDataset({
-      houseId: house.id,
-      scenarioId: "gapfill_lab",
-      inputHash,
-    });
-    if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) labCacheHit = true;
-  }
-  const cacheSource: "user" | "lab" | "rebuilt" = userCacheHit ? "user" : labCacheHit ? "lab" : "rebuilt";
-  const cacheHit = userCacheHit || labCacheHit;
-  let compressedBytesLength = 0;
-  let dataset: NonNullable<Awaited<ReturnType<typeof getPastSimulatedDatasetForHouse>>["dataset"]>;
-  if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
-    compressedBytesLength = cached.intervalsCompressed.length;
-    const decoded = decodeIntervalsV1(cached.intervalsCompressed);
-    dataset = {
-      ...cached.datasetJson,
-      series: {
-        ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series !== null
-          ? (cached.datasetJson as any).series
-          : {}),
-        intervals15: decoded,
-      },
-    } as any;
-  } else {
-    const pastResult = await getPastSimulatedDatasetForHouse({
-      userId: user.id,
-      houseId: house.id,
-      esiid,
-      travelRanges: buildExcludedRanges,
-      buildInputs,
-      startDate,
-      endDate,
-      timezone,
-    });
-    if (!pastResult.dataset) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "past_dataset_failed",
-          message: pastResult.error ?? "Could not build Past stitched dataset (same as production UI). Check house has actual data and weather stubbed.",
-          inputHash,
-          engineVersion: PAST_ENGINE_VERSION,
-        },
-        { status: 500 }
-      );
-    }
-    dataset = pastResult.dataset;
-    const intervals15 = dataset.series?.intervals15 ?? [];
-    const { bytes } = encodeIntervalsV1(intervals15);
-    compressedBytesLength = bytes.length;
-    const datasetJsonForStorage = {
-      ...dataset,
-      series: { ...(dataset.series ?? {}), intervals15: [] },
-    };
-    await saveCachedPastDataset({
-      houseId: house.id,
-      scenarioId: "gapfill_lab",
-      inputHash,
-      engineVersion: PAST_ENGINE_VERSION,
-      windowStartUtc: startDate,
-      windowEndUtc: endDate,
-      datasetJson: datasetJsonForStorage as Record<string, unknown>,
-      intervalsCodec: INTERVAL_CODEC_V1,
-      intervalsCompressed: bytes,
-    });
-  }
-
-  const intervals15m = dataset.series?.intervals15 ?? [];
-  const simulatedByTs = new Map<string, number>();
-  for (const i of intervals15m) {
-    const ts = String(i?.timestamp ?? "").trim();
-    if (ts) simulatedByTs.set(canonicalIntervalKey(ts), Number(i?.kwh) || 0);
-  }
-
-  const metrics = computeGapFillMetrics({
-    actual: maskedActual,
-    simulated: intervals15m,
-    simulatedByTs,
-  });
-
-  const baseloadDailyVal = dataset.insights?.baseloadDaily != null ? Number(dataset.insights.baseloadDaily) : null;
-  const baseloadRawVal = dataset.insights?.baseload != null ? Number(dataset.insights.baseload) : null;
-  const useDailyForParityBaseload =
-    baseloadDailyVal != null && Number.isFinite(baseloadDailyVal) && baseloadDailyVal >= 0;
-  const parityBaseloadKwhPer15m = useDailyForParityBaseload && baseloadDailyVal != null
-    ? Math.round((baseloadDailyVal / 96) * 100) / 100
-    : baseloadRawVal != null && Number.isFinite(baseloadRawVal)
-      ? Math.round((baseloadRawVal / 4) * 100) / 100
-      : null;
-
-  const shapeSource = buildResult.source?.actualIntradayShape96 ? "actual_excluding_masked" : "generic_weekday";
   const modelAssumptions = {
-    baseload: {
-      used: false,
-      method: "monthly_totals_from_actual",
-      params: { excludeDateKeys: buildExcludedUtcSet.size },
-      valueKwhPer15m: null,
-      valueKwhPerDay: null,
-    },
+    baseload: { used: false, method: "test_days_profile", params: {}, valueKwhPer15m: null, valueKwhPerDay: null },
     pool: {
       used: false,
       pumpType: homeProfile?.pool?.pumpType ?? null,
@@ -1093,7 +812,7 @@ export async function POST(req: NextRequest) {
       assumedKw: null,
       runHoursPerDaySummer: homeProfile?.pool?.summerRunHoursPerDay ?? null,
       runHoursPerDayWinter: homeProfile?.pool?.winterRunHoursPerDay ?? null,
-      scheduleRule: "Gap-fill lab does not model pool; monthly totals exclude masked days only.",
+      scheduleRule: "Gap-fill lab (test-days only) does not model pool.",
     },
     hvac: {
       used: false,
@@ -1102,28 +821,28 @@ export async function POST(req: NextRequest) {
       setpointSummerF: homeProfile?.thermostatSummerF ?? homeProfile?.summerTemp ?? null,
       setpointWinterF: homeProfile?.thermostatWinterF ?? homeProfile?.winterTemp ?? null,
       weatherUsed: false,
-      rule: "Gap-fill lab uses single intraday shape; no HVAC model.",
+      rule: "Gap-fill lab uses UsageShapeProfile shape only; no HVAC model.",
     },
     occupancy: {
       used: false,
       occupantsWork: homeProfile?.occupants?.work ?? null,
       occupantsSchool: homeProfile?.occupants?.school ?? null,
       occupantsHomeAllDay: homeProfile?.occupants?.homeAllDay ?? null,
-      rule: "Gap-fill lab uses monthly totals × shape; no occupancy model.",
+      rule: "Gap-fill lab uses profile weekday/weekend avg; no occupancy model.",
     },
     intradayShape: {
-      source: shapeSource,
-      weekdayWeekendSplit: Boolean((dataset as any)?.meta?.weekdayWeekendSplitUsed),
+      source: usageShapeProfile ? "usage_shape_profile" : "uniform_fallback",
+      weekdayWeekendSplit: Boolean(usageShapeProfile),
       smoothing: "none",
     },
-    dayTotalSource: (dataset as any)?.meta?.dayTotalSource ?? "fallback_month_avg",
+    dayTotalSource: usageShapeProfile ? "profile_weekday_weekend_by_month" : "global_avg_or_zero",
     meta: {
-      simVersion: "production_builder",
+      simVersion: "gapfill_test_days_profile",
       shapeDerivationVersion: "v1",
       seed: null,
-      maskMode: "travel_ranges",
-      holdoutN: maskedActual.length,
-      configHash: `months=${buildInputs.canonicalMonths.length},shape=${shapeSource}`,
+      maskMode: "test_dates_only",
+      holdoutN: actualTestIntervals.length,
+      configHash: `engine=gapfill_test_days_profile,profile=${usageShapeProfile ? "yes" : "no"}`,
     },
   };
 
@@ -1142,7 +861,7 @@ export async function POST(req: NextRequest) {
   if (hasPool) {
     let poolSumActual = 0, poolSumSim = 0, poolSumAbs = 0, poolN = 0;
     let nonSumActual = 0, nonSumSim = 0, nonSumAbs = 0, nonN = 0;
-    for (const p of maskedActual) {
+    for (const p of actualTestIntervals) {
       const ts = String(p?.timestamp ?? "").trim();
       const actualKwh = Number(p?.kwh) || 0;
       const simKwh = simulatedByTs.get(ts) ?? 0;
@@ -1174,9 +893,15 @@ export async function POST(req: NextRequest) {
     };
   }
 
-  const listMaskedDateKeys = Array.from(evalDateKeysLocal).sort();
-  const buildExcludedDateKeysSample = Array.from(buildExcludedUtcSet).sort().slice(0, 10);
+  const listMaskedDateKeys = testDateKeysSorted;
+  const buildExcludedDateKeysSample: string[] = [];
   const evalMaskedDateKeysSample = listMaskedDateKeys.slice(0, 10);
+  const testDatasetStub = {
+    summary: { start: fetchStart, end: fetchEnd, intervalsCount: actualTestIntervals.length },
+    totals: { netKwh: metrics.totalActualKwhMasked },
+    insights: {} as any,
+    monthly: [] as Array<{ month?: string; kwh?: number }>,
+  };
   const { fullReportJson, fullReportText } = buildFullReport({
     reportVersion: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
@@ -1186,27 +911,22 @@ export async function POST(req: NextRequest) {
     email: user.email ?? "",
     houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     timezone,
-    evalRanges,
-    buildExcludedRanges,
+    evalRanges: testRanges,
+    buildExcludedRanges: [],
     travelRangesNormalized: listMaskedDateKeys.map((d) => ({ startDate: d, endDate: d })),
     listMaskedDateKeys,
-    maskedIntervalsCount: maskedActual.length,
+    maskedIntervalsCount: actualTestIntervals.length,
     maskedDaysCount: listMaskedDateKeys.length,
-    buildExcludedDateKeysCount: buildExcludedUtcSet.size,
+    buildExcludedDateKeysCount: 0,
     buildExcludedDateKeysSample,
-    evalMaskedDateKeysCount: evalDateKeysLocal.size,
+    evalMaskedDateKeysCount: testDateKeysLocal.size,
     evalMaskedDateKeysSample,
     dateKeyDiag,
-    dataset: {
-      summary: dataset.summary,
-      totals: dataset.totals,
-      insights: dataset.insights,
-      monthly: dataset.monthly,
-    },
-    buildInputs: { canonicalMonths: buildInputs.canonicalMonths },
+    dataset: testDatasetStub,
+    buildInputs: { canonicalMonths: [] },
     configHash: modelAssumptions.meta.configHash,
-    excludedDateKeysCount: buildExcludedUtcSet.size,
-    excludedDateKeysSample: buildExcludedDateKeysSample,
+    excludedDateKeysCount: 0,
+    excludedDateKeysSample: [],
     homeProfile,
     applianceProfile,
     modelAssumptions,
@@ -1232,53 +952,28 @@ export async function POST(req: NextRequest) {
       hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
     },
     poolHoursLens,
-    usageShapeProfileDiag: (dataset as any)?.meta?.usageShapeProfileDiag ?? null,
-    profileAutoBuilt,
-    cacheHit,
-    userCacheTried,
-    userCacheHit,
-    userScenarioIdUsed: userPastScenarioId ?? null,
-    labCacheHit,
-    cacheSource,
-    inputHash,
-    intervalDataFingerprint,
-    engineVersion: PAST_ENGINE_VERSION,
-    intervalsCodec: INTERVAL_CODEC_V1,
-    compressedBytesLength,
-    pastWindowDiag: {
-      canonicalMonthsLen: buildInputs.canonicalMonths.length,
-      firstMonth: buildInputs.canonicalMonths[0] ?? null,
-      lastMonth: buildInputs.canonicalMonths.length > 0 ? buildInputs.canonicalMonths[buildInputs.canonicalMonths.length - 1] ?? null : null,
-      windowStartUtc: startDate,
-      windowEndUtc: endDate,
-      sourceOfWindow: "actualSummaryFallback",
-    },
-    pastBuildIntervalsFetchCount: cacheHit ? 0 : 1,
-    cacheKeyDiag: {
-      inputHash: inputHash ?? null,
-      engineVersion: PAST_ENGINE_VERSION,
-      intervalDataFingerprint: intervalDataFingerprint ?? null,
-      scenarioId: userCacheHit ? (userPastScenarioId ?? null) : labCacheHit ? "gapfill_lab" : null,
-    },
+    usageShapeProfileDiag: usageShapeProfile ? { found: true, id: (usageShapeProfile as any).id, version: (usageShapeProfile as any).version, derivedAt: (usageShapeProfile as any).derivedAt, windowStartUtc: null, windowEndUtc: null, profileMonthKeys: Object.keys((usageShapeProfile as any).shapeByMonth96 ?? {}).sort(), weekdayAvgLen: Array.isArray((usageShapeProfile as any).avgKwhPerDayWeekdayByMonth) ? (usageShapeProfile as any).avgKwhPerDayWeekdayByMonth.length : null, weekendAvgLen: Array.isArray((usageShapeProfile as any).avgKwhPerDayWeekendByMonth) ? (usageShapeProfile as any).avgKwhPerDayWeekendByMonth.length : null, canonicalMonths: [], canonicalMonthsLen: 0, reasonNotUsed: null } : null,
+    enginePath: "gapfill_test_days_profile",
+    expectedTestIntervals,
+    coveragePct: coveragePctNum,
   });
 
   const pasteLines = [
     "=== Simulation Audit Report (Gap-Fill Lab) ===",
     `House: ${house.addressLine1 ?? ""} ${house.addressCity ?? ""} ${house.addressState ?? ""}`.trim() || house.id,
-    `Masked intervals: ${maskedActual.length} | Timezone: ${timezone}`,
+    `Engine: gapfill_test_days_profile | Test intervals: ${actualTestIntervals.length} | Timezone: ${timezone}`,
     "",
     "--- Primary metrics ---",
     `WAPE: ${metrics.wape}% | MAE: ${metrics.mae} kWh | RMSE: ${metrics.rmse} | MAPE: ${metrics.mape}% | MaxAbs: ${metrics.maxAbs} kWh`,
     "",
-    "--- Parity (production Past simulated usage) ---",
-    `intervalCount: ${dataset.summary.intervalsCount} | annualKwh: ${dataset.totals.netKwh} | baseloadKwhPer15m: ${parityBaseloadKwhPer15m ?? "—"} | baseloadDailyKwh: ${dataset.insights.baseloadDaily ?? "—"} | window: ${dataset.summary.start ?? "—"} → ${dataset.summary.end ?? "—"}`,
+    "--- Test window ---",
+    `intervalCount: ${actualTestIntervals.length} | totalActualKwh: ${metrics.totalActualKwhMasked} | totalSimKwh: ${metrics.totalSimKwhMasked} | window: ${fetchStart} → ${fetchEnd}`,
     "",
     "--- Assumptions ---",
-    `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend split: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
-    `Baseload/Pool/HVAC/Occupancy models: not used (monthly totals × shape only)`,
+    `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
     "",
     "--- Diagnostics ---",
-    `Seasonal: Summer WAPE ${metrics.diagnostics.seasonalSplit.summer.wape}% MAE ${metrics.diagnostics.seasonalSplit.summer.mae} | Winter WAPE ${metrics.diagnostics.seasonalSplit.winter.wape}% MAE ${metrics.diagnostics.seasonalSplit.winter.mae} | Shoulder WAPE ${metrics.diagnostics.seasonalSplit.shoulder.wape}% MAE ${metrics.diagnostics.seasonalSplit.shoulder.mae}`,
+    `Seasonal: Summer WAPE ${metrics.diagnostics.seasonalSplit.summer.wape}% | Winter WAPE ${metrics.diagnostics.seasonalSplit.winter.wape}% | Shoulder WAPE ${metrics.diagnostics.seasonalSplit.shoulder.wape}%`,
     `Worst days: ${metrics.worstDays.slice(0, 5).map((d) => `${d.date}: ${d.absErrorKwh} kWh`).join(" | ")}`,
   ];
   const pasteSummary = pasteLines.join("\n");
@@ -1299,7 +994,7 @@ export async function POST(req: NextRequest) {
     homeProfile,
     applianceProfile,
     modelAssumptions,
-    maskedIntervals: maskedActual.length,
+    maskedIntervals: actualTestIntervals.length,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
@@ -1321,14 +1016,13 @@ export async function POST(req: NextRequest) {
       poolHoursErrorSplit,
     },
     parity: {
-      intervalCount: dataset.summary.intervalsCount,
-      annualKwh: dataset.totals.netKwh,
-      baseloadKwhPer15m: parityBaseloadKwhPer15m,
-      baseloadDailyKwh: dataset.insights.baseloadDaily ?? null,
-      windowStartUtc: dataset.summary.start ?? null,
-      windowEndUtc: dataset.summary.end ?? null,
+      intervalCount: actualTestIntervals.length,
+      annualKwh: metrics.totalActualKwhMasked,
+      baseloadKwhPer15m: null,
+      baseloadDailyKwh: null,
+      windowStartUtc: fetchStart,
+      windowEndUtc: fetchEnd,
     },
-    profileAutoBuilt,
     pasteSummary,
     fullReportText,
     fullReportJson,

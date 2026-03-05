@@ -319,3 +319,88 @@ export function dateKeyInTimezone(tsIso: string, tz: string): string {
     return tsIso.slice(0, 10);
   }
 }
+
+/** Get local 15-min slot index (0–95) for a timestamp in the given timezone. */
+export function localSlot96InTimezone(tsIso: string, tz: string): number {
+  try {
+    const d = new Date(tsIso);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      hour: "numeric",
+      minute: "numeric",
+      hour12: false,
+    }).formatToParts(d);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+    return Math.min(95, Math.max(0, hour * 4 + Math.floor(minute / 15)));
+  } catch {
+    return 0;
+  }
+}
+
+/** Get local day of week (0 = Sunday, 6 = Saturday) for a timestamp in the given timezone. */
+export function localDayOfWeekInTimezone(tsIso: string, tz: string): number {
+  try {
+    const d = new Date(tsIso);
+    const short = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[short] ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Usage shape profile row as returned from getLatestUsageShapeProfile (subset used for test-day sim). */
+export type UsageShapeProfileRowForSim = {
+  shapeByMonth96?: Record<string, number[]> | null;
+  avgKwhPerDayWeekdayByMonth?: number[] | null;
+  avgKwhPerDayWeekendByMonth?: number[] | null;
+} | null;
+
+/**
+ * Simulate interval kWh for test-day timestamps using UsageShapeProfile (weekday/weekend avg + shape96).
+ * Returns one entry per input interval with same timestamp; kwh is simulated.
+ */
+export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
+  timezone: string;
+  testIntervals: IntervalPoint[];
+  usageShapeProfileRowOrNull: UsageShapeProfileRowForSim;
+}): IntervalPoint[] {
+  const { timezone, testIntervals, usageShapeProfileRowOrNull } = args;
+  const profile = usageShapeProfileRowOrNull;
+  const shapeByMonth = (profile?.shapeByMonth96 && typeof profile.shapeByMonth96 === "object") ? profile.shapeByMonth96 : {};
+  const wdArr = Array.isArray(profile?.avgKwhPerDayWeekdayByMonth) ? profile.avgKwhPerDayWeekdayByMonth : [];
+  const weArr = Array.isArray(profile?.avgKwhPerDayWeekendByMonth) ? profile.avgKwhPerDayWeekendByMonth : [];
+  const profileMonthKeys = Object.keys(shapeByMonth).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+  const globalAvgWd = wdArr.length ? wdArr.reduce((a, b) => a + b, 0) / wdArr.length : 0;
+  const globalAvgWe = weArr.length ? weArr.reduce((a, b) => a + b, 0) / weArr.length : 0;
+
+  return testIntervals.map((p) => {
+    const ts = String(p?.timestamp ?? "").trim();
+    const dateKey = dateKeyInTimezone(ts, timezone);
+    const monthKey = dateKey.slice(0, 7);
+    const slot96 = localSlot96InTimezone(ts, timezone);
+    const dow = localDayOfWeekInTimezone(ts, timezone);
+    const isWeekend = dow === 0 || dow === 6;
+
+    let targetDayKwh: number;
+    const monthIdx = profileMonthKeys.indexOf(monthKey);
+    if (isWeekend) {
+      targetDayKwh = monthIdx >= 0 && weArr[monthIdx] != null && Number.isFinite(weArr[monthIdx]) ? weArr[monthIdx] : globalAvgWe;
+    } else {
+      targetDayKwh = monthIdx >= 0 && wdArr[monthIdx] != null && Number.isFinite(wdArr[monthIdx]) ? wdArr[monthIdx] : globalAvgWd;
+    }
+
+    let shape96: number[];
+    const monthShape = shapeByMonth[monthKey];
+    if (Array.isArray(monthShape) && monthShape.length === 96) {
+      const sum = monthShape.reduce((s, v) => s + v, 0);
+      shape96 = sum > 1e-9 ? monthShape.map((v) => v / sum) : Array(96).fill(1 / 96);
+    } else {
+      shape96 = Array(96).fill(1 / 96);
+    }
+
+    const simKwh = (shape96[slot96] ?? 1 / 96) * (targetDayKwh ?? 0);
+    return { timestamp: ts, kwh: Math.max(0, simKwh) };
+  });
+}
