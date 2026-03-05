@@ -18,14 +18,15 @@ export function applyOverlays(
   for (const p of base.points) {
     const tsIso = p?.tsIso ?? "";
     const key = canonicalIntervalKey(tsIso);
-    deltaByTs.set(key || tsIso, Number(p?.kwh) ?? 0);
+    const mapKey = key || tsIso;
+    if (mapKey) deltaByTs.set(mapKey, Number(p?.kwh) ?? 0);
   }
   for (const ov of overlays) {
     for (const d of ov.deltas ?? []) {
       const tsIso = d?.tsIso ?? "";
       const key = canonicalIntervalKey(tsIso);
       const mapKey = key || tsIso;
-      deltaByTs.set(mapKey, (deltaByTs.get(mapKey) ?? 0) + (Number(d?.deltaKwh) ?? 0));
+      if (mapKey) deltaByTs.set(mapKey, (deltaByTs.get(mapKey) ?? 0) + (Number(d?.deltaKwh) ?? 0));
     }
   }
   const points: IntervalPoint[] = [];
