@@ -211,15 +211,16 @@ export default function AdminUsageProduction() {
         `/api/admin/tools/prime-past-cache/lookup?email=${encodeURIComponent(email)}`,
         { headers: { "x-admin-token": token }, cache: "no-store" }
       );
-      let j: { ok?: boolean; houseId?: string; scenarioId?: string; houseLabel?: string; message?: string } | null = null;
+      type LookupResp = { ok?: boolean; houseId?: string; scenarioId?: string; houseLabel?: string; message?: string } | null;
+      let j: LookupResp = null;
       try {
         const text = await res.text();
-        j = text ? (JSON.parse(text) as typeof j) : null;
+        j = (text ? JSON.parse(text) : null) as LookupResp;
       } catch {
         j = null;
       }
       if (!res.ok) {
-        setError(j?.message ?? `Lookup failed: ${res.status}`);
+        setError((j && typeof j === "object" && "message" in j ? j.message : null) ?? `Lookup failed: ${res.status}`);
         return;
       }
       if (!j || typeof j !== "object") {
