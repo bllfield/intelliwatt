@@ -32,6 +32,8 @@ export function computeGapFillMetrics(args: {
   simulated: IntervalPoint[];
   /** Map timestamp (ISO) -> simulated kwh for lookup */
   simulatedByTs: Map<string, number>;
+  /** When set, byHour / byDayType / byMonth / byDate use local time in this tz (aligns with simulateIntervalsForTestDaysFromUsageShapeProfile). Omit for UTC bucketing. */
+  timezone?: string;
 }): {
   mae: number;
   rmse: number;
