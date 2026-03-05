@@ -1,6 +1,6 @@
 /**
- * Gap-Fill Lab: compute comparison metrics between actual and simulated intervals on masked (travel/vacant) days.
- * Used only by the admin Gap-Fill Lab tool.
+ * Gap-Fill Lab: compute comparison metrics between actual and simulated intervals on Test Dates only.
+ * Vacant/Travel (DB) are separate; scoring uses only admin-entered Test Dates.
  */
 
 export type IntervalPoint = { timestamp: string; kwh: number };

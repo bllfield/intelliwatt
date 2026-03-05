@@ -14,7 +14,7 @@ type ApiResponse =
       homeProfile: any;
       applianceProfile: any;
       modelAssumptions: any;
-      maskedIntervals: number;
+      testIntervalsCount: number;
       metrics: any;
       primaryPercentMetric: number | null;
       byMonth: any[];
@@ -28,7 +28,7 @@ type ApiResponse =
       message?: string;
       travelRangesFromDb?: Array<{ startDate: string; endDate: string }>;
     }
-  | { ok: false; error: string; message?: string };
+  | { ok: false; error: string; message?: string; overlapCount?: number; overlapSample?: string[] };
 
 const DEFAULT_RANGE: RangeRow = { startDate: "", endDate: "" };
 
@@ -39,33 +39,32 @@ function formatDate(d: string) {
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
-  const [ranges, setRanges] = useState<RangeRow[]>([{ ...DEFAULT_RANGE }]);
+  const [testRanges, setTestRanges] = useState<RangeRow[]>([{ ...DEFAULT_RANGE }]);
   const [houseId, setHouseId] = useState("");
   const [houses, setHouses] = useState<HouseOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
-  const [rangesAutofilledFromDb, setRangesAutofilledFromDb] = useState(false);
+  const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [primeLoading, setPrimeLoading] = useState(false);
   const [primeMessage, setPrimeMessage] = useState<string | null>(null);
 
-  function addRange() {
-    setRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
+  function addTestRange() {
+    setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
   }
 
-  function removeRange(i: number) {
-    setRanges((prev) => (prev.length <= 1 ? prev : prev.filter((_, j) => j !== i)));
+  function removeTestRange(i: number) {
+    setTestRanges((prev) => (prev.length <= 1 ? prev : prev.filter((_, j) => j !== i)));
   }
 
-  function updateRange(i: number, field: "startDate" | "endDate", value: string) {
-    setRanges((prev) => prev.map((r, j) => (j === i ? { ...r, [field]: value.slice(0, 10) } : r)));
+  function updateTestRange(i: number, field: "startDate" | "endDate", value: string) {
+    setTestRanges((prev) => prev.map((r, j) => (j === i ? { ...r, [field]: value.slice(0, 10) } : r)));
   }
 
   function handleHouseChange(newHouseId: string) {
     if (newHouseId !== houseId) {
       setHouseId(newHouseId);
-      setRanges([{ ...DEFAULT_RANGE }]);
-      setRangesAutofilledFromDb(false);
+      setTestRanges([{ ...DEFAULT_RANGE }]);
     }
   }
 
@@ -86,7 +85,7 @@ export default function GapFillLabClient() {
         body: JSON.stringify({
           email: trimmed,
           timezone,
-          rangesToMask: [],
+          testRanges: [],
           houseId: houseId || undefined,
         }),
       });
@@ -101,11 +100,8 @@ export default function GapFillLabClient() {
         const currentInList = houseId && data.houses.some((h) => h.id === houseId);
         setHouseId(currentInList ? houseId : data.houses[0].id);
       }
-      if (data.ok && Array.isArray((data as any).travelRangesFromDb) && (data as any).travelRangesFromDb.length > 0) {
-        setRanges((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
-        setRangesAutofilledFromDb(true);
-      } else {
-        setRangesAutofilledFromDb(false);
+      if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
+        setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
       }
       setResult(data);
     } catch (e: any) {
@@ -116,7 +112,7 @@ export default function GapFillLabClient() {
     }
   }
 
-  async function primeRequest(payload: { email: string; rangesToMask?: RangeRow[]; timezone?: string }) {
+  async function primeRequest(payload: { email: string; testRanges?: RangeRow[]; rangesToMask?: RangeRow[]; timezone?: string }) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
     try {
@@ -170,19 +166,20 @@ export default function GapFillLabClient() {
   async function handlePrimeForCompare() {
     setPrimeMessage(null);
     const trimmed = email.trim().toLowerCase();
-    const validRanges = ranges.filter((r) => r.startDate && r.endDate);
+    const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
     if (!trimmed) {
       setPrimeMessage("Enter an email and run Lookup first.");
       return;
     }
     if (!validRanges.length) {
-      setPrimeMessage("Add at least one travel/vacant range, then click Prime for Compare.");
+      setPrimeMessage("Add at least one Test Date range, then click Prime for Compare.");
       return;
     }
     setPrimeLoading(true);
     try {
       const res = await primeRequest({
         email: trimmed,
+        testRanges: validRanges,
         rangesToMask: validRanges,
         timezone,
       });
@@ -212,38 +209,44 @@ export default function GapFillLabClient() {
       setError("Enter an email address.");
       return;
     }
-    const validRanges = ranges.filter((r) => r.startDate && r.endDate);
+    const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
     if (!validRanges.length) {
-      setError("Add at least one travel/vacant range (start and end date).");
+      setError("Add at least one Test Date range (start and end date).");
       return;
     }
     setLoading(true);
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 55_000); // ~55s, under server maxDuration 60s for test-days-only path
+      timeoutId = setTimeout(() => controller.abort(), 55_000);
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: trimmed,
           timezone,
-          rangesToMask: validRanges,
+          testRanges: validRanges,
           houseId: houseId || undefined,
         }),
         signal: controller.signal,
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
-        setError((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
+        const errMsg = (data as any)?.error === "test_overlaps_travel"
+          ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
+          : ((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
+        setError(errMsg);
         setResult(null);
         return;
       }
       setResult(data);
       if (data.ok && data.houses?.length) setHouses(data.houses);
+      if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
+        setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
+      }
     } catch (e: any) {
       const msg = e?.name === "AbortError"
-        ? "Request hit the 5 min limit. Prime the Past cache first (open Past in the dashboard or use Admin → Usage → Prime Past cache), then run again for a cache hit. Or use a shorter travel range."
+        ? "Request timed out. Try a shorter Test date range."
         : (e?.message ?? String(e));
       setError(msg);
       setResult(null);
@@ -342,7 +345,7 @@ export default function GapFillLabClient() {
             <button
               type="button"
               onClick={handlePrimeForCompare}
-              disabled={!email.trim() || primeLoading || !ranges.some((r) => r.startDate && r.endDate)}
+              disabled={!email.trim() || primeLoading || !testRanges.some((r) => r.startDate && r.endDate)}
               className="px-3 py-1.5 bg-brand-blue text-white rounded text-sm hover:bg-brand-navy disabled:opacity-50"
             >
               {primeLoading ? "Priming…" : "Prime for Compare"}
@@ -364,35 +367,49 @@ export default function GapFillLabClient() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-brand-navy mb-2">Travel/Vacant ranges (start – end date, YYYY-MM-DD)</label>
-          {rangesAutofilledFromDb && (
-            <p className="text-sm text-brand-navy/70 mb-1">Filled from the customer’s saved travel dates; add or edit below.</p>
-          )}
+          <label className="block text-sm font-medium text-brand-navy mb-2">Vacant / Travel Dates (User Data)</label>
           <p className="text-sm text-brand-navy/60 mb-2">
-            Run Compare scores accuracy ONLY on the ranges entered below. The simulator build uses DB ∪ entered ranges so the full-year dataset matches production.
+            Read-only list from the customer’s saved travel/vacant dates. Vacant/Travel dates are excluded from the model and are never scored.
+          </p>
+          {travelRangesFromDb.length > 0 ? (
+            <div className="p-3 rounded border border-brand-blue/20 bg-brand-navy/5 space-y-1">
+              {travelRangesFromDb.map((r, i) => (
+                <div key={i} className="text-sm text-brand-navy">
+                  {formatDate(r.startDate)} – {formatDate(r.endDate)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-brand-navy/60 italic">Run Lookup to load. None saved if empty.</p>
+          )}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-brand-navy mb-2">Test Dates (Accuracy Test)</label>
+          <p className="text-sm text-brand-navy/60 mb-2">
+            Only Test Dates are scored against actual intervals. Do not overlap Vacant/Travel dates above.
           </p>
           <div className="space-y-2">
-            {ranges.map((r, i) => (
+            {testRanges.map((r, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <input
                   type="date"
                   value={r.startDate}
-                  onChange={(e) => updateRange(i, "startDate", e.target.value)}
+                  onChange={(e) => updateTestRange(i, "startDate", e.target.value)}
                   className="border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
                 />
                 <span className="text-brand-navy/60">–</span>
                 <input
                   type="date"
                   value={r.endDate}
-                  onChange={(e) => updateRange(i, "endDate", e.target.value)}
+                  onChange={(e) => updateTestRange(i, "endDate", e.target.value)}
                   className="border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
                 />
-                <button type="button" onClick={() => removeRange(i)} className="text-rose-600 hover:underline text-sm">
+                <button type="button" onClick={() => removeTestRange(i)} className="text-rose-600 hover:underline text-sm">
                   Remove
                 </button>
               </div>
             ))}
-            <button type="button" onClick={addRange} className="text-brand-blue hover:underline text-sm">
+            <button type="button" onClick={addTestRange} className="text-brand-blue hover:underline text-sm">
               + Add range
             </button>
           </div>
@@ -406,7 +423,7 @@ export default function GapFillLabClient() {
           >
             {loading ? "Running…" : "Run Compare"}
           </button>
-          <span className="text-sm text-brand-navy/60">May take 1–5 min (server limit 5 min). Tip: prime Past cache first (Admin → Usage) so the lab can reuse it and finish in seconds.</span>
+          <span className="text-sm text-brand-navy/60">Typically returns in seconds (test-days-only).</span>
         </div>
       </div>
 
@@ -421,7 +438,7 @@ export default function GapFillLabClient() {
           <div className="p-4 rounded bg-brand-blue/5 border border-brand-blue/20">
             <div className="font-semibold text-brand-navy">Simulation Audit Report</div>
             <div className="text-sm text-brand-navy/80 mt-1">
-              {result.house?.label} · {result.maskedIntervals} masked intervals
+              {result.house?.label} · {result.testIntervalsCount} test intervals
               {result.metrics ? ` · WAPE ${result.metrics.wape}% · MAE ${result.metrics.mae} kWh · RMSE ${result.metrics.rmse}` : ""}
             </div>
           </div>
@@ -696,7 +713,7 @@ export default function GapFillLabClient() {
             </div>
           </details>
 
-          {result.ok && result.maskedIntervals === 0 && result.message && (
+          {result.ok && result.testIntervalsCount === 0 && result.message && (
             <p className="text-brand-navy/70">{result.message}</p>
           )}
         </div>

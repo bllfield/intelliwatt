@@ -173,28 +173,26 @@ function buildFullReport(args: {
   email: string;
   houseLabel: string;
   timezone: string;
-  evalRanges: Array<{ startDate: string; endDate: string }>;
+  testRangesInput: Array<{ startDate: string; endDate: string }>;
+  travelRangesFromDb: Array<{ startDate: string; endDate: string }>;
   buildExcludedRanges: Array<{ startDate: string; endDate: string }>;
-  travelRangesNormalized: Array<{ startDate: string; endDate: string }>;
-  listMaskedDateKeys: string[];
-  maskedIntervalsCount: number;
-  maskedDaysCount: number;
+  listTestDateKeys: string[];
+  testIntervalsCount: number;
+  testDaysCount: number;
   buildExcludedDateKeysCount: number;
   buildExcludedDateKeysSample: string[];
-  evalMaskedDateKeysCount: number;
-  evalMaskedDateKeysSample: string[];
   dateKeyDiag?: {
-    dbTravelDateKeysCount: number;
-    dbTravelDateKeysSample: string[];
-    evalDateKeysCount: number;
-    evalDateKeysSample: string[];
+    travelDateKeysLocalCount: number;
+    travelDateKeysLocalSample: string[];
+    testDateKeysLocalCount: number;
+    testDateKeysLocalSample: string[];
     buildExcludedDateKeysCount: number;
     buildExcludedDateKeysSample: string[];
     setArithmetic: {
-      onlyDbCount: number;
-      onlyDbSample: string[];
-      onlyEvalCount: number;
-      onlyEvalSample: string[];
+      onlyTravelCount: number;
+      onlyTravelSample: string[];
+      onlyTestCount: number;
+      onlyTestSample: string[];
       overlapCount: number;
       overlapSample: string[];
     };
@@ -277,9 +275,9 @@ function buildFullReport(args: {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
   const enginePath = j.enginePath ?? "production_past_stitched";
-  const expectedMaskedIntervals = j.expectedTestIntervals ?? j.evalMaskedDateKeysCount * 96;
-  const missingMaskedIntervals = expectedMaskedIntervals - j.maskedIntervalsCount;
-  const coveragePct: number | null = j.coveragePct ?? (expectedMaskedIntervals > 0 ? j.maskedIntervalsCount / expectedMaskedIntervals : null);
+  const expectedTestIntervals = j.expectedTestIntervals ?? j.testDaysCount * 96;
+  const missingTestIntervals = expectedTestIntervals - j.testIntervalsCount;
+  const coveragePct: number | null = j.coveragePct ?? (expectedTestIntervals > 0 ? j.testIntervalsCount / expectedTestIntervals : null);
   const monthlyTotals: Record<string, number> = {};
   for (const m of j.dataset.monthly ?? []) {
     const month = String(m?.month ?? "").slice(0, 7);
@@ -307,16 +305,25 @@ function buildFullReport(args: {
     env: j.env,
     identifiers: { houseId: j.houseId, userId: j.userId, email: j.email, houseLabel: j.houseLabel, timezone: j.timezone },
     scenario: {
-      evalRangesInput: j.evalRanges,
+      travelRangesFromDb: j.travelRangesFromDb,
+      testRangesInput: j.testRangesInput,
       buildExcludedRanges: j.buildExcludedRanges,
-      travelRangesNormalized: j.travelRangesNormalized,
-      maskedIntervalsCount: j.maskedIntervalsCount,
-      maskedDaysCount: j.maskedDaysCount,
-      listMaskedDateKeys: j.listMaskedDateKeys,
+      travelDateKeysLocalCount: j.dateKeyDiag?.travelDateKeysLocalCount ?? 0,
+      travelDateKeysLocalSample: j.dateKeyDiag?.travelDateKeysLocalSample ?? [],
+      testDateKeysLocalCount: j.dateKeyDiag?.testDateKeysLocalCount ?? 0,
+      testDateKeysLocalSample: j.dateKeyDiag?.testDateKeysLocalSample ?? [],
+      onlyTravelCount: j.dateKeyDiag?.setArithmetic?.onlyTravelCount ?? 0,
+      onlyTravelSample: j.dateKeyDiag?.setArithmetic?.onlyTravelSample ?? [],
+      onlyTestCount: j.dateKeyDiag?.setArithmetic?.onlyTestCount ?? 0,
+      onlyTestSample: j.dateKeyDiag?.setArithmetic?.onlyTestSample ?? [],
+      overlapCount: j.dateKeyDiag?.setArithmetic?.overlapCount ?? 0,
+      overlapSample: j.dateKeyDiag?.setArithmetic?.overlapSample ?? [],
+      testIntervalsCount: j.testIntervalsCount,
+      testDaysCount: j.testDaysCount,
+      listTestDateKeys: j.listTestDateKeys,
       buildExcludedDateKeysCount: j.buildExcludedDateKeysCount,
-      evalMaskedDateKeysCount: j.evalMaskedDateKeysCount,
-      expectedMaskedIntervals: expectedMaskedIntervals,
-      missingMaskedIntervals: missingMaskedIntervals,
+      expectedTestIntervals: expectedTestIntervals,
+      missingTestIntervals: missingTestIntervals,
       coveragePct: coveragePct,
       ...(j.dateKeyDiag ? { dateKeyDiag: j.dateKeyDiag } : {}),
     },
@@ -364,8 +371,8 @@ function buildFullReport(args: {
       canonicalMonths: j.buildInputs?.canonicalMonths ?? [],
       buildExcludedDateKeysCount: j.buildExcludedDateKeysCount ?? 0,
       buildExcludedDateKeysSample: j.buildExcludedDateKeysSample ?? [],
-      evalMaskedDateKeysCount: j.evalMaskedDateKeysCount,
-      evalMaskedDateKeysSample: j.evalMaskedDateKeysSample,
+      testDateKeysLocalCount: j.dateKeyDiag?.testDateKeysLocalCount ?? 0,
+      testDateKeysLocalSample: j.dateKeyDiag?.testDateKeysLocalSample ?? [],
       excludedDateKeysCount: j.excludedDateKeysCount ?? 0,
       excludedDateKeysSample: j.excludedDateKeysSample ?? [],
       expectedTestIntervals: j.expectedTestIntervals ?? undefined,
@@ -431,36 +438,31 @@ function buildFullReport(args: {
     kv("timezone", j.timezone);
   });
 
-  section("B) Scenario + masking", () => {
-    if (enginePath === "gapfill_test_days_profile") {
-      lines.push("testRangesInput (entered; ONLY dates scored): " + JSON.stringify(j.evalRanges));
-      lines.push("travelRangesFromDb (for transparency; not used in build): shown in dateKeyDiag.");
-    } else {
-      lines.push("evalRanges input (entered ranges; used for accuracy): " + JSON.stringify(j.evalRanges));
-      lines.push("buildExcludedRanges (DB ∪ eval; used to build dataset): " + JSON.stringify(j.buildExcludedRanges));
-    }
-    lines.push("maskedIntervalsCount / maskedDaysCount / listMaskedDateKeys are based on " + (enginePath === "gapfill_test_days_profile" ? "test dates only." : "evalRanges only."));
-    kv("maskedIntervalsCount", j.maskedIntervalsCount);
-    kv("maskedDaysCount", j.maskedDaysCount);
-    lines.push("listMaskedDateKeys (eval only): " + listTrunc(j.listMaskedDateKeys, TRUNCATE_LIST).join(", "));
-    lines.push("--- Masked-interval coverage ---");
-    kv("expectedMaskedIntervals", expectedMaskedIntervals);
-    kv("missingMaskedIntervals", missingMaskedIntervals);
+  section("B) Scenario: Vacant/Travel (DB) vs Test Dates", () => {
+    lines.push("travelRangesFromDb (Vacant/Travel): " + JSON.stringify(j.travelRangesFromDb));
+    lines.push("testRangesInput (Test Dates; ONLY these scored): " + JSON.stringify(j.testRangesInput));
+    lines.push("buildExcludedRanges (travel ∪ test): " + JSON.stringify(j.buildExcludedRanges));
+    lines.push("--- Test interval coverage ---");
+    kv("testIntervalsCount", j.testIntervalsCount);
+    kv("testDaysCount", j.testDaysCount);
+    lines.push("listTestDateKeys: " + listTrunc(j.listTestDateKeys, TRUNCATE_LIST).join(", "));
+    kv("expectedTestIntervals", expectedTestIntervals);
+    kv("missingTestIntervals", missingTestIntervals);
     lines.push("coveragePct: " + (coveragePct != null ? round2(coveragePct * 100) + "%" : "—"));
     if (j.dateKeyDiag) {
       const d = j.dateKeyDiag;
       lines.push("--- Date key diagnostics (local) ---");
-      kv("dbTravelDateKeysCount", d.dbTravelDateKeysCount);
-      lines.push("dbTravelDateKeysSample: " + listTrunc(d.dbTravelDateKeysSample, 10).join(", "));
-      kv("evalDateKeysCount", d.evalDateKeysCount);
-      lines.push("evalDateKeysSample: " + listTrunc(d.evalDateKeysSample, 10).join(", "));
+      kv("travelDateKeysLocalCount", d.travelDateKeysLocalCount);
+      lines.push("travelDateKeysLocalSample: " + listTrunc(d.travelDateKeysLocalSample, 10).join(", "));
+      kv("testDateKeysLocalCount", d.testDateKeysLocalCount);
+      lines.push("testDateKeysLocalSample: " + listTrunc(d.testDateKeysLocalSample, 10).join(", "));
       kv("buildExcludedDateKeysCount", d.buildExcludedDateKeysCount);
       lines.push("buildExcludedDateKeysSample: " + listTrunc(d.buildExcludedDateKeysSample, 10).join(", "));
       lines.push("--- Set arithmetic ---");
-      kv("onlyDbCount", d.setArithmetic.onlyDbCount);
-      lines.push("onlyDbSample: " + listTrunc(d.setArithmetic.onlyDbSample, 10).join(", "));
-      kv("onlyEvalCount", d.setArithmetic.onlyEvalCount);
-      lines.push("onlyEvalSample: " + listTrunc(d.setArithmetic.onlyEvalSample, 10).join(", "));
+      kv("onlyTravelCount", d.setArithmetic.onlyTravelCount);
+      lines.push("onlyTravelSample: " + listTrunc(d.setArithmetic.onlyTravelSample, 10).join(", "));
+      kv("onlyTestCount", d.setArithmetic.onlyTestCount);
+      lines.push("onlyTestSample: " + listTrunc(d.setArithmetic.onlyTestSample, 10).join(", "));
       kv("overlapCount", d.setArithmetic.overlapCount);
       lines.push("overlapSample: " + listTrunc(d.setArithmetic.overlapSample, 10).join(", "));
     }
@@ -530,8 +532,8 @@ function buildFullReport(args: {
     kv("dayTotalSource", fullReportJson.engine.dayTotalSource);
     kv("buildExcludedDateKeysCount", j.buildExcludedDateKeysCount);
     lines.push("buildExcludedDateKeysSample: " + listTrunc(j.buildExcludedDateKeysSample, 10).join(", "));
-    kv("evalMaskedDateKeysCount", j.evalMaskedDateKeysCount);
-    lines.push("evalMaskedDateKeysSample: " + listTrunc(j.evalMaskedDateKeysSample, 10).join(", "));
+    kv("testDateKeysLocalCount", j.dateKeyDiag?.testDateKeysLocalCount ?? 0);
+    lines.push("testDateKeysLocalSample: " + listTrunc(j.dateKeyDiag?.testDateKeysLocalSample ?? [], 10).join(", "));
     const diag = fullReportJson.engine.usageShapeProfileDiag as typeof j.usageShapeProfileDiag | undefined;
     if (diag) {
       lines.push("usageShapeProfile: found=" + diag.found + " reasonNotUsed=" + (diag.reasonNotUsed ?? "(used)"));
@@ -547,7 +549,7 @@ function buildFullReport(args: {
     lines.push("weatherNote: Weather not integrated in gap-fill lab path.");
   });
 
-  section("G) Accuracy metrics (masked intervals only)", () => {
+  section("G) Accuracy metrics (test intervals only)", () => {
     kv("MAE_kwhPer15m", j.metrics.mae);
     kv("RMSE_kwhPer15m", j.metrics.rmse);
     kv("MaxAbs_kwhPer15m", j.metrics.maxAbs);
@@ -561,7 +563,7 @@ function buildFullReport(args: {
     kv("deltaKwhMasked", j.metrics.deltaKwhMasked);
   });
 
-  section("H) Daily totals comparison (masked days)", () => {
+  section("H) Daily totals comparison (test dates)", () => {
     lines.push("top10Under (most negative delta):");
     j.diagnostics.top10Under.forEach((r) => lines.push(`  ${r.date} | actual=${r.actualKwh} sim=${r.simKwh} delta=${r.deltaKwh}`));
     lines.push("top10Over (most positive delta):");
@@ -570,7 +572,7 @@ function buildFullReport(args: {
     j.metrics.worst10Abs.forEach((r) => lines.push(`  ${r.date} | actual=${r.actualKwh} sim=${r.simKwh} delta=${r.deltaKwh}`));
   });
 
-  section("I) Hourly profile comparison (masked)", () => {
+  section("I) Hourly profile comparison (test)", () => {
     lines.push("hour | actualMeanKwh | simMeanKwh | deltaMeanKwh");
     j.diagnostics.hourlyProfileMasked.forEach((r) => lines.push(`  ${r.hour} | ${r.actualMeanKwh} | ${r.simMeanKwh} | ${r.deltaMeanKwh}`));
     const peakHoursWorst = (fullReportJson.hourlyProfileComparison as any).peakHoursWorst;
@@ -587,7 +589,7 @@ function buildFullReport(args: {
     }
   });
 
-  section("K) Seasonal/month lens (masked intervals)", () => {
+  section("K) Seasonal/month lens (test intervals)", () => {
     lines.push("month | count | totalActual | totalSim | WAPE | MAE");
     j.metrics.byMonth.forEach((m) => lines.push(`  ${m.month} | ${m.count} | ${m.totalActual} | ${m.totalSim} | ${m.wape}% | ${m.mae}`));
   });
@@ -610,6 +612,7 @@ export async function POST(req: NextRequest) {
   let body: {
     email?: string;
     timezone?: string;
+    testRanges?: Array<{ startDate: string; endDate: string }>;
     rangesToMask?: Array<{ startDate: string; endDate: string }>;
     houseId?: string;
   };
@@ -626,8 +629,9 @@ export async function POST(req: NextRequest) {
   }
 
   const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
-  const rangesToMask = Array.isArray(body?.rangesToMask)
-    ? body.rangesToMask
+  const rawTestRanges = body?.testRanges ?? body?.rangesToMask ?? [];
+  const testRanges = Array.isArray(rawTestRanges)
+    ? rawTestRanges
         .map((r: any) => ({
           startDate: String(r?.startDate ?? "").slice(0, 10),
           endDate: String(r?.endDate ?? "").slice(0, 10),
@@ -677,7 +681,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (rangesToMask.length === 0) {
+  if (testRanges.length === 0) {
     const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
     return NextResponse.json({
       ok: true,
@@ -695,8 +699,8 @@ export async function POST(req: NextRequest) {
       homeProfile,
       applianceProfile,
       modelAssumptions: null,
-      maskedIntervals: 0,
-      message: "Add Test date ranges (and ensure they do not overlap saved Travel dates) and click Run Compare to see metrics.",
+      testIntervalsCount: 0,
+      message: "Add Test Dates (and ensure they do not overlap Vacant/Travel dates) and click Run Compare.",
       metrics: null,
       primaryPercentMetric: null,
       byMonth: [],
@@ -710,29 +714,29 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Test dates = ranges entered in lab UI (only these are scored). Must not overlap saved travel dates.
-  const testRanges = rangesToMask;
+  // Test Dates = admin-entered ranges (only these are scored). Vacant/Travel = DB ranges; must not overlap.
   const testDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(testRanges, timezone);
   if (testDateKeysLocal.size === 0) {
     return NextResponse.json(
-      { ok: false, error: "test_ranges_required", message: "At least one valid Test date range is required." },
+      { ok: false, error: "test_ranges_required", message: "At least one valid Test Date range is required." },
       { status: 400 }
     );
   }
 
-  const dbTravelRanges = await getTravelRangesFromDb(user.id, house.id);
-  const dbTravelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(dbTravelRanges, timezone);
-  const overlap = setIntersect(testDateKeysLocal, dbTravelDateKeysLocal);
-  if (overlap.size > 0) {
+  const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
+  const travelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(travelRangesFromDb, timezone);
+  const buildExcludedDateKeysLocal = new Set<string>([...Array.from(travelDateKeysLocal), ...Array.from(testDateKeysLocal)]);
+  const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
+  if (overlapLocal.size > 0) {
     return NextResponse.json(
       {
         ok: false,
         error: "test_overlaps_travel",
-        message: "Test dates overlap saved Travel dates. Remove overlap and retry.",
-        overlapCount: overlap.size,
-        overlapSample: sortedSample(overlap),
+        message: "Test Dates overlap saved Vacant/Travel dates. Remove overlap and retry.",
+        overlapCount: overlapLocal.size,
+        overlapSample: sortedSample(overlapLocal),
         testDateKeysCount: testDateKeysLocal.size,
-        dbTravelDateKeysCount: dbTravelDateKeysLocal.size,
+        travelDateKeysCount: travelDateKeysLocal.size,
       },
       { status: 400 }
     );
@@ -784,24 +788,24 @@ export async function POST(req: NextRequest) {
     timezone,
   });
 
-  const onlyDb = setDiff(dbTravelDateKeysLocal, testDateKeysLocal);
-  const onlyTest = setDiff(testDateKeysLocal, dbTravelDateKeysLocal);
+  const onlyTravel = setDiff(travelDateKeysLocal, testDateKeysLocal);
+  const onlyTest = setDiff(testDateKeysLocal, travelDateKeysLocal);
   const expectedTestIntervals = testDateKeysLocal.size * 96;
   const coveragePctNum = expectedTestIntervals > 0 ? actualTestIntervals.length / expectedTestIntervals : null;
   const dateKeyDiag = {
-    dbTravelDateKeysCount: dbTravelDateKeysLocal.size,
-    dbTravelDateKeysSample: sortedSample(dbTravelDateKeysLocal),
-    evalDateKeysCount: testDateKeysLocal.size,
-    evalDateKeysSample: sortedSample(testDateKeysLocal),
-    buildExcludedDateKeysCount: 0,
-    buildExcludedDateKeysSample: [] as string[],
+    travelDateKeysLocalCount: travelDateKeysLocal.size,
+    travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
+    testDateKeysLocalCount: testDateKeysLocal.size,
+    testDateKeysLocalSample: sortedSample(testDateKeysLocal),
+    buildExcludedDateKeysCount: buildExcludedDateKeysLocal.size,
+    buildExcludedDateKeysSample: sortedSample(buildExcludedDateKeysLocal).slice(0, 10),
     setArithmetic: {
-      onlyDbCount: onlyDb.size,
-      onlyDbSample: sortedSample(onlyDb),
-      onlyEvalCount: onlyTest.size,
-      onlyEvalSample: sortedSample(onlyTest),
-      overlapCount: overlap.size,
-      overlapSample: sortedSample(overlap),
+      onlyTravelCount: onlyTravel.size,
+      onlyTravelSample: sortedSample(onlyTravel),
+      onlyTestCount: onlyTest.size,
+      onlyTestSample: sortedSample(onlyTest),
+      overlapCount: overlapLocal.size,
+      overlapSample: sortedSample(overlapLocal),
     },
   };
 
@@ -895,9 +899,8 @@ export async function POST(req: NextRequest) {
     };
   }
 
-  const listMaskedDateKeys = testDateKeysSorted;
-  const buildExcludedDateKeysSample: string[] = [];
-  const evalMaskedDateKeysSample = listMaskedDateKeys.slice(0, 10);
+  const listTestDateKeys = testDateKeysSorted;
+  const buildExcludedDateKeysSample = sortedSample(buildExcludedDateKeysLocal).slice(0, 10);
   const testDatasetStub = {
     summary: { start: fetchStart, end: fetchEnd, intervalsCount: actualTestIntervals.length },
     totals: { netKwh: metrics.totalActualKwhMasked },
@@ -913,16 +916,14 @@ export async function POST(req: NextRequest) {
     email: user.email ?? "",
     houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     timezone,
-    evalRanges: testRanges,
-    buildExcludedRanges: [],
-    travelRangesNormalized: listMaskedDateKeys.map((d) => ({ startDate: d, endDate: d })),
-    listMaskedDateKeys,
-    maskedIntervalsCount: actualTestIntervals.length,
-    maskedDaysCount: listMaskedDateKeys.length,
-    buildExcludedDateKeysCount: 0,
+    testRangesInput: testRanges,
+    travelRangesFromDb,
+    buildExcludedRanges: Array.from(buildExcludedDateKeysLocal).sort().map((d) => ({ startDate: d, endDate: d })),
+    listTestDateKeys,
+    testIntervalsCount: actualTestIntervals.length,
+    testDaysCount: listTestDateKeys.length,
+    buildExcludedDateKeysCount: buildExcludedDateKeysLocal.size,
     buildExcludedDateKeysSample,
-    evalMaskedDateKeysCount: testDateKeysLocal.size,
-    evalMaskedDateKeysSample,
     dateKeyDiag,
     dataset: testDatasetStub,
     buildInputs: { canonicalMonths: [] },
@@ -996,7 +997,7 @@ export async function POST(req: NextRequest) {
     homeProfile,
     applianceProfile,
     modelAssumptions,
-    maskedIntervals: actualTestIntervals.length,
+    testIntervalsCount: actualTestIntervals.length,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
