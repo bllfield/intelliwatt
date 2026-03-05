@@ -343,8 +343,11 @@ function buildFullReport(args: {
     parity: {
       windowStartUtc: j.dataset.summary?.start ?? null,
       windowEndUtc: j.dataset.summary?.end ?? null,
+      testWindowStartUtc: j.dataset.summary?.start ?? null,
+      testWindowEndUtc: j.dataset.summary?.end ?? null,
       intervalCount: j.dataset.summary?.intervalsCount ?? null,
-      annualKwh: j.dataset.totals?.netKwh ?? null,
+      testWindowKwh: j.dataset.totals?.netKwh ?? null,
+      annualKwh: j.dataset.totals?.netKwh ?? null, // legacy; same as testWindowKwh (deprecated, remove after one deploy)
       monthlyTotals,
       baseloadKwhPer15m,
       baseloadUnit: baseloadUnit ?? undefined,
@@ -498,11 +501,12 @@ function buildFullReport(args: {
     }
   });
 
-  section("C) Production parity (Past simulated usage)", () => {
+  section("C) Test window summary (scoring window only)", () => {
+    lines.push("Note: Gap-Fill Lab v3 does not run Past; this section summarizes the scored test window only.");
     kv("windowStartUtc", j.dataset.summary?.start);
     kv("windowEndUtc", j.dataset.summary?.end);
     kv("intervalCount", j.dataset.summary?.intervalsCount);
-    kv("annualKwh", j.dataset.totals?.netKwh != null ? round2(j.dataset.totals.netKwh) : null);
+    kv("testWindowKwh", j.dataset.totals?.netKwh != null ? round2(j.dataset.totals.netKwh) : null);
     lines.push("monthlyTotals (YYYY-MM => kWh): " + JSON.stringify(monthlyTotals));
     kv("baseloadKwhPer15m", baseloadKwhPer15m);
     kv("baseloadDailyKwh", j.dataset.insights?.baseloadDaily);
@@ -1145,7 +1149,8 @@ export async function POST(req: NextRequest) {
     },
     parity: {
       intervalCount: actualTestIntervals.length,
-      annualKwh: metrics.totalActualKwhMasked,
+      testWindowKwh: metrics.totalActualKwhMasked,
+      annualKwh: metrics.totalActualKwhMasked, // legacy (deprecated, remove after one deploy)
       baseloadKwhPer15m: null,
       baseloadDailyKwh: null,
       windowStartUtc: fetchStart,
