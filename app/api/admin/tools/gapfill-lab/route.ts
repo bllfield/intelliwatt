@@ -29,7 +29,6 @@ import {
   computeGapFillMetrics,
   dateKeyInTimezone,
   getPoolHourRange,
-  localDateKeysInRange,
   localHourInTimezone,
 } from "@/lib/admin/gapfillLab";
 
@@ -63,38 +62,123 @@ function yearMonthsFromRange(startDate: string, endDate: string): string[] {
   return Array.from(seen).sort();
 }
 
-/** Normalize ranges to local date keys (YYYY-MM-DD) in tz. Returns a Set for deduping. */
-function normalizeRangesToDateKeys(
-  ranges: Array<{ startDate: string; endDate: string }>,
-  tz: string
-): Set<string> {
+type DateRange = { startDate: string; endDate: string };
+
+/** Normalize ranges to local date keys (YYYY-MM-DD) in tz, inclusive. No end+1. Uses UTC midday + Intl for DST safety. */
+function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], timezone: string): Set<string> {
   const out = new Set<string>();
   for (const r of ranges ?? []) {
-    const start = String(r?.startDate ?? "").slice(0, 10);
-    const end = String(r?.endDate ?? "").slice(0, 10);
+    const start = (r?.startDate ?? "").slice(0, 10);
+    const end = (r?.endDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
-    for (const d of localDateKeysInRange(start, end, tz)) out.add(d);
+    if (end < start) continue;
+    const startMs = Date.UTC(
+      Number(start.slice(0, 4)),
+      Number(start.slice(5, 7)) - 1,
+      Number(start.slice(8, 10)),
+      12, 0, 0
+    );
+    const endMs = Date.UTC(
+      Number(end.slice(0, 4)),
+      Number(end.slice(5, 7)) - 1,
+      Number(end.slice(8, 10)),
+      12, 0, 0
+    );
+    const dayMs = 24 * 60 * 60 * 1000;
+    for (let t = startMs; t <= endMs; t += dayMs) {
+      const dt = new Date(t);
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(dt);
+      const y = parts.find((p) => p.type === "year")?.value;
+      const m = parts.find((p) => p.type === "month")?.value;
+      const d = parts.find((p) => p.type === "day")?.value;
+      if (!y || !m || !d) continue;
+      out.add(`${y}-${m}-${d}`);
+    }
   }
   return out;
 }
 
-/** Convert a set of local date keys to UTC day-granular ranges for the window (for engine/cache). */
-function buildExcludedUtcSetFromLocalDateKeys(
+function utcDateKeyFromUtcMs(utcMs: number): string {
+  const d = new Date(utcMs);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function localDateKeyFromUtcMs(utcMs: number, timezone: string): string {
+  const dt = new Date(utcMs);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(dt);
+  const y = parts.find((p) => p.type === "year")?.value ?? "";
+  const m = parts.find((p) => p.type === "month")?.value ?? "";
+  const d = parts.find((p) => p.type === "day")?.value ?? "";
+  return `${y}-${m}-${d}`;
+}
+
+/** Map local date keys to UTC excluded date keys (YYYY-MM-DD) for the window. Same convention as Past engine. */
+function buildExcludedUtcDateKeySetFromLocalKeys(
   localDateKeys: Set<string>,
-  windowStartDate: string,
-  windowEndDate: string,
+  windowStartUtc: string,
+  windowEndUtc: string,
   timezone: string
 ): Set<string> {
-  const utcSet = new Set<string>();
-  const windowStart = new Date(windowStartDate + "T00:00:00.000Z").getTime();
-  const windowEnd = new Date(windowEndDate + "T23:59:59.999Z").getTime();
+  const out = new Set<string>();
+  if (!localDateKeys || localDateKeys.size === 0) return out;
+  const startMs = Date.UTC(
+    Number(windowStartUtc.slice(0, 4)),
+    Number(windowStartUtc.slice(5, 7)) - 1,
+    Number(windowStartUtc.slice(8, 10)),
+    0, 0, 0
+  );
+  const endMs = Date.UTC(
+    Number(windowEndUtc.slice(0, 4)),
+    Number(windowEndUtc.slice(5, 7)) - 1,
+    Number(windowEndUtc.slice(8, 10)),
+    0, 0, 0
+  );
   const dayMs = 24 * 60 * 60 * 1000;
-  for (let t = windowStart; t <= windowEnd; t += dayMs) {
-    const utcDateKey = new Date(t).toISOString().slice(0, 10);
-    const localKey = dateKeyInTimezone(new Date(t).toISOString(), timezone);
-    if (localDateKeys.has(localKey)) utcSet.add(utcDateKey);
+  for (let dayStart = startMs; dayStart <= endMs; dayStart += dayMs) {
+    const localKey = localDateKeyFromUtcMs(dayStart + 12 * 60 * 60 * 1000, timezone);
+    if (localDateKeys.has(localKey)) out.add(utcDateKeyFromUtcMs(dayStart));
   }
-  return utcSet;
+  return out;
+}
+
+function sortedSample(keys: Set<string>, limit = 10): string[] {
+  return Array.from(keys).sort().slice(0, limit);
+}
+
+function setDiff(a: Set<string>, b: Set<string>): Set<string> {
+  const out = new Set<string>();
+  for (const x of Array.from(a)) if (!b.has(x)) out.add(x);
+  return out;
+}
+
+function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
+  const out = new Set<string>();
+  for (const x of Array.from(a)) if (b.has(x)) out.add(x);
+  return out;
+}
+
+function sanityCheckKnownRange(
+  evalLocal: Set<string>,
+  evalRanges: DateRange[]
+): { pass: boolean; count: number; last: string | null } | null {
+  if (!Array.isArray(evalRanges) || evalRanges.length !== 1) return null;
+  const r = evalRanges[0];
+  if ((r?.startDate ?? "").slice(0, 10) !== "2025-06-13") return null;
+  if ((r?.endDate ?? "").slice(0, 10) !== "2025-07-01") return null;
+  const sorted = Array.from(evalLocal).sort();
+  const last = sorted.length ? sorted[sorted.length - 1]! : null;
+  const pass = sorted.length === 19 && last === "2025-07-01";
+  return { pass, count: sorted.length, last };
 }
 
 /** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
@@ -201,6 +285,23 @@ function buildFullReport(args: {
   buildExcludedDateKeysSample: string[];
   evalMaskedDateKeysCount: number;
   evalMaskedDateKeysSample: string[];
+  dateKeyDiag?: {
+    dbTravelDateKeysCount: number;
+    dbTravelDateKeysSample: string[];
+    evalDateKeysCount: number;
+    evalDateKeysSample: string[];
+    buildExcludedDateKeysCount: number;
+    buildExcludedDateKeysSample: string[];
+    setArithmetic: {
+      onlyDbCount: number;
+      onlyDbSample: string[];
+      onlyEvalCount: number;
+      onlyEvalSample: string[];
+      overlapCount: number;
+      overlapSample: string[];
+    };
+  };
+  sanityCheck?: { pass: boolean; count: number; last: string | null } | null;
   dataset: { summary: any; totals: any; insights: any; monthly?: Array<{ month?: string; kwh?: number }> };
   buildInputs: { canonicalMonths: string[] };
   configHash: string;
@@ -255,6 +356,9 @@ function buildFullReport(args: {
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
+  const expectedMaskedIntervals = j.evalMaskedDateKeysCount * 96;
+  const missingMaskedIntervals = expectedMaskedIntervals - j.maskedIntervalsCount;
+  const coveragePct: number | null = expectedMaskedIntervals > 0 ? j.maskedIntervalsCount / expectedMaskedIntervals : null;
   const monthlyTotals: Record<string, number> = {};
   for (const m of j.dataset.monthly ?? []) {
     const month = String(m?.month ?? "").slice(0, 7);
@@ -290,6 +394,11 @@ function buildFullReport(args: {
       listMaskedDateKeys: j.listMaskedDateKeys,
       buildExcludedDateKeysCount: j.buildExcludedDateKeysCount,
       evalMaskedDateKeysCount: j.evalMaskedDateKeysCount,
+      expectedMaskedIntervals: expectedMaskedIntervals,
+      missingMaskedIntervals: missingMaskedIntervals,
+      coveragePct: coveragePct,
+      ...(j.dateKeyDiag ? { dateKeyDiag: j.dateKeyDiag } : {}),
+      ...(j.sanityCheck != null ? { sanityCheck_evalRange_2025_06_13_to_2025_07_01: j.sanityCheck } : {}),
     },
     parity: {
       windowStartUtc: j.dataset.summary?.start ?? null,
@@ -365,6 +474,9 @@ function buildFullReport(args: {
   };
 
   if ((j.dataset.summary?.intervalsCount ?? 0) !== 35136) fullReportJson.notes.push(`intervalCount ${j.dataset.summary?.intervalsCount} differs from expected 35136.`);
+  if (j.sanityCheck != null) {
+    fullReportJson.notes.push(`sanityCheck_evalRange_2025_06_13_to_2025_07_01: ${j.sanityCheck.pass ? "pass" : "fail"} (count=${j.sanityCheck.count}, last=${j.sanityCheck.last ?? "—"})`);
+  }
   const baseloadDaily = Number(j.dataset.insights?.baseloadDaily);
   if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
   const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
@@ -393,12 +505,36 @@ function buildFullReport(args: {
   });
 
   section("B) Scenario + masking", () => {
-    lines.push("evalRanges input (entered ranges; used for accuracy only): " + JSON.stringify(j.evalRanges));
-    lines.push("buildExcludedRanges (union of DB + eval; used to build dataset): " + JSON.stringify(j.buildExcludedRanges));
+    lines.push("evalRanges input (entered ranges; used for accuracy): " + JSON.stringify(j.evalRanges));
+    lines.push("buildExcludedRanges (DB ∪ eval; used to build dataset): " + JSON.stringify(j.buildExcludedRanges));
     lines.push("maskedIntervalsCount / maskedDaysCount / listMaskedDateKeys are based on evalRanges only.");
     kv("maskedIntervalsCount", j.maskedIntervalsCount);
     kv("maskedDaysCount", j.maskedDaysCount);
     lines.push("listMaskedDateKeys (eval only): " + listTrunc(j.listMaskedDateKeys, TRUNCATE_LIST).join(", "));
+    lines.push("--- Masked-interval coverage ---");
+    kv("expectedMaskedIntervals", expectedMaskedIntervals);
+    kv("missingMaskedIntervals", missingMaskedIntervals);
+    lines.push("coveragePct: " + (coveragePct != null ? round2(coveragePct * 100) + "%" : "—"));
+    if (j.dateKeyDiag) {
+      const d = j.dateKeyDiag;
+      lines.push("--- Date key diagnostics (local) ---");
+      kv("dbTravelDateKeysCount", d.dbTravelDateKeysCount);
+      lines.push("dbTravelDateKeysSample: " + listTrunc(d.dbTravelDateKeysSample, 10).join(", "));
+      kv("evalDateKeysCount", d.evalDateKeysCount);
+      lines.push("evalDateKeysSample: " + listTrunc(d.evalDateKeysSample, 10).join(", "));
+      kv("buildExcludedDateKeysCount", d.buildExcludedDateKeysCount);
+      lines.push("buildExcludedDateKeysSample: " + listTrunc(d.buildExcludedDateKeysSample, 10).join(", "));
+      lines.push("--- Set arithmetic ---");
+      kv("onlyDbCount", d.setArithmetic.onlyDbCount);
+      lines.push("onlyDbSample: " + listTrunc(d.setArithmetic.onlyDbSample, 10).join(", "));
+      kv("onlyEvalCount", d.setArithmetic.onlyEvalCount);
+      lines.push("onlyEvalSample: " + listTrunc(d.setArithmetic.onlyEvalSample, 10).join(", "));
+      kv("overlapCount", d.setArithmetic.overlapCount);
+      lines.push("overlapSample: " + listTrunc(d.setArithmetic.overlapSample, 10).join(", "));
+    }
+    if (j.sanityCheck != null) {
+      lines.push("sanityCheck_evalRange_2025_06_13_to_2025_07_01: " + (j.sanityCheck.pass ? "pass" : "fail") + " (count=" + j.sanityCheck.count + ", last=" + (j.sanityCheck.last ?? "—") + ")");
+    }
   });
 
   section("C) Production parity (Past simulated usage)", () => {
@@ -692,7 +828,7 @@ export async function POST(req: NextRequest) {
   }
 
   const evalRanges = rangesToMask;
-  const evalDateKeysLocal = normalizeRangesToDateKeys(evalRanges, timezone);
+  const evalDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(evalRanges, timezone);
   if (evalDateKeysLocal.size === 0) {
     return NextResponse.json(
       { ok: false, error: "eval_ranges_required", message: "Add at least one valid travel/vacant range (start and end date, YYYY-MM-DD) to run the comparison." },
@@ -701,9 +837,30 @@ export async function POST(req: NextRequest) {
   }
 
   const dbTravelRanges = await getTravelRangesFromDb(user.id, house.id);
-  const dbDateKeys = normalizeRangesToDateKeys(dbTravelRanges, timezone);
-  const buildExcludedDateKeysLocal = new Set<string>(Array.from(dbDateKeys).concat(Array.from(evalDateKeysLocal)));
-  const buildExcludedUtcSet = buildExcludedUtcSetFromLocalDateKeys(
+  const dbLocal = normalizeRangesToLocalDateKeysInclusive(dbTravelRanges, timezone);
+  const buildExcludedDateKeysLocal = new Set<string>(Array.from(dbLocal).concat(Array.from(evalDateKeysLocal)));
+  const onlyDb = setDiff(dbLocal, evalDateKeysLocal);
+  const onlyEval = setDiff(evalDateKeysLocal, dbLocal);
+  const overlap = setIntersect(dbLocal, evalDateKeysLocal);
+  const dateKeyDiag = {
+    dbTravelDateKeysCount: dbLocal.size,
+    dbTravelDateKeysSample: sortedSample(dbLocal),
+    evalDateKeysCount: evalDateKeysLocal.size,
+    evalDateKeysSample: sortedSample(evalDateKeysLocal),
+    buildExcludedDateKeysCount: buildExcludedDateKeysLocal.size,
+    buildExcludedDateKeysSample: sortedSample(buildExcludedDateKeysLocal),
+    setArithmetic: {
+      onlyDbCount: onlyDb.size,
+      onlyDbSample: sortedSample(onlyDb),
+      onlyEvalCount: onlyEval.size,
+      onlyEvalSample: sortedSample(onlyEval),
+      overlapCount: overlap.size,
+      overlapSample: sortedSample(overlap),
+    },
+  };
+  const sanityCheck = sanityCheckKnownRange(evalDateKeysLocal, evalRanges);
+
+  const buildExcludedUtcSet = buildExcludedUtcDateKeySetFromLocalKeys(
     buildExcludedDateKeysLocal,
     startDate,
     endDate,
@@ -784,9 +941,7 @@ export async function POST(req: NextRequest) {
     filledMonths: buildResult.filledMonths ?? [],
   };
 
-  // Run Compare uses only the dates entered in the form (rangesToMask). We never merge in or use
-  // the customer's stored travel/vacant ranges from scenario events for the comparison.
-  // Use a dedicated cache key so the lab never shares cache with the user's Past scenario.
+  // Build exclusions (dataset + cache): DB ∪ Eval. Scoring mask (metrics): Eval only.
   const scenarioIdForCache = "gapfill_lab";
 
   const intervalDataFingerprint = await getIntervalDataFingerprint({
@@ -1011,6 +1166,8 @@ export async function POST(req: NextRequest) {
     buildExcludedDateKeysSample,
     evalMaskedDateKeysCount: evalDateKeysLocal.size,
     evalMaskedDateKeysSample,
+    dateKeyDiag,
+    sanityCheck,
     dataset: {
       summary: dataset.summary,
       totals: dataset.totals,

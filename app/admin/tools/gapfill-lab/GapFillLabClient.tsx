@@ -247,7 +247,7 @@ export default function GapFillLabClient() {
             <p className="text-sm text-brand-navy/70 mb-1">Filled from the customer’s saved travel dates; add or edit below.</p>
           )}
           <p className="text-sm text-brand-navy/60 mb-2">
-            Run Compare scores accuracy ONLY on the ranges entered below. The simulator build will still honor the customer’s saved travel/vacant dates (if any) so the full-year dataset matches production.
+            Run Compare scores accuracy ONLY on the ranges entered below. The simulator build uses DB ∪ entered ranges so the full-year dataset matches production.
           </p>
           <div className="space-y-2">
             {ranges.map((r, i) => (
