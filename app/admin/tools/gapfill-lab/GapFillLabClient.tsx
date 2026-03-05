@@ -116,6 +116,20 @@ export default function GapFillLabClient() {
     }
   }
 
+  async function primeRequest(payload: { email: string; rangesToMask?: RangeRow[]; timezone?: string }) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
+    const res = await fetch("/api/admin/tools/prime-past-cache", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+      credentials: "include",
+    });
+    clearTimeout(timeoutId);
+    return res;
+  }
+
   async function handlePrimePastCache() {
     setPrimeMessage(null);
     const trimmed = email.trim().toLowerCase();
@@ -124,16 +138,8 @@ export default function GapFillLabClient() {
       return;
     }
     setPrimeLoading(true);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
     try {
-      const res = await fetch("/api/admin/tools/prime-past-cache", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed }),
-        signal: controller.signal,
-        credentials: "include",
-      });
+      const res = await primeRequest({ email: trimmed });
       const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
       if (res.ok && data?.ok) {
         setPrimeMessage("Past cache primed. Run Compare can reuse it and finish in seconds.");
@@ -154,7 +160,44 @@ export default function GapFillLabClient() {
         : (e?.message ?? String(e));
       setPrimeMessage(msg);
     } finally {
-      clearTimeout(timeoutId);
+      setPrimeLoading(false);
+    }
+  }
+
+  async function handlePrimeForCompare() {
+    setPrimeMessage(null);
+    const trimmed = email.trim().toLowerCase();
+    const validRanges = ranges.filter((r) => r.startDate && r.endDate);
+    if (!trimmed) {
+      setPrimeMessage("Enter an email and run Lookup first.");
+      return;
+    }
+    if (!validRanges.length) {
+      setPrimeMessage("Add at least one travel/vacant range, then click Prime for Compare.");
+      return;
+    }
+    setPrimeLoading(true);
+    try {
+      const res = await primeRequest({
+        email: trimmed,
+        rangesToMask: validRanges,
+        timezone,
+      });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
+      if (res.ok && data?.ok) {
+        setPrimeMessage("Lab cache primed for these ranges. Run Compare will finish in seconds.");
+      } else {
+        setPrimeMessage(
+          (data as any)?.message ?? (data as any)?.error ?? (res.status === 500 ? "Server error or timeout." : `Failed (${res.status})`)
+        );
+      }
+    } catch (e: any) {
+      setPrimeMessage(
+        e?.name === "AbortError"
+          ? "Prime hit the 5 min limit. Try Run Compare after (it may build and save for next time)."
+          : (e?.message ?? String(e))
+      );
+    } finally {
       setPrimeLoading(false);
     }
   }
@@ -288,21 +331,29 @@ export default function GapFillLabClient() {
         )}
 
         <div className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5">
-          <div className="text-sm font-medium text-brand-navy mb-1">Prime Past cache (optional)</div>
+          <div className="text-sm font-medium text-brand-navy mb-1">Prime cache (optional)</div>
           <p className="text-sm text-brand-navy/70 mb-2">
-            Prime the cache so Run Compare can reuse it. Do this after Lookup, then run Compare. Same build as the user Past page (1–5 min).
+            <strong>Prime for Compare</strong> (recommended): enter your travel ranges below, then click it. Builds the lab cache for those exact ranges so Run Compare finishes in seconds (1–5 min to prime). <strong>Prime Past cache</strong>: primes the user’s dashboard Past only (no ranges).
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handlePrimePastCache}
-              disabled={!email.trim() || primeLoading}
+              onClick={handlePrimeForCompare}
+              disabled={!email.trim() || primeLoading || !ranges.some((r) => r.startDate && r.endDate)}
               className="px-3 py-1.5 bg-brand-blue text-white rounded text-sm hover:bg-brand-navy disabled:opacity-50"
             >
-              {primeLoading ? "Priming…" : "Prime Past cache"}
+              {primeLoading ? "Priming…" : "Prime for Compare"}
+            </button>
+            <button
+              type="button"
+              onClick={handlePrimePastCache}
+              disabled={!email.trim() || primeLoading}
+              className="px-3 py-1.5 bg-brand-navy/80 text-white rounded text-sm hover:bg-brand-navy disabled:opacity-50"
+            >
+              Prime Past cache
             </button>
             {primeMessage && (
-              <span className={`text-sm ${primeMessage.startsWith("Past cache primed") ? "text-green-700" : "text-rose-700"}`}>
+              <span className={`text-sm ${primeMessage.startsWith("Lab cache primed") || primeMessage.startsWith("Past cache primed") ? "text-green-700" : "text-rose-700"}`}>
                 {primeMessage}
               </span>
             )}
