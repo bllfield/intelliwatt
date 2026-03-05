@@ -80,7 +80,7 @@ curl -X POST "https://intelliwatt.com/api/admin/tools/prime-past-cache" \
   -d '{"houseId":"147bce59-b0f5-48bf-8b3b-4f07ed27ac75","scenarioId":"aad5f05b-e116-43af-8a16-29f25b2ad5f1"}'
 ```
 
-On success you get `{ "ok": true, "message": "Past dataset built and written to cache. ..." }`. The next user request for that house+scenario will be a cache hit.
+On success you get `{ "ok": true, "message": "Past dataset built and written to cache. ..." }`. The next user request for that house+scenario will be a cache hit. The **Gap-Fill Lab** also uses the same cache when the house has a "Past (Corrected)" scenario: it looks up by that scenario ID, so priming (or opening Past once) makes "Run Compare" hit cache and avoid timeout.
 
 **Option B – User house endpoint**  
 While logged in as the user (or impersonating), open the Past view and wait for the request to complete, or call:

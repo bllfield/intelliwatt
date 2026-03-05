@@ -37,6 +37,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Run Compare can take 1–3 min (auto-build + past dataset + metrics)
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
+const WORKSPACE_PAST_NAME = "Past (Corrected)";
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
   const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
@@ -702,8 +703,19 @@ export async function POST(req: NextRequest) {
     filledMonths: buildResult.filledMonths ?? [],
   };
 
-  // Same canonical builder + cache as user "Past simulated usage" (scenarioId = gapfill_lab for cache key).
-  // Fingerprint ensures cache invalidates when new interval backfills arrive.
+  // Same canonical builder + cache as user "Past simulated usage". Use the house's Past scenario ID
+  // when present so the lab reuses the same cache row as the user route (e.g. after priming or opening Past).
+  const pastScenario = await (prisma as any).usageSimulatorScenario?.findFirst?.({
+    where: {
+      userId: user.id,
+      houseId: house.id,
+      name: WORKSPACE_PAST_NAME,
+      archivedAt: null,
+    },
+    select: { id: true },
+  }).catch(() => null);
+  const scenarioIdForCache = pastScenario?.id ?? "gapfill_lab";
+
   const intervalDataFingerprint = await getIntervalDataFingerprint({
     houseId: house.id,
     esiid: house.esiid ?? null,
@@ -719,12 +731,11 @@ export async function POST(req: NextRequest) {
     buildInputs: buildInputs as Record<string, unknown>,
     intervalDataFingerprint,
   });
-  const LAB_SCENARIO_ID = "gapfill_lab";
   let cacheHit = false;
   let compressedBytesLength = 0;
   const cached = await getCachedPastDataset({
     houseId: house.id,
-    scenarioId: LAB_SCENARIO_ID,
+    scenarioId: scenarioIdForCache,
     inputHash,
   });
   let dataset: NonNullable<Awaited<ReturnType<typeof getPastSimulatedDatasetForHouse>>["dataset"]>;
@@ -774,7 +785,7 @@ export async function POST(req: NextRequest) {
     };
     await saveCachedPastDataset({
       houseId: house.id,
-      scenarioId: LAB_SCENARIO_ID,
+      scenarioId: scenarioIdForCache,
       inputHash,
       engineVersion: PAST_ENGINE_VERSION,
       windowStartUtc: startDate,
