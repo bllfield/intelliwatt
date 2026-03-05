@@ -948,7 +948,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       };
     }
     try {
-      const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid);
+      const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid, { skipFullYearIntervalFetch: true });
       if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {
         const travelMonthsSet = monthsIntersectingTravelRanges(
           ((buildInputs as any).canonicalMonths ?? []) as string[],
