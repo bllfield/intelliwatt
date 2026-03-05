@@ -51,7 +51,8 @@ export function computeGapFillMetrics(args: {
   diagnostics: GapFillDiagnostics;
   pasteSummary: string;
 } {
-  const { actual, simulatedByTs } = args;
+  const { actual, simulatedByTs, timezone } = args;
+  const useLocal = Boolean(timezone && timezone.trim());
   const errors: number[] = [];
   const absErrors: number[] = [];
   const byMonth = new Map<string, { sumAbs: number; sumAbsPct: number; sumActual: number; sumSim: number; count: number }>();
@@ -71,10 +72,10 @@ export function computeGapFillMetrics(args: {
     errors.push(err);
     absErrors.push(absErr);
 
-    const date = ts.slice(0, 10);
+    const date = useLocal ? dateKeyInTimezone(ts, timezone!) : ts.slice(0, 10);
     const month = date.slice(0, 7);
-    const hour = new Date(ts).getUTCHours();
-    const dow = new Date(ts).getUTCDay();
+    const hour = useLocal ? localHourInTimezone(ts, timezone!) : new Date(ts).getUTCHours();
+    const dow = useLocal ? localDayOfWeekInTimezone(ts, timezone!) : new Date(ts).getUTCDay();
     const dayType: "weekday" | "weekend" = dow === 0 || dow === 6 ? "weekend" : "weekday";
 
     const prevDay = byDateActualSim.get(date) ?? { actualKwh: 0, simKwh: 0 };
