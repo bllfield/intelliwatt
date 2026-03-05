@@ -46,8 +46,6 @@ export default function GapFillLabClient() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
-  const [primeLoading, setPrimeLoading] = useState(false);
-  const [primeMessage, setPrimeMessage] = useState<string | null>(null);
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -71,7 +69,6 @@ export default function GapFillLabClient() {
   async function handleLookup() {
     setError(null);
     setResult(null);
-    setPrimeMessage(null);
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setError("Enter an email address.");
@@ -109,96 +106,6 @@ export default function GapFillLabClient() {
       setResult(null);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function primeRequest(payload: { email: string; testRanges?: RangeRow[]; rangesToMask?: RangeRow[]; timezone?: string }) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 295_000); // ~4m55s, under server maxDuration 300s
-    try {
-      const res = await fetch("/api/admin/tools/prime-past-cache", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-        credentials: "include",
-      });
-      return res;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  async function handlePrimePastCache() {
-    setPrimeMessage(null);
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) {
-      setPrimeMessage("Enter an email and run Lookup first.");
-      return;
-    }
-    setPrimeLoading(true);
-    try {
-      const res = await primeRequest({ email: trimmed });
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
-      if (res.ok && data?.ok) {
-        setPrimeMessage("Past cache primed. Run Compare can reuse it and finish in seconds.");
-      } else {
-        const msg =
-          (data as any)?.message ??
-          (data as any)?.error ??
-          (res.status === 503
-            ? "Build timed out (4 min). Prime from Admin → Usage (droplet) or try Run Compare."
-            : res.status === 500
-              ? "Server error or timeout. Try Run Compare (cache may exist) or prime from Admin → Usage."
-              : `Failed (${res.status})`);
-        setPrimeMessage(msg);
-      }
-    } catch (e: any) {
-      const msg = e?.name === "AbortError"
-        ? "Prime hit the 5 min limit. Try again or run Compare (it will build and then you can prime next time)."
-        : (e?.message ?? String(e));
-      setPrimeMessage(msg);
-    } finally {
-      setPrimeLoading(false);
-    }
-  }
-
-  async function handlePrimeForCompare() {
-    setPrimeMessage(null);
-    const trimmed = email.trim().toLowerCase();
-    const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
-    if (!trimmed) {
-      setPrimeMessage("Enter an email and run Lookup first.");
-      return;
-    }
-    if (!validRanges.length) {
-      setPrimeMessage("Add at least one Test Date range, then click Prime for Compare.");
-      return;
-    }
-    setPrimeLoading(true);
-    try {
-      const res = await primeRequest({
-        email: trimmed,
-        testRanges: validRanges,
-        rangesToMask: validRanges,
-        timezone,
-      });
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
-      if (res.ok && data?.ok) {
-        setPrimeMessage("Lab cache primed for these ranges. Run Compare will finish in seconds.");
-      } else {
-        setPrimeMessage(
-          (data as any)?.message ?? (data as any)?.error ?? (res.status === 500 ? "Server error or timeout." : `Failed (${res.status})`)
-        );
-      }
-    } catch (e: any) {
-      setPrimeMessage(
-        e?.name === "AbortError"
-          ? "Prime hit the 5 min limit. Try Run Compare after (it may build and save for next time)."
-          : (e?.message ?? String(e))
-      );
-    } finally {
-      setPrimeLoading(false);
     }
   }
 
@@ -336,40 +243,10 @@ export default function GapFillLabClient() {
           </div>
         )}
 
-        <div className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5">
-          <div className="text-sm font-medium text-brand-navy mb-1">Prime cache (optional)</div>
-          <p className="text-sm text-brand-navy/70 mb-2">
-            <strong>Prime for Compare</strong> is what makes Run Compare fast when you have ranges: enter your travel ranges below, then click it. Wait 1–5 min; after that, Run Compare finishes in seconds. <strong>Prime Past cache</strong> only primes the dashboard Past (does not help Run Compare when you have ranges).
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handlePrimeForCompare}
-              disabled={!email.trim() || primeLoading || !testRanges.some((r) => r.startDate && r.endDate)}
-              className="px-3 py-1.5 bg-brand-blue text-white rounded text-sm hover:bg-brand-navy disabled:opacity-50"
-            >
-              {primeLoading ? "Priming…" : "Prime for Compare"}
-            </button>
-            <button
-              type="button"
-              onClick={handlePrimePastCache}
-              disabled={!email.trim() || primeLoading}
-              className="px-3 py-1.5 bg-brand-navy/80 text-white rounded text-sm hover:bg-brand-navy disabled:opacity-50"
-            >
-              Prime Past cache
-            </button>
-            {primeMessage && (
-              <span className={`text-sm ${primeMessage.startsWith("Lab cache primed") || primeMessage.startsWith("Past cache primed") ? "text-green-700" : "text-rose-700"}`}>
-                {primeMessage}
-              </span>
-            )}
-          </div>
-        </div>
-
         <div>
-          <label className="block text-sm font-medium text-brand-navy mb-2">Vacant / Travel Dates (User Data)</label>
+          <label className="block text-sm font-medium text-brand-navy mb-2">Vacant / Travel Dates (DB — customer-entered)</label>
           <p className="text-sm text-brand-navy/60 mb-2">
-            Read-only list from the customer’s saved travel/vacant dates. Vacant/Travel dates are excluded from the model and are never scored.
+            Vacant/Travel dates (DB) are guardrails so we don’t accidentally test on customer-travel days. Only Test Dates are scored against actual intervals.
           </p>
           {travelRangesFromDb.length > 0 ? (
             <div className="p-3 rounded border border-brand-blue/20 bg-brand-navy/5 space-y-1">
@@ -384,7 +261,7 @@ export default function GapFillLabClient() {
           )}
         </div>
         <div>
-          <label className="block text-sm font-medium text-brand-navy mb-2">Test Dates (Accuracy Test)</label>
+          <label className="block text-sm font-medium text-brand-navy mb-2">Test Dates (Admin — accuracy scoring)</label>
           <p className="text-sm text-brand-navy/60 mb-2">
             Only Test Dates are scored against actual intervals. Do not overlap Vacant/Travel dates above.
           </p>

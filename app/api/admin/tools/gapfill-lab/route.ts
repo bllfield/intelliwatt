@@ -175,19 +175,19 @@ function buildFullReport(args: {
   timezone: string;
   testRangesInput: Array<{ startDate: string; endDate: string }>;
   travelRangesFromDb: Array<{ startDate: string; endDate: string }>;
-  buildExcludedRanges: Array<{ startDate: string; endDate: string }>;
+  guardrailExcludedRanges: Array<{ startDate: string; endDate: string }>;
   listTestDateKeys: string[];
   testIntervalsCount: number;
   testDaysCount: number;
-  buildExcludedDateKeysCount: number;
-  buildExcludedDateKeysSample: string[];
+  guardrailExcludedDateKeysCount: number;
+  guardrailExcludedDateKeysSample: string[];
   dateKeyDiag?: {
     travelDateKeysLocalCount: number;
     travelDateKeysLocalSample: string[];
     testDateKeysLocalCount: number;
     testDateKeysLocalSample: string[];
-    buildExcludedDateKeysCount: number;
-    buildExcludedDateKeysSample: string[];
+    guardrailExcludedDateKeysCount: number;
+    guardrailExcludedDateKeysSample: string[];
     setArithmetic: {
       onlyTravelCount: number;
       onlyTravelSample: string[];
@@ -307,7 +307,7 @@ function buildFullReport(args: {
     scenario: {
       travelRangesFromDb: j.travelRangesFromDb,
       testRangesInput: j.testRangesInput,
-      buildExcludedRanges: j.buildExcludedRanges,
+      guardrailExcludedRanges: j.guardrailExcludedRanges,
       travelDateKeysLocalCount: j.dateKeyDiag?.travelDateKeysLocalCount ?? 0,
       travelDateKeysLocalSample: j.dateKeyDiag?.travelDateKeysLocalSample ?? [],
       testDateKeysLocalCount: j.dateKeyDiag?.testDateKeysLocalCount ?? 0,
@@ -321,7 +321,7 @@ function buildFullReport(args: {
       testIntervalsCount: j.testIntervalsCount,
       testDaysCount: j.testDaysCount,
       listTestDateKeys: j.listTestDateKeys,
-      buildExcludedDateKeysCount: j.buildExcludedDateKeysCount,
+      guardrailExcludedDateKeysCount: j.guardrailExcludedDateKeysCount,
       expectedTestIntervals: expectedTestIntervals,
       missingTestIntervals: missingTestIntervals,
       coveragePct: coveragePct,
@@ -369,8 +369,8 @@ function buildFullReport(args: {
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
       profileAutoBuilt: j.profileAutoBuilt ?? false,
       canonicalMonths: j.buildInputs?.canonicalMonths ?? [],
-      buildExcludedDateKeysCount: j.buildExcludedDateKeysCount ?? 0,
-      buildExcludedDateKeysSample: j.buildExcludedDateKeysSample ?? [],
+      guardrailExcludedDateKeysCount: j.guardrailExcludedDateKeysCount ?? 0,
+      guardrailExcludedDateKeysSample: j.guardrailExcludedDateKeysSample ?? [],
       testDateKeysLocalCount: j.dateKeyDiag?.testDateKeysLocalCount ?? 0,
       testDateKeysLocalSample: j.dateKeyDiag?.testDateKeysLocalSample ?? [],
       excludedDateKeysCount: j.excludedDateKeysCount ?? 0,
@@ -441,7 +441,8 @@ function buildFullReport(args: {
   section("B) Scenario: Vacant/Travel (DB) vs Test Dates", () => {
     lines.push("travelRangesFromDb (Vacant/Travel): " + JSON.stringify(j.travelRangesFromDb));
     lines.push("testRangesInput (Test Dates; ONLY these scored): " + JSON.stringify(j.testRangesInput));
-    lines.push("buildExcludedRanges (travel ∪ test): " + JSON.stringify(j.buildExcludedRanges));
+    lines.push("Guardrail union (Travel ∪ Test): " + JSON.stringify(j.guardrailExcludedRanges));
+    lines.push("Vacant/Travel (DB) dates are guardrails and are never scored; Test Dates are the scoring set.");
     lines.push("--- Test interval coverage ---");
     kv("testIntervalsCount", j.testIntervalsCount);
     kv("testDaysCount", j.testDaysCount);
@@ -456,8 +457,8 @@ function buildFullReport(args: {
       lines.push("travelDateKeysLocalSample: " + listTrunc(d.travelDateKeysLocalSample, 10).join(", "));
       kv("testDateKeysLocalCount", d.testDateKeysLocalCount);
       lines.push("testDateKeysLocalSample: " + listTrunc(d.testDateKeysLocalSample, 10).join(", "));
-      kv("buildExcludedDateKeysCount", d.buildExcludedDateKeysCount);
-      lines.push("buildExcludedDateKeysSample: " + listTrunc(d.buildExcludedDateKeysSample, 10).join(", "));
+      kv("guardrailExcludedDateKeysCount", d.guardrailExcludedDateKeysCount);
+      lines.push("guardrailExcludedDateKeysSample: " + listTrunc(d.guardrailExcludedDateKeysSample, 10).join(", "));
       lines.push("--- Set arithmetic ---");
       kv("onlyTravelCount", d.setArithmetic.onlyTravelCount);
       lines.push("onlyTravelSample: " + listTrunc(d.setArithmetic.onlyTravelSample, 10).join(", "));
@@ -530,8 +531,8 @@ function buildFullReport(args: {
     kv("configHash", j.configHash);
     kv("weekdayWeekendSplitUsed", fullReportJson.engine.weekdayWeekendSplitUsed);
     kv("dayTotalSource", fullReportJson.engine.dayTotalSource);
-    kv("buildExcludedDateKeysCount", j.buildExcludedDateKeysCount);
-    lines.push("buildExcludedDateKeysSample: " + listTrunc(j.buildExcludedDateKeysSample, 10).join(", "));
+    kv("guardrailExcludedDateKeysCount", j.guardrailExcludedDateKeysCount);
+    lines.push("guardrailExcludedDateKeysSample: " + listTrunc(j.guardrailExcludedDateKeysSample, 10).join(", "));
     kv("testDateKeysLocalCount", j.dateKeyDiag?.testDateKeysLocalCount ?? 0);
     lines.push("testDateKeysLocalSample: " + listTrunc(j.dateKeyDiag?.testDateKeysLocalSample ?? [], 10).join(", "));
     const diag = fullReportJson.engine.usageShapeProfileDiag as typeof j.usageShapeProfileDiag | undefined;
@@ -725,7 +726,7 @@ export async function POST(req: NextRequest) {
 
   const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
   const travelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(travelRangesFromDb, timezone);
-  const buildExcludedDateKeysLocal = new Set<string>([...Array.from(travelDateKeysLocal), ...Array.from(testDateKeysLocal)]);
+  const guardrailExcludedDateKeysLocal = new Set<string>([...Array.from(travelDateKeysLocal), ...Array.from(testDateKeysLocal)]);
   const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
   if (overlapLocal.size > 0) {
     return NextResponse.json(
@@ -797,8 +798,8 @@ export async function POST(req: NextRequest) {
     travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
     testDateKeysLocalCount: testDateKeysLocal.size,
     testDateKeysLocalSample: sortedSample(testDateKeysLocal),
-    buildExcludedDateKeysCount: buildExcludedDateKeysLocal.size,
-    buildExcludedDateKeysSample: sortedSample(buildExcludedDateKeysLocal).slice(0, 10),
+    guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+    guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal).slice(0, 10),
     setArithmetic: {
       onlyTravelCount: onlyTravel.size,
       onlyTravelSample: sortedSample(onlyTravel),
@@ -900,7 +901,7 @@ export async function POST(req: NextRequest) {
   }
 
   const listTestDateKeys = testDateKeysSorted;
-  const buildExcludedDateKeysSample = sortedSample(buildExcludedDateKeysLocal).slice(0, 10);
+  const guardrailExcludedDateKeysSample = sortedSample(guardrailExcludedDateKeysLocal).slice(0, 10);
   const testDatasetStub = {
     summary: { start: fetchStart, end: fetchEnd, intervalsCount: actualTestIntervals.length },
     totals: { netKwh: metrics.totalActualKwhMasked },
@@ -918,12 +919,12 @@ export async function POST(req: NextRequest) {
     timezone,
     testRangesInput: testRanges,
     travelRangesFromDb,
-    buildExcludedRanges: Array.from(buildExcludedDateKeysLocal).sort().map((d) => ({ startDate: d, endDate: d })),
+    guardrailExcludedRanges: Array.from(guardrailExcludedDateKeysLocal).sort().map((d) => ({ startDate: d, endDate: d })),
     listTestDateKeys,
     testIntervalsCount: actualTestIntervals.length,
     testDaysCount: listTestDateKeys.length,
-    buildExcludedDateKeysCount: buildExcludedDateKeysLocal.size,
-    buildExcludedDateKeysSample,
+    guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+    guardrailExcludedDateKeysSample,
     dateKeyDiag,
     dataset: testDatasetStub,
     buildInputs: { canonicalMonths: [] },
