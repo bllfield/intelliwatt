@@ -404,6 +404,6 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     }
 
     const simKwh = (shape96[slot96] ?? 1 / 96) * (targetDayKwh ?? 0);
-    return { timestamp: ts, kwh: Math.max(0, simKwh) };
+    return { timestamp: canonicalIntervalKey(ts), kwh: Math.max(0, simKwh) };
   });
 }

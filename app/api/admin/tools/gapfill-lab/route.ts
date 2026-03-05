@@ -271,6 +271,11 @@ function buildFullReport(args: {
   enginePath?: "production_past_stitched" | "gapfill_test_days_profile";
   expectedTestIntervals?: number;
   coveragePct?: number | null;
+  joinJoinedCount?: number;
+  joinMissingCount?: number;
+  joinPct?: number | null;
+  joinSampleActualTs?: string[];
+  joinSampleSimTs?: string[];
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -377,6 +382,11 @@ function buildFullReport(args: {
       excludedDateKeysSample: j.excludedDateKeysSample ?? [],
       expectedTestIntervals: j.expectedTestIntervals ?? undefined,
       coveragePct: j.coveragePct ?? undefined,
+      joinJoinedCount: j.joinJoinedCount ?? undefined,
+      joinMissingCount: j.joinMissingCount ?? undefined,
+      joinPct: j.joinPct != null ? round2(j.joinPct * 100) + "%" : undefined,
+      joinSampleActualTs: j.joinSampleActualTs ?? undefined,
+      joinSampleSimTs: j.joinSampleSimTs ?? undefined,
       weatherUsed: false,
       weatherNote: "Weather not integrated in gap-fill lab path.",
     },
@@ -415,8 +425,14 @@ function buildFullReport(args: {
   if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
   const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
   if (highWapeMonth) fullReportJson.notes.push(`Masked month ${highWapeMonth.month} WAPE ${highWapeMonth.wape}% is much higher than others.`);
-  if (j.metrics.totalActualKwhMasked > 0 && j.metrics.totalSimKwhMasked === 0) {
+  if (j.joinPct != null && j.joinPct < 0.95) {
     fullReportJson.notes.push("ERROR: simulated intervals did not join to actual timestamps; check timestamp keying.");
+    if (Array.isArray(j.joinSampleActualTs) && j.joinSampleActualTs.length > 0) {
+      fullReportJson.notes.push("joinSampleActualTs (first missing): " + j.joinSampleActualTs.slice(0, 5).join(", "));
+    }
+    if (Array.isArray(j.joinSampleSimTs) && j.joinSampleSimTs.length > 0) {
+      fullReportJson.notes.push("joinSampleSimTs (first 5): " + j.joinSampleSimTs.slice(0, 5).join(", "));
+    }
   }
 
   const lines: string[] = [];
@@ -503,6 +519,9 @@ function buildFullReport(args: {
     if (enginePath === "gapfill_test_days_profile") {
       kv("expectedTestIntervals", j.expectedTestIntervals ?? "—");
       kv("coveragePct", j.coveragePct != null ? round2((j.coveragePct as number) * 100) + "%" : "—");
+      kv("joinJoinedCount", j.joinJoinedCount ?? "—");
+      kv("joinMissingCount", j.joinMissingCount ?? "—");
+      kv("joinPct", j.joinPct != null ? round2((j.joinPct as number) * 100) + "%" : "—");
       lines.push("No Past cache; sim from UsageShapeProfile (or uniform fallback).");
     } else {
       kv("userCacheTried", (fullReportJson.engine as any).userCacheTried ?? false);
@@ -770,10 +789,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const actualTestIntervalsCanon = actualTestIntervals.map((p) => ({
+    ...p,
+    timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+  }));
+
   const usageShapeProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
   const simIntervals = simulateIntervalsForTestDaysFromUsageShapeProfile({
     timezone,
-    testIntervals: actualTestIntervals,
+    testIntervals: actualTestIntervalsCanon,
     usageShapeProfileRowOrNull: usageShapeProfile as UsageShapeProfileRowForSim,
   });
   const simulatedByTs = new Map<string, number>();
@@ -782,8 +806,23 @@ export async function POST(req: NextRequest) {
     if (ts) simulatedByTs.set(canonicalIntervalKey(ts), Number(p?.kwh) || 0);
   }
 
+  const actualCount = actualTestIntervalsCanon.length;
+  const joinedCount = actualTestIntervalsCanon.filter((p) => simulatedByTs.has(p.timestamp)).length;
+  const joinMissingCount = actualCount - joinedCount;
+  const joinPct = actualCount > 0 ? joinedCount / actualCount : 1;
+  const joinSampleActualTs: string[] = [];
+  if (joinMissingCount > 0) {
+    for (const p of actualTestIntervalsCanon) {
+      if (!simulatedByTs.has(p.timestamp)) {
+        joinSampleActualTs.push(p.timestamp);
+        if (joinSampleActualTs.length >= 5) break;
+      }
+    }
+  }
+  const joinSampleSimTs = Array.from(simulatedByTs.keys()).slice(0, 5);
+
   const metrics = computeGapFillMetrics({
-    actual: actualTestIntervals,
+    actual: actualTestIntervalsCanon,
     simulated: simIntervals,
     simulatedByTs,
     timezone,
@@ -868,8 +907,8 @@ export async function POST(req: NextRequest) {
   if (hasPool) {
     let poolSumActual = 0, poolSumSim = 0, poolSumAbs = 0, poolN = 0;
     let nonSumActual = 0, nonSumSim = 0, nonSumAbs = 0, nonN = 0;
-    for (const p of actualTestIntervals) {
-      const ts = String(p?.timestamp ?? "").trim();
+    for (const p of actualTestIntervalsCanon) {
+      const ts = p.timestamp;
       const actualKwh = Number(p?.kwh) || 0;
       const simKwh = simulatedByTs.get(ts) ?? 0;
       const hour = localHourInTimezone(ts, timezone);
@@ -960,6 +999,11 @@ export async function POST(req: NextRequest) {
     enginePath: "gapfill_test_days_profile",
     expectedTestIntervals,
     coveragePct: coveragePctNum,
+    joinJoinedCount: joinedCount,
+    joinMissingCount: joinMissingCount,
+    joinPct,
+    joinSampleActualTs,
+    joinSampleSimTs,
   });
 
   const pasteLines = [
