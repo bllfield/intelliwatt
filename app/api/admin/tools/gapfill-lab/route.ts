@@ -300,6 +300,10 @@ function buildFullReport(args: {
   excludedFromTest_travelCount?: number;
   excludedFromTraining_travelCount?: number;
   excludedFromTraining_testCount?: number;
+  trainingSelectionMode?: "before_range" | "all_non_test_days";
+  trainingEligibleDateKeysCount?: number;
+  trainingDateKeysSample?: string[];
+  trainingMonthDayCountsSample?: Record<string, number>;
   trainingCoverage?: { expected: number; found: number | null; pct: number | null };
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
@@ -360,6 +364,10 @@ function buildFullReport(args: {
       excludedFromTest_travelCount: j.excludedFromTest_travelCount,
       excludedFromTraining_travelCount: j.excludedFromTraining_travelCount,
       excludedFromTraining_testCount: j.excludedFromTraining_testCount,
+      trainingSelectionMode: j.trainingSelectionMode ?? null,
+      trainingEligibleDateKeysCount: j.trainingEligibleDateKeysCount ?? null,
+      trainingDateKeysSample: j.trainingDateKeysSample ?? [],
+      trainingMonthDayCountsSample: j.trainingMonthDayCountsSample ?? {},
       trainingCoverage: j.trainingCoverage,
       testIntervalsCount: j.testIntervalsCount,
       testDaysCount: j.testDaysCount,
@@ -517,6 +525,10 @@ function buildFullReport(args: {
     kv("trainingGapDays", j.trainingGapDays ?? "—");
     kv("excludedFromTraining_travelCount", j.excludedFromTraining_travelCount ?? "—");
     kv("excludedFromTraining_testCount", j.excludedFromTraining_testCount ?? "—");
+    kv("trainingSelectionMode", j.trainingSelectionMode ?? "—");
+    kv("trainingEligibleDateKeysCount", j.trainingEligibleDateKeysCount ?? "—");
+    if ((j.trainingDateKeysSample?.length ?? 0) > 0) lines.push("trainingDateKeysSample: " + listTrunc(j.trainingDateKeysSample!, 15).join(", "));
+    if (j.trainingMonthDayCountsSample && Object.keys(j.trainingMonthDayCountsSample).length > 0) lines.push("trainingMonthDayCountsSample: " + JSON.stringify(j.trainingMonthDayCountsSample));
     if (j.trainingCoverage) {
       kv("trainingCoverage_expected", j.trainingCoverage.expected);
       kv("trainingCoverage_found", j.trainingCoverage.found ?? "—");
@@ -835,6 +847,10 @@ export async function POST(req: NextRequest) {
   let candidateWindowStart: string | null = null;
   let candidateWindowEnd: string | null = null;
   let excludedFromTest_travelCount = 0;
+  /** For random_days only: date keys in candidate window with sufficient coverage (reused for training pool). */
+  let candidateDateKeysForTraining: string[] = [];
+  /** For random_days only: candidate-window intervals (reused for training to avoid second fetch). */
+  let candidateIntervalsForTraining: Array<{ timestamp: string; kwh: number }> | null = null;
 
   if (testDaysRequested != null) {
     const todayTz = dateKeyInTimezone(new Date().toISOString(), timezone);
@@ -846,10 +862,12 @@ export async function POST(req: NextRequest) {
       startDate: candidateStart,
       endDate: candidateEnd,
     });
+    candidateIntervalsForTraining = candidateIntervals ?? null;
     const coverage = summarizeDailyCoverageFromIntervals(candidateIntervals ?? [], timezone);
     const candidateDateKeys = Array.from(coverage.keys()).filter(
       (dk) => (coverage.get(dk)?.pct ?? 0) >= minDayCoveragePct
     ).sort();
+    candidateDateKeysForTraining = candidateDateKeys;
     seedUsed = seed || `${house.id}-${todayTz}`;
     const picked = pickRandomTestDateKeys({
       candidateDateKeys,
@@ -908,12 +926,33 @@ export async function POST(req: NextRequest) {
   const minTestKey = testDateKeysSorted[0] ?? "";
   const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
-  const trainEnd = prevCalendarDay(minTestKey, trainGapDays);
-  const trainStart = prevCalendarDay(trainEnd, trainMaxDays);
-  const trainingDateKeysAll = localDateKeysInRange(trainStart, trainEnd, timezone);
-  const trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
+
+  let trainStart: string;
+  let trainEnd: string;
+  let trainingDateKeysAll: string[];
+  let trainingDateKeysSet: Set<string>;
+  if (testSelectionMode === "random_days" && candidateWindowStart != null && candidateWindowEnd != null) {
+    trainStart = candidateWindowStart;
+    trainEnd = candidateWindowEnd;
+    trainingDateKeysAll = [...candidateDateKeysForTraining];
+    trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
+  } else {
+    trainEnd = prevCalendarDay(minTestKey, trainGapDays);
+    trainStart = prevCalendarDay(trainEnd, trainMaxDays);
+    trainingDateKeysAll = localDateKeysInRange(trainStart, trainEnd, timezone);
+    trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
+  }
   const excludedFromTraining_travelCount = trainingDateKeysAll.filter((d) => travelDateKeysLocal.has(d)).length;
   const excludedFromTraining_testCount = trainingDateKeysAll.filter((d) => testDateKeysLocal.has(d)).length;
+  const trainingSelectionMode: "before_range" | "all_non_test_days" =
+    testSelectionMode === "random_days" ? "all_non_test_days" : "before_range";
+  const trainingEligibleDateKeysCount = trainingDateKeysSet.size;
+  const trainingDateKeysSample = Array.from(trainingDateKeysSet).sort().slice(0, 15);
+  const trainingMonthDayCountsSample: Record<string, number> = {};
+  for (const dk of Array.from(trainingDateKeysSet)) {
+    const month = dk.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(month)) trainingMonthDayCountsSample[month] = (trainingMonthDayCountsSample[month] ?? 0) + 1;
+  }
 
   const actualIntervals = await getActualIntervalsForRange({
     houseId: house.id,
@@ -968,12 +1007,15 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const trainingIntervalsRaw = await getActualIntervalsForRange({
-      houseId: house.id,
-      esiid,
-      startDate: trainStart,
-      endDate: trainEnd,
-    });
+    const trainingIntervalsRaw =
+      testSelectionMode === "random_days" && candidateIntervalsForTraining != null
+        ? candidateIntervalsForTraining
+        : await getActualIntervalsForRange({
+            houseId: house.id,
+            esiid,
+            startDate: trainStart,
+            endDate: trainEnd,
+          });
     const trainingIntervalsFiltered = (trainingIntervalsRaw ?? []).filter((p) =>
       trainingDateKeysSet.has(dateKeyInTimezone(p.timestamp, timezone))
     );
@@ -1227,6 +1269,10 @@ export async function POST(req: NextRequest) {
     excludedFromTest_travelCount: testSelectionMode === "random_days" ? excludedFromTest_travelCount : undefined,
     excludedFromTraining_travelCount,
     excludedFromTraining_testCount,
+    trainingSelectionMode,
+    trainingEligibleDateKeysCount,
+    trainingDateKeysSample,
+    trainingMonthDayCountsSample,
     trainingCoverage: {
       expected: trainingCoverageExpected,
       found: trainingCoverageFound,
@@ -1315,6 +1361,10 @@ export async function POST(req: NextRequest) {
     excludedFromTest_travelCount: testSelectionMode === "random_days" ? excludedFromTest_travelCount : undefined,
     excludedFromTraining_travelCount,
     excludedFromTraining_testCount,
+    trainingSelectionMode,
+    trainingEligibleDateKeysCount,
+    trainingDateKeysSample,
+    trainingMonthDayCountsSample,
     trainingCoverage: { expected: trainingCoverageExpected, found: trainingCoverageFound, pct: trainingCoveragePct },
   });
   } catch (err) {
