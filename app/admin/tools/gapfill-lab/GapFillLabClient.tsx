@@ -336,7 +336,7 @@ export default function GapFillLabClient() {
         <div className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5">
           <div className="text-sm font-medium text-brand-navy mb-1">Prime cache (optional)</div>
           <p className="text-sm text-brand-navy/70 mb-2">
-            <strong>Prime for Compare</strong> (recommended): enter your travel ranges below, then click it. Builds the lab cache for those exact ranges so Run Compare finishes in seconds (1–5 min to prime). <strong>Prime Past cache</strong>: primes the user’s dashboard Past only (no ranges).
+            <strong>Prime for Compare</strong> is what makes Run Compare fast when you have ranges: enter your travel ranges below, then click it. Wait 1–5 min; after that, Run Compare finishes in seconds. <strong>Prime Past cache</strong> only primes the dashboard Past (does not help Run Compare when you have ranges).
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
