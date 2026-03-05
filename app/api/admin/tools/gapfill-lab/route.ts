@@ -64,40 +64,35 @@ function yearMonthsFromRange(startDate: string, endDate: string): string[] {
 
 type DateRange = { startDate: string; endDate: string };
 
-/** Normalize ranges to local date keys (YYYY-MM-DD) in tz, inclusive. No end+1. Uses UTC midday + Intl for DST safety. */
-function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], timezone: string): Set<string> {
+/**
+ * Eval date keys: we treat inputs as local calendar dates for eval key generation; timezone is
+ * applied only when mapping local excluded days to engine UTC excluded date keys (see
+ * buildExcludedUtcDateKeySetFromLocalKeys).
+ */
+/** Normalize ranges to local date keys (YYYY-MM-DD), inclusive. Inputs are local calendar dates (e.g. from HTML date inputs); we iterate in calendar-date space so June 13–July 1 always yields 19 keys regardless of timezone. */
+function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone: string): Set<string> {
   const out = new Set<string>();
+  const dayMs = 24 * 60 * 60 * 1000;
   for (const r of ranges ?? []) {
     const start = (r?.startDate ?? "").slice(0, 10);
     const end = (r?.endDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
     if (end < start) continue;
-    const startMs = Date.UTC(
+    let t = Date.UTC(
       Number(start.slice(0, 4)),
       Number(start.slice(5, 7)) - 1,
-      Number(start.slice(8, 10)),
-      12, 0, 0
+      Number(start.slice(8, 10))
     );
     const endMs = Date.UTC(
       Number(end.slice(0, 4)),
       Number(end.slice(5, 7)) - 1,
-      Number(end.slice(8, 10)),
-      12, 0, 0
+      Number(end.slice(8, 10))
     );
-    const dayMs = 24 * 60 * 60 * 1000;
-    for (let t = startMs; t <= endMs; t += dayMs) {
-      const dt = new Date(t);
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: timezone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).formatToParts(dt);
-      const y = parts.find((p) => p.type === "year")?.value;
-      const m = parts.find((p) => p.type === "month")?.value;
-      const d = parts.find((p) => p.type === "day")?.value;
-      if (!y || !m || !d) continue;
-      out.add(`${y}-${m}-${d}`);
+    for (; t <= endMs; t += dayMs) {
+      const d = new Date(t);
+      out.add(
+        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+      );
     }
   }
   return out;
@@ -165,20 +160,6 @@ function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
   const out = new Set<string>();
   for (const x of Array.from(a)) if (b.has(x)) out.add(x);
   return out;
-}
-
-function sanityCheckKnownRange(
-  evalLocal: Set<string>,
-  evalRanges: DateRange[]
-): { pass: boolean; count: number; last: string | null } | null {
-  if (!Array.isArray(evalRanges) || evalRanges.length !== 1) return null;
-  const r = evalRanges[0];
-  if ((r?.startDate ?? "").slice(0, 10) !== "2025-06-13") return null;
-  if ((r?.endDate ?? "").slice(0, 10) !== "2025-07-01") return null;
-  const sorted = Array.from(evalLocal).sort();
-  const last = sorted.length ? sorted[sorted.length - 1]! : null;
-  const pass = sorted.length === 19 && last === "2025-07-01";
-  return { pass, count: sorted.length, last };
 }
 
 /** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
@@ -301,7 +282,6 @@ function buildFullReport(args: {
       overlapSample: string[];
     };
   };
-  sanityCheck?: { pass: boolean; count: number; last: string | null } | null;
   dataset: { summary: any; totals: any; insights: any; monthly?: Array<{ month?: string; kwh?: number }> };
   buildInputs: { canonicalMonths: string[] };
   configHash: string;
@@ -398,7 +378,6 @@ function buildFullReport(args: {
       missingMaskedIntervals: missingMaskedIntervals,
       coveragePct: coveragePct,
       ...(j.dateKeyDiag ? { dateKeyDiag: j.dateKeyDiag } : {}),
-      ...(j.sanityCheck != null ? { sanityCheck_evalRange_2025_06_13_to_2025_07_01: j.sanityCheck } : {}),
     },
     parity: {
       windowStartUtc: j.dataset.summary?.start ?? null,
@@ -474,9 +453,6 @@ function buildFullReport(args: {
   };
 
   if ((j.dataset.summary?.intervalsCount ?? 0) !== 35136) fullReportJson.notes.push(`intervalCount ${j.dataset.summary?.intervalsCount} differs from expected 35136.`);
-  if (j.sanityCheck != null) {
-    fullReportJson.notes.push(`sanityCheck_evalRange_2025_06_13_to_2025_07_01: ${j.sanityCheck.pass ? "pass" : "fail"} (count=${j.sanityCheck.count}, last=${j.sanityCheck.last ?? "—"})`);
-  }
   const baseloadDaily = Number(j.dataset.insights?.baseloadDaily);
   if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
   const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
@@ -531,9 +507,6 @@ function buildFullReport(args: {
       lines.push("onlyEvalSample: " + listTrunc(d.setArithmetic.onlyEvalSample, 10).join(", "));
       kv("overlapCount", d.setArithmetic.overlapCount);
       lines.push("overlapSample: " + listTrunc(d.setArithmetic.overlapSample, 10).join(", "));
-    }
-    if (j.sanityCheck != null) {
-      lines.push("sanityCheck_evalRange_2025_06_13_to_2025_07_01: " + (j.sanityCheck.pass ? "pass" : "fail") + " (count=" + j.sanityCheck.count + ", last=" + (j.sanityCheck.last ?? "—") + ")");
     }
   });
 
@@ -858,7 +831,6 @@ export async function POST(req: NextRequest) {
       overlapSample: sortedSample(overlap),
     },
   };
-  const sanityCheck = sanityCheckKnownRange(evalDateKeysLocal, evalRanges);
 
   const buildExcludedUtcSet = buildExcludedUtcDateKeySetFromLocalKeys(
     buildExcludedDateKeysLocal,
@@ -1167,7 +1139,6 @@ export async function POST(req: NextRequest) {
     evalMaskedDateKeysCount: evalDateKeysLocal.size,
     evalMaskedDateKeysSample,
     dateKeyDiag,
-    sanityCheck,
     dataset: {
       summary: dataset.summary,
       totals: dataset.totals,
