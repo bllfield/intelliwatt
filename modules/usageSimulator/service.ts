@@ -1369,6 +1369,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
             intervalDataFingerprint,
           });
           const scenarioIdForCache = scenarioId ?? "BASELINE";
+          const cacheKeyDiag = {
+            inputHash,
+            engineVersion: PAST_ENGINE_VERSION,
+            intervalDataFingerprint,
+            scenarioId: scenarioIdForCache,
+          };
           const cached = await getCachedPastDataset({
             houseId: args.houseId,
             scenarioId: scenarioIdForCache,
@@ -1389,6 +1395,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;
             (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
+            (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
           } else {
             const pastResult = await getPastSimulatedDatasetForHouse({
               userId: args.userId,
@@ -1414,6 +1421,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
+              (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
             }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);

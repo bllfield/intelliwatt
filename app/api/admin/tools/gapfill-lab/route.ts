@@ -1243,6 +1243,12 @@ export async function POST(req: NextRequest) {
       sourceOfWindow: "actualSummaryFallback",
     },
     pastBuildIntervalsFetchCount: cacheHit ? 0 : 1,
+    cacheKeyDiag: {
+      inputHash: inputHash ?? null,
+      engineVersion: PAST_ENGINE_VERSION,
+      intervalDataFingerprint: intervalDataFingerprint ?? null,
+      scenarioId: userCacheHit ? (userPastScenarioId ?? null) : "gapfill_lab",
+    },
   });
 
   const pasteLines = [
