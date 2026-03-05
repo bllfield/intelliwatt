@@ -15,7 +15,7 @@ export type PastInputHashPayload = {
   timezone: string;
   travelRanges: Array<{ startDate: string; endDate: string }>;
   buildInputs: Record<string, unknown>;
-  /** Fingerprint of actual interval data (count:maxTs). When backfills add data, this changes so cache key changes and we rebuild. */
+  /** Fingerprint of actual interval data: count:maxTsEpoch:sumKwhMilli. Changes on backfill or kWh edits so cache key changes. */
   intervalDataFingerprint?: string;
 };
 

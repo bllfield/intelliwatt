@@ -39,14 +39,27 @@ So whenever the house endpoint returns a successful Past response, that response
 
 We do **not** skip cache: we always try cache first and always attempt to save after a successful build.
 
-## Cache freshness: new interval backfills
+## Cache freshness: interval data fingerprint
 
-The cache key includes an **interval data fingerprint** (count + latest timestamp of actual intervals in the window). When new intervals are backfilled (e.g. SMT or Green Button data arrives later), the fingerprint changes, so the cache key changes:
+The cache key includes an **interval data fingerprint** so that any change to the underlying actual data invalidates the cache. Format: `count:maxTsEpoch:sumKwhMilli`:
+
+- **count** – number of 15‑minute intervals in the window
+- **maxTsEpoch** – latest interval timestamp (epoch ms)
+- **sumKwhMilli** – `round(sum(kwh) * 1000)` over the same window (same canonical source as `getActualIntervalsForRange`)
+
+When new intervals are backfilled, or kWh values are corrected for existing timestamps, the fingerprint changes, so the cache key changes:
 
 - **Cache miss** → full Past build runs, then the new result is written to cache.
 - Subsequent requests use the new cached dataset.
 
-So cached intervals are never stale: new backfills automatically cause a rebuild and re-cache. No TTL or manual invalidation is required. The fingerprint is computed by `getIntervalDataFingerprint` in `lib/usage/actualDatasetForHouse.ts` and passed into `computePastInputHash` by both the user house route (via `getSimulatedUsageForHouseScenario`) and the Gap-Fill Lab.
+So cached intervals are never stale: backfills and kWh corrections both cause a rebuild and re-cache. No TTL or manual invalidation is required. The fingerprint is computed by `getIntervalDataFingerprint` in `lib/usage/actualDatasetForHouse.ts` (SMT and Green Button use the same canonical source as production interval reads) and passed into `computePastInputHash` by both the user house route (via `getSimulatedUsageForHouseScenario`) and the Gap-Fill Lab.
+
+### How to verify fingerprint and cache invalidation
+
+1. Run Past once (e.g. Gap-Fill Lab “Run Compare” or dashboard Past view). Note `intervalDataFingerprint` and `inputHash` in the report (Section F) and `cacheHit: false` on first run.
+2. Run again with same inputs: `cacheHit: true`, same `inputHash` and `intervalDataFingerprint`.
+3. **Backfill:** Add or remove intervals in the window in the DB (SMT or Green Button). Next run: fingerprint changes (count and/or maxTs and/or sumKwhMilli), so `inputHash` changes, `cacheHit: false`, then after rebuild the new result is cached.
+4. **kWh correction:** Update one interval’s kWh for an existing timestamp in the window (same count and maxTs). Next run: `sumKwhMilli` changes, so `inputHash` changes, `cacheHit: false`, then rebuild and re-cache.
 
 ## Manually priming the cache (admin)
 

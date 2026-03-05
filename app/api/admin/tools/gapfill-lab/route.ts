@@ -181,6 +181,7 @@ function buildFullReport(args: {
   profileAutoBuilt?: boolean;
   cacheHit?: boolean;
   inputHash?: string;
+  intervalDataFingerprint?: string;
   engineVersion?: string;
   intervalsCodec?: string;
   compressedBytesLength?: number;
@@ -245,6 +246,7 @@ function buildFullReport(args: {
       configHash: j.configHash,
       cacheHit: j.cacheHit ?? false,
       inputHash: j.inputHash ?? null,
+      intervalDataFingerprint: j.intervalDataFingerprint ?? null,
       engineVersion: j.engineVersion ?? null,
       intervalsCodec: j.intervalsCodec ?? null,
       compressedBytesLength: j.compressedBytesLength ?? null,
@@ -357,6 +359,7 @@ function buildFullReport(args: {
     lines.push("functionsUsed: getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve");
     kv("cacheHit", fullReportJson.engine.cacheHit);
     kv("inputHash", fullReportJson.engine.inputHash ?? "—");
+    kv("intervalDataFingerprint", fullReportJson.engine.intervalDataFingerprint ?? "—");
     kv("engineVersion", fullReportJson.engine.engineVersion ?? "—");
     kv("intervalsCodec", fullReportJson.engine.intervalsCodec ?? "—");
     kv("compressedBytesLength", fullReportJson.engine.compressedBytesLength ?? "—");
@@ -957,6 +960,7 @@ export async function POST(req: NextRequest) {
     profileAutoBuilt,
     cacheHit,
     inputHash,
+    intervalDataFingerprint,
     engineVersion: PAST_ENGINE_VERSION,
     intervalsCodec: INTERVAL_CODEC_V1,
     compressedBytesLength,
