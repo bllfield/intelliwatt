@@ -102,6 +102,7 @@ Notes:
 ### Usage Layer Map (Canonical)
 
 - Canonical interval-series layer definitions and route/function mapping live in `docs/USAGE_LAYER_MAP.md`.
+- The canonical simulation data model, overlay contract, and invariants (datasets, overlays, Vacant/Travel vs Test Dates, window rules) are defined in **docs/SIM_PLATFORM_CONTRACT.md** (Sim Platform Contract v1).
 - Code-level enum source of truth is `modules/usageSimulator/kinds.ts` (`IntervalSeriesKind`).
 - Any new usage/simulation route, repository function, or persistence path added under this plan must map explicitly to one of the five canonical layer names.
 
@@ -4598,6 +4599,7 @@ Scope
    - Display counts and sample billing periods.
    - Add PowerShell/curl smoke tests to `docs/TESTING_API.md` after endpoint exists.
    - No cron/SFTP automation in this change—ad-hoc API pulls only.
+   - Admin tooling shipped alongside each engine feature (tests + editable assumptions).
 
 Guardrails
 
