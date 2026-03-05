@@ -781,6 +781,7 @@ export async function POST(req: NextRequest) {
     actual: actualTestIntervals,
     simulated: simIntervals,
     simulatedByTs,
+    timezone,
   });
 
   const onlyDb = setDiff(dbTravelDateKeysLocal, testDateKeysLocal);
