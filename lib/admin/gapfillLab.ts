@@ -259,6 +259,112 @@ function nextCalendarDay(ymd: string): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Return the calendar date (YYYY-MM-DD) N days before the given one. */
+export function prevCalendarDay(ymd: string, daysBack: number): string {
+  const d = new Date(ymd + "T12:00:00.000Z");
+  d.setUTCDate(d.getUTCDate() - daysBack);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Lite profile shape compatible with UsageShapeProfileRowForSim (no DB write). */
+export type UsageShapeProfileLite = {
+  shapeByMonth96: Record<string, number[]>;
+  avgKwhPerDayWeekdayByMonth: number[];
+  avgKwhPerDayWeekendByMonth: number[];
+};
+
+/**
+ * Build a minimal usage shape profile from interval data (training window).
+ * Exclude no dates here; caller must pass already-filtered training intervals.
+ */
+export function buildUsageShapeProfileLiteFromIntervals(args: {
+  timezone: string;
+  intervals: IntervalPoint[];
+}): UsageShapeProfileLite {
+  const { timezone, intervals } = args;
+  const byDate = new Map<string, { slots: number[]; totalKwh: number; dow: number }>();
+
+  for (const p of intervals) {
+    const ts = String(p?.timestamp ?? "").trim();
+    const kwh = Number(p?.kwh) || 0;
+    const dateKey = dateKeyInTimezone(ts, timezone);
+    const slot96 = localSlot96InTimezone(ts, timezone);
+    const dow = localDayOfWeekInTimezone(ts, timezone);
+
+    if (!byDate.has(dateKey)) {
+      byDate.set(dateKey, { slots: Array(96).fill(0), totalKwh: 0, dow });
+    }
+    const row = byDate.get(dateKey)!;
+    row.slots[slot96] += kwh;
+    row.totalKwh += kwh;
+  }
+
+  const byMonth = new Map<
+    string,
+    { weekdayTotals: number[]; weekendTotals: number[]; weekdayShapes: number[][]; weekendShapes: number[][] }
+  >();
+
+  for (const [dateKey, row] of Array.from(byDate)) {
+    const monthKey = dateKey.slice(0, 7);
+    if (!byMonth.has(monthKey)) {
+      byMonth.set(monthKey, {
+        weekdayTotals: [],
+        weekendTotals: [],
+        weekdayShapes: [],
+        weekendShapes: [],
+      });
+    }
+    const m = byMonth.get(monthKey)!;
+    const isWeekend = row.dow === 0 || row.dow === 6;
+    if (row.totalKwh > 1e-9) {
+      const norm = row.slots.map((s) => s / row.totalKwh);
+      if (isWeekend) {
+        m.weekendTotals.push(row.totalKwh);
+        m.weekendShapes.push(norm);
+      } else {
+        m.weekdayTotals.push(row.totalKwh);
+        m.weekdayShapes.push(norm);
+      }
+    }
+  }
+
+  const shapeByMonth96: Record<string, number[]> = {};
+  const weekdayAvgByMonth: Record<string, number> = {};
+  const weekendAvgByMonth: Record<string, number> = {};
+
+  for (const [monthKey, m] of Array.from(byMonth)) {
+    const mean = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+    weekdayAvgByMonth[monthKey] = mean(m.weekdayTotals);
+    weekendAvgByMonth[monthKey] = mean(m.weekendTotals);
+
+    const allShapes: number[][] = [...m.weekdayShapes, ...m.weekendShapes];
+    if (allShapes.length > 0) {
+      const sumSlots = Array(96).fill(0);
+      for (const s of allShapes) {
+        for (let i = 0; i < 96; i++) sumSlots[i] += s[i] ?? 0;
+      }
+      const total = sumSlots.reduce((a, b) => a + b, 0);
+      shapeByMonth96[monthKey] =
+        total > 1e-9 ? sumSlots.map((v) => v / total) : Array(96).fill(1 / 96);
+    } else {
+      shapeByMonth96[monthKey] = Array(96).fill(1 / 96);
+    }
+  }
+
+  const monthKeys = Object.keys(shapeByMonth96).sort();
+  const avgKwhPerDayWeekdayByMonth = monthKeys.map((k) => weekdayAvgByMonth[k] ?? 0);
+  const avgKwhPerDayWeekendByMonth = monthKeys.map((k) => weekendAvgByMonth[k] ?? 0);
+
+  return {
+    shapeByMonth96,
+    avgKwhPerDayWeekdayByMonth,
+    avgKwhPerDayWeekendByMonth,
+  };
+}
+
 /** Enumerate local date keys (YYYY-MM-DD) for a range. start/end are treated as calendar dates
  * (YYYY-MM-DD). If they are full ISO strings, they are converted to local date keys in tz first.
  * Returns the list of calendar date strings from start to end inclusive, so they match

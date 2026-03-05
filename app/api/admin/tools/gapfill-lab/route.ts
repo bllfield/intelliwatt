@@ -9,11 +9,14 @@ import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProf
 import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
+  buildUsageShapeProfileLiteFromIntervals,
   canonicalIntervalKey,
   computeGapFillMetrics,
   dateKeyInTimezone,
   getPoolHourRange,
+  localDateKeysInRange,
   localHourInTimezone,
+  prevCalendarDay,
   simulateIntervalsForTestDaysFromUsageShapeProfile,
   type UsageShapeProfileRowForSim,
 } from "@/lib/admin/gapfillLab";
@@ -276,6 +279,11 @@ function buildFullReport(args: {
   joinPct?: number | null;
   joinSampleActualTs?: string[];
   joinSampleSimTs?: string[];
+  profileSource?: "db" | "auto_built_lite";
+  trainingWindowStartUtc?: string | null;
+  trainingWindowEndUtc?: string | null;
+  trainingIntervalsCount?: number | null;
+  trainingDaysCount?: number | null;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -387,6 +395,11 @@ function buildFullReport(args: {
       joinPct: j.joinPct != null ? round2(j.joinPct * 100) + "%" : undefined,
       joinSampleActualTs: j.joinSampleActualTs ?? undefined,
       joinSampleSimTs: j.joinSampleSimTs ?? undefined,
+      profileSource: j.profileSource ?? undefined,
+      trainingWindowStartUtc: j.trainingWindowStartUtc ?? undefined,
+      trainingWindowEndUtc: j.trainingWindowEndUtc ?? undefined,
+      trainingIntervalsCount: j.trainingIntervalsCount ?? undefined,
+      trainingDaysCount: j.trainingDaysCount ?? undefined,
       weatherUsed: false,
       weatherNote: "Weather not integrated in gap-fill lab path.",
     },
@@ -517,12 +530,19 @@ function buildFullReport(args: {
     kv("enginePath", fullReportJson.engine.enginePath);
     lines.push("functionsUsed: " + (fullReportJson.engine as any).functionsUsed);
     if (enginePath === "gapfill_test_days_profile") {
+      kv("profileSource", j.profileSource ?? "—");
+      if (j.profileSource === "auto_built_lite") {
+        kv("trainingWindowStartUtc", j.trainingWindowStartUtc ?? "—");
+        kv("trainingWindowEndUtc", j.trainingWindowEndUtc ?? "—");
+        kv("trainingIntervalsCount", j.trainingIntervalsCount ?? "—");
+        kv("trainingDaysCount", j.trainingDaysCount ?? "—");
+      }
       kv("expectedTestIntervals", j.expectedTestIntervals ?? "—");
       kv("coveragePct", j.coveragePct != null ? round2((j.coveragePct as number) * 100) + "%" : "—");
       kv("joinJoinedCount", j.joinJoinedCount ?? "—");
       kv("joinMissingCount", j.joinMissingCount ?? "—");
       kv("joinPct", j.joinPct != null ? round2((j.joinPct as number) * 100) + "%" : "—");
-      lines.push("No Past cache; sim from UsageShapeProfile (or uniform fallback).");
+      lines.push("No Past cache; sim from UsageShapeProfile or auto-built lite (or uniform fallback).");
     } else {
       kv("userCacheTried", (fullReportJson.engine as any).userCacheTried ?? false);
       kv("userCacheHit", (fullReportJson.engine as any).userCacheHit ?? false);
@@ -795,10 +815,65 @@ export async function POST(req: NextRequest) {
   }));
 
   const usageShapeProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
+  let profileForSim: UsageShapeProfileRowForSim = usageShapeProfile as UsageShapeProfileRowForSim;
+  let profileSource: "db" | "auto_built_lite" = usageShapeProfile ? "db" : "auto_built_lite";
+  let trainingWindowStartUtc: string | null = null;
+  let trainingWindowEndUtc: string | null = null;
+  let trainingIntervalsCount: number | null = null;
+  let trainingDaysCount: number | null = null;
+
+  if (!usageShapeProfile) {
+    const trainEnd = prevCalendarDay(fetchStart, 1);
+    const trainStart = prevCalendarDay(fetchStart, 60);
+    const trainingDateKeysAll = localDateKeysInRange(trainStart, trainEnd, timezone);
+    const trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
+    if (trainingDateKeysSet.size === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "PROFILE_MISSING_NO_TRAINING_DATA",
+          message:
+            "No UsageShapeProfile for this house and no non-test, non-travel dates in the 60-day training window. Ensure baseline usage exists or build a profile first.",
+          trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
+        },
+        { status: 400 }
+      );
+    }
+    const trainingIntervalsRaw = await getActualIntervalsForRange({
+      houseId: house.id,
+      esiid,
+      startDate: trainStart,
+      endDate: trainEnd,
+    });
+    const trainingIntervalsFiltered = (trainingIntervalsRaw ?? []).filter((p) =>
+      trainingDateKeysSet.has(dateKeyInTimezone(p.timestamp, timezone))
+    );
+    const minTrainingIntervals = 96 * 7;
+    if (trainingIntervalsFiltered.length < minTrainingIntervals) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "PROFILE_MISSING_NO_TRAINING_DATA",
+          message:
+            "No UsageShapeProfile for this house and not enough non-test interval history to auto-build. Ensure baseline usage exists or build a profile first.",
+          trainingIntervalsCount: trainingIntervalsFiltered.length,
+          trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
+        },
+        { status: 400 }
+      );
+    }
+    const lite = buildUsageShapeProfileLiteFromIntervals({ timezone, intervals: trainingIntervalsFiltered });
+    profileForSim = lite;
+    trainingWindowStartUtc = trainStart;
+    trainingWindowEndUtc = trainEnd;
+    trainingIntervalsCount = trainingIntervalsFiltered.length;
+    trainingDaysCount = trainingDateKeysSet.size;
+  }
+
   const simIntervals = simulateIntervalsForTestDaysFromUsageShapeProfile({
     timezone,
     testIntervals: actualTestIntervalsCanon,
-    usageShapeProfileRowOrNull: usageShapeProfile as UsageShapeProfileRowForSim,
+    usageShapeProfileRowOrNull: profileForSim,
   });
   const simulatedByTs = new Map<string, number>();
   for (const p of simIntervals) {
@@ -877,18 +952,18 @@ export async function POST(req: NextRequest) {
       rule: "Gap-fill lab uses profile weekday/weekend avg; no occupancy model.",
     },
     intradayShape: {
-      source: usageShapeProfile ? "usage_shape_profile" : "uniform_fallback",
-      weekdayWeekendSplit: Boolean(usageShapeProfile),
+      source: profileSource === "db" ? "usage_shape_profile" : profileSource === "auto_built_lite" ? "auto_built_lite" : "uniform_fallback",
+      weekdayWeekendSplit: Boolean(profileForSim),
       smoothing: "none",
     },
-    dayTotalSource: usageShapeProfile ? "profile_weekday_weekend_by_month" : "global_avg_or_zero",
+    dayTotalSource: profileForSim ? (profileSource === "auto_built_lite" ? "auto_built_lite_by_month" : "profile_weekday_weekend_by_month") : "global_avg_or_zero",
     meta: {
       simVersion: "gapfill_test_days_profile",
       shapeDerivationVersion: "v1",
       seed: null,
       maskMode: "test_dates_only",
       holdoutN: actualTestIntervals.length,
-      configHash: `engine=gapfill_test_days_profile,profile=${usageShapeProfile ? "yes" : "no"}`,
+      configHash: `engine=gapfill_test_days_profile,profile=${profileSource}`,
     },
   };
 
@@ -1004,6 +1079,11 @@ export async function POST(req: NextRequest) {
     joinPct,
     joinSampleActualTs,
     joinSampleSimTs,
+    profileSource,
+    trainingWindowStartUtc,
+    trainingWindowEndUtc,
+    trainingIntervalsCount,
+    trainingDaysCount,
   });
 
   const pasteLines = [
