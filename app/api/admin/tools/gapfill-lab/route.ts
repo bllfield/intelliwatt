@@ -344,6 +344,12 @@ function buildFullReport(args: {
     sourceOfWindow: "buildInputs" | "baselineBuild" | "actualSummaryFallback";
   };
   pastBuildIntervalsFetchCount?: number;
+  cacheKeyDiag?: {
+    inputHash: string | null;
+    engineVersion: string | null;
+    intervalDataFingerprint: string | null;
+    scenarioId: string | null;
+  };
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -428,6 +434,7 @@ function buildFullReport(args: {
       dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
       ...(j.pastWindowDiag ? { pastWindowDiag: j.pastWindowDiag } : {}),
       pastBuildIntervalsFetchCount: j.pastBuildIntervalsFetchCount ?? undefined,
+      ...(j.cacheKeyDiag ? { cacheKeyDiag: j.cacheKeyDiag } : {}),
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
       profileAutoBuilt: j.profileAutoBuilt ?? false,
       canonicalMonths: j.buildInputs.canonicalMonths,
@@ -592,6 +599,10 @@ function buildFullReport(args: {
       lines.push("pastWindowDiag: canonicalMonthsLen=" + pastWindowDiag.canonicalMonthsLen + " firstMonth=" + (pastWindowDiag.firstMonth ?? "—") + " lastMonth=" + (pastWindowDiag.lastMonth ?? "—") + " windowStartUtc=" + (pastWindowDiag.windowStartUtc ?? "—") + " windowEndUtc=" + (pastWindowDiag.windowEndUtc ?? "—") + " sourceOfWindow=" + (pastWindowDiag.sourceOfWindow ?? "—"));
     }
     kv("pastBuildIntervalsFetchCount", (fullReportJson.engine as any).pastBuildIntervalsFetchCount ?? "—");
+    const cacheKeyDiag = (fullReportJson.engine as any).cacheKeyDiag;
+    if (cacheKeyDiag) {
+      lines.push("cacheKeyDiag: inputHash=" + (cacheKeyDiag.inputHash ?? "—") + " engineVersion=" + (cacheKeyDiag.engineVersion ?? "—") + " intervalDataFingerprint=" + (cacheKeyDiag.intervalDataFingerprint ?? "—") + " scenarioId=" + (cacheKeyDiag.scenarioId ?? "—"));
+    }
     lines.push("canonicalMonths: " + (j.buildInputs.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
@@ -1247,7 +1258,7 @@ export async function POST(req: NextRequest) {
       inputHash: inputHash ?? null,
       engineVersion: PAST_ENGINE_VERSION,
       intervalDataFingerprint: intervalDataFingerprint ?? null,
-      scenarioId: userCacheHit ? (userPastScenarioId ?? null) : "gapfill_lab",
+      scenarioId: userCacheHit ? (userPastScenarioId ?? null) : labCacheHit ? "gapfill_lab" : null,
     },
   });
 
