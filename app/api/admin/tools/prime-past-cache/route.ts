@@ -5,7 +5,7 @@
  * next user request is a cache hit.
  *
  * Use when usage was already pulled but the house never had a successful Past load
- * (e.g. request timed out before save). Requires x-admin-token header.
+ * (e.g. request timed out before save). Auth: session cookie (intelliwatt_admin) or x-admin-token header.
  *
  * If the cache is already filled, this still returns 200 (cache hit; no re-save). Running again
  * with the same inputs is a no-op; if build inputs changed, the cache is upserted (replaced).
@@ -14,15 +14,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
+import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
+
+function hasAdminSessionCookie(request: NextRequest): boolean {
+  const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
+  const email = normalizeEmailSafe(raw);
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email);
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const gate = requireAdmin(req);
-    if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+    if (!hasAdminSessionCookie(req)) {
+      const gate = requireAdmin(req);
+      if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+    }
 
     let body: { houseId?: string; scenarioId?: string; email?: string };
     try {
