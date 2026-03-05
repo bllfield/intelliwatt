@@ -26,6 +26,7 @@ type ApiResponse =
       fullReportText?: string;
       fullReportJson?: object | null;
       message?: string;
+      travelRangesFromDb?: Array<{ startDate: string; endDate: string }>;
     }
   | { ok: false; error: string; message?: string };
 
@@ -44,6 +45,7 @@ export default function GapFillLabClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
+  const [rangesAutofilledFromDb, setRangesAutofilledFromDb] = useState(false);
 
   function addRange() {
     setRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -55,6 +57,14 @@ export default function GapFillLabClient() {
 
   function updateRange(i: number, field: "startDate" | "endDate", value: string) {
     setRanges((prev) => prev.map((r, j) => (j === i ? { ...r, [field]: value.slice(0, 10) } : r)));
+  }
+
+  function handleHouseChange(newHouseId: string) {
+    if (newHouseId !== houseId) {
+      setHouseId(newHouseId);
+      setRanges([{ ...DEFAULT_RANGE }]);
+      setRangesAutofilledFromDb(false);
+    }
   }
 
   async function handleLookup() {
@@ -87,6 +97,12 @@ export default function GapFillLabClient() {
         setHouses(data.houses);
         const currentInList = houseId && data.houses.some((h) => h.id === houseId);
         setHouseId(currentInList ? houseId : data.houses[0].id);
+      }
+      if (data.ok && Array.isArray((data as any).travelRangesFromDb) && (data as any).travelRangesFromDb.length > 0) {
+        setRanges((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
+        setRangesAutofilledFromDb(true);
+      } else {
+        setRangesAutofilledFromDb(false);
       }
       setResult(data);
     } catch (e: any) {
@@ -213,7 +229,7 @@ export default function GapFillLabClient() {
             <label className="block text-sm font-medium text-brand-navy mb-1">House</label>
             <select
               value={houseId}
-              onChange={(e) => setHouseId(e.target.value)}
+              onChange={(e) => handleHouseChange(e.target.value)}
               className="w-full max-w-md border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
             >
               {houses.map((h) => (
@@ -227,6 +243,12 @@ export default function GapFillLabClient() {
 
         <div>
           <label className="block text-sm font-medium text-brand-navy mb-2">Travel/Vacant ranges (start – end date, YYYY-MM-DD)</label>
+          {rangesAutofilledFromDb && (
+            <p className="text-sm text-brand-navy/70 mb-1">Filled from the customer’s saved travel dates; add or edit below.</p>
+          )}
+          <p className="text-sm text-brand-navy/60 mb-2">
+            Run Compare scores accuracy ONLY on the ranges entered below. The simulator build will still honor the customer’s saved travel/vacant dates (if any) so the full-year dataset matches production.
+          </p>
           <div className="space-y-2">
             {ranges.map((r, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2">

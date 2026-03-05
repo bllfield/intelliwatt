@@ -37,7 +37,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Run Compare can take 1–3 min (auto-build + past dataset + metrics)
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
-const WORKSPACE_PAST_NAME = "Past (Corrected)";
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
   const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
@@ -62,6 +61,68 @@ function yearMonthsFromRange(startDate: string, endDate: string): string[] {
     t += dayMs;
   }
   return Array.from(seen).sort();
+}
+
+/** Normalize ranges to local date keys (YYYY-MM-DD) in tz. Returns a Set for deduping. */
+function normalizeRangesToDateKeys(
+  ranges: Array<{ startDate: string; endDate: string }>,
+  tz: string
+): Set<string> {
+  const out = new Set<string>();
+  for (const r of ranges ?? []) {
+    const start = String(r?.startDate ?? "").slice(0, 10);
+    const end = String(r?.endDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
+    for (const d of localDateKeysInRange(start, end, tz)) out.add(d);
+  }
+  return out;
+}
+
+/** Convert a set of local date keys to UTC day-granular ranges for the window (for engine/cache). */
+function buildExcludedUtcSetFromLocalDateKeys(
+  localDateKeys: Set<string>,
+  windowStartDate: string,
+  windowEndDate: string,
+  timezone: string
+): Set<string> {
+  const utcSet = new Set<string>();
+  const windowStart = new Date(windowStartDate + "T00:00:00.000Z").getTime();
+  const windowEnd = new Date(windowEndDate + "T23:59:59.999Z").getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  for (let t = windowStart; t <= windowEnd; t += dayMs) {
+    const utcDateKey = new Date(t).toISOString().slice(0, 10);
+    const localKey = dateKeyInTimezone(new Date(t).toISOString(), timezone);
+    if (localDateKeys.has(localKey)) utcSet.add(utcDateKey);
+  }
+  return utcSet;
+}
+
+/** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
+async function getTravelRangesFromDb(userId: string, houseId: string): Promise<Array<{ startDate: string; endDate: string }>> {
+  const scenarios = await (prisma as any).usageSimulatorScenario.findMany({
+    where: { userId, houseId, archivedAt: null },
+    select: { id: true },
+  }).catch(() => []);
+  if (!scenarios?.length) return [];
+  const scenarioIds = scenarios.map((s: { id: string }) => s.id);
+  const events = await (prisma as any).usageSimulatorScenarioEvent.findMany({
+    where: { scenarioId: { in: scenarioIds }, kind: "TRAVEL_RANGE" },
+    select: { payloadJson: true },
+  }).catch(() => []);
+  const seen = new Set<string>();
+  const out: Array<{ startDate: string; endDate: string }> = [];
+  for (const e of events ?? []) {
+    const p = (e as any)?.payloadJson ?? {};
+    const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
+    const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) continue;
+    const key = `${startDate}\t${endDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ startDate, endDate });
+  }
+  out.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  return out;
 }
 
 /** Build Home Profile snapshot for audit (fields as stored; add spec aliases where needed). */
@@ -130,11 +191,16 @@ function buildFullReport(args: {
   email: string;
   houseLabel: string;
   timezone: string;
-  rangesToMask: Array<{ startDate: string; endDate: string }>;
+  evalRanges: Array<{ startDate: string; endDate: string }>;
+  buildExcludedRanges: Array<{ startDate: string; endDate: string }>;
   travelRangesNormalized: Array<{ startDate: string; endDate: string }>;
   listMaskedDateKeys: string[];
   maskedIntervalsCount: number;
   maskedDaysCount: number;
+  buildExcludedDateKeysCount: number;
+  buildExcludedDateKeysSample: string[];
+  evalMaskedDateKeysCount: number;
+  evalMaskedDateKeysSample: string[];
   dataset: { summary: any; totals: any; insights: any; monthly?: Array<{ month?: string; kwh?: number }> };
   buildInputs: { canonicalMonths: string[] };
   configHash: string;
@@ -216,11 +282,14 @@ function buildFullReport(args: {
     env: j.env,
     identifiers: { houseId: j.houseId, userId: j.userId, email: j.email, houseLabel: j.houseLabel, timezone: j.timezone },
     scenario: {
-      travelRangesInput: j.rangesToMask,
+      evalRangesInput: j.evalRanges,
+      buildExcludedRanges: j.buildExcludedRanges,
       travelRangesNormalized: j.travelRangesNormalized,
       maskedIntervalsCount: j.maskedIntervalsCount,
       maskedDaysCount: j.maskedDaysCount,
       listMaskedDateKeys: j.listMaskedDateKeys,
+      buildExcludedDateKeysCount: j.buildExcludedDateKeysCount,
+      evalMaskedDateKeysCount: j.evalMaskedDateKeysCount,
     },
     parity: {
       windowStartUtc: j.dataset.summary?.start ?? null,
@@ -256,6 +325,10 @@ function buildFullReport(args: {
       usageShapeProfileDiag: j.usageShapeProfileDiag ?? null,
       profileAutoBuilt: j.profileAutoBuilt ?? false,
       canonicalMonths: j.buildInputs.canonicalMonths,
+      buildExcludedDateKeysCount: j.buildExcludedDateKeysCount,
+      buildExcludedDateKeysSample: j.buildExcludedDateKeysSample,
+      evalMaskedDateKeysCount: j.evalMaskedDateKeysCount,
+      evalMaskedDateKeysSample: j.evalMaskedDateKeysSample,
       excludedDateKeysCount: j.excludedDateKeysCount,
       excludedDateKeysSample: j.excludedDateKeysSample,
       weatherUsed: false,
@@ -320,11 +393,12 @@ function buildFullReport(args: {
   });
 
   section("B) Scenario + masking", () => {
-    lines.push("travelRanges input: " + JSON.stringify(j.rangesToMask));
-    lines.push("travelRanges normalized: " + JSON.stringify(j.travelRangesNormalized));
+    lines.push("evalRanges input (entered ranges; used for accuracy only): " + JSON.stringify(j.evalRanges));
+    lines.push("buildExcludedRanges (union of DB + eval; used to build dataset): " + JSON.stringify(j.buildExcludedRanges));
+    lines.push("maskedIntervalsCount / maskedDaysCount / listMaskedDateKeys are based on evalRanges only.");
     kv("maskedIntervalsCount", j.maskedIntervalsCount);
     kv("maskedDaysCount", j.maskedDaysCount);
-    lines.push("listMaskedDateKeys: " + listTrunc(j.listMaskedDateKeys, TRUNCATE_LIST).join(", "));
+    lines.push("listMaskedDateKeys (eval only): " + listTrunc(j.listMaskedDateKeys, TRUNCATE_LIST).join(", "));
   });
 
   section("C) Production parity (Past simulated usage)", () => {
@@ -369,6 +443,10 @@ function buildFullReport(args: {
     kv("configHash", j.configHash);
     kv("weekdayWeekendSplitUsed", fullReportJson.engine.weekdayWeekendSplitUsed);
     kv("dayTotalSource", fullReportJson.engine.dayTotalSource);
+    kv("buildExcludedDateKeysCount", j.buildExcludedDateKeysCount);
+    lines.push("buildExcludedDateKeysSample: " + listTrunc(j.buildExcludedDateKeysSample, 10).join(", "));
+    kv("evalMaskedDateKeysCount", j.evalMaskedDateKeysCount);
+    lines.push("evalMaskedDateKeysSample: " + listTrunc(j.evalMaskedDateKeysSample, 10).join(", "));
     const diag = fullReportJson.engine.usageShapeProfileDiag as typeof j.usageShapeProfileDiag | undefined;
     if (diag) {
       lines.push("usageShapeProfile: found=" + diag.found + " reasonNotUsed=" + (diag.reasonNotUsed ?? "(used)"));
@@ -527,6 +605,7 @@ export async function POST(req: NextRequest) {
   const endDate = summary.end.slice(0, 10);
 
   if (rangesToMask.length === 0) {
+    const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
     return NextResponse.json({
       ok: true,
       email: user.email,
@@ -554,6 +633,7 @@ export async function POST(req: NextRequest) {
       diagnostics: null,
       pasteSummary: "",
       parity: null,
+      travelRangesFromDb,
     });
   }
 
@@ -611,14 +691,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_range" }, { status: 400 });
   }
 
-  const maskedLocalDates = new Set<string>();
-  for (const r of rangesToMask) {
-    for (const d of localDateKeysInRange(r.startDate, r.endDate, timezone)) {
-      maskedLocalDates.add(d);
-    }
+  const evalRanges = rangesToMask;
+  const evalDateKeysLocal = normalizeRangesToDateKeys(evalRanges, timezone);
+  if (evalDateKeysLocal.size === 0) {
+    return NextResponse.json(
+      { ok: false, error: "eval_ranges_required", message: "Add at least one valid travel/vacant range (start and end date, YYYY-MM-DD) to run the comparison." },
+      { status: 400 }
+    );
   }
 
-  const maskedActual = actualIntervals.filter((p) => maskedLocalDates.has(dateKeyInTimezone(p.timestamp, timezone)));
+  const dbTravelRanges = await getTravelRangesFromDb(user.id, house.id);
+  const dbDateKeys = normalizeRangesToDateKeys(dbTravelRanges, timezone);
+  const buildExcludedDateKeysLocal = new Set<string>(Array.from(dbDateKeys).concat(Array.from(evalDateKeysLocal)));
+  const buildExcludedUtcSet = buildExcludedUtcSetFromLocalDateKeys(
+    buildExcludedDateKeysLocal,
+    startDate,
+    endDate,
+    timezone
+  );
+  const buildExcludedRanges = Array.from(buildExcludedUtcSet)
+    .sort()
+    .map((d) => ({ startDate: d, endDate: d }));
+
+  const maskedActual = actualIntervals.filter((p) => evalDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
   if (maskedActual.length === 0) {
     return NextResponse.json({
       ok: true,
@@ -664,20 +759,6 @@ export async function POST(req: NextRequest) {
   const endMonth = endDate.slice(0, 7);
   const canonicalMonths12 = monthsEndingAt(endMonth, 12);
 
-  const utcExcludeSet = new Set<string>();
-  const windowStart = new Date(startDate + "T00:00:00.000Z").getTime();
-  const windowEnd = new Date(endDate + "T23:59:59.999Z").getTime();
-  const dayMs = 24 * 60 * 60 * 1000;
-  for (let t = windowStart; t <= windowEnd; t += dayMs) {
-    const utcDateKey = new Date(t).toISOString().slice(0, 10);
-    const localKey = dateKeyInTimezone(new Date(t).toISOString(), timezone);
-    if (maskedLocalDates.has(localKey)) utcExcludeSet.add(utcDateKey);
-  }
-
-  const travelRangesForEngine = Array.from(utcExcludeSet)
-    .sort()
-    .map((d) => ({ startDate: d, endDate: d }));
-
   const buildResult = await buildSimulatorInputs({
     mode: "SMT_BASELINE",
     manualUsagePayload: null,
@@ -685,7 +766,7 @@ export async function POST(req: NextRequest) {
     applianceProfile: normalizedAppliance,
     houseIdForActual: house.id,
     esiidForSmt: esiid,
-    travelRanges: travelRangesForEngine,
+    travelRanges: buildExcludedRanges,
     canonicalMonths: canonicalMonths12,
   });
 
@@ -698,23 +779,15 @@ export async function POST(req: NextRequest) {
     monthlyTotalsKwhByMonth: buildResult.monthlyTotalsKwhByMonth,
     intradayShape96: buildResult.intradayShape96,
     weekdayWeekendShape96: buildResult.weekdayWeekendShape96,
-    travelRanges: travelRangesForEngine,
+    travelRanges: buildExcludedRanges,
     notes: buildResult.notes ?? [],
     filledMonths: buildResult.filledMonths ?? [],
   };
 
-  // Same canonical builder + cache as user "Past simulated usage". Use the house's Past scenario ID
-  // when present so the lab reuses the same cache row as the user route (e.g. after priming or opening Past).
-  const pastScenario = await (prisma as any).usageSimulatorScenario?.findFirst?.({
-    where: {
-      userId: user.id,
-      houseId: house.id,
-      name: WORKSPACE_PAST_NAME,
-      archivedAt: null,
-    },
-    select: { id: true },
-  }).catch(() => null);
-  const scenarioIdForCache = pastScenario?.id ?? "gapfill_lab";
+  // Run Compare uses only the dates entered in the form (rangesToMask). We never merge in or use
+  // the customer's stored travel/vacant ranges from scenario events for the comparison.
+  // Use a dedicated cache key so the lab never shares cache with the user's Past scenario.
+  const scenarioIdForCache = "gapfill_lab";
 
   const intervalDataFingerprint = await getIntervalDataFingerprint({
     houseId: house.id,
@@ -727,7 +800,7 @@ export async function POST(req: NextRequest) {
     windowStartUtc: startDate,
     windowEndUtc: endDate,
     timezone,
-    travelRanges: travelRangesForEngine,
+    travelRanges: buildExcludedRanges,
     buildInputs: buildInputs as Record<string, unknown>,
     intervalDataFingerprint,
   });
@@ -757,7 +830,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       houseId: house.id,
       esiid,
-      travelRanges: travelRangesForEngine,
+      travelRanges: buildExcludedRanges,
       buildInputs,
       startDate,
       endDate,
@@ -824,7 +897,7 @@ export async function POST(req: NextRequest) {
     baseload: {
       used: false,
       method: "monthly_totals_from_actual",
-      params: { excludeDateKeys: utcExcludeSet.size },
+      params: { excludeDateKeys: buildExcludedUtcSet.size },
       valueKwhPer15m: null,
       valueKwhPerDay: null,
     },
@@ -916,8 +989,9 @@ export async function POST(req: NextRequest) {
     };
   }
 
-  const listMaskedDateKeys = Array.from(maskedLocalDates).sort();
-  const excludedDateKeysSample = Array.from(utcExcludeSet).sort().slice(0, 10);
+  const listMaskedDateKeys = Array.from(evalDateKeysLocal).sort();
+  const buildExcludedDateKeysSample = Array.from(buildExcludedUtcSet).sort().slice(0, 10);
+  const evalMaskedDateKeysSample = listMaskedDateKeys.slice(0, 10);
   const { fullReportJson, fullReportText } = buildFullReport({
     reportVersion: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
@@ -927,11 +1001,16 @@ export async function POST(req: NextRequest) {
     email: user.email ?? "",
     houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     timezone,
-    rangesToMask,
+    evalRanges,
+    buildExcludedRanges,
     travelRangesNormalized: listMaskedDateKeys.map((d) => ({ startDate: d, endDate: d })),
     listMaskedDateKeys,
     maskedIntervalsCount: maskedActual.length,
     maskedDaysCount: listMaskedDateKeys.length,
+    buildExcludedDateKeysCount: buildExcludedUtcSet.size,
+    buildExcludedDateKeysSample,
+    evalMaskedDateKeysCount: evalDateKeysLocal.size,
+    evalMaskedDateKeysSample,
     dataset: {
       summary: dataset.summary,
       totals: dataset.totals,
@@ -940,8 +1019,8 @@ export async function POST(req: NextRequest) {
     },
     buildInputs: { canonicalMonths: buildInputs.canonicalMonths },
     configHash: modelAssumptions.meta.configHash,
-    excludedDateKeysCount: utcExcludeSet.size,
-    excludedDateKeysSample,
+    excludedDateKeysCount: buildExcludedUtcSet.size,
+    excludedDateKeysSample: buildExcludedDateKeysSample,
     homeProfile,
     applianceProfile,
     modelAssumptions,
