@@ -13,16 +13,20 @@ import {
   canonicalIntervalKey,
   computeGapFillMetrics,
   dateKeyInTimezone,
+  getLocalDayOfWeekFromDateKey,
   getPoolHourRange,
   localDateKeysInRange,
   localHourInTimezone,
+  mergeDateKeysToRanges,
+  pickRandomTestDateKeys,
   prevCalendarDay,
   simulateIntervalsForTestDaysFromUsageShapeProfile,
+  summarizeDailyCoverageFromIntervals,
   type UsageShapeProfileRowForSim,
 } from "@/lib/admin/gapfillLab";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Run Compare uses test-days only (no full Past build)
+export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
@@ -284,6 +288,19 @@ function buildFullReport(args: {
   trainingWindowEndUtc?: string | null;
   trainingIntervalsCount?: number | null;
   trainingDaysCount?: number | null;
+  testSelectionMode?: "manual_ranges" | "random_days";
+  testDaysRequested?: number;
+  testDaysSelected?: number;
+  seedUsed?: string | null;
+  minDayCoveragePct?: number;
+  candidateWindowStartUtc?: string | null;
+  candidateWindowEndUtc?: string | null;
+  trainingMaxDays?: number;
+  trainingGapDays?: number;
+  excludedFromTest_travelCount?: number;
+  excludedFromTraining_travelCount?: number;
+  excludedFromTraining_testCount?: number;
+  trainingCoverage?: { expected: number; found: number | null; pct: number | null };
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -331,6 +348,19 @@ function buildFullReport(args: {
       onlyTestSample: j.dateKeyDiag?.setArithmetic?.onlyTestSample ?? [],
       overlapCount: j.dateKeyDiag?.setArithmetic?.overlapCount ?? 0,
       overlapSample: j.dateKeyDiag?.setArithmetic?.overlapSample ?? [],
+      testSelectionMode: j.testSelectionMode ?? "manual_ranges",
+      testDaysRequested: j.testDaysRequested,
+      testDaysSelected: j.testDaysSelected,
+      seedUsed: j.seedUsed ?? null,
+      minDayCoveragePct: j.minDayCoveragePct,
+      candidateWindowStartUtc: j.candidateWindowStartUtc ?? null,
+      candidateWindowEndUtc: j.candidateWindowEndUtc ?? null,
+      trainingMaxDays: j.trainingMaxDays,
+      trainingGapDays: j.trainingGapDays,
+      excludedFromTest_travelCount: j.excludedFromTest_travelCount,
+      excludedFromTraining_travelCount: j.excludedFromTraining_travelCount,
+      excludedFromTraining_testCount: j.excludedFromTraining_testCount,
+      trainingCoverage: j.trainingCoverage,
       testIntervalsCount: j.testIntervalsCount,
       testDaysCount: j.testDaysCount,
       listTestDateKeys: j.listTestDateKeys,
@@ -471,6 +501,27 @@ function buildFullReport(args: {
   });
 
   section("B) Scenario: Vacant/Travel (DB) vs Test Dates", () => {
+    if (j.testSelectionMode === "random_days") {
+      kv("testSelectionMode", "random_days");
+      kv("testDaysRequested", j.testDaysRequested ?? "—");
+      kv("testDaysSelected", j.testDaysSelected ?? "—");
+      kv("seedUsed", j.seedUsed ?? "—");
+      kv("minDayCoveragePct", j.minDayCoveragePct != null ? round2((j.minDayCoveragePct as number) * 100) + "%" : "—");
+      kv("candidateWindowStartUtc", j.candidateWindowStartUtc ?? "—");
+      kv("candidateWindowEndUtc", j.candidateWindowEndUtc ?? "—");
+      kv("excludedFromTest_travelCount", j.excludedFromTest_travelCount ?? "—");
+    } else {
+      kv("testSelectionMode", "manual_ranges");
+    }
+    kv("trainingMaxDays", j.trainingMaxDays ?? "—");
+    kv("trainingGapDays", j.trainingGapDays ?? "—");
+    kv("excludedFromTraining_travelCount", j.excludedFromTraining_travelCount ?? "—");
+    kv("excludedFromTraining_testCount", j.excludedFromTraining_testCount ?? "—");
+    if (j.trainingCoverage) {
+      kv("trainingCoverage_expected", j.trainingCoverage.expected);
+      kv("trainingCoverage_found", j.trainingCoverage.found ?? "—");
+      kv("trainingCoverage_pct", j.trainingCoverage.pct != null ? round2((j.trainingCoverage.pct as number) * 100) + "%" : "—");
+    }
     lines.push("travelRangesFromDb (Vacant/Travel): " + JSON.stringify(j.travelRangesFromDb));
     lines.push("testRangesInput (Test Dates; ONLY these scored): " + JSON.stringify(j.testRangesInput));
     lines.push("Guardrail union (Travel ∪ Test): " + JSON.stringify(j.guardrailExcludedRanges));
@@ -658,6 +709,13 @@ export async function POST(req: NextRequest) {
     timezone?: string;
     testRanges?: Array<{ startDate: string; endDate: string }>;
     rangesToMask?: Array<{ startDate: string; endDate: string }>;
+    testDays?: number;
+    seed?: string;
+    stratifyByMonth?: boolean;
+    stratifyByWeekend?: boolean;
+    minDayCoveragePct?: number;
+    trainMaxDays?: number;
+    trainGapDays?: number;
     houseId?: string;
   };
   try {
@@ -673,8 +731,16 @@ export async function POST(req: NextRequest) {
   }
 
   const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
+  const seed = String(body?.seed ?? "").trim() || null;
+  const stratifyByMonth = body?.stratifyByMonth !== false;
+  const stratifyByWeekend = body?.stratifyByWeekend !== false;
+  const minDayCoveragePct = Math.max(0.01, Math.min(1, Number(body?.minDayCoveragePct) || 0.95));
+  const trainMaxDays = Math.max(7, Math.min(365, Math.floor(Number(body?.trainMaxDays) || 365)));
+  const trainGapDays = Math.max(0, Math.min(30, Math.floor(Number(body?.trainGapDays) || 2)));
+
   const rawTestRanges = body?.testRanges ?? body?.rangesToMask ?? [];
-  const testRanges = Array.isArray(rawTestRanges)
+  let testRanges = Array.isArray(rawTestRanges)
     ? rawTestRanges
         .map((r: any) => ({
           startDate: String(r?.startDate ?? "").slice(0, 10),
@@ -725,8 +791,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (testRanges.length === 0) {
-    const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
+  const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
+  const travelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(travelRangesFromDb, timezone);
+
+  if (testRanges.length === 0 && !testDaysRequested) {
     return NextResponse.json({
       ok: true,
       email: user.email,
@@ -758,17 +826,67 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Test Dates = admin-entered ranges (only these are scored). Vacant/Travel = DB ranges; must not overlap.
-  const testDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(testRanges, timezone);
+  // Test Dates = manual ranges or random selection. Vacant/Travel (DB) are always excluded from both training and test.
+  let testDateKeysLocal: Set<string>;
+  let testRangesUsed: Array<{ startDate: string; endDate: string }>;
+  let testSelectionMode: "manual_ranges" | "random_days";
+  let testDaysSelected: number;
+  let seedUsed: string | null = null;
+  let candidateWindowStart: string | null = null;
+  let candidateWindowEnd: string | null = null;
+  let excludedFromTest_travelCount = 0;
+
+  if (testDaysRequested != null) {
+    const todayTz = dateKeyInTimezone(new Date().toISOString(), timezone);
+    const candidateEnd = prevCalendarDay(todayTz, 2);
+    const candidateStart = prevCalendarDay(todayTz, 367);
+    const candidateIntervals = await getActualIntervalsForRange({
+      houseId: house.id,
+      esiid,
+      startDate: candidateStart,
+      endDate: candidateEnd,
+    });
+    const coverage = summarizeDailyCoverageFromIntervals(candidateIntervals ?? [], timezone);
+    const candidateDateKeys = Array.from(coverage.keys()).filter(
+      (dk) => (coverage.get(dk)?.pct ?? 0) >= minDayCoveragePct
+    ).sort();
+    seedUsed = seed || `${house.id}-${todayTz}`;
+    const picked = pickRandomTestDateKeys({
+      candidateDateKeys,
+      travelDateKeysSet: travelDateKeysLocal,
+      testDays: testDaysRequested,
+      seed: seedUsed,
+      stratifyByMonth,
+      stratifyByWeekend,
+      isWeekendLocalKey: (dk) => {
+        const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+        return dow === 0 || dow === 6;
+      },
+      monthKeyFromLocalKey: (dk) => dk.slice(0, 7),
+    });
+    testRangesUsed = mergeDateKeysToRanges(picked);
+    testDateKeysLocal = new Set(picked);
+    testDaysSelected = picked.length;
+    testSelectionMode = "random_days";
+    candidateWindowStart = candidateStart;
+    candidateWindowEnd = candidateEnd;
+    excludedFromTest_travelCount = Array.from(travelDateKeysLocal).filter(
+      (dk) => dk >= candidateStart && dk <= candidateEnd
+    ).length;
+  } else {
+    testDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(testRanges, timezone);
+    testRangesUsed = testRanges;
+    testSelectionMode = "manual_ranges";
+    testDaysSelected = testDateKeysLocal.size;
+  }
+
   if (testDateKeysLocal.size === 0) {
     return NextResponse.json(
-      { ok: false, error: "test_ranges_required", message: "At least one valid Test Date range is required." },
+      { ok: false, error: "test_ranges_required", message: "At least one valid Test Date range is required (or use Random Test Days)." },
       { status: 400 }
     );
   }
 
-  const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
-  const travelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(travelRangesFromDb, timezone);
   const guardrailExcludedDateKeysLocal = new Set<string>([...Array.from(travelDateKeysLocal), ...Array.from(testDateKeysLocal)]);
   const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
   if (overlapLocal.size > 0) {
@@ -787,8 +905,16 @@ export async function POST(req: NextRequest) {
   }
 
   const testDateKeysSorted = Array.from(testDateKeysLocal).sort();
-  const fetchStart = testDateKeysSorted[0] ?? "";
+  const minTestKey = testDateKeysSorted[0] ?? "";
+  const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
+  const trainEnd = prevCalendarDay(minTestKey, trainGapDays);
+  const trainStart = prevCalendarDay(trainEnd, trainMaxDays);
+  const trainingDateKeysAll = localDateKeysInRange(trainStart, trainEnd, timezone);
+  const trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
+  const excludedFromTraining_travelCount = trainingDateKeysAll.filter((d) => travelDateKeysLocal.has(d)).length;
+  const excludedFromTraining_testCount = trainingDateKeysAll.filter((d) => testDateKeysLocal.has(d)).length;
+
   const actualIntervals = await getActualIntervalsForRange({
     houseId: house.id,
     esiid,
@@ -825,19 +951,18 @@ export async function POST(req: NextRequest) {
   let trainingWindowEndUtc: string | null = null;
   let trainingIntervalsCount: number | null = null;
   let trainingDaysCount: number | null = null;
+  const trainingCoverageExpected = trainingDateKeysSet.size * 96;
+  let trainingCoverageFound: number | null = null;
+  let trainingCoveragePct: number | null = null;
 
   if (!usageShapeProfile) {
-    const trainEnd = prevCalendarDay(fetchStart, 1);
-    const trainStart = prevCalendarDay(fetchStart, 60);
-    const trainingDateKeysAll = localDateKeysInRange(trainStart, trainEnd, timezone);
-    const trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
     if (trainingDateKeysSet.size === 0) {
       return NextResponse.json(
         {
           ok: false,
           error: "PROFILE_MISSING_NO_TRAINING_DATA",
           message:
-            "No UsageShapeProfile for this house and no non-test, non-travel dates in the 60-day training window. Ensure baseline usage exists or build a profile first.",
+            "No UsageShapeProfile for this house and no non-test, non-travel dates in the training window. Ensure baseline usage exists or build a profile first.",
           trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
         },
         { status: 400 }
@@ -859,7 +984,7 @@ export async function POST(req: NextRequest) {
           ok: false,
           error: "PROFILE_MISSING_NO_TRAINING_DATA",
           message:
-            "No UsageShapeProfile for this house and not enough non-test interval history to auto-build. Ensure baseline usage exists or build a profile first.",
+            "No UsageShapeProfile for this house and not enough non-test, non-travel interval history to auto-build. Ensure baseline usage exists or build a profile first.",
           trainingIntervalsCount: trainingIntervalsFiltered.length,
           trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
         },
@@ -872,6 +997,8 @@ export async function POST(req: NextRequest) {
     trainingWindowEndUtc = trainEnd;
     trainingIntervalsCount = trainingIntervalsFiltered.length;
     trainingDaysCount = trainingDateKeysSet.size;
+    trainingCoverageFound = trainingIntervalsFiltered.length;
+    trainingCoveragePct = trainingCoverageExpected > 0 ? trainingCoverageFound / trainingCoverageExpected : null;
   }
 
   const simIntervals = simulateIntervalsForTestDaysFromUsageShapeProfile({
@@ -1035,7 +1162,7 @@ export async function POST(req: NextRequest) {
     email: user.email ?? "",
     houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     timezone,
-    testRangesInput: testRanges,
+    testRangesInput: testRangesUsed,
     travelRangesFromDb,
     guardrailExcludedRanges: Array.from(guardrailExcludedDateKeysLocal).sort().map((d) => ({ startDate: d, endDate: d })),
     listTestDateKeys,
@@ -1088,6 +1215,23 @@ export async function POST(req: NextRequest) {
     trainingWindowEndUtc,
     trainingIntervalsCount,
     trainingDaysCount,
+    testSelectionMode,
+    testDaysRequested: testDaysRequested ?? undefined,
+    testDaysSelected,
+    seedUsed: seedUsed ?? undefined,
+    minDayCoveragePct: testSelectionMode === "random_days" ? minDayCoveragePct : undefined,
+    candidateWindowStartUtc: candidateWindowStart ?? undefined,
+    candidateWindowEndUtc: candidateWindowEnd ?? undefined,
+    trainingMaxDays: trainMaxDays,
+    trainingGapDays: trainGapDays,
+    excludedFromTest_travelCount: testSelectionMode === "random_days" ? excludedFromTest_travelCount : undefined,
+    excludedFromTraining_travelCount,
+    excludedFromTraining_testCount,
+    trainingCoverage: {
+      expected: trainingCoverageExpected,
+      found: trainingCoverageFound,
+      pct: trainingCoveragePct,
+    },
   });
 
   const pasteLines = [
@@ -1159,6 +1303,19 @@ export async function POST(req: NextRequest) {
     pasteSummary,
     fullReportText,
     fullReportJson,
+    testSelectionMode,
+    testDaysRequested: testDaysRequested ?? undefined,
+    testDaysSelected,
+    seedUsed: seedUsed ?? undefined,
+    minDayCoveragePct: testSelectionMode === "random_days" ? minDayCoveragePct : undefined,
+    candidateWindowStartUtc: candidateWindowStart ?? undefined,
+    candidateWindowEndUtc: candidateWindowEnd ?? undefined,
+    trainingMaxDays: trainMaxDays,
+    trainingGapDays: trainGapDays,
+    excludedFromTest_travelCount: testSelectionMode === "random_days" ? excludedFromTest_travelCount : undefined,
+    excludedFromTraining_travelCount,
+    excludedFromTraining_testCount,
+    trainingCoverage: { expected: trainingCoverageExpected, found: trainingCoverageFound, pct: trainingCoveragePct },
   });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

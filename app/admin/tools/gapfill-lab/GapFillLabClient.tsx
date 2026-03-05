@@ -24,9 +24,22 @@ type ApiResponse =
       diagnostics: any;
       pasteSummary: string;
       fullReportText?: string;
-      fullReportJson?: object | null;
+      fullReportJson?: { scenario?: { testRangesInput?: RangeRow[]; testSelectionMode?: string } } | null;
       message?: string;
       travelRangesFromDb?: Array<{ startDate: string; endDate: string }>;
+      testSelectionMode?: "manual_ranges" | "random_days";
+      testDaysRequested?: number;
+      testDaysSelected?: number;
+      seedUsed?: string | null;
+      minDayCoveragePct?: number;
+      candidateWindowStartUtc?: string | null;
+      candidateWindowEndUtc?: string | null;
+      trainingMaxDays?: number;
+      trainingGapDays?: number;
+      excludedFromTest_travelCount?: number;
+      excludedFromTraining_travelCount?: number;
+      excludedFromTraining_testCount?: number;
+      trainingCoverage?: { expected: number; found: number | null; pct: number | null };
     }
   | { ok: false; error: string; message?: string; overlapCount?: number; overlapSample?: string[] };
 
@@ -39,7 +52,13 @@ function formatDate(d: string) {
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
+  const [testMode, setTestMode] = useState<"manual_ranges" | "random_days">("manual_ranges");
   const [testRanges, setTestRanges] = useState<RangeRow[]>([{ ...DEFAULT_RANGE }]);
+  const [testDays, setTestDays] = useState(21);
+  const [seed, setSeed] = useState("");
+  const [minDayCoveragePct, setMinDayCoveragePct] = useState(95);
+  const [stratifyByMonth, setStratifyByMonth] = useState(true);
+  const [stratifyByWeekend, setStratifyByWeekend] = useState(true);
   const [houseId, setHouseId] = useState("");
   const [houses, setHouses] = useState<HouseOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -117,24 +136,34 @@ export default function GapFillLabClient() {
       return;
     }
     const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
-    if (!validRanges.length) {
-      setError("Add at least one Test Date range (start and end date).");
+    if (testMode === "manual_ranges" && !validRanges.length) {
+      setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
       return;
     }
     setLoading(true);
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 55_000);
+      timeoutId = setTimeout(() => controller.abort(), 115_000);
+      const body: Record<string, unknown> = {
+        email: trimmed,
+        timezone,
+        houseId: houseId || undefined,
+      };
+      if (testMode === "random_days") {
+        body.testDays = testDays;
+        if (seed.trim()) body.seed = seed.trim();
+        body.minDayCoveragePct = minDayCoveragePct / 100;
+        body.stratifyByMonth = stratifyByMonth;
+        body.stratifyByWeekend = stratifyByWeekend;
+        body.testRanges = [];
+      } else {
+        body.testRanges = validRanges;
+      }
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: trimmed,
-          timezone,
-          testRanges: validRanges,
-          houseId: houseId || undefined,
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
@@ -244,9 +273,9 @@ export default function GapFillLabClient() {
         )}
 
         <div>
-          <label className="block text-sm font-medium text-brand-navy mb-2">Vacant / Travel Dates (DB — customer-entered)</label>
+          <label className="block text-sm font-medium text-brand-navy mb-2">Vacant/Travel (DB)</label>
           <p className="text-sm text-brand-navy/60 mb-2">
-            Vacant/Travel dates (DB) are guardrails so we don’t accidentally test on customer-travel days. Only Test Dates are scored against actual intervals.
+            Vacant/Travel (DB) are guardrails so we don’t accidentally test on customer-travel days. Only Test Dates are scored against actual intervals.
           </p>
           {travelRangesFromDb.length > 0 ? (
             <div className="p-3 rounded border border-brand-blue/20 bg-brand-navy/5 space-y-1">
@@ -261,35 +290,122 @@ export default function GapFillLabClient() {
           )}
         </div>
         <div>
-          <label className="block text-sm font-medium text-brand-navy mb-2">Test Dates (Admin — accuracy scoring)</label>
+          <label className="block text-sm font-medium text-brand-navy mb-2">Test Dates</label>
           <p className="text-sm text-brand-navy/60 mb-2">
-            Only Test Dates are scored against actual intervals. Do not overlap Vacant/Travel dates above.
+            Only Test Dates are scored against actual intervals. Do not overlap Vacant/Travel (DB) above when using manual ranges.
           </p>
-          <div className="space-y-2">
-            {testRanges.map((r, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2">
-                <input
-                  type="date"
-                  value={r.startDate}
-                  onChange={(e) => updateTestRange(i, "startDate", e.target.value)}
-                  className="border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
-                />
-                <span className="text-brand-navy/60">–</span>
-                <input
-                  type="date"
-                  value={r.endDate}
-                  onChange={(e) => updateTestRange(i, "endDate", e.target.value)}
-                  className="border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
-                />
-                <button type="button" onClick={() => removeTestRange(i)} className="text-rose-600 hover:underline text-sm">
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button type="button" onClick={addTestRange} className="text-brand-blue hover:underline text-sm">
-              + Add range
+          <div className="flex flex-wrap gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setTestMode("manual_ranges")}
+              className={`px-3 py-1.5 rounded text-sm ${testMode === "manual_ranges" ? "bg-brand-navy text-white" : "bg-brand-navy/10 text-brand-navy"}`}
+            >
+              Manual Test Ranges
+            </button>
+            <button
+              type="button"
+              onClick={() => setTestMode("random_days")}
+              className={`px-3 py-1.5 rounded text-sm ${testMode === "random_days" ? "bg-brand-navy text-white" : "bg-brand-navy/10 text-brand-navy"}`}
+            >
+              Random Test Days
             </button>
           </div>
+          {testMode === "manual_ranges" && (
+            <div className="space-y-2">
+              {testRanges.map((r, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={r.startDate}
+                    onChange={(e) => updateTestRange(i, "startDate", e.target.value)}
+                    className="border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
+                  />
+                  <span className="text-brand-navy/60">–</span>
+                  <input
+                    type="date"
+                    value={r.endDate}
+                    onChange={(e) => updateTestRange(i, "endDate", e.target.value)}
+                    className="border border-brand-blue/30 rounded px-3 py-2 text-brand-navy"
+                  />
+                  <button type="button" onClick={() => removeTestRange(i)} className="text-rose-600 hover:underline text-sm">
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={addTestRange} className="text-brand-blue hover:underline text-sm">
+                + Add range
+              </button>
+            </div>
+          )}
+          {testMode === "random_days" && (
+            <div className="p-3 rounded border border-brand-blue/20 bg-brand-navy/5 space-y-3 max-w-md">
+              <div>
+                <label className="block text-xs text-brand-navy/70 mb-1">Test Days</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={testDays}
+                  onChange={(e) => setTestDays(Math.max(1, Math.min(365, parseInt(e.target.value, 10) || 21)))}
+                  className="w-24 border border-brand-blue/30 rounded px-2 py-1.5 text-brand-navy"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-brand-navy/70 mb-1">Seed (optional; blank = server picks)</label>
+                <input
+                  type="text"
+                  value={seed}
+                  onChange={(e) => setSeed(e.target.value)}
+                  placeholder="e.g. my-run-1"
+                  className="w-full border border-brand-blue/30 rounded px-2 py-1.5 text-brand-navy"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-brand-navy/70 mb-1">Min Day Coverage %</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={minDayCoveragePct}
+                  onChange={(e) => setMinDayCoveragePct(Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 95)))}
+                  className="w-20 border border-brand-blue/30 rounded px-2 py-1.5 text-brand-navy"
+                />
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm text-brand-navy">
+                  <input
+                    type="checkbox"
+                    checked={stratifyByMonth}
+                    onChange={(e) => setStratifyByMonth(e.target.checked)}
+                    className="rounded"
+                  />
+                  Stratify by month
+                </label>
+                <label className="flex items-center gap-2 text-sm text-brand-navy">
+                  <input
+                    type="checkbox"
+                    checked={stratifyByWeekend}
+                    onChange={(e) => setStratifyByWeekend(e.target.checked)}
+                    className="rounded"
+                  />
+                  Stratify by weekend/weekday
+                </label>
+              </div>
+              {result && result.ok && (result as any).testSelectionMode === "random_days" && (result as any).fullReportJson?.scenario?.testRangesInput?.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70 mb-1">Selected Test Dates (read-only)</div>
+                  <div className="text-sm text-brand-navy space-y-0.5">
+                    {(result as any).fullReportJson.scenario.testRangesInput.slice(0, 10).map((r: RangeRow, i: number) => (
+                      <div key={i}>{formatDate(r.startDate)} – {formatDate(r.endDate)}</div>
+                    ))}
+                    {(result as any).fullReportJson.scenario.testRangesInput.length > 10 && (
+                      <div className="text-brand-navy/60">… and {(result as any).fullReportJson.scenario.testRangesInput.length - 10} more ranges</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -318,6 +434,13 @@ export default function GapFillLabClient() {
               {result.house?.label} · {result.testIntervalsCount} test intervals
               {result.metrics ? ` · WAPE ${result.metrics.wape}% · MAE ${result.metrics.mae} kWh · RMSE ${result.metrics.rmse}` : ""}
             </div>
+            {(result as any).testSelectionMode === "random_days" && (
+              <div className="text-sm text-brand-navy/80 mt-1">
+                Test selection: Random ({(result as any).testDaysSelected ?? "—"} days)
+                {(result as any).seedUsed ? `, seed=${(result as any).seedUsed}` : ""}
+                {(result as any).minDayCoveragePct != null ? `, minCoverage=${Math.round((result as any).minDayCoveragePct * 100)}%` : ""}
+              </div>
+            )}
           </div>
 
           {/* Overview */}

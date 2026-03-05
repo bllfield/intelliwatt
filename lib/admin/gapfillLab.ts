@@ -5,6 +5,9 @@
 
 export type IntervalPoint = { timestamp: string; kwh: number };
 
+/** Local calendar date key YYYY-MM-DD (timezone-dependent when derived from timestamp). */
+export type LocalDateKey = string;
+
 /** Canonical timestamp key for joining actual and simulated intervals (UTC ISO string). */
 export function canonicalIntervalKey(tsIso: string): string {
   try {
@@ -387,6 +390,154 @@ export function localDateKeysInRange(startDate: string, endDate: string, tz: str
     out.push(cur);
     if (cur === last) break;
     cur = nextCalendarDay(cur);
+  }
+  return out;
+}
+
+/** Compress sorted date keys (YYYY-MM-DD) into minimal start/end ranges. */
+export function mergeDateKeysToRanges(keysSorted: string[]): Array<{ startDate: string; endDate: string }> {
+  if (keysSorted.length === 0) return [];
+  const ranges: Array<{ startDate: string; endDate: string }> = [];
+  let start = keysSorted[0]!;
+  let prev = keysSorted[0]!;
+  for (let i = 1; i < keysSorted.length; i++) {
+    const cur = keysSorted[i]!;
+    const prevNext = nextCalendarDay(prev);
+    if (cur === prevNext) {
+      prev = cur;
+    } else {
+      ranges.push({ startDate: start, endDate: prev });
+      start = cur;
+      prev = cur;
+    }
+  }
+  ranges.push({ startDate: start, endDate: prev });
+  return ranges;
+}
+
+/** Simple seeded RNG returning [0, 1). Deterministic for same seed. */
+export function seededRng(seed: string): () => number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+  let state = Math.abs(h) || 1;
+  return () => {
+    state = (Math.imul(1103515245, state) + 12345) | 0;
+    return ((state >>> 0) / 0x1_0000_0000) % 1;
+  };
+}
+
+/**
+ * Pick a deterministic random subset of candidate date keys for test days.
+ * Excludes travel dates. Optionally stratifies by month and weekend/weekday.
+ */
+export function pickRandomTestDateKeys(args: {
+  candidateDateKeys: string[];
+  travelDateKeysSet: Set<string>;
+  testDays: number;
+  seed: string;
+  stratifyByMonth: boolean;
+  stratifyByWeekend: boolean;
+  isWeekendLocalKey: (dk: string) => boolean;
+  monthKeyFromLocalKey: (dk: string) => string;
+}): string[] {
+  const {
+    candidateDateKeys,
+    travelDateKeysSet,
+    testDays,
+    seed,
+    stratifyByMonth,
+    stratifyByWeekend,
+    isWeekendLocalKey,
+    monthKeyFromLocalKey,
+  } = args;
+  const filtered = candidateDateKeys.filter((dk) => !travelDateKeysSet.has(dk));
+  if (filtered.length <= testDays) return [...filtered].sort();
+
+  const rng = seededRng(seed);
+  const shuffle = <T>(arr: T[]): T[] => {
+    const out = [...arr];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [out[i], out[j]] = [out[j]!, out[i]!];
+    }
+    return out;
+  };
+
+  if (!stratifyByMonth && !stratifyByWeekend) {
+    return shuffle(filtered).slice(0, testDays).sort();
+  }
+
+  const key = (dk: string) =>
+    stratifyByMonth && stratifyByWeekend
+      ? `${monthKeyFromLocalKey(dk)}:${isWeekendLocalKey(dk) ? "we" : "wd"}`
+      : stratifyByMonth
+        ? monthKeyFromLocalKey(dk)
+        : isWeekendLocalKey(dk)
+          ? "we"
+          : "wd";
+  const groups = new Map<string, string[]>();
+  for (const dk of filtered) {
+    const k = key(dk);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(dk);
+  }
+  const groupKeys = Array.from(groups.keys()).sort();
+  const shuffledGroups = new Map<string, string[]>();
+  for (const gk of groupKeys) {
+    shuffledGroups.set(gk, shuffle(groups.get(gk)!));
+  }
+  const picked: string[] = [];
+  let index = 0;
+  while (picked.length < testDays) {
+    let added = 0;
+    for (const gk of groupKeys) {
+      const arr = shuffledGroups.get(gk)!;
+      const dk = arr[index];
+      if (dk && !picked.includes(dk)) {
+        picked.push(dk);
+        added++;
+        if (picked.length >= testDays) break;
+      }
+    }
+    if (added === 0) break;
+    index++;
+  }
+  if (picked.length < testDays) {
+    const remaining = filtered.filter((dk) => !picked.includes(dk));
+    const extra = shuffle(remaining).slice(0, testDays - picked.length);
+    picked.push(...extra);
+  }
+  return picked.slice(0, testDays).sort();
+}
+
+/** Day of week (0=Sun .. 6=Sat) for a local date key YYYY-MM-DD in the given timezone. */
+export function getLocalDayOfWeekFromDateKey(dateKey: string, tz: string): number {
+  try {
+    const d = new Date(dateKey + "T12:00:00.000Z");
+    if (!Number.isFinite(d.getTime())) return 0;
+    const short = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[short] ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Daily coverage: for each date key, count intervals and pct vs expected 96. */
+export function summarizeDailyCoverageFromIntervals(
+  intervals: IntervalPoint[],
+  tz: string
+): Map<string, { count: number; expected: number; pct: number }> {
+  const byDay = new Map<string, number>();
+  for (const p of intervals) {
+    const dk = dateKeyInTimezone(String(p?.timestamp ?? "").trim(), tz);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    byDay.set(dk, (byDay.get(dk) ?? 0) + 1);
+  }
+  const out = new Map<string, { count: number; expected: number; pct: number }>();
+  const expected = 96;
+  for (const [dk, count] of Array.from(byDay)) {
+    out.set(dk, { count, expected, pct: count / expected });
   }
   return out;
 }
