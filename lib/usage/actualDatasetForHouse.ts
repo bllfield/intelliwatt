@@ -981,7 +981,7 @@ export async function getIntervalDataFingerprint(args: {
       `);
       const r = rows?.[0];
       const count = r?.count ?? "0";
-      const maxTs = r?.max_ts ? String(r.max_ts.getTime()) : "";
+      const maxTs = r?.max_ts ? String((r.max_ts instanceof Date ? r.max_ts : new Date(r.max_ts)).getTime()) : "";
       return `${count}:${maxTs}`;
     }
     if (!USAGE_DB_ENABLED) return "";
