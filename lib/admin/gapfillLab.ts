@@ -267,11 +267,25 @@ export function prevCalendarDay(ymd: string, daysBack: number): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Lite profile shape compatible with UsageShapeProfileRowForSim (no DB write). */
+/** Fallback level used when selecting day total for sparse buckets. */
+export type DayTotalFallbackLevel =
+  | "month_daytype"
+  | "adjacent_month_daytype"
+  | "month_overall"
+  | "season_overall"
+  | "global_daytype"
+  | "global_overall";
+
+/** Lite profile shape compatible with UsageShapeProfileRowForSim (no DB write). Includes training strength for sample-count-aware fallback. */
 export type UsageShapeProfileLite = {
   shapeByMonth96: Record<string, number[]>;
   avgKwhPerDayWeekdayByMonth: number[];
   avgKwhPerDayWeekendByMonth: number[];
+  monthKeys: string[];
+  weekdayCountByMonth: Record<string, number>;
+  weekendCountByMonth: Record<string, number>;
+  monthOverallAvgByMonth: Record<string, number>;
+  monthOverallCountByMonth: Record<string, number>;
 };
 
 /**
@@ -356,11 +370,184 @@ export function buildUsageShapeProfileLiteFromIntervals(args: {
   const avgKwhPerDayWeekdayByMonth = monthKeys.map((k) => weekdayAvgByMonth[k] ?? 0);
   const avgKwhPerDayWeekendByMonth = monthKeys.map((k) => weekendAvgByMonth[k] ?? 0);
 
+  const weekdayCountByMonth: Record<string, number> = {};
+  const weekendCountByMonth: Record<string, number> = {};
+  const monthOverallAvgByMonth: Record<string, number> = {};
+  const monthOverallCountByMonth: Record<string, number> = {};
+  for (const [monthKey, m] of Array.from(byMonth)) {
+    weekdayCountByMonth[monthKey] = m.weekdayTotals.length;
+    weekendCountByMonth[monthKey] = m.weekendTotals.length;
+    const totalCount = m.weekdayTotals.length + m.weekendTotals.length;
+    monthOverallCountByMonth[monthKey] = totalCount;
+    const sumAll =
+      m.weekdayTotals.reduce((a, b) => a + b, 0) + m.weekendTotals.reduce((a, b) => a + b, 0);
+    monthOverallAvgByMonth[monthKey] = totalCount > 0 ? sumAll / totalCount : 0;
+  }
+
   return {
     shapeByMonth96,
     avgKwhPerDayWeekdayByMonth,
     avgKwhPerDayWeekendByMonth,
+    monthKeys,
+    weekdayCountByMonth,
+    weekendCountByMonth,
+    monthOverallAvgByMonth,
+    monthOverallCountByMonth,
   };
+}
+
+/** Previous month key (YYYY-MM). */
+function prevMonthKey(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  if (m === 1) return `${y - 1}-12`;
+  return `${y}-${String(m - 1).padStart(2, "0")}`;
+}
+
+/** Next month key (YYYY-MM). */
+function nextMonthKey(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  if (m === 12) return `${y + 1}-01`;
+  return `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
+/** Season bucket: winter Dec/Jan/Feb, shoulder Mar/Apr/May + Oct/Nov, summer Jun/Jul/Aug/Sep. */
+function getSeasonForMonthKey(monthKey: string): "winter" | "shoulder" | "summer" {
+  const m = parseInt(monthKey.slice(5, 7), 10) || 0;
+  if (m === 12 || m <= 2) return "winter";
+  if (m >= 6 && m <= 9) return "summer";
+  return "shoulder";
+}
+
+/** Month keys in the same season (from a given set). */
+function getSeasonMonthKeys(monthKey: string, allMonthKeys: string[]): string[] {
+  const season = getSeasonForMonthKey(monthKey);
+  const inSeason = (k: string) => getSeasonForMonthKey(k) === season;
+  return allMonthKeys.filter(inSeason);
+}
+
+/** Result of day-total selection with fallback and optional guardrail. */
+export type DayTotalSelectionResult = {
+  targetDayKwh: number;
+  fallbackLevel: DayTotalFallbackLevel;
+  rawSelectedDayKwh: number;
+  clampApplied: boolean;
+};
+
+const MIN_DAYS_MONTH_DAYTYPE = 4;
+const MIN_DAYS_ADJACENT = 6;
+const MIN_DAYS_MONTH_OVERALL = 6;
+const MIN_DAYS_SEASON = 8;
+const MIN_DAYS_GLOBAL_DAYTYPE = 8;
+const GUARDRAIL_MAX_MULT = 1.75;
+const GUARDRAIL_MIN_MULT = 0.45;
+
+/**
+ * Select target day total (kWh) for a test day using sample-count-aware fallback.
+ * Used only when profile includes training strength (lite auto-built).
+ */
+export function selectDayTotalWithFallback(args: {
+  monthKey: string;
+  isWeekend: boolean;
+  profile: UsageShapeProfileLite;
+}): DayTotalSelectionResult {
+  const { monthKey, isWeekend, profile } = args;
+  const {
+    monthKeys,
+    avgKwhPerDayWeekdayByMonth,
+    avgKwhPerDayWeekendByMonth,
+    weekdayCountByMonth,
+    weekendCountByMonth,
+    monthOverallAvgByMonth,
+    monthOverallCountByMonth,
+  } = profile;
+  const monthIdx = monthKeys.indexOf(monthKey);
+  const wdCount = weekdayCountByMonth[monthKey] ?? 0;
+  const weCount = weekendCountByMonth[monthKey] ?? 0;
+  const sameDayTypeCount = isWeekend ? weCount : wdCount;
+  const dayTypeAvgArr = isWeekend ? avgKwhPerDayWeekendByMonth : avgKwhPerDayWeekdayByMonth;
+  const dayTypeAvg = monthIdx >= 0 && dayTypeAvgArr[monthIdx] != null ? dayTypeAvgArr[monthIdx]! : 0;
+
+  const globalWdSum = monthKeys.reduce((s, k) => s + (weekdayCountByMonth[k] ?? 0) * (avgKwhPerDayWeekdayByMonth[monthKeys.indexOf(k)] ?? 0), 0);
+  const globalWeSum = monthKeys.reduce((s, k) => s + (weekendCountByMonth[k] ?? 0) * (avgKwhPerDayWeekendByMonth[monthKeys.indexOf(k)] ?? 0), 0);
+  const globalWdCount = monthKeys.reduce((s, k) => s + (weekdayCountByMonth[k] ?? 0), 0);
+  const globalWeCount = monthKeys.reduce((s, k) => s + (weekendCountByMonth[k] ?? 0), 0);
+  const globalAvgWd = globalWdCount > 0 ? globalWdSum / globalWdCount : 0;
+  const globalAvgWe = globalWeCount > 0 ? globalWeSum / globalWeCount : 0;
+  const globalAvgDayType = isWeekend ? globalAvgWe : globalAvgWd;
+  const globalCountDayType = isWeekend ? globalWeCount : globalWdCount;
+  const globalOverallCount = globalWdCount + globalWeCount;
+  const globalOverallAvg =
+    globalOverallCount > 0
+      ? (globalWdSum + globalWeSum) / globalOverallCount
+      : (globalAvgWd + globalAvgWe) / 2 || 0;
+
+  let rawKwh: number;
+  let level: DayTotalFallbackLevel;
+
+  if (sameDayTypeCount >= MIN_DAYS_MONTH_DAYTYPE && Number.isFinite(dayTypeAvg) && dayTypeAvg > 0) {
+    rawKwh = dayTypeAvg;
+    level = "month_daytype";
+  } else {
+    const prevKey = prevMonthKey(monthKey);
+    const nextKey = nextMonthKey(monthKey);
+    const prevWd = weekdayCountByMonth[prevKey] ?? 0;
+    const prevWe = weekendCountByMonth[prevKey] ?? 0;
+    const nextWd = weekdayCountByMonth[nextKey] ?? 0;
+    const nextWe = weekendCountByMonth[nextKey] ?? 0;
+    const prevDayTypeCount = isWeekend ? prevWe : prevWd;
+    const nextDayTypeCount = isWeekend ? nextWe : nextWd;
+    const adjCount = prevDayTypeCount + nextDayTypeCount;
+    const prevIdx = monthKeys.indexOf(prevKey);
+    const nextIdx = monthKeys.indexOf(nextKey);
+    const prevAvg = prevIdx >= 0 ? (isWeekend ? avgKwhPerDayWeekendByMonth[prevIdx] : avgKwhPerDayWeekdayByMonth[prevIdx]) : 0;
+    const nextAvg = nextIdx >= 0 ? (isWeekend ? avgKwhPerDayWeekendByMonth[nextIdx] : avgKwhPerDayWeekdayByMonth[nextIdx]) : 0;
+    if (adjCount >= MIN_DAYS_ADJACENT && (Number.isFinite(prevAvg) || Number.isFinite(nextAvg))) {
+      const total = prevDayTypeCount + nextDayTypeCount;
+      rawKwh = total > 0 ? ((prevAvg ?? 0) * prevDayTypeCount + (nextAvg ?? 0) * nextDayTypeCount) / total : globalAvgDayType;
+      level = "adjacent_month_daytype";
+    } else if ((monthOverallCountByMonth[monthKey] ?? 0) >= MIN_DAYS_MONTH_OVERALL) {
+      rawKwh = monthOverallAvgByMonth[monthKey] ?? globalOverallAvg;
+      level = "month_overall";
+    } else {
+      const seasonKeys = getSeasonMonthKeys(monthKey, monthKeys);
+      const seasonCount = seasonKeys.reduce(
+        (s, k) => s + (weekdayCountByMonth[k] ?? 0) + (weekendCountByMonth[k] ?? 0),
+        0
+      );
+      if (seasonCount >= MIN_DAYS_SEASON) {
+        let sum = 0;
+        let cnt = 0;
+        for (const k of seasonKeys) {
+          const n = monthOverallCountByMonth[k] ?? 0;
+          if (n > 0) {
+            sum += (monthOverallAvgByMonth[k] ?? 0) * n;
+            cnt += n;
+          }
+        }
+        rawKwh = cnt > 0 ? sum / cnt : globalOverallAvg;
+        level = "season_overall";
+      } else if (globalCountDayType >= MIN_DAYS_GLOBAL_DAYTYPE) {
+        rawKwh = globalAvgDayType;
+        level = "global_daytype";
+      } else {
+        rawKwh = globalOverallAvg;
+        level = "global_overall";
+      }
+    }
+  }
+
+  let targetDayKwh = rawKwh;
+  let clampApplied = false;
+  if (Number.isFinite(globalAvgDayType) && globalAvgDayType > 1e-6) {
+    if (rawKwh > globalAvgDayType * GUARDRAIL_MAX_MULT) {
+      targetDayKwh = globalAvgDayType * GUARDRAIL_MAX_MULT;
+      clampApplied = true;
+    } else if (rawKwh < globalAvgDayType * GUARDRAIL_MIN_MULT) {
+      targetDayKwh = globalAvgDayType * GUARDRAIL_MIN_MULT;
+      clampApplied = true;
+    }
+  }
+  return { targetDayKwh, fallbackLevel: level, rawSelectedDayKwh: rawKwh, clampApplied };
 }
 
 /** Enumerate local date keys (YYYY-MM-DD) for a range. start/end are treated as calendar dates
@@ -605,23 +792,46 @@ export function localDayOfWeekInTimezone(tsIso: string, tz: string): number {
   }
 }
 
-/** Usage shape profile row as returned from getLatestUsageShapeProfile (subset used for test-day sim). */
+/** Usage shape profile row as returned from getLatestUsageShapeProfile (subset used for test-day sim). When from auto_built_lite, may include training strength for fallback. */
 export type UsageShapeProfileRowForSim = {
   shapeByMonth96?: Record<string, number[]> | null;
   avgKwhPerDayWeekdayByMonth?: number[] | null;
   avgKwhPerDayWeekendByMonth?: number[] | null;
+  monthKeys?: string[];
+  weekdayCountByMonth?: Record<string, number>;
+  weekendCountByMonth?: Record<string, number>;
+  monthOverallAvgByMonth?: Record<string, number>;
+  monthOverallCountByMonth?: Record<string, number>;
 } | null;
+
+/** Diagnostics from day-total fallback (lite profile path). */
+export type DayTotalDiagnostics = {
+  profileDayTotalFallbackSummary: Record<DayTotalFallbackLevel, number>;
+  profileTrainingStrengthSample: Array<{ month: string; weekdayCount: number; weekendCount: number; overallCount: number }>;
+  testedDayFallbackSample: Array<{
+    localDate: string;
+    monthKey: string;
+    dayType: "weekday" | "weekend";
+    fallbackLevelUsed: DayTotalFallbackLevel;
+    rawSelectedDayKwh: number;
+    finalSelectedDayKwh: number;
+    clampApplied: boolean;
+  }>;
+  dayTotalGuardrailAppliedCount: number;
+};
 
 /**
  * Simulate interval kWh for test-day timestamps using UsageShapeProfile (weekday/weekend avg + shape96).
  * Returns one entry per input interval with same timestamp; kwh is simulated.
+ * When profile includes training strength (lite) and returnDiagnostics is true, returns { intervals, diagnostics }.
  */
 export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
   timezone: string;
   testIntervals: IntervalPoint[];
   usageShapeProfileRowOrNull: UsageShapeProfileRowForSim;
-}): IntervalPoint[] {
-  const { timezone, testIntervals, usageShapeProfileRowOrNull } = args;
+  returnDiagnostics?: boolean;
+}): IntervalPoint[] | { intervals: IntervalPoint[]; diagnostics: DayTotalDiagnostics } {
+  const { timezone, testIntervals, usageShapeProfileRowOrNull, returnDiagnostics } = args;
   const profile = usageShapeProfileRowOrNull;
   const shapeByMonth = (profile?.shapeByMonth96 && typeof profile.shapeByMonth96 === "object") ? profile.shapeByMonth96 : {};
   const wdArr = Array.isArray(profile?.avgKwhPerDayWeekdayByMonth) ? profile.avgKwhPerDayWeekdayByMonth : [];
@@ -630,7 +840,49 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
   const globalAvgWd = wdArr.length ? wdArr.reduce((a, b) => a + b, 0) / wdArr.length : 0;
   const globalAvgWe = weArr.length ? weArr.reduce((a, b) => a + b, 0) / weArr.length : 0;
 
-  return testIntervals.map((p) => {
+  const hasLiteStrength =
+    profile &&
+    Array.isArray((profile as UsageShapeProfileLite).monthKeys) &&
+    (profile as UsageShapeProfileLite).weekdayCountByMonth != null;
+
+  const dayTotalByDate = new Map<string, DayTotalSelectionResult>();
+  const fallbackSummary: Record<DayTotalFallbackLevel, number> = {
+    month_daytype: 0,
+    adjacent_month_daytype: 0,
+    month_overall: 0,
+    season_overall: 0,
+    global_daytype: 0,
+    global_overall: 0,
+  };
+  let guardrailAppliedCount = 0;
+
+  if (hasLiteStrength) {
+    const lite = profile as UsageShapeProfileLite;
+    const seenDates = new Set<string>();
+    const dateKeysOrder: string[] = [];
+    const firstTsByDate = new Map<string, string>();
+    for (const p of testIntervals) {
+      const ts = String(p?.timestamp ?? "").trim();
+      const dk = dateKeyInTimezone(ts, timezone);
+      if (!seenDates.has(dk)) {
+        seenDates.add(dk);
+        dateKeysOrder.push(dk);
+        firstTsByDate.set(dk, ts);
+      }
+    }
+    for (const dateKey of dateKeysOrder) {
+      const monthKey = dateKey.slice(0, 7);
+      const tsForDow = firstTsByDate.get(dateKey) ?? dateKey + "T12:00:00.000Z";
+      const dow = localDayOfWeekInTimezone(tsForDow, timezone);
+      const isWeekend = dow === 0 || dow === 6;
+      const sel = selectDayTotalWithFallback({ monthKey, isWeekend, profile: lite });
+      dayTotalByDate.set(dateKey, sel);
+      fallbackSummary[sel.fallbackLevel]++;
+      if (sel.clampApplied) guardrailAppliedCount++;
+    }
+  }
+
+  const intervals: IntervalPoint[] = testIntervals.map((p) => {
     const ts = String(p?.timestamp ?? "").trim();
     const dateKey = dateKeyInTimezone(ts, timezone);
     const monthKey = dateKey.slice(0, 7);
@@ -639,11 +891,15 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     const isWeekend = dow === 0 || dow === 6;
 
     let targetDayKwh: number;
-    const monthIdx = profileMonthKeys.indexOf(monthKey);
-    if (isWeekend) {
-      targetDayKwh = monthIdx >= 0 && weArr[monthIdx] != null && Number.isFinite(weArr[monthIdx]) ? weArr[monthIdx] : globalAvgWe;
+    if (hasLiteStrength && dayTotalByDate.has(dateKey)) {
+      targetDayKwh = dayTotalByDate.get(dateKey)!.targetDayKwh;
     } else {
-      targetDayKwh = monthIdx >= 0 && wdArr[monthIdx] != null && Number.isFinite(wdArr[monthIdx]) ? wdArr[monthIdx] : globalAvgWd;
+      const monthIdx = profileMonthKeys.indexOf(monthKey);
+      if (isWeekend) {
+        targetDayKwh = monthIdx >= 0 && weArr[monthIdx] != null && Number.isFinite(weArr[monthIdx]) ? weArr[monthIdx] : globalAvgWe;
+      } else {
+        targetDayKwh = monthIdx >= 0 && wdArr[monthIdx] != null && Number.isFinite(wdArr[monthIdx]) ? wdArr[monthIdx] : globalAvgWd;
+      }
     }
 
     let shape96: number[];
@@ -658,4 +914,46 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     const simKwh = (shape96[slot96] ?? 1 / 96) * (targetDayKwh ?? 0);
     return { timestamp: canonicalIntervalKey(ts), kwh: Math.max(0, simKwh) };
   });
+
+  if (hasLiteStrength && returnDiagnostics && profile) {
+    const lite = profile as UsageShapeProfileLite;
+    const profileTrainingStrengthSample: DayTotalDiagnostics["profileTrainingStrengthSample"] = lite.monthKeys.map((month) => ({
+      month,
+      weekdayCount: lite.weekdayCountByMonth[month] ?? 0,
+      weekendCount: lite.weekendCountByMonth[month] ?? 0,
+      overallCount: (lite.weekdayCountByMonth[month] ?? 0) + (lite.weekendCountByMonth[month] ?? 0),
+    }));
+    const seenDates = new Set<string>();
+    const testedDayFallbackSample: DayTotalDiagnostics["testedDayFallbackSample"] = [];
+    for (const p of testIntervals) {
+      const ts = String(p?.timestamp ?? "").trim();
+      const dateKey = dateKeyInTimezone(ts, timezone);
+      if (seenDates.has(dateKey)) continue;
+      seenDates.add(dateKey);
+      const sel = dayTotalByDate.get(dateKey);
+      if (!sel) continue;
+      const dow = localDayOfWeekInTimezone(ts, timezone);
+      testedDayFallbackSample.push({
+        localDate: dateKey,
+        monthKey: dateKey.slice(0, 7),
+        dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
+        fallbackLevelUsed: sel.fallbackLevel,
+        rawSelectedDayKwh: sel.rawSelectedDayKwh,
+        finalSelectedDayKwh: sel.targetDayKwh,
+        clampApplied: sel.clampApplied,
+      });
+      if (testedDayFallbackSample.length >= 10) break;
+    }
+    return {
+      intervals,
+      diagnostics: {
+        profileDayTotalFallbackSummary: fallbackSummary,
+        profileTrainingStrengthSample,
+        testedDayFallbackSample,
+        dayTotalGuardrailAppliedCount: guardrailAppliedCount,
+      },
+    };
+  }
+
+  return intervals;
 }

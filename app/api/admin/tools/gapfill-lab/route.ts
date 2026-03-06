@@ -22,6 +22,7 @@ import {
   prevCalendarDay,
   simulateIntervalsForTestDaysFromUsageShapeProfile,
   summarizeDailyCoverageFromIntervals,
+  type DayTotalDiagnostics,
   type UsageShapeProfileRowForSim,
 } from "@/lib/admin/gapfillLab";
 
@@ -305,6 +306,7 @@ function buildFullReport(args: {
   trainingDateKeysSample?: string[];
   trainingMonthDayCountsSample?: Record<string, number>;
   trainingCoverage?: { expected: number; found: number | null; pct: number | null };
+  dayTotalDiagnostics?: DayTotalDiagnostics;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -443,6 +445,7 @@ function buildFullReport(args: {
       trainingDaysCount: j.trainingDaysCount ?? undefined,
       weatherUsed: false,
       weatherNote: "Weather not integrated in gap-fill lab path.",
+      ...(j.dayTotalDiagnostics ? { dayTotalDiagnostics: j.dayTotalDiagnostics } : {}),
     },
     accuracy: {
       MAE_kwhPer15m: j.metrics.mae,
@@ -479,6 +482,9 @@ function buildFullReport(args: {
   if (Number.isFinite(baseloadDaily) && (baseloadDaily > 80 || baseloadDaily < 5)) fullReportJson.notes.push(`baseloadDailyKwh ${baseloadDaily} is unusually high or low.`);
   const highWapeMonth = j.metrics.byMonth.find((m) => m.wape > 80);
   if (highWapeMonth) fullReportJson.notes.push(`Masked month ${highWapeMonth.month} WAPE ${highWapeMonth.wape}% is much higher than others.`);
+  if (j.dayTotalDiagnostics?.dayTotalGuardrailAppliedCount != null && j.dayTotalDiagnostics.dayTotalGuardrailAppliedCount > 0) {
+    fullReportJson.notes.push(`Day-total guardrail applied on ${j.dayTotalDiagnostics.dayTotalGuardrailAppliedCount} tested days.`);
+  }
   if (j.joinPct != null && j.joinPct < 0.95) {
     fullReportJson.notes.push("ERROR: simulated intervals did not join to actual timestamps; check timestamp keying.");
     if (Array.isArray(j.joinSampleActualTs) && j.joinSampleActualTs.length > 0) {
@@ -654,6 +660,19 @@ function buildFullReport(args: {
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
     kv("weatherUsed", false);
     lines.push("weatherNote: Weather not integrated in gap-fill lab path.");
+    const dayDiag = j.dayTotalDiagnostics;
+    if (dayDiag) {
+      lines.push("profileDayTotalFallbackSummary: " + JSON.stringify(dayDiag.profileDayTotalFallbackSummary));
+      lines.push("profileTrainingStrengthSample (month | weekdayCount | weekendCount | overallCount):");
+      dayDiag.profileTrainingStrengthSample.forEach((r) =>
+        lines.push(`  ${r.month} | ${r.weekdayCount} | ${r.weekendCount} | ${r.overallCount}`)
+      );
+      lines.push("testedDayFallbackSample (first 10): localDate | monthKey | dayType | fallbackLevelUsed | rawSelectedDayKwh | finalSelectedDayKwh | clampApplied");
+      dayDiag.testedDayFallbackSample.forEach((r) =>
+        lines.push(`  ${r.localDate} | ${r.monthKey} | ${r.dayType} | ${r.fallbackLevelUsed} | ${r.rawSelectedDayKwh} | ${r.finalSelectedDayKwh} | ${r.clampApplied}`)
+      );
+      kv("dayTotalGuardrailAppliedCount", dayDiag.dayTotalGuardrailAppliedCount);
+    }
   });
 
   section("G) Accuracy metrics (test intervals only)", () => {
@@ -1043,11 +1062,14 @@ export async function POST(req: NextRequest) {
     trainingCoveragePct = trainingCoverageExpected > 0 ? trainingCoverageFound / trainingCoverageExpected : null;
   }
 
-  const simIntervals = simulateIntervalsForTestDaysFromUsageShapeProfile({
+  const simResult = simulateIntervalsForTestDaysFromUsageShapeProfile({
     timezone,
     testIntervals: actualTestIntervalsCanon,
     usageShapeProfileRowOrNull: profileForSim,
+    returnDiagnostics: profileSource === "auto_built_lite",
   });
+  const simIntervals = Array.isArray(simResult) ? simResult : simResult.intervals;
+  const dayTotalDiagnostics: DayTotalDiagnostics | undefined = Array.isArray(simResult) ? undefined : simResult.diagnostics;
   const simulatedByTs = new Map<string, number>();
   for (const p of simIntervals) {
     const ts = String(p?.timestamp ?? "").trim();
@@ -1278,6 +1300,7 @@ export async function POST(req: NextRequest) {
       found: trainingCoverageFound,
       pct: trainingCoveragePct,
     },
+    ...(dayTotalDiagnostics ? { dayTotalDiagnostics: dayTotalDiagnostics } : {}),
   });
 
   const pasteLines = [
