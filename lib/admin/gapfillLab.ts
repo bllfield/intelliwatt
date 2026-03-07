@@ -957,6 +957,8 @@ export type DayTotalDiagnostics = {
     auxHeatGate_severityPassed?: boolean;
     /** Reference heating severity (ref HDD) used for aux gate. */
     referenceHeatingSeverity?: number;
+    /** True when 80/20 blend-back toward profile was applied (weather_scaled_day). */
+    blendedBackTowardProfile?: boolean;
   }>;
   /** When set, day simulation used the shared past-day simulator core. */
   sourceOfDaySimulationCore?: string;
@@ -1011,11 +1013,20 @@ export type WeatherDayClassification =
 const HEATING_BASE_C = 18;
 const COOLING_BASE_C = 22;
 const WEATHER_SEVERITY_THRESHOLD = 2;
-const WEATHER_DEADBAND_PCT = 0.15;
+/** Heating: scale only when relative deviation > 30%. Align with shared past-day simulator. */
+const HEATING_DEADBAND_PCT = 0.3;
+/** Cooling: scale only when relative deviation > 25%. Align with shared past-day simulator. */
+const COOLING_DEADBAND_PCT = 0.25;
+/** Event days: multiplier range unchanged. */
 const HEATING_MULT_MIN = 0.9;
 const HEATING_MULT_MAX = 1.35;
 const COOLING_MULT_MIN = 0.9;
 const COOLING_MULT_MAX = 1.25;
+/** Non-event days only: tighter caps. Align with shared past-day simulator. */
+const HEATING_MULT_MIN_NON_EVENT = 0.97;
+const HEATING_MULT_MAX_NON_EVENT = 1.15;
+const COOLING_MULT_MIN_NON_EVENT = 0.97;
+const COOLING_MULT_MAX_NON_EVENT = 1.1;
 const AUX_HEAT_SLOPE = 0.15;
 /** Phase 1 safety cap: aux heat adder per day (kWh). Align with shared past-day simulator. */
 const AUX_HEAT_KWH_CAP = 12;
@@ -1351,6 +1362,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       auxHeatGate_freezeHoursPassed?: boolean;
       auxHeatGate_severityPassed?: boolean;
       referenceHeatingSeverity?: number;
+      blendedBackTowardProfile?: boolean;
     }
   >();
   const fallbackSummary: Record<DayTotalFallbackLevel, number> = {
@@ -1408,7 +1420,6 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       if (useWeather && weatherByDateKey) {
         weatherAdjustmentByDate.set(dateKey, {
           profileSelectedDayKwh: r.profileSelectedDayKwh,
-          preBlendAdjustedDayKwh: r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
           finalSelectedDayKwh: r.finalDayKwh,
           weatherSeverityMultiplier: r.weatherSeverityMultiplier,
           weatherModeUsed: r.weatherModeUsed,
@@ -1563,6 +1574,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         testedDayFallbackSample,
         dayTotalGuardrailAppliedCount: guardrailAppliedCount,
         ...(weatherAdjustmentSummary != null ? { weatherAdjustmentSummary } : {}),
+        ...(weatherTighteningSummary != null ? { weatherTighteningSummary } : {}),
         ...(testedDayWeatherSample != null ? { testedDayWeatherSample } : {}),
       },
     };

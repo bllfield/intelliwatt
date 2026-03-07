@@ -42,6 +42,8 @@ export function UsageChartsPanel(props: {
   dailyView: "chart" | "table";
   onDailyViewChange: (next: "chart" | "table") => void;
   daily: DailyRow[];
+  /** Historic weather by date (YYYY-MM-DD). When set, table view shows weather columns. */
+  dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }> | null;
   fifteenCurve: FifteenMinuteAverage[];
   /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
   coverageStart?: string | null;
@@ -58,6 +60,7 @@ export function UsageChartsPanel(props: {
     dailyView,
     onDailyViewChange,
     daily,
+    dailyWeather,
     fifteenCurve,
     coverageStart,
     coverageEnd,
@@ -294,15 +297,36 @@ export function UsageChartsPanel(props: {
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Date</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">kWh</th>
+                      {dailyWeather && Object.keys(dailyWeather).length > 0 ? (
+                        <>
+                          <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Avg °F</th>
+                          <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Min °F</th>
+                          <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Max °F</th>
+                          <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">HDD65</th>
+                          <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">CDD65</th>
+                        </>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody className="text-neutral-800">
-                    {daily.map((d) => (
-                      <tr key={d.date} className="border-t border-neutral-100 hover:bg-neutral-50/50">
-                        <td className="px-3 py-1.5">{d.date}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{d.kwh.toFixed(2)}</td>
-                      </tr>
-                    ))}
+                    {daily.map((d) => {
+                      const wx = dailyWeather?.[d.date];
+                      return (
+                        <tr key={d.date} className="border-t border-neutral-100 hover:bg-neutral-50/50">
+                          <td className="px-3 py-1.5">{d.date}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{d.kwh.toFixed(2)}</td>
+                          {dailyWeather && Object.keys(dailyWeather).length > 0 ? (
+                            <>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.tAvgF) ? wx.tAvgF.toFixed(1) : "—"}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.tMinF) ? wx.tMinF.toFixed(1) : "—"}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.tMaxF) ? wx.tMaxF.toFixed(1) : "—"}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.hdd65) ? wx.hdd65.toFixed(1) : "—"}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.cdd65) ? wx.cdd65.toFixed(1) : "—"}</td>
+                            </>
+                          ) : null}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

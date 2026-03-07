@@ -517,6 +517,7 @@ export const UsageDashboard: React.FC<Props> = ({
       monthly: monthlySorted,
       stitchedMonth: dataset?.insights?.stitchedMonth ?? null,
       daily: recentDaily,
+      dailyWeather: (dataset as any)?.dailyWeather ?? null,
       fifteenCurve,
       totalKwh,
       totals,
@@ -789,6 +790,7 @@ export const UsageDashboard: React.FC<Props> = ({
             dailyView={dailyView}
             onDailyViewChange={setDailyView}
             daily={derived.daily}
+            dailyWeather={derived.dailyWeather ?? undefined}
             fifteenCurve={derived.fifteenCurve}
             coverageStart={coverage?.start ?? null}
             coverageEnd={coverage?.end ?? null}

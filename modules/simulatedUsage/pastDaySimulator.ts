@@ -172,11 +172,21 @@ function selectDayTotalWithFallback(args: {
 
 // ----- Weather adjustment (from GapFill Lab) -----
 const WEATHER_SEVERITY_THRESHOLD = 2;
-const WEATHER_DEADBAND_PCT = 0.15;
+/** Heating: scale only when relative deviation > 30% (ratio outside [0.70, 1.30]). */
+const HEATING_DEADBAND_PCT = 0.3;
+/** Cooling: scale only when relative deviation > 25% (ratio outside [0.75, 1.25]). */
+const COOLING_DEADBAND_PCT = 0.25;
+/** Event days (aux or pool): heating multiplier range unchanged. */
 const HEATING_MULT_MIN = 0.9;
 const HEATING_MULT_MAX = 1.35;
 const COOLING_MULT_MIN = 0.9;
 const COOLING_MULT_MAX = 1.25;
+/** Non-event days only: tighter heating multiplier cap. */
+const HEATING_MULT_MIN_NON_EVENT = 0.97;
+const HEATING_MULT_MAX_NON_EVENT = 1.15;
+/** Non-event days only: tighter cooling multiplier cap. */
+const COOLING_MULT_MIN_NON_EVENT = 0.97;
+const COOLING_MULT_MAX_NON_EVENT = 1.1;
 const AUX_HEAT_SLOPE = 0.15;
 /** Phase 1 safety cap: aux heat adder per day (kWh). */
 const AUX_HEAT_KWH_CAP = 12;
@@ -210,6 +220,8 @@ function computeWeatherAdjustedDayTotal(args: {
   auxHeatGate_freezeHoursPassed: boolean;
   auxHeatGate_severityPassed: boolean;
   referenceHeatingSeverity: number;
+  preBlendAdjustedDayKwh: number;
+  blendedBackTowardProfile: boolean;
 } {
   const { baseDayKwh, localDate, weatherByDateKey, trainingStats, isWeekend, homeProfile, applianceProfile } = args;
   const wx = weatherByDateKey.get(localDate);
@@ -235,6 +247,8 @@ function computeWeatherAdjustedDayTotal(args: {
       auxHeatGate_freezeHoursPassed: false,
       auxHeatGate_severityPassed: false,
       referenceHeatingSeverity: 0,
+      preBlendAdjustedDayKwh: baseDayKwh,
+      blendedBackTowardProfile: false,
     };
   }
 
@@ -248,24 +262,25 @@ function computeWeatherAdjustedDayTotal(args: {
   const testHdd = wx.heatingDegreeSeverity;
   const testCdd = wx.coolingDegreeSeverity;
 
+  // Apply deadbands: heating >30% deviation, cooling >25% deviation before scaling
   if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
     weatherModeUsed = "heating";
     if (refHdd != null && refHdd > 1e-6) {
       const ratio = testHdd / refHdd;
-      if (ratio >= 1 - WEATHER_DEADBAND_PCT && ratio <= 1 + WEATHER_DEADBAND_PCT) {
+      if (ratio >= 1 - HEATING_DEADBAND_PCT && ratio <= 1 + HEATING_DEADBAND_PCT) {
         weatherSeverityMultiplier = 1;
       } else {
-        weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, ratio));
+        weatherSeverityMultiplier = ratio;
       }
     }
   } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
     weatherModeUsed = "cooling";
     if (refCdd != null && refCdd > 1e-6) {
       const ratio = testCdd / refCdd;
-      if (ratio >= 1 - WEATHER_DEADBAND_PCT && ratio <= 1 + WEATHER_DEADBAND_PCT) {
+      if (ratio >= 1 - COOLING_DEADBAND_PCT && ratio <= 1 + COOLING_DEADBAND_PCT) {
         weatherSeverityMultiplier = 1;
       } else {
-        weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, ratio));
+        weatherSeverityMultiplier = ratio;
       }
     }
   }
@@ -310,8 +325,30 @@ function computeWeatherAdjustedDayTotal(args: {
     );
   }
 
-  const finalSelectedDayKwh =
-    baseDayKwh * weatherSeverityMultiplier + auxHeatKwhAdder + poolFreezeProtectKwhAdder;
+  // Non-event days: tighter multiplier caps. Event days: keep original caps.
+  const isEventDay = auxHeatKwhAdder > 0 || poolFreezeProtectKwhAdder > 0;
+  if (weatherModeUsed === "heating") {
+    if (isEventDay) {
+      weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, weatherSeverityMultiplier));
+    } else {
+      weatherSeverityMultiplier = Math.max(
+        HEATING_MULT_MIN_NON_EVENT,
+        Math.min(HEATING_MULT_MAX_NON_EVENT, weatherSeverityMultiplier)
+      );
+    }
+  } else if (weatherModeUsed === "cooling") {
+    if (isEventDay) {
+      weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, weatherSeverityMultiplier));
+    } else {
+      weatherSeverityMultiplier = Math.max(
+        COOLING_MULT_MIN_NON_EVENT,
+        Math.min(COOLING_MULT_MAX_NON_EVENT, weatherSeverityMultiplier)
+      );
+    }
+  }
+
+  const preBlendAdjustedDayKwh = baseDayKwh * weatherSeverityMultiplier;
+  const fullEventKwh = preBlendAdjustedDayKwh + auxHeatKwhAdder + poolFreezeProtectKwhAdder;
 
   let dayClassification: PastDayWeatherClassification;
   if (auxHeatKwhAdder > 0) {
@@ -322,6 +359,21 @@ function computeWeatherAdjustedDayTotal(args: {
     dayClassification = "weather_scaled_day";
   } else {
     dayClassification = "normal_day";
+  }
+
+  let finalSelectedDayKwh: number;
+  let blendedBackTowardProfile = false;
+  if (dayClassification === "normal_day") {
+    finalSelectedDayKwh = baseDayKwh;
+  } else if (
+    dayClassification === "extreme_cold_event_day" ||
+    dayClassification === "freeze_protect_day"
+  ) {
+    finalSelectedDayKwh = fullEventKwh;
+  } else {
+    // weather_scaled_day: stronger blend-back toward profile (80% profile, 20% pre-blend)
+    finalSelectedDayKwh = baseDayKwh * 0.8 + preBlendAdjustedDayKwh * 0.2;
+    blendedBackTowardProfile = true;
   }
 
   return {
@@ -335,6 +387,8 @@ function computeWeatherAdjustedDayTotal(args: {
     auxHeatGate_freezeHoursPassed,
     auxHeatGate_severityPassed,
     referenceHeatingSeverity,
+    preBlendAdjustedDayKwh,
+    blendedBackTowardProfile,
   };
 }
 
@@ -415,6 +469,8 @@ export function simulatePastDay(
     auxHeatGate_freezeHoursPassed: adj.auxHeatGate_freezeHoursPassed,
     auxHeatGate_severityPassed: adj.auxHeatGate_severityPassed,
     referenceHeatingSeverity: adj.referenceHeatingSeverity,
+    preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
+    blendedBackTowardProfile: adj.blendedBackTowardProfile,
   };
 }
 
@@ -464,6 +520,8 @@ export function getPastDayResultOnly(
     auxHeatGate_freezeHoursPassed: adj.auxHeatGate_freezeHoursPassed,
     auxHeatGate_severityPassed: adj.auxHeatGate_severityPassed,
     referenceHeatingSeverity: adj.referenceHeatingSeverity,
+    preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
+    blendedBackTowardProfile: adj.blendedBackTowardProfile,
   };
 }
 

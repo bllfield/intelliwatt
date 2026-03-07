@@ -79,6 +79,10 @@ export type PastDaySimulationResult = {
   auxHeatGate_severityPassed?: boolean;
   /** Reference heating severity (ref HDD) used for aux gate and ratio. */
   referenceHeatingSeverity?: number;
+  /** Pre-blend adjusted total (profile × weatherSeverityMultiplier, before aux/pool adders and blend). */
+  preBlendAdjustedDayKwh?: number;
+  /** True when day was weather_scaled_day and 80/20 blend-back toward profile was applied. */
+  blendedBackTowardProfile?: boolean;
 };
 
 export type PastDayWeatherClassification =

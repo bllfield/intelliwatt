@@ -36,7 +36,8 @@ import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
-import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { getHouseWeatherDays, upsertHouseWeatherDays } from "@/modules/weather/repo";
+import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
@@ -873,6 +874,10 @@ export async function getPastSimulatedDatasetForHouse(args: {
       const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
       if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
         actualWxByDateKey = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+        const rowsToPersist = Array.from(actualWxByDateKey.values());
+        if (rowsToPersist.length > 0) {
+          await upsertHouseWeatherDays({ rows: rowsToPersist }).catch(() => 0);
+        }
         normalWxByDateKey = await getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" });
       } else {
         await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
@@ -1015,6 +1020,14 @@ export async function getPastSimulatedDatasetForHouse(args: {
       }
     } catch {
       /* keep curve without overlay */
+    }
+    if (dataset && actualWxByDateKey && actualWxByDateKey.size > 0) {
+      (dataset as any).dailyWeather = Object.fromEntries(
+        Array.from(actualWxByDateKey.entries()).map(([dateKey, w]) => [
+          dateKey,
+          { tAvgF: w.tAvgF, tMinF: w.tMinF, tMaxF: w.tMaxF, hdd65: w.hdd65, cdd65: w.cdd65 },
+        ])
+      );
     }
     return { dataset };
   } catch (e) {
@@ -1211,6 +1224,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const useActualBaseline =
       scenarioKey === "BASELINE" &&
       isSmtBaselineMode;
+
+    // Backfill house weather for the usage window (e.g. 366 days) when missing; runs on every simulated fetch.
+    const canonicalMonthsForWx = (buildInputs as any).canonicalMonths ?? [];
+    const windowForWx = canonicalMonthsForWx.length > 0 ? canonicalWindowDateRange(canonicalMonthsForWx) : null;
+    if (windowForWx?.start && windowForWx?.end) {
+      ensureHouseWeatherBackfill({
+        houseId: args.houseId,
+        startDate: windowForWx.start,
+        endDate: windowForWx.end,
+      }).catch(() => {});
+    }
 
     let dataset: any;
     if (useActualBaseline) {

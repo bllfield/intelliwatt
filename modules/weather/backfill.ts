@@ -1,0 +1,84 @@
+/**
+ * Backfill house daily weather for the usage window (e.g. 366 days).
+ * When weather is missing, fetches from the weather API and persists; any still missing get stubbed.
+ */
+
+import { prisma } from "@/lib/db";
+import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
+import { findMissingHouseWeatherDateKeys, upsertHouseWeatherDays } from "@/modules/weather/repo";
+import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
+
+const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
+
+function enumerateDateKeysUtc(startDate: string, endDate: string): string[] {
+  const start = String(startDate).trim().slice(0, 10);
+  const end = String(endDate).trim().slice(0, 10);
+  if (!YYYY_MM_DD.test(start) || !YYYY_MM_DD.test(end) || end < start) return [];
+  const out: string[] = [];
+  const startMs = new Date(start + "T00:00:00.000Z").getTime();
+  const endMs = new Date(end + "T00:00:00.000Z").getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  for (let t = startMs; t <= endMs; t += dayMs) {
+    const dateKey = new Date(t).toISOString().slice(0, 10);
+    if (YYYY_MM_DD.test(dateKey)) out.push(dateKey);
+  }
+  return out;
+}
+
+/**
+ * Ensure house has daily weather for the given date range (e.g. 366 days used for usage).
+ * If any dates are missing for ACTUAL_LAST_YEAR, fetches from the weather API and persists;
+ * any still missing after fetch are filled with stubs. NORMAL_AVG stubs are also ensured.
+ * Call from a frequent path (e.g. simulated usage house fetch) so weather is backfilled when absent.
+ */
+export async function ensureHouseWeatherBackfill(args: {
+  houseId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<{ fetched: number; stubbed: number }> {
+  const { houseId, startDate, endDate } = args;
+  const dateKeys = enumerateDateKeysUtc(startDate, endDate);
+  if (dateKeys.length === 0) return { fetched: 0, stubbed: 0 };
+
+  const missing = await findMissingHouseWeatherDateKeys({
+    houseId,
+    dateKeys,
+    kind: "ACTUAL_LAST_YEAR",
+  });
+  if (missing.length === 0) {
+    await ensureHouseWeatherStubbed({ houseId, dateKeys });
+    return { fetched: 0, stubbed: 0 };
+  }
+
+  const house = await (prisma as any).houseAddress
+    .findUnique({ where: { id: houseId }, select: { lat: true, lng: true } })
+    .catch(() => null);
+  const lat = house?.lat != null && Number.isFinite(house.lat) ? house.lat : null;
+  const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
+
+  let fetched = 0;
+  if (missing.length > 0 && lat != null && lon != null) {
+    const minDate = missing[0]!;
+    const maxDate = missing[missing.length - 1]!;
+    try {
+      const weatherResult = await getWeatherForRange(lat, lon, minDate, maxDate);
+      if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
+        const dayWxMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+        const rowsToInsert = missing.filter((dk) => dayWxMap.has(dk)).map((dk) => dayWxMap.get(dk)!);
+        if (rowsToInsert.length > 0) {
+          fetched = await upsertHouseWeatherDays({ rows: rowsToInsert });
+        }
+      }
+    } catch (err) {
+      console.warn("[weather/backfill] getWeatherForRange failed", { houseId, err: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  const stillMissing = await findMissingHouseWeatherDateKeys({
+    houseId,
+    dateKeys,
+    kind: "ACTUAL_LAST_YEAR",
+  });
+  await ensureHouseWeatherStubbed({ houseId, dateKeys });
+  return { fetched, stubbed: stillMissing.length };
+}
