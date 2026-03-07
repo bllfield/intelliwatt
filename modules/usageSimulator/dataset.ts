@@ -168,6 +168,8 @@ function buildDisplayMonthlyFromIntervals(args: {
   endDate: string;
   /** When set, group by this timezone (e.g. house timezone). Otherwise uses America/Chicago for backward compatibility. */
   timezone?: string;
+  /** When true, group intervals by UTC month (timestamp YYYY-MM). Use for Past stitched curves so monthly matches daily and no zeros from TZ shift. */
+  useUtcMonth?: boolean;
 }): {
   monthly: Array<{ month: string; kwh: number }>;
   stitchedMonth:
@@ -182,28 +184,55 @@ function buildDisplayMonthlyFromIntervals(args: {
       }
     | null;
 } {
+  const useUtcMonth = Boolean(args.useUtcMonth);
   const tz = args.timezone && args.timezone.trim() ? args.timezone.trim() : "America/Chicago";
   const partsFn = (ts: Date) => datePartsInTimezone(ts, tz);
   const monthTotals = new Map<string, number>();
   const dayTotals = new Map<string, number>(); // `${YYYY-MM}-${DD}`
   for (const iv of args.intervals ?? []) {
-    const ts = new Date(String(iv?.timestamp ?? ""));
-    if (!Number.isFinite(ts.getTime())) continue;
-    const p = partsFn(ts);
-    if (!p) continue;
+    const tsIso = String(iv?.timestamp ?? "");
     const kwh = Number(iv?.consumption_kwh) || 0;
-    monthTotals.set(p.yearMonth, (monthTotals.get(p.yearMonth) ?? 0) + kwh);
-    const dayKey = `${p.yearMonth}-${String(p.day).padStart(2, "0")}`;
-    dayTotals.set(dayKey, (dayTotals.get(dayKey) ?? 0) + kwh);
+    if (useUtcMonth) {
+      const ym = tsIso.slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+      monthTotals.set(ym, (monthTotals.get(ym) ?? 0) + kwh);
+      const dateKey = tsIso.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        dayTotals.set(dateKey, (dayTotals.get(dateKey) ?? 0) + kwh);
+      }
+    } else {
+      const ts = new Date(tsIso);
+      if (!Number.isFinite(ts.getTime())) continue;
+      const p = partsFn(ts);
+      if (!p) continue;
+      monthTotals.set(p.yearMonth, (monthTotals.get(p.yearMonth) ?? 0) + kwh);
+      const dayKey = `${p.yearMonth}-${String(p.day).padStart(2, "0")}`;
+      dayTotals.set(dayKey, (dayTotals.get(dayKey) ?? 0) + kwh);
+    }
   }
 
   const endAnchor = new Date(`${String(args.endDate).slice(0, 10)}T23:59:59.999Z`);
-  const endParts = partsFn(endAnchor);
-  if (!endParts) {
-    const fallback = Array.from(monthTotals.entries())
-      .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
-      .sort((a, b) => (a.month < b.month ? -1 : 1));
-    return { monthly: fallback, stitchedMonth: null };
+  let endParts: { year: number; month: number; day: number; yearMonth: string };
+  if (useUtcMonth) {
+    const y = endAnchor.getUTCFullYear();
+    const m = endAnchor.getUTCMonth() + 1;
+    const d = endAnchor.getUTCDate();
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+      const fallback = Array.from(monthTotals.entries())
+        .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
+        .sort((a, b) => (a.month < b.month ? -1 : 1));
+      return { monthly: fallback, stitchedMonth: null };
+    }
+    endParts = { year: y, month: m, day: d, yearMonth: `${String(y)}-${String(m).padStart(2, "0")}` };
+  } else {
+    const p = partsFn(endAnchor);
+    if (!p) {
+      const fallback = Array.from(monthTotals.entries())
+        .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
+        .sort((a, b) => (a.month < b.month ? -1 : 1));
+      return { monthly: fallback, stitchedMonth: null };
+    }
+    endParts = p;
   }
 
   const yearMonths = lastNYearMonthsFrom(endParts.year, endParts.month, 12);
@@ -245,8 +274,21 @@ function buildDisplayMonthlyFromIntervals(args: {
     };
   }
 
-  const monthly = yearMonths.map((month) => ({ month, kwh: round2(displayTotals.get(month) ?? 0) }));
   return { monthly, stitchedMonth };
+}
+
+/** UTC-month variant for interval-based curves (Past stitched). Exported for cache restore. */
+export function buildDisplayMonthlyFromIntervalsUtc(
+  intervals: Array<{ timestamp: string; consumption_kwh: number }>,
+  endDate: string
+): { monthly: Array<{ month: string; kwh: number }>; usageBucketsByMonth: Record<string, Record<string, number>> } {
+  const monthlyBuild = buildDisplayMonthlyFromIntervals({
+    intervals,
+    endDate,
+    useUtcMonth: true,
+  });
+  const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthlyBuild.monthly);
+  return { monthly: monthlyBuild.monthly, usageBucketsByMonth };
 }
 
 function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
@@ -588,7 +630,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     notes?: string[];
     filledMonths?: string[];
   },
-  options?: { excludedDateKeys?: Set<string>; /** When set, monthly display groups by this timezone (fixes 0 kWh for non-Chicago). */ timezone?: string }
+  options?: { excludedDateKeys?: Set<string>; /** When set, monthly display groups by this timezone (fixes 0 kWh for non-Chicago). */ timezone?: string; /** When true, group monthly by UTC month so it matches daily (fixes Past simulated zeros). */ useUtcMonth?: boolean }
 ): SimulatedUsageDataset {
   const dailyMap = new Map<string, number>();
   for (let j = 0; j < curve.intervals.length; j++) {
@@ -603,6 +645,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     intervals: curve.intervals,
     endDate: curve.end,
     timezone: options?.timezone,
+    useUtcMonth: options?.useUtcMonth,
   });
   // Use stitched display-monthly output so boundary month windows don't show duplicate current month rows.
   const monthly = monthlyBuild.monthly;

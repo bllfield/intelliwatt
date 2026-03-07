@@ -14,6 +14,7 @@ import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestam
 import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
+  buildDisplayMonthlyFromIntervalsUtc,
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
@@ -977,7 +978,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       canonicalEndMonth: buildInputs.canonicalEndMonth,
       notes: buildInputs.notes ?? [],
       filledMonths: buildInputs.filledMonths ?? [],
-    }, { timezone: timezone ?? undefined });
+    }, { timezone: timezone ?? undefined, useUtcMonth: true });
     if (dataset && typeof dataset.meta === "object") {
       dataset.meta = {
         ...dataset.meta,
@@ -1379,8 +1380,26 @@ export async function getSimulatedUsageForHouseScenario(args: {
           }
         }
         const window = canonicalWindowDateRange(canonicalMonths);
-        const startDate = periodsForStitch?.[0]?.startDate ?? window?.start;
-        const endDate = periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
+        let startDate = periodsForStitch?.[0]?.startDate ?? window?.start;
+        let endDate = periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
+        // Align 12-month display to end with actual data (e.g. March 2026) so chart/table show Apr..Mar, not Mar..Feb.
+        if (startDate && endDate && window?.end) {
+          try {
+            const actualForWindow = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, { skipFullYearIntervalFetch: true });
+            const actualEnd = actualForWindow?.dataset?.summary?.end;
+            const actualStart = actualForWindow?.dataset?.summary?.start;
+            if (typeof actualEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(actualEnd.slice(0, 10))) {
+              const actualEndDate = actualEnd.slice(0, 10);
+              if (actualEndDate > endDate) endDate = actualEndDate;
+            }
+            if (typeof actualStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(actualStart.slice(0, 10))) {
+              const actualStartDate = actualStart.slice(0, 10);
+              if (actualStartDate < startDate) startDate = actualStartDate;
+            }
+          } catch {
+            /* keep window-based start/end */
+          }
+        }
         const pastWindowDiag = {
           canonicalMonthsLen: canonicalMonths.length,
           firstMonth: canonicalMonths[0] ?? null,
@@ -1431,6 +1450,27 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
             };
             dataset = restored;
+            // Recompute monthly from decoded intervals (UTC month) so totals match daily and no zeros from stale cache.
+            const curveEnd = String((cached.datasetJson as any)?.summary?.end ?? endDate).slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(curveEnd) && Array.isArray(decoded) && decoded.length > 0) {
+              const intervalsForMonthly = decoded.map((p: { timestamp: string; kwh: number }) => ({
+                timestamp: String(p?.timestamp ?? ""),
+                consumption_kwh: Number(p?.kwh) || 0,
+              }));
+              const { monthly: recomputedMonthly, usageBucketsByMonth: recomputedBuckets } =
+                buildDisplayMonthlyFromIntervalsUtc(intervalsForMonthly, curveEnd);
+              (dataset as any).monthly = recomputedMonthly;
+              (dataset as any).usageBucketsByMonth = recomputedBuckets;
+              const sumKwh = recomputedMonthly.reduce((s: number, m: { kwh?: number }) => s + (Number(m?.kwh) || 0), 0);
+              if (dataset.summary && typeof dataset.summary === "object") {
+                (dataset.summary as any).totalKwh = Math.round(sumKwh * 100) / 100;
+              }
+              if (dataset.totals && typeof dataset.totals === "object") {
+                const r = Math.round(sumKwh * 100) / 100;
+                (dataset.totals as any).importKwh = r;
+                (dataset.totals as any).netKwh = r;
+              }
+            }
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;
             (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
