@@ -915,6 +915,14 @@ export type DayTotalDiagnostics = {
     daysClassified_extreme_cold_event: number;
     daysClassified_freeze_protect: number;
   };
+  /** Tightening pass: counts and blend weights when weather scaling is selective. */
+  weatherTighteningSummary?: {
+    daysWithMultiplierOne: number;
+    daysWithScaledMultiplier: number;
+    daysBlendedBackTowardProfile: number;
+    avgBlendWeightWeather: number;
+    avgBlendWeightProfile: number;
+  };
   /** First 10 test days with weather diagnostics when weather was used. */
   testedDayWeatherSample?: Array<{
     localDate: string;
@@ -926,6 +934,10 @@ export type DayTotalDiagnostics = {
     poolFreezeProtectKwhAdder: number;
     finalSelectedDayKwh: number;
     dayClassification: WeatherDayClassification;
+    /** Pre-blend adjusted total (profile × mult + aux + pool). */
+    preBlendAdjustedDayKwh?: number;
+    /** Final day total after optional blend (same as finalSelectedDayKwh). */
+    postBlendFinalDayKwh?: number;
     dailyAvgTempC: number | null;
     dailyMinTempC: number | null;
     heatingDegreeSeverity: number;
@@ -1363,7 +1375,6 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         weatherAdjustmentByDate.set(dateKey, {
           profileSelectedDayKwh: sel.targetDayKwh,
           finalSelectedDayKwh: adj.finalSelectedDayKwh,
-          preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
           weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
           weatherModeUsed: adj.weatherModeUsed,
           auxHeatKwhAdder: adj.auxHeatKwhAdder,
@@ -1441,6 +1452,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     }
 
     let weatherAdjustmentSummary: DayTotalDiagnostics["weatherAdjustmentSummary"];
+    let weatherTighteningSummary: DayTotalDiagnostics["weatherTighteningSummary"];
     let testedDayWeatherSample: DayTotalDiagnostics["testedDayWeatherSample"];
     if (useWeather && weatherAdjustmentByDate.size > 0) {
       const mults = Array.from(weatherAdjustmentByDate.values()).map((v) => v.weatherSeverityMultiplier);
@@ -1468,15 +1480,6 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         daysClassified_extreme_cold_event,
         daysClassified_freeze_protect,
       };
-      const daysWithMultiplierOne = vals.filter((v) => v.weatherSeverityMultiplier === 1).length;
-      const daysBlendedBackTowardProfile = daysClassified_weather_scaled;
-      weatherTighteningSummary = {
-        daysWithMultiplierOne,
-        daysWithScaledMultiplier: daysWithMult,
-        daysBlendedBackTowardProfile,
-        avgBlendWeightWeather: BLEND_WEIGHT_WEATHER,
-        avgBlendWeightProfile: BLEND_WEIGHT_PROFILE,
-      };
       testedDayWeatherSample = [];
       const seenForWeather = new Set<string>();
       for (const p of testIntervals) {
@@ -1497,6 +1500,8 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
           finalSelectedDayKwh: adj.finalSelectedDayKwh,
           dayClassification: adj.dayClassification,
+          preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
+          postBlendFinalDayKwh: adj.finalSelectedDayKwh,
           dailyAvgTempC: wx?.dailyAvgTempC ?? null,
           dailyMinTempC: wx?.dailyMinTempC ?? null,
           heatingDegreeSeverity: wx?.heatingDegreeSeverity ?? 0,
@@ -1515,7 +1520,6 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         testedDayFallbackSample,
         dayTotalGuardrailAppliedCount: guardrailAppliedCount,
         ...(weatherAdjustmentSummary != null ? { weatherAdjustmentSummary } : {}),
-        ...(weatherTighteningSummary != null ? { weatherTighteningSummary } : {}),
         ...(testedDayWeatherSample != null ? { testedDayWeatherSample } : {}),
       },
     };
