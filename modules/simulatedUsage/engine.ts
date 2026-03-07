@@ -1076,7 +1076,18 @@ export function buildPastSimulatedBaselineV1(args: {
 
   // When usageShapeProfile is provided, merge it so excluded months get profile-based daily totals (then weather-scaled).
   // Otherwise months with few reference days (e.g. one day in March during travel) produce a flat repeated value.
+  // Profile month keys are from the training window (e.g. 2024-03..2025-02); simulation may use 2025-03. Use same-calendar-month fallback.
   const MIN_DAYS_FOR_PROFILE_USE = 4;
+  const profileMonthFallback = (ym: string, kind: "weekday" | "weekend"): number | undefined => {
+    const map = kind === "weekday" ? args.usageShapeProfile?.weekdayAvgByMonthKey : args.usageShapeProfile?.weekendAvgByMonthKey;
+    if (!map) return undefined;
+    const exact = map[ym];
+    if (exact != null && Number.isFinite(exact) && exact > 0) return exact;
+    const monthPart = ym.slice(5, 7);
+    const sameMonth = Object.entries(map).find(([k]) => k.slice(5, 7) === monthPart);
+    const v = sameMonth?.[1];
+    return v != null && Number.isFinite(v) && v > 0 ? v : undefined;
+  };
   let finalProfile: PastDayProfileLite = pastProfile;
   if (args.usageShapeProfile?.weekdayAvgByMonthKey || args.usageShapeProfile?.weekendAvgByMonthKey) {
     const monthKeysFromCanonical = Array.from(
@@ -1099,8 +1110,8 @@ export function buildPastSimulatedBaselineV1(args: {
     const monthOverallCount: Record<string, number> = {};
     for (let i = 0; i < fullMonthKeys.length; i++) {
       const ym = fullMonthKeys[i]!;
-      const profileWd = args.usageShapeProfile?.weekdayAvgByMonthKey?.[ym];
-      const profileWe = args.usageShapeProfile?.weekendAvgByMonthKey?.[ym];
+      const profileWd = profileMonthFallback(ym, "weekday");
+      const profileWe = profileMonthFallback(ym, "weekend");
       const refIdx = pastProfile.monthKeys.indexOf(ym);
       const hasProfileValue =
         (profileWd != null && Number.isFinite(profileWd) && profileWd > 0) ||
