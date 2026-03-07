@@ -1193,7 +1193,7 @@ export async function POST(req: NextRequest) {
       });
       if (allRows.length > 0) {
         weatherUsedForSim = !anyFromStub;
-        weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows);
+        weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows, undefined, undefined, timezone);
         const trainingDayKwhByDate = new Map<string, number>();
         for (const p of trainingIntervalsFiltered) {
           const dk = dateKeyInTimezone(p.timestamp, timezone);
