@@ -144,15 +144,15 @@ export function hourlyRowsToDayWxMap(
   }
 
   const out = new Map<string, DayWeather>();
-  for (const [dateKey, entry] of byDate) {
+  Array.from(byDate.entries()).forEach(([dateKey, entry]) => {
     const temps = entry.tempsC;
-    if (temps.length === 0) continue;
+    if (temps.length === 0) return;
     const minC = Math.min(...temps);
     const maxC = Math.max(...temps);
-    const avgC = temps.reduce((a, b) => a + b, 0) / temps.length;
-    const tMinF = Math.round((minC * 9) / 5 + 32 * 100) / 100;
-    const tMaxF = Math.round((maxC * 9) / 5 + 32 * 100) / 100;
-    const tAvgF = Math.round((avgC * 9) / 5 + 32 * 100) / 100;
+    const avgC = temps.reduce((a: number, b: number) => a + b, 0) / temps.length;
+    const tMinF = Math.round(((minC * 9) / 5 + 32) * 100) / 100;
+    const tMaxF = Math.round(((maxC * 9) / 5 + 32) * 100) / 100;
+    const tAvgF = Math.round(((avgC * 9) / 5 + 32) * 100) / 100;
     const hdd65 = Math.round(Math.max(0, 65 - tAvgF) * 100) / 100;
     const cdd65 = Math.round(Math.max(0, tAvgF - 65) * 100) / 100;
     out.set(dateKey, {
@@ -167,6 +167,6 @@ export function hourlyRowsToDayWxMap(
       cdd65,
       source: "OPEN_METEO_CACHE",
     });
-  }
+  });
   return out;
 }
