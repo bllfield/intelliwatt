@@ -818,20 +818,353 @@ export type DayTotalDiagnostics = {
     clampApplied: boolean;
   }>;
   dayTotalGuardrailAppliedCount: number;
+  /** Present when weather adjustment was applied. */
+  weatherAdjustmentSummary?: {
+    daysWithWeatherScaling: number;
+    daysWithAuxHeatAdjustment: number;
+    daysWithPoolFreezeProtectAdjustment: number;
+    avgWeatherFactor: number;
+    minWeatherFactor: number;
+    maxWeatherFactor: number;
+  };
+  /** First 10 test days with weather diagnostics when weather was used. */
+  testedDayWeatherSample?: Array<{
+    localDate: string;
+    baseDayKwh: number;
+    adjustedDayKwh: number;
+    weatherFactor: number;
+    weatherModeUsed: "heating" | "cooling" | "neutral";
+    auxHeatApplied: boolean;
+    poolFreezeProtectApplied: boolean;
+    extraPoolKwh: number;
+    dailyAvgTempC: number | null;
+    dailyMinTempC: number | null;
+    heatingDegreeSeverity: number;
+    coolingDegreeSeverity: number;
+    freezeHoursCount: number;
+  }>;
 };
+
+/** Hourly weather row shape used by gapfill-lab (matches HistoricalWeatherRow). */
+export type WeatherHourlyRowForGapfill = {
+  timestampUtc: Date | string;
+  temperatureC: number | null;
+  cloudcoverPct?: number | null;
+  solarRadiation?: number | null;
+};
+
+/** Daily weather features derived from hourly rows (UTC date key). */
+export type DailyWeatherFeatures = {
+  dailyAvgTempC: number | null;
+  dailyMinTempC: number | null;
+  dailyMaxTempC: number | null;
+  heatingDegreeSeverity: number;
+  coolingDegreeSeverity: number;
+  freezeHoursCount: number;
+  solarRadiationDailyTotal: number;
+  cloudcoverAvg: number | null;
+  extremeCold: boolean;
+  freezeDay: boolean;
+};
+
+/** Training aggregates for weather-based day-total adjustment (by bucket: month+daytype, season+daytype, global). */
+export type TrainingWeatherStats = {
+  byMonthDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
+  bySeasonDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
+  global: { avgDayKwhWd: number; avgDayKwhWe: number; avgHddWd: number; avgHddWe: number; avgCddWd: number; avgCddWe: number; countWd: number; countWe: number };
+};
+
+/** Result of weather-based day total adjustment. */
+export type WeatherAdjustmentResult = {
+  adjustedDayKwh: number;
+  weatherAdjustmentFactor: number;
+  weatherModeUsed: "heating" | "cooling" | "neutral";
+  auxHeatApplied: boolean;
+  poolFreezeProtectApplied: boolean;
+  extraPoolKwh: number;
+};
+
+const HEATING_BASE_C = 18;
+const COOLING_BASE_C = 22;
+const WEATHER_SEVERITY_THRESHOLD = 2;
+const WEATHER_FACTOR_MIN = 0.75;
+const WEATHER_FACTOR_MAX = 1.5;
+const FINAL_FACTOR_MAX = 1.9;
+const AUX_HEAT_CAP = 0.6;
+const FREEZE_HOURS_THRESHOLD = 2;
+
+/**
+ * Build daily weather features from hourly rows. Groups by UTC date key (YYYY-MM-DD).
+ */
+export function buildDailyWeatherFeaturesFromHourly(
+  rows: WeatherHourlyRowForGapfill[],
+  heatingBaseC: number = HEATING_BASE_C,
+  coolingBaseC: number = COOLING_BASE_C
+): Map<string, DailyWeatherFeatures> {
+  const byDate = new Map<string, { tempsC: number[]; cloud: number[]; solar: number[] }>();
+  for (const r of rows ?? []) {
+    const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
+    if (!Number.isFinite(t.getTime())) continue;
+    const dateKey = t.toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    const tempC = r.temperatureC != null && Number.isFinite(r.temperatureC) ? r.temperatureC : null;
+    let entry = byDate.get(dateKey);
+    if (!entry) {
+      entry = { tempsC: [], cloud: [], solar: [] };
+      byDate.set(dateKey, entry);
+    }
+    if (tempC != null) entry.tempsC.push(tempC);
+    if (r.cloudcoverPct != null && Number.isFinite(r.cloudcoverPct)) entry.cloud.push(r.cloudcoverPct);
+    if (r.solarRadiation != null && Number.isFinite(r.solarRadiation)) entry.solar.push(r.solarRadiation);
+  }
+
+  const out = new Map<string, DailyWeatherFeatures>();
+  Array.from(byDate.entries()).forEach(([dateKey, entry]) => {
+    const temps = entry.tempsC;
+    const n = temps.length;
+    const dailyAvgTempC = n > 0 ? temps.reduce((a, b) => a + b, 0) / n : null;
+    const dailyMinTempC = n > 0 ? Math.min(...temps) : null;
+    const dailyMaxTempC = n > 0 ? Math.max(...temps) : null;
+    const heatingDegreeSeverity = temps.reduce((s, t) => s + Math.max(0, heatingBaseC - t), 0);
+    const coolingDegreeSeverity = temps.reduce((s, t) => s + Math.max(0, t - coolingBaseC), 0);
+    const freezeHoursCount = temps.filter((t) => t <= 0).length;
+    const solarRadiationDailyTotal = entry.solar.length > 0 ? entry.solar.reduce((a, b) => a + b, 0) : 0;
+    const cloudcoverAvg = entry.cloud.length > 0 ? entry.cloud.reduce((a, b) => a + b, 0) / entry.cloud.length : null;
+    const extremeCold = dailyMinTempC != null && dailyMinTempC <= 0;
+    const freezeDay = freezeHoursCount >= FREEZE_HOURS_THRESHOLD;
+    out.set(dateKey, {
+      dailyAvgTempC,
+      dailyMinTempC,
+      dailyMaxTempC,
+      heatingDegreeSeverity,
+      coolingDegreeSeverity,
+      freezeHoursCount,
+      solarRadiationDailyTotal,
+      cloudcoverAvg,
+      extremeCold,
+      freezeDay,
+    });
+  });
+  return out;
+}
+
+function getSeasonBucket(monthKey: string): string {
+  const m = parseInt(monthKey.slice(5, 7), 10) || 1;
+  if (m === 12 || m <= 2) return "winter";
+  if (m >= 3 && m <= 5) return "spring";
+  if (m >= 6 && m <= 8) return "summer";
+  return "fall";
+}
+
+/**
+ * Build training weather stats from training date keys, actual day kWh per date, and weather features.
+ * Buckets: monthKey:wd|we, season:wd|we, global wd/we.
+ */
+export function buildTrainingWeatherStats(args: {
+  trainingDateKeys: string[];
+  trainingDayKwhByDate: Map<string, number>;
+  weatherByDateKey: Map<string, DailyWeatherFeatures>;
+  isWeekend: (dateKey: string) => boolean;
+}): TrainingWeatherStats {
+  const { trainingDateKeys, trainingDayKwhByDate, weatherByDateKey, isWeekend } = args;
+  const byMonthDaytype = new Map<string, { sumKwh: number; sumHdd: number; sumCdd: number; count: number }>();
+  const bySeasonDaytype = new Map<string, { sumKwh: number; sumHdd: number; sumCdd: number; count: number }>();
+  let sumKwhWd = 0, sumKwhWe = 0, sumHddWd = 0, sumHddWe = 0, sumCddWd = 0, sumCddWe = 0, countWd = 0, countWe = 0;
+
+  for (const dateKey of trainingDateKeys) {
+    const kwh = trainingDayKwhByDate.get(dateKey);
+    const wx = weatherByDateKey.get(dateKey);
+    if (kwh == null || !Number.isFinite(kwh) || !wx) continue;
+    const weekend = isWeekend(dateKey);
+    const monthKey = dateKey.slice(0, 7);
+    const season = getSeasonBucket(monthKey);
+    const bucket = `${monthKey}:${weekend ? "we" : "wd"}`;
+    const seasonBucket = `${season}:${weekend ? "we" : "wd"}`;
+
+    const hdd = wx.heatingDegreeSeverity;
+    const cdd = wx.coolingDegreeSeverity;
+
+    const add = (map: Map<string, { sumKwh: number; sumHdd: number; sumCdd: number; count: number }>, key: string) => {
+      let e = map.get(key);
+      if (!e) {
+        e = { sumKwh: 0, sumHdd: 0, sumCdd: 0, count: 0 };
+        map.set(key, e);
+      }
+      e.sumKwh += kwh;
+      e.sumHdd += hdd;
+      e.sumCdd += cdd;
+      e.count += 1;
+    };
+    add(byMonthDaytype, bucket);
+    add(bySeasonDaytype, seasonBucket);
+
+    if (weekend) {
+      sumKwhWe += kwh;
+      sumHddWe += hdd;
+      sumCddWe += cdd;
+      countWe++;
+    } else {
+      sumKwhWd += kwh;
+      sumHddWd += hdd;
+      sumCddWd += cdd;
+      countWd++;
+    }
+  }
+
+  const toAvg = (map: Map<string, { sumKwh: number; sumHdd: number; sumCdd: number; count: number }>) => {
+    const out = new Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>();
+    map.forEach((v, k) => {
+      const n = v.count;
+      out.set(k, n > 0 ? { avgDayKwh: v.sumKwh / n, avgHdd: v.sumHdd / n, avgCdd: v.sumCdd / n, count: n } : { avgDayKwh: 0, avgHdd: 0, avgCdd: 0, count: 0 });
+    });
+    return out;
+  };
+
+  return {
+    byMonthDaytype: toAvg(byMonthDaytype),
+    bySeasonDaytype: toAvg(bySeasonDaytype),
+    global: {
+      avgDayKwhWd: countWd > 0 ? sumKwhWd / countWd : 0,
+      avgDayKwhWe: countWe > 0 ? sumKwhWe / countWe : 0,
+      avgHddWd: countWd > 0 ? sumHddWd / countWd : 0,
+      avgHddWe: countWe > 0 ? sumHddWe / countWe : 0,
+      avgCddWd: countWd > 0 ? sumCddWd / countWd : 0,
+      avgCddWe: countWe > 0 ? sumCddWe / countWe : 0,
+      countWd,
+      countWe,
+    },
+  };
+}
+
+/** Minimal home profile for weather adjustment (all-electric / electric heat / pool). */
+export type GapfillHomeProfileForWeather = {
+  fuelConfiguration?: string | null;
+  heatingType?: string | null;
+  hvacType?: string | null;
+  pool?: { hasPool?: boolean; pumpType?: string | null; pumpHp?: number | null } | null;
+};
+
+/**
+ * Compute weather-adjusted day total from base profile day total.
+ * Applies heating/cooling severity ratio, optional aux heat for electric homes, and pool freeze-protect adder.
+ */
+export function computeWeatherAdjustedDayTotal(args: {
+  baseDayKwh: number;
+  localDate: string;
+  weatherByDateKey: Map<string, DailyWeatherFeatures>;
+  trainingStats: TrainingWeatherStats;
+  isWeekend: boolean;
+  homeProfile?: GapfillHomeProfileForWeather | null;
+  applianceProfile?: { appliances?: Array<{ type?: string; data?: Record<string, unknown> }> } | null;
+}): WeatherAdjustmentResult {
+  const { baseDayKwh, localDate, weatherByDateKey, trainingStats, isWeekend, homeProfile, applianceProfile } = args;
+  const wx = weatherByDateKey.get(localDate);
+  const monthKey = localDate.slice(0, 7);
+  const season = getSeasonBucket(monthKey);
+  const bucket = `${monthKey}:${isWeekend ? "we" : "wd"}`;
+  const seasonBucket = `${season}:${isWeekend ? "we" : "wd"}`;
+
+  let weatherFactor = 1;
+  let weatherModeUsed: "heating" | "cooling" | "neutral" = "neutral";
+  let auxHeatApplied = false;
+  let poolFreezeProtectApplied = false;
+  let extraPoolKwh = 0;
+
+  if (!wx) {
+    return {
+      adjustedDayKwh: baseDayKwh,
+      weatherAdjustmentFactor: 1,
+      weatherModeUsed: "neutral",
+      auxHeatApplied: false,
+      poolFreezeProtectApplied: false,
+      extraPoolKwh: 0,
+    };
+  }
+
+  const { heatingDegreeSeverity: testHdd, coolingDegreeSeverity: testCdd } = wx;
+  const refMonth = trainingStats.byMonthDaytype.get(bucket);
+  const refSeason = trainingStats.bySeasonDaytype.get(seasonBucket);
+  const refGlobal = trainingStats.global;
+  const refHdd = refMonth?.avgHdd ?? refSeason?.avgHdd ?? (isWeekend ? refGlobal.avgHddWe : refGlobal.avgHddWd);
+  const refCdd = refMonth?.avgCdd ?? refSeason?.avgCdd ?? (isWeekend ? refGlobal.avgCddWe : refGlobal.avgCddWd);
+
+  if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
+    weatherModeUsed = "heating";
+    if (refHdd > 1e-6) {
+      const raw = testHdd / refHdd;
+      weatherFactor = Math.max(WEATHER_FACTOR_MIN, Math.min(WEATHER_FACTOR_MAX, raw));
+    }
+  } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
+    weatherModeUsed = "cooling";
+    if (refCdd > 1e-6) {
+      const raw = testCdd / refCdd;
+      weatherFactor = Math.max(WEATHER_FACTOR_MIN, Math.min(WEATHER_FACTOR_MAX, raw));
+    }
+  }
+
+  let adjustedDayKwh = baseDayKwh * weatherFactor;
+
+  const isElectricHeat =
+    homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
+  if (isElectricHeat && (wx.extremeCold || wx.heatingDegreeSeverity > (refHdd || 0) * 1.5)) {
+    const ref = Math.max(refHdd || 0, 1);
+    const aux = Math.min(AUX_HEAT_CAP, Math.max(0, (wx.heatingDegreeSeverity - ref) / ref));
+    weatherFactor *= 1 + aux;
+    adjustedDayKwh = baseDayKwh * weatherFactor;
+    auxHeatApplied = true;
+  }
+
+  const capFactor = baseDayKwh > 1e-6 ? Math.max(WEATHER_FACTOR_MIN, Math.min(FINAL_FACTOR_MAX, adjustedDayKwh / baseDayKwh)) : 1;
+  if (baseDayKwh > 1e-6) {
+    adjustedDayKwh = baseDayKwh * capFactor;
+  }
+
+  const hasPool = Boolean(homeProfile?.pool?.hasPool) || (applianceProfile?.appliances ?? []).some((a) => a?.type === "pool");
+  const pumpHp = homeProfile?.pool?.pumpHp ?? (applianceProfile?.appliances ?? []).find((a) => a?.type === "pool")?.data?.pump_hp;
+  if (hasPool && (wx.freezeDay || wx.freezeHoursCount >= FREEZE_HOURS_THRESHOLD)) {
+    const hp = pumpHp != null && Number.isFinite(Number(pumpHp)) ? Number(pumpHp) : 1;
+    extraPoolKwh = Math.max(1.5, Math.min(8, (hp * 0.6 * wx.freezeHoursCount) / 6));
+    adjustedDayKwh += extraPoolKwh;
+    poolFreezeProtectApplied = true;
+  }
+
+  return {
+    adjustedDayKwh,
+    weatherAdjustmentFactor: weatherFactor,
+    weatherModeUsed,
+    auxHeatApplied,
+    poolFreezeProtectApplied,
+    extraPoolKwh,
+  };
+}
 
 /**
  * Simulate interval kWh for test-day timestamps using UsageShapeProfile (weekday/weekend avg + shape96).
  * Returns one entry per input interval with same timestamp; kwh is simulated.
  * When profile includes training strength (lite) and returnDiagnostics is true, returns { intervals, diagnostics }.
+ * When weatherByDateKey and trainingWeatherStats are provided, day totals are scaled by weather (and optional aux heat / pool freeze-protect).
  */
 export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
   timezone: string;
   testIntervals: IntervalPoint[];
   usageShapeProfileRowOrNull: UsageShapeProfileRowForSim;
   returnDiagnostics?: boolean;
+  /** When set with trainingWeatherStats, day totals are weather-adjusted. */
+  weatherByDateKey?: Map<string, DailyWeatherFeatures>;
+  trainingWeatherStats?: TrainingWeatherStats;
+  homeProfile?: GapfillHomeProfileForWeather | null;
+  applianceProfile?: { appliances?: Array<{ type?: string; data?: Record<string, unknown> }> } | null;
 }): IntervalPoint[] | { intervals: IntervalPoint[]; diagnostics: DayTotalDiagnostics } {
-  const { timezone, testIntervals, usageShapeProfileRowOrNull, returnDiagnostics } = args;
+  const {
+    timezone,
+    testIntervals,
+    usageShapeProfileRowOrNull,
+    returnDiagnostics,
+    weatherByDateKey,
+    trainingWeatherStats,
+    homeProfile,
+    applianceProfile,
+  } = args;
   const profile = usageShapeProfileRowOrNull;
   const shapeByMonth = (profile?.shapeByMonth96 && typeof profile.shapeByMonth96 === "object") ? profile.shapeByMonth96 : {};
   const wdArr = Array.isArray(profile?.avgKwhPerDayWeekdayByMonth) ? profile.avgKwhPerDayWeekdayByMonth : [];
@@ -845,7 +1178,17 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     Array.isArray((profile as UsageShapeProfileLite).monthKeys) &&
     (profile as UsageShapeProfileLite).weekdayCountByMonth != null;
 
+  const useWeather =
+    hasLiteStrength &&
+    weatherByDateKey != null &&
+    weatherByDateKey.size > 0 &&
+    trainingWeatherStats != null;
+
   const dayTotalByDate = new Map<string, DayTotalSelectionResult>();
+  const weatherAdjustmentByDate = new Map<
+    string,
+    { baseKwh: number; adjustedKwh: number; factor: number; mode: "heating" | "cooling" | "neutral"; auxHeat: boolean; poolFreeze: boolean; extraPoolKwh: number }
+  >();
   const fallbackSummary: Record<DayTotalFallbackLevel, number> = {
     month_daytype: 0,
     adjacent_month_daytype: 0,
@@ -879,6 +1222,27 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       dayTotalByDate.set(dateKey, sel);
       fallbackSummary[sel.fallbackLevel]++;
       if (sel.clampApplied) guardrailAppliedCount++;
+
+      if (useWeather && weatherByDateKey && trainingWeatherStats) {
+        const adj = computeWeatherAdjustedDayTotal({
+          baseDayKwh: sel.targetDayKwh,
+          localDate: dateKey,
+          weatherByDateKey,
+          trainingStats: trainingWeatherStats,
+          isWeekend,
+          homeProfile: homeProfile ?? null,
+          applianceProfile: applianceProfile ?? null,
+        });
+        weatherAdjustmentByDate.set(dateKey, {
+          baseKwh: sel.targetDayKwh,
+          adjustedKwh: adj.adjustedDayKwh,
+          factor: adj.weatherAdjustmentFactor,
+          mode: adj.weatherModeUsed,
+          auxHeat: adj.auxHeatApplied,
+          poolFreeze: adj.poolFreezeProtectApplied,
+          extraPoolKwh: adj.extraPoolKwh,
+        });
+      }
     }
   }
 
@@ -891,7 +1255,9 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     const isWeekend = dow === 0 || dow === 6;
 
     let targetDayKwh: number;
-    if (hasLiteStrength && dayTotalByDate.has(dateKey)) {
+    if (useWeather && weatherAdjustmentByDate.has(dateKey)) {
+      targetDayKwh = weatherAdjustmentByDate.get(dateKey)!.adjustedKwh;
+    } else if (hasLiteStrength && dayTotalByDate.has(dateKey)) {
       targetDayKwh = dayTotalByDate.get(dateKey)!.targetDayKwh;
     } else {
       const monthIdx = profileMonthKeys.indexOf(monthKey);
@@ -933,17 +1299,61 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       const sel = dayTotalByDate.get(dateKey);
       if (!sel) continue;
       const dow = localDayOfWeekInTimezone(ts, timezone);
+      const weatherAdj = weatherAdjustmentByDate.get(dateKey);
       testedDayFallbackSample.push({
         localDate: dateKey,
         monthKey: dateKey.slice(0, 7),
         dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
         fallbackLevelUsed: sel.fallbackLevel,
         rawSelectedDayKwh: sel.rawSelectedDayKwh,
-        finalSelectedDayKwh: sel.targetDayKwh,
+        finalSelectedDayKwh: weatherAdj ? weatherAdj.adjustedKwh : sel.targetDayKwh,
         clampApplied: sel.clampApplied,
       });
       if (testedDayFallbackSample.length >= 10) break;
     }
+
+    let weatherAdjustmentSummary: DayTotalDiagnostics["weatherAdjustmentSummary"];
+    let testedDayWeatherSample: DayTotalDiagnostics["testedDayWeatherSample"];
+    if (useWeather && weatherAdjustmentByDate.size > 0) {
+      const factors = Array.from(weatherAdjustmentByDate.values()).map((v) => (v.baseKwh > 1e-6 ? v.adjustedKwh / v.baseKwh : 1));
+      const daysAux = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.auxHeat).length;
+      const daysPoolFreeze = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.poolFreeze).length;
+      weatherAdjustmentSummary = {
+        daysWithWeatherScaling: weatherAdjustmentByDate.size,
+        daysWithAuxHeatAdjustment: daysAux,
+        daysWithPoolFreezeProtectAdjustment: daysPoolFreeze,
+        avgWeatherFactor: factors.length ? factors.reduce((a, b) => a + b, 0) / factors.length : 1,
+        minWeatherFactor: factors.length ? Math.min(...factors) : 1,
+        maxWeatherFactor: factors.length ? Math.max(...factors) : 1,
+      };
+      testedDayWeatherSample = [];
+      const seenForWeather = new Set<string>();
+      for (const p of testIntervals) {
+        const dk = dateKeyInTimezone(String(p?.timestamp ?? "").trim(), timezone);
+        if (seenForWeather.has(dk)) continue;
+        seenForWeather.add(dk);
+        const adj = weatherAdjustmentByDate.get(dk);
+        const wx = weatherByDateKey?.get(dk);
+        if (!adj) continue;
+        testedDayWeatherSample.push({
+          localDate: dk,
+          baseDayKwh: adj.baseKwh,
+          adjustedDayKwh: adj.adjustedKwh,
+          weatherFactor: adj.factor,
+          weatherModeUsed: adj.mode,
+          auxHeatApplied: adj.auxHeat,
+          poolFreezeProtectApplied: adj.poolFreeze,
+          extraPoolKwh: adj.extraPoolKwh,
+          dailyAvgTempC: wx?.dailyAvgTempC ?? null,
+          dailyMinTempC: wx?.dailyMinTempC ?? null,
+          heatingDegreeSeverity: wx?.heatingDegreeSeverity ?? 0,
+          coolingDegreeSeverity: wx?.coolingDegreeSeverity ?? 0,
+          freezeHoursCount: wx?.freezeHoursCount ?? 0,
+        });
+        if (testedDayWeatherSample.length >= 10) break;
+      }
+    }
+
     return {
       intervals,
       diagnostics: {
@@ -951,6 +1361,8 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         profileTrainingStrengthSample,
         testedDayFallbackSample,
         dayTotalGuardrailAppliedCount: guardrailAppliedCount,
+        ...(weatherAdjustmentSummary != null ? { weatherAdjustmentSummary } : {}),
+        ...(testedDayWeatherSample != null ? { testedDayWeatherSample } : {}),
       },
     };
   }

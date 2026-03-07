@@ -10,6 +10,8 @@ import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
   buildUsageShapeProfileLiteFromIntervals,
+  buildDailyWeatherFeaturesFromHourly,
+  buildTrainingWeatherStats,
   canonicalIntervalKey,
   computeGapFillMetrics,
   dateKeyInTimezone,
@@ -488,6 +490,13 @@ function buildFullReport(args: {
   if (j.dayTotalDiagnostics?.dayTotalGuardrailAppliedCount != null && j.dayTotalDiagnostics.dayTotalGuardrailAppliedCount > 0) {
     fullReportJson.notes.push(`Day-total guardrail applied on ${j.dayTotalDiagnostics.dayTotalGuardrailAppliedCount} tested days.`);
   }
+  const wxSummary = j.dayTotalDiagnostics?.weatherAdjustmentSummary;
+  if (wxSummary?.daysWithAuxHeatAdjustment != null && wxSummary.daysWithAuxHeatAdjustment > 0) {
+    fullReportJson.notes.push(`Extreme-cold HVAC adjustment applied on ${wxSummary.daysWithAuxHeatAdjustment} tested days.`);
+  }
+  if (wxSummary?.daysWithPoolFreezeProtectAdjustment != null && wxSummary.daysWithPoolFreezeProtectAdjustment > 0) {
+    fullReportJson.notes.push(`Pool freeze-protect adjustment applied on ${wxSummary.daysWithPoolFreezeProtectAdjustment} tested days.`);
+  }
   if (j.joinPct != null && j.joinPct < 0.95) {
     fullReportJson.notes.push("ERROR: simulated intervals did not join to actual timestamps; check timestamp keying.");
     if (Array.isArray(j.joinSampleActualTs) && j.joinSampleActualTs.length > 0) {
@@ -675,6 +684,16 @@ function buildFullReport(args: {
         lines.push(`  ${r.localDate} | ${r.monthKey} | ${r.dayType} | ${r.fallbackLevelUsed} | ${r.rawSelectedDayKwh} | ${r.finalSelectedDayKwh} | ${r.clampApplied}`)
       );
       kv("dayTotalGuardrailAppliedCount", dayDiag.dayTotalGuardrailAppliedCount);
+    }
+    if (dayDiag?.weatherAdjustmentSummary) {
+      const w = dayDiag.weatherAdjustmentSummary;
+      lines.push("weatherAdjustmentSummary: daysWithWeatherScaling=" + w.daysWithWeatherScaling + " daysWithAuxHeatAdjustment=" + w.daysWithAuxHeatAdjustment + " daysWithPoolFreezeProtectAdjustment=" + w.daysWithPoolFreezeProtectAdjustment + " avgWeatherFactor=" + round2(w.avgWeatherFactor) + " minWeatherFactor=" + round2(w.minWeatherFactor) + " maxWeatherFactor=" + round2(w.maxWeatherFactor));
+    }
+    if (Array.isArray(dayDiag?.testedDayWeatherSample) && dayDiag.testedDayWeatherSample.length > 0) {
+      lines.push("testedDayWeatherSample (first 10): localDate | baseDayKwh | adjustedDayKwh | weatherFactor | weatherModeUsed | auxHeatApplied | poolFreezeProtectApplied | extraPoolKwh | dailyAvgTempC | dailyMinTempC | heatingDegreeSeverity | coolingDegreeSeverity | freezeHoursCount");
+      dayDiag.testedDayWeatherSample.forEach((r) =>
+        lines.push(`  ${r.localDate} | ${r.baseDayKwh} | ${r.adjustedDayKwh} | ${r.weatherFactor} | ${r.weatherModeUsed} | ${r.auxHeatApplied} | ${r.poolFreezeProtectApplied} | ${r.extraPoolKwh} | ${r.dailyAvgTempC ?? "—"} | ${r.dailyMinTempC ?? "—"} | ${r.heatingDegreeSeverity} | ${r.coolingDegreeSeverity} | ${r.freezeHoursCount}`)
+      );
     }
   });
 
@@ -1015,6 +1034,8 @@ export async function POST(req: NextRequest) {
   const trainingCoverageExpected = trainingDateKeysSet.size * 96;
   let trainingCoverageFound: number | null = null;
   let trainingCoveragePct: number | null = null;
+  /** Set when profile is auto-built from training intervals; used for weather adjustment. */
+  let trainingIntervalsFiltered: Array<{ timestamp: string; kwh: number }> | null = null;
 
   if (!usageShapeProfile) {
     if (trainingDateKeysSet.size === 0) {
@@ -1038,31 +1059,64 @@ export async function POST(req: NextRequest) {
             startDate: trainStart,
             endDate: trainEnd,
           });
-    const trainingIntervalsFiltered = (trainingIntervalsRaw ?? []).filter((p) =>
+    const trainingIntervalsFilteredLocal = (trainingIntervalsRaw ?? []).filter((p) =>
       trainingDateKeysSet.has(dateKeyInTimezone(p.timestamp, timezone))
     );
+    trainingIntervalsFiltered = trainingIntervalsFilteredLocal;
     const minTrainingIntervals = 96 * 7;
-    if (trainingIntervalsFiltered.length < minTrainingIntervals) {
+    if (trainingIntervalsFilteredLocal.length < minTrainingIntervals) {
       return NextResponse.json(
         {
           ok: false,
           error: "PROFILE_MISSING_NO_TRAINING_DATA",
           message:
             "No UsageShapeProfile for this house and not enough non-test, non-travel interval history to auto-build. Ensure baseline usage exists or build a profile first.",
-          trainingIntervalsCount: trainingIntervalsFiltered.length,
+          trainingIntervalsCount: trainingIntervalsFilteredLocal.length,
           trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
         },
         { status: 400 }
       );
     }
-    const lite = buildUsageShapeProfileLiteFromIntervals({ timezone, intervals: trainingIntervalsFiltered });
+    const lite = buildUsageShapeProfileLiteFromIntervals({ timezone, intervals: trainingIntervalsFilteredLocal });
     profileForSim = lite;
     trainingWindowStartUtc = trainStart;
     trainingWindowEndUtc = trainEnd;
-    trainingIntervalsCount = trainingIntervalsFiltered.length;
+    trainingIntervalsCount = trainingIntervalsFilteredLocal.length;
     trainingDaysCount = trainingDateKeysSet.size;
-    trainingCoverageFound = trainingIntervalsFiltered.length;
+    trainingCoverageFound = trainingIntervalsFilteredLocal.length;
     trainingCoveragePct = trainingCoverageExpected > 0 ? trainingCoverageFound / trainingCoverageExpected : null;
+  }
+
+  let weatherUsedForSim = false;
+  let weatherByDateKey: Map<string, import("@/lib/admin/gapfillLab").DailyWeatherFeatures> | undefined;
+  let trainingWeatherStats: import("@/lib/admin/gapfillLab").TrainingWeatherStats | undefined;
+
+  if (profileSource === "auto_built_lite" && trainingIntervalsFiltered != null && trainingIntervalsFiltered.length > 0) {
+    const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
+    const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
+    const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
+    if (lat != null && lon != null) {
+      const weatherEnd = fetchEnd > trainEnd ? fetchEnd : trainEnd;
+      const result = await getWeatherForRange(lat, lon, trainStart, weatherEnd);
+      if (result.rows.length > 0) {
+        weatherUsedForSim = !result.fromStub;
+        weatherByDateKey = buildDailyWeatherFeaturesFromHourly(result.rows);
+        const trainingDayKwhByDate = new Map<string, number>();
+        for (const p of trainingIntervalsFiltered) {
+          const dk = dateKeyInTimezone(p.timestamp, timezone);
+          trainingDayKwhByDate.set(dk, (trainingDayKwhByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
+        }
+        trainingWeatherStats = buildTrainingWeatherStats({
+          trainingDateKeys: Array.from(trainingDateKeysSet),
+          trainingDayKwhByDate,
+          weatherByDateKey,
+          isWeekend: (dk) => {
+            const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+            return dow === 0 || dow === 6;
+          },
+        });
+      }
+    }
   }
 
   const simResult = simulateIntervalsForTestDaysFromUsageShapeProfile({
@@ -1070,6 +1124,14 @@ export async function POST(req: NextRequest) {
     testIntervals: actualTestIntervalsCanon,
     usageShapeProfileRowOrNull: profileForSim,
     returnDiagnostics: profileSource === "auto_built_lite",
+    ...(weatherByDateKey && trainingWeatherStats
+      ? {
+          weatherByDateKey,
+          trainingWeatherStats,
+          homeProfile: homeProfile as import("@/lib/admin/gapfillLab").GapfillHomeProfileForWeather | null,
+          applianceProfile,
+        }
+      : {}),
   });
   const simIntervals = Array.isArray(simResult) ? simResult : simResult.intervals;
   const dayTotalDiagnostics: DayTotalDiagnostics | undefined = Array.isArray(simResult) ? undefined : simResult.diagnostics;
@@ -1125,15 +1187,20 @@ export async function POST(req: NextRequest) {
   let weatherUsedForReport = false;
   let weatherNoteReport = "Weather not integrated in gap-fill lab path.";
   if (testDateKeysSorted.length > 0) {
-    const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
-    const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
-    const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
-    if (lat != null && lon != null) {
-      const testStart = testDateKeysSorted[0];
-      const testEnd = testDateKeysSorted[testDateKeysSorted.length - 1];
-      const result = await getWeatherForRange(lat, lon, testStart!, testEnd!);
-      weatherUsedForReport = !result.fromStub;
-      weatherNoteReport = result.fromStub ? "Weather service unavailable; stub used for test window." : "Real weather (Open-Meteo cache) used for test window.";
+    if (weatherUsedForSim) {
+      weatherUsedForReport = true;
+      weatherNoteReport = "Real weather (Open-Meteo cache) used for test window; day totals scaled by weather (and optional aux heat / pool freeze-protect).";
+    } else {
+      const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
+      const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
+      const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
+      if (lat != null && lon != null) {
+        const testStart = testDateKeysSorted[0];
+        const testEnd = testDateKeysSorted[testDateKeysSorted.length - 1];
+        const result = await getWeatherForRange(lat, lon, testStart!, testEnd!);
+        weatherUsedForReport = !result.fromStub;
+        weatherNoteReport = result.fromStub ? "Weather service unavailable; stub used for test window." : "Real weather (Open-Meteo cache) used for test window.";
+      }
     }
   }
 
