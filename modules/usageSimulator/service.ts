@@ -1112,6 +1112,27 @@ export async function getSimulatedUsageForUser(args: {
         }
       }
 
+      if (dataset && Array.isArray(dataset.daily) && dataset.daily.length > 0 && !dataset.dailyWeather) {
+        try {
+          const dateKeys = dataset.daily.map((d: { date: string }) => d.date);
+          const wxMap = await getHouseWeatherDays({
+            houseId: h.id,
+            dateKeys,
+            kind: "ACTUAL_LAST_YEAR",
+          });
+          if (wxMap.size > 0) {
+            (dataset as any).dailyWeather = Object.fromEntries(
+              Array.from(wxMap.entries()).map(([dateKey, w]) => [
+                dateKey,
+                { tAvgF: w.tAvgF, tMinF: w.tMinF, tMaxF: w.tMaxF, hdd65: w.hdd65, cdd65: w.cdd65 },
+              ])
+            );
+          }
+        } catch {
+          // optional: leave dailyWeather unset
+        }
+      }
+
       results.push({
         houseId: h.id,
         label: h.label || h.addressLine1,

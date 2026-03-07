@@ -8,6 +8,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
+import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -61,6 +63,8 @@ export type ActualHouseDataset = {
   monthly: Array<{ month: string; kwh: number }>;
   insights: Record<string, unknown> | null;
   totals: ImportExportTotals;
+  /** When set, daily usage table shows Avg °F, Min °F, Max °F, HDD65, CDD65. */
+  dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }> | null;
 };
 
 function decimalToNumber(value: Prisma.Decimal | number | null | undefined): number {
@@ -891,6 +895,28 @@ export async function getActualUsageDatasetForHouse(
         totals: totalsForDataset,
       }
     : null;
+
+  if (dataset && dataset.daily.length > 0) {
+    try {
+      const dateKeys = dataset.daily.map((d) => d.date);
+      const wxMap = await getHouseWeatherDays({
+        houseId,
+        dateKeys,
+        kind: "ACTUAL_LAST_YEAR",
+        version: WEATHER_STUB_VERSION,
+      });
+      if (wxMap.size > 0) {
+        dataset.dailyWeather = Object.fromEntries(
+          Array.from(wxMap.entries()).map(([dateKey, w]) => [
+            dateKey,
+            { tAvgF: w.tAvgF, tMinF: w.tMinF, tMaxF: w.tMaxF, hdd65: w.hdd65, cdd65: w.cdd65 },
+          ])
+        );
+      }
+    } catch {
+      // optional: leave dailyWeather unset
+    }
+  }
 
   return {
     dataset,
