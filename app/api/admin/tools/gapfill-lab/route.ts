@@ -26,6 +26,8 @@ import {
   summarizeDailyCoverageFromIntervals,
   type DayTotalDiagnostics,
   type UsageShapeProfileRowForSim,
+  filterCandidateDateKeysBySeason,
+  pickExtremeWeatherTestDateKeys,
 } from "@/lib/admin/gapfillLab";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 
@@ -296,6 +298,8 @@ function buildFullReport(args: {
   testDaysRequested?: number;
   testDaysSelected?: number;
   seedUsed?: string | null;
+  testMode?: string;
+  candidateDaysAfterModeFilterCount?: number | null;
   minDayCoveragePct?: number;
   candidateWindowStartUtc?: string | null;
   candidateWindowEndUtc?: string | null;
@@ -363,6 +367,8 @@ function buildFullReport(args: {
       testDaysRequested: j.testDaysRequested,
       testDaysSelected: j.testDaysSelected,
       seedUsed: j.seedUsed ?? null,
+      testMode: j.testMode ?? "fixed",
+      candidateDaysAfterModeFilterCount: j.candidateDaysAfterModeFilterCount ?? null,
       minDayCoveragePct: j.minDayCoveragePct,
       candidateWindowStartUtc: j.candidateWindowStartUtc ?? null,
       candidateWindowEndUtc: j.candidateWindowEndUtc ?? null,
@@ -532,9 +538,11 @@ function buildFullReport(args: {
   section("B) Scenario: Vacant/Travel (DB) vs Test Dates", () => {
     if (j.testSelectionMode === "random_days") {
       kv("testSelectionMode", "random_days");
+      kv("testMode", j.testMode ?? "fixed");
       kv("testDaysRequested", j.testDaysRequested ?? "—");
       kv("testDaysSelected", j.testDaysSelected ?? "—");
       kv("seedUsed", j.seedUsed ?? "—");
+      kv("candidateDaysAfterModeFilterCount", j.candidateDaysAfterModeFilterCount ?? "—");
       kv("minDayCoveragePct", j.minDayCoveragePct != null ? round2((j.minDayCoveragePct as number) * 100) + "%" : "—");
       kv("candidateWindowStartUtc", j.candidateWindowStartUtc ?? "—");
       kv("candidateWindowEndUtc", j.candidateWindowEndUtc ?? "—");
@@ -770,6 +778,7 @@ export async function POST(req: NextRequest) {
     rangesToMask?: Array<{ startDate: string; endDate: string }>;
     testDays?: number;
     seed?: string;
+    testMode?: string;
     stratifyByMonth?: boolean;
     stratifyByWeekend?: boolean;
     minDayCoveragePct?: number;
@@ -792,6 +801,10 @@ export async function POST(req: NextRequest) {
   const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
   const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
   const seed = String(body?.seed ?? "").trim() || null;
+  const VALID_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
+  type TestMode = (typeof VALID_TEST_MODES)[number];
+  const rawTestMode = String(body?.testMode ?? "fixed").trim().toLowerCase();
+  const testMode: TestMode = VALID_TEST_MODES.includes(rawTestMode as TestMode) ? (rawTestMode as TestMode) : "fixed";
   const stratifyByMonth = body?.stratifyByMonth !== false;
   const stratifyByWeekend = body?.stratifyByWeekend !== false;
   const minDayCoveragePct = Math.max(0.01, Math.min(1, Number(body?.minDayCoveragePct) || 0.95));
@@ -886,11 +899,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Test Dates = manual ranges or random selection. Vacant/Travel (DB) are always excluded from both training and test.
-  let testDateKeysLocal: Set<string>;
-  let testRangesUsed: Array<{ startDate: string; endDate: string }>;
-  let testSelectionMode: "manual_ranges" | "random_days";
-  let testDaysSelected: number;
+  let testDateKeysLocal: Set<string> = new Set();
+  let testRangesUsed: Array<{ startDate: string; endDate: string }> = [];
+  let testSelectionMode: "manual_ranges" | "random_days" = "manual_ranges";
+  let testDaysSelected: number = 0;
   let seedUsed: string | null = null;
+  let candidateDaysAfterModeFilterCount: number | null = null;
   let candidateWindowStart: string | null = null;
   let candidateWindowEnd: string | null = null;
   let excludedFromTest_travelCount = 0;
@@ -915,12 +929,61 @@ export async function POST(req: NextRequest) {
       (dk) => (coverage.get(dk)?.pct ?? 0) >= minDayCoveragePct
     ).sort();
     candidateDateKeysForTraining = candidateDateKeys;
-    seedUsed = seed || `${house.id}-${todayTz}`;
+    if (testMode === "random") {
+      seedUsed = `${house.id}-${Date.now()}`;
+    } else {
+      seedUsed = seed || `${house.id}-${todayTz}`;
+    }
+    let candidatesForPick: string[] = candidateDateKeys;
+    if (testMode === "winter" || testMode === "summer" || testMode === "shoulder") {
+      candidatesForPick = filterCandidateDateKeysBySeason(candidateDateKeys, testMode);
+      candidateDaysAfterModeFilterCount = candidatesForPick.length;
+    } else if (testMode === "extreme_weather") {
+      const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
+      const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
+      const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
+      if (lat == null || lon == null) {
+        return NextResponse.json(
+          { ok: false, error: "extreme_weather_requires_coordinates", message: "testMode=extreme_weather requires house lat/lng. Add coordinates to the house address." },
+          { status: 400 }
+        );
+      }
+      const wxResult = await getWeatherForRange(lat, lon, candidateStart, candidateEnd);
+      const hourly = Array.isArray(wxResult?.rows) ? wxResult.rows : [];
+      const weatherByDateKey = buildDailyWeatherFeaturesFromHourly(hourly, undefined, undefined, timezone);
+      const { picked: pickedExtreme, candidateDaysAfterModeFilterCount: extremeCount } = pickExtremeWeatherTestDateKeys({
+        candidateDateKeys,
+        travelDateKeysSet: travelDateKeysLocal,
+        weatherByDateKey,
+        testDays: testDaysRequested,
+        seed: seedUsed!,
+        stratifyByMonth,
+        stratifyByWeekend,
+        isWeekendLocalKey: (dk) => {
+          const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+          return dow === 0 || dow === 6;
+        },
+        monthKeyFromLocalKey: (dk) => dk.slice(0, 7),
+      });
+      testRangesUsed = mergeDateKeysToRanges(pickedExtreme);
+      testDateKeysLocal = new Set(pickedExtreme);
+      candidateDaysAfterModeFilterCount = extremeCount;
+      testDaysSelected = pickedExtreme.length;
+      testSelectionMode = "random_days";
+      candidateWindowStart = candidateStart;
+      candidateWindowEnd = candidateEnd;
+      excludedFromTest_travelCount = Array.from(travelDateKeysLocal).filter(
+        (dk) => dk >= candidateStart && dk <= candidateEnd
+      ).length;
+    } else {
+      candidateDaysAfterModeFilterCount = candidateDateKeys.length;
+    }
+    if (testMode !== "extreme_weather") {
     const picked = pickRandomTestDateKeys({
-      candidateDateKeys,
+      candidateDateKeys: candidatesForPick,
       travelDateKeysSet: travelDateKeysLocal,
       testDays: testDaysRequested,
-      seed: seedUsed,
+      seed: seedUsed!,
       stratifyByMonth,
       stratifyByWeekend,
       isWeekendLocalKey: (dk) => {
@@ -938,6 +1001,7 @@ export async function POST(req: NextRequest) {
     excludedFromTest_travelCount = Array.from(travelDateKeysLocal).filter(
       (dk) => dk >= candidateStart && dk <= candidateEnd
     ).length;
+    }
   } else {
     testDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(testRanges, timezone);
     testRangesUsed = testRanges;
@@ -1397,6 +1461,8 @@ export async function POST(req: NextRequest) {
     testDaysRequested: testDaysRequested ?? undefined,
     testDaysSelected,
     seedUsed: seedUsed ?? undefined,
+    testMode,
+    candidateDaysAfterModeFilterCount: candidateDaysAfterModeFilterCount ?? undefined,
     minDayCoveragePct: testSelectionMode === "random_days" ? minDayCoveragePct : undefined,
     candidateWindowStartUtc: candidateWindowStart ?? undefined,
     candidateWindowEndUtc: candidateWindowEnd ?? undefined,
@@ -1492,6 +1558,8 @@ export async function POST(req: NextRequest) {
     testDaysRequested: testDaysRequested ?? undefined,
     testDaysSelected,
     seedUsed: seedUsed ?? undefined,
+    testMode,
+    candidateDaysAfterModeFilterCount: candidateDaysAfterModeFilterCount ?? undefined,
     minDayCoveragePct: testSelectionMode === "random_days" ? minDayCoveragePct : undefined,
     candidateWindowStartUtc: candidateWindowStart ?? undefined,
     candidateWindowEndUtc: candidateWindowEnd ?? undefined,

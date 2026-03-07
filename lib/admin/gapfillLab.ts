@@ -705,6 +705,88 @@ export function getLocalDayOfWeekFromDateKey(dateKey: string, tz: string): numbe
   }
 }
 
+/** Filter candidate date keys to a season by month. Winter=Dec,Jan,Feb; Summer=Jun,Jul,Aug; Shoulder=Mar,Apr,May,Sep,Oct,Nov. */
+export function filterCandidateDateKeysBySeason(
+  candidateDateKeys: string[],
+  season: "winter" | "summer" | "shoulder"
+): string[] {
+  const winterMonths = new Set(["12", "01", "02"]);
+  const summerMonths = new Set(["06", "07", "08"]);
+  const shoulderMonths = new Set(["03", "04", "05", "09", "10", "11"]);
+  const set = season === "winter" ? winterMonths : season === "summer" ? summerMonths : shoulderMonths;
+  return candidateDateKeys.filter((dk) => set.has(dk.slice(5, 7)));
+}
+
+/**
+ * Pick test days for extreme_weather mode: prefer days with dailyMinTempC <= -2 or dailyMaxTempC >= 35;
+ * if fewer than testDays exist, fall back to top testDays by (heatingDegreeSeverity + coolingDegreeSeverity).
+ * Returns { picked, candidateDaysAfterModeFilterCount }.
+ */
+export function pickExtremeWeatherTestDateKeys(args: {
+  candidateDateKeys: string[];
+  travelDateKeysSet: Set<string>;
+  weatherByDateKey: Map<string, DailyWeatherFeatures>;
+  testDays: number;
+  seed: string;
+  stratifyByMonth: boolean;
+  stratifyByWeekend: boolean;
+  isWeekendLocalKey: (dk: string) => boolean;
+  monthKeyFromLocalKey: (dk: string) => string;
+}): { picked: string[]; candidateDaysAfterModeFilterCount: number } {
+  const {
+    candidateDateKeys,
+    travelDateKeysSet,
+    weatherByDateKey,
+    testDays,
+    seed,
+    stratifyByMonth,
+    stratifyByWeekend,
+    isWeekendLocalKey,
+    monthKeyFromLocalKey,
+  } = args;
+
+  const EXTREME_COLD_MAX_C = -2;
+  const EXTREME_HEAT_MIN_C = 35;
+
+  const withWeather = candidateDateKeys.filter((dk) => weatherByDateKey.has(dk));
+  const notTravel = withWeather.filter((dk) => !travelDateKeysSet.has(dk));
+  const extreme = notTravel.filter((dk) => {
+    const wx = weatherByDateKey.get(dk)!;
+    return (wx.dailyMinTempC != null && wx.dailyMinTempC <= EXTREME_COLD_MAX_C) ||
+      (wx.dailyMaxTempC != null && wx.dailyMaxTempC >= EXTREME_HEAT_MIN_C);
+  });
+
+  const candidateDaysAfterModeFilterCount = extreme.length >= testDays ? extreme.length : notTravel.length;
+
+  if (extreme.length >= testDays) {
+    return {
+      picked: pickRandomTestDateKeys({
+        candidateDateKeys: extreme,
+        travelDateKeysSet,
+        testDays,
+        seed,
+        stratifyByMonth,
+        stratifyByWeekend,
+        isWeekendLocalKey,
+        monthKeyFromLocalKey,
+      }),
+      candidateDaysAfterModeFilterCount,
+    };
+  }
+
+  const bySeverity = [...notTravel].sort((a, b) => {
+    const wa = weatherByDateKey.get(a)!;
+    const wb = weatherByDateKey.get(b)!;
+    const sa = (wa.heatingDegreeSeverity ?? 0) + (wa.coolingDegreeSeverity ?? 0);
+    const sb = (wb.heatingDegreeSeverity ?? 0) + (wb.coolingDegreeSeverity ?? 0);
+    return sb - sa;
+  });
+  return {
+    picked: bySeverity.slice(0, testDays).sort(),
+    candidateDaysAfterModeFilterCount,
+  };
+}
+
 /** Daily coverage: for each date key, count intervals and pct vs expected 96. */
 export function summarizeDailyCoverageFromIntervals(
   intervals: IntervalPoint[],
@@ -917,18 +999,20 @@ const POOL_FREEZE_KWH_CAP = 8;
 const POOL_FREEZE_HP_FACTOR = 0.75;
 
 /**
- * Build daily weather features from hourly rows. Groups by UTC date key (YYYY-MM-DD).
+ * Build daily weather features from hourly rows. Groups by date key.
+ * If timezone is provided, keys are local date keys (YYYY-MM-DD in that tz); otherwise UTC.
  */
 export function buildDailyWeatherFeaturesFromHourly(
   rows: WeatherHourlyRowForGapfill[],
   heatingBaseC: number = HEATING_BASE_C,
-  coolingBaseC: number = COOLING_BASE_C
+  coolingBaseC: number = COOLING_BASE_C,
+  timezone?: string
 ): Map<string, DailyWeatherFeatures> {
   const byDate = new Map<string, { tempsC: number[]; cloud: number[]; solar: number[] }>();
   for (const r of rows ?? []) {
     const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
     if (!Number.isFinite(t.getTime())) continue;
-    const dateKey = t.toISOString().slice(0, 10);
+    const dateKey = timezone ? dateKeyInTimezone(t.toISOString(), timezone) : t.toISOString().slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
     const tempC = r.temperatureC != null && Number.isFinite(r.temperatureC) ? r.temperatureC : null;
     let entry = byDate.get(dateKey);
@@ -1135,7 +1219,7 @@ export function computeWeatherAdjustedDayTotal(args: {
     homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
   const dailyMinOkForAux = wx.dailyMinTempC != null && wx.dailyMinTempC <= AUX_MIN_TEMP_C;
   const hddRatioOkForAux = (refHdd || 0) > 1e-6 && wx.heatingDegreeSeverity >= (refHdd || 0) * AUX_HDD_RATIO;
-  if (isElectricHeat && (dailyMinOkForAux || hddRatioOkForAux)) {
+  if (isElectricHeat && dailyMinOkForAux && hddRatioOkForAux) {
     const ref = Math.max(refHdd || 0, 1);
     auxHeatKwhAdder = Math.max(0, Math.min(AUX_HEAT_KWH_CAP, (wx.heatingDegreeSeverity - ref) * AUX_HEAT_SLOPE));
   }
