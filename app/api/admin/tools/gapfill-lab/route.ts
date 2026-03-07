@@ -491,11 +491,14 @@ function buildFullReport(args: {
     fullReportJson.notes.push(`Day-total guardrail applied on ${j.dayTotalDiagnostics.dayTotalGuardrailAppliedCount} tested days.`);
   }
   const wxSummary = j.dayTotalDiagnostics?.weatherAdjustmentSummary;
-  if (wxSummary?.daysWithAuxHeatAdjustment != null && wxSummary.daysWithAuxHeatAdjustment > 0) {
-    fullReportJson.notes.push(`Extreme-cold HVAC adjustment applied on ${wxSummary.daysWithAuxHeatAdjustment} tested days.`);
+  if (wxSummary?.daysWithWeatherMultiplier != null && wxSummary.daysWithWeatherMultiplier > 0) {
+    fullReportJson.notes.push(`Weather multiplier applied on ${wxSummary.daysWithWeatherMultiplier} tested days.`);
   }
-  if (wxSummary?.daysWithPoolFreezeProtectAdjustment != null && wxSummary.daysWithPoolFreezeProtectAdjustment > 0) {
-    fullReportJson.notes.push(`Pool freeze-protect adjustment applied on ${wxSummary.daysWithPoolFreezeProtectAdjustment} tested days.`);
+  if (wxSummary?.daysWithAuxHeatAdder != null && wxSummary.daysWithAuxHeatAdder > 0) {
+    fullReportJson.notes.push(`Aux heat adder applied on ${wxSummary.daysWithAuxHeatAdder} tested days.`);
+  }
+  if (wxSummary?.daysWithPoolFreezeProtectAdder != null && wxSummary.daysWithPoolFreezeProtectAdder > 0) {
+    fullReportJson.notes.push(`Pool freeze-protect adder applied on ${wxSummary.daysWithPoolFreezeProtectAdder} tested days.`);
   }
   if (j.joinPct != null && j.joinPct < 0.95) {
     fullReportJson.notes.push("ERROR: simulated intervals did not join to actual timestamps; check timestamp keying.");
@@ -687,12 +690,12 @@ function buildFullReport(args: {
     }
     if (dayDiag?.weatherAdjustmentSummary) {
       const w = dayDiag.weatherAdjustmentSummary;
-      lines.push("weatherAdjustmentSummary: daysWithWeatherScaling=" + w.daysWithWeatherScaling + " daysWithAuxHeatAdjustment=" + w.daysWithAuxHeatAdjustment + " daysWithPoolFreezeProtectAdjustment=" + w.daysWithPoolFreezeProtectAdjustment + " avgWeatherFactor=" + round2(w.avgWeatherFactor) + " minWeatherFactor=" + round2(w.minWeatherFactor) + " maxWeatherFactor=" + round2(w.maxWeatherFactor));
+      lines.push("weatherAdjustmentSummary: daysWithWeatherMultiplier=" + w.daysWithWeatherMultiplier + " daysWithAuxHeatAdder=" + w.daysWithAuxHeatAdder + " daysWithPoolFreezeProtectAdder=" + w.daysWithPoolFreezeProtectAdder + " avgWeatherSeverityMultiplier=" + round2(w.avgWeatherSeverityMultiplier) + " minWeatherSeverityMultiplier=" + round2(w.minWeatherSeverityMultiplier) + " maxWeatherSeverityMultiplier=" + round2(w.maxWeatherSeverityMultiplier) + " totalAuxHeatKwhAdded=" + round2(w.totalAuxHeatKwhAdded) + " totalPoolFreezeProtectKwhAdded=" + round2(w.totalPoolFreezeProtectKwhAdded));
     }
     if (Array.isArray(dayDiag?.testedDayWeatherSample) && dayDiag.testedDayWeatherSample.length > 0) {
-      lines.push("testedDayWeatherSample (first 10): localDate | baseDayKwh | adjustedDayKwh | weatherFactor | weatherModeUsed | auxHeatApplied | poolFreezeProtectApplied | extraPoolKwh | dailyAvgTempC | dailyMinTempC | heatingDegreeSeverity | coolingDegreeSeverity | freezeHoursCount");
+      lines.push("testedDayWeatherSample (first 10): localDate | dayType | weatherModeUsed | profileSelectedDayKwh | weatherSeverityMultiplier | auxHeatKwhAdder | poolFreezeProtectKwhAdder | finalSelectedDayKwh | dailyAvgTempC | dailyMinTempC | heatingDegreeSeverity | coolingDegreeSeverity | freezeHoursCount");
       dayDiag.testedDayWeatherSample.forEach((r) =>
-        lines.push(`  ${r.localDate} | ${r.baseDayKwh} | ${r.adjustedDayKwh} | ${r.weatherFactor} | ${r.weatherModeUsed} | ${r.auxHeatApplied} | ${r.poolFreezeProtectApplied} | ${r.extraPoolKwh} | ${r.dailyAvgTempC ?? "—"} | ${r.dailyMinTempC ?? "—"} | ${r.heatingDegreeSeverity} | ${r.coolingDegreeSeverity} | ${r.freezeHoursCount}`)
+        lines.push(`  ${r.localDate} | ${r.dayType} | ${r.weatherModeUsed} | ${r.profileSelectedDayKwh} | ${r.weatherSeverityMultiplier} | ${r.auxHeatKwhAdder} | ${r.poolFreezeProtectKwhAdder} | ${r.finalSelectedDayKwh} | ${r.dailyAvgTempC ?? "—"} | ${r.dailyMinTempC ?? "—"} | ${r.heatingDegreeSeverity} | ${r.coolingDegreeSeverity} | ${r.freezeHoursCount}`)
       );
     }
   });
@@ -1096,11 +1099,34 @@ export async function POST(req: NextRequest) {
     const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
     const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
     if (lat != null && lon != null) {
-      const weatherEnd = fetchEnd > trainEnd ? fetchEnd : trainEnd;
-      const result = await getWeatherForRange(lat, lon, trainStart, weatherEnd);
-      if (result.rows.length > 0) {
-        weatherUsedForSim = !result.fromStub;
-        weatherByDateKey = buildDailyWeatherFeaturesFromHourly(result.rows);
+      const allRows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }> = [];
+      const seenTs = new Set<string>();
+      const addRows = (rows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }>) => {
+        for (const r of rows) {
+          const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
+          const key = t.toISOString();
+          if (!seenTs.has(key)) {
+            seenTs.add(key);
+            allRows.push(r);
+          }
+        }
+      };
+      const trainResult = await getWeatherForRange(lat, lon, trainStart, trainEnd);
+      addRows(trainResult.rows);
+      let anyFromStub = trainResult.fromStub;
+      if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
+        const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
+        addRows(testResult.rows);
+        anyFromStub = anyFromStub && testResult.fromStub;
+      }
+      allRows.sort((a, b) => {
+        const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
+        const tb = b.timestampUtc instanceof Date ? b.timestampUtc.getTime() : new Date(b.timestampUtc).getTime();
+        return ta - tb;
+      });
+      if (allRows.length > 0) {
+        weatherUsedForSim = !anyFromStub;
+        weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows);
         const trainingDayKwhByDate = new Map<string, number>();
         for (const p of trainingIntervalsFiltered) {
           const dk = dateKeyInTimezone(p.timestamp, timezone);

@@ -820,23 +820,25 @@ export type DayTotalDiagnostics = {
   dayTotalGuardrailAppliedCount: number;
   /** Present when weather adjustment was applied. */
   weatherAdjustmentSummary?: {
-    daysWithWeatherScaling: number;
-    daysWithAuxHeatAdjustment: number;
-    daysWithPoolFreezeProtectAdjustment: number;
-    avgWeatherFactor: number;
-    minWeatherFactor: number;
-    maxWeatherFactor: number;
+    daysWithWeatherMultiplier: number;
+    daysWithAuxHeatAdder: number;
+    daysWithPoolFreezeProtectAdder: number;
+    avgWeatherSeverityMultiplier: number;
+    minWeatherSeverityMultiplier: number;
+    maxWeatherSeverityMultiplier: number;
+    totalAuxHeatKwhAdded: number;
+    totalPoolFreezeProtectKwhAdded: number;
   };
   /** First 10 test days with weather diagnostics when weather was used. */
   testedDayWeatherSample?: Array<{
     localDate: string;
-    baseDayKwh: number;
-    adjustedDayKwh: number;
-    weatherFactor: number;
+    dayType: "weekday" | "weekend";
     weatherModeUsed: "heating" | "cooling" | "neutral";
-    auxHeatApplied: boolean;
-    poolFreezeProtectApplied: boolean;
-    extraPoolKwh: number;
+    profileSelectedDayKwh: number;
+    weatherSeverityMultiplier: number;
+    auxHeatKwhAdder: number;
+    poolFreezeProtectKwhAdder: number;
+    finalSelectedDayKwh: number;
     dailyAvgTempC: number | null;
     dailyMinTempC: number | null;
     heatingDegreeSeverity: number;
@@ -876,22 +878,25 @@ export type TrainingWeatherStats = {
 
 /** Result of weather-based day total adjustment. */
 export type WeatherAdjustmentResult = {
-  adjustedDayKwh: number;
-  weatherAdjustmentFactor: number;
+  finalSelectedDayKwh: number;
+  weatherSeverityMultiplier: number;
   weatherModeUsed: "heating" | "cooling" | "neutral";
-  auxHeatApplied: boolean;
-  poolFreezeProtectApplied: boolean;
-  extraPoolKwh: number;
+  auxHeatKwhAdder: number;
+  poolFreezeProtectKwhAdder: number;
 };
 
 const HEATING_BASE_C = 18;
 const COOLING_BASE_C = 22;
 const WEATHER_SEVERITY_THRESHOLD = 2;
-const WEATHER_FACTOR_MIN = 0.75;
-const WEATHER_FACTOR_MAX = 1.5;
-const FINAL_FACTOR_MAX = 1.9;
-const AUX_HEAT_CAP = 0.6;
+const HEATING_MULT_MIN = 0.8;
+const HEATING_MULT_MAX = 1.8;
+const COOLING_MULT_MIN = 0.85;
+const COOLING_MULT_MAX = 1.5;
+const AUX_HEAT_SLOPE = 0.15;
+const AUX_HEAT_KWH_CAP = 40;
 const FREEZE_HOURS_THRESHOLD = 2;
+const POOL_FREEZE_KWH_CAP = 12;
+const POOL_FREEZE_HP_FACTOR = 0.75;
 
 /**
  * Build daily weather features from hourly rows. Groups by UTC date key (YYYY-MM-DD).
@@ -1045,8 +1050,7 @@ export type GapfillHomeProfileForWeather = {
 };
 
 /**
- * Compute weather-adjusted day total from base profile day total.
- * Applies heating/cooling severity ratio, optional aux heat for electric homes, and pool freeze-protect adder.
+ * Compute weather-adjusted day total: final = profileSelectedDayKwh × weatherSeverityMultiplier + auxHeatKwhAdder + poolFreezeProtectKwhAdder.
  */
 export function computeWeatherAdjustedDayTotal(args: {
   baseDayKwh: number;
@@ -1064,77 +1068,66 @@ export function computeWeatherAdjustedDayTotal(args: {
   const bucket = `${monthKey}:${isWeekend ? "we" : "wd"}`;
   const seasonBucket = `${season}:${isWeekend ? "we" : "wd"}`;
 
-  let weatherFactor = 1;
+  let weatherSeverityMultiplier = 1;
   let weatherModeUsed: "heating" | "cooling" | "neutral" = "neutral";
-  let auxHeatApplied = false;
-  let poolFreezeProtectApplied = false;
-  let extraPoolKwh = 0;
+  let auxHeatKwhAdder = 0;
+  let poolFreezeProtectKwhAdder = 0;
 
   if (!wx) {
     return {
-      adjustedDayKwh: baseDayKwh,
-      weatherAdjustmentFactor: 1,
+      finalSelectedDayKwh: baseDayKwh,
+      weatherSeverityMultiplier: 1,
       weatherModeUsed: "neutral",
-      auxHeatApplied: false,
-      poolFreezeProtectApplied: false,
-      extraPoolKwh: 0,
+      auxHeatKwhAdder: 0,
+      poolFreezeProtectKwhAdder: 0,
     };
   }
 
-  const { heatingDegreeSeverity: testHdd, coolingDegreeSeverity: testCdd } = wx;
   const refMonth = trainingStats.byMonthDaytype.get(bucket);
   const refSeason = trainingStats.bySeasonDaytype.get(seasonBucket);
   const refGlobal = trainingStats.global;
   const refHdd = refMonth?.avgHdd ?? refSeason?.avgHdd ?? (isWeekend ? refGlobal.avgHddWe : refGlobal.avgHddWd);
   const refCdd = refMonth?.avgCdd ?? refSeason?.avgCdd ?? (isWeekend ? refGlobal.avgCddWe : refGlobal.avgCddWd);
+  const { heatingDegreeSeverity: testHdd, coolingDegreeSeverity: testCdd } = wx;
 
   if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
     weatherModeUsed = "heating";
     if (refHdd > 1e-6) {
       const raw = testHdd / refHdd;
-      weatherFactor = Math.max(WEATHER_FACTOR_MIN, Math.min(WEATHER_FACTOR_MAX, raw));
+      weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, raw));
     }
   } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
     weatherModeUsed = "cooling";
     if (refCdd > 1e-6) {
       const raw = testCdd / refCdd;
-      weatherFactor = Math.max(WEATHER_FACTOR_MIN, Math.min(WEATHER_FACTOR_MAX, raw));
+      weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, raw));
     }
   }
 
-  let adjustedDayKwh = baseDayKwh * weatherFactor;
-
   const isElectricHeat =
     homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
-  if (isElectricHeat && (wx.extremeCold || wx.heatingDegreeSeverity > (refHdd || 0) * 1.5)) {
+  const extremeColdDay = wx.dailyMinTempC != null && wx.dailyMinTempC <= 0;
+  const materiallyAboveRef = (refHdd || 0) > 1e-6 && wx.heatingDegreeSeverity > (refHdd || 0) * 1.5;
+  if (isElectricHeat && (extremeColdDay || materiallyAboveRef)) {
     const ref = Math.max(refHdd || 0, 1);
-    const aux = Math.min(AUX_HEAT_CAP, Math.max(0, (wx.heatingDegreeSeverity - ref) / ref));
-    weatherFactor *= 1 + aux;
-    adjustedDayKwh = baseDayKwh * weatherFactor;
-    auxHeatApplied = true;
-  }
-
-  const capFactor = baseDayKwh > 1e-6 ? Math.max(WEATHER_FACTOR_MIN, Math.min(FINAL_FACTOR_MAX, adjustedDayKwh / baseDayKwh)) : 1;
-  if (baseDayKwh > 1e-6) {
-    adjustedDayKwh = baseDayKwh * capFactor;
+    auxHeatKwhAdder = Math.max(0, Math.min(AUX_HEAT_KWH_CAP, (wx.heatingDegreeSeverity - ref) * AUX_HEAT_SLOPE));
   }
 
   const hasPool = Boolean(homeProfile?.pool?.hasPool) || (applianceProfile?.appliances ?? []).some((a) => a?.type === "pool");
   const pumpHp = homeProfile?.pool?.pumpHp ?? (applianceProfile?.appliances ?? []).find((a) => a?.type === "pool")?.data?.pump_hp;
-  if (hasPool && (wx.freezeDay || wx.freezeHoursCount >= FREEZE_HOURS_THRESHOLD)) {
+  if (hasPool && wx.freezeHoursCount >= FREEZE_HOURS_THRESHOLD) {
     const hp = pumpHp != null && Number.isFinite(Number(pumpHp)) ? Number(pumpHp) : 1;
-    extraPoolKwh = Math.max(1.5, Math.min(8, (hp * 0.6 * wx.freezeHoursCount) / 6));
-    adjustedDayKwh += extraPoolKwh;
-    poolFreezeProtectApplied = true;
+    poolFreezeProtectKwhAdder = Math.max(0, Math.min(POOL_FREEZE_KWH_CAP, hp * POOL_FREEZE_HP_FACTOR * Math.max(1, wx.freezeHoursCount / 4)));
   }
 
+  const finalSelectedDayKwh = baseDayKwh * weatherSeverityMultiplier + auxHeatKwhAdder + poolFreezeProtectKwhAdder;
+
   return {
-    adjustedDayKwh,
-    weatherAdjustmentFactor: weatherFactor,
+    finalSelectedDayKwh: Math.max(0, finalSelectedDayKwh),
+    weatherSeverityMultiplier,
     weatherModeUsed,
-    auxHeatApplied,
-    poolFreezeProtectApplied,
-    extraPoolKwh,
+    auxHeatKwhAdder,
+    poolFreezeProtectKwhAdder,
   };
 }
 
@@ -1187,7 +1180,14 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
   const dayTotalByDate = new Map<string, DayTotalSelectionResult>();
   const weatherAdjustmentByDate = new Map<
     string,
-    { baseKwh: number; adjustedKwh: number; factor: number; mode: "heating" | "cooling" | "neutral"; auxHeat: boolean; poolFreeze: boolean; extraPoolKwh: number }
+    {
+      profileSelectedDayKwh: number;
+      finalSelectedDayKwh: number;
+      weatherSeverityMultiplier: number;
+      weatherModeUsed: "heating" | "cooling" | "neutral";
+      auxHeatKwhAdder: number;
+      poolFreezeProtectKwhAdder: number;
+    }
   >();
   const fallbackSummary: Record<DayTotalFallbackLevel, number> = {
     month_daytype: 0,
@@ -1234,13 +1234,12 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           applianceProfile: applianceProfile ?? null,
         });
         weatherAdjustmentByDate.set(dateKey, {
-          baseKwh: sel.targetDayKwh,
-          adjustedKwh: adj.adjustedDayKwh,
-          factor: adj.weatherAdjustmentFactor,
-          mode: adj.weatherModeUsed,
-          auxHeat: adj.auxHeatApplied,
-          poolFreeze: adj.poolFreezeProtectApplied,
-          extraPoolKwh: adj.extraPoolKwh,
+          profileSelectedDayKwh: sel.targetDayKwh,
+          finalSelectedDayKwh: adj.finalSelectedDayKwh,
+          weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
+          weatherModeUsed: adj.weatherModeUsed,
+          auxHeatKwhAdder: adj.auxHeatKwhAdder,
+          poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
         });
       }
     }
@@ -1256,7 +1255,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
 
     let targetDayKwh: number;
     if (useWeather && weatherAdjustmentByDate.has(dateKey)) {
-      targetDayKwh = weatherAdjustmentByDate.get(dateKey)!.adjustedKwh;
+      targetDayKwh = weatherAdjustmentByDate.get(dateKey)!.finalSelectedDayKwh;
     } else if (hasLiteStrength && dayTotalByDate.has(dateKey)) {
       targetDayKwh = dayTotalByDate.get(dateKey)!.targetDayKwh;
     } else {
@@ -1306,7 +1305,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
         fallbackLevelUsed: sel.fallbackLevel,
         rawSelectedDayKwh: sel.rawSelectedDayKwh,
-        finalSelectedDayKwh: weatherAdj ? weatherAdj.adjustedKwh : sel.targetDayKwh,
+        finalSelectedDayKwh: weatherAdj ? weatherAdj.finalSelectedDayKwh : sel.targetDayKwh,
         clampApplied: sel.clampApplied,
       });
       if (testedDayFallbackSample.length >= 10) break;
@@ -1315,16 +1314,21 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     let weatherAdjustmentSummary: DayTotalDiagnostics["weatherAdjustmentSummary"];
     let testedDayWeatherSample: DayTotalDiagnostics["testedDayWeatherSample"];
     if (useWeather && weatherAdjustmentByDate.size > 0) {
-      const factors = Array.from(weatherAdjustmentByDate.values()).map((v) => (v.baseKwh > 1e-6 ? v.adjustedKwh / v.baseKwh : 1));
-      const daysAux = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.auxHeat).length;
-      const daysPoolFreeze = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.poolFreeze).length;
+      const mults = Array.from(weatherAdjustmentByDate.values()).map((v) => v.weatherSeverityMultiplier);
+      const daysWithMult = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.weatherSeverityMultiplier !== 1).length;
+      const daysAux = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.auxHeatKwhAdder > 0).length;
+      const daysPoolFreeze = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.poolFreezeProtectKwhAdder > 0).length;
+      const totalAux = Array.from(weatherAdjustmentByDate.values()).reduce((s, v) => s + v.auxHeatKwhAdder, 0);
+      const totalPool = Array.from(weatherAdjustmentByDate.values()).reduce((s, v) => s + v.poolFreezeProtectKwhAdder, 0);
       weatherAdjustmentSummary = {
-        daysWithWeatherScaling: weatherAdjustmentByDate.size,
-        daysWithAuxHeatAdjustment: daysAux,
-        daysWithPoolFreezeProtectAdjustment: daysPoolFreeze,
-        avgWeatherFactor: factors.length ? factors.reduce((a, b) => a + b, 0) / factors.length : 1,
-        minWeatherFactor: factors.length ? Math.min(...factors) : 1,
-        maxWeatherFactor: factors.length ? Math.max(...factors) : 1,
+        daysWithWeatherMultiplier: daysWithMult,
+        daysWithAuxHeatAdder: daysAux,
+        daysWithPoolFreezeProtectAdder: daysPoolFreeze,
+        avgWeatherSeverityMultiplier: mults.length ? mults.reduce((a, b) => a + b, 0) / mults.length : 1,
+        minWeatherSeverityMultiplier: mults.length ? Math.min(...mults) : 1,
+        maxWeatherSeverityMultiplier: mults.length ? Math.max(...mults) : 1,
+        totalAuxHeatKwhAdded: totalAux,
+        totalPoolFreezeProtectKwhAdded: totalPool,
       };
       testedDayWeatherSample = [];
       const seenForWeather = new Set<string>();
@@ -1335,15 +1339,16 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         const adj = weatherAdjustmentByDate.get(dk);
         const wx = weatherByDateKey?.get(dk);
         if (!adj) continue;
+        const dow = localDayOfWeekInTimezone(String(p?.timestamp ?? "").trim(), timezone);
         testedDayWeatherSample.push({
           localDate: dk,
-          baseDayKwh: adj.baseKwh,
-          adjustedDayKwh: adj.adjustedKwh,
-          weatherFactor: adj.factor,
-          weatherModeUsed: adj.mode,
-          auxHeatApplied: adj.auxHeat,
-          poolFreezeProtectApplied: adj.poolFreeze,
-          extraPoolKwh: adj.extraPoolKwh,
+          dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
+          weatherModeUsed: adj.weatherModeUsed,
+          profileSelectedDayKwh: adj.profileSelectedDayKwh,
+          weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
+          auxHeatKwhAdder: adj.auxHeatKwhAdder,
+          poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
+          finalSelectedDayKwh: adj.finalSelectedDayKwh,
           dailyAvgTempC: wx?.dailyAvgTempC ?? null,
           dailyMinTempC: wx?.dailyMinTempC ?? null,
           heatingDegreeSeverity: wx?.heatingDegreeSeverity ?? 0,
