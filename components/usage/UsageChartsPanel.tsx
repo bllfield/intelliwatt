@@ -43,7 +43,9 @@ export function UsageChartsPanel(props: {
   onDailyViewChange: (next: "chart" | "table") => void;
   daily: DailyRow[];
   /** Historic weather by date (YYYY-MM-DD). When set, table view shows weather columns. */
-  dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }> | null;
+  dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
+  /** When set and daily table shows weather, display this truthful basis (e.g. stub/test vs actual cached). */
+  weatherBasisLabel?: string | null;
   fifteenCurve: FifteenMinuteAverage[];
   /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
   coverageStart?: string | null;
@@ -61,6 +63,7 @@ export function UsageChartsPanel(props: {
     onDailyViewChange,
     daily,
     dailyWeather,
+    weatherBasisLabel,
     fifteenCurve,
     coverageStart,
     coverageEnd,
@@ -292,6 +295,9 @@ export function UsageChartsPanel(props: {
               </div>
             ) : (
               <div className="max-h-80 overflow-auto rounded-lg border border-neutral-200 select-text">
+                {dailyWeather && Object.keys(dailyWeather).length > 0 && weatherBasisLabel ? (
+                  <p className="mb-2 text-xs text-neutral-500">{weatherBasisLabel}</p>
+                ) : null}
                 <table className="min-w-[280px] w-full text-sm font-mono">
                   <thead className="sticky top-0 z-10 bg-neutral-50 text-neutral-600">
                     <tr>

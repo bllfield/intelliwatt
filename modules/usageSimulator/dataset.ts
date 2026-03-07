@@ -482,6 +482,15 @@ export type SimulatedUsageDatasetMeta = {
   actualDayCount?: number;
   simulatedDayCount?: number;
   stitchedDayCount?: number;
+  /** Past: weather provenance — kind used (e.g. ACTUAL_LAST_YEAR, STUB_V1, MIXED). */
+  weatherKindUsed?: string;
+  /** Past: stub_only | actual_only | mixed_actual_and_stub | none */
+  weatherSourceSummary?: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none";
+  weatherRowsCount?: number;
+  weatherStubRowCount?: number;
+  weatherActualRowCount?: number;
+  weatherCoverageStart?: string | null;
+  weatherCoverageEnd?: string | null;
 };
 
 export type SimulatedUsageDataset = {

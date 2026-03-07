@@ -38,6 +38,7 @@ import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import { getHouseWeatherDays, upsertHouseWeatherDays, findMissingHouseWeatherDateKeys } from "@/modules/weather/repo";
+import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
@@ -1016,6 +1017,36 @@ export async function getPastSimulatedDatasetForHouse(args: {
         simulatedDayCount: pastDayCounts.simulatedDays,
         stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
       };
+      if (actualWxByDateKey && actualWxByDateKey.size > 0) {
+        const wxEntries = Array.from(actualWxByDateKey.entries());
+        const dateKeys = wxEntries.map(([dk]) => dk).sort();
+        const weatherCoverageStart = dateKeys[0] ?? null;
+        const weatherCoverageEnd = dateKeys[dateKeys.length - 1] ?? null;
+        let weatherStubRowCount = 0;
+        const sourcesSeen = new Set<string>();
+        for (const [, w] of wxEntries) {
+          const src = String(w?.source ?? "").trim();
+          if (src) sourcesSeen.add(src);
+          if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
+        }
+        const weatherRowsCount = wxEntries.length;
+        const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
+        const weatherKindUsed =
+          sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
+        let weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" = "none";
+        if (weatherRowsCount > 0) {
+          if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
+          else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
+          else weatherSourceSummary = "mixed_actual_and_stub";
+        }
+        (dataset.meta as Record<string, unknown>).weatherKindUsed = weatherKindUsed;
+        (dataset.meta as Record<string, unknown>).weatherSourceSummary = weatherSourceSummary;
+        (dataset.meta as Record<string, unknown>).weatherRowsCount = weatherRowsCount;
+        (dataset.meta as Record<string, unknown>).weatherStubRowCount = weatherStubRowCount;
+        (dataset.meta as Record<string, unknown>).weatherActualRowCount = weatherActualRowCount;
+        (dataset.meta as Record<string, unknown>).weatherCoverageStart = weatherCoverageStart;
+        (dataset.meta as Record<string, unknown>).weatherCoverageEnd = weatherCoverageEnd;
+      }
     }
     try {
       const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid, { skipFullYearIntervalFetch: true });
@@ -1050,7 +1081,14 @@ export async function getPastSimulatedDatasetForHouse(args: {
       (dataset as any).dailyWeather = Object.fromEntries(
         Array.from(actualWxByDateKey.entries()).map(([dateKey, w]) => [
           dateKey,
-          { tAvgF: w.tAvgF, tMinF: w.tMinF, tMaxF: w.tMaxF, hdd65: w.hdd65, cdd65: w.cdd65 },
+          {
+            tAvgF: w.tAvgF,
+            tMinF: w.tMinF,
+            tMaxF: w.tMaxF,
+            hdd65: w.hdd65,
+            cdd65: w.cdd65,
+            source: String(w?.source ?? "").trim() || "unknown",
+          },
         ])
       );
     }

@@ -77,6 +77,15 @@ type UsageDataset = {
   totals?: UsageTotals;
 } | null;
 
+/** Truthful weather basis label from Past meta. Do not show "real weather" unless weatherSourceSummary === "actual_only". */
+function getWeatherBasisLabel(meta: Record<string, unknown>): string | null {
+  const s = meta?.weatherSourceSummary as string | undefined;
+  if (s === "stub_only") return "Weather basis: stub/test weather data";
+  if (s === "actual_only") return "Weather basis: actual cached weather data";
+  if (s === "mixed_actual_and_stub") return "Weather basis: mixed actual + stub weather data";
+  return null;
+}
+
 type HouseUsage = {
   houseId: string;
   label: string | null;
@@ -436,12 +445,14 @@ export const UsageDashboard: React.FC<Props> = ({
         : datasetKind === "SIMULATED"
           ? "SIMULATED"
           : ds?.summary?.source ?? null;
+    const weatherBasisLabel = getWeatherBasisLabel(meta);
     return {
       source,
       start,
       end,
       intervalsCount: ds?.summary?.intervalsCount ?? null,
       hasSimulatedFill,
+      weatherBasisLabel,
     };
   }, [activeHouse]);
 
@@ -603,6 +614,9 @@ export const UsageDashboard: React.FC<Props> = ({
               {coverage.source ? <span> · Source: {coverage.source}</span> : null}
               {typeof coverage.intervalsCount === "number" ? <span> · {coverage.intervalsCount.toLocaleString()} intervals</span> : null}
             </p>
+          ) : null}
+          {coverage?.weatherBasisLabel ? (
+            <p className="mt-0.5 text-xs text-neutral-500">{coverage.weatherBasisLabel}</p>
           ) : null}
           {dashboardVariant && (dashboardVariant === "PAST_SIMULATED_USAGE" || dashboardVariant === "FUTURE_SIMULATED_USAGE") ? (
             <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50/80 px-3 py-2 min-w-0">
@@ -806,6 +820,7 @@ export const UsageDashboard: React.FC<Props> = ({
             onDailyViewChange={setDailyView}
             daily={derived.daily}
             dailyWeather={derived.dailyWeather ?? undefined}
+            weatherBasisLabel={coverage?.weatherBasisLabel ?? undefined}
             fifteenCurve={derived.fifteenCurve}
             coverageStart={coverage?.start ?? null}
             coverageEnd={coverage?.end ?? null}
