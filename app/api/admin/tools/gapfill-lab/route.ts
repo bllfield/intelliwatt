@@ -1117,7 +1117,7 @@ export async function POST(req: NextRequest) {
       if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
         const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
         addRows(testResult.rows);
-        anyFromStub = anyFromStub && testResult.fromStub;
+        anyFromStub = anyFromStub || testResult.fromStub;
       }
       allRows.sort((a, b) => {
         const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
