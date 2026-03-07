@@ -34,6 +34,7 @@ import {
 } from "@/lib/admin/gapfillLab";
 import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
 import { getHouseWeatherDays, upsertHouseWeatherDays } from "@/modules/weather/repo";
+import { WEATHER_STUB_SOURCE, WEATHER_SOURCE } from "@/modules/weather/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
@@ -322,6 +323,9 @@ function buildFullReport(args: {
   weatherNote?: string;
   weatherApiData?: Array<{ dateKey: string; kind: string; tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }>;
   weatherKindUsed?: string;
+  weatherRowsBySource?: Record<string, number>;
+  weatherSourcesSeen?: string[];
+  weatherSourceMismatchDetected?: boolean;
   benchmarkSummary?: {
     benchmarkAvailable: boolean;
     benchmarkSource: "request_payload" | "prior_run_copy" | "none";
@@ -484,6 +488,9 @@ function buildFullReport(args: {
       weatherNote: j.weatherNote ?? "Weather not integrated in gap-fill lab path.",
       ...(j.weatherKindUsed != null ? { weatherKindUsed: j.weatherKindUsed } : {}),
       ...(Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0 ? { weatherApiData: j.weatherApiData } : {}),
+      ...(j.weatherRowsBySource && Object.keys(j.weatherRowsBySource).length > 0 ? { weatherRowsBySource: j.weatherRowsBySource } : {}),
+      ...(Array.isArray(j.weatherSourcesSeen) && j.weatherSourcesSeen.length > 0 ? { weatherSourcesSeen: j.weatherSourcesSeen } : {}),
+      ...(j.weatherSourceMismatchDetected === true ? { weatherSourceMismatchDetected: true } : {}),
       ...(j.dayTotalDiagnostics ? { dayTotalDiagnostics: j.dayTotalDiagnostics } : {}),
     },
     accuracy: {
@@ -832,6 +839,15 @@ function buildFullReport(args: {
   if (j.weatherKindUsed != null || (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0)) {
     section("Weather API data (used for simulation)", () => {
       lines.push("weatherKindUsed: " + (j.weatherKindUsed ?? "—"));
+      if (Array.isArray(j.weatherSourcesSeen) && j.weatherSourcesSeen.length > 0) {
+        lines.push("weatherSourcesSeen: " + j.weatherSourcesSeen.join(", "));
+      }
+      if (j.weatherRowsBySource && typeof j.weatherRowsBySource === "object" && Object.keys(j.weatherRowsBySource).length > 0) {
+        lines.push("weatherRowsBySource: " + JSON.stringify(j.weatherRowsBySource));
+      }
+      if (j.weatherSourceMismatchDetected === true) {
+        lines.push("weatherSourceMismatchDetected: true (report claimed real weather but every row is stub — internal inconsistency)");
+      }
       if (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0) {
         lines.push("dateKey | kind | tAvgF | tMinF | tMaxF | hdd65 | cdd65 | source");
         j.weatherApiData.forEach((r) =>
@@ -1270,6 +1286,7 @@ export async function POST(req: NextRequest) {
           weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
           weatherUsedForSim = true;
           Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
+            const rowSource = String(w.source ?? "").trim() || weatherKind;
             weatherApiDataForReport.push({
               dateKey,
               kind: weatherKind,
@@ -1278,7 +1295,7 @@ export async function POST(req: NextRequest) {
               tMaxF: Number(w.tMaxF) || 0,
               hdd65: Number(w.hdd65) || 0,
               cdd65: Number(w.cdd65) || 0,
-              source: String(w.source || weatherKind),
+              source: rowSource,
             });
           });
         const trainingDayKwhByDate = new Map<string, number>();
@@ -1341,7 +1358,7 @@ export async function POST(req: NextRequest) {
               tMaxF,
               hdd65: f.heatingDegreeSeverity,
               cdd65: f.coolingDegreeSeverity,
-              source: anyFromStub ? "stub" : "open_meteo",
+              source: anyFromStub ? WEATHER_STUB_SOURCE : WEATHER_SOURCE.OPEN_METEO_CACHE,
             });
           });
           const trainingDayKwhByDate = new Map<string, number>();
@@ -1428,24 +1445,43 @@ export async function POST(req: NextRequest) {
     },
   };
 
-  let weatherUsedForReport = false;
+  // Derive weather note and diagnostics from the exact weather payload used by the simulator (weatherApiDataForReport).
+  let weatherUsedForReport = weatherUsedForSim;
   let weatherNoteReport = "Weather not integrated in gap-fill lab path.";
-  if (testDateKeysSorted.length > 0) {
-    if (weatherUsedForSim) {
-      weatherUsedForReport = true;
-      weatherNoteReport = "Real weather (Open-Meteo cache) used for test window; day totals scaled by weather (and optional aux heat / pool freeze-protect).";
-    } else {
-      const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
-      const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
-      const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
-      if (lat != null && lon != null) {
-        const testStart = testDateKeysSorted[0];
-        const testEnd = testDateKeysSorted[testDateKeysSorted.length - 1];
-        const result = await getWeatherForRange(lat, lon, testStart!, testEnd!);
-        weatherUsedForReport = !result.fromStub;
-        weatherNoteReport = result.fromStub ? "Weather service unavailable; stub used for test window." : "Real weather (Open-Meteo cache) used for test window.";
+  const weatherRowsBySource: Record<string, number> = {};
+  let weatherSourcesSeen: string[] = [];
+  let weatherSourceMismatchDetected = false;
+
+  if (weatherApiDataForReport.length > 0) {
+    for (const r of weatherApiDataForReport) {
+      const src = String(r?.source ?? "").trim() || "unknown";
+      weatherRowsBySource[src] = (weatherRowsBySource[src] ?? 0) + 1;
+    }
+    weatherSourcesSeen = Object.keys(weatherRowsBySource).sort();
+    const totalRows = weatherApiDataForReport.length;
+    const stubCount = weatherRowsBySource[WEATHER_STUB_SOURCE] ?? 0;
+    const allStub = stubCount === totalRows;
+    const anyStub = stubCount > 0;
+    const anyOpenMeteo =
+      (weatherRowsBySource[WEATHER_SOURCE.OPEN_METEO_CACHE] ?? 0) > 0 ||
+      (weatherRowsBySource[WEATHER_SOURCE.OPEN_METEO_LIVE] ?? 0) > 0;
+
+    if (allStub) {
+      weatherNoteReport =
+        "Stub/fallback weather used for test window (Open-Meteo unavailable or DB backfilled with stub). Day totals still scaled by weather profile.";
+    } else if (anyStub && (anyOpenMeteo || Object.keys(weatherRowsBySource).some((k) => k !== WEATHER_STUB_SOURCE))) {
+      weatherNoteReport = `Mixed weather sources: ${weatherSourcesSeen.join(", ")}. Day totals scaled by weather (and optional aux heat / pool freeze-protect).`;
+    } else if (anyOpenMeteo || weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
+      if (weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
+        weatherNoteReport = `DB weather (${weatherKind}) used for test window; day totals scaled by weather (and optional aux heat / pool freeze-protect).`;
+      } else {
+        weatherNoteReport = "Real weather (Open-Meteo) used for test window; day totals scaled by weather (and optional aux heat / pool freeze-protect).";
       }
     }
+
+    // Guardrail: if note claims real weather but every row is stub, flag mismatch.
+    const noteClaimsReal = /open-meteo|real weather/i.test(weatherNoteReport) && !/stub|fallback|mixed/i.test(weatherNoteReport);
+    if (noteClaimsReal && allStub) weatherSourceMismatchDetected = true;
   }
 
   const modelAssumptions = {
@@ -1723,6 +1759,9 @@ export async function POST(req: NextRequest) {
     weatherNote: weatherNoteReport,
     weatherApiData: weatherApiDataForReport,
     weatherKindUsed,
+    weatherRowsBySource: Object.keys(weatherRowsBySource).length > 0 ? weatherRowsBySource : undefined,
+    weatherSourcesSeen: weatherSourcesSeen.length > 0 ? weatherSourcesSeen : undefined,
+    weatherSourceMismatchDetected: weatherSourceMismatchDetected || undefined,
     benchmarkSummary,
     benchmarkPayloadForCopy,
   });
