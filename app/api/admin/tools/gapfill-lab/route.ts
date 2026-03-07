@@ -29,9 +29,11 @@ import {
   filterCandidateDateKeysBySeason,
   pickExtremeWeatherTestDateKeys,
   dailyWeatherFromDbToFeatures,
+  buildGapFillLabBenchmarkPayload,
+  type GapFillLabBenchmarkPayload,
 } from "@/lib/admin/gapfillLab";
-import { getWeatherForRange } from "@/lib/sim/weatherProvider";
-import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
+import { getHouseWeatherDays, upsertHouseWeatherDays } from "@/modules/weather/repo";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
@@ -320,6 +322,26 @@ function buildFullReport(args: {
   weatherNote?: string;
   weatherApiData?: Array<{ dateKey: string; kind: string; tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }>;
   weatherKindUsed?: string;
+  benchmarkSummary?: {
+    benchmarkAvailable: boolean;
+    benchmarkSource: "request_payload" | "prior_run_copy" | "none";
+    currentWAPE_pct: number;
+    benchmarkWAPE_pct: number | null;
+    wapeDelta_pct: number | null;
+    currentMAE_kwhPer15m: number;
+    benchmarkMAE_kwhPer15m: number | null;
+    maeDelta_kwhPer15m: number | null;
+    currentTotalSimKwhMasked: number;
+    benchmarkTotalSimKwhMasked: number | null;
+    totalSimBiasDeltaKwh: number | null;
+    currentWorstAbsDayDeltaKwh: number;
+    benchmarkWorstAbsDayDeltaKwh: number | null;
+    worstAbsDayDeltaChangeKwh: number | null;
+    currentWorstDayDate?: string | null;
+    benchmarkWorstDayDate?: string | null;
+    monthlyComparison?: Array<{ month: string; currentWAPE: number; benchmarkWAPE: number | null; delta: number | null }> | null;
+  };
+  benchmarkPayloadForCopy?: string;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -491,6 +513,8 @@ function buildFullReport(args: {
     },
     poolHoursLens: j.poolHoursLens,
     byMonthLens: j.metrics.byMonth.map((m) => ({ month: m.month, count: m.count, totalActual: m.totalActual, totalSim: m.totalSim, wape: m.wape, mae: m.mae })),
+    ...(j.benchmarkSummary ? { benchmarkRegression: { summary: j.benchmarkSummary } } : {}),
+    ...(j.benchmarkPayloadForCopy ? { benchmarkPayloadForCopy: j.benchmarkPayloadForCopy } : {}),
     notes: [] as string[],
   };
 
@@ -735,6 +759,45 @@ function buildFullReport(args: {
     kv("deltaKwhMasked", j.metrics.deltaKwhMasked);
   });
 
+  section("G2) Benchmark / regression summary", () => {
+    const bench = j.benchmarkSummary;
+    if (bench) {
+      kv("benchmarkAvailable", bench.benchmarkAvailable);
+      kv("benchmarkSource", bench.benchmarkSource);
+      kv("currentWAPE_pct", bench.currentWAPE_pct);
+      kv("benchmarkWAPE_pct", bench.benchmarkWAPE_pct);
+      kv("wapeDelta_pct", bench.wapeDelta_pct);
+      kv("currentMAE_kwhPer15m", bench.currentMAE_kwhPer15m);
+      kv("benchmarkMAE_kwhPer15m", bench.benchmarkMAE_kwhPer15m);
+      kv("maeDelta_kwhPer15m", bench.maeDelta_kwhPer15m);
+      kv("currentTotalSimKwhMasked", bench.currentTotalSimKwhMasked);
+      kv("benchmarkTotalSimKwhMasked", bench.benchmarkTotalSimKwhMasked);
+      kv("totalSimBiasDeltaKwh", bench.totalSimBiasDeltaKwh);
+      kv("currentWorstAbsDayDeltaKwh", bench.currentWorstAbsDayDeltaKwh);
+      kv("benchmarkWorstAbsDayDeltaKwh", bench.benchmarkWorstAbsDayDeltaKwh);
+      kv("worstAbsDayDeltaChangeKwh", bench.worstAbsDayDeltaChangeKwh);
+      if (bench.currentWorstDayDate != null || bench.benchmarkWorstDayDate != null) {
+        lines.push("currentWorstDayDate: " + (bench.currentWorstDayDate ?? "—"));
+        lines.push("benchmarkWorstDayDate: " + (bench.benchmarkWorstDayDate ?? "—"));
+      }
+      if (Array.isArray(bench.monthlyComparison) && bench.monthlyComparison.length > 0) {
+        lines.push("month | currentWAPE | benchmarkWAPE | delta");
+        bench.monthlyComparison.forEach((r) =>
+          lines.push(`  ${r.month} | ${r.currentWAPE} | ${r.benchmarkWAPE ?? "—"} | ${r.delta ?? "—"}`)
+        );
+      }
+    } else {
+      lines.push("benchmarkAvailable: no");
+      lines.push("benchmarkSource: none");
+    }
+    if (j.benchmarkPayloadForCopy) {
+      lines.push("Copyable benchmark payload (paste into next run request body as \"benchmark\"):");
+      lines.push("---BEGIN BENCHMARK PAYLOAD---");
+      j.benchmarkPayloadForCopy.split("\n").forEach((line) => lines.push("  " + line));
+      lines.push("---END BENCHMARK PAYLOAD---");
+    }
+  });
+
   section("H) Daily totals comparison (test dates)", () => {
     lines.push("top10Under (most negative delta):");
     j.diagnostics.top10Under.forEach((r) => lines.push(`  ${r.date} | actual=${r.actualKwh} sim=${r.simKwh} delta=${r.deltaKwh}`));
@@ -811,6 +874,8 @@ export async function POST(req: NextRequest) {
     houseId?: string;
     /** Weather source: ACTUAL_LAST_YEAR (last year temps), NORMAL_AVG (average temps), or open_meteo (live API). */
     weatherKind?: "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
+    /** Optional benchmark payload from a prior run for regression comparison (copy from report). */
+    benchmark?: unknown;
   };
   try {
     body = await req.json();
@@ -1201,21 +1266,21 @@ export async function POST(req: NextRequest) {
 
     if (weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
       const dbWx = await getHouseWeatherDays({ houseId: house.id, dateKeys: dateKeysForWeather, kind: weatherKind });
-      if (dbWx.size > 0) {
-        weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
-        weatherUsedForSim = true;
-        Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
-          weatherApiDataForReport.push({
-            dateKey,
-            kind: weatherKind,
-            tAvgF: Number(w.tAvgF) || 0,
-            tMinF: Number(w.tMinF) || 0,
-            tMaxF: Number(w.tMaxF) || 0,
-            hdd65: Number(w.hdd65) || 0,
-            cdd65: Number(w.cdd65) || 0,
-            source: String(w.source || weatherKind),
+        if (dbWx.size > 0) {
+          weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
+          weatherUsedForSim = true;
+          Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
+            weatherApiDataForReport.push({
+              dateKey,
+              kind: weatherKind,
+              tAvgF: Number(w.tAvgF) || 0,
+              tMinF: Number(w.tMinF) || 0,
+              tMaxF: Number(w.tMaxF) || 0,
+              hdd65: Number(w.hdd65) || 0,
+              cdd65: Number(w.cdd65) || 0,
+              source: String(w.source || weatherKind),
+            });
           });
-        });
         const trainingDayKwhByDate = new Map<string, number>();
         for (const p of trainingIntervalsFiltered) {
           const dk = dateKeyInTimezone(p.timestamp, timezone);
@@ -1230,75 +1295,6 @@ export async function POST(req: NextRequest) {
             return dow === 0 || dow === 6;
           },
         });
-      } else {
-        const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
-        const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
-        const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
-        if (lat != null && lon != null) {
-          const allRows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }> = [];
-          const seenTs = new Set<string>();
-          const addRows = (rows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }>) => {
-            for (const r of rows ?? []) {
-              const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
-              const key = t.toISOString();
-              if (!seenTs.has(key)) {
-                seenTs.add(key);
-                allRows.push(r);
-              }
-            }
-          };
-          const trainResult = await getWeatherForRange(lat, lon, trainStart, trainEnd);
-          addRows(trainResult.rows);
-          let anyFromStub = trainResult.fromStub;
-          if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
-            const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
-            addRows(testResult.rows);
-            anyFromStub = anyFromStub || testResult.fromStub;
-          }
-          allRows.sort((a, b) => {
-            const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
-            const tb = b.timestampUtc instanceof Date ? b.timestampUtc.getTime() : new Date(b.timestampUtc).getTime();
-            return ta - tb;
-          });
-          if (allRows.length > 0) {
-            weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows, undefined, undefined, timezone);
-            weatherUsedForSim = !anyFromStub;
-            Array.from(weatherByDateKey.entries()).forEach(([dateKey, f]) => {
-              const tAvgF = ((f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
-              const tMinF = ((f.dailyMinTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
-              const tMaxF = ((f.dailyMaxTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
-              weatherApiDataForReport.push({
-                dateKey,
-                kind: weatherKind,
-                tAvgF,
-                tMinF,
-                tMaxF,
-                hdd65: f.heatingDegreeSeverity,
-                cdd65: f.coolingDegreeSeverity,
-                source: anyFromStub ? "stub" : "open_meteo",
-              });
-            });
-            if (weatherKind === "ACTUAL_LAST_YEAR") {
-              const dayWxMap = hourlyRowsToDayWxMap(allRows, house.id);
-              const toPersist = Array.from(dayWxMap.values());
-              if (toPersist.length > 0) await upsertHouseWeatherDays({ rows: toPersist }).catch(() => 0);
-            }
-            const trainingDayKwhByDate = new Map<string, number>();
-            for (const p of trainingIntervalsFiltered) {
-              const dk = dateKeyInTimezone(p.timestamp, timezone);
-              trainingDayKwhByDate.set(dk, (trainingDayKwhByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
-            }
-            trainingWeatherStats = buildTrainingWeatherStats({
-              trainingDateKeys: Array.from(trainingDateKeysSet),
-              trainingDayKwhByDate,
-              weatherByDateKey,
-              isWeekend: (dk) => {
-                const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
-                return dow === 0 || dow === 6;
-              },
-            });
-          }
-        }
       }
     } else {
       const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
@@ -1550,6 +1546,93 @@ export async function POST(req: NextRequest) {
     insights: {} as any,
     monthly: [] as Array<{ month?: string; kwh?: number }>,
   };
+
+  const wxSummary = dayTotalDiagnostics?.weatherAdjustmentSummary;
+  const currentBenchmarkPayload = buildGapFillLabBenchmarkPayload({
+    reportVersion: REPORT_VERSION,
+    houseId: house.id,
+    testMode,
+    seedUsed: seedUsed ?? null,
+    listTestDateKeys,
+    totalActualKwhMasked: metrics.totalActualKwhMasked,
+    totalSimKwhMasked: metrics.totalSimKwhMasked,
+    deltaKwhMasked: metrics.deltaKwhMasked,
+    wape: metrics.wape,
+    mae: metrics.mae,
+    byMonth: metrics.byMonth,
+    worst10Abs: metrics.worst10Abs,
+    daysWithWeatherMultiplier: wxSummary?.daysWithWeatherMultiplier,
+    daysWithAuxHeatAdder: wxSummary?.daysWithAuxHeatAdder,
+    daysWithPoolFreezeProtectAdder: wxSummary?.daysWithPoolFreezeProtectAdder,
+  });
+  const benchmarkPayloadForCopy = JSON.stringify(currentBenchmarkPayload, null, 2);
+
+  let benchmarkFromRequest: GapFillLabBenchmarkPayload | null = null;
+  const rawBenchmark = body?.benchmark;
+  if (rawBenchmark != null && typeof rawBenchmark === "object" && !Array.isArray(rawBenchmark)) {
+    const b = rawBenchmark as Record<string, unknown>;
+    if (
+      typeof b.reportVersion === "string" &&
+      typeof b.houseId === "string" &&
+      typeof b.WAPE_pct === "number" &&
+      typeof b.MAE_kwhPer15m === "number" &&
+      typeof b.totalSimKwhMasked === "number" &&
+      typeof b.worstAbsDayDeltaKwh === "number"
+    ) {
+      benchmarkFromRequest = {
+        reportVersion: String(b.reportVersion),
+        houseId: String(b.houseId),
+        testMode: String(b.testMode ?? ""),
+        seedUsed: b.seedUsed != null ? String(b.seedUsed) : null,
+        listTestDateKeys: Array.isArray(b.listTestDateKeys) ? b.listTestDateKeys.map(String) : [],
+        WAPE_pct: Number(b.WAPE_pct),
+        MAE_kwhPer15m: Number(b.MAE_kwhPer15m),
+        totalActualKwhMasked: Number(b.totalActualKwhMasked ?? 0),
+        totalSimKwhMasked: Number(b.totalSimKwhMasked),
+        deltaKwhMasked: Number(b.deltaKwhMasked ?? 0),
+        worstAbsDayDeltaKwh: Number(b.worstAbsDayDeltaKwh),
+        worstAbsDayDate: b.worstAbsDayDate != null ? String(b.worstAbsDayDate) : null,
+        monthlyWAPEByMonth: b.monthlyWAPEByMonth != null && typeof b.monthlyWAPEByMonth === "object" && !Array.isArray(b.monthlyWAPEByMonth)
+          ? (b.monthlyWAPEByMonth as Record<string, number>)
+          : {},
+        daysWithWeatherMultiplier: typeof b.daysWithWeatherMultiplier === "number" ? b.daysWithWeatherMultiplier : undefined,
+        daysWithAuxHeatAdder: typeof b.daysWithAuxHeatAdder === "number" ? b.daysWithAuxHeatAdder : undefined,
+        daysWithPoolFreezeProtectAdder: typeof b.daysWithPoolFreezeProtectAdder === "number" ? b.daysWithPoolFreezeProtectAdder : undefined,
+      };
+    }
+  }
+
+  const benchmarkSummary = {
+    benchmarkAvailable: benchmarkFromRequest != null,
+    benchmarkSource: benchmarkFromRequest != null ? ("request_payload" as const) : ("none" as const),
+    currentWAPE_pct: metrics.wape,
+    benchmarkWAPE_pct: benchmarkFromRequest?.WAPE_pct ?? null,
+    wapeDelta_pct: benchmarkFromRequest != null ? metrics.wape - benchmarkFromRequest.WAPE_pct : null,
+    currentMAE_kwhPer15m: metrics.mae,
+    benchmarkMAE_kwhPer15m: benchmarkFromRequest?.MAE_kwhPer15m ?? null,
+    maeDelta_kwhPer15m: benchmarkFromRequest != null ? metrics.mae - benchmarkFromRequest.MAE_kwhPer15m : null,
+    currentTotalSimKwhMasked: metrics.totalSimKwhMasked,
+    benchmarkTotalSimKwhMasked: benchmarkFromRequest?.totalSimKwhMasked ?? null,
+    totalSimBiasDeltaKwh: benchmarkFromRequest != null ? metrics.totalSimKwhMasked - benchmarkFromRequest.totalSimKwhMasked : null,
+    currentWorstAbsDayDeltaKwh: metrics.worst10Abs.length > 0 ? Math.abs(metrics.worst10Abs[0]!.deltaKwh) : 0,
+    benchmarkWorstAbsDayDeltaKwh: benchmarkFromRequest?.worstAbsDayDeltaKwh ?? null,
+    worstAbsDayDeltaChangeKwh:
+      benchmarkFromRequest != null && metrics.worst10Abs.length > 0
+        ? Math.abs(metrics.worst10Abs[0]!.deltaKwh) - benchmarkFromRequest.worstAbsDayDeltaKwh
+        : null,
+    currentWorstDayDate: metrics.worst10Abs.length > 0 ? metrics.worst10Abs[0]!.date : null,
+    benchmarkWorstDayDate: benchmarkFromRequest?.worstAbsDayDate ?? null,
+    monthlyComparison:
+      benchmarkFromRequest != null
+        ? metrics.byMonth.map((m) => ({
+            month: m.month,
+            currentWAPE: m.wape,
+            benchmarkWAPE: benchmarkFromRequest!.monthlyWAPEByMonth[m.month] ?? null,
+            delta: benchmarkFromRequest!.monthlyWAPEByMonth[m.month] != null ? m.wape - benchmarkFromRequest!.monthlyWAPEByMonth[m.month]! : null,
+          }))
+        : null,
+  };
+
   const { fullReportJson, fullReportText } = buildFullReport({
     reportVersion: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
@@ -1640,6 +1723,8 @@ export async function POST(req: NextRequest) {
     weatherNote: weatherNoteReport,
     weatherApiData: weatherApiDataForReport,
     weatherKindUsed,
+    benchmarkSummary,
+    benchmarkPayloadForCopy,
   });
 
   const pasteLines = [
