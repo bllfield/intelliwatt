@@ -1408,6 +1408,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       if (useWeather && weatherByDateKey) {
         weatherAdjustmentByDate.set(dateKey, {
           profileSelectedDayKwh: r.profileSelectedDayKwh,
+          preBlendAdjustedDayKwh: r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
           finalSelectedDayKwh: r.finalDayKwh,
           weatherSeverityMultiplier: r.weatherSeverityMultiplier,
           weatherModeUsed: r.weatherModeUsed,

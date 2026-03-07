@@ -375,7 +375,7 @@ export async function POST(req: NextRequest) {
                   filled: false,
                   source: interval.source ?? file.source ?? 'smt',
                 })),
-                skipDuplicates: false,
+                skipDuplicates: true,
               });
             }
           }

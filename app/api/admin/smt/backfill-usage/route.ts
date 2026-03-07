@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
           filled: false,
           source: row.source ?? 'smt-backfill',
         })),
-        skipDuplicates: false,
+        skipDuplicates: true,
       });
 
       inserted += createResult.count;

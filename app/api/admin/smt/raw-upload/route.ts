@@ -303,7 +303,7 @@ export async function POST(req: NextRequest) {
                 for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
                   await usageClient.usageIntervalModule.createMany({
                     data: payload.slice(i, i + CHUNK_SIZE),
-                    skipDuplicates: false,
+                    skipDuplicates: true,
                   });
                 }
               }
