@@ -949,7 +949,17 @@ export type DayTotalDiagnostics = {
     heatingDegreeSeverity: number;
     coolingDegreeSeverity: number;
     freezeHoursCount: number;
+    /** Aux heat gate: dailyMinTempC <= 0 C. */
+    auxHeatGate_minTempPassed?: boolean;
+    /** Aux heat gate: freezeHoursCount >= 2. */
+    auxHeatGate_freezeHoursPassed?: boolean;
+    /** Aux heat gate: heatingDegreeSeverity >= 1.35 × referenceHeatingSeverity. */
+    auxHeatGate_severityPassed?: boolean;
+    /** Reference heating severity (ref HDD) used for aux gate. */
+    referenceHeatingSeverity?: number;
   }>;
+  /** When set, day simulation used the shared past-day simulator core. */
+  sourceOfDaySimulationCore?: string;
 };
 
 /** Hourly weather row shape used by gapfill-lab (matches HistoricalWeatherRow). */
@@ -1007,9 +1017,13 @@ const HEATING_MULT_MAX = 1.35;
 const COOLING_MULT_MIN = 0.9;
 const COOLING_MULT_MAX = 1.25;
 const AUX_HEAT_SLOPE = 0.15;
-const AUX_HEAT_KWH_CAP = 20;
-const AUX_MIN_TEMP_C = -2;
+/** Phase 1 safety cap: aux heat adder per day (kWh). Align with shared past-day simulator. */
+const AUX_HEAT_KWH_CAP = 12;
+/** Aux heat only when daily min temp <= 0 C. */
+const AUX_MIN_TEMP_C = 0;
 const AUX_HDD_RATIO = 1.35;
+/** Aux heat only when at least this many hours at or below 0 C. */
+const AUX_FREEZE_HOURS_MIN = 2;
 const FREEZE_HOURS_THRESHOLD = 2;
 const POOL_FREEZE_HOURS_MIN = 4;
 const POOL_FREEZE_MIN_TEMP_C = 0;
@@ -1236,8 +1250,9 @@ export function computeWeatherAdjustedDayTotal(args: {
   const isElectricHeat =
     homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
   const dailyMinOkForAux = wx.dailyMinTempC != null && wx.dailyMinTempC <= AUX_MIN_TEMP_C;
+  const freezeHoursOkForAux = wx.freezeHoursCount >= AUX_FREEZE_HOURS_MIN;
   const hddRatioOkForAux = (refHdd || 0) > 1e-6 && wx.heatingDegreeSeverity >= (refHdd || 0) * AUX_HDD_RATIO;
-  if (isElectricHeat && dailyMinOkForAux && hddRatioOkForAux) {
+  if (isElectricHeat && dailyMinOkForAux && freezeHoursOkForAux && hddRatioOkForAux) {
     const ref = Math.max(refHdd || 0, 1);
     auxHeatKwhAdder = Math.max(0, Math.min(AUX_HEAT_KWH_CAP, (wx.heatingDegreeSeverity - ref) * AUX_HEAT_SLOPE));
   }
@@ -1332,6 +1347,10 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       auxHeatKwhAdder: number;
       poolFreezeProtectKwhAdder: number;
       dayClassification: WeatherDayClassification;
+      auxHeatGate_minTempPassed?: boolean;
+      auxHeatGate_freezeHoursPassed?: boolean;
+      auxHeatGate_severityPassed?: boolean;
+      referenceHeatingSeverity?: number;
     }
   >();
   const fallbackSummary: Record<DayTotalFallbackLevel, number> = {
@@ -1395,7 +1414,10 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           auxHeatKwhAdder: r.auxHeatKwhAdder,
           poolFreezeProtectKwhAdder: r.poolFreezeProtectKwhAdder,
           dayClassification: r.dayClassification,
-          preBlendAdjustedDayKwh: r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
+          auxHeatGate_minTempPassed: r.auxHeatGate_minTempPassed,
+          auxHeatGate_freezeHoursPassed: r.auxHeatGate_freezeHoursPassed,
+          auxHeatGate_severityPassed: r.auxHeatGate_severityPassed,
+          referenceHeatingSeverity: r.referenceHeatingSeverity,
         });
       }
     }
@@ -1523,6 +1545,10 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           heatingDegreeSeverity: wx?.heatingDegreeSeverity ?? 0,
           coolingDegreeSeverity: wx?.coolingDegreeSeverity ?? 0,
           freezeHoursCount: wx?.freezeHoursCount ?? 0,
+          auxHeatGate_minTempPassed: adj.auxHeatGate_minTempPassed,
+          auxHeatGate_freezeHoursPassed: adj.auxHeatGate_freezeHoursPassed,
+          auxHeatGate_severityPassed: adj.auxHeatGate_severityPassed,
+          referenceHeatingSeverity: adj.referenceHeatingSeverity,
         });
         if (testedDayWeatherSample.length >= 10) break;
       }

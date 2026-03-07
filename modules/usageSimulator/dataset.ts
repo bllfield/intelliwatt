@@ -274,6 +274,7 @@ function buildDisplayMonthlyFromIntervals(args: {
     };
   }
 
+  const monthly = yearMonths.map((month) => ({ month, kwh: round2(displayTotals.get(month) ?? 0) }));
   return { monthly, stitchedMonth };
 }
 

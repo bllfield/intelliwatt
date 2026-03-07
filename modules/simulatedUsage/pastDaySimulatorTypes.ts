@@ -73,6 +73,12 @@ export type PastDaySimulationResult = {
   fallbackLevel: PastDayFallbackLevel;
   clampApplied: boolean;
   shape96Used: number[];
+  /** Diagnostics: why aux heat did or did not apply. */
+  auxHeatGate_minTempPassed?: boolean;
+  auxHeatGate_freezeHoursPassed?: boolean;
+  auxHeatGate_severityPassed?: boolean;
+  /** Reference heating severity (ref HDD) used for aux gate and ratio. */
+  referenceHeatingSeverity?: number;
 };
 
 export type PastDayWeatherClassification =
