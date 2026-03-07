@@ -4,6 +4,12 @@
  */
 
 import { canonicalIntervalKey } from "@/lib/sim/contract/time";
+import {
+  buildPastDaySimulationContext,
+  getPastDayResultOnly,
+  SOURCE_OF_DAY_SIMULATION_CORE,
+} from "@/modules/simulatedUsage/pastDaySimulator";
+import type { PastDayProfileLite, PastDayTrainingWeatherStats, PastDayWeatherFeatures } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 
 export type IntervalPoint = { timestamp: string; kwh: number };
 
@@ -1352,34 +1358,44 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         firstTsByDate.set(dk, ts);
       }
     }
+    const pastContext = buildPastDaySimulationContext({
+      profile: lite as unknown as PastDayProfileLite,
+      trainingWeatherStats: (useWeather && trainingWeatherStats ? trainingWeatherStats : null) as PastDayTrainingWeatherStats | null,
+      weatherByDateKey: (useWeather && weatherByDateKey ? weatherByDateKey : new Map()) as Map<string, PastDayWeatherFeatures>,
+    });
+    const shapeByMonth96ForShared = (profile?.shapeByMonth96 ?? null) as Record<string, number[]> | null | undefined;
     for (const dateKey of dateKeysOrder) {
       const monthKey = dateKey.slice(0, 7);
       const tsForDow = firstTsByDate.get(dateKey) ?? dateKey + "T12:00:00.000Z";
       const dow = localDayOfWeekInTimezone(tsForDow, timezone);
       const isWeekend = dow === 0 || dow === 6;
-      const sel = selectDayTotalWithFallback({ monthKey, isWeekend, profile: lite });
-      dayTotalByDate.set(dateKey, sel);
-      fallbackSummary[sel.fallbackLevel]++;
-      if (sel.clampApplied) guardrailAppliedCount++;
-
-      if (useWeather && weatherByDateKey && trainingWeatherStats) {
-        const adj = computeWeatherAdjustedDayTotal({
-          baseDayKwh: sel.targetDayKwh,
-          localDate: dateKey,
-          weatherByDateKey,
-          trainingStats: trainingWeatherStats,
-          isWeekend,
-          homeProfile: homeProfile ?? null,
-          applianceProfile: applianceProfile ?? null,
-        });
+      const r = getPastDayResultOnly(
+        dateKey,
+        isWeekend,
+        pastContext,
+        homeProfile ?? null,
+        applianceProfile ?? null,
+        useWeather && weatherByDateKey ? (weatherByDateKey.get(dateKey) as PastDayWeatherFeatures | undefined) ?? null : undefined,
+        shapeByMonth96ForShared ?? undefined
+      );
+      dayTotalByDate.set(dateKey, {
+        targetDayKwh: r.finalDayKwh,
+        fallbackLevel: r.fallbackLevel,
+        rawSelectedDayKwh: r.profileSelectedDayKwh,
+        clampApplied: r.clampApplied,
+      });
+      fallbackSummary[r.fallbackLevel]++;
+      if (r.clampApplied) guardrailAppliedCount++;
+      if (useWeather && weatherByDateKey) {
         weatherAdjustmentByDate.set(dateKey, {
-          profileSelectedDayKwh: sel.targetDayKwh,
-          finalSelectedDayKwh: adj.finalSelectedDayKwh,
-          weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
-          weatherModeUsed: adj.weatherModeUsed,
-          auxHeatKwhAdder: adj.auxHeatKwhAdder,
-          poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
-          dayClassification: adj.dayClassification,
+          profileSelectedDayKwh: r.profileSelectedDayKwh,
+          finalSelectedDayKwh: r.finalDayKwh,
+          weatherSeverityMultiplier: r.weatherSeverityMultiplier,
+          weatherModeUsed: r.weatherModeUsed,
+          auxHeatKwhAdder: r.auxHeatKwhAdder,
+          poolFreezeProtectKwhAdder: r.poolFreezeProtectKwhAdder,
+          dayClassification: r.dayClassification,
+          preBlendAdjustedDayKwh: r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
         });
       }
     }

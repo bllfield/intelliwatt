@@ -2,6 +2,32 @@ import { ManualUsagePayload, SimulatedCurve, TravelRange } from "./types";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
+import {
+  buildPastDaySimulationContext,
+  simulatePastDay,
+  SOURCE_OF_DAY_SIMULATION_CORE,
+} from "@/modules/simulatedUsage/pastDaySimulator";
+import type {
+  PastDayProfileLite,
+  PastDayTrainingWeatherStats,
+  PastDayWeatherFeatures,
+  PastDayFallbackLevel,
+} from "@/modules/simulatedUsage/pastDaySimulatorTypes";
+import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
+import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
+
+/** Map shared simulator fallback level to engine diagnostic enum. */
+function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
+  const map: Record<PastDayFallbackLevel, PastFallbackLevel> = {
+    month_daytype: "MONTH_DOW",
+    adjacent_month_daytype: "MONTH_DOW",
+    month_overall: "MONTH",
+    season_overall: "MONTH",
+    global_daytype: "GLOBAL",
+    global_overall: "GLOBAL",
+  };
+  return map[level] ?? "MONTH_DOW";
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MINUTES = 15;
@@ -107,6 +133,26 @@ function monthEndUtc(ym: string): Date | null {
 
 function sum(arr: number[]): number {
   return arr.reduce((a, b) => a + b, 0);
+}
+
+/** Convert engine weather (F, HDD65/CDD65) to shared PastDayWeatherFeatures (C, severity). */
+function engineWxToPastDayWeather(
+  wx: { tAvgF: number; tMinF?: number; tMaxF?: number; hdd65: number; cdd65: number } | null
+): PastDayWeatherFeatures | null {
+  if (!wx) return null;
+  const tAvgC = ((Number(wx.tAvgF) || 0) - 32) * (5 / 9);
+  const tMinC = wx.tMinF != null ? ((Number(wx.tMinF) || 0) - 32) * (5 / 9) : null;
+  const tMaxC = wx.tMaxF != null ? ((Number(wx.tMaxF) || 0) - 32) * (5 / 9) : null;
+  const dailyMinTempC = tMinC != null ? tMinC : tAvgC;
+  const freezeHoursCount = dailyMinTempC <= 0 ? 24 : 0;
+  return {
+    dailyAvgTempC: Number.isFinite(tAvgC) ? tAvgC : null,
+    dailyMinTempC: tMinC != null && Number.isFinite(tMinC) ? tMinC : (Number.isFinite(tAvgC) ? tAvgC : null),
+    dailyMaxTempC: tMaxC != null && Number.isFinite(tMaxC) ? tMaxC : null,
+    heatingDegreeSeverity: Math.max(0, Number(wx.hdd65) || 0),
+    coolingDegreeSeverity: Math.max(0, Number(wx.cdd65) || 0),
+    freezeHoursCount,
+  };
 }
 
 export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): SimulatedCurve {
@@ -611,6 +657,8 @@ export type PastSimulatedDayDiagnostic = {
   baseNonHvacKwh: number | null;
   hvacKwh: number | null;
   targetTotalKwh: number | null;
+  /** When set, indicates the day was simulated with the shared past-day simulator core. */
+  sourceOfDaySimulationCore?: string;
 };
 
 export type PastSimulationDebug = {
@@ -978,6 +1026,89 @@ export function buildPastSimulatedBaselineV1(args: {
   const globalHourlySum = globalHourly.reduce((a, b) => a + b, 0) || 1;
   for (let h = 0; h < 24; h++) globalHourly[h] /= globalHourlySum;
 
+  // Build shared past-day simulator context from reference days so simulated days use the same core as GapFill Lab.
+  const weatherByDateKeyPast = new Map<string, PastDayWeatherFeatures>();
+  const wxEntries = Array.from((args.actualWxByDateKey ?? new Map()).entries());
+  for (const [dk, wx] of wxEntries) {
+    const pf = engineWxToPastDayWeather(wx);
+    if (pf) weatherByDateKeyPast.set(dk, pf);
+  }
+  const monthKeysRef = Array.from(new Set(referenceDays.map((d) => d.monthKey))).sort();
+  const weekdayCountByMonthRef: Record<string, number> = {};
+  const weekendCountByMonthRef: Record<string, number> = {};
+  const monthOverallAvgByMonthRef: Record<string, number> = {};
+  const monthOverallCountByMonthRef: Record<string, number> = {};
+  for (const ym of monthKeysRef) {
+    const inMonth = referenceDays.filter((d) => d.monthKey === ym);
+    const weekdays = inMonth.filter((d) => d.dow >= 1 && d.dow <= 5);
+    const weekends = inMonth.filter((d) => d.dow === 0 || d.dow === 6);
+    weekdayCountByMonthRef[ym] = weekdays.length;
+    weekendCountByMonthRef[ym] = weekends.length;
+    monthOverallCountByMonthRef[ym] = inMonth.length;
+    monthOverallAvgByMonthRef[ym] =
+      inMonth.length > 0 ? inMonth.reduce((s, d) => s + d.total, 0) / inMonth.length : 0;
+  }
+  const avgKwhPerDayWeekdayByMonthRef = monthKeysRef.map(
+    (ym) =>
+      (weekdayCountByMonthRef[ym] > 0
+        ? referenceDays
+            .filter((d) => d.monthKey === ym && d.dow >= 1 && d.dow <= 5)
+            .reduce((s, d) => s + d.total, 0) / weekdayCountByMonthRef[ym]
+        : 0)
+  );
+  const avgKwhPerDayWeekendByMonthRef = monthKeysRef.map(
+    (ym) =>
+      (weekendCountByMonthRef[ym] > 0
+        ? referenceDays
+            .filter((d) => d.monthKey === ym && (d.dow === 0 || d.dow === 6))
+            .reduce((s, d) => s + d.total, 0) / weekendCountByMonthRef[ym]
+        : 0)
+  );
+  const pastProfile: PastDayProfileLite = {
+    monthKeys: monthKeysRef,
+    avgKwhPerDayWeekdayByMonth: avgKwhPerDayWeekdayByMonthRef,
+    avgKwhPerDayWeekendByMonth: avgKwhPerDayWeekendByMonthRef,
+    weekdayCountByMonth: weekdayCountByMonthRef,
+    weekendCountByMonth: weekendCountByMonthRef,
+    monthOverallAvgByMonth: monthOverallAvgByMonthRef,
+    monthOverallCountByMonth: monthOverallCountByMonthRef,
+  };
+  const trainingDayKwhByDate = new Map<string, number>();
+  for (const d of referenceDays) trainingDayKwhByDate.set(d.dateKey, d.total);
+  const isWeekendRef = (dateKey: string) => {
+    const r = referenceDays.find((d) => d.dateKey === dateKey);
+    return r ? r.dow === 0 || r.dow === 6 : false;
+  };
+  const trainingWeatherStatsPast =
+    referenceDays.length > 0 && weatherByDateKeyPast.size > 0
+      ? (buildTrainingWeatherStats({
+          trainingDateKeys: referenceDays.map((d) => d.dateKey),
+          trainingDayKwhByDate,
+          weatherByDateKey: weatherByDateKeyPast as Map<string, DailyWeatherFeatures>,
+          isWeekend: isWeekendRef,
+        }) as unknown as PastDayTrainingWeatherStats)
+      : null;
+  const shapeByMonth96Ref: Record<string, number[]> = {};
+  for (const ym of monthKeysRef) {
+    const inMonth = referenceDays.filter((d) => d.monthKey === ym);
+    if (inMonth.length === 0) continue;
+    const shape96 = new Array<number>(96).fill(0);
+    for (const d of inMonth) {
+      for (let h = 0; h < 24; h++) {
+        const q = d.quarterShapeByHour[h] ?? [0.25, 0.25, 0.25, 0.25];
+        for (let i = 0; i < 4; i++) shape96[h * 4 + i] += q[i] ?? 0.25;
+      }
+    }
+    const sum = shape96.reduce((a, b) => a + b, 0) || 1;
+    for (let i = 0; i < 96; i++) shape96[i] /= sum;
+    shapeByMonth96Ref[ym] = shape96;
+  }
+  const pastContext = buildPastDaySimulationContext({
+    profile: pastProfile,
+    trainingWeatherStats: trainingWeatherStatsPast,
+    weatherByDateKey: weatherByDateKeyPast,
+  });
+
   const NEAREST_WEATHER_K = 7;
   const NEAREST_WEATHER_MIN_CANDS = 4;
   const NEAREST_WEATHER_HVAC_BLEND = 0.5;
@@ -1098,103 +1229,22 @@ export function buildPastSimulatedBaselineV1(args: {
     if (shouldSimulateDay) {
       simulatedDays += 1;
       const simulatedReason: "EXCLUDED" | "LEADING_MISSING" = day.dayIsExcluded ? "EXCLUDED" : "LEADING_MISSING";
-
-      // Use ACTUAL_LAST_YEAR weather when available; if missing, keep pattern-only totals/weights.
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
-      const hvac = weatherAwareHvacKwh({
-        wx,
-        homeProfile: args.homeProfile,
-        applianceProfile: args.applianceProfile,
-      });
-
-      let hourWeights: number[] = Array.from({ length: 24 }, () => 1 / 24);
-      let qShapeByHour: number[][] | undefined;
-      let baseBeforeHvac = 0;
-      let targetTotal = 0;
-      let hourFallbackLevel: PastFallbackLevel = "MONTH_DOW";
-      let totalFallbackLevel: PastFallbackLevel = "MONTH_DOW";
-      let referenceCandidateCount = 0;
-      let referencePickedCount = 0;
-      let weatherDistanceAvg: number | null = null;
-      const poolKwh = poolSeasonalKwh({ dateKey, homeProfile: args.homeProfile });
-
-      const nearest = nearestWeatherProfileForDay({ dateKey, dow });
-      if (nearest) {
-        hourWeights = nearest.hourWeights;
-        qShapeByHour = nearest.quarterShapeByHour;
-        const hvacTarget = wx ? Number(hvac.hvacKwh) || 0 : 0;
-        const hvacDelta = hvacTarget - (Number(nearest.avgRefHvacKwh) || 0);
-        baseBeforeHvac = Number(nearest.baseTotalKwh) || 0;
-        targetTotal = Math.max(0, baseBeforeHvac + hvacDelta * NEAREST_WEATHER_HVAC_BLEND + poolKwh);
-        hourFallbackLevel = "NEAREST_WEATHER";
-        totalFallbackLevel = "NEAREST_WEATHER";
-        referenceCandidateCount = nearest.candidateCount;
-        referencePickedCount = nearest.pickedCount;
-        weatherDistanceAvg = nearest.weatherDistanceAvg;
-      } else {
-        hourWeights = avgHourly[ym]?.[dow];
-        if (!hourWeights || hourWeights.every((w) => w === 0)) {
-          hourWeights = avgHourlyMonth[ym];
-          hourFallbackLevel = "MONTH";
-        }
-        if (!hourWeights || hourWeights.every((w) => w === 0)) {
-          hourWeights = globalHourly;
-          hourFallbackLevel = "GLOBAL";
-        }
-        if (!hourWeights || hourWeights.every((w) => w === 0)) {
-          hourWeights = Array.from({ length: 24 }, () => 1 / 24);
-          hourFallbackLevel = "UNIFORM";
-        }
-
-        let baseNonHvac: number | null = null;
-        const profile = args.usageShapeProfile;
-        const tzProfile = args.timezoneForProfile;
-        if (profile && tzProfile && (Object.keys(profile.weekdayAvgByMonthKey ?? {}).length > 0 || Object.keys(profile.weekendAvgByMonthKey ?? {}).length > 0)) {
-          const local = getLocalDateKeyAndDow(dayStartMs, tzProfile);
-          const isWeekend = local.dow === 0 || local.dow === 6;
-          const v = isWeekend
-            ? profile.weekendAvgByMonthKey?.[local.monthKey]
-            : profile.weekdayAvgByMonthKey?.[local.monthKey];
-          if (v != null && Number.isFinite(v) && v > 0) {
-            baseNonHvac = v;
-            totalFallbackLevel = "USAGE_SHAPE_PROFILE";
-          }
-        }
-        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-          baseNonHvac = avgTotal[ym]?.[dow];
-        }
-        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-          baseNonHvac = avgTotalMonth[ym];
-          if (totalFallbackLevel === "MONTH_DOW") totalFallbackLevel = "MONTH";
-        }
-        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-          baseNonHvac = globalTotal;
-          totalFallbackLevel = "GLOBAL";
-        }
-        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-          baseNonHvac = 0;
-          totalFallbackLevel = "ZERO";
-        }
-        baseBeforeHvac = Number(baseNonHvac ?? 0) || 0;
-        targetTotal = Math.max(0, baseBeforeHvac + (wx ? Number(hvac.hvacKwh) || 0 : 0) + poolKwh);
-      }
-
-      const tiltedHourWeights = applyWeatherTiltHourWeights({
-        hourWeights,
-        wx,
-        electricHeat: hvac.electricHeat,
-      });
-
-      const sumW = tiltedHourWeights.reduce((a, b) => a + b, 0) || 1;
-      const hourKwh = tiltedHourWeights.map((w) => (targetTotal * w) / sumW);
-      for (let h = 0; h < 24; h++) {
-        const qShare = qShapeByHour?.[h] ?? quarterShape[ym]?.[dow]?.[h] ?? [0.25, 0.25, 0.25, 0.25];
-        const qSum = qShare.reduce((a, b) => a + b, 0) || 1;
-        for (let q = 0; q < 4; q++) {
-          const idx = h * 4 + q;
-          out.push({ timestamp: gridTs[idx], kwh: (hourKwh[h] * (qShare[q] ?? 0.25)) / qSum });
-        }
-      }
+      const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
+      const result = simulatePastDay(
+        {
+          localDate: dateKey,
+          isWeekend: dow === 0 || dow === 6,
+          gridTimestamps: gridTs,
+          weatherForDay,
+        },
+        pastContext,
+        args.homeProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayHomeProfile | null,
+        args.applianceProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayApplianceProfile | null,
+        shapeByMonth96Ref
+      );
+      for (const iv of result.intervals) out.push(iv);
+      const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
           dateKey,
@@ -1212,16 +1262,17 @@ export function buildPastSimulatedBaselineV1(args: {
                 cdd65: Number(wx.cdd65) || 0,
               }
             : null,
-          hourFallbackLevel,
-          totalFallbackLevel,
-          referenceCandidateCount,
-          referencePickedCount,
-          weatherDistanceAvg,
-          poolApplied: poolKwh > 0,
-          poolKwh: poolKwh > 0 ? poolKwh : 0,
-          baseNonHvacKwh: baseBeforeHvac,
-          hvacKwh: wx ? Number(hvac.hvacKwh) || 0 : 0,
-          targetTotalKwh: Number(targetTotal) || 0,
+          hourFallbackLevel: mappedFallback,
+          totalFallbackLevel: mappedFallback,
+          referenceCandidateCount: 0,
+          referencePickedCount: 0,
+          weatherDistanceAvg: null,
+          poolApplied: result.poolFreezeProtectKwhAdder > 0,
+          poolKwh: result.poolFreezeProtectKwhAdder > 0 ? result.poolFreezeProtectKwhAdder : 0,
+          baseNonHvacKwh: result.profileSelectedDayKwh,
+          hvacKwh: result.auxHeatKwhAdder,
+          targetTotalKwh: result.finalDayKwh,
+          sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
         });
       }
     } else {
@@ -1269,6 +1320,7 @@ export function buildPastSimulatedBaselineV1(args: {
     args.debug.out.referenceDaysUsed = referenceDays.length;
     args.debug.out.simulatedDays = simulatedDays;
     args.debug.out.dayDiagnostics = dayDiagnostics;
+    (args.debug.out as Record<string, unknown>).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
   }
 
   if (process.env.NODE_ENV !== "production") {
