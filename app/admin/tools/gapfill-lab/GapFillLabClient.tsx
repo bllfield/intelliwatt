@@ -31,6 +31,8 @@ type ApiResponse =
       testDaysRequested?: number;
       testDaysSelected?: number;
       seedUsed?: string | null;
+      testMode?: string;
+      candidateDaysAfterModeFilterCount?: number | null;
       minDayCoveragePct?: number;
       candidateWindowStartUtc?: string | null;
       candidateWindowEndUtc?: string | null;
@@ -49,10 +51,14 @@ function formatDate(d: string) {
   return d ? new Date(d + "T12:00:00Z").toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
 }
 
+const VALID_RANDOM_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
+type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
+
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
   const [testMode, setTestMode] = useState<"manual_ranges" | "random_days">("manual_ranges");
+  const [randomTestMode, setRandomTestMode] = useState<RandomTestMode>("fixed");
   const [testRanges, setTestRanges] = useState<RangeRow[]>([{ ...DEFAULT_RANGE }]);
   const [testDays, setTestDays] = useState(21);
   const [seed, setSeed] = useState("");
@@ -152,6 +158,7 @@ export default function GapFillLabClient() {
       };
       if (testMode === "random_days") {
         body.testDays = testDays;
+        body.testMode = randomTestMode;
         if (seed.trim()) body.seed = seed.trim();
         body.minDayCoveragePct = minDayCoveragePct / 100;
         body.stratifyByMonth = stratifyByMonth;
@@ -340,6 +347,21 @@ export default function GapFillLabClient() {
           {testMode === "random_days" && (
             <div className="p-3 rounded border border-brand-blue/20 bg-brand-navy/5 space-y-3 max-w-md">
               <div>
+                <label className="block text-xs text-brand-navy/70 mb-1">Test day selection mode</label>
+                <select
+                  value={randomTestMode}
+                  onChange={(e) => setRandomTestMode(e.target.value as RandomTestMode)}
+                  className="w-full border border-brand-blue/30 rounded px-2 py-1.5 text-brand-navy"
+                >
+                  <option value="fixed">Fixed (deterministic, same days every run)</option>
+                  <option value="random">Random (different days each run)</option>
+                  <option value="winter">Winter (Dec, Jan, Feb only)</option>
+                  <option value="summer">Summer (Jun, Jul, Aug only)</option>
+                  <option value="shoulder">Shoulder (Mar–May, Sep–Nov)</option>
+                  <option value="extreme_weather">Extreme weather (min ≤ -2°C or max ≥ 35°C)</option>
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs text-brand-navy/70 mb-1">Test Days</label>
                 <input
                   type="number"
@@ -437,6 +459,8 @@ export default function GapFillLabClient() {
             {(result as any).testSelectionMode === "random_days" && (
               <div className="text-sm text-brand-navy/80 mt-1">
                 Test selection: Random ({(result as any).testDaysSelected ?? "—"} days)
+                {(result as any).testMode ? `, mode=${(result as any).testMode}` : ""}
+                {(result as any).candidateDaysAfterModeFilterCount != null ? `, candidates after filter=${(result as any).candidateDaysAfterModeFilterCount}` : ""}
                 {(result as any).seedUsed ? `, seed=${(result as any).seedUsed}` : ""}
                 {(result as any).minDayCoveragePct != null ? `, minCoverage=${Math.round((result as any).minDayCoveragePct * 100)}%` : ""}
               </div>
