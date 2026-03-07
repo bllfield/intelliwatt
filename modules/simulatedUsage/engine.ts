@@ -1244,7 +1244,10 @@ export function buildPastSimulatedBaselineV1(args: {
         shapeByMonth96Ref
       );
       for (const iv of result.intervals) out.push(iv);
-      const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
+      const mappedTotalFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
+      // Hour-level fallback: shared core uses per-month 96-point shape from reference days (no dow/nearest hierarchy).
+      const hourFallbackLevel: PastFallbackLevel =
+        shapeByMonth96Ref[ym] && shapeByMonth96Ref[ym].length === 96 ? "MONTH" : "UNIFORM";
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
           dateKey,
@@ -1262,8 +1265,8 @@ export function buildPastSimulatedBaselineV1(args: {
                 cdd65: Number(wx.cdd65) || 0,
               }
             : null,
-          hourFallbackLevel: mappedFallback,
-          totalFallbackLevel: mappedFallback,
+          hourFallbackLevel,
+          totalFallbackLevel: mappedTotalFallback,
           referenceCandidateCount: 0,
           referencePickedCount: 0,
           weatherDistanceAvg: null,
