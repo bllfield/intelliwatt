@@ -245,6 +245,7 @@ export const UsageDashboard: React.FC<Props> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
+  const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
   const lastSmtIntervalsRef = useRef<number>(0);
   const smtPollTimerRef = useRef<number | null>(null);
 
@@ -785,6 +786,8 @@ export const UsageDashboard: React.FC<Props> = ({
             timeOfDayBuckets={derived.timeOfDayBuckets}
             monthlyView={monthlyView}
             onMonthlyViewChange={setMonthlyView}
+            dailyView={dailyView}
+            onDailyViewChange={setDailyView}
             daily={derived.daily}
             fifteenCurve={derived.fifteenCurve}
             coverageStart={coverage?.start ?? null}

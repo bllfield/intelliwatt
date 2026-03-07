@@ -39,6 +39,8 @@ export function UsageChartsPanel(props: {
   timeOfDayBuckets?: { key: string; label: string; kwh: number }[];
   monthlyView: "chart" | "table";
   onMonthlyViewChange: (next: "chart" | "table") => void;
+  dailyView: "chart" | "table";
+  onDailyViewChange: (next: "chart" | "table") => void;
   daily: DailyRow[];
   fifteenCurve: FifteenMinuteAverage[];
   /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
@@ -53,6 +55,8 @@ export function UsageChartsPanel(props: {
     timeOfDayBuckets,
     monthlyView,
     onMonthlyViewChange,
+    dailyView,
+    onDailyViewChange,
     daily,
     fifteenCurve,
     coverageStart,
@@ -226,36 +230,83 @@ export function UsageChartsPanel(props: {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-            Daily usage (all {daily.length} days)
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+              Daily usage (all {daily.length} days)
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onDailyViewChange("chart")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                  dailyView === "chart"
+                    ? "border-teal-300 bg-teal-50 text-teal-700"
+                    : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                }`}
+              >
+                Chart
+              </button>
+              <button
+                type="button"
+                onClick={() => onDailyViewChange("table")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                  dailyView === "table"
+                    ? "border-teal-300 bg-teal-50 text-teal-700"
+                    : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                }`}
+              >
+                Table
+              </button>
+            </div>
           </div>
           {daily.length ? (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={daily.map((d) => ({
-                    ...d,
-                    label: dailyLabelFormat(d.date),
-                    consumed: Math.max(d.kwh, 0),
-                    exported: Math.max(-d.kwh, 0),
-                  }))}
-                  margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" />
-                  <YAxis />
-                  <Tooltip
-                    formatter={(value: number, key) => {
-                      const label = key === "consumed" ? "Imported" : "Exported";
-                      return `${(value as number).toFixed(1)} kWh (${label})`;
-                    }}
-                  />
-                  <Legend />
-                  <Bar dataKey="consumed" stackId="daily" fill="#14B8A6" radius={[6, 6, 0, 0]} name="Imported" />
-                  <Bar dataKey="exported" stackId="daily" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            dailyView === "chart" ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={daily.map((d) => ({
+                      ...d,
+                      label: dailyLabelFormat(d.date),
+                      consumed: Math.max(d.kwh, 0),
+                      exported: Math.max(-d.kwh, 0),
+                    }))}
+                    margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" />
+                    <YAxis />
+                    <Tooltip
+                      formatter={(value: number, key) => {
+                        const label = key === "consumed" ? "Imported" : "Exported";
+                        return `${(value as number).toFixed(1)} kWh (${label})`;
+                      }}
+                    />
+                    <Legend />
+                    <Bar dataKey="consumed" stackId="daily" fill="#14B8A6" radius={[6, 6, 0, 0]} name="Imported" />
+                    <Bar dataKey="exported" stackId="daily" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-auto rounded-lg border border-neutral-200 select-text">
+                <table className="min-w-[280px] w-full text-sm font-mono">
+                  <thead className="sticky top-0 z-10 bg-neutral-50 text-neutral-600">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Date</th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">kWh</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-neutral-800">
+                    {daily.map((d) => (
+                      <tr key={d.date} className="border-t border-neutral-100 hover:bg-neutral-50/50">
+                        <td className="px-3 py-1.5">{d.date}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{d.kwh.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           ) : (
             <p className="text-xs text-neutral-500">No daily data available yet.</p>
           )}
