@@ -839,6 +839,9 @@ function buildFullReport(args: {
   if (j.weatherKindUsed != null || (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0)) {
     section("Weather API data (used for simulation)", () => {
       lines.push("weatherKindUsed: " + (j.weatherKindUsed ?? "—"));
+      if (typeof j.weatherRowCount === "number" && j.weatherRowCount > 0) {
+        lines.push("weatherRowCount: " + j.weatherRowCount);
+      }
       if (Array.isArray(j.weatherSourcesSeen) && j.weatherSourcesSeen.length > 0) {
         lines.push("weatherSourcesSeen: " + j.weatherSourcesSeen.join(", "));
       }
@@ -847,6 +850,9 @@ function buildFullReport(args: {
       }
       if (j.weatherSourceMismatchDetected === true) {
         lines.push("weatherSourceMismatchDetected: true (report claimed real weather but every row is stub — internal inconsistency)");
+      }
+      if (j.simulationWeatherSourceOwner != null || j.reportWeatherSourceOwner != null || j.simulationAndReportWeatherMatch != null) {
+        lines.push("validation: simulationWeatherSourceOwner=" + (j.simulationWeatherSourceOwner ?? "—") + " reportWeatherSourceOwner=" + (j.reportWeatherSourceOwner ?? "—") + " simulationAndReportWeatherMatch=" + (j.simulationAndReportWeatherMatch ?? "—") + (j.weatherValidationFingerprint ? " fingerprint=" + JSON.stringify(j.weatherValidationFingerprint) : ""));
       }
       if (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0) {
         lines.push("dateKey | kind | tAvgF | tMinF | tMaxF | hdd65 | cdd65 | source");
