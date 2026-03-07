@@ -734,6 +734,21 @@ model WeatherDaily {
   @@index([stationId, dateKey])
 }
 
+/// Open-Meteo hourly weather cache keyed by bucketed coordinates (0.1°). Shared across homes.
+model WeatherHourly {
+  id             String    @id @default(cuid())
+  latBucket      Float
+  lonBucket      Float
+  timestampUtc   DateTime
+  temperatureC   Float?
+  cloudcoverPct  Float?
+  solarRadiation Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([latBucket, lonBucket, timestampUtc])
+}
+
 /// Raw WattBuy API response snapshots for audit + replay.
 /// This is intentionally "append-only-ish": we store the raw payload + sha256 so we can
 /// trace what WattBuy returned at a given time for a given request/house.
