@@ -25,6 +25,7 @@ import {
   type DayTotalDiagnostics,
   type UsageShapeProfileRowForSim,
 } from "@/lib/admin/gapfillLab";
+import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
@@ -307,6 +308,8 @@ function buildFullReport(args: {
   trainingMonthDayCountsSample?: Record<string, number>;
   trainingCoverage?: { expected: number; found: number | null; pct: number | null };
   dayTotalDiagnostics?: DayTotalDiagnostics;
+  weatherUsed?: boolean;
+  weatherNote?: string;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -443,8 +446,8 @@ function buildFullReport(args: {
       trainingWindowEndUtc: j.trainingWindowEndUtc ?? undefined,
       trainingIntervalsCount: j.trainingIntervalsCount ?? undefined,
       trainingDaysCount: j.trainingDaysCount ?? undefined,
-      weatherUsed: false,
-      weatherNote: "Weather not integrated in gap-fill lab path.",
+      weatherUsed: j.weatherUsed ?? false,
+      weatherNote: j.weatherNote ?? "Weather not integrated in gap-fill lab path.",
       ...(j.dayTotalDiagnostics ? { dayTotalDiagnostics: j.dayTotalDiagnostics } : {}),
     },
     accuracy: {
@@ -658,8 +661,8 @@ function buildFullReport(args: {
     lines.push("canonicalMonths: " + (j.buildInputs?.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
-    kv("weatherUsed", false);
-    lines.push("weatherNote: Weather not integrated in gap-fill lab path.");
+    kv("weatherUsed", j.weatherUsed ?? false);
+    lines.push("weatherNote: " + (j.weatherNote ?? "Weather not integrated in gap-fill lab path."));
     const dayDiag = j.dayTotalDiagnostics;
     if (dayDiag) {
       lines.push("profileDayTotalFallbackSummary: " + JSON.stringify(dayDiag.profileDayTotalFallbackSummary));
@@ -1119,6 +1122,21 @@ export async function POST(req: NextRequest) {
     },
   };
 
+  let weatherUsedForReport = false;
+  let weatherNoteReport = "Weather not integrated in gap-fill lab path.";
+  if (testDateKeysSorted.length > 0) {
+    const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
+    const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
+    const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
+    if (lat != null && lon != null) {
+      const testStart = testDateKeysSorted[0];
+      const testEnd = testDateKeysSorted[testDateKeysSorted.length - 1];
+      const result = await getWeatherForRange(lat, lon, testStart!, testEnd!);
+      weatherUsedForReport = !result.fromStub;
+      weatherNoteReport = result.fromStub ? "Weather service unavailable; stub used for test window." : "Real weather (Open-Meteo cache) used for test window.";
+    }
+  }
+
   const modelAssumptions = {
     baseload: { used: false, method: "test_days_profile", params: {}, valueKwhPer15m: null, valueKwhPerDay: null },
     pool: {
@@ -1136,7 +1154,7 @@ export async function POST(req: NextRequest) {
       heatingType: homeProfile?.heatingType ?? null,
       setpointSummerF: homeProfile?.thermostatSummerF ?? homeProfile?.summerTemp ?? null,
       setpointWinterF: homeProfile?.thermostatWinterF ?? homeProfile?.winterTemp ?? null,
-      weatherUsed: false,
+      weatherUsed: weatherUsedForReport,
       rule: "Gap-fill lab uses UsageShapeProfile shape only; no HVAC model.",
     },
     occupancy: {
@@ -1301,6 +1319,8 @@ export async function POST(req: NextRequest) {
       pct: trainingCoveragePct,
     },
     ...(dayTotalDiagnostics ? { dayTotalDiagnostics: dayTotalDiagnostics } : {}),
+    weatherUsed: weatherUsedForReport,
+    weatherNote: weatherNoteReport,
   });
 
   const pasteLines = [

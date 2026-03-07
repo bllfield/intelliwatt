@@ -36,6 +36,7 @@ import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type ManualUsagePayloadAny = any;
@@ -581,11 +582,30 @@ export async function recalcSimulatorBuild(args: {
       const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
       const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
       const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-      await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-      const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-      ]);
+      let actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+      let normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+      const houseForWx = await (prisma as any).houseAddress.findUnique({ where: { id: houseId }, select: { lat: true, lng: true } }).catch(() => null);
+      const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
+      const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
+      if (lat != null && lon != null) {
+        const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
+        if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
+          actualWxByDateKey = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+          normalWxByDateKey = await getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" });
+        } else {
+          await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+          [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+          ]);
+        }
+      } else {
+        await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+        ]);
+      }
       const patchedIntervals = buildPastSimulatedBaselineV1({
         actualIntervals,
         canonicalDayStartsMs,
@@ -843,11 +863,30 @@ export async function getPastSimulatedDatasetForHouse(args: {
     const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(travelRanges));
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-    await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-    const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-    ]);
+    let actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+    let normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+    const houseForWx = await (prisma as any).houseAddress.findUnique({ where: { id: houseId }, select: { lat: true, lng: true } }).catch(() => null);
+    const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
+    const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
+    if (lat != null && lon != null) {
+      const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
+      if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
+        actualWxByDateKey = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+        normalWxByDateKey = await getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" });
+      } else {
+        await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+        ]);
+      }
+    } else {
+      await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+      [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+      ]);
+    }
     const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
