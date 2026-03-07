@@ -1017,16 +1017,10 @@ const WEATHER_SEVERITY_THRESHOLD = 2;
 const HEATING_DEADBAND_PCT = 0.3;
 /** Cooling: scale only when relative deviation > 25%. Align with shared past-day simulator. */
 const COOLING_DEADBAND_PCT = 0.25;
-/** Event days: multiplier range unchanged. */
 const HEATING_MULT_MIN = 0.9;
 const HEATING_MULT_MAX = 1.35;
 const COOLING_MULT_MIN = 0.9;
 const COOLING_MULT_MAX = 1.25;
-/** Non-event days only: tighter caps. Align with shared past-day simulator. */
-const HEATING_MULT_MIN_NON_EVENT = 0.97;
-const HEATING_MULT_MAX_NON_EVENT = 1.15;
-const COOLING_MULT_MIN_NON_EVENT = 0.97;
-const COOLING_MULT_MAX_NON_EVENT = 1.1;
 const AUX_HEAT_SLOPE = 0.15;
 /** Phase 1 safety cap: aux heat adder per day (kWh). Align with shared past-day simulator. */
 const AUX_HEAT_KWH_CAP = 12;
@@ -1240,7 +1234,7 @@ export function computeWeatherAdjustedDayTotal(args: {
     weatherModeUsed = "heating";
     if (refHdd > 1e-6) {
       const ratio = testHdd / refHdd;
-      if (ratio >= 1 - WEATHER_DEADBAND_PCT && ratio <= 1 + WEATHER_DEADBAND_PCT) {
+      if (ratio >= 1 - HEATING_DEADBAND_PCT && ratio <= 1 + HEATING_DEADBAND_PCT) {
         weatherSeverityMultiplier = 1;
       } else {
         weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, ratio));
@@ -1250,7 +1244,7 @@ export function computeWeatherAdjustedDayTotal(args: {
     weatherModeUsed = "cooling";
     if (refCdd > 1e-6) {
       const ratio = testCdd / refCdd;
-      if (ratio >= 1 - WEATHER_DEADBAND_PCT && ratio <= 1 + WEATHER_DEADBAND_PCT) {
+      if (ratio >= 1 - COOLING_DEADBAND_PCT && ratio <= 1 + COOLING_DEADBAND_PCT) {
         weatherSeverityMultiplier = 1;
       } else {
         weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, ratio));
@@ -1420,6 +1414,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       if (useWeather && weatherByDateKey) {
         weatherAdjustmentByDate.set(dateKey, {
           profileSelectedDayKwh: r.profileSelectedDayKwh,
+          preBlendAdjustedDayKwh: r.preBlendAdjustedDayKwh ?? r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
           finalSelectedDayKwh: r.finalDayKwh,
           weatherSeverityMultiplier: r.weatherSeverityMultiplier,
           weatherModeUsed: r.weatherModeUsed,
@@ -1430,6 +1425,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           auxHeatGate_freezeHoursPassed: r.auxHeatGate_freezeHoursPassed,
           auxHeatGate_severityPassed: r.auxHeatGate_severityPassed,
           referenceHeatingSeverity: r.referenceHeatingSeverity,
+          blendedBackTowardProfile: r.blendedBackTowardProfile,
         });
       }
     }
@@ -1552,6 +1548,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           dayClassification: adj.dayClassification,
           preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
           postBlendFinalDayKwh: adj.finalSelectedDayKwh,
+          blendedBackTowardProfile: adj.blendedBackTowardProfile,
           dailyAvgTempC: wx?.dailyAvgTempC ?? null,
           dailyMinTempC: wx?.dailyMinTempC ?? null,
           heatingDegreeSeverity: wx?.heatingDegreeSeverity ?? 0,
