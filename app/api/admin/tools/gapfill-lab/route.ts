@@ -1201,21 +1201,21 @@ export async function POST(req: NextRequest) {
 
     if (weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
       const dbWx = await getHouseWeatherDays({ houseId: house.id, dateKeys: dateKeysForWeather, kind: weatherKind });
-        if (dbWx.size > 0) {
-          weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
-          weatherUsedForSim = true;
-          Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
-            weatherApiDataForReport.push({
-              dateKey,
-              kind: weatherKind,
-              tAvgF: Number(w.tAvgF) || 0,
-              tMinF: Number(w.tMinF) || 0,
-              tMaxF: Number(w.tMaxF) || 0,
-              hdd65: Number(w.hdd65) || 0,
-              cdd65: Number(w.cdd65) || 0,
-              source: String(w.source || weatherKind),
-            });
+      if (dbWx.size > 0) {
+        weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
+        weatherUsedForSim = true;
+        Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
+          weatherApiDataForReport.push({
+            dateKey,
+            kind: weatherKind,
+            tAvgF: Number(w.tAvgF) || 0,
+            tMinF: Number(w.tMinF) || 0,
+            tMaxF: Number(w.tMaxF) || 0,
+            hdd65: Number(w.hdd65) || 0,
+            cdd65: Number(w.cdd65) || 0,
+            source: String(w.source || weatherKind),
           });
+        });
         const trainingDayKwhByDate = new Map<string, number>();
         for (const p of trainingIntervalsFiltered) {
           const dk = dateKeyInTimezone(p.timestamp, timezone);
@@ -1230,6 +1230,75 @@ export async function POST(req: NextRequest) {
             return dow === 0 || dow === 6;
           },
         });
+      } else {
+        const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
+        const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
+        const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
+        if (lat != null && lon != null) {
+          const allRows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }> = [];
+          const seenTs = new Set<string>();
+          const addRows = (rows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }>) => {
+            for (const r of rows ?? []) {
+              const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
+              const key = t.toISOString();
+              if (!seenTs.has(key)) {
+                seenTs.add(key);
+                allRows.push(r);
+              }
+            }
+          };
+          const trainResult = await getWeatherForRange(lat, lon, trainStart, trainEnd);
+          addRows(trainResult.rows);
+          let anyFromStub = trainResult.fromStub;
+          if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
+            const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
+            addRows(testResult.rows);
+            anyFromStub = anyFromStub || testResult.fromStub;
+          }
+          allRows.sort((a, b) => {
+            const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
+            const tb = b.timestampUtc instanceof Date ? b.timestampUtc.getTime() : new Date(b.timestampUtc).getTime();
+            return ta - tb;
+          });
+          if (allRows.length > 0) {
+            weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows, undefined, undefined, timezone);
+            weatherUsedForSim = !anyFromStub;
+            Array.from(weatherByDateKey.entries()).forEach(([dateKey, f]) => {
+              const tAvgF = ((f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
+              const tMinF = ((f.dailyMinTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
+              const tMaxF = ((f.dailyMaxTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
+              weatherApiDataForReport.push({
+                dateKey,
+                kind: weatherKind,
+                tAvgF,
+                tMinF,
+                tMaxF,
+                hdd65: f.heatingDegreeSeverity,
+                cdd65: f.coolingDegreeSeverity,
+                source: anyFromStub ? "stub" : "open_meteo",
+              });
+            });
+            if (weatherKind === "ACTUAL_LAST_YEAR") {
+              const dayWxMap = hourlyRowsToDayWxMap(allRows, house.id);
+              const toPersist = Array.from(dayWxMap.values());
+              if (toPersist.length > 0) await upsertHouseWeatherDays({ rows: toPersist }).catch(() => 0);
+            }
+            const trainingDayKwhByDate = new Map<string, number>();
+            for (const p of trainingIntervalsFiltered) {
+              const dk = dateKeyInTimezone(p.timestamp, timezone);
+              trainingDayKwhByDate.set(dk, (trainingDayKwhByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
+            }
+            trainingWeatherStats = buildTrainingWeatherStats({
+              trainingDateKeys: Array.from(trainingDateKeysSet),
+              trainingDayKwhByDate,
+              weatherByDateKey,
+              isWeekend: (dk) => {
+                const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+                return dow === 0 || dow === 6;
+              },
+            });
+          }
+        }
       }
     } else {
       const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);

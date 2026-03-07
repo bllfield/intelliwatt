@@ -292,6 +292,22 @@ export function buildDisplayMonthlyFromIntervalsUtc(
   return { monthly: monthlyBuild.monthly, usageBucketsByMonth };
 }
 
+/** Build daily array from 15-min intervals (one row per date, sorted ascending). For cache restore so daily matches the interval set. */
+export function buildDailyFromIntervals(
+  intervals: Array<{ timestamp: string; consumption_kwh?: number; kwh?: number }>
+): Array<{ date: string; kwh: number }> {
+  const dailyMap = new Map<string, number>();
+  for (const iv of intervals ?? []) {
+    const dk = String(iv?.timestamp ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    const kwh = Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0;
+    dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + kwh);
+  }
+  return Array.from(dailyMap.entries())
+    .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
   const monthTotals = new Map<string, number>();
   for (const iv of intervals ?? []) {
@@ -455,6 +471,17 @@ export type SimulatedUsageDatasetMeta = {
     reasonNotUsed: string | null;
   };
   scenarioId?: string | null;
+  /** Past: shared simulator core identifier for validation. */
+  sourceOfDaySimulationCore?: string;
+  /** Past: daily table row count (for validation). */
+  dailyRowCount?: number;
+  /** Past: 15-min interval count. */
+  intervalCount?: number;
+  coverageStart?: string;
+  coverageEnd?: string;
+  actualDayCount?: number;
+  simulatedDayCount?: number;
+  stitchedDayCount?: number;
 };
 
 export type SimulatedUsageDataset = {

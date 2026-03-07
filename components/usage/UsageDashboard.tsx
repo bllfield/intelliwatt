@@ -449,9 +449,24 @@ export const UsageDashboard: React.FC<Props> = ({
     const dataset = activeHouse?.dataset;
     const monthly = dataset?.monthly ?? dataset?.insights?.monthlyTotals ?? [];
     const daily = dataset?.daily ?? [];
-    const fallbackDaily = daily.length
+    const fallbackDailyRaw = daily.length
       ? daily
       : (dataset?.series?.daily ?? []).map((d) => ({ date: toDateKeyFromTimestamp(d.timestamp), kwh: d.kwh }));
+    const coverageStart = dataset?.summary?.start ? String(dataset.summary.start).slice(0, 10) : null;
+    const coverageEnd = dataset?.summary?.end ? String(dataset.summary.end).slice(0, 10) : null;
+    const dateInRange = (d: string) =>
+      (!coverageStart || d >= coverageStart) && (!coverageEnd || d <= coverageEnd);
+    const seen = new Set<string>();
+    const fallbackDaily = fallbackDailyRaw
+      .filter((row) => {
+        const d = String(row?.date ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+        if (seen.has(d)) return false;
+        seen.add(d);
+        return dateInRange(d);
+      })
+      .map((row) => ({ date: String(row.date).slice(0, 10), kwh: Number(row.kwh) || 0 }))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const intervals = dataset?.intervals ?? [];
     const fifteenCurve = (dataset?.insights?.fifteenMinuteAverages ?? []).slice().sort((a, b) => {

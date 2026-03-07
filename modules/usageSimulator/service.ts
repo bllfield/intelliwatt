@@ -15,6 +15,7 @@ import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
   buildDisplayMonthlyFromIntervalsUtc,
+  buildDailyFromIntervals,
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
@@ -36,8 +37,9 @@ import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
-import { getHouseWeatherDays, upsertHouseWeatherDays } from "@/modules/weather/repo";
+import { getHouseWeatherDays, upsertHouseWeatherDays, findMissingHouseWeatherDateKeys } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
+import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
@@ -590,16 +592,23 @@ export async function recalcSimulatorBuild(args: {
       const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
       const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
       if (lat != null && lon != null) {
-        const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
-        if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
-          actualWxByDateKey = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
-          normalWxByDateKey = await getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" });
-        } else {
-          await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-          [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-          ]);
+        await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+        ]);
+        const missingActual = await findMissingHouseWeatherDateKeys({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" });
+        if (missingActual.length > 0) {
+          const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
+          if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
+            const fetchedMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+            const toPersist = missingActual.filter((dk) => fetchedMap.has(dk)).map((dk) => fetchedMap.get(dk)!);
+            if (toPersist.length > 0) await upsertHouseWeatherDays({ rows: toPersist }).catch(() => 0);
+            [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+              getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+              getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+            ]);
+          }
         }
       } else {
         await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
@@ -871,20 +880,23 @@ export async function getPastSimulatedDatasetForHouse(args: {
     const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
     const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
     if (lat != null && lon != null) {
-      const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
-      if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
-        actualWxByDateKey = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
-        const rowsToPersist = Array.from(actualWxByDateKey.values());
-        if (rowsToPersist.length > 0) {
-          await upsertHouseWeatherDays({ rows: rowsToPersist }).catch(() => 0);
+      await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+      [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+      ]);
+      const missingActual = await findMissingHouseWeatherDateKeys({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" });
+      if (missingActual.length > 0) {
+        const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
+        if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
+          const fetchedMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+          const toPersist = missingActual.filter((dk) => fetchedMap.has(dk)).map((dk) => fetchedMap.get(dk)!);
+          if (toPersist.length > 0) await upsertHouseWeatherDays({ rows: toPersist }).catch(() => 0);
+          [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+          ]);
         }
-        normalWxByDateKey = await getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" });
-      } else {
-        await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-        ]);
       }
     } else {
       await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
@@ -959,6 +971,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       reasonNotUsed,
     };
 
+    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const patchedIntervals = buildPastSimulatedBaselineV1({
       actualIntervals: actualIntervals.map((p) => ({ timestamp: p.timestamp, kwh: p.kwh })),
       canonicalDayStartsMs,
@@ -971,6 +984,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       timezoneForProfile: timezone ?? undefined,
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
+      debug: { out: pastDayCounts as any },
     });
     const stitchedCurve = buildCurveFromPatchedIntervals({
       startDate,
@@ -990,6 +1004,17 @@ export async function getPastSimulatedDatasetForHouse(args: {
         weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
         dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
         usageShapeProfileDiag,
+        sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+        dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
+        intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+        coverageStart: dataset?.summary?.start ?? startDate,
+        coverageEnd: dataset?.summary?.end ?? endDate,
+        actualDayCount:
+          typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
+            ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
+            : undefined,
+        simulatedDayCount: pastDayCounts.simulatedDays,
+        stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
       };
     }
     try {
@@ -1515,11 +1540,18 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 (dataset.totals as any).importKwh = r;
                 (dataset.totals as any).netKwh = r;
               }
+              const recomputedDaily = buildDailyFromIntervals(decoded);
+              (dataset as any).daily = recomputedDaily;
             }
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;
             (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
             (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
+            (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
+            (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
+            (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
+            (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
+            (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
           } else {
             const pastResult = await getPastSimulatedDatasetForHouse({
               userId: args.userId,
@@ -1546,6 +1578,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
+              (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
+              (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
+              (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
+              (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
+              (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
             }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);
