@@ -1135,7 +1135,7 @@ export function computeWeatherAdjustedDayTotal(args: {
     homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
   const dailyMinOkForAux = wx.dailyMinTempC != null && wx.dailyMinTempC <= AUX_MIN_TEMP_C;
   const hddRatioOkForAux = (refHdd || 0) > 1e-6 && wx.heatingDegreeSeverity >= (refHdd || 0) * AUX_HDD_RATIO;
-  if (isElectricHeat && dailyMinOkForAux && hddRatioOkForAux) {
+  if (isElectricHeat && (dailyMinOkForAux || hddRatioOkForAux)) {
     const ref = Math.max(refHdd || 0, 1);
     auxHeatKwhAdder = Math.max(0, Math.min(AUX_HEAT_KWH_CAP, (wx.heatingDegreeSeverity - ref) * AUX_HEAT_SLOPE));
   }
