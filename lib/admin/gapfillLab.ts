@@ -1308,6 +1308,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     {
       profileSelectedDayKwh: number;
       finalSelectedDayKwh: number;
+      preBlendAdjustedDayKwh?: number;
       weatherSeverityMultiplier: number;
       weatherModeUsed: "heating" | "cooling" | "neutral";
       auxHeatKwhAdder: number;
@@ -1362,6 +1363,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         weatherAdjustmentByDate.set(dateKey, {
           profileSelectedDayKwh: sel.targetDayKwh,
           finalSelectedDayKwh: adj.finalSelectedDayKwh,
+          preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
           weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
           weatherModeUsed: adj.weatherModeUsed,
           auxHeatKwhAdder: adj.auxHeatKwhAdder,
@@ -1466,6 +1468,15 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         daysClassified_extreme_cold_event,
         daysClassified_freeze_protect,
       };
+      const daysWithMultiplierOne = vals.filter((v) => v.weatherSeverityMultiplier === 1).length;
+      const daysBlendedBackTowardProfile = daysClassified_weather_scaled;
+      weatherTighteningSummary = {
+        daysWithMultiplierOne,
+        daysWithScaledMultiplier: daysWithMult,
+        daysBlendedBackTowardProfile,
+        avgBlendWeightWeather: BLEND_WEIGHT_WEATHER,
+        avgBlendWeightProfile: BLEND_WEIGHT_PROFILE,
+      };
       testedDayWeatherSample = [];
       const seenForWeather = new Set<string>();
       for (const p of testIntervals) {
@@ -1504,6 +1515,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         testedDayFallbackSample,
         dayTotalGuardrailAppliedCount: guardrailAppliedCount,
         ...(weatherAdjustmentSummary != null ? { weatherAdjustmentSummary } : {}),
+        ...(weatherTighteningSummary != null ? { weatherTighteningSummary } : {}),
         ...(testedDayWeatherSample != null ? { testedDayWeatherSample } : {}),
       },
     };

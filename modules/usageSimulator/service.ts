@@ -722,7 +722,7 @@ export async function recalcSimulatorBuild(args: {
           canonicalEndMonth: buildInputs.canonicalEndMonth,
           notes: buildInputs.notes,
           filledMonths: buildInputs.filledMonths,
-        })
+        }, { timezone: (buildInputs as any).timezone ?? undefined })
       : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
   const filledSet = new Set<string>((buildInputs.filledMonths ?? []).map(String));
   const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
@@ -977,7 +977,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       canonicalEndMonth: buildInputs.canonicalEndMonth,
       notes: buildInputs.notes ?? [],
       filledMonths: buildInputs.filledMonths ?? [],
-    });
+    }, { timezone: timezone ?? undefined });
     if (dataset && typeof dataset.meta === "object") {
       dataset.meta = {
         ...dataset.meta,

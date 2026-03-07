@@ -126,9 +126,14 @@ function daysInMonth(year: number, month1: number): number {
 }
 
 function chicagoParts(ts: Date): { year: number; month: number; day: number; yearMonth: string } | null {
+  return datePartsInTimezone(ts, "America/Chicago");
+}
+
+/** Date parts in a given timezone (for monthly grouping). Uses same shape as chicagoParts. */
+function datePartsInTimezone(ts: Date, tz: string): { year: number; month: number; day: number; yearMonth: string } | null {
   try {
     const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
+      timeZone: tz || "America/Chicago",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -161,6 +166,8 @@ function lastNYearMonthsFrom(year: number, month1: number, n: number): string[] 
 function buildDisplayMonthlyFromIntervals(args: {
   intervals: Array<{ timestamp: string; consumption_kwh: number }>;
   endDate: string;
+  /** When set, group by this timezone (e.g. house timezone). Otherwise uses America/Chicago for backward compatibility. */
+  timezone?: string;
 }): {
   monthly: Array<{ month: string; kwh: number }>;
   stitchedMonth:
@@ -175,12 +182,14 @@ function buildDisplayMonthlyFromIntervals(args: {
       }
     | null;
 } {
+  const tz = args.timezone && args.timezone.trim() ? args.timezone.trim() : "America/Chicago";
+  const partsFn = (ts: Date) => datePartsInTimezone(ts, tz);
   const monthTotals = new Map<string, number>();
   const dayTotals = new Map<string, number>(); // `${YYYY-MM}-${DD}`
   for (const iv of args.intervals ?? []) {
     const ts = new Date(String(iv?.timestamp ?? ""));
     if (!Number.isFinite(ts.getTime())) continue;
-    const p = chicagoParts(ts);
+    const p = partsFn(ts);
     if (!p) continue;
     const kwh = Number(iv?.consumption_kwh) || 0;
     monthTotals.set(p.yearMonth, (monthTotals.get(p.yearMonth) ?? 0) + kwh);
@@ -189,7 +198,7 @@ function buildDisplayMonthlyFromIntervals(args: {
   }
 
   const endAnchor = new Date(`${String(args.endDate).slice(0, 10)}T23:59:59.999Z`);
-  const endParts = chicagoParts(endAnchor);
+  const endParts = partsFn(endAnchor);
   if (!endParts) {
     const fallback = Array.from(monthTotals.entries())
       .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
@@ -579,7 +588,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     notes?: string[];
     filledMonths?: string[];
   },
-  options?: { excludedDateKeys?: Set<string> }
+  options?: { excludedDateKeys?: Set<string>; /** When set, monthly display groups by this timezone (fixes 0 kWh for non-Chicago). */ timezone?: string }
 ): SimulatedUsageDataset {
   const dailyMap = new Map<string, number>();
   for (let j = 0; j < curve.intervals.length; j++) {
@@ -593,6 +602,7 @@ export function buildSimulatedUsageDatasetFromCurve(
   const monthlyBuild = buildDisplayMonthlyFromIntervals({
     intervals: curve.intervals,
     endDate: curve.end,
+    timezone: options?.timezone,
   });
   // Use stitched display-monthly output so boundary month windows don't show duplicate current month rows.
   const monthly = monthlyBuild.monthly;
