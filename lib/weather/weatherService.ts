@@ -43,12 +43,13 @@ function toStartOfDayUtc(dateStr: string): Date {
 
 /**
  * Parse a date string (YYYY-MM-DD) to end of that day in UTC (23:00:00.000).
+ * Consistent for both valid and invalid formats so cache range and coverage are deterministic.
  */
 function toEndOfDayUtc(dateStr: string): Date {
   const s = String(dateStr).trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const d = new Date(s);
-    d.setUTCHours(23, 59, 59, 999);
+    d.setUTCHours(23, 0, 0, 0);
     return d;
   }
   return new Date(Date.UTC(

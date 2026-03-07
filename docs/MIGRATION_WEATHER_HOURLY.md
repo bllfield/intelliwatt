@@ -18,8 +18,49 @@ Apply on **dev DB first**, then **defaultdb** (production). All commands on the 
 
 ## Step 0 — Migration in repo
 
-- `prisma/migrations/20260305000000_add_weather_hourly/migration.sql`
-- Model: `WeatherHourly` in `prisma/schema.prisma`
+- `prisma/migrations/20260305000000_add_weather_hourly/migration.sql` — creates table and non-unique index.
+- `prisma/migrations/20260305100000_weather_hourly_unique/migration.sql` — replaces index with composite unique `(latBucket, lonBucket, timestampUtc)` so `createMany` with `skipDuplicates: true` works.
+- Model: `WeatherHourly` in `prisma/schema.prisma` (includes `@@unique([latBucket, lonBucket, timestampUtc])`).
+
+---
+
+## Reset dev DB (then apply migrations)
+
+Use this when the dev DB is out of sync with migration history (e.g. failed or partial migrations, or you want a clean slate for WeatherHourly). **Only on dev DB (`intelliwatt_dev`). Never run reset on production (`defaultdb`).**
+
+**Where:** Droplet SSH. Switch to `deploy`, run from repo root.
+
+1. Become `deploy` and go to the repo:
+
+   ```bash
+   sudo -iu deploy
+   cd /home/deploy/apps/intelliwatt
+   pwd
+   whoami
+   ```
+
+2. Pull latest and install deps:
+
+   ```bash
+   git status -sb
+   git pull origin main
+   npm install
+   ```
+
+3. Point at **main dev DB** and reset (drops all data and reapplies all migrations from scratch):
+
+   ```bash
+   export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_dev?sslmode=require"
+   npx prisma migrate reset --force --schema=prisma/schema.prisma
+   ```
+
+4. Confirm dev is clean:
+
+   ```bash
+   npx prisma migrate status --schema=prisma/schema.prisma
+   ```
+
+5. Then apply to **production** (`defaultdb`) — see Step B below. Do **not** run `migrate reset` on defaultdb.
 
 ---
 
@@ -115,3 +156,4 @@ Apply on **dev DB first**, then **defaultdb** (production). All commands on the 
 - Do **not** run `npx prisma migrate reset` on production (`defaultdb`).
 - Run all `npx prisma` commands from the repo root (`/home/deploy/apps/intelliwatt`).
 - Use Linux paths in droplet bash (`prisma/schema.prisma`), not Windows paths.
+- If the second migration fails with a unique constraint violation, the table has duplicate `(latBucket, lonBucket, timestampUtc)` rows; dedupe (e.g. keep one row per key) before re-running `migrate deploy`.
