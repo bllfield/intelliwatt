@@ -828,6 +828,10 @@ export type DayTotalDiagnostics = {
     maxWeatherSeverityMultiplier: number;
     totalAuxHeatKwhAdded: number;
     totalPoolFreezeProtectKwhAdded: number;
+    daysClassified_normal: number;
+    daysClassified_weather_scaled: number;
+    daysClassified_extreme_cold_event: number;
+    daysClassified_freeze_protect: number;
   };
   /** First 10 test days with weather diagnostics when weather was used. */
   testedDayWeatherSample?: Array<{
@@ -839,6 +843,7 @@ export type DayTotalDiagnostics = {
     auxHeatKwhAdder: number;
     poolFreezeProtectKwhAdder: number;
     finalSelectedDayKwh: number;
+    dayClassification: WeatherDayClassification;
     dailyAvgTempC: number | null;
     dailyMinTempC: number | null;
     heatingDegreeSeverity: number;
@@ -883,19 +888,32 @@ export type WeatherAdjustmentResult = {
   weatherModeUsed: "heating" | "cooling" | "neutral";
   auxHeatKwhAdder: number;
   poolFreezeProtectKwhAdder: number;
+  dayClassification: WeatherDayClassification;
 };
+
+/** Day classification for weather diagnostics. */
+export type WeatherDayClassification =
+  | "normal_day"
+  | "weather_scaled_day"
+  | "extreme_cold_event_day"
+  | "freeze_protect_day";
 
 const HEATING_BASE_C = 18;
 const COOLING_BASE_C = 22;
 const WEATHER_SEVERITY_THRESHOLD = 2;
-const HEATING_MULT_MIN = 0.8;
-const HEATING_MULT_MAX = 1.8;
-const COOLING_MULT_MIN = 0.85;
-const COOLING_MULT_MAX = 1.5;
+const WEATHER_DEADBAND_PCT = 0.15;
+const HEATING_MULT_MIN = 0.9;
+const HEATING_MULT_MAX = 1.35;
+const COOLING_MULT_MIN = 0.9;
+const COOLING_MULT_MAX = 1.25;
 const AUX_HEAT_SLOPE = 0.15;
-const AUX_HEAT_KWH_CAP = 40;
+const AUX_HEAT_KWH_CAP = 20;
+const AUX_MIN_TEMP_C = -2;
+const AUX_HDD_RATIO = 1.35;
 const FREEZE_HOURS_THRESHOLD = 2;
-const POOL_FREEZE_KWH_CAP = 12;
+const POOL_FREEZE_HOURS_MIN = 4;
+const POOL_FREEZE_MIN_TEMP_C = 0;
+const POOL_FREEZE_KWH_CAP = 8;
 const POOL_FREEZE_HP_FACTOR = 0.75;
 
 /**
@@ -1080,6 +1098,7 @@ export function computeWeatherAdjustedDayTotal(args: {
       weatherModeUsed: "neutral",
       auxHeatKwhAdder: 0,
       poolFreezeProtectKwhAdder: 0,
+      dayClassification: "normal_day",
     };
   }
 
@@ -1093,34 +1112,55 @@ export function computeWeatherAdjustedDayTotal(args: {
   if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
     weatherModeUsed = "heating";
     if (refHdd > 1e-6) {
-      const raw = testHdd / refHdd;
-      weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, raw));
+      const ratio = testHdd / refHdd;
+      if (ratio >= 1 - WEATHER_DEADBAND_PCT && ratio <= 1 + WEATHER_DEADBAND_PCT) {
+        weatherSeverityMultiplier = 1;
+      } else {
+        weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, ratio));
+      }
     }
   } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
     weatherModeUsed = "cooling";
     if (refCdd > 1e-6) {
-      const raw = testCdd / refCdd;
-      weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, raw));
+      const ratio = testCdd / refCdd;
+      if (ratio >= 1 - WEATHER_DEADBAND_PCT && ratio <= 1 + WEATHER_DEADBAND_PCT) {
+        weatherSeverityMultiplier = 1;
+      } else {
+        weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, ratio));
+      }
     }
   }
 
   const isElectricHeat =
     homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
-  const extremeColdDay = wx.dailyMinTempC != null && wx.dailyMinTempC <= 0;
-  const materiallyAboveRef = (refHdd || 0) > 1e-6 && wx.heatingDegreeSeverity > (refHdd || 0) * 1.5;
-  if (isElectricHeat && (extremeColdDay || materiallyAboveRef)) {
+  const dailyMinOkForAux = wx.dailyMinTempC != null && wx.dailyMinTempC <= AUX_MIN_TEMP_C;
+  const hddRatioOkForAux = (refHdd || 0) > 1e-6 && wx.heatingDegreeSeverity >= (refHdd || 0) * AUX_HDD_RATIO;
+  if (isElectricHeat && dailyMinOkForAux && hddRatioOkForAux) {
     const ref = Math.max(refHdd || 0, 1);
     auxHeatKwhAdder = Math.max(0, Math.min(AUX_HEAT_KWH_CAP, (wx.heatingDegreeSeverity - ref) * AUX_HEAT_SLOPE));
   }
 
   const hasPool = Boolean(homeProfile?.pool?.hasPool) || (applianceProfile?.appliances ?? []).some((a) => a?.type === "pool");
   const pumpHp = homeProfile?.pool?.pumpHp ?? (applianceProfile?.appliances ?? []).find((a) => a?.type === "pool")?.data?.pump_hp;
-  if (hasPool && wx.freezeHoursCount >= FREEZE_HOURS_THRESHOLD) {
+  const freezeHoursOk = wx.freezeHoursCount >= POOL_FREEZE_HOURS_MIN;
+  const dailyMinOkForPool = wx.dailyMinTempC != null && wx.dailyMinTempC <= POOL_FREEZE_MIN_TEMP_C;
+  if (hasPool && freezeHoursOk && dailyMinOkForPool) {
     const hp = pumpHp != null && Number.isFinite(Number(pumpHp)) ? Number(pumpHp) : 1;
     poolFreezeProtectKwhAdder = Math.max(0, Math.min(POOL_FREEZE_KWH_CAP, hp * POOL_FREEZE_HP_FACTOR * Math.max(1, wx.freezeHoursCount / 4)));
   }
 
   const finalSelectedDayKwh = baseDayKwh * weatherSeverityMultiplier + auxHeatKwhAdder + poolFreezeProtectKwhAdder;
+
+  let dayClassification: WeatherDayClassification;
+  if (auxHeatKwhAdder > 0) {
+    dayClassification = "extreme_cold_event_day";
+  } else if (poolFreezeProtectKwhAdder > 0) {
+    dayClassification = "freeze_protect_day";
+  } else if (weatherSeverityMultiplier !== 1) {
+    dayClassification = "weather_scaled_day";
+  } else {
+    dayClassification = "normal_day";
+  }
 
   return {
     finalSelectedDayKwh: Math.max(0, finalSelectedDayKwh),
@@ -1128,6 +1168,7 @@ export function computeWeatherAdjustedDayTotal(args: {
     weatherModeUsed,
     auxHeatKwhAdder,
     poolFreezeProtectKwhAdder,
+    dayClassification,
   };
 }
 
@@ -1187,6 +1228,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       weatherModeUsed: "heating" | "cooling" | "neutral";
       auxHeatKwhAdder: number;
       poolFreezeProtectKwhAdder: number;
+      dayClassification: WeatherDayClassification;
     }
   >();
   const fallbackSummary: Record<DayTotalFallbackLevel, number> = {
@@ -1240,6 +1282,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           weatherModeUsed: adj.weatherModeUsed,
           auxHeatKwhAdder: adj.auxHeatKwhAdder,
           poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
+          dayClassification: adj.dayClassification,
         });
       }
     }
@@ -1320,6 +1363,11 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       const daysPoolFreeze = Array.from(weatherAdjustmentByDate.values()).filter((v) => v.poolFreezeProtectKwhAdder > 0).length;
       const totalAux = Array.from(weatherAdjustmentByDate.values()).reduce((s, v) => s + v.auxHeatKwhAdder, 0);
       const totalPool = Array.from(weatherAdjustmentByDate.values()).reduce((s, v) => s + v.poolFreezeProtectKwhAdder, 0);
+      const vals = Array.from(weatherAdjustmentByDate.values());
+      const daysClassified_normal = vals.filter((v) => v.dayClassification === "normal_day").length;
+      const daysClassified_weather_scaled = vals.filter((v) => v.dayClassification === "weather_scaled_day").length;
+      const daysClassified_extreme_cold_event = vals.filter((v) => v.dayClassification === "extreme_cold_event_day").length;
+      const daysClassified_freeze_protect = vals.filter((v) => v.dayClassification === "freeze_protect_day").length;
       weatherAdjustmentSummary = {
         daysWithWeatherMultiplier: daysWithMult,
         daysWithAuxHeatAdder: daysAux,
@@ -1329,6 +1377,10 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         maxWeatherSeverityMultiplier: mults.length ? Math.max(...mults) : 1,
         totalAuxHeatKwhAdded: totalAux,
         totalPoolFreezeProtectKwhAdded: totalPool,
+        daysClassified_normal,
+        daysClassified_weather_scaled,
+        daysClassified_extreme_cold_event,
+        daysClassified_freeze_protect,
       };
       testedDayWeatherSample = [];
       const seenForWeather = new Set<string>();
@@ -1349,6 +1401,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
           auxHeatKwhAdder: adj.auxHeatKwhAdder,
           poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
           finalSelectedDayKwh: adj.finalSelectedDayKwh,
+          dayClassification: adj.dayClassification,
           dailyAvgTempC: wx?.dailyAvgTempC ?? null,
           dailyMinTempC: wx?.dailyMinTempC ?? null,
           heatingDegreeSeverity: wx?.heatingDegreeSeverity ?? 0,
