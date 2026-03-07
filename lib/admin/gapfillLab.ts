@@ -1092,7 +1092,34 @@ export function buildDailyWeatherFeaturesFromHourly(
   return out;
 }
 
-function getSeasonBucket(monthKey: string): string {
+/** Convert DB daily weather (HouseDailyWeather / getHouseWeatherDays) to DailyWeatherFeatures for gap-fill sim. */
+export function dailyWeatherFromDbToFeatures(
+  byDateKey: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>
+): Map<string, DailyWeatherFeatures> {
+  const out = new Map<string, DailyWeatherFeatures>();
+  for (const [dateKey, w] of byDateKey.entries()) {
+    if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    const tAvgC = ((Number(w.tAvgF) || 0) - 32) * (5 / 9);
+    const tMinC = ((Number(w.tMinF) ?? w.tAvgF) - 32) * (5 / 9);
+    const tMaxC = ((Number(w.tMaxF) ?? w.tAvgF) - 32) * (5 / 9);
+    const heatingDegreeSeverity = Math.max(0, Number(w.hdd65) || 0);
+    const coolingDegreeSeverity = Math.max(0, Number(w.cdd65) || 0);
+    const freezeHoursCount = tMinC <= 0 ? 24 : 0;
+    out.set(dateKey, {
+      dailyAvgTempC: Number.isFinite(tAvgC) ? tAvgC : null,
+      dailyMinTempC: Number.isFinite(tMinC) ? tMinC : null,
+      dailyMaxTempC: Number.isFinite(tMaxC) ? tMaxC : null,
+      heatingDegreeSeverity,
+      coolingDegreeSeverity,
+      freezeHoursCount,
+      solarRadiationDailyTotal: 0,
+      cloudcoverAvg: null,
+      extremeCold: tMinC <= 0,
+      freezeDay: freezeHoursCount >= FREEZE_HOURS_THRESHOLD,
+    });
+  }
+  return out;
+}
   const m = parseInt(monthKey.slice(5, 7), 10) || 1;
   if (m === 12 || m <= 2) return "winter";
   if (m >= 3 && m <= 5) return "spring";

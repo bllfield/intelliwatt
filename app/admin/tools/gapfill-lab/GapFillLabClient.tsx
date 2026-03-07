@@ -54,9 +54,12 @@ function formatDate(d: string) {
 const VALID_RANDOM_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
 type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 
+type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
+
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
+  const [weatherKind, setWeatherKind] = useState<WeatherKindOption>("ACTUAL_LAST_YEAR");
   const [testMode, setTestMode] = useState<"manual_ranges" | "random_days">("manual_ranges");
   const [randomTestMode, setRandomTestMode] = useState<RandomTestMode>("fixed");
   const [testRanges, setTestRanges] = useState<RangeRow[]>([{ ...DEFAULT_RANGE }]);
@@ -155,6 +158,7 @@ export default function GapFillLabClient() {
         email: trimmed,
         timezone,
         houseId: houseId || undefined,
+        weatherKind,
       };
       if (testMode === "random_days") {
         body.testDays = testDays;
@@ -428,6 +432,44 @@ export default function GapFillLabClient() {
               )}
             </div>
           )}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-brand-navy mb-2">Weather for simulation</label>
+          <p className="text-sm text-brand-navy/60 mb-2">
+            Choose which temperature source to use for gap-fill weather scaling (last year, normals, or live API).
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-sm text-brand-navy cursor-pointer">
+              <input
+                type="radio"
+                name="weatherKind"
+                checked={weatherKind === "ACTUAL_LAST_YEAR"}
+                onChange={() => setWeatherKind("ACTUAL_LAST_YEAR")}
+                className="text-brand-blue"
+              />
+              Last year temps
+            </label>
+            <label className="flex items-center gap-2 text-sm text-brand-navy cursor-pointer">
+              <input
+                type="radio"
+                name="weatherKind"
+                checked={weatherKind === "NORMAL_AVG"}
+                onChange={() => setWeatherKind("NORMAL_AVG")}
+                className="text-brand-blue"
+              />
+              Average temps
+            </label>
+            <label className="flex items-center gap-2 text-sm text-brand-navy cursor-pointer">
+              <input
+                type="radio"
+                name="weatherKind"
+                checked={weatherKind === "open_meteo"}
+                onChange={() => setWeatherKind("open_meteo")}
+                className="text-brand-blue"
+              />
+              Live (Open-Meteo)
+            </label>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button

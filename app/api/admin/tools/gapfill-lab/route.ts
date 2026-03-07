@@ -28,8 +28,10 @@ import {
   type UsageShapeProfileRowForSim,
   filterCandidateDateKeysBySeason,
   pickExtremeWeatherTestDateKeys,
+  dailyWeatherFromDbToFeatures,
 } from "@/lib/admin/gapfillLab";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
+import { getHouseWeatherDays } from "@/modules/weather/repo";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
@@ -316,6 +318,8 @@ function buildFullReport(args: {
   dayTotalDiagnostics?: DayTotalDiagnostics;
   weatherUsed?: boolean;
   weatherNote?: string;
+  weatherApiData?: Array<{ dateKey: string; kind: string; tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }>;
+  weatherKindUsed?: string;
 }): { fullReportJson: object; fullReportText: string } {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -456,6 +460,8 @@ function buildFullReport(args: {
       trainingDaysCount: j.trainingDaysCount ?? undefined,
       weatherUsed: j.weatherUsed ?? false,
       weatherNote: j.weatherNote ?? "Weather not integrated in gap-fill lab path.",
+      ...(j.weatherKindUsed != null ? { weatherKindUsed: j.weatherKindUsed } : {}),
+      ...(Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0 ? { weatherApiData: j.weatherApiData } : {}),
       ...(j.dayTotalDiagnostics ? { dayTotalDiagnostics: j.dayTotalDiagnostics } : {}),
     },
     accuracy: {
@@ -760,6 +766,20 @@ function buildFullReport(args: {
     j.metrics.byMonth.forEach((m) => lines.push(`  ${m.month} | ${m.count} | ${m.totalActual} | ${m.totalSim} | ${m.wape}% | ${m.mae}`));
   });
 
+  if (j.weatherKindUsed != null || (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0)) {
+    section("Weather API data (used for simulation)", () => {
+      lines.push("weatherKindUsed: " + (j.weatherKindUsed ?? "—"));
+      if (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0) {
+        lines.push("dateKey | kind | tAvgF | tMinF | tMaxF | hdd65 | cdd65 | source");
+        j.weatherApiData.forEach((r) =>
+          lines.push(`  ${r.dateKey} | ${r.kind} | ${r.tAvgF} | ${r.tMinF} | ${r.tMaxF} | ${r.hdd65} | ${r.cdd65} | ${r.source}`)
+        );
+      } else {
+        lines.push("(no per-date weather rows)");
+      }
+    });
+  }
+
   section("L) Notes / next-action hints", () => {
     fullReportJson.notes.forEach((n) => lines.push("- " + n));
     if (fullReportJson.notes.length === 0) lines.push("- No automatic flags.");
@@ -789,6 +809,8 @@ export async function POST(req: NextRequest) {
     trainMaxDays?: number;
     trainGapDays?: number;
     houseId?: string;
+    /** Weather source: ACTUAL_LAST_YEAR (last year temps), NORMAL_AVG (average temps), or open_meteo (live API). */
+    weatherKind?: "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
   };
   try {
     body = await req.json();
@@ -814,6 +836,11 @@ export async function POST(req: NextRequest) {
   const minDayCoveragePct = Math.max(0.01, Math.min(1, Number(body?.minDayCoveragePct) || 0.95));
   const trainMaxDays = Math.max(7, Math.min(365, Math.floor(Number(body?.trainMaxDays) || 365)));
   const trainGapDays = Math.max(0, Math.min(30, Math.floor(Number(body?.trainGapDays) || 2)));
+
+  const VALID_WEATHER_KINDS = ["ACTUAL_LAST_YEAR", "NORMAL_AVG", "open_meteo"] as const;
+  type WeatherKindParam = (typeof VALID_WEATHER_KINDS)[number];
+  const rawWeatherKind = String(body?.weatherKind ?? "open_meteo").trim();
+  const weatherKind: WeatherKindParam = VALID_WEATHER_KINDS.includes(rawWeatherKind as WeatherKindParam) ? (rawWeatherKind as WeatherKindParam) : "open_meteo";
 
   const rawTestRanges = body?.testRanges ?? body?.rangesToMask ?? [];
   let testRanges = Array.isArray(rawTestRanges)
@@ -1164,40 +1191,31 @@ export async function POST(req: NextRequest) {
   let weatherUsedForSim = false;
   let weatherByDateKey: Map<string, import("@/lib/admin/gapfillLab").DailyWeatherFeatures> | undefined;
   let trainingWeatherStats: import("@/lib/admin/gapfillLab").TrainingWeatherStats | undefined;
+  const weatherApiDataForReport: Array<{ dateKey: string; kind: string; tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }> = [];
+  const weatherKindUsed = weatherKind;
 
   if (profileSource === "auto_built_lite" && trainingIntervalsFiltered != null && trainingIntervalsFiltered.length > 0) {
-    const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
-    const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
-    const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
-    if (lat != null && lon != null) {
-      const allRows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }> = [];
-      const seenTs = new Set<string>();
-      const addRows = (rows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }>) => {
-        for (const r of rows) {
-          const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
-          const key = t.toISOString();
-          if (!seenTs.has(key)) {
-            seenTs.add(key);
-            allRows.push(r);
-          }
-        }
-      };
-      const trainResult = await getWeatherForRange(lat, lon, trainStart, trainEnd);
-      addRows(trainResult.rows);
-      let anyFromStub = trainResult.fromStub;
-      if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
-        const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
-        addRows(testResult.rows);
-        anyFromStub = anyFromStub || testResult.fromStub;
-      }
-      allRows.sort((a, b) => {
-        const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
-        const tb = b.timestampUtc instanceof Date ? b.timestampUtc.getTime() : new Date(b.timestampUtc).getTime();
-        return ta - tb;
-      });
-      if (allRows.length > 0) {
-        weatherUsedForSim = !anyFromStub;
-        weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows, undefined, undefined, timezone);
+    const dateKeysForWeatherSet = new Set<string>(trainingDateKeysSet);
+    for (const d of testDateKeysSorted) dateKeysForWeatherSet.add(d);
+    const dateKeysForWeather = Array.from(dateKeysForWeatherSet).sort();
+
+    if (weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
+      const dbWx = await getHouseWeatherDays({ houseId: house.id, dateKeys: dateKeysForWeather, kind: weatherKind });
+        if (dbWx.size > 0) {
+          weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
+          weatherUsedForSim = true;
+          Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
+            weatherApiDataForReport.push({
+              dateKey,
+              kind: weatherKind,
+              tAvgF: Number(w.tAvgF) || 0,
+              tMinF: Number(w.tMinF) || 0,
+              tMaxF: Number(w.tMaxF) || 0,
+              hdd65: Number(w.hdd65) || 0,
+              cdd65: Number(w.cdd65) || 0,
+              source: String(w.source || weatherKind),
+            });
+          });
         const trainingDayKwhByDate = new Map<string, number>();
         for (const p of trainingIntervalsFiltered) {
           const dk = dateKeyInTimezone(p.timestamp, timezone);
@@ -1212,6 +1230,70 @@ export async function POST(req: NextRequest) {
             return dow === 0 || dow === 6;
           },
         });
+      }
+    } else {
+      const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
+      const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
+      const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
+      if (lat != null && lon != null) {
+        const allRows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }> = [];
+        const seenTs = new Set<string>();
+        const addRows = (rows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }>) => {
+          for (const r of rows) {
+            const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
+            const key = t.toISOString();
+            if (!seenTs.has(key)) {
+              seenTs.add(key);
+              allRows.push(r);
+            }
+          }
+        };
+        const trainResult = await getWeatherForRange(lat, lon, trainStart, trainEnd);
+        addRows(trainResult.rows);
+        let anyFromStub = trainResult.fromStub;
+        if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
+          const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
+          addRows(testResult.rows);
+          anyFromStub = anyFromStub || testResult.fromStub;
+        }
+        allRows.sort((a, b) => {
+          const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
+          const tb = b.timestampUtc instanceof Date ? b.timestampUtc.getTime() : new Date(b.timestampUtc).getTime();
+          return ta - tb;
+        });
+        if (allRows.length > 0) {
+          weatherUsedForSim = !anyFromStub;
+          weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows, undefined, undefined, timezone);
+          Array.from(weatherByDateKey.entries()).forEach(([dateKey, f]) => {
+            const tAvgF = ((f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
+            const tMinF = ((f.dailyMinTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
+            const tMaxF = ((f.dailyMaxTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
+            weatherApiDataForReport.push({
+              dateKey,
+              kind: "open_meteo",
+              tAvgF,
+              tMinF,
+              tMaxF,
+              hdd65: f.heatingDegreeSeverity,
+              cdd65: f.coolingDegreeSeverity,
+              source: anyFromStub ? "stub" : "open_meteo",
+            });
+          });
+          const trainingDayKwhByDate = new Map<string, number>();
+          for (const p of trainingIntervalsFiltered) {
+            const dk = dateKeyInTimezone(p.timestamp, timezone);
+            trainingDayKwhByDate.set(dk, (trainingDayKwhByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
+          }
+          trainingWeatherStats = buildTrainingWeatherStats({
+            trainingDateKeys: Array.from(trainingDateKeysSet),
+            trainingDayKwhByDate,
+            weatherByDateKey,
+            isWeekend: (dk) => {
+              const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+              return dow === 0 || dow === 6;
+            },
+          });
+        }
       }
     }
   }
@@ -1487,6 +1569,8 @@ export async function POST(req: NextRequest) {
     ...(dayTotalDiagnostics ? { dayTotalDiagnostics: dayTotalDiagnostics } : {}),
     weatherUsed: weatherUsedForReport,
     weatherNote: weatherNoteReport,
+    weatherApiData: weatherApiDataForReport,
+    weatherKindUsed,
   });
 
   const pasteLines = [
