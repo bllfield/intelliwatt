@@ -1097,8 +1097,8 @@ export function dailyWeatherFromDbToFeatures(
   byDateKey: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>
 ): Map<string, DailyWeatherFeatures> {
   const out = new Map<string, DailyWeatherFeatures>();
-  for (const [dateKey, w] of byDateKey.entries()) {
-    if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+  Array.from(byDateKey.entries()).forEach(([dateKey, w]) => {
+    if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
     const tAvgC = ((Number(w.tAvgF) || 0) - 32) * (5 / 9);
     const tMinC = ((Number(w.tMinF) ?? w.tAvgF) - 32) * (5 / 9);
     const tMaxC = ((Number(w.tMaxF) ?? w.tAvgF) - 32) * (5 / 9);
@@ -1117,9 +1117,11 @@ export function dailyWeatherFromDbToFeatures(
       extremeCold: tMinC <= 0,
       freezeDay: freezeHoursCount >= FREEZE_HOURS_THRESHOLD,
     });
-  }
+  });
   return out;
 }
+
+function getSeasonBucket(monthKey: string): "winter" | "spring" | "summer" | "fall" {
   const m = parseInt(monthKey.slice(5, 7), 10) || 1;
   if (m === 12 || m <= 2) return "winter";
   if (m >= 3 && m <= 5) return "spring";
@@ -1605,4 +1607,67 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
   }
 
   return intervals;
+}
+
+/** Compact benchmark payload for Gap-Fill Lab regression comparison. Copy from report and paste into next run's request body as "benchmark". */
+export type GapFillLabBenchmarkPayload = {
+  reportVersion: string;
+  houseId: string;
+  testMode: string;
+  seedUsed: string | null;
+  listTestDateKeys: string[];
+  WAPE_pct: number;
+  MAE_kwhPer15m: number;
+  totalActualKwhMasked: number;
+  totalSimKwhMasked: number;
+  deltaKwhMasked: number;
+  worstAbsDayDeltaKwh: number;
+  worstAbsDayDate: string | null;
+  monthlyWAPEByMonth: Record<string, number>;
+  daysWithWeatherMultiplier?: number;
+  daysWithAuxHeatAdder?: number;
+  daysWithPoolFreezeProtectAdder?: number;
+};
+
+/** Build benchmark payload from current run for later comparison. */
+export function buildGapFillLabBenchmarkPayload(args: {
+  reportVersion: string;
+  houseId: string;
+  testMode: string;
+  seedUsed: string | null;
+  listTestDateKeys: string[];
+  totalActualKwhMasked: number;
+  totalSimKwhMasked: number;
+  deltaKwhMasked: number;
+  wape: number;
+  mae: number;
+  byMonth: Array<{ month: string; wape: number }>;
+  worst10Abs: Array<{ date: string; deltaKwh: number }>;
+  daysWithWeatherMultiplier?: number;
+  daysWithAuxHeatAdder?: number;
+  daysWithPoolFreezeProtectAdder?: number;
+}): GapFillLabBenchmarkPayload {
+  const worst = args.worst10Abs.length > 0 ? args.worst10Abs[0]! : null;
+  const monthlyWAPEByMonth: Record<string, number> = {};
+  for (const m of args.byMonth) {
+    monthlyWAPEByMonth[m.month] = m.wape;
+  }
+  return {
+    reportVersion: args.reportVersion,
+    houseId: args.houseId,
+    testMode: args.testMode,
+    seedUsed: args.seedUsed,
+    listTestDateKeys: args.listTestDateKeys,
+    WAPE_pct: args.wape,
+    MAE_kwhPer15m: args.mae,
+    totalActualKwhMasked: args.totalActualKwhMasked,
+    totalSimKwhMasked: args.totalSimKwhMasked,
+    deltaKwhMasked: args.deltaKwhMasked,
+    worstAbsDayDeltaKwh: worst != null ? Math.abs(worst.deltaKwh) : 0,
+    worstAbsDayDate: worst?.date ?? null,
+    monthlyWAPEByMonth,
+    ...(args.daysWithWeatherMultiplier != null ? { daysWithWeatherMultiplier: args.daysWithWeatherMultiplier } : {}),
+    ...(args.daysWithAuxHeatAdder != null ? { daysWithAuxHeatAdder: args.daysWithAuxHeatAdder } : {}),
+    ...(args.daysWithPoolFreezeProtectAdder != null ? { daysWithPoolFreezeProtectAdder: args.daysWithPoolFreezeProtectAdder } : {}),
+  };
 }
