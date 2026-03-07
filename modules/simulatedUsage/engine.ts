@@ -1073,6 +1073,76 @@ export function buildPastSimulatedBaselineV1(args: {
     monthOverallAvgByMonth: monthOverallAvgByMonthRef,
     monthOverallCountByMonth: monthOverallCountByMonthRef,
   };
+
+  // When usageShapeProfile is provided, merge it so excluded months get profile-based daily totals (then weather-scaled).
+  // Otherwise months with few reference days (e.g. one day in March during travel) produce a flat repeated value.
+  const MIN_DAYS_FOR_PROFILE_USE = 4;
+  let finalProfile: PastDayProfileLite = pastProfile;
+  if (args.usageShapeProfile?.weekdayAvgByMonthKey || args.usageShapeProfile?.weekendAvgByMonthKey) {
+    const monthKeysFromCanonical = Array.from(
+      new Set(
+        (args.canonicalDayStartsMs ?? [])
+          .filter((ms) => Number.isFinite(ms))
+          .map((ms) => {
+            const gridTs = args.getDayGridTimestamps(ms);
+            return gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]).slice(0, 7) : "";
+          })
+          .filter((k) => isYearMonth(k))
+      )
+    ).sort();
+    const fullMonthKeys = Array.from(new Set([...pastProfile.monthKeys, ...monthKeysFromCanonical])).sort();
+    const wdByMonth: number[] = [];
+    const weByMonth: number[] = [];
+    const wdCount: Record<string, number> = {};
+    const weCount: Record<string, number> = {};
+    const monthOverallAvg: Record<string, number> = {};
+    const monthOverallCount: Record<string, number> = {};
+    for (let i = 0; i < fullMonthKeys.length; i++) {
+      const ym = fullMonthKeys[i]!;
+      const profileWd = args.usageShapeProfile?.weekdayAvgByMonthKey?.[ym];
+      const profileWe = args.usageShapeProfile?.weekendAvgByMonthKey?.[ym];
+      const refIdx = pastProfile.monthKeys.indexOf(ym);
+      const hasProfileValue =
+        (profileWd != null && Number.isFinite(profileWd) && profileWd > 0) ||
+        (profileWe != null && Number.isFinite(profileWe) && profileWe > 0);
+      if (hasProfileValue) {
+        wdByMonth[i] =
+          profileWd != null && Number.isFinite(profileWd) && profileWd > 0
+            ? profileWd
+            : (refIdx >= 0 ? pastProfile.avgKwhPerDayWeekdayByMonth[refIdx] : 0) ?? 0;
+        weByMonth[i] =
+          profileWe != null && Number.isFinite(profileWe) && profileWe > 0
+            ? profileWe
+            : (refIdx >= 0 ? pastProfile.avgKwhPerDayWeekendByMonth[refIdx] : 0) ?? 0;
+        const useWdCount = profileWd != null && Number.isFinite(profileWd) && profileWd > 0;
+        const useWeCount = profileWe != null && Number.isFinite(profileWe) && profileWe > 0;
+        wdCount[ym] = useWdCount ? MIN_DAYS_FOR_PROFILE_USE : (pastProfile.weekdayCountByMonth[ym] ?? 0);
+        weCount[ym] = useWeCount ? MIN_DAYS_FOR_PROFILE_USE : (pastProfile.weekendCountByMonth[ym] ?? 0);
+        monthOverallCount[ym] = wdCount[ym]! + weCount[ym]!;
+        monthOverallAvg[ym] =
+          monthOverallCount[ym]! > 0
+            ? (wdByMonth[i]! * wdCount[ym]! + weByMonth[i]! * weCount[ym]!) / monthOverallCount[ym]!
+            : 0;
+      } else {
+        wdByMonth[i] = refIdx >= 0 ? (pastProfile.avgKwhPerDayWeekdayByMonth[refIdx] ?? 0) : 0;
+        weByMonth[i] = refIdx >= 0 ? (pastProfile.avgKwhPerDayWeekendByMonth[refIdx] ?? 0) : 0;
+        wdCount[ym] = pastProfile.weekdayCountByMonth[ym] ?? 0;
+        weCount[ym] = pastProfile.weekendCountByMonth[ym] ?? 0;
+        monthOverallCount[ym] = pastProfile.monthOverallCountByMonth[ym] ?? 0;
+        monthOverallAvg[ym] = pastProfile.monthOverallAvgByMonth[ym] ?? 0;
+      }
+    }
+    finalProfile = {
+      monthKeys: fullMonthKeys,
+      avgKwhPerDayWeekdayByMonth: wdByMonth,
+      avgKwhPerDayWeekendByMonth: weByMonth,
+      weekdayCountByMonth: wdCount,
+      weekendCountByMonth: weCount,
+      monthOverallAvgByMonth: monthOverallAvg,
+      monthOverallCountByMonth: monthOverallCount,
+    };
+  }
+
   const trainingDayKwhByDate = new Map<string, number>();
   for (const d of referenceDays) trainingDayKwhByDate.set(d.dateKey, d.total);
   const isWeekendRef = (dateKey: string) => {
@@ -1104,7 +1174,7 @@ export function buildPastSimulatedBaselineV1(args: {
     shapeByMonth96Ref[ym] = shape96;
   }
   const pastContext = buildPastDaySimulationContext({
-    profile: pastProfile,
+    profile: finalProfile,
     trainingWeatherStats: trainingWeatherStatsPast,
     weatherByDateKey: weatherByDateKeyPast,
   });
@@ -1244,10 +1314,7 @@ export function buildPastSimulatedBaselineV1(args: {
         shapeByMonth96Ref
       );
       for (const iv of result.intervals) out.push(iv);
-      const mappedTotalFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
-      // Hour-level fallback: shared core uses per-month 96-point shape from reference days (no dow/nearest hierarchy).
-      const hourFallbackLevel: PastFallbackLevel =
-        shapeByMonth96Ref[ym] && shapeByMonth96Ref[ym].length === 96 ? "MONTH" : "UNIFORM";
+      const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
           dateKey,
@@ -1265,8 +1332,8 @@ export function buildPastSimulatedBaselineV1(args: {
                 cdd65: Number(wx.cdd65) || 0,
               }
             : null,
-          hourFallbackLevel,
-          totalFallbackLevel: mappedTotalFallback,
+          hourFallbackLevel: mappedFallback,
+          totalFallbackLevel: mappedFallback,
           referenceCandidateCount: 0,
           referencePickedCount: 0,
           weatherDistanceAvg: null,
