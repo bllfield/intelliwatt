@@ -471,8 +471,13 @@ export type SimulatedUsageDatasetMeta = {
     reasonNotUsed: string | null;
   };
   scenarioId?: string | null;
+  /** Past: cold_build | recalc | lab_validation | cache_restore. */
+  buildPathKind?: "cold_build" | "recalc" | "lab_validation" | "cache_restore";
   /** Past: shared simulator core identifier for validation. */
   sourceOfDaySimulationCore?: string;
+  /** Past: engine/derivation version. */
+  derivationVersion?: string;
+  simVersion?: string;
   /** Past: daily table row count (for validation). */
   dailyRowCount?: number;
   /** Past: 15-min interval count. */
@@ -482,10 +487,17 @@ export type SimulatedUsageDatasetMeta = {
   actualDayCount?: number;
   simulatedDayCount?: number;
   stitchedDayCount?: number;
+  actualIntervalsCount?: number;
+  referenceDaysCount?: number;
+  shapeMonthsPresent?: string[];
+  excludedDateKeysCount?: number;
+  leadingMissingDaysCount?: number;
   /** Past: weather provenance — kind used (e.g. ACTUAL_LAST_YEAR, STUB_V1, MIXED). */
   weatherKindUsed?: string;
   /** Past: stub_only | actual_only | mixed_actual_and_stub | none | unknown (unknown when provenance missing, e.g. cache restore). */
   weatherSourceSummary?: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" | "unknown";
+  weatherFallbackReason?: string | null;
+  weatherProviderName?: string;
   weatherRowsCount?: number;
   weatherStubRowCount?: number;
   weatherActualRowCount?: number;
