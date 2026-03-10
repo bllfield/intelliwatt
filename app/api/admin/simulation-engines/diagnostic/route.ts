@@ -10,6 +10,97 @@ export const dynamic = "force-dynamic";
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 
+/** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
+async function getTravelRangesFromDb(userId: string, houseId: string): Promise<Array<{ startDate: string; endDate: string }>> {
+  const scenarios = await (prisma as any).usageSimulatorScenario
+    .findMany({ where: { userId, houseId, archivedAt: null }, select: { id: true } })
+    .catch(() => []);
+  if (!scenarios?.length) return [];
+  const scenarioIds = scenarios.map((s: { id: string }) => s.id);
+  const events = await (prisma as any).usageSimulatorScenarioEvent
+    .findMany({
+      where: { scenarioId: { in: scenarioIds }, kind: "TRAVEL_RANGE" },
+      select: { payloadJson: true },
+    })
+    .catch(() => []);
+  const seen = new Set<string>();
+  const out: Array<{ startDate: string; endDate: string }> = [];
+  for (const e of events ?? []) {
+    const p = (e as any)?.payloadJson ?? {};
+    const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
+    const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) continue;
+    const key = `${startDate}\t${endDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ startDate, endDate });
+  }
+  out.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  return out;
+}
+
+/**
+ * GET: Load homes for email and optionally vacant/travel ranges for a house.
+ * Query: email (required), houseId (optional). Returns { ok, houses, travelRanges? }.
+ */
+export async function GET(req: NextRequest) {
+  const gate = requireAdmin(req);
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+
+  try {
+    const url = new URL(req.url);
+    const email = normalizeEmailSafe(url.searchParams.get("email") ?? "");
+    const houseId = typeof url.searchParams.get("houseId") === "string" ? url.searchParams.get("houseId")!.trim() : "";
+
+    if (!email) {
+      return NextResponse.json({ ok: false, error: "Valid email is required." }, { status: 400 });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (!user?.id) {
+      return NextResponse.json({ ok: false, error: "User not found for email." }, { status: 404 });
+    }
+
+    const houses = await prisma.houseAddress.findMany({
+      where: { userId: user.id, archivedAt: null },
+      select: { id: true, label: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, isPrimary: true },
+      orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+    });
+    const houseList = houses.map((h) => ({
+      id: h.id,
+      label: h.label ?? null,
+      addressLine1: h.addressLine1 ?? null,
+      city: h.addressCity ?? null,
+      state: h.addressState ?? null,
+      addressZip5: h.addressZip5 ?? null,
+      isPrimary: h.isPrimary ?? false,
+    }));
+
+    let travelRanges: Array<{ startDate: string; endDate: string }> | undefined;
+    if (houseId) {
+      const house = await prisma.houseAddress.findFirst({
+        where: { id: houseId, userId: user.id, archivedAt: null },
+        select: { id: true },
+      });
+      if (house) {
+        travelRanges = await getTravelRangesFromDb(user.id, house.id);
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      houses: houseList,
+      ...(travelRanges !== undefined ? { travelRanges } : {}),
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
 /**
  * Admin-only: run full simulator/weather diagnostic for a house.
  * POST body: { email: string, houseId: string, scenarioId?: string, startDate?: string, endDate?: string, recalcFirst?: boolean, includeParity?: boolean }

@@ -102,6 +102,10 @@ export default function SimulationEnginesPage() {
   const [repairResult, setRepairResult] = useState<{ ok: boolean; deleted?: number; fetched?: number; stubbed?: number; error?: string } | null>(null);
   const [diagNotice, setDiagNotice] = useState<string | null>(null);
 
+  const [diagLoadHomesLoading, setDiagLoadHomesLoading] = useState(false);
+  const [diagTravelRanges, setDiagTravelRanges] = useState<Array<{ startDate: string; endDate: string }>>([]);
+  const [diagLoadTravelLoading, setDiagLoadTravelLoading] = useState(false);
+
   useEffect(() => {
     const token = window.localStorage.getItem("iw_admin_token");
     if (token) setAdminToken(token);
@@ -406,6 +410,78 @@ export default function SimulationEnginesPage() {
     }
   }
 
+  async function loadHomesForDiag() {
+    if (!email.trim()) {
+      setDiagError("Enter email above, then click Load homes.");
+      return;
+    }
+    setDiagLoadHomesLoading(true);
+    setDiagError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/simulation-engines/diagnostic?${new URLSearchParams({ email: email.trim() })}`,
+        { method: "GET", headers, cache: "no-store" }
+      );
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setDiagError(json?.error ?? `Request failed (${res.status})`);
+        return;
+      }
+      const houseList = Array.isArray(json.houses) ? json.houses : [];
+      setPayload((prev) => ({ ...prev, ok: true, availableHouses: houseList } as InspectResponse));
+      if (houseList.length > 0 && !houseId.trim()) setHouseId(houseList[0].id);
+      setDiagNotice(houseList.length ? `Loaded ${houseList.length} home(s). Select a house and load vacant/travel dates if needed.` : "No homes found for this email.");
+    } finally {
+      setDiagLoadHomesLoading(false);
+    }
+  }
+
+  async function loadTravelRangesForDiag() {
+    const effectiveHouseId = houseId.trim() || (houses[0] as { id: string } | undefined)?.id;
+    if (!email.trim()) {
+      setDiagError("Email is required.");
+      return;
+    }
+    if (!effectiveHouseId) {
+      setDiagError("Select a house first (use Load homes if needed).");
+      return;
+    }
+    setDiagLoadTravelLoading(true);
+    setDiagError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/simulation-engines/diagnostic?${new URLSearchParams({ email: email.trim(), houseId: effectiveHouseId })}`,
+        { method: "GET", headers, cache: "no-store" }
+      );
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setDiagError(json?.error ?? `Request failed (${res.status})`);
+        return;
+      }
+      const ranges = Array.isArray(json.travelRanges) ? json.travelRanges : [];
+      setDiagTravelRanges(ranges.length > 0 ? ranges.map((r: { startDate: string; endDate: string }) => ({ startDate: r.startDate ?? "", endDate: r.endDate ?? "" })) : [{ startDate: "", endDate: "" }]);
+      setDiagNotice(ranges.length ? `Loaded ${ranges.length} vacant/travel range(s) from system.` : "No vacant/travel dates in system for this house.");
+    } finally {
+      setDiagLoadTravelLoading(false);
+    }
+  }
+
+  function addDiagTravelRange() {
+    setDiagTravelRanges((prev) => [...prev, { startDate: "", endDate: "" }]);
+  }
+
+  function removeDiagTravelRange(index: number) {
+    setDiagTravelRanges((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setDiagTravelRangeAt(index: number, field: "startDate" | "endDate", value: string) {
+    setDiagTravelRanges((prev) => {
+      const next = [...prev];
+      if (next[index]) next[index] = { ...next[index]!, [field]: value.slice(0, 10) };
+      return next;
+    });
+  }
+
   return (
     <div className="min-h-screen bg-brand-navy">
       <div className="mx-auto max-w-7xl px-4 py-8">
@@ -625,8 +701,69 @@ export default function SimulationEnginesPage() {
         <div className="mt-8 rounded-lg bg-brand-white p-6 shadow-lg">
           <h2 className="text-lg font-bold text-brand-navy">Past pipeline diagnostics</h2>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Validate production simulator/weather pipeline for the selected house: cold build, weather provenance, stub audit, parity (cold vs cache vs recalc), and weather repair. Uses same email/house as above.
+            Validate production simulator/weather pipeline for the selected house: cold build, weather provenance, stub audit, parity (cold vs cache vs recalc), and weather repair.
           </p>
+          <p className="mt-1 text-xs text-brand-navy/60">
+            Use the <strong>User email</strong> and <strong>House</strong> fields above (or Load homes here to pull up homes by email without running full Inspect). Load vacant/travel dates to prefill from the system; supports multiple date ranges.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loadHomesForDiag()}
+              disabled={diagLoadHomesLoading}
+              className="rounded border border-slate-400 bg-slate-100 px-3 py-2 text-sm font-semibold text-brand-navy hover:bg-slate-200 disabled:opacity-60"
+            >
+              {diagLoadHomesLoading ? "Loading..." : "Load homes (by email)"}
+            </button>
+          </div>
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-brand-navy">Vacant / travel dates (multiple ranges)</span>
+              <button
+                type="button"
+                onClick={() => loadTravelRangesForDiag()}
+                disabled={diagLoadTravelLoading}
+                className="rounded border border-slate-400 bg-slate-50 px-2 py-1 text-xs font-semibold text-brand-navy hover:bg-slate-100 disabled:opacity-60"
+              >
+                {diagLoadTravelLoading ? "Loading..." : "Load from system"}
+              </button>
+            </div>
+            <div className="space-y-2 rounded border border-slate-200 bg-slate-50/50 p-3">
+              {diagTravelRanges.map((range, idx) => (
+                <div key={idx} className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    className="w-28 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm"
+                    value={range.startDate}
+                    onChange={(e) => setDiagTravelRangeAt(idx, "startDate", e.target.value)}
+                    placeholder="Start YYYY-MM-DD"
+                  />
+                  <span className="text-slate-500">–</span>
+                  <input
+                    type="text"
+                    className="w-28 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm"
+                    value={range.endDate}
+                    onChange={(e) => setDiagTravelRangeAt(idx, "endDate", e.target.value)}
+                    placeholder="End YYYY-MM-DD"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeDiagTravelRange(idx)}
+                    className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addDiagTravelRange}
+                className="mt-1 rounded border border-dashed border-slate-400 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                + Add range
+              </button>
+            </div>
+          </div>
           <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm">
               <div className="mb-1 font-semibold text-brand-navy">Start date (optional)</div>
