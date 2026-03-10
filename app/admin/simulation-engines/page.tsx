@@ -350,6 +350,9 @@ export default function SimulationEnginesPage() {
     setDiagnosticResult(null);
     setDiagNotice(null);
     try {
+      const travelRangesPayload = diagTravelRanges
+        .map((r) => ({ startDate: (r.startDate ?? "").trim().slice(0, 10), endDate: (r.endDate ?? "").trim().slice(0, 10) }))
+        .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
       const res = await fetch("/api/admin/simulation-engines/diagnostic", {
         method: "POST",
         headers,
@@ -361,6 +364,7 @@ export default function SimulationEnginesPage() {
           endDate: diagEndDate.trim().slice(0, 10) || undefined,
           recalcFirst,
           includeParity,
+          ...(travelRangesPayload.length > 0 ? { travelRanges: travelRangesPayload } : {}),
         }),
       });
       const json = await res.json().catch(() => null);

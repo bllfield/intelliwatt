@@ -87,6 +87,8 @@ export type RunSimulatorDiagnosticArgs = {
   startDateOverride?: string;
   endDateOverride?: string;
   includeParity?: boolean;
+  /** When provided, used instead of buildInputs.travelRanges for cold build (e.g. admin override from UI). */
+  travelRangesOverride?: Array<{ startDate: string; endDate: string }>;
 };
 
 export type SimulatorDiagnosticResult = {
@@ -99,6 +101,7 @@ export type SimulatorDiagnosticResult = {
     coverageStart: string;
     coverageEnd: string;
     userId: string;
+    travelRangesUsed: Array<{ startDate: string; endDate: string }>;
   };
   pastPath: Record<string, unknown>;
   weatherProvenance: Record<string, unknown>;
@@ -142,7 +145,10 @@ export async function runSimulatorDiagnostic(
     return { ok: false, error: "Could not resolve canonical window (missing or invalid buildInputs.canonicalMonths or override)." };
   }
 
-  const travelRanges = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
+  const travelRangesFromBuild = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
+  const travelRanges = Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+    ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
+    : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
   const canonicalDateKeys = canonicalDateKeysFromWindow(startDate, endDate);
@@ -223,6 +229,7 @@ export async function runSimulatorDiagnostic(
       coverageStart: startDate,
       coverageEnd: endDate,
       userId,
+      travelRangesUsed: travelRanges,
     },
     pastPath: coldMeta,
     weatherProvenance: {

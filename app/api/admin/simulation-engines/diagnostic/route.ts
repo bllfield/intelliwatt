@@ -118,6 +118,14 @@ export async function POST(req: NextRequest) {
     const endDateOverride = typeof body?.endDate === "string" ? body.endDate.trim().slice(0, 10) : undefined;
     const recalcFirst = Boolean(body?.recalcFirst);
     const includeParity = Boolean(body?.includeParity);
+    const travelRangesOverride = Array.isArray(body?.travelRanges)
+      ? (body.travelRanges as Array<{ startDate?: string; endDate?: string }>)
+          .map((r) => ({
+            startDate: typeof r?.startDate === "string" ? r.startDate.trim().slice(0, 10) : "",
+            endDate: typeof r?.endDate === "string" ? r.endDate.trim().slice(0, 10) : "",
+          }))
+          .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate))
+      : undefined;
 
     if (!email) {
       return NextResponse.json({ ok: false, error: "Valid email is required." }, { status: 400 });
@@ -215,6 +223,7 @@ export async function POST(req: NextRequest) {
       startDateOverride: startDateOverride && /^\d{4}-\d{2}-\d{2}$/.test(startDateOverride) ? startDateOverride : undefined,
       endDateOverride: endDateOverride && /^\d{4}-\d{2}-\d{2}$/.test(endDateOverride) ? endDateOverride : undefined,
       includeParity,
+      travelRangesOverride: travelRangesOverride && travelRangesOverride.length > 0 ? travelRangesOverride : undefined,
     });
 
     if (!result.ok) {
