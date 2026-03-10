@@ -100,6 +100,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [recalcNote, setRecalcNote] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [canRecalc, setCanRecalc] = useState(false);
+  const [missingRequirements, setMissingRequirements] = useState<string[]>([]);
   const [requirementsError, setRequirementsError] = useState<string | null>(null);
   const [requirementsDbStatus, setRequirementsDbStatus] = useState<{
     homeDetails: RequirementsDbStatus;
@@ -247,11 +248,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           setCanRecalc(false);
           setRequirementsError(j && "error" in j && typeof (j as any).error === "string" ? String((j as any).error) : `HTTP ${r.status}`);
           setRequirementsDbStatus(null);
+          setMissingRequirements([]);
           setCanonicalEndMonth("");
           return;
         }
         setCanRecalc(Boolean(j.canRecalc));
         setRequirementsError(null);
+        setMissingRequirements(Array.isArray((j as any).missingItems) ? (j as any).missingItems : j.canRecalc ? [] : []);
         setRequirementsDbStatus((j as any).dbStatus ?? null);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
       } catch {
@@ -259,6 +262,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           setCanRecalc(false);
           setRequirementsError("Unable to load simulator requirements.");
           setRequirementsDbStatus(null);
+          setMissingRequirements([]);
           setCanonicalEndMonth("");
         }
       }
@@ -705,7 +709,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       });
       const j = (await r.json().catch(() => null)) as any;
       if (!r.ok || !j?.ok) {
-        setRecalcNote(j?.error ? String(j.error) : `Recalc failed (${r.status})`);
+        if (j?.error === "requirements_unmet" && Array.isArray(j?.missingItems) && j.missingItems.length > 0) {
+          setMissingRequirements(j.missingItems);
+          setRecalcNote("Complete the required details below before we can calculate.");
+        } else {
+          setRecalcNote(j?.error ? String(j.error) : `Recalc failed (${r.status})`);
+        }
         return;
       }
       setRecalcNote("Updated.");
@@ -792,6 +801,38 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     <li key={`${idx}-${x}`}>{x}</li>
                   ))}
                 </ul>
+              </div>
+            ) : null}
+            {missingRequirements.length > 0 ? (
+              <div className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/15 px-4 py-3 text-sm text-amber-50">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-[0.25em] text-amber-200">
+                  Complete the following before we can calculate
+                </div>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-50/95">
+                  {missingRequirements.map((item, idx) => (
+                    <li key={`${idx}-${item}`}>{item}</li>
+                  ))}
+                </ul>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {missingRequirements.some((m) => m.toLowerCase().includes("home details")) ? (
+                    <button
+                      type="button"
+                      onClick={() => setOpenHome(true)}
+                      className="rounded-full border border-amber-400/50 bg-amber-500/25 px-3 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-500/35"
+                    >
+                      Complete Home Details
+                    </button>
+                  ) : null}
+                  {missingRequirements.some((m) => m.toLowerCase().includes("appliances")) ? (
+                    <button
+                      type="button"
+                      onClick={() => setOpenAppliances(true)}
+                      className="rounded-full border border-amber-400/50 bg-amber-500/25 px-3 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-500/35"
+                    >
+                      Complete Appliances
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>
