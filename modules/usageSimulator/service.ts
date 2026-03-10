@@ -1354,7 +1354,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).weatherSourceSummary = "unknown";
             }
             if ((dataset.meta as any).weatherFallbackReason == null || (dataset.meta as any).weatherFallbackReason === "") {
-              (dataset.meta as any).weatherFallbackReason = "unknown";
+              (dataset.meta as any).weatherFallbackReason =
+                (dataset.meta as any).weatherSourceSummary === "actual_only" ? null : "unknown";
             }
             (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
             (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;

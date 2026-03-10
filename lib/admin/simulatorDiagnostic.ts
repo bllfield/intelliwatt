@@ -146,9 +146,13 @@ export async function runSimulatorDiagnostic(
   }
 
   const travelRangesFromBuild = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
-  const travelRanges = Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
-    ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
-    : travelRangesFromBuild;
+  // When parity is requested, cold must use the same inputs as production/recalc (stored build). Otherwise cold would use UI override and diverge.
+  const travelRanges =
+    includeParity
+      ? travelRangesFromBuild
+      : Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+        ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
+        : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
   const canonicalDateKeys = canonicalDateKeysFromWindow(startDate, endDate);
@@ -199,22 +203,55 @@ export async function runSimulatorDiagnostic(
     }
     const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
     const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
+    const coldSide = buildParitySide({
+      summary: coldSummary,
+      meta: coldMeta,
+      scenarioId,
+      scenarioKey,
+      buildInputsHash,
+      travelRangesUsed: travelRanges,
+      coverageStart: startDate,
+      coverageEnd: endDate,
+      label: "cold",
+    });
+    const productionSide = buildParitySide({
+      summary: productionSummary,
+      meta: productionMeta,
+      scenarioId,
+      scenarioKey,
+      buildInputsHash,
+      travelRangesUsed: travelRanges,
+      coverageStart: String(productionMeta.coverageStart ?? startDate),
+      coverageEnd: String(productionMeta.coverageEnd ?? endDate),
+      label: "production",
+    });
+    const recalcSide = buildParitySide({
+      summary: recalcSummary,
+      meta: recalcMeta,
+      scenarioId,
+      scenarioKey,
+      buildInputsHash,
+      travelRangesUsed: travelRanges,
+      coverageStart: String(recalcMeta.coverageStart ?? startDate),
+      coverageEnd: String(recalcMeta.coverageEnd ?? endDate),
+      label: "recalc",
+    });
     parity = {
       coldVsProduction: {
         totalKwhMatch: coldVsProd.totalKwhMatch,
         intervalCountMatch: coldVsProd.intervalCountMatch,
         weatherSummaryMatch: coldVsProd.weatherSummaryMatch,
         weatherFallbackMatch: coldVsProd.weatherFallbackMatch,
-        cold: coldVsProd.cold,
-        production: coldVsProd.production,
+        cold: coldSide,
+        production: productionSide,
       },
       coldVsRecalc: {
         totalKwhMatch: coldVsRec.totalKwhMatch,
         intervalCountMatch: coldVsRec.intervalCountMatch,
         weatherSummaryMatch: coldVsRec.weatherSummaryMatch,
         weatherFallbackMatch: coldVsRec.weatherFallbackMatch,
-        cold: coldVsRec.cold,
-        recalc: coldVsRec.production,
+        cold: coldSide,
+        recalc: recalcSide,
       },
     };
   }
@@ -230,6 +267,9 @@ export async function runSimulatorDiagnostic(
       coverageEnd: endDate,
       userId,
       travelRangesUsed: travelRanges,
+      ...(includeParity && Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+        ? { parityNote: "Include parity was true; cold used stored build travelRanges (not UI override) so cold/production/recalc are comparable." }
+        : {}),
     },
     pastPath: coldMeta,
     weatherProvenance: {
@@ -281,6 +321,44 @@ async function runStubAudit(houseId: string, canonicalDateKeys: string[]): Promi
     totalStubRows: stubDateKeys.length,
     stubDateKeys: sortedStub,
     boundaryStubDateKeys,
+  };
+}
+
+function buildParitySide(args: {
+  summary: { totalKwh?: number; intervalsCount?: number };
+  meta: Record<string, unknown>;
+  scenarioId: string | null;
+  scenarioKey: string;
+  buildInputsHash: string | null;
+  travelRangesUsed: Array<{ startDate: string; endDate: string }>;
+  coverageStart: string;
+  coverageEnd: string;
+  label: "cold" | "production" | "recalc";
+}): Record<string, unknown> {
+  const { summary, meta, scenarioId, scenarioKey, buildInputsHash, travelRangesUsed, coverageStart, coverageEnd, label } = args;
+  const buildPathKind = meta.buildPathKind ?? (label === "cold" ? "cold_build" : label === "recalc" ? "recalc" : "production");
+  const source =
+    label === "cold"
+      ? "cold_build"
+      : String(meta.buildPathKind ?? "") === "cache_restore"
+        ? "cache_restore"
+        : label === "recalc"
+          ? "recalc_then_getSimulatedUsage"
+          : "getSimulatedUsageForHouseScenario";
+  return {
+    scenarioId,
+    scenarioKey,
+    buildInputsHash,
+    travelRangesUsed,
+    coverageStart,
+    coverageEnd,
+    buildPathKind,
+    totalKwh: summary.totalKwh,
+    intervalsCount: summary.intervalsCount,
+    weatherSourceSummary: meta.weatherSourceSummary,
+    weatherFallbackReason: meta.weatherFallbackReason,
+    lastBuiltAt: meta.lastBuiltAt ?? undefined,
+    source,
   };
 }
 
