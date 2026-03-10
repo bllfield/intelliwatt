@@ -257,6 +257,19 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setMissingRequirements(j.canRecalc ? [] : (Array.isArray((j as any).missingItems) ? (j as any).missingItems : []));
         setRequirementsDbStatus((j as any).dbStatus ?? null);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
+        // If the only blocker is manual usage but we have actual intervals + home details, switch to SMT_BASELINE so user can calculate without entering manual totals.
+        const missing = Array.isArray((j as any).missingItems) ? (j as any).missingItems as string[] : [];
+        const onlyManualMissing =
+          missing.length === 1 &&
+          String(missing[0]).toLowerCase().includes("manual usage totals");
+        if (
+          !j.canRecalc &&
+          onlyManualMissing &&
+          (j as any).hasActualIntervals === true &&
+          mode === "MANUAL_TOTALS"
+        ) {
+          setMode("SMT_BASELINE");
+        }
       } catch {
         if (!cancelled) {
           setCanRecalc(false);
