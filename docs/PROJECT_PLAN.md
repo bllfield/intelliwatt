@@ -6168,3 +6168,9 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - `POST /api/admin/efl/manual-url`
   - `POST /api/admin/efl-review/process-open`
 - Docs updated with “Remediation Rule: Pattern-driven fixes (no label hardcoding)” + end-to-end checklist.
+## Past shared-core unification (2026-03-06)
+
+- **Shared Past simulation core** implemented for production cold build and recalc: single entrypoint `modules/simulatedUsage/simulatePastUsageDataset.ts`; cold build and recalc both use it with `useUtcMonth: true`.
+- **Cache restore** preserves truthful provenance metadata; `buildPathKind: cache_restore`; weather defaults to unknown when missing.
+- **GapFill Lab** production Past path uses shared core via `getPastSimulatedDatasetForHouse` with `buildPathKind: lab_validation`.
+- **gapfill_test_days_profile** remains a separate validation path. See `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md` for verification checklist.

@@ -30,12 +30,13 @@ function enumerateDateKeysUtc(startDate: string, endDate: string): string[] {
  * If any dates are missing for ACTUAL_LAST_YEAR, fetches from the weather API and persists;
  * any still missing after fetch are filled with stubs. NORMAL_AVG stubs are also ensured.
  * Call from a frequent path (e.g. simulated usage house fetch) so weather is backfilled when absent.
+ * Returns skippedLatLng: true when house has no lat/lng (no API call made; caller can set weatherFallbackReason).
  */
 export async function ensureHouseWeatherBackfill(args: {
   houseId: string;
   startDate: string;
   endDate: string;
-}): Promise<{ fetched: number; stubbed: number }> {
+}): Promise<{ fetched: number; stubbed: number; skippedLatLng?: boolean }> {
   const { houseId, startDate, endDate } = args;
   const dateKeys = enumerateDateKeysUtc(startDate, endDate);
   if (dateKeys.length === 0) return { fetched: 0, stubbed: 0 };
@@ -56,22 +57,25 @@ export async function ensureHouseWeatherBackfill(args: {
   const lat = house?.lat != null && Number.isFinite(house.lat) ? house.lat : null;
   const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
 
+  if (lat == null || lon == null) {
+    await ensureHouseWeatherStubbed({ houseId, dateKeys });
+    return { fetched: 0, stubbed: dateKeys.length, skippedLatLng: true };
+  }
+
   let fetched = 0;
-  if (missing.length > 0 && lat != null && lon != null) {
-    const minDate = missing[0]!;
-    const maxDate = missing[missing.length - 1]!;
-    try {
-      const weatherResult = await getWeatherForRange(lat, lon, minDate, maxDate);
-      if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
-        const dayWxMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
-        const rowsToInsert = missing.filter((dk) => dayWxMap.has(dk)).map((dk) => dayWxMap.get(dk)!);
-        if (rowsToInsert.length > 0) {
-          fetched = await upsertHouseWeatherDays({ rows: rowsToInsert });
-        }
+  const minDate = missing[0]!;
+  const maxDate = missing[missing.length - 1]!;
+  try {
+    const weatherResult = await getWeatherForRange(lat, lon, minDate, maxDate);
+    if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
+      const dayWxMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
+      const rowsToInsert = missing.filter((dk) => dayWxMap.has(dk)).map((dk) => dayWxMap.get(dk)!);
+      if (rowsToInsert.length > 0) {
+        fetched = await upsertHouseWeatherDays({ rows: rowsToInsert });
       }
-    } catch (err) {
-      console.warn("[weather/backfill] getWeatherForRange failed", { houseId, err: err instanceof Error ? err.message : String(err) });
     }
+  } catch (err) {
+    console.warn("[weather/backfill] getWeatherForRange failed", { houseId, err: err instanceof Error ? err.message : String(err) });
   }
 
   const stillMissing = await findMissingHouseWeatherDateKeys({

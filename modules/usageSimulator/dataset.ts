@@ -657,6 +657,38 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
   };
 }
 
+/** Build a SimulatedCurve from patched 15-min intervals (e.g. output of buildPastSimulatedBaselineV1). */
+export function buildCurveFromPatchedIntervals(args: {
+  startDate: string;
+  endDate: string;
+  intervals: Array<{ timestamp: string; kwh: number }>;
+}): SimulatedCurve {
+  const rows = (args.intervals ?? [])
+    .map((p) => ({ timestamp: String(p?.timestamp ?? ""), consumption_kwh: Number(p?.kwh) || 0, interval_minutes: 15 as const }))
+    .filter((p) => p.timestamp.length > 0)
+    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+
+  const monthlyTotalsMap = new Map<string, number>();
+  for (const iv of rows) {
+    const ym = iv.timestamp.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+    monthlyTotalsMap.set(ym, (monthlyTotalsMap.get(ym) ?? 0) + (Number(iv.consumption_kwh) || 0));
+  }
+  const monthlyTotals = Array.from(monthlyTotalsMap.entries())
+    .map(([month, kwh]) => ({ month, kwh: Math.round(kwh * 100) / 100 }))
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const annualTotalKwh = monthlyTotals.reduce((s, m) => s + m.kwh, 0);
+
+  return {
+    start: String(args.startDate).slice(0, 10),
+    end: String(args.endDate).slice(0, 10),
+    intervals: rows,
+    monthlyTotals,
+    annualTotalKwh: Math.round(annualTotalKwh * 100) / 100,
+    meta: { excludedDays: 0, renormalized: false },
+  };
+}
+
 /** Build dataset from a precomputed curve (e.g. Past stitched actual + simulated). Use when the curve was built outside generateSimulatedCurve. */
 export function buildSimulatedUsageDatasetFromCurve(
   curve: SimulatedCurve,

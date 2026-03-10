@@ -80,9 +80,19 @@ type UsageDataset = {
 /** Truthful weather basis label from Past meta. Do not show "real weather" unless weatherSourceSummary === "actual_only". */
 function getWeatherBasisLabel(meta: Record<string, unknown>): string | null {
   const s = meta?.weatherSourceSummary as string | undefined;
-  if (s === "stub_only") return "Weather basis: stub/test weather data";
+  const reason = meta?.weatherFallbackReason as string | undefined;
+  const reasonSuffix =
+    reason === "missing_lat_lng"
+      ? " (no coordinates)"
+      : reason === "partial_coverage"
+        ? " (partial coverage)"
+        : reason === "api_failure_or_no_data"
+          ? " (API unavailable)"
+          : "";
+  if (s === "stub_only") return "Weather basis: stub/test weather data" + reasonSuffix;
   if (s === "actual_only") return "Weather basis: actual cached weather data";
-  if (s === "mixed_actual_and_stub") return "Weather basis: mixed actual + stub weather data";
+  if (s === "mixed_actual_and_stub") return "Weather basis: mixed actual + stub weather data" + reasonSuffix;
+  if (s === "unknown" || (s && s !== "none")) return "Weather basis: " + (reason ? reason.replace(/_/g, " ") : "unknown");
   return null;
 }
 

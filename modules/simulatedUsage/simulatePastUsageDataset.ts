@@ -1,0 +1,424 @@
+/**
+ * Shared Past simulation entrypoint.
+ * Single internal entrypoint for user-facing Past (cold build + recalc) and GapFill Lab production path.
+ * Owns: canonical window, weather loading with provenance, reference-day derivation, curve and dataset build.
+ */
+
+import { prisma } from "@/lib/db";
+import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import {
+  buildCurveFromPatchedIntervals,
+  buildSimulatedUsageDatasetFromCurve,
+  type SimulatorBuildInputsV1,
+} from "@/modules/usageSimulator/dataset";
+import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
+import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
+import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
+import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
+import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
+import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
+import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
+import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
+
+export type BuildPathKind = "cold_build" | "recalc" | "lab_validation";
+
+export type WeatherFallbackReason =
+  | "missing_lat_lng"
+  | "api_failure_or_no_data"
+  | "partial_coverage"
+  | "unknown"
+  | null;
+
+export type WeatherProvenance = {
+  weatherKindUsed: string | undefined;
+  weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none";
+  weatherFallbackReason: WeatherFallbackReason;
+  weatherProviderName: string;
+  weatherCoverageStart: string | null;
+  weatherCoverageEnd: string | null;
+  weatherStubRowCount: number;
+  weatherActualRowCount: number;
+};
+
+function dateKeysFromCanonicalDayStarts(canonicalDayStartsMs: number[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const dayStartMs of canonicalDayStartsMs ?? []) {
+    if (!Number.isFinite(dayStartMs)) continue;
+    const gridTs = getDayGridTimestamps(dayStartMs);
+    if (!gridTs.length) continue;
+    const dateKey = dateKeyFromTimestamp(gridTs[0]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || seen.has(dateKey)) continue;
+    seen.add(dateKey);
+    out.push(dateKey);
+  }
+  return out;
+}
+
+/**
+ * Single shared weather loader for Past window.
+ * Produces actualWxByDateKey, normalWxByDateKey, and truthful provenance.
+ */
+export async function loadWeatherForPastWindow(args: {
+  houseId: string;
+  startDate: string;
+  endDate: string;
+  canonicalDateKeys: string[];
+}): Promise<{
+  actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  provenance: WeatherProvenance;
+}> {
+  const { houseId, startDate, endDate, canonicalDateKeys } = args;
+  const house = await (prisma as any).houseAddress
+    .findUnique({ where: { id: houseId }, select: { lat: true, lng: true } })
+    .catch(() => null);
+  const lat = house?.lat != null && Number.isFinite(house.lat) ? house.lat : null;
+  const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
+
+  if (lat != null && lon != null) {
+    const backfillResult = await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
+    const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+    ]);
+    const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
+    if (missingWxKeys.length > 0) {
+      await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
+      const [actualWx2, normalWx2] = await Promise.all([
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+      ]);
+      const wxEntries = Array.from(actualWx2.entries());
+      const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
+      let weatherStubRowCount = 0;
+      const sourcesSeen = new Set<string>();
+      for (const [, w] of wxEntries) {
+        const src = String(w?.source ?? "").trim();
+        if (src) sourcesSeen.add(src);
+        if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
+      }
+      const weatherRowsCount = wxEntries.length;
+      const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
+      const weatherKindUsed =
+        sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
+      let weatherSourceSummary: WeatherProvenance["weatherSourceSummary"] = "none";
+      if (weatherRowsCount > 0) {
+        if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
+        else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
+        else weatherSourceSummary = "mixed_actual_and_stub";
+      }
+      const weatherFallbackReason: WeatherFallbackReason =
+        backfillResult.skippedLatLng === true
+          ? "missing_lat_lng"
+          : backfillResult.fetched === 0 && (backfillResult.stubbed ?? 0) > 0
+            ? "api_failure_or_no_data"
+            : (backfillResult.stubbed ?? 0) > 0
+              ? "partial_coverage"
+              : null;
+      return {
+        actualWxByDateKey: actualWx2,
+        normalWxByDateKey: normalWx2,
+        provenance: {
+          weatherKindUsed,
+          weatherSourceSummary,
+          weatherFallbackReason,
+          weatherProviderName: weatherActualRowCount > 0 ? "OPEN_METEO" : "STUB",
+          weatherCoverageStart: dateKeysSorted[0] ?? null,
+          weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
+          weatherStubRowCount,
+          weatherActualRowCount,
+        },
+      };
+    }
+    const wxEntries = Array.from(actualWxByDateKey.entries());
+    const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
+    let weatherStubRowCount = 0;
+    const sourcesSeen = new Set<string>();
+    for (const [, w] of wxEntries) {
+      const src = String(w?.source ?? "").trim();
+      if (src) sourcesSeen.add(src);
+      if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
+    }
+    const weatherRowsCount = wxEntries.length;
+    const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
+    const weatherKindUsed =
+      sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
+    let weatherSourceSummary: WeatherProvenance["weatherSourceSummary"] = "none";
+    if (weatherRowsCount > 0) {
+      if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
+      else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
+      else weatherSourceSummary = "mixed_actual_and_stub";
+    }
+    const weatherFallbackReason: WeatherFallbackReason =
+      (backfillResult.stubbed ?? 0) > 0 ? "partial_coverage" : null;
+    return {
+      actualWxByDateKey,
+      normalWxByDateKey,
+      provenance: {
+        weatherKindUsed,
+        weatherSourceSummary,
+        weatherFallbackReason,
+        weatherProviderName: weatherActualRowCount > 0 ? "OPEN_METEO" : "STUB",
+        weatherCoverageStart: dateKeysSorted[0] ?? null,
+        weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
+        weatherStubRowCount,
+        weatherActualRowCount,
+      },
+    };
+  }
+
+  await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+  const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+  ]);
+  const wxEntries = Array.from(actualWxByDateKey.entries());
+  const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
+  const weatherStubRowCount = wxEntries.length;
+  return {
+    actualWxByDateKey,
+    normalWxByDateKey,
+    provenance: {
+      weatherKindUsed: WEATHER_STUB_SOURCE,
+      weatherSourceSummary: "stub_only",
+      weatherFallbackReason: "missing_lat_lng",
+      weatherProviderName: "STUB",
+      weatherCoverageStart: dateKeysSorted[0] ?? null,
+      weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
+      weatherStubRowCount,
+      weatherActualRowCount: 0,
+    },
+  };
+}
+
+export type SimulatePastUsageDatasetArgs = {
+  houseId: string;
+  userId: string;
+  esiid: string | null;
+  startDate: string;
+  endDate: string;
+  timezone: string | undefined;
+  travelRanges: Array<{ startDate: string; endDate: string }>;
+  buildInputs: SimulatorBuildInputsV1;
+  buildPathKind: BuildPathKind;
+  /** When provided, skip fetching actual intervals (caller already has them). */
+  actualIntervals?: Array<{ timestamp: string; kwh: number }>;
+};
+
+export type SimulatePastUsageDatasetResult = {
+  dataset: ReturnType<typeof buildSimulatedUsageDatasetFromCurve>;
+  meta: Record<string, unknown>;
+  pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
+  shapeMonthsPresent: string[];
+  /** For callers that attach dailyWeather or need weather for overlay. */
+  actualWxByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  /** For recalc path to set pastPatchedCurve and monthlyTotalsKwhByMonth. */
+  stitchedCurve?: SimulatedCurve;
+};
+
+/**
+ * Single shared Past simulation entrypoint.
+ * Used by getPastSimulatedDatasetForHouse (cold build), recalcSimulatorBuild (recalc), and GapFill Lab production path.
+ */
+export async function simulatePastUsageDataset(
+  args: SimulatePastUsageDatasetArgs
+): Promise<SimulatePastUsageDatasetResult | { dataset: null; error: string }> {
+  const {
+    houseId,
+    userId,
+    esiid,
+    startDate,
+    endDate,
+    timezone,
+    travelRanges,
+    buildInputs,
+    buildPathKind,
+    actualIntervals: preloadedIntervals,
+  } = args;
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
+  }
+
+  try {
+    const actualIntervals =
+      preloadedIntervals ??
+      (await getActualIntervalsForRange({ houseId, esiid, startDate, endDate })).map((p) => ({
+        timestamp: p.timestamp,
+        kwh: p.kwh,
+      }));
+
+    const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(travelRanges));
+    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+
+    const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
+      houseId,
+      startDate,
+      endDate,
+      canonicalDateKeys,
+    });
+
+    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
+      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
+      getLatestUsageShapeProfile(houseId).catch(() => null),
+    ]);
+    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
+    const applianceProfileForPast =
+      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
+        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
+        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+
+    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
+    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
+    let reasonNotUsed: string | null = null;
+    if (!shapeProfileRow) {
+      reasonNotUsed = "profile_not_found";
+    } else if (!timezone) {
+      reasonNotUsed = "missing_timezone";
+    } else if (!shapeProfileRow.shapeByMonth96) {
+      reasonNotUsed = "no_shapeByMonth96";
+    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
+      reasonNotUsed = "missing_arrays";
+    }
+    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
+      const shapeByMonth = shapeProfileRow.shapeByMonth96 as Record<string, unknown>;
+      const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+      const wd = Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRow.avgKwhPerDayWeekdayByMonth as number[]) : [];
+      const we = Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? (shapeProfileRow.avgKwhPerDayWeekendByMonth as number[]) : [];
+      const weekdayAvgByMonthKey: Record<string, number> = {};
+      const weekendAvgByMonthKey: Record<string, number> = {};
+      for (let i = 0; i < profileMonthKeys.length; i++) {
+        const ym = profileMonthKeys[i];
+        if (!ym) continue;
+        const vWd = wd[i];
+        const vWe = we[i];
+        if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
+        if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
+      }
+      if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
+        usageShapeProfileSnap = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
+        reasonNotUsed = null;
+      } else {
+        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
+      }
+    }
+    const usageShapeProfileDiag = {
+      found: !!shapeProfileRow,
+      id: shapeProfileRow?.id ?? null,
+      version: shapeProfileRow?.version ?? null,
+      derivedAt: shapeProfileRow?.derivedAt != null ? String(shapeProfileRow.derivedAt) : null,
+      windowStartUtc: shapeProfileRow?.windowStartUtc != null ? String(shapeProfileRow.windowStartUtc) : null,
+      windowEndUtc: shapeProfileRow?.windowEndUtc != null ? String(shapeProfileRow.windowEndUtc) : null,
+      profileMonthKeys: shapeProfileRow?.shapeByMonth96
+        ? Object.keys((shapeProfileRow.shapeByMonth96 as Record<string, unknown>) ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort()
+        : [],
+      weekdayAvgLen: shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null
+        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length : null)
+        : null,
+      weekendAvgLen: shapeProfileRow?.avgKwhPerDayWeekendByMonth != null
+        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length : null)
+        : null,
+      canonicalMonths,
+      canonicalMonthsLen: canonicalMonths.length,
+      reasonNotUsed,
+    };
+
+    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
+    const patchedIntervals = buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs,
+      excludedDateKeys,
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      homeProfile: homeProfileForPast,
+      applianceProfile: applianceProfileForPast,
+      usageShapeProfile: usageShapeProfileSnap ?? undefined,
+      timezoneForProfile: timezone ?? undefined,
+      actualWxByDateKey,
+      _normalWxByDateKey: normalWxByDateKey,
+      debug: { out: pastDayCounts as any },
+    });
+
+    const referenceDaysCount =
+      typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
+        ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
+        : undefined;
+    const shapeMonthsPresent = canonicalMonths;
+
+    const stitchedCurve = buildCurveFromPatchedIntervals({
+      startDate,
+      endDate,
+      intervals: patchedIntervals,
+    });
+
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      stitchedCurve,
+      {
+        baseKind: buildInputs.baseKind,
+        mode: buildInputs.mode,
+        canonicalEndMonth: buildInputs.canonicalEndMonth,
+        notes: buildInputs.notes ?? [],
+        filledMonths: buildInputs.filledMonths ?? [],
+      },
+      { timezone: timezone ?? undefined, useUtcMonth: true }
+    );
+
+    if (dataset && typeof dataset.meta === "object") {
+      dataset.meta = {
+        ...dataset.meta,
+        buildPathKind,
+        sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+        derivationVersion: PAST_ENGINE_VERSION,
+        simVersion: PAST_ENGINE_VERSION,
+        weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
+        dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
+        usageShapeProfileDiag,
+        dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
+        intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+        coverageStart: dataset?.summary?.start ?? startDate,
+        coverageEnd: dataset?.summary?.end ?? endDate,
+        actualDayCount:
+          typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
+            ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
+            : undefined,
+        simulatedDayCount: pastDayCounts.simulatedDays,
+        stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
+        actualIntervalsCount: actualIntervals.length,
+        referenceDaysCount,
+        shapeMonthsPresent,
+        excludedDateKeysCount: excludedDateKeys.size,
+        leadingMissingDaysCount: pastDayCounts.leadingMissingDays ?? undefined,
+        weatherKindUsed: provenance.weatherKindUsed,
+        weatherSourceSummary: provenance.weatherSourceSummary,
+        weatherFallbackReason: provenance.weatherFallbackReason,
+        weatherProviderName: provenance.weatherProviderName,
+        weatherCoverageStart: provenance.weatherCoverageStart,
+        weatherCoverageEnd: provenance.weatherCoverageEnd,
+        weatherStubRowCount: provenance.weatherStubRowCount,
+        weatherActualRowCount: provenance.weatherActualRowCount,
+      };
+    }
+
+    return {
+      dataset,
+      meta: (dataset?.meta as Record<string, unknown>) ?? {},
+      pastDayCounts,
+      shapeMonthsPresent,
+      actualWxByDateKey: actualWxByDateKey,
+      stitchedCurve,
+    };
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.warn("[simulatePastUsageDataset] failed", { houseId, err: e });
+    return { dataset: null, error: err.message };
+  }
+}

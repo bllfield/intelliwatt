@@ -7,10 +7,8 @@ import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, typ
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
-import { getActualUsageDatasetForHouse, getActualIntervalsForRange, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
+import { getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
-import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
-import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
@@ -38,9 +36,9 @@ import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
-import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
+import { simulatePastUsageDataset } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type ManualUsagePayloadAny = any;
@@ -99,52 +97,6 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   const end = `${last}-${String(lastDay).padStart(2, "0")}`;
   const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
   return { start, end, days: Math.max(1, days) };
-}
-
-function dateKeysFromCanonicalDayStarts(canonicalDayStartsMs: number[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const dayStartMs of canonicalDayStartsMs ?? []) {
-    if (!Number.isFinite(dayStartMs)) continue;
-    const dayTs = getDayGridTimestamps(dayStartMs);
-    if (!dayTs.length) continue;
-    const dateKey = dateKeyFromTimestamp(dayTs[0]);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || seen.has(dateKey)) continue;
-    seen.add(dateKey);
-    out.push(dateKey);
-  }
-  return out;
-}
-
-function buildCurveFromPatchedIntervals(args: {
-  startDate: string;
-  endDate: string;
-  intervals: Array<{ timestamp: string; kwh: number }>;
-}): SimulatedCurve {
-  const rows = (args.intervals ?? [])
-    .map((p) => ({ timestamp: String(p?.timestamp ?? ""), consumption_kwh: Number(p?.kwh) || 0, interval_minutes: 15 as const }))
-    .filter((p) => p.timestamp.length > 0)
-    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
-
-  const monthlyTotalsMap = new Map<string, number>();
-  for (const iv of rows) {
-    const ym = iv.timestamp.slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(ym)) continue;
-    monthlyTotalsMap.set(ym, (monthlyTotalsMap.get(ym) ?? 0) + (Number(iv.consumption_kwh) || 0));
-  }
-  const monthlyTotals = Array.from(monthlyTotalsMap.entries())
-    .map(([month, kwh]) => ({ month, kwh: Math.round(kwh * 100) / 100 }))
-    .sort((a, b) => (a.month < b.month ? -1 : 1));
-  const annualTotalKwh = monthlyTotals.reduce((s, m) => s + m.kwh, 0);
-
-  return {
-    start: String(args.startDate).slice(0, 10),
-    end: String(args.endDate).slice(0, 10),
-    intervals: rows,
-    monthlyTotals,
-    annualTotalKwh: Math.round(annualTotalKwh * 100) / 100,
-    meta: { excludedDays: 0, renormalized: false },
-  };
 }
 
 function monthsIntersectingTravelRanges(
@@ -581,94 +533,40 @@ export async function recalcSimulatorBuild(args: {
         smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
         canonicalWindow?.end ??
         `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
-      const actualIntervals = await getActualIntervalsForRange({
+      const recalcBuildInputs: SimulatorBuildInputsV1 = {
+        version: 1,
+        mode,
+        baseKind: built.baseKind,
+        canonicalEndMonth: built.canonicalMonths[built.canonicalMonths.length - 1] ?? "",
+        canonicalMonths: built.canonicalMonths,
+        monthlyTotalsKwhByMonth: built.monthlyTotalsKwhByMonth,
+        intradayShape96: built.intradayShape96,
+        notes: built.notes ?? [],
+        filledMonths: built.filledMonths ?? [],
+        snapshots: { homeProfile, applianceProfile },
+      };
+      const result = await simulatePastUsageDataset({
         houseId,
+        userId,
         esiid: esiid ?? null,
         startDate,
         endDate,
+        timezone: timezoneForStoredBuild,
+        travelRanges: allTravelRanges,
+        buildInputs: recalcBuildInputs,
+        buildPathKind: "recalc",
       });
-      const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
-      const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
-      const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-      let actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
-      let normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
-      const houseForWx = await (prisma as any).houseAddress.findUnique({ where: { id: houseId }, select: { lat: true, lng: true } }).catch(() => null);
-      const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
-      const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
-      if (lat != null && lon != null) {
-        await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
-        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-        ]);
-      } else {
-        await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-        ]);
-      }
-      const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
-      if (missingWxKeys.length > 0) {
-        await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
-        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-        ]);
-      }
-      const shapeProfileRowRecalc = await getLatestUsageShapeProfile(houseId).catch(() => null);
-      let usageShapeProfileSnapRecalc: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
-      if (
-        timezoneForStoredBuild &&
-        shapeProfileRowRecalc?.shapeByMonth96 &&
-        shapeProfileRowRecalc.avgKwhPerDayWeekdayByMonth != null &&
-        shapeProfileRowRecalc.avgKwhPerDayWeekendByMonth != null
-      ) {
-        const shapeByMonth = shapeProfileRowRecalc.shapeByMonth96 as Record<string, unknown>;
-        const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
-        const wd = Array.isArray(shapeProfileRowRecalc.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRowRecalc.avgKwhPerDayWeekdayByMonth as number[]) : [];
-        const we = Array.isArray(shapeProfileRowRecalc.avgKwhPerDayWeekendByMonth) ? (shapeProfileRowRecalc.avgKwhPerDayWeekendByMonth as number[]) : [];
-        const weekdayAvgByMonthKey: Record<string, number> = {};
-        const weekendAvgByMonthKey: Record<string, number> = {};
-        for (let i = 0; i < profileMonthKeys.length; i++) {
-          const ym = profileMonthKeys[i];
-          if (!ym) continue;
-          const vWd = wd[i];
-          const vWe = we[i];
-          if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
-          if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
+      if (result.dataset !== null && result.stitchedCurve) {
+        pastPatchedCurve = result.stitchedCurve;
+        const byMonth: Record<string, number> = {};
+        for (const m of result.stitchedCurve.monthlyTotals) {
+          const ym = String(m?.month ?? "").trim();
+          if (/^\d{4}-\d{2}$/.test(ym) && typeof m?.kwh === "number" && Number.isFinite(m.kwh)) byMonth[ym] = m.kwh;
         }
-        if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
-          usageShapeProfileSnapRecalc = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
-        }
+        if (Object.keys(byMonth).length > 0) monthlyTotalsKwhByMonth = byMonth;
+        pastSimulatedMonths = [];
+        notes.push("Past: baseline patched for excluded + leading-missing days");
       }
-      const patchedIntervals = buildPastSimulatedBaselineV1({
-        actualIntervals,
-        canonicalDayStartsMs,
-        excludedDateKeys,
-        dateKeyFromTimestamp,
-        getDayGridTimestamps,
-        homeProfile,
-        applianceProfile,
-        usageShapeProfile: usageShapeProfileSnapRecalc ?? undefined,
-        timezoneForProfile: timezoneForStoredBuild,
-        actualWxByDateKey,
-        _normalWxByDateKey: normalWxByDateKey,
-      });
-      const stitchedCurve = buildCurveFromPatchedIntervals({
-        startDate,
-        endDate,
-        intervals: patchedIntervals,
-      });
-      pastPatchedCurve = stitchedCurve;
-      const byMonth: Record<string, number> = {};
-      for (const m of stitchedCurve.monthlyTotals) {
-        const ym = String(m?.month ?? "").trim();
-        if (/^\d{4}-\d{2}$/.test(ym) && typeof m?.kwh === "number" && Number.isFinite(m.kwh)) byMonth[ym] = m.kwh;
-      }
-      if (Object.keys(byMonth).length > 0) monthlyTotalsKwhByMonth = byMonth;
-      pastSimulatedMonths = [];
-      notes.push("Past: baseline patched for excluded + leading-missing days");
     } catch (e) {
       console.warn("[usageSimulator] Past stitched curve failed, using monthly curve", e);
     }
@@ -762,7 +660,7 @@ export async function recalcSimulatorBuild(args: {
           canonicalEndMonth: buildInputs.canonicalEndMonth,
           notes: buildInputs.notes,
           filledMonths: buildInputs.filledMonths,
-        }, { timezone: (buildInputs as any).timezone ?? undefined })
+        }, { timezone: (buildInputs as any).timezone ?? undefined, useUtcMonth: true })
       : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
   const filledSet = new Set<string>((buildInputs.filledMonths ?? []).map(String));
   const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
@@ -885,192 +783,32 @@ export async function getPastSimulatedDatasetForHouse(args: {
   endDate: string;
   /** When set, excluded days use weekday/weekend avg from UsageShapeProfile (local timezone). */
   timezone?: string;
+  /** Optional: cold_build (default), recalc, or lab_validation. */
+  buildPathKind?: "cold_build" | "recalc" | "lab_validation";
 }): Promise<
   | { dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>; error?: undefined }
   | { dataset: null; error: string }
 > {
-  const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate, timezone } = args;
+  const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate, timezone, buildPathKind = "cold_build" } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
   }
   try {
-    const actualIntervals = await getActualIntervalsForRange({
+    const result = await simulatePastUsageDataset({
       houseId,
+      userId,
       esiid,
       startDate,
       endDate,
+      timezone,
+      travelRanges,
+      buildInputs,
+      buildPathKind,
     });
-    const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(travelRanges));
-    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
-    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-    let actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
-    let normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
-    const houseForWx = await (prisma as any).houseAddress.findUnique({ where: { id: houseId }, select: { lat: true, lng: true } }).catch(() => null);
-    const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
-    const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
-    if (lat != null && lon != null) {
-      await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
-      [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-      ]);
-    } else {
-      await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-      [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-      ]);
+    if (result.dataset === null) {
+      return { dataset: null, error: (result as { error: string }).error ?? "simulatePastUsageDataset failed" };
     }
-    const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
-    if (missingWxKeys.length > 0) {
-      await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
-      [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-      ]);
-    }
-    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
-      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
-      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-      getLatestUsageShapeProfile(houseId).catch(() => null),
-    ]);
-    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
-    const applianceProfileForPast =
-      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
-        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
-        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
-
-    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
-    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
-    let reasonNotUsed: string | null = null;
-    if (!shapeProfileRow) {
-      reasonNotUsed = "profile_not_found";
-    } else if (!timezone) {
-      reasonNotUsed = "missing_timezone";
-    } else if (!shapeProfileRow.shapeByMonth96) {
-      reasonNotUsed = "no_shapeByMonth96";
-    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
-      reasonNotUsed = "missing_arrays";
-    }
-    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
-      const shapeByMonth = shapeProfileRow.shapeByMonth96 as Record<string, unknown>;
-      const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
-      const wd = Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRow.avgKwhPerDayWeekdayByMonth as number[]) : [];
-      const we = Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? (shapeProfileRow.avgKwhPerDayWeekendByMonth as number[]) : [];
-      const weekdayAvgByMonthKey: Record<string, number> = {};
-      const weekendAvgByMonthKey: Record<string, number> = {};
-      for (let i = 0; i < profileMonthKeys.length; i++) {
-        const ym = profileMonthKeys[i];
-        if (!ym) continue;
-        const vWd = wd[i];
-        const vWe = we[i];
-        if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
-        if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
-      }
-      if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
-        usageShapeProfileSnap = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
-        reasonNotUsed = null;
-      } else {
-        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
-      }
-    }
-    const usageShapeProfileDiag = {
-      found: !!shapeProfileRow,
-      id: shapeProfileRow?.id ?? null,
-      version: shapeProfileRow?.version ?? null,
-      derivedAt: shapeProfileRow?.derivedAt != null ? String(shapeProfileRow.derivedAt) : null,
-      windowStartUtc: shapeProfileRow?.windowStartUtc != null ? String(shapeProfileRow.windowStartUtc) : null,
-      windowEndUtc: shapeProfileRow?.windowEndUtc != null ? String(shapeProfileRow.windowEndUtc) : null,
-      profileMonthKeys: shapeProfileRow?.shapeByMonth96
-        ? Object.keys((shapeProfileRow.shapeByMonth96 as Record<string, unknown>) ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort()
-        : [],
-      weekdayAvgLen: shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null
-        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length : null)
-        : null,
-      weekendAvgLen: shapeProfileRow?.avgKwhPerDayWeekendByMonth != null
-        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length : null)
-        : null,
-      canonicalMonths,
-      canonicalMonthsLen: canonicalMonths.length,
-      reasonNotUsed,
-    };
-
-    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
-    const patchedIntervals = buildPastSimulatedBaselineV1({
-      actualIntervals: actualIntervals.map((p) => ({ timestamp: p.timestamp, kwh: p.kwh })),
-      canonicalDayStartsMs,
-      excludedDateKeys,
-      dateKeyFromTimestamp,
-      getDayGridTimestamps,
-      homeProfile: homeProfileForPast,
-      applianceProfile: applianceProfileForPast,
-      usageShapeProfile: usageShapeProfileSnap ?? undefined,
-      timezoneForProfile: timezone ?? undefined,
-      actualWxByDateKey,
-      _normalWxByDateKey: normalWxByDateKey,
-      debug: { out: pastDayCounts as any },
-    });
-    const stitchedCurve = buildCurveFromPatchedIntervals({
-      startDate,
-      endDate,
-      intervals: patchedIntervals,
-    });
-    const dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
-      baseKind: buildInputs.baseKind,
-      mode: buildInputs.mode,
-      canonicalEndMonth: buildInputs.canonicalEndMonth,
-      notes: buildInputs.notes ?? [],
-      filledMonths: buildInputs.filledMonths ?? [],
-    }, { timezone: timezone ?? undefined, useUtcMonth: true });
-    if (dataset && typeof dataset.meta === "object") {
-      dataset.meta = {
-        ...dataset.meta,
-        weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
-        dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
-        usageShapeProfileDiag,
-        sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-        dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
-        intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
-        coverageStart: dataset?.summary?.start ?? startDate,
-        coverageEnd: dataset?.summary?.end ?? endDate,
-        actualDayCount:
-          typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
-            ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
-            : undefined,
-        simulatedDayCount: pastDayCounts.simulatedDays,
-        stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
-      };
-      if (actualWxByDateKey && actualWxByDateKey.size > 0) {
-        const wxEntries = Array.from(actualWxByDateKey.entries());
-        const dateKeys = wxEntries.map(([dk]) => dk).sort();
-        const weatherCoverageStart = dateKeys[0] ?? null;
-        const weatherCoverageEnd = dateKeys[dateKeys.length - 1] ?? null;
-        let weatherStubRowCount = 0;
-        const sourcesSeen = new Set<string>();
-        for (const [, w] of wxEntries) {
-          const src = String(w?.source ?? "").trim();
-          if (src) sourcesSeen.add(src);
-          if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
-        }
-        const weatherRowsCount = wxEntries.length;
-        const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
-        const weatherKindUsed =
-          sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
-        let weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" = "none";
-        if (weatherRowsCount > 0) {
-          if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
-          else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
-          else weatherSourceSummary = "mixed_actual_and_stub";
-        }
-        (dataset.meta as Record<string, unknown>).weatherKindUsed = weatherKindUsed;
-        (dataset.meta as Record<string, unknown>).weatherSourceSummary = weatherSourceSummary;
-        (dataset.meta as Record<string, unknown>).weatherRowsCount = weatherRowsCount;
-        (dataset.meta as Record<string, unknown>).weatherStubRowCount = weatherStubRowCount;
-        (dataset.meta as Record<string, unknown>).weatherActualRowCount = weatherActualRowCount;
-        (dataset.meta as Record<string, unknown>).weatherCoverageStart = weatherCoverageStart;
-        (dataset.meta as Record<string, unknown>).weatherCoverageEnd = weatherCoverageEnd;
-      }
-    }
+    const dataset = result.dataset;
     try {
       const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid, { skipFullYearIntervalFetch: true });
       if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {
@@ -1100,6 +838,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
     } catch {
       /* keep curve without overlay */
     }
+    const actualWxByDateKey = result.actualWxByDateKey;
     if (dataset && actualWxByDateKey && actualWxByDateKey.size > 0) {
       (dataset as any).dailyWeather = Object.fromEntries(
         Array.from(actualWxByDateKey.entries()).map(([dateKey, w]) => [
@@ -1610,6 +1349,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
             (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
             (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
             (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
+            (dataset.meta as any).buildPathKind = "cache_restore";
+            if ((dataset.meta as any).weatherSourceSummary == null || (dataset.meta as any).weatherSourceSummary === "") {
+              (dataset.meta as any).weatherSourceSummary = "unknown";
+            }
+            if ((dataset.meta as any).weatherFallbackReason == null || (dataset.meta as any).weatherFallbackReason === "") {
+              (dataset.meta as any).weatherFallbackReason = "unknown";
+            }
             (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
             (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
             (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
