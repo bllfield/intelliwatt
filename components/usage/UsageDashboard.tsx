@@ -446,6 +446,7 @@ export const UsageDashboard: React.FC<Props> = ({
           ? "SIMULATED"
           : ds?.summary?.source ?? null;
     const weatherBasisLabel = getWeatherBasisLabel(meta);
+    const sourceOfDaySimulationCore = (meta.sourceOfDaySimulationCore as string) || null;
     return {
       source,
       start,
@@ -453,6 +454,7 @@ export const UsageDashboard: React.FC<Props> = ({
       intervalsCount: ds?.summary?.intervalsCount ?? null,
       hasSimulatedFill,
       weatherBasisLabel,
+      sourceOfDaySimulationCore,
     };
   }, [activeHouse]);
 
@@ -617,6 +619,12 @@ export const UsageDashboard: React.FC<Props> = ({
           ) : null}
           {coverage?.weatherBasisLabel ? (
             <p className="mt-0.5 text-xs text-neutral-500">{coverage.weatherBasisLabel}</p>
+          ) : null}
+          {coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Simulation core: <span className="font-medium text-neutral-600">{coverage.sourceOfDaySimulationCore}</span>
+              {" "}(same engine as GapFill Lab validation)
+            </p>
           ) : null}
           {dashboardVariant && (dashboardVariant === "PAST_SIMULATED_USAGE" || dashboardVariant === "FUTURE_SIMULATED_USAGE") ? (
             <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50/80 px-3 py-2 min-w-0">
