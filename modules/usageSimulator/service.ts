@@ -1582,7 +1582,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
             };
             dataset = restored;
             // Recompute monthly from decoded intervals (UTC month) so totals match daily and no zeros from stale cache.
-            const curveEnd = String((cached.datasetJson as any)?.summary?.end ?? endDate).slice(0, 10);
+            const lastDecodedTs = Array.isArray(decoded) && decoded.length > 0 ? (decoded as Array<{ timestamp?: string }>)[decoded.length - 1]?.timestamp : null;
+            const curveEnd = (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) || String((cached.datasetJson as any)?.summary?.end ?? endDate).slice(0, 10);
             if (/^\d{4}-\d{2}-\d{2}$/.test(curveEnd) && Array.isArray(decoded) && decoded.length > 0) {
               const intervalsForMonthly = decoded.map((p: { timestamp: string; kwh: number }) => ({
                 timestamp: String(p?.timestamp ?? ""),
