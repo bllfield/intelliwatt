@@ -326,6 +326,11 @@ function buildFullReport(args: {
   weatherRowsBySource?: Record<string, number>;
   weatherSourcesSeen?: string[];
   weatherSourceMismatchDetected?: boolean;
+  weatherRowCount?: number;
+  simulationWeatherSourceOwner?: string;
+  reportWeatherSourceOwner?: string;
+  simulationAndReportWeatherMatch?: boolean;
+  weatherValidationFingerprint?: { firstRow: string; lastRow: string; rowCount: number };
   benchmarkSummary?: {
     benchmarkAvailable: boolean;
     benchmarkSource: "request_payload" | "prior_run_copy" | "none";
@@ -850,9 +855,6 @@ function buildFullReport(args: {
       }
       if (j.weatherSourceMismatchDetected === true) {
         lines.push("weatherSourceMismatchDetected: true (report claimed real weather but every row is stub — internal inconsistency)");
-      }
-      if (j.simulationWeatherSourceOwner != null || j.reportWeatherSourceOwner != null || j.simulationAndReportWeatherMatch != null) {
-        lines.push("validation: simulationWeatherSourceOwner=" + (j.simulationWeatherSourceOwner ?? "—") + " reportWeatherSourceOwner=" + (j.reportWeatherSourceOwner ?? "—") + " simulationAndReportWeatherMatch=" + (j.simulationAndReportWeatherMatch ?? "—") + (j.weatherValidationFingerprint ? " fingerprint=" + JSON.stringify(j.weatherValidationFingerprint) : ""));
       }
       if (Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0) {
         lines.push("dateKey | kind | tAvgF | tMinF | tMaxF | hdd65 | cdd65 | source");
@@ -1768,6 +1770,7 @@ export async function POST(req: NextRequest) {
     weatherRowsBySource: Object.keys(weatherRowsBySource).length > 0 ? weatherRowsBySource : undefined,
     weatherSourcesSeen: weatherSourcesSeen.length > 0 ? weatherSourcesSeen : undefined,
     weatherSourceMismatchDetected: weatherSourceMismatchDetected || undefined,
+    weatherRowCount: weatherApiDataForReport.length,
     benchmarkSummary,
     benchmarkPayloadForCopy,
   });
