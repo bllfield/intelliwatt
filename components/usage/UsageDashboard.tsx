@@ -649,7 +649,6 @@ export const UsageDashboard: React.FC<Props> = ({
           {coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
             <p className="mt-0.5 text-xs text-neutral-500">
               Simulation core: <span className="font-medium text-neutral-600">{coverage.sourceOfDaySimulationCore}</span>
-              {" "}(same engine as GapFill Lab validation)
             </p>
           ) : null}
           {dashboardVariant && (dashboardVariant === "PAST_SIMULATED_USAGE" || dashboardVariant === "FUTURE_SIMULATED_USAGE") ? (
