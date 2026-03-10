@@ -37,7 +37,8 @@ export type WeatherFallbackReason =
 
 export type WeatherProvenance = {
   weatherKindUsed: string | undefined;
-  weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none";
+  /** When provenance is missing (e.g. cache restore from older cache), use "unknown" so UI never implies actual weather. */
+  weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" | "unknown";
   weatherFallbackReason: WeatherFallbackReason;
   weatherProviderName: string;
   weatherCoverageStart: string | null;

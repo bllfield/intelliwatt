@@ -484,8 +484,8 @@ export type SimulatedUsageDatasetMeta = {
   stitchedDayCount?: number;
   /** Past: weather provenance — kind used (e.g. ACTUAL_LAST_YEAR, STUB_V1, MIXED). */
   weatherKindUsed?: string;
-  /** Past: stub_only | actual_only | mixed_actual_and_stub | none */
-  weatherSourceSummary?: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none";
+  /** Past: stub_only | actual_only | mixed_actual_and_stub | none | unknown (unknown when provenance missing, e.g. cache restore). */
+  weatherSourceSummary?: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" | "unknown";
   weatherRowsCount?: number;
   weatherStubRowCount?: number;
   weatherActualRowCount?: number;
