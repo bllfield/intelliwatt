@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { DayWeather, DayWeatherByDateKey, WeatherKind } from "@/modules/weather/types";
-import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
+import { WEATHER_STUB_SOURCE, WEATHER_STUB_VERSION } from "@/modules/weather/types";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -93,6 +93,69 @@ export async function findMissingHouseWeatherDateKeys(args: {
     .catch(() => []);
   const existing = new Set<string>((existingRows ?? []).map((r: any) => String(r?.dateKey ?? "").slice(0, 10)));
   return dateKeys.filter((k) => !existing.has(k));
+}
+
+/**
+ * Date keys that need actual weather: no row exists, or only a STUB_V1 row exists.
+ * Used by backfill to replace stale stubs with real data when API returns it.
+ */
+export async function findDateKeysMissingOrStub(args: {
+  houseId: string;
+  dateKeys: string[];
+  kind: WeatherKind;
+  version?: number;
+}): Promise<string[]> {
+  const version = Number.isFinite(Number(args.version)) ? Number(args.version) : WEATHER_STUB_VERSION;
+  const dateKeys = uniqDateKeys(args.dateKeys ?? []);
+  if (!args.houseId || dateKeys.length <= 0) return [];
+
+  const rows = await (prisma as any).houseDailyWeather
+    .findMany({
+      where: {
+        houseId: args.houseId,
+        kind: args.kind,
+        version,
+        dateKey: { in: dateKeys },
+      },
+      select: { dateKey: true, source: true },
+    })
+    .catch(() => []);
+  const dateKeysWithNonStub = new Set<string>();
+  for (const r of rows ?? []) {
+    const dk = String(r?.dateKey ?? "").slice(0, 10);
+    if (!YYYY_MM_DD.test(dk)) continue;
+    const src = String(r?.source ?? "").trim();
+    if (src !== WEATHER_STUB_SOURCE) dateKeysWithNonStub.add(dk);
+  }
+  return dateKeys.filter((k) => !dateKeysWithNonStub.has(k));
+}
+
+/**
+ * Delete only STUB_V1 rows for the given house/dateKeys/kind. Never deletes real weather rows.
+ * Used before inserting actual weather so createMany can succeed for those dates.
+ */
+export async function deleteHouseWeatherStubRows(args: {
+  houseId: string;
+  dateKeys: string[];
+  kind: WeatherKind;
+  version?: number;
+}): Promise<number> {
+  const version = Number.isFinite(Number(args.version)) ? Number(args.version) : WEATHER_STUB_VERSION;
+  const dateKeys = uniqDateKeys(args.dateKeys ?? []);
+  if (!args.houseId || dateKeys.length <= 0) return 0;
+
+  const res = await (prisma as any).houseDailyWeather
+    .deleteMany({
+      where: {
+        houseId: args.houseId,
+        kind: args.kind,
+        version,
+        source: WEATHER_STUB_SOURCE,
+        dateKey: { in: dateKeys },
+      },
+    })
+    .catch(() => ({ count: 0 }));
+  return Number(res?.count) || 0;
 }
 
 export async function upsertHouseWeatherDays(args: {

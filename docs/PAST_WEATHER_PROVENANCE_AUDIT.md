@@ -61,6 +61,12 @@ So **any** date in the full window with a stub row makes the summary “mixed.�
   - Fix is data/backfill: ensure backfill (or a one-off job) writes actual weather for all canonical dates when the API succeeds, and that we do not leave stub rows for dates we could fill. No change to the provenance **rule** is required; the rule is correct.
 - **Current recommendation:** Keep the existing rule. Remove only the misleading “same engine as GapFill Lab validation” label (done). If “mixed” is correct for the full window, the label is truthful. If it is stale, improve backfill/coverage rather than relaxing the summary rule.
 
+## 5a. Stale stub rows (root cause and fix)
+
+**Root cause:** Backfill previously fetched only for date keys that had **no** row (`findMissingHouseWeatherDateKeys`). The repo uses `createMany(..., skipDuplicates: true)`, so it only inserts and never updates. Once a STUB_V1 row existed for a date (e.g. from an earlier partial fetch or first run), later successful API fetches never replaced it.
+
+**Fix:** Backfill now treats “needs actual weather” as: no row **or** row has `source === STUB_V1` (`findDateKeysMissingOrStub`). For dates where the API returns actual data, we delete only STUB_V1 rows for those dates, then insert the actual rows. Real weather rows are never deleted or overwritten with stubs. See `modules/weather/backfill.ts` and `modules/weather/repo.ts` (`deleteHouseWeatherStubRows`, `findDateKeysMissingOrStub`). For repairing existing bad data, see **docs/PAST_WEATHER_STUB_REPAIR.md**.
+
 ## 6. Summary
 
 | Item | Status |
@@ -68,4 +74,4 @@ So **any** date in the full window with a stub row makes the summary “mixed.�
 | Past page “same engine as GapFill Lab validation” | **Removed**; label now shows only “Simulation core: shared_past_day_simulator”. |
 | GapFill Lab validation engine | Still **separate** (`gapfill_test_days_profile`); not the same as shared Past core. |
 | weatherSourceSummary rule | One stub row in the full Past window → “mixed_actual_and_stub”; rule is strict and conservative. |
-| Recommended next step | If “mixed” is wrong for a house, verify stub vs actual row counts in `HouseDailyWeather` for the canonical date set; if stub rows are stale, fix backfill/coverage rather than changing the provenance rule. |
+| Recommended next step | If “mixed” is wrong for a house, verify stub vs actual row counts in `HouseDailyWeather` for the canonical date set; if stub rows are stale, run the repair script (see PAST_WEATHER_STUB_REPAIR.md) or fix backfill/coverage. |

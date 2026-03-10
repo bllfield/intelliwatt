@@ -6174,3 +6174,5 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - **Cache restore** preserves truthful provenance metadata; `buildPathKind: cache_restore`; weather defaults to unknown when missing.
 - **GapFill Lab** production Past path uses shared core via `getPastSimulatedDatasetForHouse` with `buildPathKind: lab_validation`.
 - **gapfill_test_days_profile** remains a separate validation path. See `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md` for verification checklist.
+- **Weather backfill** replaces stale STUB_V1 rows when actual Open-Meteo data is available; repair script and procedure for existing bad data: see `docs/PAST_WEATHER_STUB_REPAIR.md`.
+- **Admin simulation diagnostics:** Tool on `/admin/simulation-engines` (Past pipeline diagnostics section) to validate production simulator/weather pipeline for a selected house without shell/droplet: Past path meta, weather provenance, stub audit, cold/cache/recalc parity, weather repair action. GapFill Lab explicitly labeled as separate from Past production.

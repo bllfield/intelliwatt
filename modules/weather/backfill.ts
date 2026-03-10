@@ -1,12 +1,19 @@
 /**
  * Backfill house daily weather for the usage window (e.g. 366 days).
- * When weather is missing, fetches from the weather API and persists; any still missing get stubbed.
+ * Fetches actual weather for dates that are missing or have only STUB_V1; replaces stale stubs when API returns data.
+ * Any still-missing dates get stubs. Never overwrites real rows with stubs.
  */
 
 import { prisma } from "@/lib/db";
 import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
-import { findMissingHouseWeatherDateKeys, upsertHouseWeatherDays } from "@/modules/weather/repo";
+import {
+  deleteHouseWeatherStubRows,
+  findDateKeysMissingOrStub,
+  findMissingHouseWeatherDateKeys,
+  upsertHouseWeatherDays,
+} from "@/modules/weather/repo";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
+import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -41,12 +48,13 @@ export async function ensureHouseWeatherBackfill(args: {
   const dateKeys = enumerateDateKeysUtc(startDate, endDate);
   if (dateKeys.length === 0) return { fetched: 0, stubbed: 0 };
 
-  const missing = await findMissingHouseWeatherDateKeys({
+  // Fetch for dates that have no row or only a STUB_V1 row (so we can replace stale stubs with actual).
+  const missingOrStub = await findDateKeysMissingOrStub({
     houseId,
     dateKeys,
     kind: "ACTUAL_LAST_YEAR",
   });
-  if (missing.length === 0) {
+  if (missingOrStub.length === 0) {
     await ensureHouseWeatherStubbed({ houseId, dateKeys });
     return { fetched: 0, stubbed: 0 };
   }
@@ -63,14 +71,21 @@ export async function ensureHouseWeatherBackfill(args: {
   }
 
   let fetched = 0;
-  const minDate = missing[0]!;
-  const maxDate = missing[missing.length - 1]!;
+  const minDate = missingOrStub[0]!;
+  const maxDate = missingOrStub[missingOrStub.length - 1]!;
   try {
     const weatherResult = await getWeatherForRange(lat, lon, minDate, maxDate);
     if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
       const dayWxMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
-      const rowsToInsert = missing.filter((dk) => dayWxMap.has(dk)).map((dk) => dayWxMap.get(dk)!);
-      if (rowsToInsert.length > 0) {
+      const dateKeysWithActual = missingOrStub.filter((dk) => dayWxMap.has(dk));
+      if (dateKeysWithActual.length > 0) {
+        // Replace stale STUB_V1 rows with actual: delete stubs so createMany can insert (never deletes real rows).
+        await deleteHouseWeatherStubRows({
+          houseId,
+          dateKeys: dateKeysWithActual,
+          kind: "ACTUAL_LAST_YEAR",
+        });
+        const rowsToInsert = dateKeysWithActual.map((dk) => dayWxMap.get(dk)!);
         fetched = await upsertHouseWeatherDays({ rows: rowsToInsert });
       }
     }
@@ -85,4 +100,60 @@ export async function ensureHouseWeatherBackfill(args: {
   });
   await ensureHouseWeatherStubbed({ houseId, dateKeys });
   return { fetched, stubbed: stillMissing.length };
+}
+
+const YYYY_MM_DD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function toUtcDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Repair stale ACTUAL_LAST_YEAR STUB_V1 rows: delete them and rerun backfill for the range.
+ * Safe to rerun. Never deletes or overwrites real weather rows.
+ * If startDate/endDate omitted, uses last 366 days from today (UTC).
+ */
+export async function repairStaleStubWeather(args: {
+  houseId: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<{ deleted: number; fetched: number; stubbed: number }> {
+  const { houseId } = args;
+  let startDate = args.startDate?.trim().slice(0, 10);
+  let endDate = args.endDate?.trim().slice(0, 10);
+  if (!startDate || !endDate || !YYYY_MM_DD_RE.test(startDate) || !YYYY_MM_DD_RE.test(endDate)) {
+    const end = new Date();
+    const start = new Date(end.getTime() - 366 * 24 * 60 * 60 * 1000);
+    startDate = toUtcDateKey(start);
+    endDate = toUtcDateKey(end);
+  }
+  if (startDate > endDate) {
+    const t = startDate;
+    startDate = endDate;
+    endDate = t;
+  }
+
+  const stubRows = await (prisma as any).houseDailyWeather
+    .findMany({
+      where: {
+        houseId,
+        kind: "ACTUAL_LAST_YEAR",
+        source: WEATHER_STUB_SOURCE,
+        dateKey: { gte: startDate, lte: endDate },
+      },
+      select: { dateKey: true },
+    })
+    .catch(() => []);
+  const stubDateKeys = [...new Set((stubRows ?? []).map((r: { dateKey: string }) => String(r?.dateKey ?? "").slice(0, 10)).filter((k: string) => YYYY_MM_DD_RE.test(k)))];
+  if (stubDateKeys.length === 0) {
+    return { deleted: 0, fetched: 0, stubbed: 0 };
+  }
+
+  const deleted = await deleteHouseWeatherStubRows({
+    houseId,
+    dateKeys: stubDateKeys,
+    kind: "ACTUAL_LAST_YEAR",
+  });
+  const result = await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
+  return { deleted, fetched: result.fetched, stubbed: result.stubbed };
 }

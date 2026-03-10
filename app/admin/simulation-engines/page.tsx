@@ -81,6 +81,27 @@ export default function SimulationEnginesPage() {
   const [verifyNotice, setVerifyNotice] = useState<string | null>(null);
   const [verificationReport, setVerificationReport] = useState<string>("");
 
+  const [diagStartDate, setDiagStartDate] = useState("");
+  const [diagEndDate, setDiagEndDate] = useState("");
+  const [includeParity, setIncludeParity] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagError, setDiagError] = useState<string | null>(null);
+  const [diagnosticResult, setDiagnosticResult] = useState<{
+    ok: true;
+    diagnostic: {
+      ok: true;
+      context: any;
+      pastPath: any;
+      weatherProvenance: any;
+      stubAudit: any;
+      parity?: any;
+      gapfillLabNote: any;
+    };
+  } | null>(null);
+  const [repairLoading, setRepairLoading] = useState(false);
+  const [repairResult, setRepairResult] = useState<{ ok: boolean; deleted?: number; fetched?: number; stubbed?: number; error?: string } | null>(null);
+  const [diagNotice, setDiagNotice] = useState<string | null>(null);
+
   useEffect(() => {
     const token = window.localStorage.getItem("iw_admin_token");
     if (token) setAdminToken(token);
@@ -304,6 +325,87 @@ export default function SimulationEnginesPage() {
     }
   }
 
+  function getDiagnosticScenarioId(): string | null {
+    if (scenario === "past") return scenarios.find((s) => s.name === "Past (Corrected)")?.id ?? null;
+    if (scenario === "future") return scenarios.find((s) => s.name === "Future (What-if)")?.id ?? null;
+    return null;
+  }
+
+  async function runDiagnostic(recalcFirst = false) {
+    if (!email.trim()) {
+      setDiagError("Email is required.");
+      return;
+    }
+    const effectiveHouseId = houseId.trim() || (houses[0] as { id: string } | undefined)?.id;
+    if (!effectiveHouseId) {
+      setDiagError("Select a house (or run Inspect first to load houses).");
+      return;
+    }
+    setDiagLoading(true);
+    setDiagError(null);
+    setDiagnosticResult(null);
+    setDiagNotice(null);
+    try {
+      const res = await fetch("/api/admin/simulation-engines/diagnostic", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          email: email.trim(),
+          houseId: effectiveHouseId,
+          scenarioId: getDiagnosticScenarioId(),
+          startDate: diagStartDate.trim().slice(0, 10) || undefined,
+          endDate: diagEndDate.trim().slice(0, 10) || undefined,
+          recalcFirst,
+          includeParity,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setDiagError(json?.error ?? `Request failed (${res.status})`);
+        return;
+      }
+      setDiagnosticResult(json);
+      setDiagNotice("Diagnostic complete.");
+    } finally {
+      setDiagLoading(false);
+    }
+  }
+
+  async function runWeatherRepair() {
+    const effectiveHouseId = houseId.trim() || (houses[0] as { id: string } | undefined)?.id;
+    if (!effectiveHouseId) {
+      setRepairResult({ ok: false, error: "Select a house first." });
+      return;
+    }
+    setRepairLoading(true);
+    setRepairResult(null);
+    try {
+      const res = await fetch("/api/admin/weather/repair-stale-stubs", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          houseId: effectiveHouseId,
+          startDate: diagStartDate.trim().slice(0, 10) || undefined,
+          endDate: diagEndDate.trim().slice(0, 10) || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      setRepairResult(json?.ok ? { ok: true, deleted: json.deleted, fetched: json.fetched, stubbed: json.stubbed } : { ok: false, error: json?.error ?? "Request failed" });
+    } finally {
+      setRepairLoading(false);
+    }
+  }
+
+  async function copyDiagnosticJson() {
+    if (!diagnosticResult) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(diagnosticResult, null, 2));
+      setDiagNotice("Copied diagnostic JSON to clipboard.");
+    } catch {
+      setDiagNotice("Copy failed.");
+    }
+  }
+
   return (
     <div className="min-h-screen bg-brand-navy">
       <div className="mx-auto max-w-7xl px-4 py-8">
@@ -516,6 +618,134 @@ export default function SimulationEnginesPage() {
                 value={prettyJson}
                 className="h-[560px] w-full rounded border border-slate-300 bg-slate-950 p-3 font-mono text-xs text-slate-100"
               />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-8 rounded-lg bg-brand-white p-6 shadow-lg">
+          <h2 className="text-lg font-bold text-brand-navy">Past pipeline diagnostics</h2>
+          <p className="mt-1 text-sm text-brand-navy/70">
+            Validate production simulator/weather pipeline for the selected house: cold build, weather provenance, stub audit, parity (cold vs cache vs recalc), and weather repair. Uses same email/house as above.
+          </p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <label className="text-sm">
+              <div className="mb-1 font-semibold text-brand-navy">Start date (optional)</div>
+              <input
+                type="text"
+                className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                value={diagStartDate}
+                onChange={(e) => setDiagStartDate(e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+            </label>
+            <label className="text-sm">
+              <div className="mb-1 font-semibold text-brand-navy">End date (optional)</div>
+              <input
+                type="text"
+                className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                value={diagEndDate}
+                onChange={(e) => setDiagEndDate(e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-brand-navy">
+              <input type="checkbox" checked={includeParity} onChange={(e) => setIncludeParity(e.target.checked)} />
+              Include parity (cold vs production vs recalc)
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => runDiagnostic(false)}
+              disabled={diagLoading}
+              className="rounded border border-brand-blue/50 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
+            >
+              {diagLoading ? "Running..." : "Run full diagnostic"}
+            </button>
+            <button
+              type="button"
+              onClick={() => runDiagnostic(true)}
+              disabled={diagLoading}
+              className="rounded border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-slate-200 disabled:opacity-60"
+            >
+              {diagLoading ? "Running..." : "Refresh/rebuild Past then diagnostic"}
+            </button>
+            <button
+              type="button"
+              onClick={() => runWeatherRepair()}
+              disabled={repairLoading}
+              className="rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+            >
+              {repairLoading ? "Repairing..." : "Run weather repair"}
+            </button>
+            {diagnosticResult ? (
+              <button
+                type="button"
+                onClick={() => copyDiagnosticJson()}
+                className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-brand-navy hover:bg-slate-50"
+              >
+                Copy diagnostic JSON
+              </button>
+            ) : null}
+            {diagNotice ? <span className="text-xs text-slate-600">{diagNotice}</span> : null}
+          </div>
+          {diagError ? <div className="mt-3 rounded bg-rose-50 p-3 text-sm text-rose-700">{diagError}</div> : null}
+          {repairResult ? (
+            <div className={`mt-3 rounded p-3 text-sm ${repairResult.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>
+              {repairResult.ok
+                ? `Repair done: deleted=${repairResult.deleted ?? 0}, fetched=${repairResult.fetched ?? 0}, stubbed=${repairResult.stubbed ?? 0}`
+                : repairResult.error}
+              {repairResult.ok ? (
+                <button
+                  type="button"
+                  onClick={() => runDiagnostic(false)}
+                  className="ml-2 text-brand-navy underline"
+                >
+                  Run diagnostic again
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {diagnosticResult?.diagnostic ? (
+            <div className="mt-6 space-y-4">
+              <div className="rounded border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">House / scenario context</div>
+                <pre className="mt-1 overflow-auto text-xs text-slate-800">
+                  {JSON.stringify(diagnosticResult.diagnostic.context, null, 2)}
+                </pre>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Past production path</div>
+                <pre className="mt-1 overflow-auto text-xs text-slate-800">
+                  {JSON.stringify(diagnosticResult.diagnostic.pastPath, null, 2)}
+                </pre>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Weather provenance</div>
+                <pre className="mt-1 overflow-auto text-xs text-slate-800">
+                  {JSON.stringify(diagnosticResult.diagnostic.weatherProvenance, null, 2)}
+                </pre>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Stub row audit</div>
+                <pre className="mt-1 overflow-auto text-xs text-slate-800">
+                  {JSON.stringify(diagnosticResult.diagnostic.stubAudit, null, 2)}
+                </pre>
+              </div>
+              {diagnosticResult.diagnostic.parity ? (
+                <div className="rounded border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Parity checks</div>
+                  <pre className="mt-1 overflow-auto text-xs text-slate-800">
+                    {JSON.stringify(diagnosticResult.diagnostic.parity, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
+              <div className="rounded border border-amber-200 bg-amber-50 p-3">
+                <div className="text-xs font-semibold uppercase text-amber-800">GapFill Lab (separate from Past)</div>
+                <pre className="mt-1 overflow-auto text-xs text-amber-900">
+                  {JSON.stringify(diagnosticResult.diagnostic.gapfillLabNote, null, 2)}
+                </pre>
+              </div>
             </div>
           ) : null}
         </div>
