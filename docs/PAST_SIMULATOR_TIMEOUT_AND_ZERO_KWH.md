@@ -76,3 +76,11 @@ The user-facing **Past** simulated usage flow now exposes the same truthfulness 
 - **STUB_V1 is not real weather** — Rows with `source === "STUB_V1"` are test/default data and must not be labeled as "actual" or "real."
 
 - **Same provenance logic as GapFill Lab** — Both flows should be validated using the same provenance logic: `weatherSourceSummary`, `weatherKindUsed`, and the weather row counts/coverage fields in meta.
+
+---
+
+## Why "mixed" weather and the backfill fix
+
+Previously, the Past build path called **ensureHouseWeatherStubbed** before fetching from the weather API. That filled every missing day with stub data first, so there were no "missing" days left to fetch — the UI showed "mixed" (or all stub) even when the house had lat/lng and the API could return real data.
+
+**Fix:** Both the inline Past path (buildInputs) and **getPastSimulatedDatasetForHouse** now call **ensureHouseWeatherBackfill** when the house has lat/lng. Backfill: find missing dates → fetch from weather API → persist → then stub only any still-missing dates. So real weather is fetched and stored before stubs are used. After a cold build (or cache invalidation), the UI should show "actual cached weather data" when the API returns data for the full window. If the API has limits (e.g. historical range) or fails for part of the range, you will still see "mixed"; ensure the house has valid lat/lng and that the weather service covers the requested date range.

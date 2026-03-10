@@ -37,11 +37,10 @@ import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
-import { getHouseWeatherDays, upsertHouseWeatherDays, findMissingHouseWeatherDateKeys } from "@/modules/weather/repo";
+import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
-import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type ManualUsagePayloadAny = any;
@@ -593,24 +592,11 @@ export async function recalcSimulatorBuild(args: {
       const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
       const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
       if (lat != null && lon != null) {
-        await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+        await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
         [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
           getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
           getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
         ]);
-        const missingActual = await findMissingHouseWeatherDateKeys({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" });
-        if (missingActual.length > 0) {
-          const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
-          if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
-            const fetchedMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
-            const toPersist = missingActual.filter((dk) => fetchedMap.has(dk)).map((dk) => fetchedMap.get(dk)!);
-            if (toPersist.length > 0) await upsertHouseWeatherDays({ rows: toPersist }).catch(() => 0);
-            [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-              getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-              getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-            ]);
-          }
-        }
       } else {
         await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
         [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
@@ -881,24 +867,11 @@ export async function getPastSimulatedDatasetForHouse(args: {
     const lat = houseForWx?.lat != null && Number.isFinite(houseForWx.lat) ? houseForWx.lat : null;
     const lon = houseForWx?.lng != null && Number.isFinite(houseForWx.lng) ? houseForWx.lng : null;
     if (lat != null && lon != null) {
-      await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+      await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
       [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
         getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
         getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
       ]);
-      const missingActual = await findMissingHouseWeatherDateKeys({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" });
-      if (missingActual.length > 0) {
-        const weatherResult = await getWeatherForRange(lat, lon, startDate, endDate);
-        if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
-          const fetchedMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
-          const toPersist = missingActual.filter((dk) => fetchedMap.has(dk)).map((dk) => fetchedMap.get(dk)!);
-          if (toPersist.length > 0) await upsertHouseWeatherDays({ rows: toPersist }).catch(() => 0);
-          [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-            getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-          ]);
-        }
-      }
     } else {
       await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
       [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
