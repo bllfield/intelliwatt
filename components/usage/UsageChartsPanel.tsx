@@ -68,8 +68,14 @@ export function UsageChartsPanel(props: {
     coverageStart,
     coverageEnd,
   } = props;
-  const dailyLabelFormat =
-    coverageStart && coverageEnd && coverageStart.slice(0, 4) !== coverageEnd.slice(0, 4) ? formatDateShortWithYear : formatDateShort;
+  const spansTwoYears = coverageStart && coverageEnd && coverageStart.slice(0, 4) !== coverageEnd.slice(0, 4);
+  const firstLastSameMonthDay =
+    daily.length >= 2 &&
+    (() => {
+      const [a, b] = [daily[0]!.date.slice(5, 10), daily[daily.length - 1]!.date.slice(5, 10)];
+      return a === b && daily[0]!.date.slice(0, 4) !== daily[daily.length - 1]!.date.slice(0, 4);
+    })();
+  const dailyLabelFormat = spansTwoYears || firstLastSameMonthDay ? formatDateShortWithYear : formatDateShort;
 
   return (
     <>

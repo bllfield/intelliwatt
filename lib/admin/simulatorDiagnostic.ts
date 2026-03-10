@@ -147,11 +147,15 @@ export async function runSimulatorDiagnostic(
 
   const travelRangesFromBuild = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
   // When parity is requested, cold must use the same inputs as production/recalc (stored build). Otherwise cold would use UI override and diverge.
+  const filteredOverride =
+    Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+      ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
+      : [];
   const travelRanges =
     includeParity
       ? travelRangesFromBuild
-      : Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
-        ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
+      : filteredOverride.length > 0
+        ? filteredOverride
         : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
@@ -387,7 +391,9 @@ function compareParity(
   const intervalCountMatch = intervalCountA === intervalCountB;
 
   const weatherSummaryMatch = String(aMeta.weatherSourceSummary ?? "") === String(bMeta.weatherSourceSummary ?? "");
-  const weatherFallbackMatch = String(aMeta.weatherFallbackReason ?? "") === String(bMeta.weatherFallbackReason ?? "");
+  const aFallback = aMeta.weatherFallbackReason != null && String(aMeta.weatherFallbackReason).trim() !== "" ? aMeta.weatherFallbackReason : null;
+  const bFallback = bMeta.weatherFallbackReason != null && String(bMeta.weatherFallbackReason).trim() !== "" ? bMeta.weatherFallbackReason : null;
+  const weatherFallbackMatch = aFallback === bFallback;
 
   return {
     totalKwhMatch,
