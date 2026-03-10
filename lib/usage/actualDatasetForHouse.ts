@@ -862,7 +862,18 @@ export async function getActualUsageDatasetForHouse(
     totals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
   }
 
-  const monthlyForDataset = stitchedMonthlyTotals ?? monthlyTotals;
+  // Prefer stitched monthly only when it has comparable coverage to DB monthly totals.
+  // HomeMonthlyUsageBucket is often populated only for the current month, so stitched can
+  // return 12 rows with 11 zeros and one non-zero; in that case use direct SMT monthly aggregation.
+  const stitched = stitchedMonthlyTotals ?? [];
+  const fromDb = monthlyTotals ?? [];
+  const stitchedSum = stitched.reduce((s, m) => s + (Number(m?.kwh) || 0), 0);
+  const dbSum = fromDb.reduce((s, m) => s + (Number(m?.kwh) || 0), 0);
+  const stitchedNonZeroMonths = stitched.filter((m) => (Number(m?.kwh) || 0) > 1e-3).length;
+  const useStitched =
+    stitched.length > 0 &&
+    (stitchedNonZeroMonths >= 2 || (dbSum <= 1e-3) || (stitchedSum >= dbSum * 0.5));
+  const monthlyForDataset = useStitched ? stitched : fromDb;
   const baseloadMonthlyFromDataset = low10Average(
     (monthlyForDataset ?? []).map((m) => Number(m?.kwh) || 0)
   );
