@@ -257,7 +257,7 @@ async function runStubAudit(houseId: string, canonicalDateKeys: string[]): Promi
   });
   const stubDateKeys: string[] = [];
   let actualCount = 0;
-  for (const [dk, row] of wx) {
+  for (const [dk, row] of Array.from(wx.entries())) {
     if (String(row?.source ?? "").trim() === WEATHER_STUB_SOURCE) {
       stubDateKeys.push(dk);
     } else {

@@ -144,7 +144,11 @@ export async function repairStaleStubWeather(args: {
       select: { dateKey: true },
     })
     .catch(() => []);
-  const stubDateKeys = [...new Set((stubRows ?? []).map((r: { dateKey: string }) => String(r?.dateKey ?? "").slice(0, 10)).filter((k: string) => YYYY_MM_DD_RE.test(k)))];
+  const stubDateKeys: string[] = Array.from(
+    new Set<string>(
+      (stubRows ?? []).map((r: { dateKey: string }) => String(r?.dateKey ?? "").slice(0, 10)).filter((k: string) => YYYY_MM_DD_RE.test(k))
+    )
+  );
   if (stubDateKeys.length === 0) {
     return { deleted: 0, fetched: 0, stubbed: 0 };
   }
