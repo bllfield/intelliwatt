@@ -230,11 +230,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true, diagnostic: result });
+    const diagnostic = result;
+    const payload = {
+      ok: true as const,
+      diagnostic: {
+        ok: diagnostic.ok,
+        context: diagnostic.context,
+        pastPath: diagnostic.pastPath,
+        weatherProvenance: diagnostic.weatherProvenance,
+        stubAudit: diagnostic.stubAudit,
+        parity: diagnostic.parity,
+        gapfillLabNote: diagnostic.gapfillLabNote,
+      },
+    };
+    return NextResponse.json(payload);
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
+    const err = e instanceof Error ? e : new Error(String(e));
+    const message = err.message;
+    const stack = err.stack;
+    console.error("[diagnostic] POST failed", { message, stack });
     return NextResponse.json(
-      { ok: false, error: message },
+      { ok: false, error: message, ...(process.env.NODE_ENV === "development" && stack ? { stack } : {}) },
       { status: 500 }
     );
   }
