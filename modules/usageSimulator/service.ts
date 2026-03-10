@@ -335,6 +335,7 @@ export async function recalcSimulatorBuild(args: {
 
   // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).
   let canonicalForBuild = canonical;
+  let baselineInputsForRecalc: any = null;
   if (scenarioId) {
     const baselineBuild = await (prisma as any).usageSimulatorBuild
       .findUnique({
@@ -343,6 +344,7 @@ export async function recalcSimulatorBuild(args: {
       })
       .catch(() => null);
     const baselineInputs = baselineBuild?.buildInputs as any;
+    baselineInputsForRecalc = baselineInputs;
     if (
       Array.isArray(baselineInputs?.canonicalMonths) &&
       baselineInputs.canonicalMonths.length > 0 &&
@@ -564,6 +566,8 @@ export async function recalcSimulatorBuild(args: {
   }
 
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
+  /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
+  let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
   if (
@@ -604,6 +608,40 @@ export async function recalcSimulatorBuild(args: {
           getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
         ]);
       }
+      const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
+      if (missingWxKeys.length > 0) {
+        await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
+        [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+          getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+        ]);
+      }
+      const shapeProfileRowRecalc = await getLatestUsageShapeProfile(houseId).catch(() => null);
+      let usageShapeProfileSnapRecalc: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
+      if (
+        timezoneForStoredBuild &&
+        shapeProfileRowRecalc?.shapeByMonth96 &&
+        shapeProfileRowRecalc.avgKwhPerDayWeekdayByMonth != null &&
+        shapeProfileRowRecalc.avgKwhPerDayWeekendByMonth != null
+      ) {
+        const shapeByMonth = shapeProfileRowRecalc.shapeByMonth96 as Record<string, unknown>;
+        const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+        const wd = Array.isArray(shapeProfileRowRecalc.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRowRecalc.avgKwhPerDayWeekdayByMonth as number[]) : [];
+        const we = Array.isArray(shapeProfileRowRecalc.avgKwhPerDayWeekendByMonth) ? (shapeProfileRowRecalc.avgKwhPerDayWeekendByMonth as number[]) : [];
+        const weekdayAvgByMonthKey: Record<string, number> = {};
+        const weekendAvgByMonthKey: Record<string, number> = {};
+        for (let i = 0; i < profileMonthKeys.length; i++) {
+          const ym = profileMonthKeys[i];
+          if (!ym) continue;
+          const vWd = wd[i];
+          const vWe = we[i];
+          if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
+          if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
+        }
+        if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
+          usageShapeProfileSnapRecalc = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
+        }
+      }
       const patchedIntervals = buildPastSimulatedBaselineV1({
         actualIntervals,
         canonicalDayStartsMs,
@@ -612,6 +650,8 @@ export async function recalcSimulatorBuild(args: {
         getDayGridTimestamps,
         homeProfile,
         applianceProfile,
+        usageShapeProfile: usageShapeProfileSnapRecalc ?? undefined,
+        timezoneForProfile: timezoneForStoredBuild,
         actualWxByDateKey,
         _normalWxByDateKey: normalWxByDateKey,
       });
@@ -639,6 +679,7 @@ export async function recalcSimulatorBuild(args: {
     scenarioId?: string | null;
     versions?: typeof versions;
     pastSimulatedMonths?: string[];
+    timezone?: string;
   } = {
     version: 1,
     mode,
@@ -652,6 +693,7 @@ export async function recalcSimulatorBuild(args: {
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
     travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
+    timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,
     ...(pastSimulatedMonths != null ? { pastSimulatedMonths } : {}),
@@ -874,6 +916,14 @@ export async function getPastSimulatedDatasetForHouse(args: {
       ]);
     } else {
       await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+      [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+      ]);
+    }
+    const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
+    if (missingWxKeys.length > 0) {
+      await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
       [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
         getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
         getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
