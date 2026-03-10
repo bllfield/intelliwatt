@@ -6,6 +6,9 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 
+/** Allow time for per-house interval resolution (SMT/Green Button) when loading Usage. */
+export const maxDuration = 120;
+
 export async function GET(_request: NextRequest) {
   try {
     const cookieStore = cookies();

@@ -304,7 +304,17 @@ export const UsageDashboard: React.FC<Props> = ({
             ? `/api/user/usage/simulated?ts=${Date.now()}`
             : `/api/user/usage?ts=${Date.now()}`;
         const res = await fetch(url, { cache: "no-store" });
-        const json = (await res.json()) as UsageApiResponse;
+        let json: UsageApiResponse;
+        try {
+          const text = await res.text();
+          json = JSON.parse(text) as UsageApiResponse;
+        } catch {
+          const msg =
+            res.status === 504 || (res.status === 502 && res.url)
+              ? "Request timed out. Please try again."
+              : "Server returned an invalid response. Please try again.";
+          throw new Error(msg);
+        }
         if (!res.ok || json.ok === false) {
           throw new Error((json as any).error || `Failed with status ${res.status}`);
         }
@@ -361,7 +371,13 @@ export const UsageDashboard: React.FC<Props> = ({
 
     async function reloadUsageOnce() {
       const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
-      const json = (await res.json()) as UsageApiResponse;
+      let json: UsageApiResponse;
+      try {
+        const text = await res.text();
+        json = JSON.parse(text) as UsageApiResponse;
+      } catch {
+        return; // Non-JSON (e.g. timeout page): skip update, next poll will retry
+      }
       if (!res.ok || (json as any).ok === false) return;
       if (cancelled) return;
       writeSessionCache("REAL", json);

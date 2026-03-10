@@ -6,6 +6,8 @@ import { getSimulatedUsageForUser } from "@/modules/usageSimulator/service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+/** Allow time for per-house baseline build (actual or simulated) when loading the list. */
+export const maxDuration = 120;
 
 export async function GET(_request: NextRequest) {
   try {

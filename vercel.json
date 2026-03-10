@@ -13,6 +13,14 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "app/api/user/usage/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "app/api/user/usage/simulated/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
     "app/api/user/usage/simulated/house/route.ts": {
       "maxDuration": 300,
       "memory": 1024
