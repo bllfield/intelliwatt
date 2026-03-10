@@ -1374,8 +1374,9 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     string,
     {
       profileSelectedDayKwh: number;
+      /** Pre-blend weather adjustment: profileSelectedDayKwh × weatherSeverityMultiplier (before aux/pool adders and blend). */
+      preBlendAdjustedDayKwh: number;
       finalSelectedDayKwh: number;
-      preBlendAdjustedDayKwh?: number;
       weatherSeverityMultiplier: number;
       weatherModeUsed: "heating" | "cooling" | "neutral";
       auxHeatKwhAdder: number;
@@ -1443,7 +1444,8 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
       if (useWeather && weatherByDateKey) {
         weatherAdjustmentByDate.set(dateKey, {
           profileSelectedDayKwh: r.profileSelectedDayKwh,
-          preBlendAdjustedDayKwh: r.preBlendAdjustedDayKwh ?? r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
+          preBlendAdjustedDayKwh:
+            r.preBlendAdjustedDayKwh ?? r.profileSelectedDayKwh * r.weatherSeverityMultiplier,
           finalSelectedDayKwh: r.finalDayKwh,
           weatherSeverityMultiplier: r.weatherSeverityMultiplier,
           weatherModeUsed: r.weatherModeUsed,
