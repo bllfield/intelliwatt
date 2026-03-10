@@ -1343,6 +1343,39 @@ export async function getSimulatedUsageForHouseScenario(args: {
               }
               const recomputedDaily = buildDailyFromIntervals(decoded);
               (dataset as any).daily = recomputedDaily;
+              // Apply same actual overlay as cold build so totalKwh matches (non-travel months = actual kWh).
+              try {
+                const actualForOverlay = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, { skipFullYearIntervalFetch: true });
+                const canonicalMonthsForOverlay = (buildInputs as any).canonicalMonths ?? [];
+                if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly) && Array.isArray(canonicalMonthsForOverlay)) {
+                  const travelMonthsSet = monthsIntersectingTravelRanges(canonicalMonthsForOverlay as string[], travelRanges);
+                  const actualByMonth = new Map<string, number>();
+                  const actualMonthly = actualForOverlay.dataset.monthly as Array<{ month?: string; kwh?: number }>;
+                  for (const row of actualMonthly) {
+                    const ym = String(row?.month ?? "").trim();
+                    if (/^\d{4}-\d{2}$/.test(ym)) actualByMonth.set(ym, Number(row?.kwh) || 0);
+                  }
+                  (dataset as any).monthly = dataset.monthly.map((m: { month?: string; kwh?: number }) => {
+                    const ym = String(m?.month ?? "").trim();
+                    if (!/^\d{4}-\d{2}$/.test(ym)) return { month: m?.month ?? "", kwh: Number(m?.kwh) || 0 };
+                    if (travelMonthsSet.has(ym)) return { month: ym, kwh: Number(m?.kwh) || 0 };
+                    const actualKwh = actualByMonth.get(ym);
+                    if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return { month: ym, kwh: Number(m?.kwh) || 0 };
+                    return { month: ym, kwh: actualKwh };
+                  });
+                  const overlaySum = ((dataset as any).monthly as Array<{ kwh?: number }>).reduce((s: number, r: { kwh?: number }) => s + (Number(r?.kwh) || 0), 0);
+                  if (dataset.summary && typeof dataset.summary === "object") {
+                    (dataset.summary as any).totalKwh = Math.round(overlaySum * 100) / 100;
+                  }
+                  if (dataset.totals && typeof dataset.totals === "object") {
+                    const r = Math.round(overlaySum * 100) / 100;
+                    (dataset.totals as any).importKwh = r;
+                    (dataset.totals as any).netKwh = r;
+                  }
+                }
+              } catch {
+                /* keep recomputed-from-intervals totals */
+              }
             }
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;

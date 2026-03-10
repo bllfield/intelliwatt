@@ -3,6 +3,7 @@
  * Runs cold build, stub audit, production path, optional recalc+parity; returns structured payload.
  */
 
+import { createHash } from "crypto";
 import { enumerateDayStartsMsForWindow, dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { getPastSimulatedDatasetForHouse, getSimulatedUsageForHouseScenario, recalcSimulatorBuild } from "@/modules/usageSimulator/service";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
@@ -15,7 +16,7 @@ const BOUNDARY_STUB_SAMPLE = 5;
 function normalizeWeatherFallbackReason(value: unknown): string | null {
   if (value == null) return null;
   const s = String(value).trim();
-  return s === "" ? null : (value as string);
+  return s === "" ? null : s;
 }
 
 function getWindowFromBuildInputs(buildInputs: any): { startDate: string; endDate: string } | null {
@@ -80,6 +81,47 @@ function extractSummary(dataset: any): { totalKwh?: number; intervalsCount?: num
   return {
     totalKwh: typeof s.totalKwh === "number" ? s.totalKwh : undefined,
     intervalsCount: typeof s.intervalsCount === "number" ? s.intervalsCount : undefined,
+  };
+}
+
+/** Lightweight digest of intervals15 (timestamps + kwh) for parity comparison. */
+function intervalDigest(intervals15: Array<{ timestamp?: string; kwh?: number }>): string | undefined {
+  if (!Array.isArray(intervals15) || intervals15.length === 0) return undefined;
+  const parts = intervals15
+    .slice(0, 5000)
+    .map((p) => `${String(p?.timestamp ?? "").slice(0, 19)}:${Number(p?.kwh) ?? 0}`)
+    .sort();
+  return createHash("sha256").update(parts.join("\n"), "utf8").digest("hex").slice(0, 16);
+}
+
+function recomputedTotalFromIntervals(intervals15: Array<{ timestamp?: string; kwh?: number }>): number | undefined {
+  if (!Array.isArray(intervals15)) return undefined;
+  const sum = intervals15.reduce((s, p) => s + (Number(p?.kwh) ?? 0), 0);
+  return Number.isFinite(sum) ? Math.round(sum * 100) / 100 : undefined;
+}
+
+/** Parity diagnostics derived from a dataset (interval digest, recomputed total, source artifact). */
+function computeParityDiagnostics(dataset: any): {
+  intervalDigest?: string;
+  recomputedTotalFromIntervals?: number;
+  datasetTotalKwh?: number;
+  totalSource: string;
+  sourceArtifact: string;
+} {
+  const buildPathKind = dataset?.meta?.buildPathKind;
+  const sourceArtifact =
+    buildPathKind === "cold_build"
+      ? "fresh_in_memory"
+      : buildPathKind === "cache_restore"
+        ? "decoded_cached_intervals"
+        : "saved_dataset_json";
+  const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+  return {
+    intervalDigest: intervalDigest(intervals15),
+    recomputedTotalFromIntervals: recomputedTotalFromIntervals(intervals15),
+    datasetTotalKwh: typeof dataset?.summary?.totalKwh === "number" ? dataset.summary.totalKwh : undefined,
+    totalSource: "dataset_summary",
+    sourceArtifact,
   };
 }
 
@@ -154,15 +196,11 @@ export async function runSimulatorDiagnostic(
 
   const travelRangesFromBuild = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
   // When parity is requested, cold must use the same inputs as production/recalc (stored build). Otherwise cold would use UI override and diverge.
-  const filteredOverride =
-    Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
-      ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
-      : [];
   const travelRanges =
     includeParity
       ? travelRangesFromBuild
-      : filteredOverride.length > 0
-        ? filteredOverride
+      : Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+        ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
         : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
@@ -186,85 +224,96 @@ export async function runSimulatorDiagnostic(
     coldSummary = extractSummary(coldResult.dataset);
   }
 
+  const coldParityDiag = coldResult.dataset ? computeParityDiagnostics(coldResult.dataset) : undefined;
+
   const stubAudit = await runStubAudit(houseId, canonicalDateKeys);
 
   const productionResult = await getSimulatedUsageForHouseScenario({ userId, houseId, scenarioId });
   const productionMeta = productionResult.ok && productionResult.dataset ? extractMeta(productionResult.dataset) : {};
   const productionSummary = productionResult.ok && productionResult.dataset ? extractSummary(productionResult.dataset) : {};
+  const productionParityDiag = productionResult.ok && productionResult.dataset ? computeParityDiagnostics(productionResult.dataset) : undefined;
 
   let parity: SimulatorDiagnosticResult["parity"] | undefined;
   if (includeParity) {
-    const mode = (buildInputs as any)?.mode ?? "SMT_BASELINE";
-    const recalcResult = await recalcSimulatorBuild({
-      userId,
-      houseId,
-      esiid,
-      mode: mode as "SMT_BASELINE" | "NEW_BUILD_ESTIMATE" | "MANUAL_TOTALS",
-      scenarioId,
-      persistPastSimBaseline: false,
-    });
-    let recalcMeta: Record<string, unknown> = {};
-    let recalcSummary: { totalKwh?: number; intervalsCount?: number } = {};
-    if (recalcResult.ok) {
-      const afterRecalc = await getSimulatedUsageForHouseScenario({ userId, houseId, scenarioId });
-      if (afterRecalc.ok && afterRecalc.dataset) {
-        recalcMeta = extractMeta(afterRecalc.dataset);
-        recalcSummary = extractSummary(afterRecalc.dataset);
+    try {
+      const mode = (buildInputs as any)?.mode ?? "SMT_BASELINE";
+      const recalcResult = await recalcSimulatorBuild({
+        userId,
+        houseId,
+        esiid,
+        mode: mode as "SMT_BASELINE" | "NEW_BUILD_ESTIMATE" | "MANUAL_TOTALS",
+        scenarioId,
+        persistPastSimBaseline: false,
+      });
+      let recalcMeta: Record<string, unknown> = {};
+      let recalcSummary: { totalKwh?: number; intervalsCount?: number } = {};
+      if (recalcResult.ok) {
+        const afterRecalc = await getSimulatedUsageForHouseScenario({ userId, houseId, scenarioId });
+        if (afterRecalc.ok && afterRecalc.dataset) {
+          recalcMeta = extractMeta(afterRecalc.dataset);
+          recalcSummary = extractSummary(afterRecalc.dataset);
+        }
       }
+      const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
+      const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
+      const coldSide = buildParitySide({
+        summary: coldSummary,
+        meta: coldMeta,
+        scenarioId,
+        scenarioKey,
+        buildInputsHash,
+        travelRangesUsed: travelRanges,
+        coverageStart: startDate,
+        coverageEnd: endDate,
+        label: "cold",
+        parityDiagnostics: coldParityDiag,
+      });
+      const productionSide = buildParitySide({
+        summary: productionSummary,
+        meta: productionMeta,
+        scenarioId,
+        scenarioKey,
+        buildInputsHash,
+        travelRangesUsed: travelRanges,
+        coverageStart: String(productionMeta.coverageStart ?? startDate),
+        coverageEnd: String(productionMeta.coverageEnd ?? endDate),
+        label: "production",
+        parityDiagnostics: productionParityDiag,
+      });
+      const recalcSide = buildParitySide({
+        summary: recalcSummary,
+        meta: recalcMeta,
+        scenarioId,
+        scenarioKey,
+        buildInputsHash,
+        travelRangesUsed: travelRanges,
+        coverageStart: String(recalcMeta.coverageStart ?? startDate),
+        coverageEnd: String(recalcMeta.coverageEnd ?? endDate),
+        label: "recalc",
+        parityDiagnostics: recalcParityDiag,
+      });
+      parity = {
+        coldVsProduction: {
+          totalKwhMatch: coldVsProd.totalKwhMatch,
+          intervalCountMatch: coldVsProd.intervalCountMatch,
+          weatherSummaryMatch: coldVsProd.weatherSummaryMatch,
+          weatherFallbackMatch: coldVsProd.weatherFallbackMatch,
+          cold: coldSide,
+          production: productionSide,
+        },
+        coldVsRecalc: {
+          totalKwhMatch: coldVsRec.totalKwhMatch,
+          intervalCountMatch: coldVsRec.intervalCountMatch,
+          weatherSummaryMatch: coldVsRec.weatherSummaryMatch,
+          weatherFallbackMatch: coldVsRec.weatherFallbackMatch,
+          cold: coldSide,
+          recalc: recalcSide,
+        },
+      };
+    } catch (parityErr) {
+      const msg = parityErr instanceof Error ? parityErr.message : String(parityErr);
+      return { ok: false, error: `Parity step failed: ${msg}` };
     }
-    const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
-    const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
-    const coldSide = buildParitySide({
-      summary: coldSummary,
-      meta: coldMeta,
-      scenarioId,
-      scenarioKey,
-      buildInputsHash,
-      travelRangesUsed: travelRanges,
-      coverageStart: startDate,
-      coverageEnd: endDate,
-      label: "cold",
-    });
-    const productionSide = buildParitySide({
-      summary: productionSummary,
-      meta: productionMeta,
-      scenarioId,
-      scenarioKey,
-      buildInputsHash,
-      travelRangesUsed: travelRanges,
-      coverageStart: String(productionMeta.coverageStart ?? startDate),
-      coverageEnd: String(productionMeta.coverageEnd ?? endDate),
-      label: "production",
-    });
-    const recalcSide = buildParitySide({
-      summary: recalcSummary,
-      meta: recalcMeta,
-      scenarioId,
-      scenarioKey,
-      buildInputsHash,
-      travelRangesUsed: travelRanges,
-      coverageStart: String(recalcMeta.coverageStart ?? startDate),
-      coverageEnd: String(recalcMeta.coverageEnd ?? endDate),
-      label: "recalc",
-    });
-    parity = {
-      coldVsProduction: {
-        totalKwhMatch: coldVsProd.totalKwhMatch,
-        intervalCountMatch: coldVsProd.intervalCountMatch,
-        weatherSummaryMatch: coldVsProd.weatherSummaryMatch,
-        weatherFallbackMatch: coldVsProd.weatherFallbackMatch,
-        cold: coldSide,
-        production: productionSide,
-      },
-      coldVsRecalc: {
-        totalKwhMatch: coldVsRec.totalKwhMatch,
-        intervalCountMatch: coldVsRec.intervalCountMatch,
-        weatherSummaryMatch: coldVsRec.weatherSummaryMatch,
-        weatherFallbackMatch: coldVsRec.weatherFallbackMatch,
-        cold: coldSide,
-        recalc: recalcSide,
-      },
-    };
   }
 
   return {
@@ -367,9 +416,19 @@ function buildParitySide(args: {
     totalKwh: summary.totalKwh,
     intervalsCount: summary.intervalsCount,
     weatherSourceSummary: meta.weatherSourceSummary ?? undefined,
+    // Normalize so match flag and displayed value agree: null/undefined/"" all become null.
     weatherFallbackReason: normalizeWeatherFallbackReason(meta.weatherFallbackReason),
     lastBuiltAt: meta.lastBuiltAt ?? undefined,
     source,
+    ...(parityDiagnostics
+      ? {
+          intervalDigest: parityDiagnostics.intervalDigest,
+          datasetTotalKwh: parityDiagnostics.datasetTotalKwh,
+          recomputedTotalFromIntervals: parityDiagnostics.recomputedTotalFromIntervals,
+          totalSource: parityDiagnostics.totalSource,
+          sourceArtifact: parityDiagnostics.sourceArtifact,
+        }
+      : {}),
   };
 }
 
@@ -398,8 +457,8 @@ function compareParity(
   const intervalCountMatch = intervalCountA === intervalCountB;
 
   const weatherSummaryMatch = String(aMeta.weatherSourceSummary ?? "") === String(bMeta.weatherSourceSummary ?? "");
-  const aFallback = aMeta.weatherFallbackReason != null && String(aMeta.weatherFallbackReason).trim() !== "" ? aMeta.weatherFallbackReason : null;
-  const bFallback = bMeta.weatherFallbackReason != null && String(bMeta.weatherFallbackReason).trim() !== "" ? bMeta.weatherFallbackReason : null;
+  const aFallback = normalizeWeatherFallbackReason(aMeta.weatherFallbackReason);
+  const bFallback = normalizeWeatherFallbackReason(bMeta.weatherFallbackReason);
   const weatherFallbackMatch = aFallback === bFallback;
 
   return {
