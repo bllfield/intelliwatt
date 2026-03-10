@@ -254,7 +254,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         }
         setCanRecalc(Boolean(j.canRecalc));
         setRequirementsError(null);
-        setMissingRequirements(Array.isArray((j as any).missingItems) ? (j as any).missingItems : j.canRecalc ? [] : []);
+        setMissingRequirements(j.canRecalc ? [] : (Array.isArray((j as any).missingItems) ? (j as any).missingItems : []));
         setRequirementsDbStatus((j as any).dbStatus ?? null);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
       } catch {
@@ -717,6 +717,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         }
         return;
       }
+      setMissingRequirements([]);
       setRecalcNote("Updated.");
       setRefreshToken((x) => x + 1);
     } catch (e: any) {
