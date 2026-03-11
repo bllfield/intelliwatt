@@ -196,12 +196,16 @@ export async function runSimulatorDiagnostic(
   }
 
   const travelRangesFromBuild = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
-  // When parity is requested, cold must use the same inputs as production/recalc (stored build). Otherwise cold would use UI override and diverge.
+  // When parity is requested, cold must use the same inputs as production/recalc (stored build). Otherwise use UI override if present and valid; if override has only invalid entries, fall back to stored ranges.
+  const filteredOverride =
+    Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+      ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
+      : [];
   const travelRanges =
     includeParity
       ? travelRangesFromBuild
-      : Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
-        ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
+      : filteredOverride.length > 0
+        ? filteredOverride
         : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
