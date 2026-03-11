@@ -164,6 +164,37 @@ export type SimulatorDiagnosticResult = {
     coldVsProduction: { totalKwhMatch: boolean; intervalCountMatch: boolean; weatherSummaryMatch: boolean; weatherFallbackMatch: boolean; cold: any; production: any };
     coldVsRecalc: { totalKwhMatch: boolean; intervalCountMatch: boolean; weatherSummaryMatch: boolean; weatherFallbackMatch: boolean; cold: any; recalc: any };
   };
+  /** Optional simulated-day parity sample for selected date. */
+  dayLevelParity?: {
+    selectedSimulatedDate: string;
+    cold: {
+      source: string;
+      localDate: string;
+      intervalSumKwh?: number;
+      displayDayKwh?: number;
+      rawDayKwh?: number;
+      weatherAdjustedDayKwh?: number;
+      finalDayKwh?: number;
+      fallbackLevel?: string;
+      clampApplied?: boolean;
+      intervalDigest?: string;
+    };
+    production?: {
+      source: string;
+      localDate: string;
+      intervalSumKwh?: number;
+      displayDayKwh?: number;
+      intervalDigest?: string;
+    } | null;
+    recalc?: {
+      source: string;
+      localDate: string;
+      intervalSumKwh?: number;
+      displayDayKwh?: number;
+      intervalDigest?: string;
+    } | null;
+    note?: string;
+  };
   /** Dataset integrity and cache consistency. Present when diagnostic ran. */
   integrity?: {
     intervalCountMatch: boolean;
@@ -241,6 +272,9 @@ export async function runSimulatorDiagnostic(
     coldMeta = extractMeta(coldResult.dataset);
     coldSummary = extractSummary(coldResult.dataset);
   }
+  const coldSimulatedDayResults = Array.isArray((coldResult as { simulatedDayResults?: unknown }).simulatedDayResults)
+    ? ((coldResult as { simulatedDayResults?: Array<Record<string, unknown>> }).simulatedDayResults ?? [])
+    : [];
 
   const coldParityDiag = coldResult.dataset ? computeParityDiagnostics(coldResult.dataset) : undefined;
   // Drop heavy dataset so GC can reclaim before loading production (reduces OOM risk in serverless)
@@ -249,14 +283,18 @@ export async function runSimulatorDiagnostic(
   const stubAudit = await runStubAudit(houseId, canonicalDateKeys);
 
   const productionResult = await getSimulatedUsageForHouseScenario({ userId, houseId, scenarioId });
+  let productionDatasetForDayParity: any | null = null;
   const productionMeta = productionResult.ok && productionResult.dataset ? extractMeta(productionResult.dataset) : {};
   const productionSummary = productionResult.ok && productionResult.dataset ? extractSummary(productionResult.dataset) : {};
   const productionParityDiag = productionResult.ok && productionResult.dataset ? computeParityDiagnostics(productionResult.dataset) : undefined;
   if (productionResult.ok && productionResult.dataset) {
+    productionDatasetForDayParity = productionResult.dataset;
     (productionResult as { dataset?: unknown }).dataset = undefined;
   }
 
   let parity: SimulatorDiagnosticResult["parity"] | undefined;
+  let dayLevelParity: SimulatorDiagnosticResult["dayLevelParity"] | undefined;
+  let recalcDatasetForDayParity: any | null = null;
   if (includeParity) {
     try {
       const mode = (buildInputs as any)?.mode ?? "SMT_BASELINE";
@@ -277,6 +315,7 @@ export async function runSimulatorDiagnostic(
           recalcMeta = extractMeta(afterRecalc.dataset);
           recalcSummary = extractSummary(afterRecalc.dataset);
           recalcParityDiag = computeParityDiagnostics(afterRecalc.dataset);
+          recalcDatasetForDayParity = afterRecalc.dataset;
           (afterRecalc as { dataset?: unknown }).dataset = undefined;
         }
       }
@@ -340,6 +379,65 @@ export async function runSimulatorDiagnostic(
       const msg = parityErr instanceof Error ? parityErr.message : String(parityErr);
       return { ok: false, error: `Parity step failed: ${msg}` };
     }
+  }
+
+  const selectedColdDay = coldSimulatedDayResults.length > 0 ? (coldSimulatedDayResults[0] as any) : null;
+  if (selectedColdDay && typeof selectedColdDay.localDate === "string") {
+    const dateKey = String(selectedColdDay.localDate).slice(0, 10);
+    const summarizeDayFromDataset = (dataset: any, source: string) => {
+      const rows = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+      const dayRows = rows.filter((r: any) => String(r?.timestamp ?? "").slice(0, 10) === dateKey);
+      if (!dayRows.length) return null;
+      const intervalSum = dayRows.reduce((s: number, r: any) => s + (Number(r?.kwh) || 0), 0);
+      return {
+        source,
+        localDate: dateKey,
+        intervalSumKwh: Math.round(intervalSum * 100) / 100,
+        displayDayKwh: Math.round(intervalSum * 100) / 100,
+        intervalDigest: intervalDigest(dayRows),
+      };
+    };
+    dayLevelParity = {
+      selectedSimulatedDate: dateKey,
+      cold: {
+        source: String(selectedColdDay.source ?? "simulated_vacant_day"),
+        localDate: dateKey,
+        intervalSumKwh:
+          typeof selectedColdDay.intervalSumKwh === "number"
+            ? selectedColdDay.intervalSumKwh
+            : undefined,
+        displayDayKwh:
+          typeof selectedColdDay.displayDayKwh === "number"
+            ? selectedColdDay.displayDayKwh
+            : undefined,
+        rawDayKwh:
+          typeof selectedColdDay.rawDayKwh === "number" ? selectedColdDay.rawDayKwh : undefined,
+        weatherAdjustedDayKwh:
+          typeof selectedColdDay.weatherAdjustedDayKwh === "number"
+            ? selectedColdDay.weatherAdjustedDayKwh
+            : undefined,
+        finalDayKwh:
+          typeof selectedColdDay.finalDayKwh === "number" ? selectedColdDay.finalDayKwh : undefined,
+        fallbackLevel:
+          typeof selectedColdDay.fallbackLevel === "string"
+            ? selectedColdDay.fallbackLevel
+            : undefined,
+        clampApplied:
+          typeof selectedColdDay.clampApplied === "boolean"
+            ? selectedColdDay.clampApplied
+            : undefined,
+        intervalDigest: intervalDigest(Array.isArray(selectedColdDay.intervals) ? selectedColdDay.intervals : []),
+      },
+      production:
+        productionDatasetForDayParity
+          ? summarizeDayFromDataset(productionDatasetForDayParity, "production_dataset_intervals")
+          : null,
+      recalc: recalcDatasetForDayParity
+        ? summarizeDayFromDataset(recalcDatasetForDayParity, "recalc_dataset_intervals")
+        : null,
+      note:
+        "Day-level diagnostics for actual dates may continue to come from existing actual-usage inspection paths; this refactor only requires SimulatedDayResult parity for simulated dates.",
+    };
   }
 
   // Integrity and cache consistency (from cold + production; recalc when includeParity).
@@ -415,6 +513,7 @@ export async function runSimulatorDiagnostic(
     },
     stubAudit,
     parity,
+    dayLevelParity,
     integrity,
     gapfillLabNote: {
       enginePath: "gapfill_test_days_profile",

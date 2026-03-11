@@ -38,6 +38,7 @@ import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
+import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { simulatePastUsageDataset } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
@@ -522,6 +523,7 @@ export async function recalcSimulatorBuild(args: {
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
+  let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
   if (
     scenario?.name === WORKSPACE_PAST_NAME &&
     mode === "SMT_BASELINE"
@@ -558,6 +560,7 @@ export async function recalcSimulatorBuild(args: {
       });
       if (result.dataset !== null && result.stitchedCurve) {
         pastPatchedCurve = result.stitchedCurve;
+        pastSimulatedDayResults = result.simulatedDayResults;
         const byMonth: Record<string, number> = {};
         for (const m of result.stitchedCurve.monthlyTotals) {
           const ym = String(m?.month ?? "").trim();
@@ -660,7 +663,11 @@ export async function recalcSimulatorBuild(args: {
           canonicalEndMonth: buildInputs.canonicalEndMonth,
           notes: buildInputs.notes,
           filledMonths: buildInputs.filledMonths,
-        }, { timezone: (buildInputs as any).timezone ?? undefined, useUtcMonth: true })
+        }, {
+          timezone: (buildInputs as any).timezone ?? undefined,
+          useUtcMonth: true,
+          simulatedDayResults: pastSimulatedDayResults,
+        })
       : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
   const filledSet = new Set<string>((buildInputs.filledMonths ?? []).map(String));
   const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
@@ -786,7 +793,11 @@ export async function getPastSimulatedDatasetForHouse(args: {
   /** Optional: cold_build (default), recalc, or lab_validation. */
   buildPathKind?: "cold_build" | "recalc" | "lab_validation";
 }): Promise<
-  | { dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>; error?: undefined }
+  | {
+      dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>;
+      simulatedDayResults?: SimulatedDayResult[];
+      error?: undefined;
+    }
   | { dataset: null; error: string }
 > {
   const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate, timezone, buildPathKind = "cold_build" } = args;
@@ -809,42 +820,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       return { dataset: null, error: (result as { error: string }).error ?? "simulatePastUsageDataset failed" };
     }
     const dataset = result.dataset;
-    try {
-      const actualForOverlay = await getActualUsageDatasetForHouse(houseId, esiid, { skipFullYearIntervalFetch: true });
-      if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly)) {
-        const travelMonthsSet = monthsIntersectingTravelRanges(
-          ((buildInputs as any).canonicalMonths ?? []) as string[],
-          travelRanges
-        );
-        const actualByMonth = new Map<string, number>();
-        const actualMonthly = actualForOverlay.dataset.monthly as Array<{ month?: string; kwh?: number }>;
-        for (const row of actualMonthly) {
-          const ym = String(row?.month ?? "").trim();
-          if (/^\d{4}-\d{2}$/.test(ym)) actualByMonth.set(ym, Number(row?.kwh) || 0);
-        }
-        dataset.monthly = dataset.monthly.map((m: { month?: string; kwh?: number }) => {
-          const ym = String(m?.month ?? "").trim();
-          if (!/^\d{4}-\d{2}$/.test(ym)) return { month: m?.month ?? "", kwh: Number(m?.kwh) || 0 };
-          if (travelMonthsSet.has(ym)) return { month: ym, kwh: Number(m?.kwh) || 0 };
-          const actualKwh = actualByMonth.get(ym);
-          if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return { month: ym, kwh: Number(m?.kwh) || 0 };
-          return { month: ym, kwh: actualKwh };
-        });
-        // Single source of truth: totalKwh from sum(intervals15) so parity with recomputedTotalFromIntervals holds.
-        const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
-        const sumFromIntervals = intervals15.reduce((s: number, p: { kwh?: number }) => s + (Number(p?.kwh) ?? 0), 0);
-        const totalKwhRounded = Number.isFinite(sumFromIntervals) ? Math.round(sumFromIntervals * 100) / 100 : 0;
-        if (dataset.summary && typeof dataset.summary === "object") {
-          (dataset.summary as any).totalKwh = totalKwhRounded;
-        }
-        if (dataset.totals && typeof dataset.totals === "object") {
-          (dataset.totals as any).importKwh = totalKwhRounded;
-          (dataset.totals as any).netKwh = totalKwhRounded;
-        }
-      }
-    } catch {
-      /* keep curve without overlay */
-    }
+    // Keep cold build on the stitched saved artifact only; no second overlay pass.
     const actualWxByDateKey = result.actualWxByDateKey;
     if (dataset && actualWxByDateKey && actualWxByDateKey.size > 0) {
       (dataset as any).dailyWeather = Object.fromEntries(
@@ -861,7 +837,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
         ])
       );
     }
-    return { dataset };
+    return { dataset, simulatedDayResults: result.simulatedDayResults };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.warn("[usageSimulator/service] getPastSimulatedDatasetForHouse failed", { houseId, err: e });
@@ -1350,40 +1326,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               }
               const recomputedDaily = buildDailyFromIntervals(decoded);
               (dataset as any).daily = recomputedDaily;
-              // Apply same actual overlay as cold build so totalKwh matches (non-travel months = actual kWh).
-              try {
-                const actualForOverlay = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, { skipFullYearIntervalFetch: true });
-                const canonicalMonthsForOverlay = (buildInputs as any).canonicalMonths ?? [];
-                if (dataset?.monthly && actualForOverlay?.dataset?.monthly && Array.isArray(dataset.monthly) && Array.isArray(canonicalMonthsForOverlay)) {
-                  const travelMonthsSet = monthsIntersectingTravelRanges(canonicalMonthsForOverlay as string[], travelRanges);
-                  const actualByMonth = new Map<string, number>();
-                  const actualMonthly = actualForOverlay.dataset.monthly as Array<{ month?: string; kwh?: number }>;
-                  for (const row of actualMonthly) {
-                    const ym = String(row?.month ?? "").trim();
-                    if (/^\d{4}-\d{2}$/.test(ym)) actualByMonth.set(ym, Number(row?.kwh) || 0);
-                  }
-                  (dataset as any).monthly = dataset.monthly.map((m: { month?: string; kwh?: number }) => {
-                    const ym = String(m?.month ?? "").trim();
-                    if (!/^\d{4}-\d{2}$/.test(ym)) return { month: m?.month ?? "", kwh: Number(m?.kwh) || 0 };
-                    if (travelMonthsSet.has(ym)) return { month: ym, kwh: Number(m?.kwh) || 0 };
-                    const actualKwh = actualByMonth.get(ym);
-                    if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return { month: ym, kwh: Number(m?.kwh) || 0 };
-                    return { month: ym, kwh: actualKwh };
-                  });
-                  // Single source of truth: totalKwh from sum(decoded intervals) so parity with recomputedTotalFromIntervals holds.
-                  const sumFromDecoded = (decoded as Array<{ kwh?: number }>).reduce((s: number, p: { kwh?: number }) => s + (Number(p?.kwh) ?? 0), 0);
-                  const totalKwhRounded = Number.isFinite(sumFromDecoded) ? Math.round(sumFromDecoded * 100) / 100 : 0;
-                  if (dataset.summary && typeof dataset.summary === "object") {
-                    (dataset.summary as any).totalKwh = totalKwhRounded;
-                  }
-                  if (dataset.totals && typeof dataset.totals === "object") {
-                    (dataset.totals as any).importKwh = totalKwhRounded;
-                    (dataset.totals as any).netKwh = totalKwhRounded;
-                  }
-                }
-              } catch {
-                /* keep recomputed-from-intervals totals */
-              }
+              // Keep cache restore on the saved stitched artifact only; no second overlay pass.
             }
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;

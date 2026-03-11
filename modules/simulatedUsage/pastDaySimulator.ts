@@ -7,6 +7,7 @@ import type {
   PastDaySimulationContext,
   PastDaySimulationRequest,
   PastDaySimulationResult,
+  SimulatedDayResult,
   PastDayProfileLite,
   PastDayTrainingWeatherStats,
   PastDayWeatherFeatures,
@@ -17,9 +18,14 @@ import type {
 } from "./pastDaySimulatorTypes";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
-export type { PastDaySimulationContext, PastDaySimulationRequest, PastDaySimulationResult } from "./pastDaySimulatorTypes";
+export type { PastDaySimulationContext, PastDaySimulationRequest, PastDaySimulationResult, SimulatedDayResult } from "./pastDaySimulatorTypes";
 
 const INTERVALS_PER_DAY = 96;
+
+/** Canonical day-display rounding used across simulated-day paths. */
+export function roundDayKwhDisplay(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
 
 // ----- Fallback hierarchy (from GapFill Lab) -----
 function prevMonthKey(monthKey: string): string {
@@ -418,7 +424,7 @@ export function simulatePastDay(
   homeProfile?: PastDayHomeProfile | null,
   applianceProfile?: PastDayApplianceProfile | null,
   shapeByMonth96?: Record<string, number[]> | null
-): PastDaySimulationResult {
+): SimulatedDayResult {
   const { localDate, isWeekend, gridTimestamps, weatherForDay } = request;
   const monthKey = localDate.slice(0, 7);
 
@@ -452,9 +458,20 @@ export function simulatePastDay(
     timestamp: ts,
     kwh: Math.max(0, (adj.finalSelectedDayKwh ?? 0) * (normShape[i] ?? 1 / INTERVALS_PER_DAY)),
   }));
+  const intervalSumKwh = intervals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
+  const displayDayKwh = roundDayKwhDisplay(intervalSumKwh);
+  const weatherAdjustedDayKwh =
+    Number(adj.preBlendAdjustedDayKwh) || (Number(sel.targetDayKwh) || 0) * (Number(adj.weatherSeverityMultiplier) || 0);
 
   return {
+    localDate,
+    source: "simulated_vacant_day",
     intervals,
+    intervals15: intervals.map((row) => Number(row.kwh) || 0),
+    intervalSumKwh,
+    displayDayKwh,
+    rawDayKwh: sel.targetDayKwh,
+    weatherAdjustedDayKwh,
     profileSelectedDayKwh: sel.targetDayKwh,
     finalDayKwh: adj.finalSelectedDayKwh,
     weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
@@ -475,7 +492,8 @@ export function simulatePastDay(
 }
 
 /**
- * Get day-level simulation result only (no intervals). Use when caller applies shape to its own grid (e.g. GapFill Lab).
+ * Backward-compatible wrapper for callers still using this function name.
+ * Returns the same full canonical simulated-day artifact as simulatePastDay.
  */
 export function getPastDayResultOnly(
   localDate: string,
@@ -485,44 +503,24 @@ export function getPastDayResultOnly(
   applianceProfile?: PastDayApplianceProfile | null,
   weatherForDay?: PastDayWeatherFeatures | null,
   shapeByMonth96?: Record<string, number[]> | null
-): Omit<PastDaySimulationResult, "intervals"> {
-  const monthKey = localDate.slice(0, 7);
-  const sel = selectDayTotalWithFallback({ monthKey, isWeekend, profile: context.profile });
-  const weatherByDateKey = new Map<string, PastDayWeatherFeatures>();
-  if (weatherForDay) weatherByDateKey.set(localDate, weatherForDay);
-  const adj = computeWeatherAdjustedDayTotal({
-    baseDayKwh: sel.targetDayKwh,
-    localDate,
-    weatherByDateKey,
-    trainingStats: context.trainingWeatherStats,
-    isWeekend,
-    homeProfile: homeProfile ?? null,
-    applianceProfile: applianceProfile ?? null,
-  });
-  const shape96 =
-    (shapeByMonth96 && shapeByMonth96[monthKey] && shapeByMonth96[monthKey].length === INTERVALS_PER_DAY
-      ? shapeByMonth96[monthKey]
-      : null) ?? Array.from({ length: INTERVALS_PER_DAY }, () => 1 / INTERVALS_PER_DAY);
-  const sumShape = shape96.reduce((a, b) => a + b, 0) || 1;
-  const normShape = shape96.map((w) => w / sumShape);
-  return {
-    profileSelectedDayKwh: sel.targetDayKwh,
-    finalDayKwh: adj.finalSelectedDayKwh,
-    weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
-    weatherModeUsed: adj.weatherModeUsed,
-    auxHeatKwhAdder: adj.auxHeatKwhAdder,
-    poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
-    dayClassification: adj.dayClassification,
-    fallbackLevel: sel.fallbackLevel,
-    clampApplied: sel.clampApplied,
-    shape96Used: normShape,
-    auxHeatGate_minTempPassed: adj.auxHeatGate_minTempPassed,
-    auxHeatGate_freezeHoursPassed: adj.auxHeatGate_freezeHoursPassed,
-    auxHeatGate_severityPassed: adj.auxHeatGate_severityPassed,
-    referenceHeatingSeverity: adj.referenceHeatingSeverity,
-    preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
-    blendedBackTowardProfile: adj.blendedBackTowardProfile,
-  };
+): SimulatedDayResult {
+  const [year, month, day] = localDate.split("-").map((x) => Number(x));
+  const dayStartMs = Date.UTC(year, (month || 1) - 1, day || 1, 0, 0, 0, 0);
+  const gridTimestamps = Array.from({ length: INTERVALS_PER_DAY }, (_, idx) =>
+    new Date(dayStartMs + idx * 15 * 60 * 1000).toISOString()
+  );
+  return simulatePastDay(
+    {
+      localDate,
+      isWeekend,
+      gridTimestamps,
+      weatherForDay: weatherForDay ?? null,
+    },
+    context,
+    homeProfile,
+    applianceProfile,
+    shapeByMonth96
+  );
 }
 
 /**

@@ -12,6 +12,7 @@ import type {
   PastDayTrainingWeatherStats,
   PastDayWeatherFeatures,
   PastDayFallbackLevel,
+  SimulatedDayResult,
 } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
 import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
@@ -659,6 +660,11 @@ export type PastSimulatedDayDiagnostic = {
   targetTotalKwh: number | null;
   /** When set, indicates the day was simulated with the shared past-day simulator core. */
   sourceOfDaySimulationCore?: string;
+  rawDayKwh?: number | null;
+  weatherAdjustedDayKwh?: number | null;
+  finalDayKwh?: number | null;
+  displayDayKwh?: number | null;
+  intervalSumKwh?: number | null;
 };
 
 export type PastSimulationDebug = {
@@ -844,7 +850,10 @@ export function buildPastSimulatedBaselineV1(args: {
     maxDayDiagnostics?: number;
     out?: PastSimulationDebug;
   };
-}): Array<{ timestamp: string; kwh: number }> {
+}): {
+  intervals: Array<{ timestamp: string; kwh: number }>;
+  dayResults: SimulatedDayResult[];
+} {
   const actualByTs = new Map<string, number>();
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
   for (const p of args.actualIntervals ?? []) {
@@ -1287,6 +1296,7 @@ export function buildPastSimulatedBaselineV1(args: {
   };
 
   const out: Array<{ timestamp: string; kwh: number }> = [];
+  const dayResults: SimulatedDayResult[] = [];
   let totalDays = 0;
   let excludedDays = 0;
   let leadingMissingDays = 0;
@@ -1324,6 +1334,7 @@ export function buildPastSimulatedBaselineV1(args: {
         args.applianceProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayApplianceProfile | null,
         shapeByMonth96Ref
       );
+      dayResults.push(result);
       for (const iv of result.intervals) out.push(iv);
       const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
@@ -1354,6 +1365,11 @@ export function buildPastSimulatedBaselineV1(args: {
           hvacKwh: result.auxHeatKwhAdder,
           targetTotalKwh: result.finalDayKwh,
           sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+          rawDayKwh: result.rawDayKwh,
+          weatherAdjustedDayKwh: result.weatherAdjustedDayKwh,
+          finalDayKwh: result.finalDayKwh,
+          displayDayKwh: result.displayDayKwh,
+          intervalSumKwh: result.intervalSumKwh,
         });
       }
     } else {
@@ -1418,7 +1434,7 @@ export function buildPastSimulatedBaselineV1(args: {
   }
 
   out.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  return out;
+  return { intervals: out, dayResults };
 }
 
 // Future stubs (do not implement yet)

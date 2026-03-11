@@ -1370,6 +1370,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     trainingWeatherStats != null;
 
   const dayTotalByDate = new Map<string, DayTotalSelectionResult>();
+  const simulatedDayResultByDate = new Map<string, ReturnType<typeof getPastDayResultOnly>>();
   const weatherAdjustmentByDate = new Map<
     string,
     {
@@ -1433,6 +1434,7 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
         useWeather && weatherByDateKey ? (weatherByDateKey.get(dateKey) as PastDayWeatherFeatures | undefined) ?? null : undefined,
         shapeByMonth96ForShared ?? undefined
       );
+      simulatedDayResultByDate.set(dateKey, r);
       dayTotalByDate.set(dateKey, {
         targetDayKwh: r.finalDayKwh,
         fallbackLevel: r.fallbackLevel,
@@ -1469,6 +1471,13 @@ export function simulateIntervalsForTestDaysFromUsageShapeProfile(args: {
     const slot96 = localSlot96InTimezone(ts, timezone);
     const dow = localDayOfWeekInTimezone(ts, timezone);
     const isWeekend = dow === 0 || dow === 6;
+
+    const canonicalDay = simulatedDayResultByDate.get(dateKey);
+    if (canonicalDay) {
+      const intervalRow = canonicalDay.intervals[slot96];
+      const simKwh = Number(intervalRow?.kwh) || 0;
+      return { timestamp: canonicalIntervalKey(ts), kwh: Math.max(0, simKwh) };
+    }
 
     let targetDayKwh: number;
     if (useWeather && weatherAdjustmentByDate.has(dateKey)) {

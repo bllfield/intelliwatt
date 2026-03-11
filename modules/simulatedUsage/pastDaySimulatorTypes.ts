@@ -60,9 +60,16 @@ export type PastDaySimulationRequest = {
   weatherForDay: PastDayWeatherFeatures | null;
 };
 
-/** Result of simulating one past day. */
-export type PastDaySimulationResult = {
+/** Canonical artifact for one simulated day. */
+export type SimulatedDayResult = {
+  localDate: string;
+  source: "simulated_vacant_day";
   intervals: Array<{ timestamp: string; kwh: number }>;
+  intervals15: number[];
+  intervalSumKwh: number;
+  displayDayKwh: number;
+  rawDayKwh: number;
+  weatherAdjustedDayKwh: number;
   profileSelectedDayKwh: number;
   finalDayKwh: number;
   weatherSeverityMultiplier: number;
@@ -84,6 +91,9 @@ export type PastDaySimulationResult = {
   /** True when day was weather_scaled_day and 80/20 blend-back toward profile was applied. */
   blendedBackTowardProfile?: boolean;
 };
+
+/** Backward-compatible alias used by existing callers during migration. */
+export type PastDaySimulationResult = SimulatedDayResult;
 
 export type PastDayWeatherClassification =
   | "normal_day"

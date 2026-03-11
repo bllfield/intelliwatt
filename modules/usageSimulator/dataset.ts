@@ -1,10 +1,12 @@
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
+import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
+import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
 
 function round2(n: number): number {
-  return Math.round((Number(n) || 0) * 100) / 100;
+  return roundDayKwhDisplay(n);
 }
 
 function low10Average(values: number[]): number | null {
@@ -711,15 +713,33 @@ export function buildSimulatedUsageDatasetFromCurve(
     notes?: string[];
     filledMonths?: string[];
   },
-  options?: { excludedDateKeys?: Set<string>; /** When set, monthly display groups by this timezone (fixes 0 kWh for non-Chicago). */ timezone?: string; /** When true, group monthly by UTC month so it matches daily (fixes Past simulated zeros). */ useUtcMonth?: boolean }
+  options?: {
+    excludedDateKeys?: Set<string>;
+    /** When set, monthly display groups by this timezone (fixes 0 kWh for non-Chicago). */
+    timezone?: string;
+    /** When true, group monthly by UTC month so it matches daily (fixes Past simulated zeros). */
+    useUtcMonth?: boolean;
+    /** Canonical simulated-day artifacts used for simulated-date daily display parity. */
+    simulatedDayResults?: SimulatedDayResult[];
+  }
 ): SimulatedUsageDataset {
   const dailyMap = new Map<string, number>();
   for (let j = 0; j < curve.intervals.length; j++) {
     const dk = toDateKey(curve.intervals[j].timestamp);
     dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + (Number(curve.intervals[j].consumption_kwh) || 0));
   }
+  const simulatedDisplayByDate = new Map<string, number>();
+  for (const row of options?.simulatedDayResults ?? []) {
+    const dk = String(row?.localDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    simulatedDisplayByDate.set(dk, Number(row.displayDayKwh) || 0);
+  }
+  // Daily display values for simulated days come from shared core SimulatedDayResult.
   const daily = Array.from(dailyMap.entries())
-    .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
+    .map(([date, kwh]) => ({
+      date,
+      kwh: round2(simulatedDisplayByDate.has(date) ? simulatedDisplayByDate.get(date)! : kwh),
+    }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
   const monthlyBuild = buildDisplayMonthlyFromIntervals({

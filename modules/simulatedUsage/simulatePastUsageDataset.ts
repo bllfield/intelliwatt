@@ -25,6 +25,7 @@ import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/vali
 import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
+import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 
 export type BuildPathKind = "cold_build" | "recalc" | "lab_validation";
 
@@ -222,6 +223,8 @@ export type SimulatePastUsageDatasetResult = {
   actualWxByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   /** For recalc path to set pastPatchedCurve and monthlyTotalsKwhByMonth. */
   stitchedCurve?: SimulatedCurve;
+  /** Supplemental metadata for simulated dates only. */
+  simulatedDayResults?: SimulatedDayResult[];
 };
 
 /**
@@ -334,7 +337,7 @@ export async function simulatePastUsageDataset(
     };
 
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
-    const patchedIntervals = buildPastSimulatedBaselineV1({
+    const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
       canonicalDayStartsMs,
       excludedDateKeys,
@@ -370,7 +373,11 @@ export async function simulatePastUsageDataset(
         notes: buildInputs.notes ?? [],
         filledMonths: buildInputs.filledMonths ?? [],
       },
-      { timezone: timezone ?? undefined, useUtcMonth: true }
+      {
+        timezone: timezone ?? undefined,
+        useUtcMonth: true,
+        simulatedDayResults: dayResults,
+      }
     );
 
     if (dataset && typeof dataset.meta === "object") {
@@ -416,6 +423,7 @@ export async function simulatePastUsageDataset(
       shapeMonthsPresent,
       actualWxByDateKey: actualWxByDateKey,
       stitchedCurve,
+      simulatedDayResults: dayResults,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
