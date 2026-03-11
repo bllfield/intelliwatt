@@ -7,6 +7,8 @@ import { normalizeScenarioKey } from "@/modules/usageSimulator/repo";
 import { runSimulatorDiagnostic } from "@/lib/admin/simulatorDiagnostic";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 300; // recalc + cold build + production + parity can be slow
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 

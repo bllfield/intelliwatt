@@ -243,6 +243,8 @@ export async function runSimulatorDiagnostic(
   }
 
   const coldParityDiag = coldResult.dataset ? computeParityDiagnostics(coldResult.dataset) : undefined;
+  // Drop heavy dataset so GC can reclaim before loading production (reduces OOM risk in serverless)
+  (coldResult as { dataset?: unknown }).dataset = undefined;
 
   const stubAudit = await runStubAudit(houseId, canonicalDateKeys);
 
@@ -250,6 +252,9 @@ export async function runSimulatorDiagnostic(
   const productionMeta = productionResult.ok && productionResult.dataset ? extractMeta(productionResult.dataset) : {};
   const productionSummary = productionResult.ok && productionResult.dataset ? extractSummary(productionResult.dataset) : {};
   const productionParityDiag = productionResult.ok && productionResult.dataset ? computeParityDiagnostics(productionResult.dataset) : undefined;
+  if (productionResult.ok && productionResult.dataset) {
+    (productionResult as { dataset?: unknown }).dataset = undefined;
+  }
 
   let parity: SimulatorDiagnosticResult["parity"] | undefined;
   if (includeParity) {
@@ -272,6 +277,7 @@ export async function runSimulatorDiagnostic(
           recalcMeta = extractMeta(afterRecalc.dataset);
           recalcSummary = extractSummary(afterRecalc.dataset);
           recalcParityDiag = computeParityDiagnostics(afterRecalc.dataset);
+          (afterRecalc as { dataset?: unknown }).dataset = undefined;
         }
       }
       const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
