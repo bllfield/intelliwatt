@@ -48,7 +48,7 @@ function toEndOfDayUtc(dateStr: string): Date {
   const s = String(dateStr).trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const d = new Date(s);
-    d.setUTCHours(23, 59, 59, 999);
+    d.setUTCHours(23, 0, 0, 0);
     return d;
   }
   return new Date(Date.UTC(
