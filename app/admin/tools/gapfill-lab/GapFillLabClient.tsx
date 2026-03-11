@@ -2,9 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 
 type HouseOption = { id: string; label: string };
 type RangeRow = { startDate: string; endDate: string };
+type Usage365Payload = {
+  source: string;
+  timezone: string;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  intervalCount: number;
+  daily: Array<{ date: string; kwh: number }>;
+  monthly: Array<{ month: string; kwh: number }>;
+  weekdayKwh: number;
+  weekendKwh: number;
+  fifteenCurve: Array<{ hhmm: string; avgKw: number }>;
+};
 
 type ApiResponse =
   | {
@@ -42,6 +55,7 @@ type ApiResponse =
       excludedFromTraining_travelCount?: number;
       excludedFromTraining_testCount?: number;
       trainingCoverage?: { expected: number; found: number | null; pct: number | null };
+      usage365?: Usage365Payload;
     }
   | { ok: false; error: string; message?: string; overlapCount?: number; overlapSample?: string[] };
 
@@ -74,6 +88,8 @@ export default function GapFillLabClient() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
+  const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
+  const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -492,6 +508,34 @@ export default function GapFillLabClient() {
 
       {result && result.ok && (
         <div className="space-y-4">
+          {result.usage365?.daily?.length ? (
+            <details className="border border-brand-blue/20 rounded" open>
+              <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+                365-day usage chart (same as user Usage page)
+              </summary>
+              <div className="p-4 border-t border-brand-blue/20">
+                <p className="text-sm text-brand-navy/70 mb-4">
+                  Source: {result.usage365.source} · {result.usage365.intervalCount.toLocaleString()} intervals ·
+                  {` ${result.usage365.coverageStart ?? "—"} to ${result.usage365.coverageEnd ?? "—"}`}
+                </p>
+                <UsageChartsPanel
+                  monthly={result.usage365.monthly}
+                  stitchedMonth={null}
+                  weekdayKwh={result.usage365.weekdayKwh}
+                  weekendKwh={result.usage365.weekendKwh}
+                  monthlyView={usageMonthlyView}
+                  onMonthlyViewChange={setUsageMonthlyView}
+                  dailyView={usageDailyView}
+                  onDailyViewChange={setUsageDailyView}
+                  daily={result.usage365.daily}
+                  fifteenCurve={result.usage365.fifteenCurve}
+                  coverageStart={result.usage365.coverageStart}
+                  coverageEnd={result.usage365.coverageEnd}
+                />
+              </div>
+            </details>
+          ) : null}
+
           <div className="p-4 rounded bg-brand-blue/5 border border-brand-blue/20">
             <div className="font-semibold text-brand-navy">Simulation Audit Report</div>
             <div className="text-sm text-brand-navy/80 mt-1">

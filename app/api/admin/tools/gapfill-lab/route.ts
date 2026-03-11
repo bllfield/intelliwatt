@@ -50,6 +50,18 @@ function hasAdminSessionCookie(request: NextRequest): boolean {
 }
 
 type DateRange = { startDate: string; endDate: string };
+type Usage365Payload = {
+  source: string;
+  timezone: string;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  intervalCount: number;
+  daily: Array<{ date: string; kwh: number }>;
+  monthly: Array<{ month: string; kwh: number }>;
+  weekdayKwh: number;
+  weekendKwh: number;
+  fifteenCurve: Array<{ hhmm: string; avgKw: number }>;
+};
 
 /** Normalize ranges to local date keys (YYYY-MM-DD), inclusive. Inputs are local calendar dates (e.g. from HTML date inputs). We iterate in calendar-day space (no UTC) so output keys match dateKeyInTimezone(ts, timezone) when filtering actual intervals. */
 function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone: string): Set<string> {
@@ -96,6 +108,87 @@ function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
   const out = new Set<string>();
   for (const x of Array.from(a)) if (b.has(x)) out.add(x);
   return out;
+}
+
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
+  try {
+    const d = new Date(tsIso);
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hour: "numeric",
+      minute: "numeric",
+      hour12: false,
+    }).formatToParts(d);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10) || 0;
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10) || 0;
+    return { hour: Math.max(0, Math.min(23, hour)), minute: Math.max(0, Math.min(59, minute)) };
+  } catch {
+    const d = new Date(tsIso);
+    return { hour: d.getUTCHours(), minute: d.getUTCMinutes() };
+  }
+}
+
+function buildUsage365Payload(args: {
+  intervals: Array<{ timestamp: string; kwh: number }>;
+  timezone: string;
+  source: string;
+}): Usage365Payload {
+  const { intervals, timezone, source } = args;
+  const byDay = new Map<string, number>();
+  const byMonth = new Map<string, number>();
+  const slotSums = Array<number>(96).fill(0);
+  const slotCounts = Array<number>(96).fill(0);
+  let weekdayKwh = 0;
+  let weekendKwh = 0;
+
+  for (const row of intervals) {
+    const ts = String(row?.timestamp ?? "").trim();
+    const kwh = Number(row?.kwh) || 0;
+    const dateKey = dateKeyInTimezone(ts, timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    const monthKey = dateKey.slice(0, 7);
+    byDay.set(dateKey, (byDay.get(dateKey) ?? 0) + kwh);
+    byMonth.set(monthKey, (byMonth.get(monthKey) ?? 0) + kwh);
+    const dow = getLocalDayOfWeekFromDateKey(dateKey, timezone);
+    if (dow === 0 || dow === 6) weekendKwh += kwh;
+    else weekdayKwh += kwh;
+
+    const hm = getLocalHourMinuteInTimezone(ts, timezone);
+    const slot = Math.min(95, Math.max(0, hm.hour * 4 + Math.floor(hm.minute / 15)));
+    slotSums[slot] += kwh;
+    slotCounts[slot] += 1;
+  }
+
+  const daily = Array.from(byDay.entries())
+    .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const monthly = Array.from(byMonth.entries())
+    .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const fifteenCurve = Array.from({ length: 96 }, (_, slot) => {
+    const hour = Math.floor(slot / 4);
+    const minute = (slot % 4) * 15;
+    const hhmm = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    const avgKwh = slotCounts[slot] > 0 ? slotSums[slot] / slotCounts[slot] : 0;
+    return { hhmm, avgKw: round2(avgKwh * 4) };
+  });
+
+  return {
+    source,
+    timezone,
+    coverageStart: daily[0]?.date ?? null,
+    coverageEnd: daily[daily.length - 1]?.date ?? null,
+    intervalCount: intervals.length,
+    daily,
+    monthly,
+    weekdayKwh: round2(weekdayKwh),
+    weekendKwh: round2(weekendKwh),
+    fifteenCurve,
+  };
 }
 
 /** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
@@ -991,6 +1084,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const usage365End = prevCalendarDay(dateKeyInTimezone(new Date().toISOString(), timezone), 2);
+  const usage365Start = prevCalendarDay(usage365End, 364);
+  const usage365Intervals = await getActualIntervalsForRange({
+    houseId: house.id,
+    esiid,
+    startDate: usage365Start,
+    endDate: usage365End,
+  });
+  const usage365 = buildUsage365Payload({
+    intervals: usage365Intervals ?? [],
+    timezone,
+    source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
+  });
+
   const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
   const travelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(travelRangesFromDb, timezone);
 
@@ -1023,6 +1130,7 @@ export async function POST(req: NextRequest) {
       pasteSummary: "",
       parity: null,
       travelRangesFromDb,
+      usage365,
     });
   }
 
@@ -1871,6 +1979,7 @@ export async function POST(req: NextRequest) {
     trainingDateKeysSample,
     trainingMonthDayCountsSample,
     trainingCoverage: { expected: trainingCoverageExpected, found: trainingCoverageFound, pct: trainingCoveragePct },
+    usage365,
   });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

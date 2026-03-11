@@ -747,6 +747,7 @@ model WeatherHourly {
   createdAt DateTime @default(now())
 
   @@unique([latBucket, lonBucket, timestampUtc])
+  @@index([latBucket, lonBucket, timestampUtc])
 }
 
 /// Raw WattBuy API response snapshots for audit + replay.

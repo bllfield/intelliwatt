@@ -119,8 +119,8 @@ export async function repairStaleStubWeather(args: {
   endDate?: string;
 }): Promise<{ deleted: number; fetched: number; stubbed: number }> {
   const { houseId } = args;
-  let startDate = args.startDate?.trim().slice(0, 10);
-  let endDate = args.endDate?.trim().slice(0, 10);
+  let startDate = (args.startDate?.trim() ?? "").slice(0, 10);
+  let endDate = (args.endDate?.trim() ?? "").slice(0, 10);
   if (!startDate || !endDate || !YYYY_MM_DD_RE.test(startDate) || !YYYY_MM_DD_RE.test(endDate)) {
     const end = new Date();
     const start = new Date(end.getTime() - 366 * 24 * 60 * 60 * 1000);
@@ -144,11 +144,7 @@ export async function repairStaleStubWeather(args: {
       select: { dateKey: true },
     })
     .catch(() => []);
-  const stubDateKeys: string[] = Array.from(
-    new Set<string>(
-      (stubRows ?? []).map((r: { dateKey: string }) => String(r?.dateKey ?? "").slice(0, 10)).filter((k: string) => YYYY_MM_DD_RE.test(k))
-    )
-  );
+  const stubDateKeys: string[] = Array.from(new Set((stubRows ?? []).map((r: { dateKey: string }) => String(r?.dateKey ?? "").slice(0, 10)).filter((k: string) => YYYY_MM_DD_RE.test(k))));
   if (stubDateKeys.length === 0) {
     return { deleted: 0, fetched: 0, stubbed: 0 };
   }
