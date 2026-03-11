@@ -122,6 +122,16 @@
 - See **ENV_VARS.md → ADMIN_TOKEN** for details and usage examples.
 - **Admin/debug calls:** Use the wrapper `scripts/admin/Invoke-Intelliwatt.ps1` so requests automatically include `x-admin-token`. See **docs/ADMIN_API.md**.
 
+## Engineering Guardrail: No Duplicate Logic
+
+- Do not write the same function or functional logic in two places.
+- All shared behavior must live in a module and be imported where needed.
+- Routes, pages, and admin tools must import shared modules instead of reimplementing business logic.
+- If logic appears duplicated, stop and consolidate it into one canonical module before continuing.
+- Do not create a second derivation path for the same output or artifact.
+- This is a project-level rule for all future work.
+- Canonical source for this rule: `docs/ARCHITECTURE_STANDARDS.md` (`## Single Implementation Rule`).
+
 ---
 
 

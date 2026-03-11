@@ -1,5 +1,12 @@
 ## PC-2025-11-30-SMT-ADMIN-MGMT
 
+## Project-wide engineering rule
+
+- No duplicate functional logic is allowed across files.
+- Shared behavior must be implemented once in a canonical module and imported everywhere else.
+- Do not create a second derivation path for the same output or artifact.
+- Consolidate duplicate logic into one canonical module before extending functionality.
+
 Scope: SMT agreement/subscription admin tools + usage normalization trigger
 
 - Added internal SMT admin API routes (Vercel, admin-only via `x-admin-token`):

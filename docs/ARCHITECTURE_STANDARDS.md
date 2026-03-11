@@ -107,6 +107,25 @@
 - Include response time in logs
 - Monitor connection pool status
 
+## Single Implementation Rule
+
+- The same functional logic may not exist in multiple files.
+- Shared behavior must be implemented once in a canonical module and imported everywhere else.
+- Controllers, routes, pages, and services may orchestrate modules but may not duplicate business logic.
+- No duplicate derivation paths are allowed for the same output.
+- No slightly modified copies of the same logic are allowed.
+- If duplicate logic is found, it must be consolidated into one canonical module before further extension.
+- Canonical artifacts produced by a module must not be recomputed differently elsewhere.
+- This rule applies to calculations, transforms, aggregation, simulation steps, display derivation, and normalization logic.
+- App Router/page files must stay thin and call modules, not implement business rules inline.
+
+### Enforcement
+
+- Reuse an existing module if similar logic already exists.
+- Move logic into a shared module immediately if it will be used in more than one place.
+- Refuse duplicate implementations.
+- Prefer parameterized canonical functions over multiple near-duplicate functions.
+
 ## Implementation Guidelines
 
 ### File Organization
