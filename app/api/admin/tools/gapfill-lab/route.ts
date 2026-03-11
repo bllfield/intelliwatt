@@ -35,6 +35,7 @@ import {
 import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
 import { getHouseWeatherDays, upsertHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE, WEATHER_SOURCE } from "@/modules/weather/types";
+import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
@@ -363,7 +364,6 @@ function buildFullReport(args: {
     const month = String(m?.month ?? "").slice(0, 7);
     if (month) monthlyTotals[month] = round2(Number(m?.kwh) || 0);
   }
-  // Prefer daily-derived per-15m so parity matches baseloadDaily; else convert kW→kWh/15m when dataset provides kW.
   const baseloadDailyNum = j.dataset.insights?.baseloadDaily != null ? Number(j.dataset.insights.baseloadDaily) : null;
   const baseloadRaw = j.dataset.insights?.baseload != null ? Number(j.dataset.insights.baseload) : null;
   const useDailyForBaseload = baseloadDailyNum != null && Number.isFinite(baseloadDailyNum) && baseloadDailyNum >= 0;
@@ -448,7 +448,13 @@ function buildFullReport(args: {
     applianceProfile: j.applianceProfile,
     engine: {
       enginePath: enginePath,
-      functionsUsed: enginePath === "gapfill_test_days_profile" ? "getActualIntervalsForRange(test window only) -> simulateIntervalsForTestDaysFromUsageShapeProfile -> computeGapFillMetrics" : "getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve",
+      functionsUsed:
+        enginePath === "gapfill_test_days_profile"
+          ? "getActualIntervalsForRange(test window only) -> simulateIntervalsForTestDaysFromUsageShapeProfile (day totals: getPastDayResultOnly / shared_past_day_simulator) -> computeGapFillMetrics"
+          : "getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve",
+      ...(enginePath === "gapfill_test_days_profile"
+        ? { daySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE, sameEngineAsPastProduction: true }
+        : {}),
       simVersion: j.modelAssumptions?.meta?.simVersion ?? "production_builder",
       derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
       configHash: j.configHash,
@@ -668,6 +674,8 @@ function buildFullReport(args: {
     kv("enginePath", fullReportJson.engine.enginePath);
     lines.push("functionsUsed: " + (fullReportJson.engine as any).functionsUsed);
     if (enginePath === "gapfill_test_days_profile") {
+      kv("daySimulationCore", (fullReportJson.engine as any).daySimulationCore ?? SOURCE_OF_DAY_SIMULATION_CORE);
+      kv("sameEngineAsPastProduction", (fullReportJson.engine as any).sameEngineAsPastProduction ?? true);
       kv("profileSource", j.profileSource ?? "—");
       if (j.profileSource === "auto_built_lite") {
         kv("trainingWindowStartUtc", j.trainingWindowStartUtc ?? "—");

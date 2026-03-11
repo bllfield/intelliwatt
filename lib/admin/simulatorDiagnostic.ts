@@ -16,7 +16,7 @@ const BOUNDARY_STUB_SAMPLE = 5;
 function normalizeWeatherFallbackReason(value: unknown): string | null {
   if (value == null) return null;
   const s = String(value).trim();
-  return s === "" ? null : (value as string);
+  return s === "" ? null : s;
 }
 
 function getWindowFromBuildInputs(buildInputs: any): { startDate: string; endDate: string } | null {
@@ -167,7 +167,8 @@ export type SimulatorDiagnosticResult = {
   gapfillLabNote: {
     enginePath: string;
     label: string;
-    sameEngineAsPastProduction: false;
+    sameEngineAsPastProduction: boolean;
+    daySimulationCore?: string;
     note: string;
   };
 };
@@ -196,15 +197,11 @@ export async function runSimulatorDiagnostic(
 
   const travelRangesFromBuild = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
   // When parity is requested, cold must use the same inputs as production/recalc (stored build). Otherwise cold would use UI override and diverge.
-  const filteredOverride =
-    Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
-      ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
-      : [];
   const travelRanges =
     includeParity
       ? travelRangesFromBuild
-      : filteredOverride.length > 0
-        ? filteredOverride
+      : Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
+        ? args.travelRangesOverride.filter((r) => YYYY_MM_DD.test(String(r?.startDate ?? "")) && YYYY_MM_DD.test(String(r?.endDate ?? "")))
         : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
@@ -239,15 +236,16 @@ export async function runSimulatorDiagnostic(
 
   let parity: SimulatorDiagnosticResult["parity"] | undefined;
   if (includeParity) {
-    const mode = (buildInputs as any)?.mode ?? "SMT_BASELINE";
-    const recalcResult = await recalcSimulatorBuild({
-      userId,
-      houseId,
-      esiid,
-      mode: mode as "SMT_BASELINE" | "NEW_BUILD_ESTIMATE" | "MANUAL_TOTALS",
-      scenarioId,
-      persistPastSimBaseline: false,
-    });
+    try {
+      const mode = (buildInputs as any)?.mode ?? "SMT_BASELINE";
+      const recalcResult = await recalcSimulatorBuild({
+        userId,
+        houseId,
+        esiid,
+        mode: mode as "SMT_BASELINE" | "NEW_BUILD_ESTIMATE" | "MANUAL_TOTALS",
+        scenarioId,
+        persistPastSimBaseline: false,
+      });
       let recalcMeta: Record<string, unknown> = {};
       let recalcSummary: { totalKwh?: number; intervalsCount?: number } = {};
       let recalcParityDiag: ReturnType<typeof computeParityDiagnostics> | undefined;
@@ -259,62 +257,66 @@ export async function runSimulatorDiagnostic(
           recalcParityDiag = computeParityDiagnostics(afterRecalc.dataset);
         }
       }
-    const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
-    const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
-    const coldSide = buildParitySide({
-      summary: coldSummary,
-      meta: coldMeta,
-      scenarioId,
-      scenarioKey,
-      buildInputsHash,
-      travelRangesUsed: travelRanges,
-      coverageStart: startDate,
-      coverageEnd: endDate,
-      label: "cold",
-      parityDiagnostics: coldParityDiag,
-    });
-    const productionSide = buildParitySide({
-      summary: productionSummary,
-      meta: productionMeta,
-      scenarioId,
-      scenarioKey,
-      buildInputsHash,
-      travelRangesUsed: travelRanges,
-      coverageStart: String(productionMeta.coverageStart ?? startDate),
-      coverageEnd: String(productionMeta.coverageEnd ?? endDate),
-      label: "production",
-      parityDiagnostics: productionParityDiag,
-    });
-    const recalcSide = buildParitySide({
-      summary: recalcSummary,
-      meta: recalcMeta,
-      scenarioId,
-      scenarioKey,
-      buildInputsHash,
-      travelRangesUsed: travelRanges,
-      coverageStart: String(recalcMeta.coverageStart ?? startDate),
-      coverageEnd: String(recalcMeta.coverageEnd ?? endDate),
-      label: "recalc",
-      parityDiagnostics: recalcParityDiag,
-    });
-    parity = {
-      coldVsProduction: {
-        totalKwhMatch: coldVsProd.totalKwhMatch,
-        intervalCountMatch: coldVsProd.intervalCountMatch,
-        weatherSummaryMatch: coldVsProd.weatherSummaryMatch,
-        weatherFallbackMatch: coldVsProd.weatherFallbackMatch,
-        cold: coldSide,
-        production: productionSide,
-      },
-      coldVsRecalc: {
-        totalKwhMatch: coldVsRec.totalKwhMatch,
-        intervalCountMatch: coldVsRec.intervalCountMatch,
-        weatherSummaryMatch: coldVsRec.weatherSummaryMatch,
-        weatherFallbackMatch: coldVsRec.weatherFallbackMatch,
-        cold: coldSide,
-        recalc: recalcSide,
-      },
-    };
+      const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
+      const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
+      const coldSide = buildParitySide({
+        summary: coldSummary,
+        meta: coldMeta,
+        scenarioId,
+        scenarioKey,
+        buildInputsHash,
+        travelRangesUsed: travelRanges,
+        coverageStart: startDate,
+        coverageEnd: endDate,
+        label: "cold",
+        parityDiagnostics: coldParityDiag,
+      });
+      const productionSide = buildParitySide({
+        summary: productionSummary,
+        meta: productionMeta,
+        scenarioId,
+        scenarioKey,
+        buildInputsHash,
+        travelRangesUsed: travelRanges,
+        coverageStart: String(productionMeta.coverageStart ?? startDate),
+        coverageEnd: String(productionMeta.coverageEnd ?? endDate),
+        label: "production",
+        parityDiagnostics: productionParityDiag,
+      });
+      const recalcSide = buildParitySide({
+        summary: recalcSummary,
+        meta: recalcMeta,
+        scenarioId,
+        scenarioKey,
+        buildInputsHash,
+        travelRangesUsed: travelRanges,
+        coverageStart: String(recalcMeta.coverageStart ?? startDate),
+        coverageEnd: String(recalcMeta.coverageEnd ?? endDate),
+        label: "recalc",
+        parityDiagnostics: recalcParityDiag,
+      });
+      parity = {
+        coldVsProduction: {
+          totalKwhMatch: coldVsProd.totalKwhMatch,
+          intervalCountMatch: coldVsProd.intervalCountMatch,
+          weatherSummaryMatch: coldVsProd.weatherSummaryMatch,
+          weatherFallbackMatch: coldVsProd.weatherFallbackMatch,
+          cold: coldSide,
+          production: productionSide,
+        },
+        coldVsRecalc: {
+          totalKwhMatch: coldVsRec.totalKwhMatch,
+          intervalCountMatch: coldVsRec.intervalCountMatch,
+          weatherSummaryMatch: coldVsRec.weatherSummaryMatch,
+          weatherFallbackMatch: coldVsRec.weatherFallbackMatch,
+          cold: coldSide,
+          recalc: recalcSide,
+        },
+      };
+    } catch (parityErr) {
+      const msg = parityErr instanceof Error ? parityErr.message : String(parityErr);
+      return { ok: false, error: `Parity step failed: ${msg}` };
+    }
   }
 
   return {
@@ -348,8 +350,9 @@ export async function runSimulatorDiagnostic(
     gapfillLabNote: {
       enginePath: "gapfill_test_days_profile",
       label: "GapFill Lab validation (test-days profile)",
-      sameEngineAsPastProduction: false,
-      note: "GapFill Lab validation is a separate path from Past production. Past uses shared_past_day_simulator; Lab uses getActualIntervalsForRange(test window) -> simulateIntervalsForTestDaysFromUsageShapeProfile -> computeGapFillMetrics.",
+      sameEngineAsPastProduction: true,
+      daySimulationCore: "shared_past_day_simulator",
+      note: "GapFill Lab uses the same day-simulation core as Past production: day totals come from getPastDayResultOnly (modules/simulatedUsage/pastDaySimulator.ts), i.e. shared_past_day_simulator. The Lab pipeline is getActualIntervalsForRange(test window) -> simulateIntervalsForTestDaysFromUsageShapeProfile -> computeGapFillMetrics; only the pipeline name differs from Past, not the day-total logic.",
     },
   };
 }
@@ -424,6 +427,7 @@ function buildParitySide(args: {
     totalKwh: summary.totalKwh,
     intervalsCount: summary.intervalsCount,
     weatherSourceSummary: meta.weatherSourceSummary ?? undefined,
+    // Normalize so match flag and displayed value agree: null/undefined/"" all become null.
     weatherFallbackReason: normalizeWeatherFallbackReason(meta.weatherFallbackReason),
     lastBuiltAt: meta.lastBuiltAt ?? undefined,
     source,

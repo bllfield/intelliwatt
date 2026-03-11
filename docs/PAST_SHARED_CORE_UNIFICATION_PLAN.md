@@ -25,7 +25,7 @@ Single internal entrypoint for Past simulation (cold build, recalc, GapFill Lab 
 
 ## Still separate / pending
 
-- **gapfill_test_days_profile**: Lab path that uses `simulateIntervalsForTestDaysFromUsageShapeProfile` and `computeGapFillMetrics` remains a **separate validation engine**. It is not routed through `simulatePastUsageDataset`. Future alignment (e.g. shared day sim or shared metrics) is optional.
+- **gapfill_test_days_profile**: Lab path name for the validation pipeline (getActualIntervalsForRange → simulateIntervalsForTestDaysFromUsageShapeProfile → computeGapFillMetrics). **Day-total logic is shared**: when using auto_built_lite or profile with lite strength, test-day totals are produced by **getPastDayResultOnly** in `modules/simulatedUsage/pastDaySimulator.ts` (same as Past production’s **simulatePastDay**). So Lab and Past use the **same day-simulation core** (`shared_past_day_simulator`); only the pipeline entry and shape source (profile vs reference-derived) differ. Admin report now exposes `daySimulationCore` and `sameEngineAsPastProduction: true` for the gapfill path.
 
 ## Call graph (production Past)
 
@@ -59,4 +59,4 @@ flowchart LR
 - [ ] **Cache restore parity**: Restored dataset has same daily/monthly as when first built; `buildPathKind: 'cache_restore'`; no re-run of weather backfill on restore.
 - [ ] **Truthful missing_lat_lng stub labeling**: When house has no lat/lng, UI shows stub weather and fallback reason (e.g. "no coordinates"); `weatherSourceSummary` = stub_only, `weatherFallbackReason` = missing_lat_lng.
 - [ ] **Truthful partial coverage labeling**: When some days have actual weather and some stub, UI shows mixed and fallback reason (e.g. "partial coverage") where applicable.
-- [ ] **Lab test-days path**: `gapfill_test_days_profile` remains a separate path; production GapFill Lab Past path uses shared core via `getPastSimulatedDatasetForHouse` with `buildPathKind: 'lab_validation'`.
+- [ ] **Lab test-days path**: Day totals use **shared_past_day_simulator** (getPastDayResultOnly); report shows daySimulationCore and sameEngineAsPastProduction: true. Pipeline name remains gapfill_test_days_profile.
