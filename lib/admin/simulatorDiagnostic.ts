@@ -164,6 +164,19 @@ export type SimulatorDiagnosticResult = {
     coldVsProduction: { totalKwhMatch: boolean; intervalCountMatch: boolean; weatherSummaryMatch: boolean; weatherFallbackMatch: boolean; cold: any; production: any };
     coldVsRecalc: { totalKwhMatch: boolean; intervalCountMatch: boolean; weatherSummaryMatch: boolean; weatherFallbackMatch: boolean; cold: any; recalc: any };
   };
+  /** Dataset integrity and cache consistency. Present when diagnostic ran. */
+  integrity?: {
+    intervalCountMatch: boolean;
+    parityMatch: boolean;
+    coldVsCacheMatch: boolean | null;
+    cacheDigestMatch: boolean | null;
+    coldTotalKwh?: number;
+    cacheTotalKwh?: number;
+    recalcTotalKwh?: number;
+    coldRecomputedFromIntervals?: number;
+    cacheRecomputedFromIntervals?: number;
+    recalcRecomputedFromIntervals?: number;
+  };
   gapfillLabNote: {
     enginePath: string;
     label: string;
@@ -323,6 +336,51 @@ export async function runSimulatorDiagnostic(
     }
   }
 
+  // Integrity and cache consistency (from cold + production; recalc when includeParity).
+  const coldIntervalCount = typeof coldMeta.intervalCount === "number" ? coldMeta.intervalCount : Number(coldMeta.intervalCount);
+  const coldDailyRowCount = typeof coldMeta.dailyRowCount === "number" ? coldMeta.dailyRowCount : Number(coldMeta.dailyRowCount);
+  const intervalCountMatch = Number.isFinite(coldIntervalCount) && Number.isFinite(coldDailyRowCount) && coldIntervalCount === coldDailyRowCount * 96;
+  const coldParityOk =
+    coldParityDiag != null &&
+    typeof coldParityDiag.datasetTotalKwh === "number" &&
+    typeof coldParityDiag.recomputedTotalFromIntervals === "number" &&
+    Math.abs(coldParityDiag.datasetTotalKwh - coldParityDiag.recomputedTotalFromIntervals) <= 0.01;
+  const productionParityOk =
+    productionParityDiag != null &&
+    typeof productionParityDiag.datasetTotalKwh === "number" &&
+    typeof productionParityDiag.recomputedTotalFromIntervals === "number" &&
+    Math.abs(productionParityDiag.datasetTotalKwh - productionParityDiag.recomputedTotalFromIntervals) <= 0.01;
+  const parityMatch = coldParityOk && (productionResult.ok ? productionParityOk : true);
+  const isCacheRestore = String(productionMeta.buildPathKind ?? "") === "cache_restore";
+  const coldVsCacheMatch: boolean | null =
+    isCacheRestore && typeof coldSummary.totalKwh === "number" && typeof productionSummary.totalKwh === "number"
+      ? Math.abs(coldSummary.totalKwh - productionSummary.totalKwh) <= 0.01
+      : isCacheRestore
+        ? false
+        : null;
+  const cacheDigestMatch: boolean | null =
+    isCacheRestore && coldParityDiag?.intervalDigest != null && productionParityDiag?.intervalDigest != null
+      ? coldParityDiag.intervalDigest === productionParityDiag.intervalDigest
+      : null;
+
+  const integrity: SimulatorDiagnosticResult["integrity"] = {
+    intervalCountMatch,
+    parityMatch,
+    coldVsCacheMatch,
+    cacheDigestMatch,
+    coldTotalKwh: coldSummary.totalKwh,
+    cacheTotalKwh: productionResult.ok ? productionSummary.totalKwh : undefined,
+    recalcTotalKwh: undefined,
+    coldRecomputedFromIntervals: coldParityDiag?.recomputedTotalFromIntervals,
+    cacheRecomputedFromIntervals: productionParityDiag?.recomputedTotalFromIntervals,
+    recalcRecomputedFromIntervals: undefined,
+  };
+  if (parity?.coldVsRecalc?.recalc) {
+    const recalcSide = parity.coldVsRecalc.recalc as { totalKwh?: number; recomputedTotalFromIntervals?: number };
+    integrity.recalcTotalKwh = recalcSide.totalKwh;
+    integrity.recalcRecomputedFromIntervals = recalcSide.recomputedTotalFromIntervals;
+  }
+
   return {
     ok: true,
     context: {
@@ -351,6 +409,7 @@ export async function runSimulatorDiagnostic(
     },
     stubAudit,
     parity,
+    integrity,
     gapfillLabNote: {
       enginePath: "gapfill_test_days_profile",
       label: "GapFill Lab validation (test-days profile)",
@@ -464,7 +523,7 @@ function compareParity(
   const totalKwhB = bSummary.totalKwh;
   const totalKwhMatch =
     typeof totalKwhA === "number" && typeof totalKwhB === "number"
-      ? Math.abs(totalKwhA - totalKwhB) < 1e-6
+      ? Math.abs(totalKwhA - totalKwhB) <= 0.01
       : totalKwhA === totalKwhB;
 
   const intervalCountA = aSummary.intervalsCount;

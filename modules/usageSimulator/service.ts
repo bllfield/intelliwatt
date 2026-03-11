@@ -830,9 +830,16 @@ export async function getPastSimulatedDatasetForHouse(args: {
           if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return { month: ym, kwh: Number(m?.kwh) || 0 };
           return { month: ym, kwh: actualKwh };
         });
-        const overlaySum = (dataset.monthly as Array<{ kwh?: number }>).reduce((s, r) => s + (Number(r?.kwh) || 0), 0);
+        // Single source of truth: totalKwh from sum(intervals15) so parity with recomputedTotalFromIntervals holds.
+        const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+        const sumFromIntervals = intervals15.reduce((s: number, p: { kwh?: number }) => s + (Number(p?.kwh) ?? 0), 0);
+        const totalKwhRounded = Number.isFinite(sumFromIntervals) ? Math.round(sumFromIntervals * 100) / 100 : 0;
         if (dataset.summary && typeof dataset.summary === "object") {
-          (dataset.summary as any).totalKwh = Math.round(overlaySum * 100) / 100;
+          (dataset.summary as any).totalKwh = totalKwhRounded;
+        }
+        if (dataset.totals && typeof dataset.totals === "object") {
+          (dataset.totals as any).importKwh = totalKwhRounded;
+          (dataset.totals as any).netKwh = totalKwhRounded;
         }
       }
     } catch {
@@ -1363,14 +1370,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
                     if (typeof actualKwh !== "number" || !Number.isFinite(actualKwh)) return { month: ym, kwh: Number(m?.kwh) || 0 };
                     return { month: ym, kwh: actualKwh };
                   });
-                  const overlaySum = ((dataset as any).monthly as Array<{ kwh?: number }>).reduce((s: number, r: { kwh?: number }) => s + (Number(r?.kwh) || 0), 0);
+                  // Single source of truth: totalKwh from sum(decoded intervals) so parity with recomputedTotalFromIntervals holds.
+                  const sumFromDecoded = (decoded as Array<{ kwh?: number }>).reduce((s: number, p: { kwh?: number }) => s + (Number(p?.kwh) ?? 0), 0);
+                  const totalKwhRounded = Number.isFinite(sumFromDecoded) ? Math.round(sumFromDecoded * 100) / 100 : 0;
                   if (dataset.summary && typeof dataset.summary === "object") {
-                    (dataset.summary as any).totalKwh = Math.round(overlaySum * 100) / 100;
+                    (dataset.summary as any).totalKwh = totalKwhRounded;
                   }
                   if (dataset.totals && typeof dataset.totals === "object") {
-                    const r = Math.round(overlaySum * 100) / 100;
-                    (dataset.totals as any).importKwh = r;
-                    (dataset.totals as any).netKwh = r;
+                    (dataset.totals as any).importKwh = totalKwhRounded;
+                    (dataset.totals as any).netKwh = totalKwhRounded;
                   }
                 }
               } catch {

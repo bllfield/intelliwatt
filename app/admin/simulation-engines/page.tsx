@@ -95,11 +95,26 @@ export default function SimulationEnginesPage() {
       weatherProvenance: any;
       stubAudit: any;
       parity?: any;
+      integrity?: {
+        intervalCountMatch: boolean;
+        parityMatch: boolean;
+        coldVsCacheMatch: boolean | null;
+        cacheDigestMatch: boolean | null;
+        coldTotalKwh?: number;
+        cacheTotalKwh?: number;
+        recalcTotalKwh?: number;
+        coldRecomputedFromIntervals?: number;
+        cacheRecomputedFromIntervals?: number;
+        recalcRecomputedFromIntervals?: number;
+      };
       gapfillLabNote: any;
     };
   } | null>(null);
+  const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [repairLoading, setRepairLoading] = useState(false);
   const [repairResult, setRepairResult] = useState<{ ok: boolean; deleted?: number; fetched?: number; stubbed?: number; error?: string } | null>(null);
+  const [rebuildCacheLoading, setRebuildCacheLoading] = useState(false);
+  const [rebuildCacheResult, setRebuildCacheResult] = useState<{ ok: boolean; deleted?: number; error?: string } | null>(null);
   const [diagNotice, setDiagNotice] = useState<string | null>(null);
 
   const [diagLoadHomesLoading, setDiagLoadHomesLoading] = useState(false);
@@ -350,9 +365,6 @@ export default function SimulationEnginesPage() {
     setDiagnosticResult(null);
     setDiagNotice(null);
     try {
-      const travelRangesPayload = diagTravelRanges
-        .map((r) => ({ startDate: (r.startDate ?? "").trim().slice(0, 10), endDate: (r.endDate ?? "").trim().slice(0, 10) }))
-        .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
       const res = await fetch("/api/admin/simulation-engines/diagnostic", {
         method: "POST",
         headers,
@@ -364,7 +376,10 @@ export default function SimulationEnginesPage() {
           endDate: diagEndDate.trim().slice(0, 10) || undefined,
           recalcFirst,
           includeParity,
-          ...(travelRangesPayload.length > 0 ? { travelRanges: travelRangesPayload } : {}),
+          travelRanges:
+            diagTravelRanges.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate)).length > 0
+              ? diagTravelRanges.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate))
+              : undefined,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -401,6 +416,35 @@ export default function SimulationEnginesPage() {
       setRepairResult(json?.ok ? { ok: true, deleted: json.deleted, fetched: json.fetched, stubbed: json.stubbed } : { ok: false, error: json?.error ?? "Request failed" });
     } finally {
       setRepairLoading(false);
+    }
+  }
+
+  async function runRebuildCache() {
+    const effectiveHouseId = houseId.trim() || (houses[0] as { id: string } | undefined)?.id;
+    if (!email.trim()) {
+      setRebuildCacheResult({ ok: false, error: "Email is required." });
+      return;
+    }
+    if (!effectiveHouseId) {
+      setRebuildCacheResult({ ok: false, error: "Select a house first." });
+      return;
+    }
+    setRebuildCacheLoading(true);
+    setRebuildCacheResult(null);
+    try {
+      const res = await fetch("/api/admin/simulation-engines/rebuild-cache", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          email: email.trim(),
+          houseId: effectiveHouseId,
+          scenarioId: getDiagnosticScenarioId() || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      setRebuildCacheResult(json?.ok ? { ok: true, deleted: json.deleted } : { ok: false, error: json?.error ?? "Request failed" });
+    } finally {
+      setRebuildCacheLoading(false);
     }
   }
 
@@ -801,7 +845,7 @@ export default function SimulationEnginesPage() {
               disabled={diagLoading}
               className="rounded border border-brand-blue/50 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
             >
-              {diagLoading ? "Running..." : "Run full diagnostic"}
+              {diagLoading ? "Running..." : "Run Simulation Diagnostics"}
             </button>
             <button
               type="button"
@@ -817,7 +861,15 @@ export default function SimulationEnginesPage() {
               disabled={repairLoading}
               className="rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
             >
-              {repairLoading ? "Repairing..." : "Run weather repair"}
+              {repairLoading ? "Repairing..." : "Refresh Weather Cache"}
+            </button>
+            <button
+              type="button"
+              onClick={() => runRebuildCache()}
+              disabled={rebuildCacheLoading}
+              className="rounded border border-slate-400 bg-slate-100 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-slate-200 disabled:opacity-60"
+            >
+              {rebuildCacheLoading ? "Rebuilding..." : "Rebuild Simulation Cache"}
             </button>
             {diagnosticResult ? (
               <button
@@ -847,8 +899,157 @@ export default function SimulationEnginesPage() {
               ) : null}
             </div>
           ) : null}
+          {rebuildCacheResult ? (
+            <div className={`mt-3 rounded p-3 text-sm ${rebuildCacheResult.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>
+              {rebuildCacheResult.ok
+                ? `Cache cleared: ${rebuildCacheResult.deleted ?? 0} row(s) deleted. Next request will cold-build and re-cache.`
+                : rebuildCacheResult.error}
+              {rebuildCacheResult.ok ? (
+                <button
+                  type="button"
+                  onClick={() => runDiagnostic(false)}
+                  className="ml-2 text-brand-navy underline"
+                >
+                  Run diagnostic again
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {diagnosticResult?.diagnostic ? (
             <div className="mt-6 space-y-4">
+              {/* Simulation Diagnostics summary panel */}
+              <div className="rounded border border-slate-300 bg-slate-50 p-4">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">Simulation Diagnostics</h3>
+                <div className="mt-3 grid gap-2 font-mono text-sm">
+                  {(() => {
+                    const diag = diagnosticResult.diagnostic;
+                    const integrity = diag.integrity;
+                    const pastPath = diag.pastPath as { totalKwh?: number; recomputedTotalFromIntervals?: number } | undefined;
+                    const coldTotal = integrity?.coldTotalKwh ?? pastPath?.totalKwh ?? diag.parity?.coldVsProduction?.cold?.totalKwh;
+                    const cacheTotal = integrity?.cacheTotalKwh ?? diag.parity?.coldVsProduction?.production?.totalKwh;
+                    const recalcTotal = integrity?.recalcTotalKwh ?? diag.parity?.coldVsRecalc?.recalc?.totalKwh;
+                    const recomputed = integrity?.coldRecomputedFromIntervals ?? pastPath?.recomputedTotalFromIntervals ?? diag.parity?.coldVsProduction?.cold?.recomputedTotalFromIntervals;
+                    const parityPass = integrity?.parityMatch ?? false;
+                    const parityDiff =
+                      typeof coldTotal === "number" && typeof recomputed === "number"
+                        ? Math.abs(coldTotal - recomputed)
+                        : null;
+                    const intervalPass = integrity?.intervalCountMatch ?? false;
+                    const wx = diag.weatherProvenance as { weatherCoverageStart?: string; weatherCoverageEnd?: string; weatherStubRowCount?: number } | undefined;
+                    const weatherPass = wx != null && (wx.weatherCoverageStart != null || wx.weatherCoverageEnd != null);
+                    const cacheMatch = integrity?.coldVsCacheMatch;
+                    const cacheDigestMatch = integrity?.cacheDigestMatch;
+                    const cachePass = cacheMatch === null && cacheDigestMatch === null ? null : (cacheMatch !== false && (cacheDigestMatch === null || cacheDigestMatch === true));
+                    return (
+                      <>
+                        <div className="grid gap-x-4 gap-y-1 md:grid-cols-2">
+                          <span>Cold Build Total:</span>
+                          <span>{typeof coldTotal === "number" ? coldTotal.toFixed(2) : "—"} kWh</span>
+                          <span>Cache Restore Total:</span>
+                          <span>{typeof cacheTotal === "number" ? cacheTotal.toFixed(2) : "—"} kWh</span>
+                          <span>Recomputed From Intervals:</span>
+                          <span>{typeof recomputed === "number" ? recomputed.toFixed(2) : "—"} kWh</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-4 border-t border-slate-200 pt-2">
+                          <span className={parityPass ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
+                            Parity Status: {parityPass ? "PASS" : "FAIL"}
+                            {!parityPass && parityDiff != null ? ` (Difference: ${parityDiff.toFixed(2)} kWh)` : null}
+                          </span>
+                          <span className={intervalPass ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
+                            Interval Count: {intervalPass ? "PASS" : "FAIL"}
+                          </span>
+                          <span className={weatherPass ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
+                            Weather Coverage: {weatherPass ? "PASS" : "FAIL"}
+                          </span>
+                          <span
+                            className={
+                              cachePass === null
+                                ? "text-slate-500"
+                                : cachePass
+                                  ? "font-semibold text-emerald-700"
+                                  : "font-semibold text-rose-700"
+                            }
+                          >
+                            Cache Integrity: {cachePass === null ? "N/A" : cachePass ? "PASS" : "FAIL"}
+                            {cacheDigestMatch === false ? " (Cache corruption detected)" : null}
+                          </span>
+                          {integrity?.coldVsCacheMatch !== undefined && integrity.coldVsCacheMatch !== null ? (
+                            <span className={integrity.coldVsCacheMatch ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
+                              Cold Build vs Cache: {integrity.coldVsCacheMatch ? "MATCH" : "MISMATCH"}
+                            </span>
+                          ) : null}
+                          <span className={parityPass ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
+                            Dataset Total vs Interval Sum: {parityPass ? "MATCH" : "MISMATCH"}
+                            {!parityPass && parityDiff != null ? ` (summary vs sum(intervals15) diff: ${parityDiff.toFixed(2)} kWh)` : null}
+                          </span>
+                        </div>
+                        {(!parityPass || cachePass === false) ? (
+                          <div className="mt-2 border-t border-slate-200 pt-2 text-xs text-slate-600">
+                            {!parityPass
+                              ? "Pipeline: dataset.summary.totalKwh is derived from sum(intervals15); mismatch indicates overlay or codec rounding. Check cold build and cache restore paths in modules/usageSimulator/service.ts."
+                              : null}
+                            {cachePass === false && cacheDigestMatch === false
+                              ? " Cache: decoded intervals digest does not match cold build digest; possible cache corruption or encode/decode drift (intervalCodec.ts)."
+                              : cachePass === false
+                                ? " Cache: cold vs cache total mismatch; run Rebuild Simulation Cache and re-run diagnostic."
+                                : null}
+                          </div>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Collapsible Weather Diagnostics */}
+              <div className="rounded border border-slate-200 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setWeatherPanelOpen((o) => !o)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-brand-navy"
+                >
+                  <span>Weather Diagnostics</span>
+                  <span className="text-slate-500">{weatherPanelOpen ? "▼" : "▶"}</span>
+                </button>
+                {weatherPanelOpen ? (
+                  <div className="border-t border-slate-200 px-4 pb-3 pt-2">
+                    {(() => {
+                      const wx = diagnosticResult.diagnostic.weatherProvenance as {
+                        weatherProviderName?: string;
+                        weatherSourceSummary?: string;
+                        weatherActualRowCount?: number;
+                        weatherStubRowCount?: number;
+                        weatherCoverageStart?: string;
+                        weatherCoverageEnd?: string;
+                      };
+                      const stub = diagnosticResult.diagnostic.stubAudit as {
+                        stubDateKeys?: string[];
+                        boundaryStubDateKeys?: string[];
+                      };
+                      return (
+                        <div className="space-y-2 font-mono text-xs text-slate-800">
+                          <div>Weather provider: {String(wx?.weatherProviderName ?? "—")}</div>
+                          <div>Weather source summary: {String(wx?.weatherSourceSummary ?? "—")}</div>
+                          <div>Actual rows: {typeof wx?.weatherActualRowCount === "number" ? wx.weatherActualRowCount : "—"}</div>
+                          <div>Stub rows: {typeof wx?.weatherStubRowCount === "number" ? wx.weatherStubRowCount : "—"}</div>
+                          <div>
+                            Coverage: {String(wx?.weatherCoverageStart ?? "—")} → {String(wx?.weatherCoverageEnd ?? "—")}
+                          </div>
+                          {Array.isArray(stub?.stubDateKeys) && stub.stubDateKeys.length > 0 ? (
+                            <div className="mt-2">
+                              <div className="font-semibold">Days that used stub weather:</div>
+                              <div className="mt-1 max-h-32 overflow-auto rounded bg-white p-2">
+                                {stub.stubDateKeys.join(", ")}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="rounded border border-slate-200 bg-slate-50 p-3">
                 <div className="text-xs font-semibold uppercase text-slate-500">House / scenario context</div>
                 <pre className="mt-1 overflow-auto text-xs text-slate-800">
@@ -894,4 +1095,3 @@ export default function SimulationEnginesPage() {
     </div>
   );
 }
-

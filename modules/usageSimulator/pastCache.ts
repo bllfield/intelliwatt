@@ -61,10 +61,19 @@ export type CachedPastDataset = {
 };
 
 /** Guard: usage client may not have cache table (e.g. old generate or no USAGE_DATABASE_URL). */
-function getCacheModel(): { findUnique: (args: any) => Promise<any>; upsert: (args: any) => Promise<any> } | null {
+function getCacheModel(): {
+  findUnique: (args: any) => Promise<any>;
+  upsert: (args: any) => Promise<any>;
+  deleteMany: (args: any) => Promise<{ count: number }>;
+} | null {
   try {
     const model = (usagePrisma as any).pastSimulatedDatasetCache;
-    return model && typeof model.findUnique === "function" && typeof model.upsert === "function" ? model : null;
+    return model &&
+      typeof model.findUnique === "function" &&
+      typeof model.upsert === "function" &&
+      typeof model.deleteMany === "function"
+      ? model
+      : null;
   } catch {
     return null;
   }
@@ -141,5 +150,27 @@ export async function saveCachedPastDataset(args: {
     });
   } catch {
     // Cache unavailable (e.g. no USAGE_DATABASE_URL, table missing, or connection failed). Non-fatal.
+  }
+}
+
+/** Delete cached Past dataset row(s) by houseId + scenarioId + inputHash. Returns number of rows deleted (0 or 1). */
+export async function deleteCachedPastDataset(args: {
+  houseId: string;
+  scenarioId: string;
+  inputHash: string;
+}): Promise<number> {
+  const model = getCacheModel();
+  if (!model) return 0;
+  try {
+    const result = await model.deleteMany({
+      where: {
+        houseId: args.houseId,
+        scenarioId: args.scenarioId,
+        inputHash: args.inputHash,
+      },
+    });
+    return typeof result?.count === "number" ? result.count : 0;
+  } catch {
+    return 0;
   }
 }

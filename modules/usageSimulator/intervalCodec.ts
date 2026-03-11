@@ -56,7 +56,9 @@ export function encodeIntervalsV1(
   for (let i = 0; i < sorted.length; i++) {
     const ts = new Date(sorted[i]!.timestamp).getTime();
     const sec = Math.round(ts / 1000);
-    const kwh = Math.max(0, Number(sorted[i]!.kwh) || 0);
+    const kwhRaw = Math.max(0, Number(sorted[i]!.kwh) || 0);
+    // Round to 0.001 kWh so encode/decode round-trip is deterministic.
+    const kwh = Math.round(kwhRaw * KWH_SCALE) / KWH_SCALE;
     const scaled = Math.min(MAX_KWH_SCALED, Math.round(kwh * KWH_SCALE));
     if (i === 0) {
       writeInt32LE(out, sec);

@@ -240,6 +240,7 @@ export async function POST(req: NextRequest) {
         weatherProvenance: diagnostic.weatherProvenance,
         stubAudit: diagnostic.stubAudit,
         parity: diagnostic.parity,
+        integrity: diagnostic.integrity,
         gapfillLabNote: diagnostic.gapfillLabNote,
       },
     };
