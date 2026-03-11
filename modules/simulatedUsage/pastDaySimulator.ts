@@ -460,8 +460,7 @@ export function simulatePastDay(
   }));
   const intervalSumKwh = intervals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
   const displayDayKwh = roundDayKwhDisplay(intervalSumKwh);
-  const weatherAdjustedDayKwh =
-    Number(adj.preBlendAdjustedDayKwh) || (Number(sel.targetDayKwh) || 0) * (Number(adj.weatherSeverityMultiplier) || 0);
+  const weatherAdjustedDayKwh = Number(adj.preBlendAdjustedDayKwh);
 
   return {
     localDate,
