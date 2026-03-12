@@ -7,6 +7,90 @@
 - Do not create a second derivation path for the same output or artifact.
 - Consolidate duplicate logic into one canonical module before extending functionality.
 
+### Shared Module Rule
+
+- It is not allowed to implement the same function in two places.
+- If logic is needed in multiple places, it must live in one shared module and be consumed from there.
+- No duplicate or parallel implementations are allowed for interval derivation, simulated-day generation, daily aggregation, monthly aggregation, summary totals, overlays, bucket generation, or diagnostics transforms.
+- If similar code already exists in multiple places, future work must consolidate toward one shared module path and must not add another path.
+
+### Canonical Past Sim Artifact Rule
+
+- Raw actual usage remains the raw source of truth.
+- Past Corrected Baseline is the first canonical derived full-year artifact.
+- Past Corrected Baseline is built from:
+  - actual SMT intervals for non-travel and non-vacant dates, and
+  - shared-core simulated replacement intervals for travel and vacant dates.
+- After Past Corrected Baseline is built, it must be saved in the existing Past baseline storage.
+- Past page, admin tools, cache restore, diagnostics, and downstream systems must read that saved stitched artifact.
+- No read-time re-stitching.
+- No second overlay pass on top of the saved Past baseline artifact.
+- No alternate rebuild path for the same Past baseline output.
+
+### Downstream Artifact Boundary Rule
+
+- Do not change current Usage logic as part of Past Sim or downstream stage work.
+- Current Usage remains as-is.
+- Past Sim Baseline continues to pull from the same saved interval foundation as Usage.
+- Past Sim and later stages must treat saved artifacts as stage boundaries.
+- Downstream stages must not repeatedly go back to raw usage when a canonical saved artifact already exists for that stage.
+
+### Stage Boundary Rule
+
+- Usage actual intervals = saved source artifact.
+- Past Corrected Baseline = first stitched derived artifact.
+- Upgrade Overlay = derived from saved Past Corrected Baseline.
+- Future Baseline = derived from saved Past Corrected Baseline plus approved adjustments and overlays.
+- Buckets = derived from the saved artifact for that stage, not rebuilt from scratch upstream.
+
+### Performance Rule for Past Sim and Beyond
+
+- Optimize for reuse of saved artifacts, not repeated recomputation.
+- Every downstream stage should start from the nearest valid saved artifact.
+- Avoid rebuilding full prior chains when only later-stage logic changed.
+- Bucket generation must consume saved stage artifacts and should not rerun earlier interval pipelines unless required.
+
+### Test Parity and Speed Rule
+
+- Tests are not allowed to recreate alternate logic paths.
+- Tests must use the same shared production modules and artifacts.
+- No separate test-only business math for intervals, simulated-day generation, daily or monthly aggregation, overlay math, or bucket math.
+- Most tests should be stage-local and artifact-based.
+- Only a small number of end-to-end tests should run the full chain.
+- Tests should stay fast by reusing canonical saved artifact fixtures when possible.
+- Past baseline tests should start from saved intervals foundation.
+- Overlay tests should start from saved Past Corrected Baseline artifacts.
+- Future baseline tests should start from saved Past Corrected Baseline artifacts.
+- Bucket tests should start from the saved artifact for that stage.
+
+### Not Allowed
+
+- Same function implemented in multiple files.
+- Read-time restitching of Past baseline.
+- Second monthly overlay pass after stitched Past baseline is saved.
+- Admin-only alternate baseline computation for display.
+- Test-only duplicate business logic.
+- Recomputing whole upstream chains when a saved artifact already exists for the needed stage.
+
+### Implementation Follow-up Checklist (Code Alignment)
+
+- Route admin compare/read flows to canonical saved artifacts (no alternate recompute reads):
+  - `app/api/admin/tools/gapfill-lab/route.ts`
+  - `lib/admin/gapfillLab.ts`
+- Strengthen Past cache invalidation fingerprint/hash:
+  - `lib/usage/actualDatasetForHouse.ts` (`getIntervalDataFingerprint`)
+  - `modules/usageSimulator/pastCache.ts`
+  - `modules/simulatedUsage/simulatePastUsageDataset.ts`
+- Ensure persisted `PAST_SIM_BASELINE` is a first-class read path:
+  - `lib/usage/resolveIntervalsLayer.ts`
+- Align admin prime/rebuild semantics with canonical read semantics:
+  - `app/api/admin/tools/prime-past-cache/route.ts`
+  - `lib/admin/gapfillLabPrime.ts`
+- Add parity tests focused on artifact-first stage boundaries:
+  - `tests/usageSimulator/`
+  - `tests/simulatedUsage/`
+  - `tests/usage/`
+
 Scope: SMT agreement/subscription admin tools + usage normalization trigger
 
 - Added internal SMT admin API routes (Vercel, admin-only via `x-admin-token`):

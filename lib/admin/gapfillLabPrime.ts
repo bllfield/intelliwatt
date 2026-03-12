@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "@/lib/db";
+import { usagePrisma } from "@/lib/db/usageClient";
 import { getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { monthsEndingAt } from "@/modules/manualUsage/anchor";
@@ -20,6 +21,7 @@ import { encodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/i
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 
 type DateRange = { startDate: string; endDate: string };
 
@@ -135,6 +137,35 @@ export type PrimeGapfillLabResult =
   | { ok: true; inputHash: string; houseId: string }
   | { ok: false; error: string; message: string };
 
+export async function inspectPastCacheArtifacts(args: {
+  houseId: string;
+  scenarioId: string;
+}): Promise<{ count: number; latestUpdatedAt: string | null }> {
+  try {
+    const rows = await (usagePrisma as any).pastSimulatedDatasetCache.findMany({
+      where: {
+        houseId: args.houseId,
+        scenarioId: args.scenarioId,
+      },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+      take: 1,
+    });
+    const count = await (usagePrisma as any).pastSimulatedDatasetCache.count({
+      where: {
+        houseId: args.houseId,
+        scenarioId: args.scenarioId,
+      },
+    });
+    return {
+      count: Number(count) || 0,
+      latestUpdatedAt: rows?.[0]?.updatedAt ? new Date(rows[0].updatedAt).toISOString() : null,
+    };
+  } catch {
+    return { count: 0, latestUpdatedAt: null };
+  }
+}
+
 /**
  * Build Past dataset with buildExcludedRanges = dbTravelRanges ∪ rangesToMask and save to
  * scenarioId "gapfill_lab". Run Compare will then get a cache hit for the same ranges.
@@ -230,6 +261,7 @@ export async function buildAndSavePastForGapfillLab(args: {
     startDate,
     endDate,
   });
+  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
   const inputHash = computePastInputHash({
     engineVersion: PAST_ENGINE_VERSION,
     windowStartUtc: startDate,
@@ -238,6 +270,9 @@ export async function buildAndSavePastForGapfillLab(args: {
     travelRanges: buildExcludedRanges,
     buildInputs: buildInputs as Record<string, unknown>,
     intervalDataFingerprint,
+    usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+    usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+    usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
   });
 
   const pastResult = await getPastSimulatedDatasetForHouse({

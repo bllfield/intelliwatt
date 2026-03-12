@@ -227,6 +227,25 @@ export type SimulatePastUsageDatasetResult = {
   simulatedDayResults?: SimulatedDayResult[];
 };
 
+export type UsageShapeProfileIdentity = {
+  usageShapeProfileId: string | null;
+  usageShapeProfileVersion: string | null;
+  usageShapeProfileDerivedAt: string | null;
+};
+
+/**
+ * Shared identity/version snapshot used in Past cache-key construction.
+ * Keeps cache invalidation aligned with the profile row that drives day-total selection.
+ */
+export async function getUsageShapeProfileIdentityForPast(houseId: string): Promise<UsageShapeProfileIdentity> {
+  const row = await getLatestUsageShapeProfile(houseId).catch(() => null);
+  return {
+    usageShapeProfileId: row?.id ? String(row.id) : null,
+    usageShapeProfileVersion: row?.version != null ? String(row.version) : null,
+    usageShapeProfileDerivedAt: row?.derivedAt != null ? String(row.derivedAt) : null,
+  };
+}
+
 /**
  * Single shared Past simulation entrypoint.
  * Used by getPastSimulatedDatasetForHouse (cold build), recalcSimulatorBuild (recalc), and GapFill Lab production path.

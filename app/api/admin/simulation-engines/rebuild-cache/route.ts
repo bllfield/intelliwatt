@@ -5,6 +5,7 @@ import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { computePastInputHash, deleteCachedPastDataset, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import { normalizeScenarioKey } from "@/modules/usageSimulator/repo";
+import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
       startDate: window.startDate,
       endDate: window.endDate,
     });
+    const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(house.id);
     const inputHash = computePastInputHash({
       engineVersion: PAST_ENGINE_VERSION,
       windowStartUtc: window.startDate,
@@ -127,6 +129,9 @@ export async function POST(req: NextRequest) {
       travelRanges,
       buildInputs,
       intervalDataFingerprint,
+      usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+      usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+      usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
     });
 
     const scenarioIdForCache = resolvedScenarioId ?? "BASELINE";

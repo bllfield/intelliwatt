@@ -193,7 +193,7 @@ Do NOT break:
 
 ## 5. GapFill: use full SimulatedDayResult (intervals + display)
 
-**File:** `[lib/admin/gapfillLab.ts](lib/admin/gapfillLab.ts)` (e.g. `simulateIntervalsForTestDaysFromUsageShapeProfile` or equivalent).
+**File:** `[lib/admin/gapfillLab.ts](lib/admin/gapfillLab.ts)` (test-window compare path or equivalent).
 
 - **Today:** For each test day, calls `getPastDayResultOnly` (no intervals), then builds intervals as `shape96[slot] * targetDayKwh`, so intervals and day total can differ from Past.
 - **Change:** For each test day, call `simulatePastDay` with the same grid timestamps and context (or keep using `getPastDayResultOnly` if it is updated to return full `SimulatedDayResult` including intervals). Use `dayResult.intervals15` (or `dayResult.intervals`) for scoring and `dayResult.displayDayKwh` for any displayed day total. Do not recompute intervals from shape × finalDayKwh.

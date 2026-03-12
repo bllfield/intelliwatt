@@ -42,6 +42,53 @@ _Generated from audit; implementation not started. Do not redesign existing admi
 
 **Constraints:** Reuse existing admin patterns and components. Do not replace existing pages. Add new sections/buttons/forms only. Each new capability: name, route (or where it lives), DB model touched (if any), fields editable, validations.
 
+### Shared Module Rule
+
+- It is not allowed to implement the same function in two places.
+- If logic is needed in multiple places, it must live in one shared module and be consumed from there.
+- Admin tools may orchestrate shared modules but may not create duplicate or parallel implementations of interval derivation, simulated-day generation, daily/monthly aggregation, summary totals, overlays, bucket generation, or diagnostics transforms.
+
+### Canonical Past Sim Artifact Rule
+
+- Raw actual usage remains the raw source of truth.
+- Past Corrected Baseline is the first canonical derived full-year artifact.
+- After Past Corrected Baseline is built, it must be saved in existing Past baseline storage.
+- Admin reads and inspections must use the saved stitched artifact and must not perform read-time re-stitching.
+
+### Admin Tool Consistency Rule
+
+For `/admin/simulation-engines`, `/admin/tools/gapfill-lab`, and related tooling:
+
+- Tools must inspect the same saved artifacts production uses.
+- Tools are not allowed to compute alternate versions of the same baseline for display.
+- Tools must clearly show:
+  - raw actual source,
+  - simulated replacement source,
+  - saved stitched Past baseline artifact.
+- Admin rebuild actions may regenerate and resave the canonical artifact.
+- Admin read and inspect actions must use the saved artifact.
+
+### Performance Rule for Past Sim and Beyond
+
+- Optimize admin tooling for reuse of saved artifacts, not repeated recomputation.
+- Downstream admin checks should start from the nearest valid saved artifact for that stage.
+- Avoid rebuilding full upstream chains when validating only a later stage.
+
+### Test Parity and Speed Rule
+
+- Admin tool tests must use the same shared production modules and artifacts.
+- No test-only duplicate business logic for interval, simulation, aggregation, overlay, or bucket math.
+- Prefer stage-local artifact-based tests and keep only a small set of full-chain end-to-end checks.
+
+### Not Allowed
+
+- Same function implemented in multiple files.
+- Read-time restitching of Past baseline.
+- Second monthly overlay pass after stitched Past baseline is saved.
+- Admin-only alternate baseline computation for display.
+- Test-only duplicate business logic.
+- Recomputing whole upstream chains when a saved artifact already exists for the needed stage.
+
 ---
 
 ### Category 1) Test runners / diagnostics: baseline build, gapfill scoring, overlay application checks

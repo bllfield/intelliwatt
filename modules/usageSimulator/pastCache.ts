@@ -15,8 +15,12 @@ export type PastInputHashPayload = {
   timezone: string;
   travelRanges: Array<{ startDate: string; endDate: string }>;
   buildInputs: Record<string, unknown>;
-  /** Fingerprint of actual interval data: count:maxTsEpoch:sumKwhMilli. Changes on backfill or kWh edits so cache key changes. */
+  /** Fingerprint of actual interval data (count/maxTs/value checksum). */
   intervalDataFingerprint?: string;
+  /** Usage-shape identity/version fields used by Past simulation day-total selection. */
+  usageShapeProfileId?: string | null;
+  usageShapeProfileVersion?: string | null;
+  usageShapeProfileDerivedAt?: string | null;
 };
 
 /** Stable hash of buildInputs + travelRanges + timezone + window + engineVersion (base64url). */
@@ -33,6 +37,9 @@ export function computePastInputHash(payload: PastInputHashPayload): string {
     }),
     buildInputsHash: stableHashObject(payload.buildInputs),
     intervalDataFingerprint: payload.intervalDataFingerprint ?? "",
+    usageShapeProfileId: payload.usageShapeProfileId ?? "",
+    usageShapeProfileVersion: payload.usageShapeProfileVersion ?? "",
+    usageShapeProfileDerivedAt: payload.usageShapeProfileDerivedAt ?? "",
   };
   const json = JSON.stringify(canonical);
   const digest = createHash("sha256").update(json, "utf8").digest();
@@ -100,6 +107,40 @@ export async function getCachedPastDataset(args: {
     .catch(() => null);
   if (!row?.datasetJson || !row?.intervalsCompressed) return null;
   return {
+    datasetJson: row.datasetJson as Record<string, unknown>,
+    intervalsCodec: String(row.intervalsCodec ?? ""),
+    intervalsCompressed: Buffer.isBuffer(row.intervalsCompressed)
+      ? row.intervalsCompressed
+      : Buffer.from(row.intervalsCompressed),
+  };
+}
+
+export async function getLatestCachedPastDatasetByScenario(args: {
+  houseId: string;
+  scenarioId: string;
+}): Promise<(CachedPastDataset & { inputHash: string; updatedAt: Date | null }) | null> {
+  const model = getCacheModel();
+  if (!model) return null;
+  const row = await (model as any)
+    .findFirst({
+      where: {
+        houseId: args.houseId,
+        scenarioId: args.scenarioId,
+      },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        inputHash: true,
+        updatedAt: true,
+        datasetJson: true,
+        intervalsCodec: true,
+        intervalsCompressed: true,
+      },
+    })
+    .catch(() => null);
+  if (!row?.datasetJson || !row?.intervalsCompressed) return null;
+  return {
+    inputHash: String(row.inputHash ?? ""),
+    updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
     datasetJson: row.datasetJson as Record<string, unknown>,
     intervalsCodec: String(row.intervalsCodec ?? ""),
     intervalsCompressed: Buffer.isBuffer(row.intervalsCompressed)

@@ -520,7 +520,7 @@ export async function runSimulatorDiagnostic(
       label: "GapFill Lab validation (test-days profile)",
       sameEngineAsPastProduction: true,
       daySimulationCore: "shared_past_day_simulator",
-      note: "GapFill Lab uses the same day-simulation core as Past production: day totals come from getPastDayResultOnly (modules/simulatedUsage/pastDaySimulator.ts), i.e. shared_past_day_simulator. The Lab pipeline is getActualIntervalsForRange(test window) -> simulateIntervalsForTestDaysFromUsageShapeProfile -> computeGapFillMetrics; only the pipeline name differs from Past, not the day-total logic.",
+      note: "GapFill Lab compare/read now uses artifact-only reads from the saved gapfill_lab Past artifact via getSimulatedUsageForHouseScenario(readMode=artifact_only), then computes metrics via computeGapFillMetrics. Rebuilds remain explicit actions.",
     },
   };
 }

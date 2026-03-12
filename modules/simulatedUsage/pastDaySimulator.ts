@@ -68,7 +68,7 @@ const MIN_DAYS_GLOBAL_DAYTYPE = 8;
 const GUARDRAIL_MAX_MULT = 1.75;
 const GUARDRAIL_MIN_MULT = 0.45;
 
-function selectDayTotalWithFallback(args: {
+function selectPastDayTotalWithFallback(args: {
   monthKey: string;
   isWeekend: boolean;
   profile: PastDayProfileLite;
@@ -428,7 +428,7 @@ export function simulatePastDay(
   const { localDate, isWeekend, gridTimestamps, weatherForDay } = request;
   const monthKey = localDate.slice(0, 7);
 
-  const sel = selectDayTotalWithFallback({
+  const sel = selectPastDayTotalWithFallback({
     monthKey,
     isWeekend,
     profile: context.profile,
@@ -460,7 +460,8 @@ export function simulatePastDay(
   }));
   const intervalSumKwh = intervals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
   const displayDayKwh = roundDayKwhDisplay(intervalSumKwh);
-  const weatherAdjustedDayKwh = Number(adj.preBlendAdjustedDayKwh);
+  const weatherAdjustedDayKwh =
+    Number(adj.preBlendAdjustedDayKwh) || (Number(sel.targetDayKwh) || 0) * (Number(adj.weatherSeverityMultiplier) || 0);
 
   return {
     localDate,

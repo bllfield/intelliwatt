@@ -27,6 +27,7 @@ import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import {
   computePastInputHash,
   getCachedPastDataset,
+  getLatestCachedPastDatasetByScenario,
   saveCachedPastDataset,
   PAST_ENGINE_VERSION,
 } from "@/modules/usageSimulator/pastCache";
@@ -39,7 +40,10 @@ import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
-import { simulatePastUsageDataset } from "@/modules/simulatedUsage/simulatePastUsageDataset";
+import {
+  simulatePastUsageDataset,
+  getUsageShapeProfileIdentityForPast,
+} from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type ManualUsagePayloadAny = any;
@@ -962,11 +966,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
   userId: string;
   houseId: string;
   scenarioId?: string | null;
+  readMode?: "artifact_only" | "allow_rebuild";
 }): Promise<
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | {
       ok: false;
-      code: "NO_BUILD" | "SCENARIO_NOT_FOUND" | "HOUSE_NOT_FOUND" | "INTERNAL_ERROR";
+      code: "NO_BUILD" | "SCENARIO_NOT_FOUND" | "HOUSE_NOT_FOUND" | "INTERNAL_ERROR" | "ARTIFACT_MISSING";
       message: string;
       inputHash?: string;
       engineVersion?: string;
@@ -975,6 +980,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
   try {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
+    const readMode = args.readMode ?? "allow_rebuild";
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
@@ -988,6 +994,42 @@ export async function getSimulatedUsageForHouseScenario(args: {
         })
         .catch(() => null);
       if (!scenarioRow) return { ok: false, code: "SCENARIO_NOT_FOUND", message: "Scenario not found for user/house" };
+    }
+
+    if (readMode === "artifact_only") {
+      const scenarioIdForCache = scenarioId ?? "BASELINE";
+      const latestCached = await getLatestCachedPastDatasetByScenario({
+        houseId: args.houseId,
+        scenarioId: scenarioIdForCache,
+      });
+      if (!latestCached || latestCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+        return {
+          ok: false,
+          code: "ARTIFACT_MISSING",
+          message: "Persisted artifact not found for this house/scenario. Run explicit rebuild first.",
+          engineVersion: PAST_ENGINE_VERSION,
+        };
+      }
+      const decoded = decodeIntervalsV1(latestCached.intervalsCompressed);
+      const restored = {
+        ...latestCached.datasetJson,
+        series: {
+          ...(typeof (latestCached.datasetJson as any).series === "object" &&
+          (latestCached.datasetJson as any).series !== null
+            ? (latestCached.datasetJson as any).series
+            : {}),
+          intervals15: decoded,
+        },
+      };
+      if (!restored.meta || typeof restored.meta !== "object") (restored as any).meta = {};
+      (restored.meta as any).artifactReadMode = "artifact_only";
+      (restored.meta as any).artifactSource = "past_cache";
+      (restored.meta as any).artifactInputHash = latestCached.inputHash;
+      (restored.meta as any).artifactUpdatedAt = latestCached.updatedAt
+        ? latestCached.updatedAt.toISOString()
+        : null;
+      (restored.meta as any).artifactRecomputed = false;
+      return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: restored };
     }
 
     // Future always recomputed from current Past (or Baseline when no Past): no cache. Every time Future is opened we recalc so it uses the latest Past curve.
@@ -1264,6 +1306,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         if (startDate && endDate) {
           const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
           const timezone = (buildInputs as any).timezone ?? "America/Chicago";
+          const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
           const intervalDataFingerprint = await getIntervalDataFingerprint({
             houseId: args.houseId,
             esiid: house.esiid ?? null,
@@ -1278,12 +1321,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
             travelRanges,
             buildInputs: buildInputs as Record<string, unknown>,
             intervalDataFingerprint,
+            usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+            usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+            usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
           });
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cacheKeyDiag = {
             inputHash,
             engineVersion: PAST_ENGINE_VERSION,
             intervalDataFingerprint,
+            usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+            usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
             scenarioId: scenarioIdForCache,
           };
           const cached = await getCachedPastDataset({

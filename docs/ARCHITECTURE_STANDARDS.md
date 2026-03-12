@@ -126,6 +126,43 @@
 - Refuse duplicate implementations.
 - Prefer parameterized canonical functions over multiple near-duplicate functions.
 
+### Shared Module Rule
+
+- It is not allowed to implement the same function in two places.
+- If logic is needed in multiple places, it must live in one shared module and be consumed from there.
+- No duplicate or parallel implementations are allowed for interval derivation, simulated-day generation, daily aggregation, monthly aggregation, summary totals, overlays, bucket generation, or diagnostics transforms.
+- If similar code already exists in multiple places, future work must consolidate toward one shared module path and must not add another path.
+
+### Downstream Artifact Boundary Rule
+
+- Current Usage logic remains as-is unless a dedicated Usage change is explicitly approved.
+- Past Sim and downstream stages must treat saved artifacts as hard stage boundaries.
+- Downstream stages must not repeatedly return to raw usage when a canonical saved artifact already exists for the required stage.
+
+### Stage Boundary Rule
+
+- Usage actual intervals = saved source artifact.
+- Past Corrected Baseline = first stitched derived artifact.
+- Upgrade Overlay = derived from saved Past Corrected Baseline.
+- Future Baseline = derived from saved Past Corrected Baseline plus approved adjustments and overlays.
+- Buckets = derived from the saved artifact for that stage, not rebuilt from scratch upstream.
+
+### Test Parity and Speed Rule
+
+- Tests must use the same shared production modules and artifacts.
+- Tests are not allowed to recreate alternate business logic paths.
+- No test-only duplicate business math for intervals, simulated-day generation, daily/monthly aggregation, overlay math, or bucket math.
+- Most tests should be stage-local and artifact-based, with only a small number of full-chain end-to-end tests.
+
+### Not Allowed
+
+- Same function implemented in multiple files.
+- Read-time restitching of Past baseline.
+- Second monthly overlay pass after stitched Past baseline is saved.
+- Admin-only alternate baseline computation for display.
+- Test-only duplicate business logic.
+- Recomputing whole upstream chains when a saved artifact already exists for the needed stage.
+
 ## Implementation Guidelines
 
 ### File Organization
@@ -251,3 +288,13 @@
 3. Baseline generation must be deterministic.
 4. Weather keys must match canonical day grid (no timezone drift).
 5. Past must be fully stable before Future overlay is applied.
+
+### Canonical Past Sim Artifact Rule
+
+- Raw actual usage remains the raw source of truth.
+- Past Corrected Baseline is the first canonical derived full-year artifact.
+- Past Corrected Baseline must be saved in the existing Past baseline storage.
+- Past pages, admin tools, cache restore, diagnostics, and downstream systems must read the saved stitched artifact.
+- No read-time re-stitching.
+- No second overlay pass on top of the saved Past baseline artifact.
+- No alternate rebuild path for the same Past baseline output.

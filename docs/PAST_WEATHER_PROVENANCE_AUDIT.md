@@ -3,7 +3,7 @@
 ## 1. Why GapFill Lab validation is still separate
 
 - **Production Past path** (user-facing Past page, cold build, recalc, and Lab “production Past” priming) uses the **shared Past core**: `simulatePastUsageDataset` → `buildPastSimulatedBaselineV1` → `buildCurveFromPatchedIntervals` → `buildSimulatedUsageDatasetFromCurve`. Engine identifier: `shared_past_day_simulator`.
-- **GapFill Lab validation** (the scoring run that produces WAPE/MAE etc.) uses a **different engine**: `enginePath: gapfill_test_days_profile`, with `getActualIntervalsForRange(test window only) → simulateIntervalsForTestDaysFromUsageShapeProfile → computeGapFillMetrics`. It does **not** call `simulatePastUsageDataset` or the shared Past day simulator. It scores a small set of test dates using a usage-shape-profile–based simulator, not the full-window Past stitched curve.
+- **GapFill Lab validation** (the scoring run that produces WAPE/MAE etc.) uses a **different engine**: `enginePath: gapfill_test_days_profile`, with a test-window compare pipeline that loads intervals then scores via `computeGapFillMetrics`. It does **not** call `simulatePastUsageDataset` or the shared Past day simulator. It scores a small set of test dates using a usage-shape-profile–based simulator, not the full-window Past stitched curve.
 
 So the Past page and GapFill Lab validation are **not** the same engine. The UI previously stated “same engine as GapFill Lab validation,” which was incorrect.
 
@@ -16,7 +16,7 @@ The Past page showed:
 The Lab report for the same house showed:
 
 - **enginePath:** gapfill_test_days_profile  
-- **functionsUsed:** getActualIntervalsForRange(test window only) → simulateIntervalsForTestDaysFromUsageShapeProfile → computeGapFillMetrics  
+- **functionsUsed:** test-window interval load → `computeGapFillMetrics`  
 
 So the **validation** path (test-days profile engine) is not the same as the **production Past** path (shared_past_day_simulator). The phrase “same engine as GapFill Lab validation” was wrong. **Fix applied:** that phrase was removed from the Past page; the line now only shows “Simulation core: shared_past_day_simulator.”
 

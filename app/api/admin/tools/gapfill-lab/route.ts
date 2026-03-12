@@ -6,36 +6,25 @@ import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
-import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
-  buildUsageShapeProfileLiteFromIntervals,
   buildDailyWeatherFeaturesFromHourly,
-  buildTrainingWeatherStats,
   canonicalIntervalKey,
   computeGapFillMetrics,
   dateKeyInTimezone,
   getLocalDayOfWeekFromDateKey,
-  getPoolHourRange,
-  localDateKeysInRange,
-  localHourInTimezone,
   mergeDateKeysToRanges,
   pickRandomTestDateKeys,
   prevCalendarDay,
-  simulateIntervalsForTestDaysFromUsageShapeProfile,
   summarizeDailyCoverageFromIntervals,
   type DayTotalDiagnostics,
-  type UsageShapeProfileRowForSim,
   filterCandidateDateKeysBySeason,
   pickExtremeWeatherTestDateKeys,
-  dailyWeatherFromDbToFeatures,
-  buildGapFillLabBenchmarkPayload,
-  type GapFillLabBenchmarkPayload,
 } from "@/lib/admin/gapfillLab";
-import { getWeatherForRange, hourlyRowsToDayWxMap } from "@/lib/sim/weatherProvider";
-import { getHouseWeatherDays, upsertHouseWeatherDays } from "@/modules/weather/repo";
-import { WEATHER_STUB_SOURCE, WEATHER_SOURCE } from "@/modules/weather/types";
+import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
+import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
@@ -96,12 +85,6 @@ function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone:
 
 function sortedSample(keys: Set<string>, limit = 10): string[] {
   return Array.from(keys).sort().slice(0, limit);
-}
-
-function setDiff(a: Set<string>, b: Set<string>): Set<string> {
-  const out = new Set<string>();
-  for (const x of Array.from(a)) if (!b.has(x)) out.add(x);
-  return out;
 }
 
 function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
@@ -543,7 +526,7 @@ function buildFullReport(args: {
       enginePath: enginePath,
       functionsUsed:
         enginePath === "gapfill_test_days_profile"
-          ? "getActualIntervalsForRange(test window only) -> simulateIntervalsForTestDaysFromUsageShapeProfile (day totals: getPastDayResultOnly / shared_past_day_simulator) -> computeGapFillMetrics"
+          ? "getSimulatedUsageForHouseScenario(readMode=artifact_only) -> computeGapFillMetrics"
           : "getPastSimulatedDatasetForHouse -> buildPastSimulatedBaselineV1 -> buildCurveFromPatchedIntervals -> buildSimulatedUsageDatasetFromCurve",
       ...(enginePath === "gapfill_test_days_profile"
         ? { daySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE, sameEngineAsPastProduction: true }
@@ -1001,6 +984,8 @@ export async function POST(req: NextRequest) {
     weatherKind?: "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
     /** Optional benchmark payload from a prior run for regression comparison (copy from report). */
     benchmark?: unknown;
+    /** Explicit write action: regenerate + resave canonical Past artifact for gapfill_lab before compare. */
+    rebuildArtifact?: boolean;
   };
   try {
     body = await req.json();
@@ -1144,10 +1129,6 @@ export async function POST(req: NextRequest) {
   let candidateWindowStart: string | null = null;
   let candidateWindowEnd: string | null = null;
   let excludedFromTest_travelCount = 0;
-  /** For random_days only: date keys in candidate window with sufficient coverage (reused for training pool). */
-  let candidateDateKeysForTraining: string[] = [];
-  /** For random_days only: candidate-window intervals (reused for training to avoid second fetch). */
-  let candidateIntervalsForTraining: Array<{ timestamp: string; kwh: number }> | null = null;
 
   if (testDaysRequested != null) {
     const todayTz = dateKeyInTimezone(new Date().toISOString(), timezone);
@@ -1159,12 +1140,10 @@ export async function POST(req: NextRequest) {
       startDate: candidateStart,
       endDate: candidateEnd,
     });
-    candidateIntervalsForTraining = candidateIntervals ?? null;
     const coverage = summarizeDailyCoverageFromIntervals(candidateIntervals ?? [], timezone);
     const candidateDateKeys = Array.from(coverage.keys()).filter(
       (dk) => (coverage.get(dk)?.pct ?? 0) >= minDayCoveragePct
     ).sort();
-    candidateDateKeysForTraining = candidateDateKeys;
     if (testMode === "random") {
       seedUsed = `${house.id}-${Date.now()}`;
     } else {
@@ -1274,33 +1253,6 @@ export async function POST(req: NextRequest) {
   const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
 
-  let trainStart: string;
-  let trainEnd: string;
-  let trainingDateKeysAll: string[];
-  let trainingDateKeysSet: Set<string>;
-  if (testSelectionMode === "random_days" && candidateWindowStart != null && candidateWindowEnd != null) {
-    trainStart = candidateWindowStart;
-    trainEnd = candidateWindowEnd;
-    trainingDateKeysAll = [...candidateDateKeysForTraining];
-    trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
-  } else {
-    trainEnd = prevCalendarDay(minTestKey, trainGapDays);
-    trainStart = prevCalendarDay(trainEnd, trainMaxDays);
-    trainingDateKeysAll = localDateKeysInRange(trainStart, trainEnd, timezone);
-    trainingDateKeysSet = new Set(trainingDateKeysAll.filter((d) => !guardrailExcludedDateKeysLocal.has(d)));
-  }
-  const excludedFromTraining_travelCount = trainingDateKeysAll.filter((d) => travelDateKeysLocal.has(d)).length;
-  const excludedFromTraining_testCount = trainingDateKeysAll.filter((d) => testDateKeysLocal.has(d)).length;
-  const trainingSelectionMode: "before_range" | "all_non_test_days" =
-    testSelectionMode === "random_days" ? "all_non_test_days" : "before_range";
-  const trainingEligibleDateKeysCount = trainingDateKeysSet.size;
-  const trainingDateKeysSample = Array.from(trainingDateKeysSet).sort().slice(0, 15);
-  const trainingMonthDayCountsSample: Record<string, number> = {};
-  for (const dk of Array.from(trainingDateKeysSet)) {
-    const month = dk.slice(0, 7);
-    if (/^\d{4}-\d{2}$/.test(month)) trainingMonthDayCountsSample[month] = (trainingMonthDayCountsSample[month] ?? 0) + 1;
-  }
-
   const actualIntervals = await getActualIntervalsForRange({
     houseId: house.id,
     esiid,
@@ -1330,586 +1282,86 @@ export async function POST(req: NextRequest) {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
   }));
 
-  const usageShapeProfile = await getLatestUsageShapeProfile(house.id).catch(() => null);
-  let profileForSim: UsageShapeProfileRowForSim = usageShapeProfile as UsageShapeProfileRowForSim;
-  let profileSource: "db" | "auto_built_lite" = usageShapeProfile ? "db" : "auto_built_lite";
-  let trainingWindowStartUtc: string | null = null;
-  let trainingWindowEndUtc: string | null = null;
-  let trainingIntervalsCount: number | null = null;
-  let trainingDaysCount: number | null = null;
-  const trainingCoverageExpected = trainingDateKeysSet.size * 96;
-  let trainingCoverageFound: number | null = null;
-  let trainingCoveragePct: number | null = null;
-  /** Set when profile is auto-built from training intervals; used for weather adjustment. */
-  let trainingIntervalsFiltered: Array<{ timestamp: string; kwh: number }> | null = null;
-
-  if (!usageShapeProfile) {
-    if (trainingDateKeysSet.size === 0) {
+  // Canonical path: compare against saved production artifact (gapfill_lab), artifact-first on reads.
+  const rebuildArtifact = body?.rebuildArtifact === true;
+  if (rebuildArtifact) {
+    const rebuilt = await buildAndSavePastForGapfillLab({
+      userId: user.id,
+      houseId: house.id,
+      rangesToMask: testRangesUsed,
+      timezone,
+    });
+    if (!rebuilt.ok) {
       return NextResponse.json(
         {
           ok: false,
-          error: "PROFILE_MISSING_NO_TRAINING_DATA",
-          message:
-            "No UsageShapeProfile for this house and no non-test, non-travel dates in the training window. Ensure baseline usage exists or build a profile first.",
-          trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
+          error: rebuilt.error,
+          message: rebuilt.message,
         },
         { status: 400 }
       );
     }
-    const trainingIntervalsRaw =
-      testSelectionMode === "random_days" && candidateIntervalsForTraining != null
-        ? candidateIntervalsForTraining
-        : await getActualIntervalsForRange({
-            houseId: house.id,
-            esiid,
-            startDate: trainStart,
-            endDate: trainEnd,
-          });
-    const trainingIntervalsFilteredLocal = (trainingIntervalsRaw ?? []).filter((p) =>
-      trainingDateKeysSet.has(dateKeyInTimezone(p.timestamp, timezone))
-    );
-    trainingIntervalsFiltered = trainingIntervalsFilteredLocal;
-    const minTrainingIntervals = 96 * 7;
-    if (trainingIntervalsFilteredLocal.length < minTrainingIntervals) {
+  } else {
+    const inspect = await inspectPastCacheArtifacts({
+      houseId: house.id,
+      scenarioId: "gapfill_lab",
+    });
+    if (inspect.count <= 0) {
       return NextResponse.json(
         {
           ok: false,
-          error: "PROFILE_MISSING_NO_TRAINING_DATA",
+          error: "artifact_missing_rebuild_required",
           message:
-            "No UsageShapeProfile for this house and not enough non-test, non-travel interval history to auto-build. Ensure baseline usage exists or build a profile first.",
-          trainingIntervalsCount: trainingIntervalsFilteredLocal.length,
-          trainingWindow: { trainStartUtc: trainStart, trainEndUtc: trainEnd },
+            "No saved gapfill_lab artifact found. Trigger explicit rebuildArtifact=true (or prime-past-cache action=rebuild) before inspect/read compare.",
+          mode: "artifact_only",
+          scenarioId: "gapfill_lab",
         },
-        { status: 400 }
+        { status: 409 }
       );
     }
-    const lite = buildUsageShapeProfileLiteFromIntervals({ timezone, intervals: trainingIntervalsFilteredLocal });
-    profileForSim = lite;
-    trainingWindowStartUtc = trainStart;
-    trainingWindowEndUtc = trainEnd;
-    trainingIntervalsCount = trainingIntervalsFilteredLocal.length;
-    trainingDaysCount = trainingDateKeysSet.size;
-    trainingCoverageFound = trainingIntervalsFilteredLocal.length;
-    trainingCoveragePct = trainingCoverageExpected > 0 ? trainingCoverageFound / trainingCoverageExpected : null;
   }
 
-  let weatherUsedForSim = false;
-  let weatherByDateKey: Map<string, import("@/lib/admin/gapfillLab").DailyWeatherFeatures> | undefined;
-  let trainingWeatherStats: import("@/lib/admin/gapfillLab").TrainingWeatherStats | undefined;
-  const weatherApiDataForReport: Array<{ dateKey: string; kind: string; tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }> = [];
-  const weatherKindUsed = weatherKind;
-
-  if (profileSource === "auto_built_lite" && trainingIntervalsFiltered != null && trainingIntervalsFiltered.length > 0) {
-    const dateKeysForWeatherSet = new Set<string>(trainingDateKeysSet);
-    for (const d of testDateKeysSorted) dateKeysForWeatherSet.add(d);
-    const dateKeysForWeather = Array.from(dateKeysForWeatherSet).sort();
-
-    if (weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
-      const dbWx = await getHouseWeatherDays({ houseId: house.id, dateKeys: dateKeysForWeather, kind: weatherKind });
-        if (dbWx.size > 0) {
-          weatherByDateKey = dailyWeatherFromDbToFeatures(dbWx);
-          weatherUsedForSim = true;
-          Array.from(dbWx.entries()).forEach(([dateKey, w]) => {
-            const rowSource = String(w.source ?? "").trim() || weatherKind;
-            weatherApiDataForReport.push({
-              dateKey,
-              kind: weatherKind,
-              tAvgF: Number(w.tAvgF) || 0,
-              tMinF: Number(w.tMinF) || 0,
-              tMaxF: Number(w.tMaxF) || 0,
-              hdd65: Number(w.hdd65) || 0,
-              cdd65: Number(w.cdd65) || 0,
-              source: rowSource,
-            });
-          });
-        const trainingDayKwhByDate = new Map<string, number>();
-        for (const p of trainingIntervalsFiltered) {
-          const dk = dateKeyInTimezone(p.timestamp, timezone);
-          trainingDayKwhByDate.set(dk, (trainingDayKwhByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
-        }
-        trainingWeatherStats = buildTrainingWeatherStats({
-          trainingDateKeys: Array.from(trainingDateKeysSet),
-          trainingDayKwhByDate,
-          weatherByDateKey,
-          isWeekend: (dk) => {
-            const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
-            return dow === 0 || dow === 6;
-          },
-        });
-      }
-    } else {
-      const houseWx = await prisma.houseAddress.findUnique({ where: { id: house.id }, select: { lat: true, lng: true } }).catch(() => null);
-      const lat = houseWx?.lat != null && Number.isFinite(houseWx.lat) ? houseWx.lat : null;
-      const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
-      if (lat != null && lon != null) {
-        const allRows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }> = [];
-        const seenTs = new Set<string>();
-        const addRows = (rows: Array<{ timestampUtc: Date | string; temperatureC: number | null; cloudcoverPct?: number | null; solarRadiation?: number | null }>) => {
-          for (const r of rows) {
-            const t = r.timestampUtc instanceof Date ? r.timestampUtc : new Date(r.timestampUtc);
-            const key = t.toISOString();
-            if (!seenTs.has(key)) {
-              seenTs.add(key);
-              allRows.push(r);
-            }
-          }
-        };
-        const trainResult = await getWeatherForRange(lat, lon, trainStart, trainEnd);
-        addRows(trainResult.rows);
-        let anyFromStub = trainResult.fromStub;
-        if (fetchStart !== trainStart || fetchEnd !== trainEnd) {
-          const testResult = await getWeatherForRange(lat, lon, fetchStart, fetchEnd);
-          addRows(testResult.rows);
-          anyFromStub = anyFromStub || testResult.fromStub;
-        }
-        allRows.sort((a, b) => {
-          const ta = a.timestampUtc instanceof Date ? a.timestampUtc.getTime() : new Date(a.timestampUtc).getTime();
-          const tb = b.timestampUtc instanceof Date ? b.timestampUtc.getTime() : new Date(b.timestampUtc).getTime();
-          return ta - tb;
-        });
-        if (allRows.length > 0) {
-          weatherUsedForSim = !anyFromStub;
-          weatherByDateKey = buildDailyWeatherFeaturesFromHourly(allRows, undefined, undefined, timezone);
-          Array.from(weatherByDateKey.entries()).forEach(([dateKey, f]) => {
-            const tAvgF = ((f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
-            const tMinF = ((f.dailyMinTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
-            const tMaxF = ((f.dailyMaxTempC ?? f.dailyAvgTempC ?? 0) * 9) / 5 + 32;
-            weatherApiDataForReport.push({
-              dateKey,
-              kind: "open_meteo",
-              tAvgF,
-              tMinF,
-              tMaxF,
-              hdd65: f.heatingDegreeSeverity,
-              cdd65: f.coolingDegreeSeverity,
-              source: anyFromStub ? WEATHER_STUB_SOURCE : WEATHER_SOURCE.OPEN_METEO_CACHE,
-            });
-          });
-          const trainingDayKwhByDate = new Map<string, number>();
-          for (const p of trainingIntervalsFiltered) {
-            const dk = dateKeyInTimezone(p.timestamp, timezone);
-            trainingDayKwhByDate.set(dk, (trainingDayKwhByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
-          }
-          trainingWeatherStats = buildTrainingWeatherStats({
-            trainingDateKeys: Array.from(trainingDateKeysSet),
-            trainingDayKwhByDate,
-            weatherByDateKey,
-            isWeekend: (dk) => {
-              const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
-              return dow === 0 || dow === 6;
-            },
-          });
-        }
-      }
-    }
-  }
-
-  const simResult = simulateIntervalsForTestDaysFromUsageShapeProfile({
-    timezone,
-    testIntervals: actualTestIntervalsCanon,
-    usageShapeProfileRowOrNull: profileForSim,
-    returnDiagnostics: profileSource === "auto_built_lite",
-    ...(weatherByDateKey && trainingWeatherStats
-      ? {
-          weatherByDateKey,
-          trainingWeatherStats,
-          homeProfile: homeProfile as import("@/lib/admin/gapfillLab").GapfillHomeProfileForWeather | null,
-          applianceProfile,
-        }
-      : {}),
+  const simOut = await getSimulatedUsageForHouseScenario({
+    userId: user.id,
+    houseId: house.id,
+    scenarioId: "gapfill_lab",
+    readMode: "artifact_only",
   });
-  const simIntervals = Array.isArray(simResult) ? simResult : simResult.intervals;
-  const dayTotalDiagnostics: DayTotalDiagnostics | undefined = Array.isArray(simResult) ? undefined : simResult.diagnostics;
-  const simulatedByTs = new Map<string, number>();
-  for (const p of simIntervals) {
-    const ts = String(p?.timestamp ?? "").trim();
-    if (ts) simulatedByTs.set(canonicalIntervalKey(ts), Number(p?.kwh) || 0);
+  if (!simOut.ok || !simOut.dataset?.series?.intervals15) {
+    const status = simOut.ok ? 500 : simOut.code === "ARTIFACT_MISSING" ? 409 : 500;
+    return NextResponse.json(
+      {
+        ok: false,
+        error: simOut.ok ? "artifact_read_failed" : simOut.code === "ARTIFACT_MISSING" ? "artifact_missing_rebuild_required" : "artifact_read_failed",
+        message:
+          simOut.ok
+            ? "Saved artifact missing intervals15 series."
+            : simOut.code === "ARTIFACT_MISSING"
+              ? "No saved gapfill_lab artifact found. Trigger explicit rebuildArtifact=true before inspect/read compare."
+              : simOut.message,
+        code: simOut.ok ? "INTERNAL_ERROR" : simOut.code,
+      },
+      { status }
+    );
   }
 
-  const actualCount = actualTestIntervalsCanon.length;
-  const joinedCount = actualTestIntervalsCanon.filter((p) => simulatedByTs.has(p.timestamp)).length;
-  const joinMissingCount = actualCount - joinedCount;
-  const joinPct = actualCount > 0 ? joinedCount / actualCount : 1;
-  const joinSampleActualTs: string[] = [];
-  if (joinMissingCount > 0) {
-    for (const p of actualTestIntervalsCanon) {
-      if (!simulatedByTs.has(p.timestamp)) {
-        joinSampleActualTs.push(p.timestamp);
-        if (joinSampleActualTs.length >= 5) break;
-      }
-    }
-  }
-  const joinSampleSimTs = Array.from(simulatedByTs.keys()).slice(0, 5);
+  const artifactIntervals = (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
+    .map((p) => ({
+      timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+      kwh: Number(p?.kwh) || 0,
+    }));
+  const simulatedTestIntervals = artifactIntervals.filter((p) =>
+    testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+  );
+  const simulatedByTs = new Map<string, number>();
+  for (const p of simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
 
   const metrics = computeGapFillMetrics({
     actual: actualTestIntervalsCanon,
-    simulated: simIntervals,
+    simulated: simulatedTestIntervals,
     simulatedByTs,
     timezone,
   });
-
-  const onlyTravel = setDiff(travelDateKeysLocal, testDateKeysLocal);
-  const onlyTest = setDiff(testDateKeysLocal, travelDateKeysLocal);
-  const expectedTestIntervals = testDateKeysLocal.size * 96;
-  const coveragePctNum = expectedTestIntervals > 0 ? actualTestIntervals.length / expectedTestIntervals : null;
-  const dateKeyDiag = {
-    travelDateKeysLocalCount: travelDateKeysLocal.size,
-    travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
-    testDateKeysLocalCount: testDateKeysLocal.size,
-    testDateKeysLocalSample: sortedSample(testDateKeysLocal),
-    guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-    guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal).slice(0, 10),
-    setArithmetic: {
-      onlyTravelCount: onlyTravel.size,
-      onlyTravelSample: sortedSample(onlyTravel),
-      onlyTestCount: onlyTest.size,
-      onlyTestSample: sortedSample(onlyTest),
-      overlapCount: overlapLocal.size,
-      overlapSample: sortedSample(overlapLocal),
-    },
-  };
-
-  // Derive weather note and diagnostics from the exact weather payload used by the simulator (weatherApiDataForReport).
-  let weatherUsedForReport = weatherUsedForSim;
-  let weatherNoteReport = "Weather not integrated in gap-fill lab path.";
-  const weatherRowsBySource: Record<string, number> = {};
-  let weatherSourcesSeen: string[] = [];
-  let weatherSourceMismatchDetected = false;
-
-  if (weatherApiDataForReport.length > 0) {
-    for (const r of weatherApiDataForReport) {
-      const src = String(r?.source ?? "").trim() || "unknown";
-      weatherRowsBySource[src] = (weatherRowsBySource[src] ?? 0) + 1;
-    }
-    weatherSourcesSeen = Object.keys(weatherRowsBySource).sort();
-    const totalRows = weatherApiDataForReport.length;
-    const stubCount = weatherRowsBySource[WEATHER_STUB_SOURCE] ?? 0;
-    const allStub = stubCount === totalRows;
-    const anyStub = stubCount > 0;
-    const anyOpenMeteo =
-      (weatherRowsBySource[WEATHER_SOURCE.OPEN_METEO_CACHE] ?? 0) > 0 ||
-      (weatherRowsBySource[WEATHER_SOURCE.OPEN_METEO_LIVE] ?? 0) > 0;
-
-    if (allStub) {
-      weatherNoteReport =
-        "Stub/fallback weather used for test window (Open-Meteo unavailable or DB backfilled with stub). Day totals still scaled by weather profile.";
-    } else if (anyStub && (anyOpenMeteo || Object.keys(weatherRowsBySource).some((k) => k !== WEATHER_STUB_SOURCE))) {
-      weatherNoteReport = `Mixed weather sources: ${weatherSourcesSeen.join(", ")}. Day totals scaled by weather (and optional aux heat / pool freeze-protect).`;
-    } else if (anyOpenMeteo || weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
-      if (weatherKind === "ACTUAL_LAST_YEAR" || weatherKind === "NORMAL_AVG") {
-        weatherNoteReport = `DB weather (${weatherKind}) used for test window; day totals scaled by weather (and optional aux heat / pool freeze-protect).`;
-      } else {
-        weatherNoteReport = "Real weather (Open-Meteo) used for test window; day totals scaled by weather (and optional aux heat / pool freeze-protect).";
-      }
-    }
-
-    // Guardrail: if note claims real weather but every row is stub, flag mismatch.
-    const noteClaimsReal = /open-meteo|real weather/i.test(weatherNoteReport) && !/stub|fallback|mixed/i.test(weatherNoteReport);
-    if (noteClaimsReal && allStub) weatherSourceMismatchDetected = true;
-  }
-
-  const modelAssumptions = {
-    baseload: { used: false, method: "test_days_profile", params: {}, valueKwhPer15m: null, valueKwhPerDay: null },
-    pool: {
-      used: false,
-      pumpType: homeProfile?.pool?.pumpType ?? null,
-      pumpHp: homeProfile?.pool?.pumpHp ?? null,
-      assumedKw: null,
-      runHoursPerDaySummer: homeProfile?.pool?.summerRunHoursPerDay ?? null,
-      runHoursPerDayWinter: homeProfile?.pool?.winterRunHoursPerDay ?? null,
-      scheduleRule: "Gap-fill lab (test-days only) does not model pool.",
-    },
-    hvac: {
-      used: false,
-      hvacType: homeProfile?.hvacType ?? null,
-      heatingType: homeProfile?.heatingType ?? null,
-      setpointSummerF: homeProfile?.thermostatSummerF ?? homeProfile?.summerTemp ?? null,
-      setpointWinterF: homeProfile?.thermostatWinterF ?? homeProfile?.winterTemp ?? null,
-      weatherUsed: weatherUsedForReport,
-      rule: "Gap-fill lab uses UsageShapeProfile shape only; no HVAC model.",
-    },
-    occupancy: {
-      used: false,
-      occupantsWork: homeProfile?.occupants?.work ?? null,
-      occupantsSchool: homeProfile?.occupants?.school ?? null,
-      occupantsHomeAllDay: homeProfile?.occupants?.homeAllDay ?? null,
-      rule: "Gap-fill lab uses profile weekday/weekend avg; no occupancy model.",
-    },
-    intradayShape: {
-      source: profileSource === "db" ? "usage_shape_profile" : profileSource === "auto_built_lite" ? "auto_built_lite" : "uniform_fallback",
-      weekdayWeekendSplit: Boolean(profileForSim),
-      smoothing: "none",
-    },
-    dayTotalSource: profileForSim ? (profileSource === "auto_built_lite" ? "auto_built_lite_by_month" : "profile_weekday_weekend_by_month") : "global_avg_or_zero",
-    meta: {
-      simVersion: "gapfill_test_days_profile",
-      shapeDerivationVersion: "v1",
-      seed: null,
-      maskMode: "test_dates_only",
-      holdoutN: actualTestIntervals.length,
-      configHash: `engine=gapfill_test_days_profile,profile=${profileSource}`,
-    },
-  };
-
-  const hasPool = Boolean(homeProfile?.pool?.hasPool);
-  const poolHoursErrorSplit = hasPool
-    ? {
-        poolHours: { wape: null as number | null, mae: null as number | null },
-        nonPoolHours: { wape: null as number | null, mae: null as number | null },
-        scheduleRuleUsed: "Pool schedule not implemented in gap-fill lab; used: false.",
-      }
-    : null;
-
-  const runHours = Number(homeProfile?.pool?.summerRunHoursPerDay) || 12;
-  const poolRange = getPoolHourRange(runHours);
-  let poolHoursLens: { poolHours: { wape: number | null; mae: number | null }; nonPoolHours: { wape: number | null; mae: number | null }; rule: string } | null = null;
-  if (hasPool) {
-    let poolSumActual = 0, poolSumSim = 0, poolSumAbs = 0, poolN = 0;
-    let nonSumActual = 0, nonSumSim = 0, nonSumAbs = 0, nonN = 0;
-    for (const p of actualTestIntervalsCanon) {
-      const ts = p.timestamp;
-      const actualKwh = Number(p?.kwh) || 0;
-      const simKwh = simulatedByTs.get(ts) ?? 0;
-      const hour = localHourInTimezone(ts, timezone);
-      const inPool = hour >= poolRange.startHour && hour <= poolRange.endHour;
-      if (inPool) {
-        poolSumActual += actualKwh;
-        poolSumSim += simKwh;
-        poolSumAbs += Math.abs(simKwh - actualKwh);
-        poolN++;
-      } else {
-        nonSumActual += actualKwh;
-        nonSumSim += simKwh;
-        nonSumAbs += Math.abs(simKwh - actualKwh);
-        nonN++;
-      }
-    }
-    const round2 = (x: number) => Math.round(x * 100) / 100;
-    poolHoursLens = {
-      poolHours: {
-        wape: poolSumActual > 1e-6 ? round2((poolSumAbs / poolSumActual) * 100) : null,
-        mae: poolN > 0 ? round2(poolSumAbs / poolN) : null,
-      },
-      nonPoolHours: {
-        wape: nonSumActual > 1e-6 ? round2((nonSumAbs / nonSumActual) * 100) : null,
-        mae: nonN > 0 ? round2(nonSumAbs / nonN) : null,
-      },
-      rule: `Pool window: local hours ${poolRange.startHour}-${poolRange.endHour} (centered midday, runHoursPerDay=${runHours}).`,
-    };
-  }
-
-  const listTestDateKeys = testDateKeysSorted;
-  const guardrailExcludedDateKeysSample = sortedSample(guardrailExcludedDateKeysLocal).slice(0, 10);
-  const testDatasetStub = {
-    summary: { start: fetchStart, end: fetchEnd, intervalsCount: actualTestIntervals.length },
-    totals: { netKwh: metrics.totalActualKwhMasked },
-    insights: {} as any,
-    monthly: [] as Array<{ month?: string; kwh?: number }>,
-  };
-
-  const wxSummary = dayTotalDiagnostics?.weatherAdjustmentSummary;
-  const currentBenchmarkPayload = buildGapFillLabBenchmarkPayload({
-    reportVersion: REPORT_VERSION,
-    houseId: house.id,
-    testMode,
-    seedUsed: seedUsed ?? null,
-    listTestDateKeys,
-    totalActualKwhMasked: metrics.totalActualKwhMasked,
-    totalSimKwhMasked: metrics.totalSimKwhMasked,
-    deltaKwhMasked: metrics.deltaKwhMasked,
-    wape: metrics.wape,
-    mae: metrics.mae,
-    byMonth: metrics.byMonth,
-    worst10Abs: metrics.worst10Abs,
-    daysWithWeatherMultiplier: wxSummary?.daysWithWeatherMultiplier,
-    daysWithAuxHeatAdder: wxSummary?.daysWithAuxHeatAdder,
-    daysWithPoolFreezeProtectAdder: wxSummary?.daysWithPoolFreezeProtectAdder,
-  });
-  const benchmarkPayloadForCopy = JSON.stringify(currentBenchmarkPayload, null, 2);
-
-  let benchmarkFromRequest: GapFillLabBenchmarkPayload | null = null;
-  const rawBenchmark = body?.benchmark;
-  if (rawBenchmark != null && typeof rawBenchmark === "object" && !Array.isArray(rawBenchmark)) {
-    const b = rawBenchmark as Record<string, unknown>;
-    if (
-      typeof b.reportVersion === "string" &&
-      typeof b.houseId === "string" &&
-      typeof b.WAPE_pct === "number" &&
-      typeof b.MAE_kwhPer15m === "number" &&
-      typeof b.totalSimKwhMasked === "number" &&
-      typeof b.worstAbsDayDeltaKwh === "number"
-    ) {
-      benchmarkFromRequest = {
-        reportVersion: String(b.reportVersion),
-        houseId: String(b.houseId),
-        testMode: String(b.testMode ?? ""),
-        seedUsed: b.seedUsed != null ? String(b.seedUsed) : null,
-        listTestDateKeys: Array.isArray(b.listTestDateKeys) ? b.listTestDateKeys.map(String) : [],
-        WAPE_pct: Number(b.WAPE_pct),
-        MAE_kwhPer15m: Number(b.MAE_kwhPer15m),
-        totalActualKwhMasked: Number(b.totalActualKwhMasked ?? 0),
-        totalSimKwhMasked: Number(b.totalSimKwhMasked),
-        deltaKwhMasked: Number(b.deltaKwhMasked ?? 0),
-        worstAbsDayDeltaKwh: Number(b.worstAbsDayDeltaKwh),
-        worstAbsDayDate: b.worstAbsDayDate != null ? String(b.worstAbsDayDate) : null,
-        monthlyWAPEByMonth: b.monthlyWAPEByMonth != null && typeof b.monthlyWAPEByMonth === "object" && !Array.isArray(b.monthlyWAPEByMonth)
-          ? (b.monthlyWAPEByMonth as Record<string, number>)
-          : {},
-        daysWithWeatherMultiplier: typeof b.daysWithWeatherMultiplier === "number" ? b.daysWithWeatherMultiplier : undefined,
-        daysWithAuxHeatAdder: typeof b.daysWithAuxHeatAdder === "number" ? b.daysWithAuxHeatAdder : undefined,
-        daysWithPoolFreezeProtectAdder: typeof b.daysWithPoolFreezeProtectAdder === "number" ? b.daysWithPoolFreezeProtectAdder : undefined,
-      };
-    }
-  }
-
-  const benchmarkSummary = {
-    benchmarkAvailable: benchmarkFromRequest != null,
-    benchmarkSource: benchmarkFromRequest != null ? ("request_payload" as const) : ("none" as const),
-    currentWAPE_pct: metrics.wape,
-    benchmarkWAPE_pct: benchmarkFromRequest?.WAPE_pct ?? null,
-    wapeDelta_pct: benchmarkFromRequest != null ? metrics.wape - benchmarkFromRequest.WAPE_pct : null,
-    currentMAE_kwhPer15m: metrics.mae,
-    benchmarkMAE_kwhPer15m: benchmarkFromRequest?.MAE_kwhPer15m ?? null,
-    maeDelta_kwhPer15m: benchmarkFromRequest != null ? metrics.mae - benchmarkFromRequest.MAE_kwhPer15m : null,
-    currentTotalSimKwhMasked: metrics.totalSimKwhMasked,
-    benchmarkTotalSimKwhMasked: benchmarkFromRequest?.totalSimKwhMasked ?? null,
-    totalSimBiasDeltaKwh: benchmarkFromRequest != null ? metrics.totalSimKwhMasked - benchmarkFromRequest.totalSimKwhMasked : null,
-    currentWorstAbsDayDeltaKwh: metrics.worst10Abs.length > 0 ? Math.abs(metrics.worst10Abs[0]!.deltaKwh) : 0,
-    benchmarkWorstAbsDayDeltaKwh: benchmarkFromRequest?.worstAbsDayDeltaKwh ?? null,
-    worstAbsDayDeltaChangeKwh:
-      benchmarkFromRequest != null && metrics.worst10Abs.length > 0
-        ? Math.abs(metrics.worst10Abs[0]!.deltaKwh) - benchmarkFromRequest.worstAbsDayDeltaKwh
-        : null,
-    currentWorstDayDate: metrics.worst10Abs.length > 0 ? metrics.worst10Abs[0]!.date : null,
-    benchmarkWorstDayDate: benchmarkFromRequest?.worstAbsDayDate ?? null,
-    monthlyComparison:
-      benchmarkFromRequest != null
-        ? metrics.byMonth.map((m) => ({
-            month: m.month,
-            currentWAPE: m.wape,
-            benchmarkWAPE: benchmarkFromRequest!.monthlyWAPEByMonth[m.month] ?? null,
-            delta: benchmarkFromRequest!.monthlyWAPEByMonth[m.month] != null ? m.wape - benchmarkFromRequest!.monthlyWAPEByMonth[m.month]! : null,
-          }))
-        : null,
-  };
-
-  const { fullReportJson, fullReportText } = buildFullReport({
-    reportVersion: REPORT_VERSION,
-    generatedAt: new Date().toISOString(),
-    env: process.env.VERCEL ? "vercel" : "local",
-    houseId: house.id,
-    userId: user.id,
-    email: user.email ?? "",
-    houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-    timezone,
-    testRangesInput: testRangesUsed,
-    travelRangesFromDb,
-    guardrailExcludedRanges: Array.from(guardrailExcludedDateKeysLocal).sort().map((d) => ({ startDate: d, endDate: d })),
-    listTestDateKeys,
-    testIntervalsCount: actualTestIntervals.length,
-    testDaysCount: listTestDateKeys.length,
-    guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-    guardrailExcludedDateKeysSample,
-    dateKeyDiag,
-    dataset: testDatasetStub,
-    buildInputs: { canonicalMonths: [] },
-    configHash: modelAssumptions.meta.configHash,
-    excludedDateKeysCount: 0,
-    excludedDateKeysSample: [],
-    homeProfile,
-    applianceProfile,
-    modelAssumptions,
-    metrics: {
-      mae: metrics.mae,
-      rmse: metrics.rmse,
-      maxAbs: metrics.maxAbs,
-      wape: metrics.wape,
-      mape: metrics.mape,
-      totalActualKwhMasked: metrics.totalActualKwhMasked,
-      totalSimKwhMasked: metrics.totalSimKwhMasked,
-      deltaKwhMasked: metrics.deltaKwhMasked,
-      mapeFiltered: metrics.mapeFiltered,
-      mapeFilteredCount: metrics.mapeFilteredCount,
-      byMonth: metrics.byMonth,
-      byHour: metrics.byHour,
-      worst10Abs: metrics.worst10Abs,
-    },
-    diagnostics: {
-      dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
-      top10Under: metrics.diagnostics.top10Under,
-      top10Over: metrics.diagnostics.top10Over,
-      hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
-    },
-    poolHoursLens,
-    usageShapeProfileDiag: usageShapeProfile ? { found: true, id: (usageShapeProfile as any).id, version: (usageShapeProfile as any).version, derivedAt: (usageShapeProfile as any).derivedAt, windowStartUtc: null, windowEndUtc: null, profileMonthKeys: Object.keys((usageShapeProfile as any).shapeByMonth96 ?? {}).sort(), weekdayAvgLen: Array.isArray((usageShapeProfile as any).avgKwhPerDayWeekdayByMonth) ? (usageShapeProfile as any).avgKwhPerDayWeekdayByMonth.length : null, weekendAvgLen: Array.isArray((usageShapeProfile as any).avgKwhPerDayWeekendByMonth) ? (usageShapeProfile as any).avgKwhPerDayWeekendByMonth.length : null, canonicalMonths: [], canonicalMonthsLen: 0, reasonNotUsed: null } : null,
-    enginePath: "gapfill_test_days_profile",
-    expectedTestIntervals,
-    coveragePct: coveragePctNum,
-    joinJoinedCount: joinedCount,
-    joinMissingCount: joinMissingCount,
-    joinPct,
-    joinSampleActualTs,
-    joinSampleSimTs,
-    profileSource,
-    trainingWindowStartUtc,
-    trainingWindowEndUtc,
-    trainingIntervalsCount,
-    trainingDaysCount,
-    testSelectionMode,
-    testDaysRequested: testDaysRequested ?? undefined,
-    testDaysSelected,
-    seedUsed: seedUsed ?? undefined,
-    testMode,
-    candidateDaysAfterModeFilterCount: candidateDaysAfterModeFilterCount ?? undefined,
-    minDayCoveragePct: testSelectionMode === "random_days" ? minDayCoveragePct : undefined,
-    candidateWindowStartUtc: candidateWindowStart ?? undefined,
-    candidateWindowEndUtc: candidateWindowEnd ?? undefined,
-    trainingMaxDays: trainMaxDays,
-    trainingGapDays: trainGapDays,
-    excludedFromTest_travelCount: testSelectionMode === "random_days" ? excludedFromTest_travelCount : undefined,
-    excludedFromTraining_travelCount,
-    excludedFromTraining_testCount,
-    trainingSelectionMode,
-    trainingEligibleDateKeysCount,
-    trainingDateKeysSample,
-    trainingMonthDayCountsSample,
-    trainingCoverage: {
-      expected: trainingCoverageExpected,
-      found: trainingCoverageFound,
-      pct: trainingCoveragePct,
-    },
-    ...(dayTotalDiagnostics ? { dayTotalDiagnostics: dayTotalDiagnostics } : {}),
-    weatherUsed: weatherUsedForReport,
-    weatherNote: weatherNoteReport,
-    weatherApiData: weatherApiDataForReport,
-    weatherKindUsed,
-    weatherRowsBySource: Object.keys(weatherRowsBySource).length > 0 ? weatherRowsBySource : undefined,
-    weatherSourcesSeen: weatherSourcesSeen.length > 0 ? weatherSourcesSeen : undefined,
-    weatherSourceMismatchDetected: weatherSourceMismatchDetected || undefined,
-    weatherRowCount: weatherApiDataForReport.length,
-    benchmarkSummary,
-    benchmarkPayloadForCopy,
-  });
-
-  const pasteLines = [
-    "=== Simulation Audit Report (Gap-Fill Lab) ===",
-    `House: ${house.addressLine1 ?? ""} ${house.addressCity ?? ""} ${house.addressState ?? ""}`.trim() || house.id,
-    `Engine: gapfill_test_days_profile | Test intervals: ${actualTestIntervals.length} | Timezone: ${timezone}`,
-    "",
-    "--- Primary metrics ---",
-    `WAPE: ${metrics.wape}% | MAE: ${metrics.mae} kWh | RMSE: ${metrics.rmse} | MAPE: ${metrics.mape}% | MaxAbs: ${metrics.maxAbs} kWh`,
-    "",
-    "--- Test window ---",
-    `intervalCount: ${actualTestIntervals.length} | totalActualKwh: ${metrics.totalActualKwhMasked} | totalSimKwh: ${metrics.totalSimKwhMasked} | window: ${fetchStart} → ${fetchEnd}`,
-    "",
-    "--- Assumptions ---",
-    `Intraday shape: ${modelAssumptions.intradayShape.source} | Weekday/weekend: ${modelAssumptions.intradayShape.weekdayWeekendSplit}`,
-    "",
-    "--- Diagnostics ---",
-    `Seasonal: Summer WAPE ${metrics.diagnostics.seasonalSplit.summer.wape}% | Winter WAPE ${metrics.diagnostics.seasonalSplit.winter.wape}% | Shoulder WAPE ${metrics.diagnostics.seasonalSplit.shoulder.wape}%`,
-    `Worst days: ${metrics.worstDays.slice(0, 5).map((d) => `${d.date}: ${d.absErrorKwh} kWh`).join(" | ")}`,
-  ];
-  const pasteSummary = pasteLines.join("\n");
 
   return NextResponse.json({
     ok: true,
@@ -1919,15 +1371,13 @@ export async function POST(req: NextRequest) {
       id: house.id,
       label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     },
-    houses: houses.map((h: any) => ({
-      id: h.id,
-      label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
-    })),
     timezone,
-    homeProfile,
-    applianceProfile,
-    modelAssumptions,
-    testIntervalsCount: actualTestIntervals.length,
+    mode: "artifact_only",
+    rebuilt: rebuildArtifact,
+    enginePath: "production_past_stitched",
+    cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
+    sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+    scenarioId: "gapfill_lab",
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
@@ -1935,7 +1385,6 @@ export async function POST(req: NextRequest) {
       wape: metrics.wape,
       maxAbs: metrics.maxAbs,
     },
-    primaryPercentMetric: metrics.wape,
     byMonth: metrics.byMonth,
     byHour: metrics.byHour,
     byDayType: metrics.byDayType,
@@ -1946,40 +1395,19 @@ export async function POST(req: NextRequest) {
       top10Over: metrics.diagnostics.top10Over,
       hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
       seasonalSplit: metrics.diagnostics.seasonalSplit,
-      poolHoursErrorSplit,
     },
     parity: {
       intervalCount: actualTestIntervals.length,
       testWindowKwh: metrics.totalActualKwhMasked,
-      annualKwh: metrics.totalActualKwhMasked, // legacy (deprecated, remove after one deploy)
+      annualKwh: metrics.totalActualKwhMasked,
       baseloadKwhPer15m: null,
       baseloadDailyKwh: null,
       windowStartUtc: fetchStart,
       windowEndUtc: fetchEnd,
     },
-    pasteSummary,
-    fullReportText,
-    fullReportJson,
-    testSelectionMode,
-    testDaysRequested: testDaysRequested ?? undefined,
-    testDaysSelected,
-    seedUsed: seedUsed ?? undefined,
-    testMode,
-    candidateDaysAfterModeFilterCount: candidateDaysAfterModeFilterCount ?? undefined,
-    minDayCoveragePct: testSelectionMode === "random_days" ? minDayCoveragePct : undefined,
-    candidateWindowStartUtc: candidateWindowStart ?? undefined,
-    candidateWindowEndUtc: candidateWindowEnd ?? undefined,
-    trainingMaxDays: trainMaxDays,
-    trainingGapDays: trainGapDays,
-    excludedFromTest_travelCount: testSelectionMode === "random_days" ? excludedFromTest_travelCount : undefined,
-    excludedFromTraining_travelCount,
-    excludedFromTraining_testCount,
-    trainingSelectionMode,
-    trainingEligibleDateKeysCount,
-    trainingDateKeysSample,
-    trainingMonthDayCountsSample,
-    trainingCoverage: { expected: trainingCoverageExpected, found: trainingCoverageFound, pct: trainingCoveragePct },
-    usage365,
+    fullReportText:
+      `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
+      `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=gapfill_lab`,
   });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

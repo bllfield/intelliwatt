@@ -25,7 +25,7 @@ Single internal entrypoint for Past simulation (cold build, recalc, GapFill Lab 
 
 ## Still separate / pending
 
-- **gapfill_test_days_profile**: Lab path name for the validation pipeline (getActualIntervalsForRange → simulateIntervalsForTestDaysFromUsageShapeProfile → computeGapFillMetrics). **Day-total logic is shared**: when using auto_built_lite or profile with lite strength, test-day totals are produced by **getPastDayResultOnly** in `modules/simulatedUsage/pastDaySimulator.ts` (same as Past production’s **simulatePastDay**). So Lab and Past use the **same day-simulation core** (`shared_past_day_simulator`); only the pipeline entry and shape source (profile vs reference-derived) differ. Admin report now exposes `daySimulationCore` and `sameEngineAsPastProduction: true` for the gapfill path.
+- **gapfill_test_days_profile**: Lab path name for the validation pipeline (test-window interval load → `computeGapFillMetrics`). **Day-total logic is shared**: when using auto_built_lite or profile with lite strength, test-day totals are produced by **getPastDayResultOnly** in `modules/simulatedUsage/pastDaySimulator.ts` (same as Past production’s **simulatePastDay**). So Lab and Past use the **same day-simulation core** (`shared_past_day_simulator`); only the pipeline entry and shape source (profile vs reference-derived) differ. Admin report now exposes `daySimulationCore` and `sameEngineAsPastProduction: true` for the gapfill path.
 
 ## Call graph (production Past)
 

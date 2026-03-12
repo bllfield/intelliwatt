@@ -16,7 +16,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
-import { buildAndSavePastForGapfillLab } from "@/lib/admin/gapfillLabPrime";
+import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -41,6 +41,8 @@ export async function POST(req: NextRequest) {
       houseId?: string;
       scenarioId?: string;
       email?: string;
+      /** inspect = artifact-only read, rebuild = regenerate/resave canonical artifact */
+      action?: "inspect" | "rebuild";
       /** When provided, prime the Gap-Fill Lab cache (gapfill_lab) with db ∪ rangesToMask so Run Compare gets a cache hit. Requires email. */
       rangesToMask?: Array<{ startDate?: string; endDate?: string }>;
       timezone?: string;
@@ -59,6 +61,7 @@ export async function POST(req: NextRequest) {
           }))
           .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate))
       : [];
+    const action = body?.action === "inspect" ? "inspect" : "rebuild";
 
     if (rangesToMask.length > 0) {
       const email = String(body?.email ?? "").trim().toLowerCase();
@@ -91,6 +94,23 @@ export async function POST(req: NextRequest) {
       }
       const houseId = houses[0].id;
       const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+      if (action === "inspect") {
+        const inspect = await inspectPastCacheArtifacts({
+          houseId,
+          scenarioId: "gapfill_lab",
+        });
+        return NextResponse.json({
+          ok: true,
+          action: "inspect",
+          mode: "artifact_only",
+          houseId,
+          scenarioId: "gapfill_lab",
+          artifactCount: inspect.count,
+          latestUpdatedAt: inspect.latestUpdatedAt,
+          artifactAvailable: inspect.count > 0,
+          rebuilt: false,
+        });
+      }
       const result = await buildAndSavePastForGapfillLab({
         userId: user.id,
         houseId,
@@ -100,9 +120,12 @@ export async function POST(req: NextRequest) {
       if (result.ok) {
         return NextResponse.json({
           ok: true,
+          action: "rebuild",
+          mode: "write",
           message: "Gap-Fill Lab cache primed with these ranges. Run Compare will use cache and finish in seconds.",
           houseId: result.houseId,
           scenarioId: "gapfill_lab",
+          rebuilt: true,
         });
       }
       if (result.error === "house_not_found" || result.error === "no_actual_data") {
@@ -181,6 +204,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (action === "inspect") {
+      const inspect = await inspectPastCacheArtifacts({
+        houseId: house.id,
+        scenarioId,
+      });
+      return NextResponse.json({
+        ok: true,
+        action: "inspect",
+        mode: "artifact_only",
+        houseId: house.id,
+        scenarioId,
+        artifactCount: inspect.count,
+        latestUpdatedAt: inspect.latestUpdatedAt,
+        artifactAvailable: inspect.count > 0,
+        rebuilt: false,
+      });
+    }
+
     const out = await getSimulatedUsageForHouseScenario({
       userId: house.userId,
       houseId: house.id,
@@ -190,9 +231,12 @@ export async function POST(req: NextRequest) {
     if (out.ok) {
       return NextResponse.json({
         ok: true,
+        action: "rebuild",
+        mode: "write",
         message: "Past dataset built and written to cache. Next user request for this house+scenario will use cache.",
         houseId: out.houseId,
         scenarioId,
+        rebuilt: true,
       });
     }
 
