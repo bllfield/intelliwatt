@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
-import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForUsageShapeProfile } from "@/modules/usageShapeProfile/actualIntervals";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 
@@ -71,15 +71,21 @@ export async function POST(req: NextRequest) {
     const esiid = house.esiid ? String(house.esiid) : null;
     const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
 
-    const actualIntervals = await getActualIntervalsForRange({
+    const actual = await getActualIntervalsForUsageShapeProfile({
       houseId: house.id,
       esiid,
       startDate: canonicalWindow.startDate,
       endDate: canonicalWindow.endDate,
     });
+    const actualIntervals = actual.intervals;
     if (!actualIntervals?.length) {
       return NextResponse.json(
-        { ok: false, error: "no_actual_data", message: "No actual interval data in window." },
+        {
+          ok: false,
+          error: "no_actual_data",
+          message: "No actual interval data in the canonical 365-day window.",
+          sourceTried: actual.source,
+        },
         { status: 400 }
       );
     }
@@ -111,6 +117,7 @@ export async function POST(req: NextRequest) {
       timeOfDayShares: profile.timeOfDayShares,
       configHash: profile.configHash,
       shapeAll96Preview: profile.shapeAll96.slice(0, 24),
+      actualSource: actual.source,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
