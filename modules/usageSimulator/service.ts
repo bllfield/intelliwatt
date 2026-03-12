@@ -229,7 +229,12 @@ export async function buildGapfillCompareSimShared(args: {
       ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
       : [];
 
-  if (simOut.ok && initialIntervals15.length > 0 && initialIntervals15.length < expectedChartIntervalCount) {
+  if (
+    !rebuildArtifact &&
+    simOut.ok &&
+    initialIntervals15.length > 0 &&
+    initialIntervals15.length < expectedChartIntervalCount
+  ) {
     const staleRebuild = await buildAndSavePastForGapfillLab({
       userId,
       houseId,
@@ -263,7 +268,7 @@ export async function buildGapfillCompareSimShared(args: {
       !observedMaskedFingerprint ||
       (expectedMaskedFingerprint != null && observedMaskedFingerprint !== expectedMaskedFingerprint));
 
-  if (needsMaskScopeRebuild) {
+  if (!rebuildArtifact && needsMaskScopeRebuild) {
     const scopeRebuild = await buildAndSavePastForGapfillLab({
       userId,
       houseId,
@@ -1531,7 +1536,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
         (pastSimulatedList == null || !Array.isArray(pastSimulatedList) || pastSimulatedList.length === 0) &&
         !isSmtBaselineMode;
       if (pastHasNoEvents) {
-        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, {
+          skipFullYearIntervalFetch: true,
+        });
         if (actualResult?.dataset) {
           const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
           const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
@@ -1846,7 +1853,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
       dataset?.summary
     ) {
       try {
-        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, {
+          skipFullYearIntervalFetch: true,
+        });
         const actualSummary = actualResult?.dataset?.summary;
         if (actualSummary?.start != null && actualSummary?.end != null) {
           dataset.summary.start = actualSummary.start;
