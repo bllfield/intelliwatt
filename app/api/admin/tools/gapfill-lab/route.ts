@@ -99,6 +99,13 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function canonicalGapfillWindow(timezone: string): { startDate: string; endDate: string } {
+  // Keep one canonical 366-day window (inclusive) across usage, test selection, and compare.
+  const endDate = prevCalendarDay(dateKeyInTimezone(new Date().toISOString(), timezone), 1);
+  const startDate = prevCalendarDay(endDate, 365);
+  return { startDate, endDate };
+}
+
 function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
   try {
     const d = new Date(tsIso);
@@ -1074,16 +1081,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const canonicalWindow = canonicalGapfillWindow(timezone);
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
-    const usage365End = prevCalendarDay(dateKeyInTimezone(new Date().toISOString(), timezone), 2);
-    const usage365Start = prevCalendarDay(usage365End, 364);
     const usage365Intervals = await getActualIntervalsForRange({
       houseId: house.id,
       esiid,
-      startDate: usage365Start,
-      endDate: usage365End,
+      startDate: canonicalWindow.startDate,
+      endDate: canonicalWindow.endDate,
     });
     usage365 = buildUsage365Payload({
       intervals: usage365Intervals ?? [],
@@ -1141,9 +1147,8 @@ export async function POST(req: NextRequest) {
   let candidateIntervalsForTesting: IntervalPoint[] | null = null;
 
   if (testDaysRequested != null) {
-    const todayTz = dateKeyInTimezone(new Date().toISOString(), timezone);
-    const candidateEnd = prevCalendarDay(todayTz, 2);
-    const candidateStart = prevCalendarDay(todayTz, 367);
+    const candidateEnd = canonicalWindow.endDate;
+    const candidateStart = canonicalWindow.startDate;
     const candidateIntervals = await getActualIntervalsForRange({
       houseId: house.id,
       esiid,
@@ -1158,7 +1163,7 @@ export async function POST(req: NextRequest) {
     if (testMode === "random") {
       seedUsed = `${house.id}-${Date.now()}`;
     } else {
-      seedUsed = seed || `${house.id}-${todayTz}`;
+      seedUsed = seed || `${house.id}-${candidateEnd}`;
     }
     let candidatesForPick: string[] = candidateDateKeys;
     if (testMode === "winter" || testMode === "summer" || testMode === "shoulder") {
@@ -1367,6 +1372,22 @@ export async function POST(req: NextRequest) {
   const simulatedTestIntervals = artifactIntervals.filter((p) =>
     testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
+  const chartDateKeysLocal = new Set<string>([
+    ...Array.from(testDateKeysLocal),
+    ...Array.from(travelDateKeysLocal),
+  ]);
+  const simulatedChartIntervals = artifactIntervals.filter((p) =>
+    chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+  );
+  const simulatedChartDaily = Array.from(
+    simulatedChartIntervals.reduce((acc, p) => {
+      const dk = dateKeyInTimezone(p.timestamp, timezone);
+      acc.set(dk, (acc.get(dk) ?? 0) + (Number(p.kwh) || 0));
+      return acc;
+    }, new Map<string, number>())
+  )
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, simKwh]) => ({ date, simKwh: round2(simKwh) }));
   const simulatedByTs = new Map<string, number>();
   for (const p of simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
 
@@ -1392,6 +1413,7 @@ export async function POST(req: NextRequest) {
     cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
     scenarioId: "gapfill_lab",
+    testIntervalsCount: actualTestIntervals.length,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
@@ -1404,6 +1426,9 @@ export async function POST(req: NextRequest) {
     byDayType: metrics.byDayType,
     worstDays: metrics.worstDays,
     diagnostics: {
+      // Chart-only union scope: Test Dates plus DB Vacant/Travel dates.
+      dailyTotalsChartSim: simulatedChartDaily,
+      chartIntervalCount: simulatedChartIntervals.length,
       dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
       top10Under: metrics.diagnostics.top10Under,
       top10Over: metrics.diagnostics.top10Over,
@@ -1416,8 +1441,8 @@ export async function POST(req: NextRequest) {
       annualKwh: metrics.totalActualKwhMasked,
       baseloadKwhPer15m: null,
       baseloadDailyKwh: null,
-      windowStartUtc: fetchStart,
-      windowEndUtc: fetchEnd,
+      windowStartUtc: canonicalWindow.startDate,
+      windowEndUtc: canonicalWindow.endDate,
     },
     fullReportText:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +

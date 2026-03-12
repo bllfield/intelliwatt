@@ -98,41 +98,32 @@ export default function GapFillLabClient() {
 
   const gapfillChartData = useMemo(() => {
     if (!result || !result.ok) return null;
-    const dailyMasked = Array.isArray((result as any).diagnostics?.dailyTotalsMasked)
-      ? ((result as any).diagnostics.dailyTotalsMasked as Array<{ date: string; actualKwh: number; simKwh: number }>)
+    const dailyChartRows = Array.isArray((result as any).diagnostics?.dailyTotalsChartSim)
+      ? ((result as any).diagnostics.dailyTotalsChartSim as Array<{ date: string; simKwh: number }>)
+      : Array.isArray((result as any).diagnostics?.dailyTotalsMasked)
+        ? ((result as any).diagnostics.dailyTotalsMasked as Array<{ date: string; simKwh?: number; kwh?: number }>)
       : [];
-    if (!dailyMasked.length) return null;
+    if (!dailyChartRows.length) return null;
 
-    const daily = dailyMasked
+    const daily = dailyChartRows
       .map((d) => ({
         date: String(d.date ?? ""),
-        kwh: Number(d.simKwh) || 0,
+        kwh: Number((d as any).simKwh ?? (d as any).kwh ?? 0) || 0,
       }))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
     if (!daily.length) return null;
 
-    const byMonthRows = Array.isArray((result as any).byMonth) ? ((result as any).byMonth as Array<any>) : [];
-    const monthlyFromResult = byMonthRows
-      .filter((m) => typeof m?.month === "string" && /^\d{4}-\d{2}$/.test(m.month))
-      .map((m) => ({
-        month: String(m.month),
-        kwh: Number(m.totalSim ?? m.simKwh ?? m.simulatedKwh ?? 0) || 0,
-      }));
-
-    const monthly =
-      monthlyFromResult.length > 0
-        ? monthlyFromResult
-        : Array.from(
-            daily.reduce((acc, d) => {
-              const month = d.date.slice(0, 7);
-              acc.set(month, (acc.get(month) ?? 0) + d.kwh);
-              return acc;
-            }, new Map<string, number>())
-          )
-            .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-            .map(([month, kwh]) => ({ month, kwh }));
+    const monthly = Array.from(
+      daily.reduce((acc, d) => {
+        const month = d.date.slice(0, 7);
+        acc.set(month, (acc.get(month) ?? 0) + d.kwh);
+        return acc;
+      }, new Map<string, number>())
+    )
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([month, kwh]) => ({ month, kwh }));
 
     const weekdayWeekend = daily.reduce(
       (acc, d) => {
@@ -159,9 +150,9 @@ export default function GapFillLabClient() {
     return {
       source: "GAPFILL_SIMULATED_TEST_WINDOW",
       timezone: timezone || "America/Chicago",
-      coverageStart: daily[0]?.date ?? null,
-      coverageEnd: daily[daily.length - 1]?.date ?? null,
-      intervalCount: Number((result as any).testIntervalsCount) || 0,
+      coverageStart: (result as any)?.parity?.windowStartUtc ?? daily[0]?.date ?? null,
+      coverageEnd: (result as any)?.parity?.windowEndUtc ?? daily[daily.length - 1]?.date ?? null,
+      intervalCount: Number((result as any)?.diagnostics?.chartIntervalCount ?? (result as any).testIntervalsCount ?? (result as any)?.parity?.intervalCount ?? 0) || 0,
       daily,
       monthly,
       weekdayKwh: weekdayWeekend.weekday,
@@ -232,7 +223,12 @@ export default function GapFillLabClient() {
       if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
         setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
       }
-      setResult(data);
+      setResult((prev) => {
+        if (data.ok && !data.usage365 && prev?.ok && prev.usage365) {
+          return { ...data, usage365: prev.usage365 };
+        }
+        return data;
+      });
     } catch (e: any) {
       setError(e?.name === "AbortError" ? "Request timed out." : (e?.message ?? String(e)));
       setResult(null);
@@ -297,7 +293,12 @@ export default function GapFillLabClient() {
         setResult(null);
         return;
       }
-      setResult(data);
+      setResult((prev) => {
+        if (data.ok && !data.usage365 && prev?.ok && prev.usage365) {
+          return { ...data, usage365: prev.usage365 };
+        }
+        return data;
+      });
       if (data.ok && data.houses?.length) setHouses(data.houses);
       if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
         setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
