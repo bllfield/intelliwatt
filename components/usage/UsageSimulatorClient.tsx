@@ -404,6 +404,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       setScenarioBanner(null);
       setScenarioSimHouseOverride(null);
       if (!viewScenarioId || viewScenarioId === "baseline") {
@@ -412,9 +413,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       }
       setScenarioLoading(true);
       try {
+        const controller = new AbortController();
+        // Avoid indefinite "Showing baseline..." state if the scenario endpoint hangs.
+        timeoutId = setTimeout(() => controller.abort(), 120_000);
         const r = await fetch(
           `/api/user/usage/simulated/house?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(viewScenarioId)}`,
-          { cache: "no-store" },
+          { cache: "no-store", signal: controller.signal },
         );
         const j = (await r.json().catch(() => null)) as ScenarioHouseResp | null;
         if (cancelled) return;
@@ -444,12 +448,18 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             alternatives: { smt: null, greenButton: null },
           },
         ]);
-      } catch {
+      } catch (e: any) {
         if (!cancelled) {
-          setScenarioBanner("Unable to load scenario dataset. Try saving again to recompute.");
+          const timedOut = e?.name === "AbortError";
+          setScenarioBanner(
+            timedOut
+              ? "Scenario calculation is taking longer than expected. Try again, or save once more to recompute."
+              : "Unable to load scenario dataset. Try saving again to recompute."
+          );
           setScenarioSimHouseOverride(null);
         }
       } finally {
+        if (timeoutId != null) clearTimeout(timeoutId);
         if (!cancelled) setScenarioLoading(false);
       }
     })();
@@ -1098,7 +1108,17 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     </div>
                   ) : curveView !== "BASELINE" && scenarioBanner ? (
                     <div className="rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-cyan/80">
-                      {scenarioBanner}
+                      <div>{scenarioBanner}</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScenarioBanner(null);
+                          setRefreshToken((x) => x + 1);
+                        }}
+                        className="mt-2 inline-flex rounded-lg border border-brand-cyan/30 bg-brand-cyan/10 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan hover:bg-brand-cyan/20"
+                      >
+                        Retry
+                      </button>
                     </div>
                   ) : (
                     <div className="text-xs text-brand-cyan/70">Usage is generated automatically when requirements are met.</div>
