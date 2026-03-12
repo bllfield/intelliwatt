@@ -496,9 +496,9 @@ export async function getBaseloadFromActualExcludingDates(args: {
 }): Promise<number | null> {
   const latestIso = String(args.latestIso ?? "").trim().slice(0, 10);
   if (!YYYY_MM_DD.test(latestIso)) return null;
-  const latest = new Date(latestIso + "T12:00:00.000Z");
-  if (!Number.isFinite(latest.getTime())) return null;
-  const cutoff = new Date(latest.getTime() - 364 * DAY_MS);
+  const latestStart = new Date(latestIso + "T00:00:00.000Z");
+  if (!Number.isFinite(latestStart.getTime())) return null;
+  const cutoff = new Date(latestStart.getTime() - 364 * DAY_MS);
   const end = new Date(latestIso + "T23:59:59.999Z");
   const excludeDateKeys = validDateKeys(args.excludeDateKeys ?? []);
 
