@@ -249,6 +249,7 @@ export default function GapFillLabClient() {
         setArtifactMissing((data as any)?.error === "artifact_missing_rebuild_required");
         return;
       }
+      setError(null);
       setArtifactMissing(false);
       setResult(data);
       if (data.ok && data.houses?.length) setHouses(data.houses);
