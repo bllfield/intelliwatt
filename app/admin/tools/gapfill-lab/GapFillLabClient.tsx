@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 
@@ -69,6 +69,7 @@ const VALID_RANDOM_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulde
 type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
+type ChartMode = "usage365" | "gapfill";
 
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
@@ -93,6 +94,81 @@ export default function GapFillLabClient() {
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
+  const [chartMode, setChartMode] = useState<ChartMode>("usage365");
+
+  const gapfillChartData = useMemo(() => {
+    if (!result || !result.ok) return null;
+    const dailyMasked = Array.isArray((result as any).diagnostics?.dailyTotalsMasked)
+      ? ((result as any).diagnostics.dailyTotalsMasked as Array<{ date: string; actualKwh: number; simKwh: number }>)
+      : [];
+    if (!dailyMasked.length) return null;
+
+    const daily = dailyMasked
+      .map((d) => ({
+        date: String(d.date ?? ""),
+        kwh: Number(d.simKwh) || 0,
+      }))
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    if (!daily.length) return null;
+
+    const byMonthRows = Array.isArray((result as any).byMonth) ? ((result as any).byMonth as Array<any>) : [];
+    const monthlyFromResult = byMonthRows
+      .filter((m) => typeof m?.month === "string" && /^\d{4}-\d{2}$/.test(m.month))
+      .map((m) => ({
+        month: String(m.month),
+        kwh: Number(m.totalSim ?? m.simKwh ?? m.simulatedKwh ?? 0) || 0,
+      }));
+
+    const monthly =
+      monthlyFromResult.length > 0
+        ? monthlyFromResult
+        : Array.from(
+            daily.reduce((acc, d) => {
+              const month = d.date.slice(0, 7);
+              acc.set(month, (acc.get(month) ?? 0) + d.kwh);
+              return acc;
+            }, new Map<string, number>())
+          )
+            .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+            .map(([month, kwh]) => ({ month, kwh }));
+
+    const weekdayWeekend = daily.reduce(
+      (acc, d) => {
+        const dow = new Date(`${d.date}T12:00:00.000Z`).getUTCDay();
+        if (dow === 0 || dow === 6) acc.weekend += d.kwh;
+        else acc.weekday += d.kwh;
+        return acc;
+      },
+      { weekday: 0, weekend: 0 }
+    );
+
+    const hourly = Array.isArray((result as any).diagnostics?.hourlyProfileMasked)
+      ? ((result as any).diagnostics.hourlyProfileMasked as Array<{ hour: number; simMeanKwh: number }>)
+      : [];
+    const fifteenCurve = hourly
+      .filter((h) => Number.isFinite(Number(h.hour)) && Number(h.hour) >= 0 && Number(h.hour) <= 23)
+      .sort((a, b) => Number(a.hour) - Number(b.hour))
+      .map((h) => ({
+        hhmm: `${String(Number(h.hour)).padStart(2, "0")}:00`,
+        // simMeanKwh is per 15m interval in this diagnostics view; convert to avg kW.
+        avgKw: (Number(h.simMeanKwh) || 0) * 4,
+      }));
+
+    return {
+      source: "GAPFILL_SIMULATED_TEST_WINDOW",
+      timezone: timezone || "America/Chicago",
+      coverageStart: daily[0]?.date ?? null,
+      coverageEnd: daily[daily.length - 1]?.date ?? null,
+      intervalCount: Number((result as any).testIntervalsCount) || 0,
+      daily,
+      monthly,
+      weekdayKwh: weekdayWeekend.weekday,
+      weekendKwh: weekdayWeekend.weekend,
+      fifteenCurve,
+    };
+  }, [result, timezone]);
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -173,7 +249,7 @@ export default function GapFillLabClient() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 115_000);
+      timeoutId = setTimeout(() => controller.abort(), 295_000);
       const body: Record<string, unknown> = {
         email: trimmed,
         timezone,
@@ -217,7 +293,7 @@ export default function GapFillLabClient() {
       }
     } catch (e: any) {
       const msg = e?.name === "AbortError"
-        ? "Request timed out. Try a shorter Test date range."
+        ? "Request timed out. Compare can take several minutes for heavy windows; try rebuild-and-retry or a shorter range."
         : (e?.message ?? String(e));
       setError(msg);
       setResult(null);
@@ -249,7 +325,6 @@ export default function GapFillLabClient() {
         setArtifactMissing((data as any)?.error === "artifact_missing_rebuild_required");
         return;
       }
-      setError(null);
       setArtifactMissing(false);
       setResult(data);
       if (data.ok && data.houses?.length) setHouses(data.houses);
@@ -563,30 +638,81 @@ export default function GapFillLabClient() {
 
       {result && result.ok && (
         <div className="space-y-4">
-          {result.usage365?.daily?.length ? (
+          {(result.usage365?.daily?.length || gapfillChartData?.daily?.length) ? (
             <details className="border border-brand-blue/20 rounded" open>
               <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
-                365-day usage chart (same as user Usage page)
+                Usage / Gap-Fill chart
               </summary>
               <div className="p-4 border-t border-brand-blue/20">
-                <p className="text-sm text-brand-navy/70 mb-4">
-                  Source: {result.usage365.source} · {result.usage365.intervalCount.toLocaleString()} intervals ·
-                  {` ${result.usage365.coverageStart ?? "—"} to ${result.usage365.coverageEnd ?? "—"}`}
-                </p>
-                <UsageChartsPanel
-                  monthly={result.usage365.monthly}
-                  stitchedMonth={null}
-                  weekdayKwh={result.usage365.weekdayKwh}
-                  weekendKwh={result.usage365.weekendKwh}
-                  monthlyView={usageMonthlyView}
-                  onMonthlyViewChange={setUsageMonthlyView}
-                  dailyView={usageDailyView}
-                  onDailyViewChange={setUsageDailyView}
-                  daily={result.usage365.daily}
-                  fifteenCurve={result.usage365.fifteenCurve}
-                  coverageStart={result.usage365.coverageStart}
-                  coverageEnd={result.usage365.coverageEnd}
-                />
+                <div className="mb-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setChartMode("usage365")}
+                    disabled={!result.usage365?.daily?.length}
+                    className={`px-3 py-1.5 rounded text-sm border ${
+                      chartMode === "usage365"
+                        ? "bg-brand-navy text-white border-brand-navy"
+                        : "bg-white text-brand-navy border-brand-blue/30"
+                    } disabled:opacity-50`}
+                  >
+                    Usage (365-day)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChartMode("gapfill")}
+                    disabled={!gapfillChartData?.daily?.length}
+                    className={`px-3 py-1.5 rounded text-sm border ${
+                      chartMode === "gapfill"
+                        ? "bg-brand-navy text-white border-brand-navy"
+                        : "bg-white text-brand-navy border-brand-blue/30"
+                    } disabled:opacity-50`}
+                  >
+                    Gap-Fill (simulated test window)
+                  </button>
+                </div>
+                {chartMode === "gapfill" && gapfillChartData ? (
+                  <>
+                    <p className="text-sm text-brand-navy/70 mb-4">
+                      Source: {gapfillChartData.source} · {gapfillChartData.intervalCount.toLocaleString()} intervals ·
+                      {` ${gapfillChartData.coverageStart ?? "—"} to ${gapfillChartData.coverageEnd ?? "—"}`}
+                    </p>
+                    <UsageChartsPanel
+                      monthly={gapfillChartData.monthly}
+                      stitchedMonth={null}
+                      weekdayKwh={gapfillChartData.weekdayKwh}
+                      weekendKwh={gapfillChartData.weekendKwh}
+                      monthlyView={usageMonthlyView}
+                      onMonthlyViewChange={setUsageMonthlyView}
+                      dailyView={usageDailyView}
+                      onDailyViewChange={setUsageDailyView}
+                      daily={gapfillChartData.daily}
+                      fifteenCurve={gapfillChartData.fifteenCurve}
+                      coverageStart={gapfillChartData.coverageStart}
+                      coverageEnd={gapfillChartData.coverageEnd}
+                    />
+                  </>
+                ) : result.usage365?.daily?.length ? (
+                  <>
+                    <p className="text-sm text-brand-navy/70 mb-4">
+                      Source: {result.usage365.source} · {result.usage365.intervalCount.toLocaleString()} intervals ·
+                      {` ${result.usage365.coverageStart ?? "—"} to ${result.usage365.coverageEnd ?? "—"}`}
+                    </p>
+                    <UsageChartsPanel
+                      monthly={result.usage365.monthly}
+                      stitchedMonth={null}
+                      weekdayKwh={result.usage365.weekdayKwh}
+                      weekendKwh={result.usage365.weekendKwh}
+                      monthlyView={usageMonthlyView}
+                      onMonthlyViewChange={setUsageMonthlyView}
+                      dailyView={usageDailyView}
+                      onDailyViewChange={setUsageDailyView}
+                      daily={result.usage365.daily}
+                      fifteenCurve={result.usage365.fifteenCurve}
+                      coverageStart={result.usage365.coverageStart}
+                      coverageEnd={result.usage365.coverageEnd}
+                    />
+                  </>
+                ) : null}
               </div>
             </details>
           ) : null}
