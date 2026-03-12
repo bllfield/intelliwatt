@@ -85,7 +85,10 @@ export default function GapFillLabClient() {
   const [houseId, setHouseId] = useState("");
   const [houses, setHouses] = useState<HouseOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [rebuildLoading, setRebuildLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [artifactMissing, setArtifactMissing] = useState(false);
+  const [lastCompareBody, setLastCompareBody] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
@@ -155,6 +158,7 @@ export default function GapFillLabClient() {
 
   async function handleRunCompare() {
     setError(null);
+    setArtifactMissing(false);
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setError("Enter an email address.");
@@ -187,6 +191,7 @@ export default function GapFillLabClient() {
       } else {
         body.testRanges = validRanges;
       }
+      setLastCompareBody(body);
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -195,6 +200,9 @@ export default function GapFillLabClient() {
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
+        if ((data as any)?.error === "artifact_missing_rebuild_required") {
+          setArtifactMissing(true);
+        }
         const errMsg = (data as any)?.error === "test_overlaps_travel"
           ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
           : ((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
@@ -216,6 +224,42 @@ export default function GapFillLabClient() {
     } finally {
       if (timeoutId != null) clearTimeout(timeoutId);
       setLoading(false);
+    }
+  }
+
+  async function handleRebuildAndRetry() {
+    if (!lastCompareBody) {
+      setError("No prior compare request found. Run Compare first.");
+      return;
+    }
+    setRebuildLoading(true);
+    setError(null);
+    try {
+      const body = { ...lastCompareBody, rebuildArtifact: true };
+      const res = await fetch("/api/admin/tools/gapfill-lab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => null)) as ApiResponse;
+      if (!res.ok) {
+        const errMsg = (data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`;
+        setError(errMsg);
+        setResult(null);
+        setArtifactMissing((data as any)?.error === "artifact_missing_rebuild_required");
+        return;
+      }
+      setArtifactMissing(false);
+      setResult(data);
+      if (data.ok && data.houses?.length) setHouses(data.houses);
+      if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
+        setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
+      }
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      setResult(null);
+    } finally {
+      setRebuildLoading(false);
     }
   }
 
@@ -502,7 +546,17 @@ export default function GapFillLabClient() {
 
       {error && (
         <div className="mb-6 p-4 rounded bg-rose-50 text-rose-800 border border-rose-200">
-          {error}
+          <div>{error}</div>
+          {artifactMissing && (
+            <button
+              type="button"
+              onClick={handleRebuildAndRetry}
+              disabled={rebuildLoading || loading}
+              className="mt-3 px-3 py-1.5 bg-brand-navy text-white rounded hover:bg-brand-blue disabled:opacity-50 text-sm"
+            >
+              {rebuildLoading ? "Rebuilding and retrying..." : "Rebuild artifact and retry"}
+            </button>
+          )}
         </div>
       )}
 
