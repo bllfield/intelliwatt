@@ -643,7 +643,7 @@ export type PastSimulatedDayDiagnostic = {
   monthKey: string;
   dow: number;
   dayType: "ACTUAL" | "SIMULATED";
-  simulatedReason: "EXCLUDED" | "LEADING_MISSING" | null;
+  simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" | null;
   dayIsExcluded: boolean;
   dayIsLeadingMissing: boolean;
   weatherUsed: boolean;
@@ -867,18 +867,22 @@ export function buildPastSimulatedBaselineV1(args: {
   const analyzeDay = (dayStartMs: number) => {
     const gridTs = args.getDayGridTimestamps(dayStartMs);
     const dateKey = gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "";
+    const presentSlotCount = gridTs.reduce((acc, ts) => acc + (actualByTs.has(ts) ? 1 : 0), 0);
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsLeadingMissing =
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
-    const shouldSimulateDay = dayIsExcluded || dayIsLeadingMissing;
+    const dayIsIncomplete = !dayIsExcluded && !dayIsLeadingMissing && presentSlotCount < INTERVALS_PER_DAY;
+    const shouldSimulateDay = dayIsExcluded || dayIsLeadingMissing || dayIsIncomplete;
     const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing;
     return {
       gridTs,
       dateKey,
+      presentSlotCount,
       dayIsExcluded,
       dayIsLeadingMissing,
+      dayIsIncomplete,
       shouldSimulateDay,
       isReferenceDay,
     };
@@ -1319,7 +1323,8 @@ export function buildPastSimulatedBaselineV1(args: {
 
     if (shouldSimulateDay) {
       simulatedDays += 1;
-      const simulatedReason: "EXCLUDED" | "LEADING_MISSING" = day.dayIsExcluded ? "EXCLUDED" : "LEADING_MISSING";
+      const simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" =
+        day.dayIsExcluded ? "EXCLUDED" : day.dayIsLeadingMissing ? "LEADING_MISSING" : "INCOMPLETE";
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       const result = simulatePastDay(
@@ -1334,8 +1339,29 @@ export function buildPastSimulatedBaselineV1(args: {
         args.applianceProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayApplianceProfile | null,
         shapeByMonth96Ref
       );
-      dayResults.push(result);
-      for (const iv of result.intervals) out.push(iv);
+      const blendedResult =
+        simulatedReason === "INCOMPLETE"
+          ? (() => {
+              const blendedIntervals = result.intervals.map((iv) => {
+                if (actualByTs.has(iv.timestamp)) {
+                  return { timestamp: iv.timestamp, kwh: Number(actualByTs.get(iv.timestamp) ?? 0) || 0 };
+                }
+                return iv;
+              });
+              const blendedIntervals15 = blendedIntervals.map((iv) => Number(iv.kwh) || 0);
+              const blendedSum = blendedIntervals15.reduce((a, b) => a + b, 0);
+              return {
+                ...result,
+                intervals: blendedIntervals,
+                intervals15: blendedIntervals15,
+                intervalSumKwh: blendedSum,
+                displayDayKwh: Number(blendedSum.toFixed(2)),
+                finalDayKwh: blendedSum,
+              };
+            })()
+          : result;
+      dayResults.push(blendedResult);
+      for (const iv of blendedResult.intervals) out.push(iv);
       const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
