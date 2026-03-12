@@ -1,9 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
+import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
-import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 const PROFILE_VERSION = "v1";
 
@@ -20,22 +19,21 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   });
   if (!house) return { ok: false, reason: "house_not_found" };
 
-  const resolved = await resolveIntervalsLayer({
-    userId: args.userId,
-    houseId: house.id,
-    layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
-    esiid: house.esiid ?? null,
+  const actual = await getActualUsageDatasetForHouse(house.id, house.esiid ?? null, {
+    skipFullYearIntervalFetch: true,
   });
-  const ds = resolved?.dataset ?? null;
-  const startDate = String(ds?.summary?.start ?? "").slice(0, 10);
-  const endDate = String(ds?.summary?.end ?? "").slice(0, 10);
+  const startDate = String(actual?.dataset?.summary?.start ?? "").slice(0, 10);
+  const endDate = String(actual?.dataset?.summary?.end ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { ok: false, reason: "no_actual_summary_window" };
   }
 
-  const intervals = Array.isArray((ds as any)?.series?.intervals15)
-    ? ((ds as any).series.intervals15 as Array<{ timestamp: string; kwh: number }>)
-    : [];
+  const intervals = await getActualIntervalsForRange({
+    houseId: house.id,
+    esiid: house.esiid ?? null,
+    startDate,
+    endDate,
+  });
   if (!Array.isArray(intervals) || intervals.length === 0) {
     return { ok: false, reason: "no_actual_intervals" };
   }
