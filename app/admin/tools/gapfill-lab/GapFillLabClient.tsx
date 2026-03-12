@@ -165,8 +165,9 @@ export default function GapFillLabClient() {
     return {
       source: "GAPFILL_SIMULATED_TEST_WINDOW",
       timezone: timezone || "America/Chicago",
-      coverageStart: (result as any)?.parity?.windowStartUtc ?? daily[0]?.date ?? null,
-      coverageEnd: (result as any)?.parity?.windowEndUtc ?? daily[daily.length - 1]?.date ?? null,
+      // Coverage should reflect the chart's actual displayed data span.
+      coverageStart: daily[0]?.date ?? (result as any)?.parity?.windowStartUtc ?? null,
+      coverageEnd: daily[daily.length - 1]?.date ?? (result as any)?.parity?.windowEndUtc ?? null,
       intervalCount: Number((result as any)?.diagnostics?.chartIntervalCount ?? (result as any).testIntervalsCount ?? (result as any)?.parity?.intervalCount ?? 0) || 0,
       daily,
       monthly,
@@ -243,6 +244,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+            ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -319,6 +323,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+            ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -370,6 +377,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+            ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),

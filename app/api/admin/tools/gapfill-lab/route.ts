@@ -4,9 +4,6 @@ import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
-import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
-import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
   buildDailyWeatherFeaturesFromHourly,
   canonicalIntervalKey,
@@ -23,9 +20,8 @@ import {
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
-import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
-import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
-import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
+import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
+import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/gapfillCompareShared";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
@@ -217,60 +213,6 @@ async function getTravelRangesFromDb(userId: string, houseId: string): Promise<A
   }
   out.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
   return out;
-}
-
-/** Build Home Profile snapshot for audit (fields as stored; add spec aliases where needed). */
-function homeProfileSnapshot(rec: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>) {
-  if (!rec) return null;
-  const o = rec as Record<string, unknown>;
-  return {
-    homeAge: o.homeAge,
-    homeStyle: o.homeStyle,
-    squareFeet: o.squareFeet,
-    stories: o.stories,
-    insulation: o.insulationType,
-    insulationType: o.insulationType,
-    windows: o.windowType,
-    windowType: o.windowType,
-    foundation: o.foundation,
-    fuelConfiguration: o.fuelConfiguration,
-    hvacType: o.hvacType,
-    heatingType: o.heatingType,
-    thermostatSummerF: o.summerTemp,
-    thermostatWinterF: o.winterTemp,
-    summerTemp: o.summerTemp,
-    winterTemp: o.winterTemp,
-    ledLights: o.ledLights,
-    smartThermostat: o.smartThermostat,
-    pool: {
-      hasPool: o.hasPool,
-      pumpType: o.poolPumpType,
-      pumpHp: o.poolPumpHp,
-      summerRunHoursPerDay: o.poolSummerRunHoursPerDay,
-      winterRunHoursPerDay: o.poolWinterRunHoursPerDay,
-      heaterInstalled: o.hasPoolHeater,
-      poolHeaterType: o.poolHeaterType,
-    },
-    occupants: {
-      work: o.occupantsWork,
-      school: o.occupantsSchool,
-      homeAllDay: o.occupantsHomeAllDay,
-      total: Number(o.occupantsWork ?? 0) + Number(o.occupantsSchool ?? 0) + Number(o.occupantsHomeAllDay ?? 0),
-    },
-    ev: o.ev ?? undefined,
-  };
-}
-
-/** Build Appliance Profile snapshot for audit. */
-function applianceProfileSnapshot(rec: Awaited<ReturnType<typeof getApplianceProfileSimulatedByUserHouse>>) {
-  if (!rec?.appliancesJson) return null;
-  const normalized = normalizeStoredApplianceProfile(rec.appliancesJson as any);
-  return {
-    version: normalized.version,
-    fuelConfiguration: normalized.fuelConfiguration,
-    appliances: normalized.appliances,
-    applianceCount: normalized.appliances?.length ?? 0,
-  };
 }
 
 const REPORT_VERSION = "gapfill_lab_report_v3";
@@ -1073,12 +1015,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "house_not_found", message: "House not found or not owned by user." }, { status: 404 });
   }
 
-  const [homeProfileRec, applianceProfileRec] = await Promise.all([
-    getHomeProfileSimulatedByUserHouse({ userId: user.id, houseId: house.id }),
-    getApplianceProfileSimulatedByUserHouse({ userId: user.id, houseId: house.id }),
-  ]);
-  const homeProfile = homeProfileSnapshot(homeProfileRec);
-  const applianceProfile = applianceProfileSnapshot(applianceProfileRec);
+  const { homeProfile, applianceProfile } = await loadDisplayProfilesForHouse({
+    userId: user.id,
+    houseId: house.id,
+  });
 
   const esiid = house.esiid ? String(house.esiid) : null;
   const source = await chooseActualSource({ houseId: house.id, esiid });
@@ -1100,8 +1040,8 @@ export async function POST(req: NextRequest) {
       usage365 = {
         source: String(ds.summary?.source ?? String((source as any)?.source ?? (source as any)?.kind ?? "actual")),
         timezone,
-        coverageStart: canonicalWindow.startDate,
-        coverageEnd: canonicalWindow.endDate,
+        coverageStart: String((ds.summary as any)?.start ?? "").slice(0, 10) || null,
+        coverageEnd: String((ds.summary as any)?.end ?? "").slice(0, 10) || null,
         intervalCount: Number(ds.summary?.intervalsCount ?? 0) || 0,
         daily: Array.isArray(ds.daily) ? ds.daily : [],
         monthly: Array.isArray(ds.monthly) ? ds.monthly : [],
@@ -1116,8 +1056,6 @@ export async function POST(req: NextRequest) {
         timezone,
         source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
       });
-      usage365.coverageStart = canonicalWindow.startDate;
-      usage365.coverageEnd = canonicalWindow.endDate;
     }
   }
 
@@ -1324,153 +1262,32 @@ export async function POST(req: NextRequest) {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
   }));
 
-  // Canonical path: compare against saved production artifact (gapfill_lab), artifact-first on reads.
+  // Canonical path: compare uses shared simulation artifact orchestration; route keeps compare-only logic.
   const rebuildArtifact = body?.rebuildArtifact === true;
-  if (rebuildArtifact) {
-    const rebuilt = await buildAndSavePastForGapfillLab({
-      userId: user.id,
-      houseId: house.id,
-      rangesToMask: testRangesUsed,
-      timezone,
-    });
-    if (!rebuilt.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: rebuilt.error,
-          message: rebuilt.message,
-        },
-        { status: 400 }
-      );
-    }
-  } else {
-    const inspect = await inspectPastCacheArtifacts({
-      houseId: house.id,
-      scenarioId: "gapfill_lab",
-    });
-    if (inspect.count <= 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "artifact_missing_rebuild_required",
-          message:
-            "No saved gapfill_lab artifact found. Trigger explicit rebuildArtifact=true (or prime-past-cache action=rebuild) before inspect/read compare.",
-          mode: "artifact_only",
-          scenarioId: "gapfill_lab",
-        },
-        { status: 409 }
-      );
-    }
-  }
-
-  const expectedChartDayCount = normalizeRangesToLocalDateKeysInclusive(
-    [{ startDate: canonicalWindow.startDate, endDate: canonicalWindow.endDate }],
-    timezone
-  ).size;
-  const expectedChartIntervalCount = expectedChartDayCount * 96;
-
-  let simOut = await getSimulatedUsageForHouseScenario({
+  const sharedSim = await buildGapfillCompareSimShared({
     userId: user.id,
     houseId: house.id,
-    scenarioId: "gapfill_lab",
-    readMode: "artifact_only",
+    timezone,
+    canonicalWindow,
+    testRangesUsed,
+    testDateKeysLocal,
+    rebuildArtifact,
   });
-  let artifactAutoRebuilt = false;
-  const initialIntervals15 =
-    simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
-      ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
-      : [];
-  if (
-    simOut.ok &&
-    initialIntervals15.length > 0 &&
-    initialIntervals15.length < expectedChartIntervalCount
-  ) {
-    const staleRebuild = await buildAndSavePastForGapfillLab({
-      userId: user.id,
-      houseId: house.id,
-      rangesToMask: testRangesUsed,
-      timezone,
-    });
-    if (staleRebuild.ok) {
-      artifactAutoRebuilt = true;
-      simOut = await getSimulatedUsageForHouseScenario({
-        userId: user.id,
-        houseId: house.id,
-        scenarioId: "gapfill_lab",
-        readMode: "artifact_only",
-      });
-    }
-  }
-  if (!simOut.ok || !simOut.dataset?.series?.intervals15) {
-    const status = simOut.ok ? 500 : simOut.code === "ARTIFACT_MISSING" ? 409 : 500;
-    return NextResponse.json(
-      {
-        ok: false,
-        error: simOut.ok ? "artifact_read_failed" : simOut.code === "ARTIFACT_MISSING" ? "artifact_missing_rebuild_required" : "artifact_read_failed",
-        message:
-          simOut.ok
-            ? "Saved artifact missing intervals15 series."
-            : simOut.code === "ARTIFACT_MISSING"
-              ? "No saved gapfill_lab artifact found. Trigger explicit rebuildArtifact=true before inspect/read compare."
-              : simOut.message,
-        code: simOut.ok ? "INTERNAL_ERROR" : simOut.code,
-      },
-      { status }
-    );
+  if (!sharedSim.ok) {
+    return NextResponse.json(sharedSim.body, { status: sharedSim.status });
   }
 
-  const artifactIntervals = (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
-    .map((p) => ({
-      timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-      kwh: Number(p?.kwh) || 0,
-    }));
-  const simulatedTestIntervals = artifactIntervals.filter((p) =>
-    testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-  );
-  const chartDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(
-    [{ startDate: canonicalWindow.startDate, endDate: canonicalWindow.endDate }],
-    timezone
-  );
-  const simulatedChartIntervals = artifactIntervals.filter((p) =>
-    chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-  );
-  const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
-    (Array.isArray((simOut.dataset as any)?.daily) ? (simOut.dataset as any).daily : [])
-      .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
-      .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
-  );
-  const simulatedChartDaily = Array.from(
-    simulatedChartIntervals.reduce((acc, p) => {
-      const dk = dateKeyInTimezone(p.timestamp, timezone);
-      acc.set(dk, (acc.get(dk) ?? 0) + (Number(p.kwh) || 0));
-      return acc;
-    }, new Map<string, number>())
-  )
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([date, simKwh]) => ({
-      date,
-      simKwh: round2(simKwh),
-      source: daySourceFromDataset.get(date) ?? "ACTUAL",
-    }));
-  const monthlyChartBuild = buildDisplayMonthlyFromIntervalsUtc(
-    simulatedChartIntervals.map((p) => ({
-      timestamp: String(p.timestamp ?? ""),
-      consumption_kwh: Number(p.kwh) || 0,
-    })),
-    canonicalWindow.endDate
-  );
-  const simulatedChartMonthly = monthlyChartBuild.monthly;
-  const simulatedChartStitchedMonth = monthlyChartBuild.stitchedMonth;
   const simulatedByTs = new Map<string, number>();
-  for (const p of simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
+  for (const p of sharedSim.simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
 
   const metrics = computeGapFillMetrics({
     actual: actualTestIntervalsCanon,
-    simulated: simulatedTestIntervals,
+    simulated: sharedSim.simulatedTestIntervals,
     simulatedByTs,
     timezone,
   });
-  const sharedModelAssumptions = (simOut.dataset as any)?.meta ?? null;
+  const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
+  const responseApplianceProfile = sharedSim.applianceProfileFromModel ?? applianceProfile;
 
   return NextResponse.json({
     ok: true,
@@ -1480,17 +1297,21 @@ export async function POST(req: NextRequest) {
       id: house.id,
       label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     },
+    houses: houses.map((h: any) => ({
+      id: h.id,
+      label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
+    })),
     timezone,
     mode: "artifact_only",
     rebuilt: rebuildArtifact,
-    artifactAutoRebuilt,
+    artifactAutoRebuilt: sharedSim.artifactAutoRebuilt,
     enginePath: "production_past_stitched",
     cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
     scenarioId: "gapfill_lab",
-    homeProfile,
-    applianceProfile,
-    modelAssumptions: sharedModelAssumptions,
+    homeProfile: responseHomeProfile,
+    applianceProfile: responseApplianceProfile,
+    modelAssumptions: sharedSim.modelAssumptions,
     testIntervalsCount: actualTestIntervals.length,
     metrics: {
       mae: metrics.mae,
@@ -1499,16 +1320,17 @@ export async function POST(req: NextRequest) {
       wape: metrics.wape,
       maxAbs: metrics.maxAbs,
     },
+    primaryPercentMetric: Number.isFinite(metrics.wape) ? metrics.wape : null,
     byMonth: metrics.byMonth,
     byHour: metrics.byHour,
     byDayType: metrics.byDayType,
     worstDays: metrics.worstDays,
     diagnostics: {
       // Chart scope is always the full canonical window for parity with Usage dashboard charts.
-      dailyTotalsChartSim: simulatedChartDaily,
-      monthlyTotalsChartSim: simulatedChartMonthly,
-      stitchedMonthChartSim: simulatedChartStitchedMonth,
-      chartIntervalCount: simulatedChartIntervals.length,
+      dailyTotalsChartSim: sharedSim.simulatedChartDaily,
+      monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
+      stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
+      chartIntervalCount: sharedSim.simulatedChartIntervals.length,
       dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
       top10Under: metrics.diagnostics.top10Under,
       top10Over: metrics.diagnostics.top10Over,
@@ -1525,6 +1347,9 @@ export async function POST(req: NextRequest) {
       windowEndUtc: canonicalWindow.endDate,
     },
     fullReportText:
+      `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
+      `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=gapfill_lab`,
+    pasteSummary:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
       `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=gapfill_lab`,
   });
