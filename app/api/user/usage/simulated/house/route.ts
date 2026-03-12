@@ -50,7 +50,8 @@ export async function GET(request: NextRequest) {
       const resolved = await resolveIntervalsLayer({
         userId: u.user.id,
         houseId: house.id,
-        layerKind: IntervalSeriesKind.BASELINE_INTERVALS,
+        // Keep baseline "Usage" path on the exact same shared actual-usage layer as /api/user/usage.
+        layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
         scenarioId: null,
         esiid: house.esiid ?? null,
       });

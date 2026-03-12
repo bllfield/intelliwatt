@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
+import { replaceNormalizedSmtIntervals } from '@/lib/usage/normalizeSmtIntervals';
 import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 import { requireAdmin } from '@/lib/auth/admin';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
@@ -206,110 +207,24 @@ export async function POST(req: NextRequest) {
 
         if (bounded.length > 0 && tsMax) {
           try {
-            // Give this overwrite transaction more time; large FTP files can
-            // generate many intervals and the default 5s interactive timeout
-            // is too aggressive.
-            await prisma.$transaction(async (tx) => {
-              const boundedTs = bounded.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
-              const tsMinBound = boundedTs.length ? new Date(Math.min(...boundedTs)) : tsMinAll;
-
-              const pairs = Array.from(new Set(bounded.map((i) => `${i.esiid}|${i.meter}`)))
-                .map((k) => {
-                  const [e, m] = k.split('|');
-                  return { esiid: e, meter: m };
-                });
-
-              for (const pair of pairs) {
-                const pairIntervals = bounded.filter((i) => i.esiid === pair.esiid && i.meter === pair.meter);
-                if (pairIntervals.length === 0) continue;
-
-                const pairTimestamps = pairIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
-                const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinBound;
-                const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMax;
-
-                await tx.smtInterval.deleteMany({
-                  where: {
-                    esiid: pair.esiid,
-                    meter: pair.meter,
-                    ts: { gte: pairMin ?? tsMinBound ?? tsMax, lte: pairMax ?? tsMax },
-                  },
-                });
-              }
-
-              const payload = bounded.map((interval) => ({
+            const persisted = await replaceNormalizedSmtIntervals({
+              intervals: bounded.map((interval) => ({
                 esiid: interval.esiid,
                 meter: interval.meter,
                 ts: interval.ts,
-                kwh: new Prisma.Decimal(interval.kwh),
+                kwh: interval.kwh,
                 source: interval.source ?? source ?? 'smt',
-              }));
-
-              // Chunk large createMany writes to reduce memory spikes and oversized DB statements.
-              const CHUNK_SIZE = 5000;
-              let createdTotal = 0;
-              for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
-                const slice = payload.slice(i, i + CHUNK_SIZE);
-                const res = await tx.smtInterval.createMany({
-                  data: slice,
-                  skipDuplicates: false,
-                });
-                createdTotal += res.count;
-              }
-
-              inserted = createdTotal;
-              skipped = bounded.length - createdTotal;
-            }, { timeout: 30000 });
+              })),
+              transactionTimeoutMs: 30_000,
+              primaryChunkSize: 5000,
+              usageChunkSize: 5000,
+              writeUsageModule: true,
+            });
+            inserted = persisted.inserted;
+            skipped = persisted.skipped;
           } catch (err) {
             console.error('[raw-upload:inline] failed overwrite transaction', { err });
             throw err;
-          }
-
-          // Dual-write to usage DB so dashboards see SMT data from inline uploads
-          try {
-            const usageClient: any = usagePrisma;
-            if (usageClient?.usageIntervalModule) {
-              const pairs = Array.from(new Set(bounded.map((i) => `${i.esiid}|${i.meter}`)))
-                .map((k) => {
-                  const [e, m] = k.split('|');
-                  return { esiid: e, meter: m };
-                });
-
-              for (const pair of pairs) {
-                const pairIntervals = bounded.filter((i) => i.esiid === pair.esiid && i.meter === pair.meter);
-                if (pairIntervals.length === 0) continue;
-
-                const pairTimestamps = pairIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
-                const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinAll;
-                const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMax;
-
-                await usageClient.usageIntervalModule.deleteMany({
-                  where: {
-                    esiid: pair.esiid,
-                    meter: pair.meter,
-                    ts: { gte: pairMin ?? tsMinAll ?? tsMax, lte: pairMax ?? tsMax },
-                  },
-                });
-
-                const payload = pairIntervals.map((interval) => ({
-                  esiid: interval.esiid,
-                  meter: interval.meter,
-                  ts: interval.ts,
-                  kwh: new Prisma.Decimal(interval.kwh),
-                  filled: false,
-                  source: interval.source ?? source ?? 'smt',
-                }));
-
-                const CHUNK_SIZE = 5000;
-                for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
-                  await usageClient.usageIntervalModule.createMany({
-                    data: payload.slice(i, i + CHUNK_SIZE),
-                    skipDuplicates: true,
-                  });
-                }
-              }
-            }
-          } catch (usageErr) {
-            console.error('[raw-upload:inline] usage dual-write failed', usageErr);
           }
 
           if (distinctEsiids.length > 0 && postIngest) {

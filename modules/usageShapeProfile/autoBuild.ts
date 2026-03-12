@@ -4,6 +4,7 @@ import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { getActualIntervalsForUsageShapeProfile } from "@/modules/usageShapeProfile/actualIntervals";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
+import { invalidatePastCachesForHouse } from "@/modules/usageSimulator/pastCache";
 
 const PROFILE_VERSION = "v1";
 
@@ -21,6 +22,10 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
         actualSource: "SMT" | "GREEN_BUTTON" | "NONE";
         intervalCount: number;
         derivedMonthKeyCount: number;
+        profileDerivedAt?: string;
+        profileSimIdentityHash?: string | null;
+        dependentPastArtifactsInvalidated?: number;
+        dependentPastRebuildRequired?: boolean;
       };
     }
   | { ok: false; reason: string }
@@ -53,6 +58,7 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   );
 
   const saved = await upsertUsageShapeProfile(house.id, PROFILE_VERSION, profile);
+  const invalidatedPastArtifactCount = await invalidatePastCachesForHouse({ houseId: house.id });
   return {
     ok: true,
     profileId: String(saved.id),
@@ -62,6 +68,10 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
       actualSource: actual.source,
       intervalCount: intervals.length,
       derivedMonthKeyCount: Object.keys(profile.shapeByMonth96 ?? {}).length,
+      profileDerivedAt: saved.derivedAt,
+      profileSimIdentityHash: saved.simIdentityHash,
+      dependentPastArtifactsInvalidated: invalidatedPastArtifactCount,
+      dependentPastRebuildRequired: true,
     },
   };
 }

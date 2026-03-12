@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Prisma } from '@prisma/client';
 import { GetObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
+import { replaceNormalizedSmtIntervals } from '@/lib/usage/normalizeSmtIntervals';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
 
@@ -233,58 +233,7 @@ export async function POST(req: NextRequest) {
 
     const boundedTotalKwh = boundedIntervals.reduce((sum, i) => sum + i.kwh, 0);
 
-    const distinctPairs = Array.from(new Set(boundedIntervals.map((i) => `${i.esiid}|${i.meter}`))).map((key) => {
-      const [esiid, meter] = key.split('|');
-      return { esiid, meter };
-    });
     const distinctEsiids = Array.from(new Set(boundedIntervals.map((i) => i.esiid))).filter(Boolean);
-
-    // Pre-group intervals by (esiid, meter) outside any DB transaction.
-    // This avoids spending transaction time on CPU-heavy filtering/mapping for large files.
-    const byPair = new Map<
-      string,
-      {
-        esiid: string;
-        meter: string;
-        minTsMs: number;
-        maxTsMs: number;
-        rows: Array<{
-          esiid: string;
-          meter: string;
-          ts: Date;
-          kwh: Prisma.Decimal;
-          source: string;
-        }>;
-      }
-    >();
-
-    for (const interval of boundedIntervals) {
-      const key = `${interval.esiid}|${interval.meter}`;
-      const tsMs = interval.ts.getTime();
-      const existing = byPair.get(key);
-      const row = {
-        esiid: interval.esiid,
-        meter: interval.meter,
-        ts: interval.ts,
-        kwh: new Prisma.Decimal(interval.kwh),
-        source: interval.source ?? file.source ?? 'smt',
-      };
-      if (!existing) {
-        byPair.set(key, {
-          esiid: interval.esiid,
-          meter: interval.meter,
-          minTsMs: tsMs,
-          maxTsMs: tsMs,
-          rows: [row],
-        });
-      } else {
-        existing.rows.push(row);
-        if (Number.isFinite(tsMs)) {
-          if (!Number.isFinite(existing.minTsMs) || tsMs < existing.minTsMs) existing.minTsMs = tsMs;
-          if (!Number.isFinite(existing.maxTsMs) || tsMs > existing.maxTsMs) existing.maxTsMs = tsMs;
-        }
-      }
-    }
 
     // Recompute bounds for the bounded set to drive delete + summary
     const boundedTimestamps = boundedIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
@@ -292,95 +241,23 @@ export async function POST(req: NextRequest) {
 
     if (!dryRun && tsMinDate && tsMaxDate) {
       try {
-        await prisma.$transaction(
-          async (tx) => {
-            // For each (esiid, meter), delete the exact range then bulk insert rows.
-            // Keep the transaction focused on DB work only (all grouping/mapping done above).
-            for (const pair of distinctPairs) {
-              const key = `${pair.esiid}|${pair.meter}`;
-              const bucket = byPair.get(key);
-              if (!bucket || bucket.rows.length === 0) continue;
-
-              const pairMin = Number.isFinite(bucket.minTsMs) ? new Date(bucket.minTsMs) : tsMinDate;
-              const pairMax = Number.isFinite(bucket.maxTsMs) ? new Date(bucket.maxTsMs) : tsMaxDate;
-
-              await tx.smtInterval.deleteMany({
-                where: {
-                  esiid: pair.esiid,
-                  meter: pair.meter,
-                  ts: { gte: pairMin ?? tsMinDate, lte: pairMax ?? tsMaxDate },
-                },
-              });
-            }
-
-            let insertedTotal = 0;
-            for (const pair of distinctPairs) {
-              const key = `${pair.esiid}|${pair.meter}`;
-              const bucket = byPair.get(key);
-              if (!bucket || bucket.rows.length === 0) continue;
-
-              // Chunk inserts to keep queries predictable for large SMT files.
-              for (let i = 0; i < bucket.rows.length; i += INSERT_BATCH_SIZE) {
-                const chunk = bucket.rows.slice(i, i + INSERT_BATCH_SIZE);
-                const result = await tx.smtInterval.createMany({
-                  data: chunk,
-                  skipDuplicates: false,
-                });
-                insertedTotal += result.count;
-              }
-            }
-
-            inserted = insertedTotal;
-            skipped = boundedIntervals.length - insertedTotal;
-
-            if (distinctEsiids.length > 0) {
-              await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
-            }
-          },
-          // Prisma interactive transaction default timeout is ~5s; large SMT files can exceed this.
-          // We keep the transaction narrow + chunked, but still bump timeout for safety.
-          { timeout: 60_000 },
-        );
-
-        // Dual-write to usage DB so dashboards see SMT data
-        try {
-          const usageClient: any = usagePrisma;
-          if (usageClient?.usageIntervalModule) {
-            for (const pair of distinctPairs) {
-              const pairIntervals = boundedIntervals.filter(
-                (i) => i.esiid === pair.esiid && i.meter === pair.meter,
-              );
-              if (pairIntervals.length === 0) continue;
-
-              const pairTimestamps = pairIntervals
-                .map((i) => i.ts.getTime())
-                .filter((ms) => Number.isFinite(ms));
-              const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinDate;
-              const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMaxDate;
-
-              await usageClient.usageIntervalModule.deleteMany({
-                where: {
-                  esiid: pair.esiid,
-                  meter: pair.meter,
-                  ts: { gte: pairMin ?? tsMinDate, lte: pairMax ?? tsMaxDate },
-                },
-              });
-
-              await usageClient.usageIntervalModule.createMany({
-                data: pairIntervals.map((interval) => ({
-                  esiid: interval.esiid,
-                  meter: interval.meter,
-                  ts: interval.ts,
-                  kwh: new Prisma.Decimal(interval.kwh),
-                  filled: false,
-                  source: interval.source ?? file.source ?? 'smt',
-                })),
-                skipDuplicates: true,
-              });
-            }
-          }
-        } catch (usageErr) {
-          console.error('[smt/normalize] usage dual-write failed', usageErr);
+        const persisted = await replaceNormalizedSmtIntervals({
+          intervals: boundedIntervals.map((interval) => ({
+            esiid: interval.esiid,
+            meter: interval.meter,
+            ts: interval.ts,
+            kwh: interval.kwh,
+            source: interval.source ?? file.source ?? 'smt',
+          })),
+          transactionTimeoutMs: 60_000,
+          primaryChunkSize: INSERT_BATCH_SIZE,
+          usageChunkSize: 5000,
+          writeUsageModule: true,
+        });
+        inserted = persisted.inserted;
+        skipped = persisted.skipped;
+        if (persisted.distinctEsiids.length > 0) {
+          await prisma.smtBillingRead.deleteMany({ where: { esiid: { in: persisted.distinctEsiids } } });
         }
       } catch (err) {
         console.error('[smt/normalize] failed overwrite transaction', {

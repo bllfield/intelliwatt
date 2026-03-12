@@ -36,11 +36,38 @@ export type DerivedUsageShapeProfile = {
   shapeByMonth96: Record<string, number[]>; // YYYY-MM -> 96
   avgKwhPerDayWeekdayByMonth: number[];     // 12, Jan=0
   avgKwhPerDayWeekendByMonth: number[];
+  avgKwhPerDayWeekdayByMonthKey?: Record<string, number>; // YYYY-MM -> avg/day
+  avgKwhPerDayWeekendByMonthKey?: Record<string, number>; // YYYY-MM -> avg/day
   peakHourByMonth: number[];                // 12, 0-23
   p95KwByMonth: number[];
   timeOfDayShares: TimeOfDayShares;
   configHash: string;
 };
+
+function monthIndexFromYearMonth(ym: string): number | null {
+  if (!/^\d{4}-\d{2}$/.test(ym)) return null;
+  const m = Number(ym.slice(5, 7));
+  if (!Number.isFinite(m) || m < 1 || m > 12) return null;
+  return m - 1;
+}
+
+export function buildMonthKeyedDailyAverages(args: {
+  monthKeys: string[];
+  weekdayByCalendarMonth: number[];
+  weekendByCalendarMonth: number[];
+}): { weekdayByMonthKey: Record<string, number>; weekendByMonthKey: Record<string, number> } {
+  const weekdayByMonthKey: Record<string, number> = {};
+  const weekendByMonthKey: Record<string, number> = {};
+  for (const ym of args.monthKeys ?? []) {
+    const idx = monthIndexFromYearMonth(String(ym ?? ""));
+    if (idx == null) continue;
+    const wd = args.weekdayByCalendarMonth?.[idx];
+    const we = args.weekendByCalendarMonth?.[idx];
+    if (wd != null && Number.isFinite(wd) && wd > 0) weekdayByMonthKey[ym] = wd;
+    if (we != null && Number.isFinite(we) && we > 0) weekendByMonthKey[ym] = we;
+  }
+  return { weekdayByMonthKey, weekendByMonthKey };
+}
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
@@ -177,6 +204,11 @@ export function deriveUsageShapeProfile(
   };
 
   const configHash = `${PROFILE_VERSION}_${CONFIG_BASELOAD}_tz_${tz.replace(/\//g, "_")}`;
+  const keyed = buildMonthKeyedDailyAverages({
+    monthKeys: monthsOrder,
+    weekdayByCalendarMonth: avgKwhPerDayWeekdayByMonth,
+    weekendByCalendarMonth: avgKwhPerDayWeekendByMonth,
+  });
 
   return {
     windowStartUtc,
@@ -189,6 +221,8 @@ export function deriveUsageShapeProfile(
     shapeByMonth96,
     avgKwhPerDayWeekdayByMonth,
     avgKwhPerDayWeekendByMonth,
+    avgKwhPerDayWeekdayByMonthKey: keyed.weekdayByMonthKey,
+    avgKwhPerDayWeekendByMonthKey: keyed.weekendByMonthKey,
     peakHourByMonth,
     p95KwByMonth,
     timeOfDayShares,

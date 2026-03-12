@@ -11,6 +11,7 @@ import {
   type AdjustmentType,
 } from "@/lib/usageScenario/catalog";
 import { ScenarioUpgradesEditor } from "@/components/upgrades/ScenarioUpgradesEditor";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 
@@ -196,7 +197,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         const hasIntervals = intervalsCount > 0 && intervals15Len > 0;
         setHasActualIntervals(hasIntervals);
         setActualSource(source === "SMT" || source === "GREEN_BUTTON" ? (source as any) : null);
-        setActualCoverage({ start: ds?.summary?.start ?? null, end: ds?.summary?.end ?? null, intervalsCount });
+        const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+        setActualCoverage({
+          start: canonicalWindow.startDate,
+          end: canonicalWindow.endDate,
+          intervalsCount,
+        });
         // If we have interval data, baseline is Actual (read-only). Prefer the actual-baseline simulation mode.
         if (hasIntervals && normalizedIntent !== "MANUAL" && normalizedIntent !== "NEW_BUILD") setMode("SMT_BASELINE");
       } catch {

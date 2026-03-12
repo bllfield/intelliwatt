@@ -133,6 +133,102 @@
 - No duplicate or parallel implementations are allowed for interval derivation, simulated-day generation, daily aggregation, monthly aggregation, summary totals, overlays, bucket generation, or diagnostics transforms.
 - If similar code already exists in multiple places, future work must consolidate toward one shared module path and must not add another path.
 
+### Canonical Shared Module Usage (All Future Development)
+
+- This rule is mandatory for all new runtime features, routes, pages, services, tools, and refactors.
+- Routes/pages/tools may orchestrate, validate input, and format responses, but business logic must live in shared modules.
+- No copy/paste variants or second implementations of existing aligned logic are allowed.
+- If a shared module already exists, use it (or extend it) and do not create a parallel path.
+
+#### 1) Canonical date/window logic
+
+- All canonical date/window calculations must use shared Chicago-time helpers only.
+- Use:
+  - `lib/time/chicago.ts`
+  - `modules/usageSimulator/canonicalWindow.ts`
+- Do not add route-level date math for canonical windows unless unique and documented.
+
+#### 2) Actual interval source selection + fetching
+
+- All actual interval source selection/fetching must use shared modules.
+- Use:
+  - `modules/realUsageAdapter/actual.ts`
+  - `lib/usage/actualDatasetForHouse.ts`
+  - `lib/usage/resolveIntervalsLayer.ts`
+- Do not create route-level SMT-first/GB-fallback source selection.
+- Do not directly query interval tables from normal runtime flows if a shared module exists.
+
+#### 3) Past corrected baseline / simulated-day generation
+
+- All simulated-day generation must use shared simulator core modules.
+- Use:
+  - `modules/simulatedUsage/pastDaySimulator.ts`
+  - `modules/simulatedUsage/engine.ts`
+  - `modules/simulatedUsage/simulatePastUsageDataset.ts`
+  - `modules/usageSimulator/service.ts`
+  - `modules/usageSimulator/pastCache.ts`
+- Do not recreate simulated intervals from shape/target-day totals in other places.
+- Do not create alternate Past baseline compute paths for read/inspect flows.
+
+#### 4) Usage shape profile
+
+- Usage-shape profile interval loading and derivation inputs must use shared modules and shared Chicago semantics.
+- Use:
+  - `modules/usageShapeProfile/actualIntervals.ts`
+  - `modules/usageShapeProfile/derive.ts`
+  - `modules/usageShapeProfile/autoBuild.ts`
+  - `modules/usageShapeProfile/repo.ts`
+- Do not add separate source-choice logic or local date parsing variants.
+
+#### 5) Persisted interval artifacts
+
+- Flows that read/write persisted interval artifacts must use shared artifact modules.
+- Use:
+  - `lib/usage/intervalSeriesRepo.ts`
+  - `lib/usage/resolveIntervalsLayer.ts`
+  - `modules/usageSimulator/pastCache.ts`
+- Artifact-first read paths must not silently recompute unless action is explicitly rebuild.
+
+#### 6) SMT normalized interval persistence
+
+- All normalized SMT write/replace/persist behavior must go through one module only:
+  - `lib/usage/normalizeSmtIntervals.ts`
+- Routes may parse/upload/auth/report but must not implement persistence loops or overwrite logic.
+
+#### 7) Monthly stitching / display monthly totals
+
+- Monthly stitching/aggregation must use shared modules.
+- Use:
+  - `lib/usage/buildUsageBucketsForEstimate.ts`
+  - `modules/usageSimulator/dataset.ts`
+- Do not create route/tool-specific alternate monthly stitch logic.
+
+#### 8) Admin/debug tools
+
+- Admin/debug routes are not exempt from shared-module rules.
+- If a shared module exists, admin/debug routes must use it unless intentionally low-level inspection.
+- Any intentional bypass must be clearly labeled low-level inspection/debug only and not used as production/runtime pattern.
+
+#### Required process gate before adding logic
+
+- Before adding new logic, check if shared modules already exist for:
+  - date/window logic
+  - interval source selection
+  - interval fetching
+  - simulation/day generation
+  - profile derivation inputs
+  - cache/artifact reads
+  - normalized SMT persistence
+  - monthly stitching/aggregation
+- If one exists:
+  - use it
+  - extend it if needed
+  - do not duplicate it elsewhere
+- If none exists:
+  - create a shared module first
+  - then call it from routes/services/tools
+  - do not bury reusable logic inside a route/page
+
 ### Downstream Artifact Boundary Rule
 
 - Current Usage logic remains as-is unless a dedicated Usage change is explicitly approved.

@@ -6,6 +6,7 @@ import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { getActualIntervalsForUsageShapeProfile } from "@/modules/usageShapeProfile/actualIntervals";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
+import { invalidatePastCachesForHouse } from "@/modules/usageSimulator/pastCache";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -101,14 +102,19 @@ export async function POST(req: NextRequest) {
     const intervalsForDerive = actualIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
 
     const profile = deriveUsageShapeProfile(intervalsForDerive, timezone, windowStartUtc, windowEndUtc);
-    const { id } = await upsertUsageShapeProfile(house.id, PROFILE_VERSION, profile);
+    const saved = await upsertUsageShapeProfile(house.id, PROFILE_VERSION, profile);
+    const invalidatedPastArtifactCount = await invalidatePastCachesForHouse({ houseId: house.id });
 
     return NextResponse.json({
       ok: true,
-      profileId: id,
+      profileId: saved.id,
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
       version: PROFILE_VERSION,
+      profileDerivedAt: saved.derivedAt,
+      profileSimIdentityHash: saved.simIdentityHash,
+      dependentPastArtifactsInvalidated: invalidatedPastArtifactCount,
+      dependentPastRebuildRequired: true,
       windowStartUtc: profile.windowStartUtc,
       windowEndUtc: profile.windowEndUtc,
       intervalCount: actualIntervals.length,

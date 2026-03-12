@@ -4,12 +4,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Prisma } from '@prisma/client';
 import { requireVercelCron } from '@/lib/auth/cron';
 import { computeDailySummaries } from '@/lib/analysis/dailySummary';
 import { DateTime } from 'luxon';
-import { prisma } from '@/lib/db';
-import { normalizeSmtTo15Min } from '@/lib/analysis/normalizeSmt';
+import { loadSmtRawRows, normalizeAndPersistSmtIntervals } from '@/lib/usage/normalizeSmtIntervals';
 
 function generateCorrId(): string {
   return `catch-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -45,15 +43,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2) For each missing day, try to fetch raw data and normalize
-    const RAW_MODEL_CANDIDATES = ['rawSmtRow', 'rawSmtRows', 'rawSmtFile', 'rawSmtFiles', 'smtRawRow', 'smtRawRows'];
-    let dao: any = null;
-    for (const name of RAW_MODEL_CANDIDATES) {
-      if ((prisma as any)[name]?.findMany) {
-        dao = (prisma as any)[name];
-        break;
-      }
-    }
+    // 2) For each missing day, fetch raw rows then normalize + persist via shared module
 
     const results: Array<{ esiid: string; meter: string; date: string; processed: number; persisted: number }> = [];
 
@@ -63,110 +53,30 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Convert local day to UTC window
-      const dayStartLocal = DateTime.fromISO(day.date, { zone: tz }).startOf('day');
-      const dayEndLocal = dayStartLocal.plus({ days: 1 });
-      const fromUTC = dayStartLocal.toUTC().toJSDate();
-      const toUTC = dayEndLocal.toUTC().toJSDate();
-
-      // Fetch raw rows for this ESIID/Meter/Date window
-      if (!dao) {
-        // No raw model available - skip
-        continue;
-      }
-
-      const where: any = {
+      const loaded = await loadSmtRawRows({
         esiid: day.esiid,
         meter: day.meter,
-      };
-
-      // Try to match by createdAt or received_at if available
-      const rawRows = await dao.findMany({
-        where,
-        orderBy: { id: 'asc' },
-        take: 10000, // reasonable limit
+        take: 10000,
       });
+      if (!loaded.modelName) {
+        // No raw model available
+        continue;
+      }
+      const rawRows = loaded.rows;
 
       if (rawRows.length === 0) {
         continue; // No raw data available for this day
       }
 
-      // Shape and normalize
-      const shaped = rawRows.map((r: any) => ({
-        esiid: r.esiid ?? day.esiid,
-        meter: r.meter ?? day.meter,
-        timestamp: r.timestamp ?? r.end ?? undefined,
-        kwh: r.kwh ?? r.value ?? undefined,
-        start: r.start ?? undefined,
-        end: r.end ?? undefined,
-      }));
-
-      const norm = normalizeSmtTo15Min(shaped).map((p: any) => ({
-        ...p,
+      const out = await normalizeAndPersistSmtIntervals({
+        rows: rawRows,
         esiid: day.esiid,
         meter: day.meter,
-        filled: p.filled ?? (p.kwh === 0),
         source: 'smt',
-      }));
-
-      // Filter to only intervals within the target day (in local time)
-      const filtered = norm.filter((p: any) => {
-        const localDt = DateTime.fromISO(p.ts).setZone(tz);
-        const localDate = localDt.toISODate();
-        return localDate === day.date;
+        filterLocalDate: { date: day.date, timezone: tz },
       });
-
-      if (filtered.length === 0) {
+      if (out.consideredPoints === 0) {
         continue; // No intervals for this day after filtering
-      }
-
-      // Persist with guards (same logic as ingest-normalize)
-      let persisted = 0;
-      for (const p of filtered) {
-        const key = { esiid_meter_ts: { esiid: p.esiid, meter: p.meter, ts: new Date(p.ts) } };
-        const existing = await prisma.smtInterval.findUnique({ where: key });
-
-        if (!existing) {
-          try {
-            await prisma.smtInterval.create({
-              data: {
-                esiid: p.esiid,
-                meter: p.meter,
-                ts: new Date(p.ts),
-                kwh: p.kwh,
-                filled: !!p.filled,
-                source: p.source,
-              },
-            });
-            persisted++;
-          } catch (err) {
-            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-              // duplicate key constraint; skip silently
-            } else {
-              throw err;
-            }
-          }
-          continue;
-        }
-
-        const isExistingReal = existing.filled === false;
-        const isIncomingReal = p.filled === false;
-
-        if (isExistingReal && !isIncomingReal) {
-          // don't overwrite real with zero
-          continue;
-        }
-
-        // upgrade zero→real OR update real→real
-        await prisma.smtInterval.update({
-          where: key,
-          data: {
-            kwh: p.kwh,
-            filled: isIncomingReal ? false : existing.filled,
-            source: p.source ?? existing.source ?? 'smt',
-          },
-        });
-        persisted++;
       }
 
       results.push({
@@ -174,7 +84,7 @@ export async function POST(req: NextRequest) {
         meter: day.meter,
         date: day.date,
         processed: rawRows.length,
-        persisted,
+        persisted: out.persisted,
       });
     }
 

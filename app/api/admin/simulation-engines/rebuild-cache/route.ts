@@ -132,6 +132,7 @@ export async function POST(req: NextRequest) {
       usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
       usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
       usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+      usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
     });
 
     const scenarioIdForCache = resolvedScenarioId ?? "BASELINE";

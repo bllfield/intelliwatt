@@ -273,6 +273,7 @@ export async function buildAndSavePastForGapfillLab(args: {
     usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
     usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
     usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+    usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
   });
 
   const pastResult = await getPastSimulatedDatasetForHouse({

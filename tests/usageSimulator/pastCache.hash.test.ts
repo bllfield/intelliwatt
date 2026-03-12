@@ -13,6 +13,7 @@ describe("past cache hash invalidation", () => {
     usageShapeProfileId: "profile_1",
     usageShapeProfileVersion: "8",
     usageShapeProfileDerivedAt: "2026-03-10T10:00:00.000Z",
+    usageShapeProfileSimHash: "shape_hash_a",
   };
 
   it("changes when interval fingerprint changes (value-only edits)", () => {
@@ -29,6 +30,15 @@ describe("past cache hash invalidation", () => {
     const b = computePastInputHash({
       ...basePayload,
       usageShapeProfileVersion: "9",
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it("changes when usage-shape profile sim hash changes", () => {
+    const a = computePastInputHash(basePayload);
+    const b = computePastInputHash({
+      ...basePayload,
+      usageShapeProfileSimHash: "shape_hash_b",
     });
     expect(a).not.toBe(b);
   });

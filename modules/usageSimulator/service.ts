@@ -235,21 +235,18 @@ export async function buildGapfillCompareSimShared(args: {
     initialIntervals15.length > 0 &&
     initialIntervals15.length < expectedChartIntervalCount
   ) {
-    const staleRebuild = await buildAndSavePastForGapfillLab({
-      userId,
-      houseId,
-      rangesToMask: testRangesUsed,
-      timezone,
-    });
-    if (staleRebuild.ok) {
-      artifactAutoRebuilt = true;
-      simOut = await getSimulatedUsageForHouseScenario({
-        userId,
-        houseId,
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_stale_rebuild_required",
+        message:
+          "Saved gapfill_lab artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+        mode: "artifact_only",
         scenarioId: "gapfill_lab",
-        readMode: "artifact_only",
-      });
-    }
+      },
+    };
   }
 
   const expectedMaskedDayCount = fallbackSimulatedDateKeysLocal?.size ?? null;
@@ -269,21 +266,18 @@ export async function buildGapfillCompareSimShared(args: {
       (expectedMaskedFingerprint != null && observedMaskedFingerprint !== expectedMaskedFingerprint));
 
   if (!rebuildArtifact && needsMaskScopeRebuild) {
-    const scopeRebuild = await buildAndSavePastForGapfillLab({
-      userId,
-      houseId,
-      rangesToMask: testRangesUsed,
-      timezone,
-    });
-    if (scopeRebuild.ok) {
-      artifactAutoRebuilt = true;
-      simOut = await getSimulatedUsageForHouseScenario({
-        userId,
-        houseId,
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_scope_mismatch_rebuild_required",
+        message:
+          "Saved gapfill_lab artifact mask scope does not match requested ranges. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+        mode: "artifact_only",
         scenarioId: "gapfill_lab",
-        readMode: "artifact_only",
-      });
-    }
+      },
+    };
   }
 
   if (!simOut.ok || !simOut.dataset?.series?.intervals15) {
@@ -1676,6 +1670,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
             usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
             usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+            usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
           });
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cacheKeyDiag = {

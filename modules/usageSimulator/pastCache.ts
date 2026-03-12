@@ -21,6 +21,7 @@ export type PastInputHashPayload = {
   usageShapeProfileId?: string | null;
   usageShapeProfileVersion?: string | null;
   usageShapeProfileDerivedAt?: string | null;
+  usageShapeProfileSimHash?: string | null;
 };
 
 /** Stable hash of buildInputs + travelRanges + timezone + window + engineVersion (base64url). */
@@ -40,6 +41,7 @@ export function computePastInputHash(payload: PastInputHashPayload): string {
     usageShapeProfileId: payload.usageShapeProfileId ?? "",
     usageShapeProfileVersion: payload.usageShapeProfileVersion ?? "",
     usageShapeProfileDerivedAt: payload.usageShapeProfileDerivedAt ?? "",
+    usageShapeProfileSimHash: payload.usageShapeProfileSimHash ?? "",
   };
   const json = JSON.stringify(canonical);
   const digest = createHash("sha256").update(json, "utf8").digest();
@@ -209,6 +211,20 @@ export async function deleteCachedPastDataset(args: {
         scenarioId: args.scenarioId,
         inputHash: args.inputHash,
       },
+    });
+    return typeof result?.count === "number" ? result.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Delete all cached Past rows for a house across scenarios/input hashes. */
+export async function invalidatePastCachesForHouse(args: { houseId: string }): Promise<number> {
+  const model = getCacheModel();
+  if (!model) return 0;
+  try {
+    const result = await model.deleteMany({
+      where: { houseId: args.houseId },
     });
     return typeof result?.count === "number" ? result.count : 0;
   } catch {

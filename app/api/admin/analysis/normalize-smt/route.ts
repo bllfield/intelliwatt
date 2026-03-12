@@ -12,7 +12,7 @@ import {
   buildDailyCompleteness,
 } from '@/lib/analysis/normalizeSmt';
 import { TZ_BUILD_ID } from '@/lib/time/tz';
-import { prisma } from '@/lib/db';
+import { persistNormalizedSmtPoints } from '@/lib/usage/normalizeSmtIntervals';
 
 type GroupBy = 'none' | 'esiid' | 'meter' | 'esiid_meter';
 
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Build rows to persist
+      // Build rows to persist (contract preserved)
       type SaveRow = { esiid: string; meter: string; ts: string; kwh: number; filled: boolean; source?: string };
       const toSave: SaveRow[] = [];
 
@@ -131,27 +131,22 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Chunk upserts (simple first pass)
       let persisted = 0;
-      const chunkSize = 500;
-      for (let i = 0; i < toSave.length; i += chunkSize) {
-        const chunk = toSave.slice(i, i + chunkSize);
-        // Use upsert per row (safe initial implementation)
-        for (const r of chunk) {
-          await prisma.smtInterval.upsert({
-            where: { esiid_meter_ts: { esiid: r.esiid, meter: r.meter, ts: new Date(r.ts) } },
-            update: { kwh: r.kwh, filled: r.filled, source: r.source },
-            create: {
-              esiid: r.esiid,
-              meter: r.meter,
-              ts: new Date(r.ts),
-              kwh: r.kwh,
-              filled: r.filled,
-              source: r.source,
-            },
-          });
-          persisted++;
-        }
+      for (const [key, val] of Object.entries(groups)) {
+        const { esiid, meter } = splitKey(key);
+        if (!esiid || !meter) continue;
+        const out = await persistNormalizedSmtPoints({
+          points: val.points.map((p) => ({
+            esiid,
+            meter,
+            ts: p.ts,
+            kwh: p.kwh,
+            filled: !!p.filled,
+            source,
+          })),
+          saveFilled: true,
+        });
+        persisted += out.persisted;
       }
 
       return NextResponse.json({

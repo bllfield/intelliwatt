@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
 import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
-import { dualWriteUsageIntervals, type UsageIntervalCreateInput } from '@/lib/usage/dualWriteUsageIntervals';
+import { persistParsedNormalizedSmtIntervals } from '@/lib/usage/normalizeSmtIntervals';
 import { cleanEsiid, resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
@@ -47,15 +47,15 @@ async function normalizeInlineSmtCsv(opts: {
 
   if (intervals.length === 0) return;
 
-  const rows: UsageIntervalCreateInput[] = intervals.map((interval) => ({
-    esiid: interval.esiid,
-    meter: interval.meter,
-    ts: interval.ts,
-    kwh: new Prisma.Decimal(interval.kwh),
-    source: interval.source ?? 'smt-inline',
-  }));
-
-  await dualWriteUsageIntervals(rows);
+  await persistParsedNormalizedSmtIntervals({
+    intervals: intervals.map((interval) => ({
+      esiid: interval.esiid,
+      meter: interval.meter,
+      ts: interval.ts,
+      kwh: interval.kwh,
+      source: interval.source ?? 'smt-inline',
+    })),
+  });
 }
 
 type BillingCsvDetectionInput = {

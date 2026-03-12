@@ -14,6 +14,57 @@
 - No duplicate or parallel implementations are allowed for interval derivation, simulated-day generation, daily aggregation, monthly aggregation, summary totals, overlays, bucket generation, or diagnostics transforms.
 - If similar code already exists in multiple places, future work must consolidate toward one shared module path and must not add another path.
 
+### Shared Module Enforcement Rule (All Future Development)
+
+- Applies to all future work: runtime routes, pages, services, admin tools, debug tools, and refactors.
+- Do not implement the same functional logic in multiple files.
+- If logic is needed in more than one place, it must live in a shared module and all callers must use that module.
+- New routes/pages/tools may orchestrate/validate/format, but business logic must live in shared modules.
+
+#### Canonical shared modules that must be used
+
+1) Canonical date/window logic:
+   - `lib/time/chicago.ts`
+   - `modules/usageSimulator/canonicalWindow.ts`
+2) Actual interval source selection/fetching:
+   - `modules/realUsageAdapter/actual.ts`
+   - `lib/usage/actualDatasetForHouse.ts`
+   - `lib/usage/resolveIntervalsLayer.ts`
+3) Past corrected baseline/simulated-day generation:
+   - `modules/simulatedUsage/pastDaySimulator.ts`
+   - `modules/simulatedUsage/engine.ts`
+   - `modules/simulatedUsage/simulatePastUsageDataset.ts`
+   - `modules/usageSimulator/service.ts`
+   - `modules/usageSimulator/pastCache.ts`
+4) Usage shape profile:
+   - `modules/usageShapeProfile/actualIntervals.ts`
+   - `modules/usageShapeProfile/derive.ts`
+   - `modules/usageShapeProfile/autoBuild.ts`
+   - `modules/usageShapeProfile/repo.ts`
+5) Persisted interval artifacts:
+   - `lib/usage/intervalSeriesRepo.ts`
+   - `lib/usage/resolveIntervalsLayer.ts`
+   - `modules/usageSimulator/pastCache.ts`
+6) SMT normalized interval persistence:
+   - `lib/usage/normalizeSmtIntervals.ts`
+7) Monthly stitching/display totals:
+   - `lib/usage/buildUsageBucketsForEstimate.ts`
+   - `modules/usageSimulator/dataset.ts`
+
+#### Process rule before adding logic
+
+- First check whether a shared module already exists for:
+  - date/window logic
+  - interval source selection
+  - interval fetching
+  - simulation/day generation
+  - profile derivation inputs
+  - cache/artifact reads
+  - normalized SMT persistence
+  - monthly stitching/aggregation
+- If one exists: use it, extend it if needed, and do not duplicate it elsewhere.
+- If one does not exist: create a shared module first, then call it from routes/services/tools.
+
 ### Canonical Past Sim Artifact Rule
 
 - Raw actual usage remains the raw source of truth.

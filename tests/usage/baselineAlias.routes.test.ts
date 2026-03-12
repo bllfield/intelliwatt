@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
+vi.mock("server-only", () => ({}));
+
 const prismaUserFindUnique = vi.fn();
 const prismaHouseFindMany = vi.fn();
 const prismaHouseFindFirst = vi.fn();
@@ -84,7 +86,7 @@ describe("baseline alias parity across usage routes", () => {
 
     const kindsCalled = resolveIntervalsLayer.mock.calls.map((c: any[]) => c[0]?.layerKind);
     expect(kindsCalled).toContain(IntervalSeriesKind.ACTUAL_USAGE_INTERVALS);
-    expect(kindsCalled).toContain(IntervalSeriesKind.BASELINE_INTERVALS);
+    expect(kindsCalled).not.toContain(IntervalSeriesKind.BASELINE_INTERVALS);
     expect(getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
   });
 });
