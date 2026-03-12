@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 
@@ -19,24 +20,21 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   });
   if (!house) return { ok: false, reason: "house_not_found" };
 
-  const actual = await getActualUsageDatasetForHouse(house.id, house.esiid ?? null, {
-    skipFullYearIntervalFetch: true,
-  });
-  const startDate = String(actual?.dataset?.summary?.start ?? "").slice(0, 10);
-  const endDate = String(actual?.dataset?.summary?.end ?? "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return { ok: false, reason: "no_actual_summary_window" };
-  }
-
+  const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
   const intervals = await getActualIntervalsForRange({
     houseId: house.id,
     esiid: house.esiid ?? null,
-    startDate,
-    endDate,
+    startDate: canonicalWindow.startDate,
+    endDate: canonicalWindow.endDate,
   });
   if (!Array.isArray(intervals) || intervals.length === 0) {
     return { ok: false, reason: "no_actual_intervals" };
   }
+
+  const firstTs = String(intervals[0]?.timestamp ?? "");
+  const lastTs = String(intervals[intervals.length - 1]?.timestamp ?? "");
+  const startDate = /^\d{4}-\d{2}-\d{2}/.test(firstTs) ? firstTs.slice(0, 10) : canonicalWindow.startDate;
+  const endDate = /^\d{4}-\d{2}-\d{2}/.test(lastTs) ? lastTs.slice(0, 10) : canonicalWindow.endDate;
 
   const profile = deriveUsageShapeProfile(
     intervals.map((r) => ({ tsUtc: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),

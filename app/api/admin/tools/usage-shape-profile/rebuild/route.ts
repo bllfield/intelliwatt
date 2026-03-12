@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
@@ -67,25 +69,13 @@ export async function POST(req: NextRequest) {
     }
 
     const esiid = house.esiid ? String(house.esiid) : null;
-    const actual = await getActualUsageDatasetForHouse(house.id, esiid, {
-      skipFullYearIntervalFetch: true,
-    });
-    const summary = actual?.dataset?.summary;
-    if (!summary?.start || !summary?.end) {
-      return NextResponse.json(
-        { ok: false, error: "no_actual_data", message: "No actual interval data for baseline window." },
-        { status: 400 }
-      );
-    }
-
-    const startDate = summary.start.slice(0, 10);
-    const endDate = summary.end.slice(0, 10);
+    const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
 
     const actualIntervals = await getActualIntervalsForRange({
       houseId: house.id,
       esiid,
-      startDate,
-      endDate,
+      startDate: canonicalWindow.startDate,
+      endDate: canonicalWindow.endDate,
     });
     if (!actualIntervals?.length) {
       return NextResponse.json(
@@ -94,6 +84,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const firstTs = String(actualIntervals[0]?.timestamp ?? "");
+    const lastTs = String(actualIntervals[actualIntervals.length - 1]?.timestamp ?? "");
+    const startDate = /^\d{4}-\d{2}-\d{2}/.test(firstTs) ? firstTs.slice(0, 10) : canonicalWindow.startDate;
+    const endDate = /^\d{4}-\d{2}-\d{2}/.test(lastTs) ? lastTs.slice(0, 10) : canonicalWindow.endDate;
     const windowStartUtc = `${startDate}T00:00:00.000Z`;
     const windowEndUtc = `${endDate}T23:59:59.999Z`;
     const intervalsForDerive = actualIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
