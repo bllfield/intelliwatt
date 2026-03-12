@@ -68,9 +68,19 @@ export async function buildGapfillCompareSimShared(args: {
   canonicalWindow: { startDate: string; endDate: string };
   testRangesUsed: DateRange[];
   testDateKeysLocal: Set<string>;
+  fallbackSimulatedDateKeysLocal?: Set<string>;
   rebuildArtifact: boolean;
 }): Promise<GapfillCompareSimSharedResult> {
-  const { userId, houseId, timezone, canonicalWindow, testRangesUsed, testDateKeysLocal, rebuildArtifact } = args;
+  const {
+    userId,
+    houseId,
+    timezone,
+    canonicalWindow,
+    testRangesUsed,
+    testDateKeysLocal,
+    fallbackSimulatedDateKeysLocal,
+    rebuildArtifact,
+  } = args;
 
   if (rebuildArtifact) {
     const rebuilt = await buildAndSavePastForGapfillLab({
@@ -185,7 +195,9 @@ export async function buildGapfillCompareSimShared(args: {
     .map(([date, simKwh]) => ({
       date,
       simKwh: round2(simKwh),
-      source: daySourceFromDataset.get(date) ?? "ACTUAL",
+      source:
+        daySourceFromDataset.get(date) ??
+        (fallbackSimulatedDateKeysLocal?.has(date) ? "SIMULATED" : "ACTUAL"),
     }));
 
   const monthlyChartBuild = buildDisplayMonthlyFromIntervalsUtc(

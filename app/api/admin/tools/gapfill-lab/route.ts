@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import {
   buildDailyWeatherFeaturesFromHourly,
@@ -22,6 +23,7 @@ import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/gapfillCompareShared";
+import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
@@ -1033,15 +1035,21 @@ export async function POST(req: NextRequest) {
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
-    const actual = await getActualUsageDatasetForHouse(house.id, esiid, { skipFullYearIntervalFetch: true });
-    const ds = actual.dataset;
+    const resolved = await resolveIntervalsLayer({
+      userId: user.id,
+      houseId: house.id,
+      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+      esiid,
+    });
+    const ds = resolved?.dataset;
     if (ds) {
       const insightsAny = (ds.insights ?? {}) as any;
       usage365 = {
         source: String(ds.summary?.source ?? String((source as any)?.source ?? (source as any)?.kind ?? "actual")),
         timezone,
-        coverageStart: String((ds.summary as any)?.start ?? "").slice(0, 10) || null,
-        coverageEnd: String((ds.summary as any)?.end ?? "").slice(0, 10) || null,
+        // Keep coverage labels aligned with Usage dashboard canonical window.
+        coverageStart: canonicalWindow.startDate,
+        coverageEnd: canonicalWindow.endDate,
         intervalCount: Number(ds.summary?.intervalsCount ?? 0) || 0,
         daily: Array.isArray(ds.daily) ? ds.daily : [],
         monthly: Array.isArray(ds.monthly) ? ds.monthly : [],
@@ -1271,6 +1279,10 @@ export async function POST(req: NextRequest) {
     canonicalWindow,
     testRangesUsed,
     testDateKeysLocal,
+    fallbackSimulatedDateKeysLocal: new Set<string>([
+      ...Array.from(travelDateKeysLocal),
+      ...Array.from(testDateKeysLocal),
+    ]),
     rebuildArtifact,
   });
   if (!sharedSim.ok) {
