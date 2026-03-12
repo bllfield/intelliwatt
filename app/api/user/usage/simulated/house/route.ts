@@ -5,6 +5,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
+import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -60,7 +61,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
+    let out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
+    const message = String((out as any)?.message ?? "");
+    const shouldAutoBuildProfile =
+      !out.ok &&
+      out.code === "INTERNAL_ERROR" &&
+      /usage_shape_profile_required|usage-shape profile|fallback_month_avg/i.test(message);
+    if (shouldAutoBuildProfile) {
+      const rebuilt = await ensureUsageShapeProfileForUserHouse({
+        userId: u.user.id,
+        houseId,
+        timezone: "America/Chicago",
+      });
+      if (rebuilt.ok) {
+        out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
+      }
+    }
     // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).
     const cacheControl = scenarioId ? "private, no-store" : "private, max-age=30";
     if (out.ok) return NextResponse.json(out, { headers: { "Cache-Control": cacheControl } });

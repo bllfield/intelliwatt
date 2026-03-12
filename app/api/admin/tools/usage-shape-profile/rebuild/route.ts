@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
+import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
@@ -67,8 +68,14 @@ export async function POST(req: NextRequest) {
     }
 
     const esiid = house.esiid ? String(house.esiid) : null;
-    const result = await getActualUsageDatasetForHouse(house.id, esiid, { skipFullYearIntervalFetch: true });
-    const summary = result?.dataset?.summary;
+    const resolved = await resolveIntervalsLayer({
+      userId: user.id,
+      houseId: house.id,
+      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+      esiid,
+    });
+    const ds = resolved?.dataset ?? null;
+    const summary = ds?.summary;
     if (!summary?.start || !summary?.end) {
       return NextResponse.json(
         { ok: false, error: "no_actual_data", message: "No actual interval data for baseline window." },
@@ -79,12 +86,9 @@ export async function POST(req: NextRequest) {
     const startDate = summary.start.slice(0, 10);
     const endDate = summary.end.slice(0, 10);
 
-    const actualIntervals = await getActualIntervalsForRange({
-      houseId: house.id,
-      esiid,
-      startDate,
-      endDate,
-    });
+    const actualIntervals = Array.isArray((ds as any)?.series?.intervals15)
+      ? ((ds as any).series.intervals15 as Array<{ timestamp: string; kwh: number }>)
+      : [];
     if (!actualIntervals?.length) {
       return NextResponse.json(
         { ok: false, error: "no_actual_data", message: "No actual interval data in window." },
