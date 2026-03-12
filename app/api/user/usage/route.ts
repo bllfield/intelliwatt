@@ -58,9 +58,11 @@ export async function GET(_request: NextRequest) {
         result = resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } };
       } catch (err) {
         console.warn('[user/usage] actual dataset fetch failed for house', house.id, err);
+        const errCode = String((err as any)?.code ?? (err as any)?.name ?? 'INTERNAL_ERROR');
+        const errMessage = String((err as any)?.message ?? 'actual interval fetch failed');
         const classification = classifySimulationFailure({
-          code: 'no_actual_data',
-          message: String((err as any)?.message ?? 'actual interval fetch failed'),
+          code: errCode,
+          message: errMessage,
         });
         await recordSimulationDataAlert({
           source: 'USAGE_DASHBOARD',
@@ -73,7 +75,8 @@ export async function GET(_request: NextRequest) {
           missingData: classification.missingData,
           context: {
             route: '/api/user/usage',
-            internalMessage: String((err as any)?.message ?? ''),
+            internalCode: errCode,
+            internalMessage: errMessage,
           },
         });
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };

@@ -264,9 +264,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -343,9 +343,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -397,9 +397,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
