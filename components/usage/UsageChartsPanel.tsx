@@ -17,7 +17,7 @@ import { formatDateShort, formatDateShortWithYear, formatMonthLabel, formatTimeL
 import { pct, sumKwh } from "@/components/usage/usageMath";
 
 type MonthlyRow = { month: string; kwh: number };
-type DailyRow = { date: string; kwh: number };
+type DailyRow = { date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" };
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
 type StitchedMonth =
   | {
@@ -309,11 +309,15 @@ export function UsageChartsPanel(props: {
                 {dailyWeather && Object.keys(dailyWeather).length > 0 && weatherBasisLabel ? (
                   <p className="mb-2 text-xs text-neutral-500">{weatherBasisLabel}</p>
                 ) : null}
+                {daily.some((d) => d.source === "SIMULATED") ? (
+                  <p className="mb-2 text-xs text-neutral-500">Source notation: <span className="font-medium text-neutral-700">ACTUAL</span> or <span className="font-medium text-neutral-700">SIMULATED</span>.</p>
+                ) : null}
                 <table className="min-w-[280px] w-full text-sm font-mono">
                   <thead className="sticky top-0 z-10 bg-neutral-50 text-neutral-600">
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Date</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">kWh</th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Source</th>
                       {dailyWeather && Object.keys(dailyWeather).length > 0 ? (
                         <>
                           <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Avg °F</th>
@@ -332,6 +336,7 @@ export function UsageChartsPanel(props: {
                         <tr key={d.date} className="border-t border-neutral-100 hover:bg-neutral-50/50">
                           <td className="px-3 py-1.5">{d.date}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{d.kwh.toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{d.source ?? "ACTUAL"}</td>
                           {dailyWeather && Object.keys(dailyWeather).length > 0 ? (
                             <>
                               <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.tAvgF) ? wx.tAvgF.toFixed(1) : "—"}</td>

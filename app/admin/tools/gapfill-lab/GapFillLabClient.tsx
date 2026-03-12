@@ -12,7 +12,7 @@ type Usage365Payload = {
   coverageStart: string | null;
   coverageEnd: string | null;
   intervalCount: number;
-  daily: Array<{ date: string; kwh: number }>;
+  daily: Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" }>;
   monthly: Array<{ month: string; kwh: number }>;
   weekdayKwh: number;
   weekendKwh: number;
@@ -108,7 +108,7 @@ export default function GapFillLabClient() {
   const gapfillChartData = useMemo(() => {
     if (!result || !result.ok) return null;
     const dailyChartRows = Array.isArray((result as any).diagnostics?.dailyTotalsChartSim)
-      ? ((result as any).diagnostics.dailyTotalsChartSim as Array<{ date: string; simKwh: number }>)
+      ? ((result as any).diagnostics.dailyTotalsChartSim as Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>)
       : Array.isArray((result as any).diagnostics?.dailyTotalsMasked)
         ? ((result as any).diagnostics.dailyTotalsMasked as Array<{ date: string; simKwh?: number; kwh?: number }>)
       : [];
@@ -118,21 +118,27 @@ export default function GapFillLabClient() {
       .map((d) => ({
         date: String(d.date ?? ""),
         kwh: Number((d as any).simKwh ?? (d as any).kwh ?? 0) || 0,
+        ...(String((d as any)?.source ?? "").toUpperCase() === "SIMULATED" ? { source: "SIMULATED" as const } : {}),
       }))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
     if (!daily.length) return null;
 
-    const monthly = Array.from(
-      daily.reduce((acc, d) => {
-        const month = d.date.slice(0, 7);
-        acc.set(month, (acc.get(month) ?? 0) + d.kwh);
-        return acc;
-      }, new Map<string, number>())
-    )
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([month, kwh]) => ({ month, kwh }));
+    const monthly = Array.isArray((result as any)?.diagnostics?.monthlyTotalsChartSim)
+      ? ((result as any).diagnostics.monthlyTotalsChartSim as Array<{ month: string; kwh: number }>)
+          .map((m) => ({ month: String(m.month ?? ""), kwh: Number(m.kwh) || 0 }))
+          .filter((m) => /^\d{4}-\d{2}$/.test(m.month))
+          .sort((a, b) => (a.month < b.month ? -1 : 1))
+      : Array.from(
+          daily.reduce((acc, d) => {
+            const month = d.date.slice(0, 7);
+            acc.set(month, (acc.get(month) ?? 0) + d.kwh);
+            return acc;
+          }, new Map<string, number>())
+        )
+          .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+          .map(([month, kwh]) => ({ month, kwh }));
 
     const weekdayWeekend = daily.reduce(
       (acc, d) => {
@@ -159,15 +165,15 @@ export default function GapFillLabClient() {
     return {
       source: "GAPFILL_SIMULATED_TEST_WINDOW",
       timezone: timezone || "America/Chicago",
-      // Coverage should reflect the chart's actual displayed data span.
-      coverageStart: daily[0]?.date ?? (result as any)?.parity?.windowStartUtc ?? null,
-      coverageEnd: daily[daily.length - 1]?.date ?? (result as any)?.parity?.windowEndUtc ?? null,
+      coverageStart: (result as any)?.parity?.windowStartUtc ?? daily[0]?.date ?? null,
+      coverageEnd: (result as any)?.parity?.windowEndUtc ?? daily[daily.length - 1]?.date ?? null,
       intervalCount: Number((result as any)?.diagnostics?.chartIntervalCount ?? (result as any).testIntervalsCount ?? (result as any)?.parity?.intervalCount ?? 0) || 0,
       daily,
       monthly,
       weekdayKwh: weekdayWeekend.weekday,
       weekendKwh: weekdayWeekend.weekend,
       fifteenCurve,
+      stitchedMonth: (result as any)?.diagnostics?.stitchedMonthChartSim ?? null,
     };
   }, [result, timezone]);
   const hasUsage365ChartData = Boolean(result && result.ok && result.usage365?.daily?.length);
@@ -700,7 +706,7 @@ export default function GapFillLabClient() {
                     </p>
                     <UsageChartsPanel
                       monthly={gapfillChartData.monthly}
-                      stitchedMonth={null}
+                      stitchedMonth={gapfillChartData.stitchedMonth ?? null}
                       weekdayKwh={gapfillChartData.weekdayKwh}
                       weekendKwh={gapfillChartData.weekendKwh}
                       monthlyView={usageMonthlyView}

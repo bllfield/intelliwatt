@@ -284,20 +284,35 @@ function buildDisplayMonthlyFromIntervals(args: {
 export function buildDisplayMonthlyFromIntervalsUtc(
   intervals: Array<{ timestamp: string; consumption_kwh: number }>,
   endDate: string
-): { monthly: Array<{ month: string; kwh: number }>; usageBucketsByMonth: Record<string, Record<string, number>> } {
+): {
+  monthly: Array<{ month: string; kwh: number }>;
+  usageBucketsByMonth: Record<string, Record<string, number>>;
+  stitchedMonth:
+    | {
+        mode: "PRIOR_YEAR_TAIL";
+        yearMonth: string;
+        haveDaysThrough: number;
+        missingDaysFrom: number;
+        missingDaysTo: number;
+        borrowedFromYearMonth: string;
+        completenessRule: string;
+      }
+    | null;
+} {
   const monthlyBuild = buildDisplayMonthlyFromIntervals({
     intervals,
     endDate,
     useUtcMonth: true,
   });
   const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthlyBuild.monthly);
-  return { monthly: monthlyBuild.monthly, usageBucketsByMonth };
+  return { monthly: monthlyBuild.monthly, usageBucketsByMonth, stitchedMonth: monthlyBuild.stitchedMonth };
 }
 
 /** Build daily array from 15-min intervals (one row per date, sorted ascending). For cache restore so daily matches the interval set. */
 export function buildDailyFromIntervals(
-  intervals: Array<{ timestamp: string; consumption_kwh?: number; kwh?: number }>
-): Array<{ date: string; kwh: number }> {
+  intervals: Array<{ timestamp: string; consumption_kwh?: number; kwh?: number }>,
+  simulatedDateKeys?: Set<string>
+): Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" }> {
   const dailyMap = new Map<string, number>();
   for (const iv of intervals ?? []) {
     const dk = String(iv?.timestamp ?? "").slice(0, 10);
@@ -306,7 +321,11 @@ export function buildDailyFromIntervals(
     dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + kwh);
   }
   return Array.from(dailyMap.entries())
-    .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
+    .map(([date, kwh]) => ({
+      date,
+      kwh: round2(kwh),
+      ...(simulatedDateKeys ? { source: simulatedDateKeys.has(date) ? ("SIMULATED" as const) : ("ACTUAL" as const) } : {}),
+    }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
@@ -729,16 +748,19 @@ export function buildSimulatedUsageDatasetFromCurve(
     dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + (Number(curve.intervals[j].consumption_kwh) || 0));
   }
   const simulatedDisplayByDate = new Map<string, number>();
+  const simulatedSourceByDate = new Set<string>();
   for (const row of options?.simulatedDayResults ?? []) {
     const dk = String(row?.localDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
     simulatedDisplayByDate.set(dk, Number(row.displayDayKwh) || 0);
+    simulatedSourceByDate.add(dk);
   }
   // Daily display values for simulated days come from shared core SimulatedDayResult.
   const daily = Array.from(dailyMap.entries())
     .map(([date, kwh]) => ({
       date,
       kwh: round2(simulatedDisplayByDate.has(date) ? simulatedDisplayByDate.get(date)! : kwh),
+      source: simulatedSourceByDate.has(date) ? ("SIMULATED" as const) : ("ACTUAL" as const),
     }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 

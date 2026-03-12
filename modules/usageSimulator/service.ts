@@ -1373,7 +1373,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 (dataset.totals as any).importKwh = r;
                 (dataset.totals as any).netKwh = r;
               }
-              const recomputedDaily = buildDailyFromIntervals(decoded);
+              const simDateKeys = new Set<string>(
+                (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
+                  .filter((d: any) => String(d?.source ?? "").toUpperCase() === "SIMULATED")
+                  .map((d: any) => String(d?.date ?? "").slice(0, 10))
+                  .filter((dk: string) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+              );
+              const recomputedDaily = buildDailyFromIntervals(decoded, simDateKeys);
               (dataset as any).daily = recomputedDaily;
               // Keep cache restore on the saved stitched artifact only; no second overlay pass.
             }

@@ -23,6 +23,7 @@ import {
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
+import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 
@@ -1433,6 +1434,11 @@ export async function POST(req: NextRequest) {
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
     chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
+  const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
+    (Array.isArray((simOut.dataset as any)?.daily) ? (simOut.dataset as any).daily : [])
+      .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
+      .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
+  );
   const simulatedChartDaily = Array.from(
     simulatedChartIntervals.reduce((acc, p) => {
       const dk = dateKeyInTimezone(p.timestamp, timezone);
@@ -1441,7 +1447,20 @@ export async function POST(req: NextRequest) {
     }, new Map<string, number>())
   )
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([date, simKwh]) => ({ date, simKwh: round2(simKwh) }));
+    .map(([date, simKwh]) => ({
+      date,
+      simKwh: round2(simKwh),
+      source: daySourceFromDataset.get(date) ?? "ACTUAL",
+    }));
+  const monthlyChartBuild = buildDisplayMonthlyFromIntervalsUtc(
+    simulatedChartIntervals.map((p) => ({
+      timestamp: String(p.timestamp ?? ""),
+      consumption_kwh: Number(p.kwh) || 0,
+    })),
+    canonicalWindow.endDate
+  );
+  const simulatedChartMonthly = monthlyChartBuild.monthly;
+  const simulatedChartStitchedMonth = monthlyChartBuild.stitchedMonth;
   const simulatedByTs = new Map<string, number>();
   for (const p of simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
 
@@ -1483,6 +1502,8 @@ export async function POST(req: NextRequest) {
     diagnostics: {
       // Chart scope is always the full canonical window for parity with Usage dashboard charts.
       dailyTotalsChartSim: simulatedChartDaily,
+      monthlyTotalsChartSim: simulatedChartMonthly,
+      stitchedMonthChartSim: simulatedChartStitchedMonth,
       chartIntervalCount: simulatedChartIntervals.length,
       dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
       top10Under: metrics.diagnostics.top10Under,
