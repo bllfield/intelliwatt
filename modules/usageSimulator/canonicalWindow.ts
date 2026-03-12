@@ -1,9 +1,10 @@
 /**
  * Canonical window: last 12 full months ending at the canonical end month.
- * End month = (a) last full month America/Chicago (default), or (b) manual anchor end month when in manual mode.
+ * End month is derived from the canonical usage day window anchor (today-2 Chicago by default).
  * See CANONICAL_WINDOW.md. Output day count may be 365 or 366 depending on the window.
  */
-import { lastFullMonthChicago, monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 
 export type CanonicalWindow = {
   endMonth: string; // YYYY-MM
@@ -11,7 +12,8 @@ export type CanonicalWindow = {
 };
 
 export function canonicalWindow12Months(now = new Date()): CanonicalWindow {
-  const endMonth = lastFullMonthChicago(now);
+  const { endDate } = canonicalUsageWindowChicago({ now });
+  const endMonth = endDate.slice(0, 7);
   return { endMonth, months: monthsEndingAt(endMonth, 12) };
 }
 

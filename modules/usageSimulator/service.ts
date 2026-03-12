@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { anchorEndDateUtc, monthsEndingAt, lastFullMonthChicago } from "@/modules/manualUsage/anchor";
+import { anchorEndDateUtc, monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { canonicalWindow12Months } from "@/modules/usageSimulator/canonicalWindow";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -160,8 +161,7 @@ function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayloa
     }
   }
 
-  const endMonth = lastFullMonthChicago(now);
-  return { endMonth, months: monthsEndingAt(endMonth, 12) };
+  return canonicalWindow12Months(now);
 }
 
 function baseKindFromMode(mode: SimulatorMode): BaseKind {

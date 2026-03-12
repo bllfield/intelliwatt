@@ -61,3 +61,37 @@ export function lastFullMonthChicago(now = new Date()): string {
   return month === 1 ? `${year - 1}-12` : `${year}-${pad2(month - 1)}`;
 }
 
+export function chicagoDateKey(now = new Date()): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(now);
+}
+
+export function prevCalendarDayDateKey(ymd: string, daysBack: number): string {
+  const key = String(ymd ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
+  const [y, m, d] = key.split("-").map(Number);
+  const back = Math.max(0, Math.trunc(Number(daysBack) || 0));
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1, 12, 0, 0, 0));
+  dt.setUTCDate(dt.getUTCDate() - back);
+  return dt.toISOString().slice(0, 10);
+}
+
+export function canonicalUsageWindowChicago(args?: {
+  now?: Date;
+  reliableLagDays?: number;
+  totalDays?: number;
+}): { startDate: string; endDate: string } {
+  const now = args?.now ?? new Date();
+  const reliableLagDays = Math.max(0, Math.trunc(args?.reliableLagDays ?? 2));
+  const totalDays = Math.max(1, Math.trunc(args?.totalDays ?? 365));
+  const todayChicago = chicagoDateKey(now);
+  const endDate = prevCalendarDayDateKey(todayChicago, reliableLagDays);
+  const startDate = prevCalendarDayDateKey(endDate, totalDays - 1);
+  return { startDate, endDate };
+}
+

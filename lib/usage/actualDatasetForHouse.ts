@@ -11,6 +11,7 @@ import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEs
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -222,6 +223,7 @@ async function computeImportExportTotalsFromDb(args: {
   houseId?: string | null;
   rawId?: string | null;
   cutoff: Date;
+  end: Date;
 }): Promise<ImportExportTotals> {
   try {
     if (args.source === "SMT") {
@@ -235,7 +237,7 @@ async function computeImportExportTotalsFromDb(args: {
             MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS importkwh,
             MAX(CASE WHEN "kwh" < 0 THEN ABS("kwh") ELSE 0 END)::float AS exportkwh
           FROM "SmtInterval"
-          WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff}
+          WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end}
           GROUP BY "ts"
         )
         SELECT COALESCE(SUM(importkwh)::float, 0) AS importkwh, COALESCE(SUM(exportkwh)::float, 0) AS exportkwh
@@ -255,7 +257,7 @@ async function computeImportExportTotalsFromDb(args: {
       SELECT COALESCE(SUM(CASE WHEN "consumptionKwh" >= 0 THEN "consumptionKwh" ELSE 0 END)::float, 0) AS importkwh,
              COALESCE(SUM(CASE WHEN "consumptionKwh" < 0 THEN ABS("consumptionKwh") ELSE 0 END)::float, 0) AS exportkwh
       FROM "GreenButtonInterval"
-      WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+      WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
     `)) as Array<{ importkwh: number; exportkwh: number }>;
     const importKwh = round2(rows?.[0]?.importkwh ?? 0);
     const exportKwh = round2(rows?.[0]?.exportkwh ?? 0);
@@ -271,6 +273,7 @@ async function computeInsightsFromDb(args: {
   houseId?: string | null;
   rawId?: string | null;
   cutoff: Date;
+  end: Date;
 }): Promise<{
   dailyTotals: Array<{ date: string; kwh: number }>;
   monthlyTotals: Array<{ month: string; kwh: number }>;
@@ -305,7 +308,7 @@ async function computeInsightsFromDb(args: {
       const dailyRows = await prisma.$queryRaw<Array<{ date: string; kwh: number }>>(Prisma.sql`
         WITH iv AS (
           SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
-          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff}
+          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end}
           GROUP BY "ts"
         )
         SELECT to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date, COALESCE(SUM("kwh"), 0)::float AS kwh
@@ -316,7 +319,7 @@ async function computeInsightsFromDb(args: {
       const monthlyRows = await prisma.$queryRaw<Array<{ month: string; kwh: number }>>(Prisma.sql`
         WITH iv AS (
           SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
-          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff}
+          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end}
           GROUP BY "ts"
         )
         SELECT to_char(date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::date, 'YYYY-MM') AS month, COALESCE(SUM("kwh"), 0)::float AS kwh
@@ -326,7 +329,7 @@ async function computeInsightsFromDb(args: {
       const fifteenRows = await prisma.$queryRaw<Array<{ hhmm: string; avgkw: number }>>(Prisma.sql`
         WITH iv AS (
           SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
-          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff}
+          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end}
           GROUP BY "ts"
         )
         SELECT to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'), 'HH24:MI') AS hhmm, AVG(("kwh" * 4))::float AS avgkw
@@ -349,7 +352,7 @@ async function computeInsightsFromDb(args: {
                  WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 12 THEN 2
                  WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 18 THEN 3 ELSE 4 END AS sort,
             "kwh"
-          FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv
+          FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end} GROUP BY "ts") iv
         ) t GROUP BY key, label, sort ORDER BY sort ASC
       `
       );
@@ -357,12 +360,12 @@ async function computeInsightsFromDb(args: {
       const peakHourRows = await prisma.$queryRaw<Array<{ hour: number; avgkw: number }>>(Prisma.sql`
         SELECT EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::int AS hour,
                AVG(("kwh" * 4))::float AS avgkw
-        FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv
+        FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end} GROUP BY "ts") iv
         GROUP BY 1 ORDER BY avgkw DESC LIMIT 1
       `);
       const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].avgkw)) } : null;
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
-        WITH t AS (SELECT kwh::float AS kwh FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv),
+        WITH t AS (SELECT kwh::float AS kwh FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end} GROUP BY "ts") iv),
              p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
         SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh > 0 AND t.kwh <= p.p10
       `);
@@ -373,7 +376,7 @@ async function computeInsightsFromDb(args: {
       const dowRows = await prisma.$queryRaw<Array<{ weekdaykwh: number; weekendkwh: number }>>(Prisma.sql`
         SELECT COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN 0 ELSE "kwh" END)::float, 0) AS weekdaykwh,
                COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN "kwh" ELSE 0 END)::float, 0) AS weekendkwh
-        FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv
+        FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} AND "ts" <= ${args.end} GROUP BY "ts") iv
       `);
       const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
       const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
@@ -400,20 +403,20 @@ async function computeInsightsFromDb(args: {
     if (!houseId || !rawId) return empty;
     const dailyRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
     `)) as Array<{ date: string; kwh: number }>;
     const dailyTotals = dailyRows.map((r) => ({ date: String(r.date), kwh: round2(r.kwh) }));
     const peakDay = dailyTotals.length > 0 ? dailyTotals.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
     const monthlyRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT to_char(date_trunc('month', "timestamp")::date, 'YYYY-MM') AS month, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
     `)) as Array<{ month: string; kwh: number }>;
     const monthlyTotals = monthlyRows.map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
     const fifteenRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT to_char("timestamp", 'HH24:MI') AS hhmm, AVG(("consumptionKwh" * 4))::float AS avgkw
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
     `)) as Array<{ hhmm: string; avgkw: number }>;
     const fifteenMinuteAverages = fifteenRows.map((r) => ({ hhmm: String(r.hhmm), avgKw: round2(r.avgkw) }));
@@ -429,18 +432,18 @@ async function computeInsightsFromDb(args: {
                     WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12 THEN 2
                     WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18 THEN 3 ELSE 4 END AS sort,
                "consumptionKwh"
-        FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+        FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       ) t GROUP BY key, label, sort ORDER BY sort ASC
     `)) as Array<{ key: string; label: string; sort: number; kwh: number }>;
     const timeOfDayBuckets = todRows.map((r) => ({ key: String(r.key), label: String(r.label), kwh: round2(r.kwh) }));
     const peakHourRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT EXTRACT(HOUR FROM "timestamp")::int AS hour, AVG(("consumptionKwh" * 4))::float AS avgkw
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY avgkw DESC LIMIT 1
     `)) as Array<{ hour: number; avgkw: number }>;
     const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].avgkw)) } : null;
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
-      WITH t AS (SELECT "consumptionKwh"::float AS kwh FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}),
+      WITH t AS (SELECT "consumptionKwh"::float AS kwh FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}),
            p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
       SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh > 0 AND t.kwh <= p.p10
     `)) as Array<{ baseload: number | null }>;
@@ -451,7 +454,7 @@ async function computeInsightsFromDb(args: {
     const dowRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN 0 ELSE "consumptionKwh" END)::float, 0) AS weekdaykwh,
              COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN "consumptionKwh" ELSE 0 END)::float, 0) AS weekendkwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
     `)) as Array<{ weekdaykwh: number; weekendkwh: number }>;
     const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
     const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
@@ -495,7 +498,8 @@ export async function getBaseloadFromActualExcludingDates(args: {
   if (!YYYY_MM_DD.test(latestIso)) return null;
   const latest = new Date(latestIso + "T12:00:00.000Z");
   if (!Number.isFinite(latest.getTime())) return null;
-  const cutoff = new Date(latest.getTime() - 365 * DAY_MS);
+  const cutoff = new Date(latest.getTime() - 364 * DAY_MS);
+  const end = new Date(latestIso + "T23:59:59.999Z");
   const excludeDateKeys = validDateKeys(args.excludeDateKeys ?? []);
 
   try {
@@ -509,7 +513,7 @@ export async function getBaseloadFromActualExcludingDates(args: {
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
         WITH iv AS (
           SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
-          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${cutoff}
+          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${cutoff} AND "ts" <= ${end}
           ${dateFilter}
           GROUP BY "ts"
         ),
@@ -539,7 +543,7 @@ export async function getBaseloadFromActualExcludingDates(args: {
       WITH t AS (
         SELECT "consumptionKwh"::float AS kwh
         FROM "GreenButtonInterval"
-        WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${cutoff}
+        WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${cutoff} AND "timestamp" <= ${end}
         ${dateFilter}
       ),
       p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t)
@@ -553,25 +557,29 @@ export async function getBaseloadFromActualExcludingDates(args: {
 }
 
 async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: string) {
-  const latest = await usageClient.greenButtonInterval.findFirst({
-    where: { homeId: houseId, rawId },
+  const { startDate, endDate } = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const cutoff = new Date(startDate + "T00:00:00.000Z");
+  const end = new Date(endDate + "T23:59:59.999Z");
+  const hasRows = await usageClient.greenButtonInterval.findFirst({
+    where: { homeId: houseId, rawId, timestamp: { gte: cutoff, lte: end } },
     orderBy: { timestamp: "desc" },
     select: { timestamp: true },
   });
-  if (!latest?.timestamp) return null;
-  const cutoff = new Date(latest.timestamp.getTime() - 365 * DAY_MS);
-  return { latest: latest.timestamp, cutoff };
+  if (!hasRows?.timestamp) return null;
+  return { cutoff, end };
 }
 
 async function getSmtWindow(esiid: string) {
-  const latest = await prisma.smtInterval.findFirst({
-    where: { esiid },
+  const { startDate, endDate } = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const cutoff = new Date(startDate + "T00:00:00.000Z");
+  const end = new Date(endDate + "T23:59:59.999Z");
+  const hasRows = await prisma.smtInterval.findFirst({
+    where: { esiid, ts: { gte: cutoff, lte: end } },
     orderBy: { ts: "desc" },
     select: { ts: true },
   });
-  if (!latest?.ts) return null;
-  const cutoff = new Date(latest.ts.getTime() - 365 * DAY_MS);
-  return { latest: latest.ts, cutoff };
+  if (!hasRows?.ts) return null;
+  return { cutoff, end };
 }
 
 function chooseDataset(smt: UsageDatasetResult | null, greenButton: UsageDatasetResult | null): UsageDatasetResult | null {
@@ -606,7 +614,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   >(Prisma.sql`
     WITH iv AS (
       SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS importkwh, MAX(CASE WHEN "kwh" < 0 THEN ABS("kwh") ELSE 0 END)::float AS exportkwh
-      FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} GROUP BY "ts"
+      FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts"
     )
     SELECT COUNT(*)::int AS intervalsCount, COALESCE(SUM(importkwh), 0)::float AS importkwh, COALESCE(SUM(exportkwh), 0)::float AS exportkwh, MIN("ts") AS start, MAX("ts") AS end FROM iv
   `);
@@ -620,25 +628,25 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   const end = agg?.end ?? null;
   const recentIntervals = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
     SELECT DISTINCT ON ("ts") "ts", GREATEST("kwh", 0)::float AS kwh
-    FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff}
+    FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end}
     ORDER BY "ts" DESC, CASE WHEN "meter" = 'unknown' THEN 1 ELSE 0 END ASC, "updatedAt" DESC
     LIMIT 192
   `);
   const intervals15 = recentIntervals.map((row) => ({ timestamp: row.ts.toISOString(), kwh: decimalToNumber(row.kwh) })).reverse();
   const hourlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" >= NOW() - INTERVAL '14 days' GROUP BY "ts")
+    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} AND "ts" >= NOW() - INTERVAL '14 days' GROUP BY "ts")
     SELECT date_trunc('hour', "ts") AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket ASC
   `);
   const dailyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} GROUP BY "ts")
+    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts")
     SELECT date_trunc('day', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket DESC LIMIT 400
   `);
   const monthlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} GROUP BY "ts")
+    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts")
     SELECT date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket DESC LIMIT 120
   `);
   const annualRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} GROUP BY "ts")
+    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts")
     SELECT date_trunc('year', "ts") AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket ASC
   `);
   return {
@@ -662,7 +670,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
     if (!window) return null;
     const aggregates = await usageClient.greenButtonInterval.aggregate({
-      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
+      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff, lte: window.end } },
       _count: { _all: true },
       _sum: { consumptionKwh: true },
       _min: { timestamp: true },
@@ -674,32 +682,32 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     const start = aggregates._min?.timestamp ?? null;
     const end = aggregates._max?.timestamp ?? null;
     const recentIntervals = (await usageClient.greenButtonInterval.findMany({
-      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
+      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff, lte: window.end } },
       orderBy: { timestamp: "desc" },
       take: 192,
     })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
     const intervals15 = recentIntervals.map((row) => ({ timestamp: row.timestamp.toISOString(), kwh: decimalToNumber(row.consumptionKwh) })).reverse();
     const hourlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('hour', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" >= NOW() - INTERVAL '14 days'
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end} AND "timestamp" >= NOW() - INTERVAL '14 days'
       GROUP BY bucket ORDER BY bucket ASC
     `);
     const hourlyRows = hourlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket DESC LIMIT 400
     `);
     const dailyRows = dailyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const monthlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('month', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket DESC LIMIT 120
     `);
     const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const annualRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('year', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket ASC
     `);
     const annualRows = annualRowsRaw as Array<{ bucket: Date; kwh: number }>;
@@ -797,19 +805,21 @@ export async function getActualUsageDatasetForHouse(
     const latestIso = selected?.summary?.latest ?? null;
     const latest = latestIso ? new Date(latestIso) : null;
     if (selected?.summary?.source && latest && Number.isFinite(latest.getTime())) {
+      const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
       const cutoff =
         args?.cutoff && Number.isFinite(args.cutoff.getTime())
           ? new Date(args.cutoff.getTime())
-          : new Date(latest.getTime() - 365 * DAY_MS);
+          : new Date(canonicalWindow.startDate + "T00:00:00.000Z");
+      const end = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
       let rawId: string | null = null;
       if (selected.summary.source === "GREEN_BUTTON") {
         const usageClient = usagePrisma as any;
         const latestRaw = await usageClient.rawGreenButton.findFirst({ where: { homeId: houseId }, orderBy: { createdAt: "desc" }, select: { id: true } });
         rawId = latestRaw?.id ?? null;
       }
-      const computed = await computeInsightsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff });
-      const rangeStart = cutoff.toISOString().slice(0, 10);
-      const rangeEnd = latest.toISOString().slice(0, 10);
+      const computed = await computeInsightsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff, end });
+      const rangeStart = canonicalWindow.startDate;
+      const rangeEnd = canonicalWindow.endDate;
       let baseload: number | null = computed.baseload;
       let baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = "SQL_P10_V1";
       let baseloadFiltered: { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null };
@@ -839,7 +849,7 @@ export async function getActualUsageDatasetForHouse(
       }
       dailyTotals = computed.dailyTotals;
       monthlyTotals = computed.monthlyTotals;
-      totals = await computeImportExportTotalsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff });
+      totals = await computeImportExportTotalsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff, end });
       insights = {
         fifteenMinuteAverages: computed.fifteenMinuteAverages,
         timeOfDayBuckets: computed.timeOfDayBuckets,

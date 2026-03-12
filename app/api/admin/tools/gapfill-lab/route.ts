@@ -15,13 +15,13 @@ import {
   getLocalDayOfWeekFromDateKey,
   mergeDateKeysToRanges,
   pickRandomTestDateKeys,
-  prevCalendarDay,
   summarizeDailyCoverageFromIntervals,
   type DayTotalDiagnostics,
   filterCandidateDateKeysBySeason,
   pickExtremeWeatherTestDateKeys,
 } from "@/lib/admin/gapfillLab";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
@@ -100,10 +100,8 @@ function round2(n: number): number {
 }
 
 function canonicalGapfillWindow(timezone: string): { startDate: string; endDate: string } {
-  // Keep one canonical 366-day window (inclusive) across usage, test selection, and compare.
-  const endDate = prevCalendarDay(dateKeyInTimezone(new Date().toISOString(), timezone), 1);
-  const startDate = prevCalendarDay(endDate, 365);
-  return { startDate, endDate };
+  void timezone; // canonical window currently follows shared Chicago usage anchor.
+  return canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
 }
 
 function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
