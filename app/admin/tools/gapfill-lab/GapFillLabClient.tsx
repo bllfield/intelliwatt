@@ -240,8 +240,14 @@ export default function GapFillLabClient() {
         setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
       }
       setResult((prev) => {
-        if (data.ok && !data.usage365 && prev?.ok && prev.usage365) {
-          return { ...data, usage365: prev.usage365 };
+        if (data.ok && prev?.ok) {
+          return {
+            ...data,
+            ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
+            ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
+            ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
+            ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
+          };
         }
         return data;
       });
@@ -310,8 +316,14 @@ export default function GapFillLabClient() {
         return;
       }
       setResult((prev) => {
-        if (data.ok && !data.usage365 && prev?.ok && prev.usage365) {
-          return { ...data, usage365: prev.usage365 };
+        if (data.ok && prev?.ok) {
+          return {
+            ...data,
+            ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
+            ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
+            ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
+            ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
+          };
         }
         return data;
       });
@@ -354,7 +366,18 @@ export default function GapFillLabClient() {
         return;
       }
       setArtifactMissing(false);
-      setResult(data);
+      setResult((prev) => {
+        if (data.ok && prev?.ok) {
+          return {
+            ...data,
+            ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
+            ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
+            ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
+            ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
+          };
+        }
+        return data;
+      });
       if (data.ok && data.houses?.length) setHouses(data.houses);
       if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
         setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));

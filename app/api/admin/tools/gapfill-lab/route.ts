@@ -1470,6 +1470,7 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
     timezone,
   });
+  const sharedModelAssumptions = (simOut.dataset as any)?.meta ?? null;
 
   return NextResponse.json({
     ok: true,
@@ -1487,6 +1488,9 @@ export async function POST(req: NextRequest) {
     cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
     scenarioId: "gapfill_lab",
+    homeProfile,
+    applianceProfile,
+    modelAssumptions: sharedModelAssumptions,
     testIntervalsCount: actualTestIntervals.length,
     metrics: {
       mae: metrics.mae,
