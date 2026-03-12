@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -50,6 +50,15 @@ type Usage365Payload = {
   weekdayKwh: number;
   weekendKwh: number;
   fifteenCurve: Array<{ hhmm: string; avgKw: number }>;
+  stitchedMonth?: {
+    mode: "PRIOR_YEAR_TAIL";
+    yearMonth: string;
+    haveDaysThrough: number;
+    missingDaysFrom: number;
+    missingDaysTo: number;
+    borrowedFromYearMonth: string;
+    completenessRule: string;
+  } | null;
 };
 
 type IntervalPoint = { timestamp: string; kwh: number };
@@ -1083,17 +1092,32 @@ export async function POST(req: NextRequest) {
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
-    const usage365Intervals = await getActualIntervalsForRange({
-      houseId: house.id,
-      esiid,
-      startDate: canonicalWindow.startDate,
-      endDate: canonicalWindow.endDate,
-    });
-    usage365 = buildUsage365Payload({
-      intervals: usage365Intervals ?? [],
-      timezone,
-      source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
-    });
+    const actual = await getActualUsageDatasetForHouse(house.id, esiid, { skipFullYearIntervalFetch: true });
+    const ds = actual.dataset;
+    if (ds) {
+      const insightsAny = (ds.insights ?? {}) as any;
+      usage365 = {
+        source: String(ds.summary?.source ?? String((source as any)?.source ?? (source as any)?.kind ?? "actual")),
+        timezone,
+        coverageStart: canonicalWindow.startDate,
+        coverageEnd: canonicalWindow.endDate,
+        intervalCount: Number(ds.summary?.intervalsCount ?? 0) || 0,
+        daily: Array.isArray(ds.daily) ? ds.daily : [],
+        monthly: Array.isArray(ds.monthly) ? ds.monthly : [],
+        weekdayKwh: Number(insightsAny?.weekdayVsWeekend?.weekday ?? 0) || 0,
+        weekendKwh: Number(insightsAny?.weekdayVsWeekend?.weekend ?? 0) || 0,
+        fifteenCurve: Array.isArray(insightsAny?.fifteenMinuteAverages) ? insightsAny.fifteenMinuteAverages : [],
+        stitchedMonth: (insightsAny?.stitchedMonth ?? null) as Usage365Payload["stitchedMonth"],
+      };
+    } else {
+      usage365 = buildUsage365Payload({
+        intervals: [],
+        timezone,
+        source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
+      });
+      usage365.coverageStart = canonicalWindow.startDate;
+      usage365.coverageEnd = canonicalWindow.endDate;
+    }
   }
 
   const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
@@ -1338,12 +1362,44 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const simOut = await getSimulatedUsageForHouseScenario({
+  const expectedChartDayCount = normalizeRangesToLocalDateKeysInclusive(
+    [{ startDate: canonicalWindow.startDate, endDate: canonicalWindow.endDate }],
+    timezone
+  ).size;
+  const expectedChartIntervalCount = expectedChartDayCount * 96;
+
+  let simOut = await getSimulatedUsageForHouseScenario({
     userId: user.id,
     houseId: house.id,
     scenarioId: "gapfill_lab",
     readMode: "artifact_only",
   });
+  let artifactAutoRebuilt = false;
+  const initialIntervals15 =
+    simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
+      ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
+      : [];
+  if (
+    simOut.ok &&
+    initialIntervals15.length > 0 &&
+    initialIntervals15.length < expectedChartIntervalCount
+  ) {
+    const staleRebuild = await buildAndSavePastForGapfillLab({
+      userId: user.id,
+      houseId: house.id,
+      rangesToMask: testRangesUsed,
+      timezone,
+    });
+    if (staleRebuild.ok) {
+      artifactAutoRebuilt = true;
+      simOut = await getSimulatedUsageForHouseScenario({
+        userId: user.id,
+        houseId: house.id,
+        scenarioId: "gapfill_lab",
+        readMode: "artifact_only",
+      });
+    }
+  }
   if (!simOut.ok || !simOut.dataset?.series?.intervals15) {
     const status = simOut.ok ? 500 : simOut.code === "ARTIFACT_MISSING" ? 409 : 500;
     return NextResponse.json(
@@ -1370,10 +1426,10 @@ export async function POST(req: NextRequest) {
   const simulatedTestIntervals = artifactIntervals.filter((p) =>
     testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
-  const chartDateKeysLocal = new Set<string>([
-    ...Array.from(testDateKeysLocal),
-    ...Array.from(travelDateKeysLocal),
-  ]);
+  const chartDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(
+    [{ startDate: canonicalWindow.startDate, endDate: canonicalWindow.endDate }],
+    timezone
+  );
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
     chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
@@ -1407,6 +1463,7 @@ export async function POST(req: NextRequest) {
     timezone,
     mode: "artifact_only",
     rebuilt: rebuildArtifact,
+    artifactAutoRebuilt,
     enginePath: "production_past_stitched",
     cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
@@ -1424,7 +1481,7 @@ export async function POST(req: NextRequest) {
     byDayType: metrics.byDayType,
     worstDays: metrics.worstDays,
     diagnostics: {
-      // Chart-only union scope: Test Dates plus DB Vacant/Travel dates.
+      // Chart scope is always the full canonical window for parity with Usage dashboard charts.
       dailyTotalsChartSim: simulatedChartDaily,
       chartIntervalCount: simulatedChartIntervals.length,
       dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,

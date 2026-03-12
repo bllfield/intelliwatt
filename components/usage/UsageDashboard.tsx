@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -115,7 +116,7 @@ type HouseUsage = {
 type UsageApiResponse = { ok: true; houses: HouseUsage[] } | { ok: false; error: string };
 
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
-const SESSION_KEY_PREFIX = "usage_dashboard_v1";
+const SESSION_KEY_PREFIX = "usage_dashboard_v2";
 const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
 
 function sessionKey(mode: "REAL" | "SIMULATED") {
@@ -454,10 +455,9 @@ export const UsageDashboard: React.FC<Props> = ({
     const ds = activeHouse?.dataset;
     const meta = (ds as any)?.meta ?? {};
     const datasetKind = meta.datasetKind ?? null;
-    const startIso = ds?.summary?.start ?? null;
-    const endIso = ds?.summary?.end ?? ds?.summary?.latest ?? null;
-    const start = startIso ? String(startIso).slice(0, 10) : null;
-    const end = endIso ? String(endIso).slice(0, 10) : null;
+    const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+    const start = canonicalWindow.startDate;
+    const end = canonicalWindow.endDate;
     const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
     const actualSource = meta.actualSource as string | undefined;
     const hasSimulatedFill =
@@ -491,8 +491,9 @@ export const UsageDashboard: React.FC<Props> = ({
     const fallbackDailyRaw = daily.length
       ? daily
       : (dataset?.series?.daily ?? []).map((d) => ({ date: toDateKeyFromTimestamp(d.timestamp), kwh: d.kwh }));
-    const coverageStart = dataset?.summary?.start ? String(dataset.summary.start).slice(0, 10) : null;
-    const coverageEnd = dataset?.summary?.end ? String(dataset.summary.end).slice(0, 10) : null;
+    const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+    const coverageStart = canonicalWindow.startDate;
+    const coverageEnd = canonicalWindow.endDate;
     const dateInRange = (d: string) =>
       (!coverageStart || d >= coverageStart) && (!coverageEnd || d <= coverageEnd);
     const seen = new Set<string>();

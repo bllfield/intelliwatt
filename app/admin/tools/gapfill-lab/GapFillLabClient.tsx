@@ -17,6 +17,15 @@ type Usage365Payload = {
   weekdayKwh: number;
   weekendKwh: number;
   fifteenCurve: Array<{ hhmm: string; avgKw: number }>;
+  stitchedMonth?: {
+    mode: "PRIOR_YEAR_TAIL";
+    yearMonth: string;
+    haveDaysThrough: number;
+    missingDaysFrom: number;
+    missingDaysTo: number;
+    borrowedFromYearMonth: string;
+    completenessRule: string;
+  } | null;
 };
 
 type ApiResponse =
@@ -150,9 +159,8 @@ export default function GapFillLabClient() {
     return {
       source: "GAPFILL_SIMULATED_TEST_WINDOW",
       timezone: timezone || "America/Chicago",
-      // Coverage should reflect the chart's actual displayed data span.
-      coverageStart: daily[0]?.date ?? null,
-      coverageEnd: daily[daily.length - 1]?.date ?? null,
+      coverageStart: (result as any)?.parity?.windowStartUtc ?? daily[0]?.date ?? null,
+      coverageEnd: (result as any)?.parity?.windowEndUtc ?? daily[daily.length - 1]?.date ?? null,
       intervalCount: Number((result as any)?.diagnostics?.chartIntervalCount ?? (result as any).testIntervalsCount ?? (result as any)?.parity?.intervalCount ?? 0) || 0,
       daily,
       monthly,
@@ -712,7 +720,7 @@ export default function GapFillLabClient() {
                     </p>
                     <UsageChartsPanel
                       monthly={result.usage365.monthly}
-                      stitchedMonth={null}
+                      stitchedMonth={result.usage365.stitchedMonth ?? null}
                       weekdayKwh={result.usage365.weekdayKwh}
                       weekendKwh={result.usage365.weekendKwh}
                       monthlyView={usageMonthlyView}
