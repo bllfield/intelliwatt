@@ -169,6 +169,14 @@ export default function GapFillLabClient() {
       fifteenCurve,
     };
   }, [result, timezone]);
+  const hasUsage365ChartData = Boolean(result && result.ok && result.usage365?.daily?.length);
+  const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
+  const effectiveChartMode: ChartMode =
+    chartMode === "usage365" && !hasUsage365ChartData && hasGapfillChartData
+      ? "gapfill"
+      : chartMode === "gapfill" && !hasGapfillChartData && hasUsage365ChartData
+        ? "usage365"
+        : chartMode;
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -638,7 +646,7 @@ export default function GapFillLabClient() {
 
       {result && result.ok && (
         <div className="space-y-4">
-          {(result.usage365?.daily?.length || gapfillChartData?.daily?.length) ? (
+          {(hasUsage365ChartData || hasGapfillChartData) ? (
             <details className="border border-brand-blue/20 rounded" open>
               <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
                 Usage / Gap-Fill chart
@@ -650,7 +658,7 @@ export default function GapFillLabClient() {
                     onClick={() => setChartMode("usage365")}
                     disabled={!result.usage365?.daily?.length}
                     className={`px-3 py-1.5 rounded text-sm border ${
-                      chartMode === "usage365"
+                      effectiveChartMode === "usage365"
                         ? "bg-brand-navy text-white border-brand-navy"
                         : "bg-white text-brand-navy border-brand-blue/30"
                     } disabled:opacity-50`}
@@ -662,7 +670,7 @@ export default function GapFillLabClient() {
                     onClick={() => setChartMode("gapfill")}
                     disabled={!gapfillChartData?.daily?.length}
                     className={`px-3 py-1.5 rounded text-sm border ${
-                      chartMode === "gapfill"
+                      effectiveChartMode === "gapfill"
                         ? "bg-brand-navy text-white border-brand-navy"
                         : "bg-white text-brand-navy border-brand-blue/30"
                     } disabled:opacity-50`}
@@ -670,7 +678,7 @@ export default function GapFillLabClient() {
                     Gap-Fill (simulated test window)
                   </button>
                 </div>
-                {chartMode === "gapfill" && gapfillChartData ? (
+                {effectiveChartMode === "gapfill" && gapfillChartData ? (
                   <>
                     <p className="text-sm text-brand-navy/70 mb-4">
                       Source: {gapfillChartData.source} · {gapfillChartData.intervalCount.toLocaleString()} intervals ·
