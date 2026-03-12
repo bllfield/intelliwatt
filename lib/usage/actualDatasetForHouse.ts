@@ -956,21 +956,21 @@ export type ActualIntervalPoint = { timestamp: string; kwh: number };
  * Fetches all actual 15-min intervals for a house in a date range (inclusive).
  * Used when building Past so unchanged segments use real usage intervals.
  */
-export async function getActualIntervalsForRange(args: {
+export async function getActualIntervalsForRangeWithSource(args: {
   houseId: string;
   esiid: string | null;
   startDate: string;
   endDate: string;
-}): Promise<ActualIntervalPoint[]> {
+}): Promise<{ source: "SMT" | "GREEN_BUTTON" | null; intervals: ActualIntervalPoint[] }> {
   const start = new Date(args.startDate + "T00:00:00.000Z");
   const end = new Date(args.endDate + "T23:59:59.999Z");
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
-    return [];
+    return { source: null, intervals: [] };
   }
   const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
-  if (!source) return [];
+  if (!source) return { source: null, intervals: [] };
   if (source === "SMT") {
-    if (!args.esiid) return [];
+    if (!args.esiid) return { source: "SMT", intervals: [] };
     try {
       const rows = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
         WITH iv AS (
@@ -981,12 +981,15 @@ export async function getActualIntervalsForRange(args: {
         )
         SELECT "ts", kwh FROM iv ORDER BY "ts" ASC
       `);
-      return rows.map((r) => ({ timestamp: r.ts.toISOString(), kwh: Number(r.kwh) || 0 }));
+      return {
+        source: "SMT",
+        intervals: rows.map((r) => ({ timestamp: r.ts.toISOString(), kwh: Number(r.kwh) || 0 })),
+      };
     } catch {
-      return [];
+      return { source: "SMT", intervals: [] };
     }
   }
-  if (!USAGE_DB_ENABLED) return [];
+  if (!USAGE_DB_ENABLED) return { source: "GREEN_BUTTON", intervals: [] };
   try {
     const usageClient = usagePrisma as any;
     const latestRaw = await usageClient.rawGreenButton.findFirst({
@@ -994,7 +997,7 @@ export async function getActualIntervalsForRange(args: {
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });
-    if (!latestRaw?.id) return [];
+    if (!latestRaw?.id) return { source: "GREEN_BUTTON", intervals: [] };
     const rows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT "timestamp" AS ts, "consumptionKwh"::float AS kwh
       FROM "GreenButtonInterval"
@@ -1002,13 +1005,26 @@ export async function getActualIntervalsForRange(args: {
         AND "timestamp" >= ${start} AND "timestamp" <= ${end}
       ORDER BY "timestamp" ASC
     `)) as Array<{ ts: Date; kwh: number }>;
-    return rows.map((r) => ({
-      timestamp: (r.ts instanceof Date ? r.ts : new Date(r.ts)).toISOString(),
-      kwh: Number(r.kwh) || 0,
-    }));
+    return {
+      source: "GREEN_BUTTON",
+      intervals: rows.map((r) => ({
+        timestamp: (r.ts instanceof Date ? r.ts : new Date(r.ts)).toISOString(),
+        kwh: Number(r.kwh) || 0,
+      })),
+    };
   } catch {
-    return [];
+    return { source: "GREEN_BUTTON", intervals: [] };
   }
+}
+
+export async function getActualIntervalsForRange(args: {
+  houseId: string;
+  esiid: string | null;
+  startDate: string;
+  endDate: string;
+}): Promise<ActualIntervalPoint[]> {
+  const out = await getActualIntervalsForRangeWithSource(args);
+  return out.intervals;
 }
 
 /**

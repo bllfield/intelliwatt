@@ -1,6 +1,5 @@
 import "server-only";
-import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
+import { getActualIntervalsForRangeWithSource } from "@/lib/usage/actualDatasetForHouse";
 
 export type UsageShapeActualIntervalsResult = {
   source: "SMT" | "GREEN_BUTTON" | "NONE";
@@ -34,22 +33,21 @@ export async function getActualIntervalsForUsageShapeProfile(args: {
     };
   }
 
-  const selected = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid ?? null }).catch(() => null);
-  const intervals = await getActualIntervalsForRange({
+  const resolved = await getActualIntervalsForRangeWithSource({
     houseId: args.houseId,
     esiid: args.esiid ?? null,
     startDate: args.startDate,
     endDate: args.endDate,
-  }).catch(() => []);
-  const source: "SMT" | "GREEN_BUTTON" | "NONE" = selected ?? "NONE";
+  }).catch(() => ({ source: null, intervals: [] as Array<{ timestamp: string; kwh: number }> }));
+  const source: "SMT" | "GREEN_BUTTON" | "NONE" = resolved.source ?? "NONE";
   return {
     source,
-    intervals: intervals.map((r) => ({ timestamp: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
+    intervals: resolved.intervals.map((r) => ({ timestamp: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
     diagnostics: {
       startDate: args.startDate,
       endDate: args.endDate,
       selectedSource: source,
-      intervalCount: intervals.length,
+      intervalCount: resolved.intervals.length,
     },
   };
 }
