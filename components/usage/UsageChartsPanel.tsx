@@ -101,6 +101,11 @@ export function UsageChartsPanel(props: {
                       <span className="text-neutral-500 font-normal">({pct(weekendKwh, total)})</span>
                     </span>
                   </div>
+                  <div className="my-1 h-px w-full bg-neutral-200" />
+                  <div className="flex items-center justify-between">
+                    <span>Total</span>
+                    <span className="font-semibold">{total.toFixed(1)} kWh</span>
+                  </div>
                 </>
               );
             })()}
