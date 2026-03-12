@@ -985,17 +985,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
 
-    let scenarioRow: { id: string; name: string } | null = null;
-    if (scenarioId) {
-      scenarioRow = await (prisma as any).usageSimulatorScenario
-        .findFirst({
-          where: { id: scenarioId, userId: args.userId, houseId: args.houseId, archivedAt: null },
-          select: { id: true, name: true },
-        })
-        .catch(() => null);
-      if (!scenarioRow) return { ok: false, code: "SCENARIO_NOT_FOUND", message: "Scenario not found for user/house" };
-    }
-
     if (readMode === "artifact_only") {
       const scenarioIdForCache = scenarioId ?? "BASELINE";
       const latestCached = await getLatestCachedPastDatasetByScenario({
@@ -1031,6 +1020,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
         : null;
       restoredAny.meta.artifactRecomputed = false;
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: restored };
+    }
+
+    let scenarioRow: { id: string; name: string } | null = null;
+    if (scenarioId) {
+      scenarioRow = await (prisma as any).usageSimulatorScenario
+        .findFirst({
+          where: { id: scenarioId, userId: args.userId, houseId: args.houseId, archivedAt: null },
+          select: { id: true, name: true },
+        })
+        .catch(() => null);
+      if (!scenarioRow) return { ok: false, code: "SCENARIO_NOT_FOUND", message: "Scenario not found for user/house" };
     }
 
     // Future always recomputed from current Past (or Baseline when no Past): no cache. Every time Future is opened we recalc so it uses the latest Past curve.

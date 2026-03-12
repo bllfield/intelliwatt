@@ -96,5 +96,30 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     }
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
+
+  it("artifact_only does not require usageSimulatorScenario row for cache-backed scenarios", async () => {
+    scenarioFindFirst.mockResolvedValue(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash2",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01", latest: "2026-01-01" },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(scenarioFindFirst).not.toHaveBeenCalled();
+    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
 });
 
