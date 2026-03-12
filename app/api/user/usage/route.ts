@@ -8,6 +8,7 @@ import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 
 /** Allow time for per-house interval resolution (SMT/Green Button) when loading Usage. */
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 120;
 
 export async function GET(_request: NextRequest) {
