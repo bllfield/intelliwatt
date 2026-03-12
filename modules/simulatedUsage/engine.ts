@@ -875,7 +875,7 @@ export function buildPastSimulatedBaselineV1(args: {
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
     const dayIsIncomplete = !dayIsExcluded && !dayIsLeadingMissing && presentSlotCount < INTERVALS_PER_DAY;
     const shouldSimulateDay = dayIsExcluded || dayIsLeadingMissing || dayIsIncomplete;
-    const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing;
+    const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing && !dayIsIncomplete;
     return {
       gridTs,
       dateKey,
@@ -1362,7 +1362,7 @@ export function buildPastSimulatedBaselineV1(args: {
           : result;
       dayResults.push(blendedResult);
       for (const iv of blendedResult.intervals) out.push(iv);
-      const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
+      const mappedFallback = pastDayFallbackToEngineLevel(blendedResult.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
           dateKey,
@@ -1385,17 +1385,17 @@ export function buildPastSimulatedBaselineV1(args: {
           referenceCandidateCount: 0,
           referencePickedCount: 0,
           weatherDistanceAvg: null,
-          poolApplied: result.poolFreezeProtectKwhAdder > 0,
-          poolKwh: result.poolFreezeProtectKwhAdder > 0 ? result.poolFreezeProtectKwhAdder : 0,
-          baseNonHvacKwh: result.profileSelectedDayKwh,
-          hvacKwh: result.auxHeatKwhAdder,
-          targetTotalKwh: result.finalDayKwh,
+          poolApplied: blendedResult.poolFreezeProtectKwhAdder > 0,
+          poolKwh: blendedResult.poolFreezeProtectKwhAdder > 0 ? blendedResult.poolFreezeProtectKwhAdder : 0,
+          baseNonHvacKwh: blendedResult.profileSelectedDayKwh,
+          hvacKwh: blendedResult.auxHeatKwhAdder,
+          targetTotalKwh: blendedResult.finalDayKwh,
           sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-          rawDayKwh: result.rawDayKwh,
-          weatherAdjustedDayKwh: result.weatherAdjustedDayKwh,
-          finalDayKwh: result.finalDayKwh,
-          displayDayKwh: result.displayDayKwh,
-          intervalSumKwh: result.intervalSumKwh,
+          rawDayKwh: blendedResult.rawDayKwh,
+          weatherAdjustedDayKwh: blendedResult.weatherAdjustedDayKwh,
+          finalDayKwh: blendedResult.finalDayKwh,
+          displayDayKwh: blendedResult.displayDayKwh,
+          intervalSumKwh: blendedResult.intervalSumKwh,
         });
       }
     } else {
