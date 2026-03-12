@@ -27,7 +27,7 @@ import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/serv
 import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120; // Run Compare: candidate + training + test windows; allow longer for 365-day usage
+export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
