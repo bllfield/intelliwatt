@@ -85,17 +85,19 @@ export async function POST(req: NextRequest) {
           error: "no_actual_data",
           message: "No actual interval data in the canonical 365-day window.",
           sourceTried: actual.source,
+          diagnostics: {
+            canonicalWindowStartDate: canonicalWindow.startDate,
+            canonicalWindowEndDate: canonicalWindow.endDate,
+            actualSource: actual.source,
+            intervalCount: actualIntervals.length,
+          },
         },
         { status: 400 }
       );
     }
 
-    const firstTs = String(actualIntervals[0]?.timestamp ?? "");
-    const lastTs = String(actualIntervals[actualIntervals.length - 1]?.timestamp ?? "");
-    const startDate = /^\d{4}-\d{2}-\d{2}/.test(firstTs) ? firstTs.slice(0, 10) : canonicalWindow.startDate;
-    const endDate = /^\d{4}-\d{2}-\d{2}/.test(lastTs) ? lastTs.slice(0, 10) : canonicalWindow.endDate;
-    const windowStartUtc = `${startDate}T00:00:00.000Z`;
-    const windowEndUtc = `${endDate}T23:59:59.999Z`;
+    const windowStartUtc = `${canonicalWindow.startDate}T00:00:00.000Z`;
+    const windowEndUtc = `${canonicalWindow.endDate}T23:59:59.999Z`;
     const intervalsForDerive = actualIntervals.map((r) => ({ tsUtc: r.timestamp, kwh: r.kwh }));
 
     const profile = deriveUsageShapeProfile(intervalsForDerive, timezone, windowStartUtc, windowEndUtc);
@@ -118,6 +120,13 @@ export async function POST(req: NextRequest) {
       configHash: profile.configHash,
       shapeAll96Preview: profile.shapeAll96.slice(0, 24),
       actualSource: actual.source,
+      diagnostics: {
+        canonicalWindowStartDate: canonicalWindow.startDate,
+        canonicalWindowEndDate: canonicalWindow.endDate,
+        actualSource: actual.source,
+        intervalCount: actualIntervals.length,
+        derivedMonthKeyCount: Object.keys(profile.shapeByMonth96 ?? {}).length,
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

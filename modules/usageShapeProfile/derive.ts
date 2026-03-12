@@ -4,6 +4,8 @@
  * Baseload: bottom 10% of intervals by kwh (documented in configHash).
  */
 
+import { dateTimePartsInTimezone } from "@/lib/time/chicago";
+
 const SLOTS_PER_DAY = 96;
 const HOURS_OVERNIGHT = [0, 1, 2, 3, 4, 5];   // 12am–6am
 const HOURS_MORNING = [6, 7, 8, 9, 10, 11];   // 6am–12pm
@@ -44,52 +46,6 @@ function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
-function getLocalSlot(tsIso: string, timezone: string): number {
-  const d = new Date(tsIso);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-  }).formatToParts(d);
-  const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
-  const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
-  return Math.min(95, hour * 4 + Math.floor(minute / 15));
-}
-
-function getLocalMonth(tsIso: string, timezone: string): string {
-  const d = new Date(tsIso);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit" })
-    .format(d)
-    .replace(/\//g, "-");
-}
-
-function getLocalDateKey(tsIso: string, timezone: string): string {
-  const d = new Date(tsIso);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(d)
-    .replace(/\//g, "-");
-}
-
-function getLocalHour(tsIso: string, timezone: string): number {
-  const d = new Date(tsIso);
-  const hour = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, hour: "numeric", hour12: false }).format(d);
-  return parseInt(hour, 10) || 0;
-}
-
-/** 0 = Sunday, 6 = Saturday. Weekday = 1-5. */
-function getLocalDayOfWeek(tsIso: string, timezone: string): number {
-  const d = new Date(tsIso);
-  const dow = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, weekday: "short" }).format(d);
-  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  return map[dow] ?? 0;
-}
-
-function isWeekday(tsIso: string, timezone: string): boolean {
-  const dow = getLocalDayOfWeek(tsIso, timezone);
-  return dow >= 1 && dow <= 5;
-}
-
 function percentile(sorted: number[], p: number): number | null {
   if (!sorted.length) return null;
   const idx = (sorted.length - 1) * p;
@@ -119,10 +75,10 @@ export function deriveUsageShapeProfile(
   const slotCountsWeekend = new Array(SLOTS_PER_DAY).fill(0);
 
   const byMonth: Record<string, { sums: number[]; counts: number[] }> = {};
-  const kwhByMonthWeekday: Record<string, number[]> = {};
-  const kwhByMonthWeekend: Record<string, number[]> = {};
-  const kwByMonth: Record<string, number[]> = {};
-  const hourKwByMonth: Record<string, Record<number, number[]>> = {};
+  const kwhByCalendarMonthWeekday: number[][] = Array.from({ length: 12 }, () => []);
+  const kwhByCalendarMonthWeekend: number[][] = Array.from({ length: 12 }, () => []);
+  const kwByCalendarMonth: number[][] = Array.from({ length: 12 }, () => []);
+  const hourKwByCalendarMonth: Array<Record<number, number[]>> = Array.from({ length: 12 }, () => ({}));
 
   let totalKwh = 0;
   const overnight: number[] = [];
@@ -131,33 +87,32 @@ export function deriveUsageShapeProfile(
   const evening: number[] = [];
 
   for (const r of rows) {
-    const slot = getLocalSlot(r.tsUtc, tz);
-    const month = getLocalMonth(r.tsUtc, tz);
-    const hour = getLocalHour(r.tsUtc, tz);
+    const local = dateTimePartsInTimezone(r.tsUtc, tz);
+    if (!local) continue;
+    const slot = Math.min(95, local.hour * 4 + Math.floor(local.minute / 15));
+    const month = local.yearMonth;
+    const hour = local.hour;
+    const calendarMonthIndex = Math.max(0, Math.min(11, local.month - 1));
     const kw = r.kwh * 4;
 
     slotSumsAll[slot] += r.kwh;
     slotCountsAll[slot]++;
     totalKwh += r.kwh;
-    if (isWeekday(r.tsUtc, tz)) {
+    if (local.weekdayIndex >= 1 && local.weekdayIndex <= 5) {
       slotSumsWeekday[slot] += r.kwh;
       slotCountsWeekday[slot]++;
-      if (!kwhByMonthWeekday[month]) kwhByMonthWeekday[month] = [];
-      kwhByMonthWeekday[month].push(r.kwh);
+      kwhByCalendarMonthWeekday[calendarMonthIndex].push(r.kwh);
     } else {
       slotSumsWeekend[slot] += r.kwh;
       slotCountsWeekend[slot]++;
-      if (!kwhByMonthWeekend[month]) kwhByMonthWeekend[month] = [];
-      kwhByMonthWeekend[month].push(r.kwh);
+      kwhByCalendarMonthWeekend[calendarMonthIndex].push(r.kwh);
     }
     if (!byMonth[month]) byMonth[month] = { sums: new Array(SLOTS_PER_DAY).fill(0), counts: new Array(SLOTS_PER_DAY).fill(0) };
     byMonth[month].sums[slot] += r.kwh;
     byMonth[month].counts[slot]++;
-    if (!kwByMonth[month]) kwByMonth[month] = [];
-    kwByMonth[month].push(kw);
-    if (!hourKwByMonth[month]) hourKwByMonth[month] = {};
-    if (!hourKwByMonth[month][hour]) hourKwByMonth[month][hour] = [];
-    hourKwByMonth[month][hour].push(kw);
+    kwByCalendarMonth[calendarMonthIndex].push(kw);
+    if (!hourKwByCalendarMonth[calendarMonthIndex][hour]) hourKwByCalendarMonth[calendarMonthIndex][hour] = [];
+    hourKwByCalendarMonth[calendarMonthIndex][hour].push(kw);
     if (HOURS_OVERNIGHT.includes(hour)) overnight.push(r.kwh);
     else if (HOURS_MORNING.includes(hour)) morning.push(r.kwh);
     else if (HOURS_AFTERNOON.includes(hour)) afternoon.push(r.kwh);
@@ -183,16 +138,15 @@ export function deriveUsageShapeProfile(
   const peakHourByMonth: number[] = [];
   const p95KwByMonth: number[] = [];
   for (let i = 0; i < 12; i++) {
-    const ym = monthsOrder[i] ?? "";
-    const wd = kwhByMonthWeekday[ym];
-    const we = kwhByMonthWeekend[ym];
+    const wd = kwhByCalendarMonthWeekday[i];
+    const we = kwhByCalendarMonthWeekend[i];
     const sumWd = wd?.reduce((a, b) => a + b, 0) ?? 0;
     const sumWe = we?.reduce((a, b) => a + b, 0) ?? 0;
     avgKwhPerDayWeekdayByMonth.push(wd?.length ? round4((sumWd * SLOTS_PER_DAY) / wd.length) : 0);
     avgKwhPerDayWeekendByMonth.push(we?.length ? round4((sumWe * SLOTS_PER_DAY) / we.length) : 0);
-    const kws = kwByMonth[ym];
+    const kws = kwByCalendarMonth[i];
     p95KwByMonth.push(kws?.length ? (percentile([...kws].sort((a, b) => a - b), P95_PERCENTILE) ?? 0) : 0);
-    const hourMeans = hourKwByMonth[ym];
+    const hourMeans = hourKwByCalendarMonth[i];
     let peakH = 0;
     let maxMean = 0;
     if (hourMeans) {

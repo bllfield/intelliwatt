@@ -71,6 +71,72 @@ export function chicagoDateKey(now = new Date()): string {
   return fmt.format(now);
 }
 
+const dtfCache = new Map<string, Intl.DateTimeFormat>();
+
+function getFormatter(
+  timezone: string,
+  opts: {
+    year?: "numeric" | "2-digit";
+    month?: "numeric" | "2-digit";
+    day?: "numeric" | "2-digit";
+    hour?: "numeric" | "2-digit";
+    minute?: "numeric" | "2-digit";
+    weekday?: "short" | "long" | "narrow";
+    hour12?: boolean;
+  }
+): Intl.DateTimeFormat {
+  const key = `${timezone}|${JSON.stringify(opts)}`;
+  const cached = dtfCache.get(key);
+  if (cached) return cached;
+  const created = new Intl.DateTimeFormat("en-US", { timeZone: timezone, ...opts });
+  dtfCache.set(key, created);
+  return created;
+}
+
+export function dateTimePartsInTimezone(
+  input: Date | string,
+  timezone = "America/Chicago"
+): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  weekdayIndex: number; // 0=Sun..6=Sat
+  dateKey: string; // YYYY-MM-DD
+  yearMonth: string; // YYYY-MM
+} | null {
+  const ts = input instanceof Date ? input : new Date(String(input ?? ""));
+  if (!Number.isFinite(ts.getTime())) return null;
+  try {
+    const fmt = getFormatter(timezone, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(ts);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const year = Number(get("year"));
+    const month = Number(get("month"));
+    const day = Number(get("day"));
+    const hour = Number(get("hour"));
+    const minute = Number(get("minute"));
+    const weekday = get("weekday");
+    if (![year, month, day, hour, minute].every((n) => Number.isFinite(n))) return null;
+    const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday);
+    if (weekdayIndex < 0) return null;
+    const yearMonth = `${String(year)}-${pad2(month)}`;
+    const dateKey = `${yearMonth}-${pad2(day)}`;
+    return { year, month, day, hour, minute, weekdayIndex, dateKey, yearMonth };
+  } catch {
+    return null;
+  }
+}
+
 export function prevCalendarDayDateKey(ymd: string, daysBack: number): string {
   const key = String(ymd ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;

@@ -11,7 +11,20 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   userId: string;
   houseId: string;
   timezone?: string | null;
-}): Promise<{ ok: true; profileId: string } | { ok: false; reason: string }> {
+}): Promise<
+  | {
+      ok: true;
+      profileId: string;
+      diagnostics?: {
+        canonicalWindowStartDate: string;
+        canonicalWindowEndDate: string;
+        actualSource: "SMT" | "GREEN_BUTTON" | "NONE";
+        intervalCount: number;
+        derivedMonthKeyCount: number;
+      };
+    }
+  | { ok: false; reason: string }
+> {
   const tz = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
 
   const house = await prisma.houseAddress.findFirst({
@@ -32,19 +45,24 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
     return { ok: false, reason: "no_actual_intervals" };
   }
 
-  const firstTs = String(intervals[0]?.timestamp ?? "");
-  const lastTs = String(intervals[intervals.length - 1]?.timestamp ?? "");
-  const startDate = /^\d{4}-\d{2}-\d{2}/.test(firstTs) ? firstTs.slice(0, 10) : canonicalWindow.startDate;
-  const endDate = /^\d{4}-\d{2}-\d{2}/.test(lastTs) ? lastTs.slice(0, 10) : canonicalWindow.endDate;
-
   const profile = deriveUsageShapeProfile(
     intervals.map((r) => ({ tsUtc: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
     tz,
-    `${startDate}T00:00:00.000Z`,
-    `${endDate}T23:59:59.999Z`
+    `${canonicalWindow.startDate}T00:00:00.000Z`,
+    `${canonicalWindow.endDate}T23:59:59.999Z`
   );
 
   const saved = await upsertUsageShapeProfile(house.id, PROFILE_VERSION, profile);
-  return { ok: true, profileId: String(saved.id) };
+  return {
+    ok: true,
+    profileId: String(saved.id),
+    diagnostics: {
+      canonicalWindowStartDate: canonicalWindow.startDate,
+      canonicalWindowEndDate: canonicalWindow.endDate,
+      actualSource: actual.source,
+      intervalCount: intervals.length,
+      derivedMonthKeyCount: Object.keys(profile.shapeByMonth96 ?? {}).length,
+    },
+  };
 }
 
