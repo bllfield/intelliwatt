@@ -1021,14 +1021,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
           intervals15: decoded,
         },
       };
-      if (!restored.meta || typeof restored.meta !== "object") (restored as any).meta = {};
-      (restored.meta as any).artifactReadMode = "artifact_only";
-      (restored.meta as any).artifactSource = "past_cache";
-      (restored.meta as any).artifactInputHash = latestCached.inputHash;
-      (restored.meta as any).artifactUpdatedAt = latestCached.updatedAt
+      const restoredAny = restored as any;
+      if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
+      restoredAny.meta.artifactReadMode = "artifact_only";
+      restoredAny.meta.artifactSource = "past_cache";
+      restoredAny.meta.artifactInputHash = latestCached.inputHash;
+      restoredAny.meta.artifactUpdatedAt = latestCached.updatedAt
         ? latestCached.updatedAt.toISOString()
         : null;
-      (restored.meta as any).artifactRecomputed = false;
+      restoredAny.meta.artifactRecomputed = false;
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: restored };
     }
 

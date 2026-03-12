@@ -1,6 +1,21 @@
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import type { ActualHouseDataset, UsageSummary } from "@/lib/usage/actualDatasetForHouse";
 import { getIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
+
+type SimulatedUsageSummary = Omit<ActualHouseDataset["summary"], "source"> & {
+  source: "SIMULATED";
+};
+
+type PersistedPastDataset = Omit<ActualHouseDataset, "summary"> & {
+  summary: SimulatedUsageSummary;
+};
+
+type ResolveIntervalsLayerResult = {
+  dataset: ActualHouseDataset | PersistedPastDataset | null;
+  alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null };
+  skippedFullYearIntervalFetch?: boolean;
+};
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -9,7 +24,7 @@ function round2(n: number): number {
 function buildPersistedDatasetFromIntervals(args: {
   points: Array<{ tsUtc: Date; kwh: string }>;
   kind: IntervalSeriesKind;
-}) {
+}): PersistedPastDataset | null {
   const intervals15 = (args.points ?? []).map((p) => ({
     timestamp: new Date(p.tsUtc).toISOString(),
     kwh: Number(p.kwh) || 0,
@@ -68,7 +83,7 @@ export async function resolveIntervalsLayer(args: {
   layerKind: IntervalSeriesKind;
   scenarioId?: string | null;
   esiid?: string | null;
-}): Promise<Awaited<ReturnType<typeof getActualUsageDatasetForHouse>> | null> {
+}): Promise<ResolveIntervalsLayerResult | null> {
   if (
     args.layerKind === IntervalSeriesKind.ACTUAL_USAGE_INTERVALS ||
     args.layerKind === IntervalSeriesKind.BASELINE_INTERVALS
