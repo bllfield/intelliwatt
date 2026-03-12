@@ -5,6 +5,10 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
+import {
+  classifySimulationFailure,
+  recordSimulationDataAlert,
+} from '@/modules/usageSimulator/simulationDataAlerts';
 
 /** Allow time for per-house interval resolution (SMT/Green Button) when loading Usage. */
 export const dynamic = "force-dynamic";
@@ -54,6 +58,24 @@ export async function GET(_request: NextRequest) {
         result = resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } };
       } catch (err) {
         console.warn('[user/usage] actual dataset fetch failed for house', house.id, err);
+        const classification = classifySimulationFailure({
+          code: 'no_actual_data',
+          message: String((err as any)?.message ?? 'actual interval fetch failed'),
+        });
+        await recordSimulationDataAlert({
+          source: 'USAGE_DASHBOARD',
+          userId: user.id,
+          userEmail,
+          houseId: house.id,
+          houseLabel: house.label || house.addressLine1 || house.id,
+          reasonCode: classification.reasonCode,
+          reasonMessage: classification.reasonMessage,
+          missingData: classification.missingData,
+          context: {
+            route: '/api/user/usage',
+            internalMessage: String((err as any)?.message ?? ''),
+          },
+        });
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
       results.push({
@@ -67,6 +89,14 @@ export async function GET(_request: NextRequest) {
         esiid: house.esiid,
         dataset: result.dataset,
         alternatives: result.alternatives,
+        datasetError:
+          result.dataset == null
+            ? {
+                code: 'ACTUAL_DATA_UNAVAILABLE',
+                explanation:
+                  'We could not load interval usage for this home right now. This can happen when SMT/Green Button data is still syncing or temporarily unavailable.',
+              }
+            : null,
       });
     }
 
@@ -96,6 +126,14 @@ export async function GET(_request: NextRequest) {
     } catch {
       // ignore
     }
-    return NextResponse.json({ ok: false, error: 'Internal error', ...(detail ? { detail } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'Internal error',
+        explanation: 'Usage data could not be loaded right now due to a temporary backend failure.',
+        ...(detail ? { detail } : {}),
+      },
+      { status: 500 }
+    );
   }
 }

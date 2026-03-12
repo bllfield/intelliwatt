@@ -22,8 +22,12 @@ import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
-import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/gapfillCompareShared";
+import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
+import {
+  classifySimulationFailure,
+  recordSimulationDataAlert,
+} from "@/modules/usageSimulator/simulationDataAlerts";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
@@ -1249,8 +1253,29 @@ export async function POST(req: NextRequest) {
         });
 
   if (!actualIntervals?.length) {
+    const classification = classifySimulationFailure({
+      code: "no_actual_data",
+      message: "No actual interval data for the test date window.",
+    });
+    await recordSimulationDataAlert({
+      source: "GAPFILL_LAB",
+      userId: user.id,
+      userEmail: user.email,
+      houseId: house.id,
+      houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+      scenarioId: "gapfill_lab",
+      reasonCode: classification.reasonCode,
+      reasonMessage: classification.reasonMessage,
+      missingData: classification.missingData,
+      context: { fetchStart, fetchEnd, testDaysRequested: testDateKeysLocal.size },
+    });
     return NextResponse.json(
-      { ok: false, error: "no_actual_data", message: "No actual interval data for the test date window." },
+      {
+        ok: false,
+        error: "no_actual_data",
+        message: "No actual interval data for the test date window.",
+        explanation: classification.userFacingExplanation,
+      },
       { status: 400 }
     );
   }
@@ -1259,8 +1284,29 @@ export async function POST(req: NextRequest) {
     testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
   if (actualTestIntervals.length === 0) {
+    const classification = classifySimulationFailure({
+      code: "no_actual_data",
+      message: "No actual interval data found for Test dates in this window.",
+    });
+    await recordSimulationDataAlert({
+      source: "GAPFILL_LAB",
+      userId: user.id,
+      userEmail: user.email,
+      houseId: house.id,
+      houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+      scenarioId: "gapfill_lab",
+      reasonCode: classification.reasonCode,
+      reasonMessage: classification.reasonMessage,
+      missingData: classification.missingData,
+      context: { fetchStart, fetchEnd, testDaysRequested: testDateKeysLocal.size },
+    });
     return NextResponse.json(
-      { ok: false, error: "no_actual_data", message: "No actual interval data found for Test dates in this window." },
+      {
+        ok: false,
+        error: "no_actual_data",
+        message: "No actual interval data found for Test dates in this window.",
+        explanation: classification.userFacingExplanation,
+      },
       { status: 400 }
     );
   }
@@ -1286,7 +1332,17 @@ export async function POST(req: NextRequest) {
     rebuildArtifact,
   });
   if (!sharedSim.ok) {
-    return NextResponse.json(sharedSim.body, { status: sharedSim.status });
+    const classification = classifySimulationFailure({
+      code: String((sharedSim.body as any)?.error ?? ""),
+      message: String((sharedSim.body as any)?.message ?? ""),
+    });
+    const mergedBody = {
+      ...(sharedSim.body as Record<string, unknown>),
+      explanation: classification.userFacingExplanation,
+      missingData: classification.missingData,
+      reasonCode: classification.reasonCode,
+    };
+    return NextResponse.json(mergedBody, { status: sharedSim.status });
   }
 
   const simulatedByTs = new Map<string, number>();

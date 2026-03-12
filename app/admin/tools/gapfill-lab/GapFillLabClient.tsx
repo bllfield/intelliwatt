@@ -66,7 +66,16 @@ type ApiResponse =
       trainingCoverage?: { expected: number; found: number | null; pct: number | null };
       usage365?: Usage365Payload;
     }
-  | { ok: false; error: string; message?: string; overlapCount?: number; overlapSample?: string[] };
+  | {
+      ok: false;
+      error: string;
+      message?: string;
+      explanation?: string;
+      missingData?: string[];
+      reasonCode?: string;
+      overlapCount?: number;
+      overlapSample?: string[];
+    };
 
 const DEFAULT_RANGE: RangeRow = { startDate: "", endDate: "" };
 
@@ -79,6 +88,17 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
+
+function formatApiError(data: any, status: number): string {
+  const base = String(data?.message ?? data?.error ?? `Request failed (${status})`);
+  const explanation = String(data?.explanation ?? "").trim();
+  const missing = Array.isArray(data?.missingData) ? data.missingData.map((v: unknown) => String(v)).filter(Boolean) : [];
+  if (!explanation && missing.length === 0) return base;
+  const parts: string[] = [base];
+  if (explanation) parts.push(`Why: ${explanation}`);
+  if (missing.length > 0) parts.push(`Missing data: ${missing.join(", ")}`);
+  return parts.join("\n");
+}
 
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
@@ -228,7 +248,7 @@ export default function GapFillLabClient() {
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
-        setError((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
+        setError(formatApiError(data, res.status));
         setResult(null);
         return;
       }
@@ -244,9 +264,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -314,7 +334,7 @@ export default function GapFillLabClient() {
         }
         const errMsg = (data as any)?.error === "test_overlaps_travel"
           ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
-          : ((data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`);
+          : formatApiError(data, res.status);
         setError(errMsg);
         setResult(null);
         return;
@@ -323,9 +343,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -366,7 +386,7 @@ export default function GapFillLabClient() {
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
-        const errMsg = (data as any)?.message ?? (data as any)?.error ?? `Request failed (${res.status})`;
+        const errMsg = formatApiError(data, res.status);
         setError(errMsg);
         setResult(null);
         setArtifactMissing((data as any)?.error === "artifact_missing_rebuild_required");
@@ -377,9 +397,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -683,7 +703,7 @@ export default function GapFillLabClient() {
 
       {error && (
         <div className="mb-6 p-4 rounded bg-rose-50 text-rose-800 border border-rose-200">
-          <div>{error}</div>
+          <div className="whitespace-pre-line">{error}</div>
           {artifactMissing && (
             <button
               type="button"

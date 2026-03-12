@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getSimulatedUsageForUser } from "@/modules/usageSimulator/service";
+import {
+  classifySimulationFailure,
+  recordSimulationDataAlert,
+} from "@/modules/usageSimulator/simulationDataAlerts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,7 +31,33 @@ export async function GET(_request: NextRequest) {
     }
 
     const out = await getSimulatedUsageForUser({ userId: user.id });
-    if (!out.ok) return NextResponse.json(out, { status: 500 });
+    if (!out.ok) {
+      const classification = classifySimulationFailure({
+        code: "INTERNAL_ERROR",
+        message: out.error,
+      });
+      if (classification.shouldAlert) {
+        await recordSimulationDataAlert({
+          source: "USER_SIMULATION",
+          userId: user.id,
+          userEmail,
+          reasonCode: classification.reasonCode,
+          reasonMessage: classification.reasonMessage,
+          missingData: classification.missingData,
+          context: { route: "/api/user/usage/simulated", serviceError: out.error },
+        });
+      }
+      return NextResponse.json(
+        {
+          ok: false,
+          error: out.error,
+          code: classification.reasonCode,
+          explanation: classification.userFacingExplanation,
+          missingData: classification.missingData,
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(out, {
       headers: {
@@ -36,7 +66,14 @@ export async function GET(_request: NextRequest) {
     });
   } catch (error) {
     console.error("[user/usage/simulated] failed", error);
-    return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Internal error",
+        explanation: "Simulated usage is temporarily unavailable due to a backend failure.",
+      },
+      { status: 500 }
+    );
   }
 }
 

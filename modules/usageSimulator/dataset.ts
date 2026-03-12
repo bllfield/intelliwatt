@@ -489,6 +489,7 @@ export type SimulatedUsageDatasetMeta = {
     weekendAvgLen: number | null;
     canonicalMonths: string[];
     canonicalMonthsLen: number;
+    inlineDerivedFromActual?: boolean;
     reasonNotUsed: string | null;
   };
   scenarioId?: string | null;
@@ -512,6 +513,7 @@ export type SimulatedUsageDatasetMeta = {
   referenceDaysCount?: number;
   shapeMonthsPresent?: string[];
   excludedDateKeysCount?: number;
+  excludedDateKeysFingerprint?: string;
   leadingMissingDaysCount?: number;
   /** Past: weather provenance — kind used (e.g. ACTUAL_LAST_YEAR, STUB_V1, MIXED). */
   weatherKindUsed?: string;

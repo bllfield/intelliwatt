@@ -179,6 +179,23 @@ interface TestimonialRecord {
   };
 }
 
+interface SimulationDataAlertRecord {
+  id: string;
+  source: string;
+  userId: string | null;
+  userEmail: string | null;
+  houseId: string | null;
+  houseLabel: string | null;
+  scenarioId: string | null;
+  reasonCode: string;
+  reasonMessage: string;
+  missingData: string[];
+  context: Record<string, unknown> | null;
+  seenCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
 interface SummaryStats {
   totalUsers: number;
   activeSmtAuthorizations: number;
@@ -197,6 +214,7 @@ interface SummaryStats {
   pendingSmtEmailConfirmations: number;
   declinedSmtEmailConfirmations: number;
   approvedSmtEmailConfirmations: number;
+  simulationDataAlertsOpenCount?: number;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -243,6 +261,7 @@ export default function AdminDashboard() {
     pending: SmtEmailConfirmationRecord[];
     declined: SmtEmailConfirmationRecord[];
   }>({ pending: [], declined: [] });
+  const [simulationDataAlerts, setSimulationDataAlerts] = useState<SimulationDataAlertRecord[]>([]);
   const [adminToken, setAdminToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
@@ -359,6 +378,7 @@ export default function AdminDashboard() {
         testimonialsRes,
         referralsRes,
         emailConfirmationsRes,
+        simulationAlertsRes,
       ] = await Promise.all([
         fetchWithAdmin('/api/admin/stats/summary'),
         fetchWithAdmin('/api/admin/users/insights?page=1&pageSize=20&sort=savingsToEndNet&dir=desc'),
@@ -370,6 +390,7 @@ export default function AdminDashboard() {
         fetchWithAdmin('/api/admin/testimonials'),
         fetchWithAdmin('/api/admin/referrals'),
         fetchWithAdmin('/api/admin/smt/email-confirmations'),
+        fetchWithAdmin('/api/admin/sim-alerts'),
       ]);
 
       if (summaryRes.ok) {
@@ -470,6 +491,18 @@ export default function AdminDashboard() {
           'Failed to fetch SMT email confirmations:',
           emailConfirmationsRes.status,
           emailConfirmationsRes.statusText,
+        );
+      }
+
+      if (simulationAlertsRes.ok) {
+        const simAlertsData = await simulationAlertsRes.json().catch(() => null);
+        const rows = Array.isArray(simAlertsData?.alerts) ? simAlertsData.alerts : [];
+        setSimulationDataAlerts(rows as SimulationDataAlertRecord[]);
+      } else {
+        console.error(
+          'Failed to fetch simulation data alerts:',
+          simulationAlertsRes.status,
+          simulationAlertsRes.statusText,
         );
       }
     } catch (error) {
@@ -581,6 +614,8 @@ export default function AdminDashboard() {
   const declinedEmailConfirmationsCount =
     summary?.declinedSmtEmailConfirmations ?? emailConfirmations.declined.length;
   const approvedEmailConfirmationsCount = summary?.approvedSmtEmailConfirmations ?? 0;
+  const simulationDataAlertsOpenCount =
+    summary?.simulationDataAlertsOpenCount ?? simulationDataAlerts.length;
   const testimonialStatusStyles: Record<TestimonialRecord['status'], string> = {
     PENDING: 'border border-amber-400/40 bg-amber-400/10 text-amber-600',
     APPROVED: 'border border-emerald-400/40 bg-emerald-400/10 text-emerald-600',
@@ -647,6 +682,12 @@ export default function AdminDashboard() {
     { label: 'SMT Email Confirmations Pending', value: pendingEmailConfirmationsCount.toLocaleString(), href: '#smt-email-confirmations' },
     { label: 'SMT Email Confirmations Declined', value: declinedEmailConfirmationsCount.toLocaleString(), href: '#smt-email-confirmations' },
     { label: 'SMT Email Confirmations Approved', value: approvedEmailConfirmationsCount.toLocaleString(), href: '#smt-email-confirmations' },
+    {
+      label: 'Simulation Data Alerts (Open)',
+      value: simulationDataAlertsOpenCount.toLocaleString(),
+      href: '#simulation-data-alerts',
+      tone: simulationDataAlertsOpenCount > 0 ? 'danger' : 'default',
+    },
     { label: 'SMT Email Follow-ups Flagged', value: flaggedEmailPending.length.toLocaleString(), href: '#smt-followups' },
     { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString(), href: '#smt-revocations' },
     { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions), href: '#commissions' },
@@ -734,6 +775,47 @@ export default function AdminDashboard() {
             );
           })}
         </div>
+
+        <section id="simulation-data-alerts" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">Simulation Data Alerts</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Open alerts where simulation could not run because required data was unavailable.
+          </p>
+          {simulationDataAlerts.length === 0 ? (
+            <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+              No open simulation data alerts.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {simulationDataAlerts.map((alert) => (
+                <details key={alert.id} className="rounded border border-rose-200 bg-rose-50/60">
+                  <summary className="cursor-pointer list-none p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-semibold text-brand-navy">
+                        {alert.userEmail || 'Unknown user'} · {alert.reasonCode}
+                      </div>
+                      <div className="text-xs text-brand-navy/70">
+                        seen {alert.seenCount}x · last {formatTimestamp(alert.lastSeenAt)}
+                      </div>
+                    </div>
+                    <div className="mt-1 text-sm text-brand-navy/80">
+                      Missing data: {alert.missingData.length ? alert.missingData.join(', ') : 'unspecified'}
+                    </div>
+                  </summary>
+                  <div className="border-t border-rose-200 px-3 py-3 text-sm text-brand-navy space-y-1">
+                    <div><span className="font-semibold">Source:</span> {alert.source}</div>
+                    <div><span className="font-semibold">User:</span> {alert.userEmail || 'Unknown'} {alert.userId ? `(${alert.userId})` : ''}</div>
+                    <div><span className="font-semibold">House:</span> {alert.houseLabel || 'Unknown'} {alert.houseId ? `(${alert.houseId})` : ''}</div>
+                    <div><span className="font-semibold">Scenario:</span> {alert.scenarioId || '—'}</div>
+                    <div><span className="font-semibold">Issue:</span> {alert.reasonMessage}</div>
+                    <div><span className="font-semibold">First seen:</span> {formatTimestamp(alert.firstSeenAt)}</div>
+                    <div><span className="font-semibold">Last seen:</span> {formatTimestamp(alert.lastSeenAt)}</div>
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Quick Links / Tools Section */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">

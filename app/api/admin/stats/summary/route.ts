@@ -12,6 +12,14 @@ function isTestimonialTableMissing(error: unknown) {
   );
 }
 
+function isSimulationAlertTableMissing(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2021' &&
+    /SimulationDataAlert/i.test(error.message)
+  );
+}
+
 export async function GET() {
   try {
     const now = new Date();
@@ -106,6 +114,7 @@ export async function GET() {
 
     let totalTestimonials = 0;
     let pendingTestimonials = 0;
+    let simulationDataAlertsOpenCount = 0;
     let referralPendingCount = referralPendingCountBase;
     let referralQualifiedCount = referralQualifiedCountBase;
 
@@ -120,6 +129,19 @@ export async function GET() {
       }
       if (process.env.NODE_ENV !== 'production') {
         console.warn('[admin stats] Testimonial table missing; counters defaulting to zero.');
+      }
+    }
+
+    try {
+      simulationDataAlertsOpenCount = await prismaAny.simulationDataAlert.count({
+        where: { resolvedAt: null },
+      });
+    } catch (error) {
+      if (!isSimulationAlertTableMissing(error)) {
+        throw error;
+      }
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[admin stats] SimulationDataAlert table missing; counter defaulting to zero.');
       }
     }
 
@@ -141,6 +163,7 @@ export async function GET() {
       pendingSmtEmailConfirmations,
       declinedSmtEmailConfirmations,
       approvedSmtEmailConfirmations,
+      simulationDataAlertsOpenCount,
     });
   } catch (error) {
     console.error('Error fetching admin summary stats:', error);

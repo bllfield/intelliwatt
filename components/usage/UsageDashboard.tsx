@@ -111,9 +111,15 @@ type HouseUsage = {
     smt: UsageDatasetSummary | null;
     greenButton: UsageDatasetSummary | null;
   };
+  datasetError?: {
+    code?: string;
+    explanation?: string;
+  } | null;
 };
 
-type UsageApiResponse = { ok: true; houses: HouseUsage[] } | { ok: false; error: string };
+type UsageApiResponse =
+  | { ok: true; houses: HouseUsage[] }
+  | { ok: false; error: string; code?: string; explanation?: string; missingData?: string[] };
 
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
 const SESSION_KEY_PREFIX = "usage_dashboard_v2";
@@ -143,6 +149,19 @@ function writeSessionCache(mode: "REAL" | "SIMULATED", payload: UsageApiResponse
   } catch {
     // ignore
   }
+}
+
+function formatUsageApiError(payload: any, status: number): string {
+  const base = String(payload?.error ?? `Failed with status ${status}`);
+  const explanation = String(payload?.explanation ?? "").trim();
+  const missing = Array.isArray(payload?.missingData)
+    ? payload.missingData.map((v: unknown) => String(v)).filter(Boolean)
+    : [];
+  if (!explanation && missing.length === 0) return base;
+  const lines: string[] = [base];
+  if (explanation) lines.push(`Why: ${explanation}`);
+  if (missing.length > 0) lines.push(`Missing data: ${missing.join(", ")}`);
+  return lines.join("\n");
 }
 
 function deriveTotalsFromRows(rows: { kwh: number }[]): UsageTotals {
@@ -327,7 +346,7 @@ export const UsageDashboard: React.FC<Props> = ({
           throw new Error(msg);
         }
         if (!res.ok || json.ok === false) {
-          throw new Error((json as any).error || `Failed with status ${res.status}`);
+          throw new Error(formatUsageApiError(json, res.status));
         }
         if (cancelled) return;
         // Don't write REAL to cache so no stale usage data can ever be shown when switching views.
@@ -617,11 +636,15 @@ export const UsageDashboard: React.FC<Props> = ({
             ? "No homes found yet. Add a service address, then enter manual usage to generate a simulated curve."
             : "No usage data yet. Connect SMT or upload a Green Button file to view analytics."}
         </p>
+        <p className="mt-2 text-xs text-neutral-500">
+          If this looks wrong, data sync may still be running or a required source is temporarily unavailable.
+        </p>
       </div>
     );
   }
 
   const hasData = Boolean(activeHouse?.dataset);
+  const houseDatasetExplanation = String(activeHouse?.datasetError?.explanation ?? "").trim();
 
   return (
     <div className="space-y-6">
@@ -765,6 +788,9 @@ export const UsageDashboard: React.FC<Props> = ({
               "No usage data for this home yet. Once SMT or Green Button data is ingested, charts will appear here."
             )}
           </p>
+          {houseDatasetExplanation ? (
+            <p className="mt-2 text-sm text-amber-700">Why: {houseDatasetExplanation}</p>
+          ) : null}
         </div>
       ) : (
         <>

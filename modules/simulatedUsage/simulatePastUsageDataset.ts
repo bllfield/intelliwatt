@@ -22,6 +22,7 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDayS
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
@@ -279,6 +280,7 @@ export async function simulatePastUsageDataset(
       }));
 
     const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(travelRanges));
+    const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
 
@@ -288,6 +290,12 @@ export async function simulatePastUsageDataset(
       endDate,
       canonicalDateKeys,
     });
+    if (provenance.weatherSourceSummary !== "actual_only") {
+      return {
+        dataset: null,
+        error: `actual_weather_required:${provenance.weatherSourceSummary}`,
+      };
+    }
 
     const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
@@ -302,7 +310,32 @@ export async function simulatePastUsageDataset(
 
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
+    let inlineDerivedShapeProfile:
+      | ReturnType<typeof deriveUsageShapeProfile>
+      | null = null;
     let reasonNotUsed: string | null = null;
+    const buildUsageShapeProfileSnap = (
+      monthKeys: string[],
+      weekdayVals: unknown,
+      weekendVals: unknown
+    ): { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null => {
+      const wd = Array.isArray(weekdayVals) ? (weekdayVals as number[]) : [];
+      const we = Array.isArray(weekendVals) ? (weekendVals as number[]) : [];
+      const weekdayAvgByMonthKey: Record<string, number> = {};
+      const weekendAvgByMonthKey: Record<string, number> = {};
+      for (let i = 0; i < monthKeys.length; i++) {
+        const ym = monthKeys[i];
+        if (!ym) continue;
+        const vWd = wd[i];
+        const vWe = we[i];
+        if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
+        if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
+      }
+      if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
+        return { weekdayAvgByMonthKey, weekendAvgByMonthKey };
+      }
+      return null;
+    };
     if (!shapeProfileRow) {
       reasonNotUsed = "profile_not_found";
     } else if (!timezone) {
@@ -315,43 +348,84 @@ export async function simulatePastUsageDataset(
     if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
       const shapeByMonth = shapeProfileRow.shapeByMonth96 as Record<string, unknown>;
       const profileMonthKeys = Object.keys(shapeByMonth ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
-      const wd = Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? (shapeProfileRow.avgKwhPerDayWeekdayByMonth as number[]) : [];
-      const we = Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? (shapeProfileRow.avgKwhPerDayWeekendByMonth as number[]) : [];
-      const weekdayAvgByMonthKey: Record<string, number> = {};
-      const weekendAvgByMonthKey: Record<string, number> = {};
-      for (let i = 0; i < profileMonthKeys.length; i++) {
-        const ym = profileMonthKeys[i];
-        if (!ym) continue;
-        const vWd = wd[i];
-        const vWe = we[i];
-        if (vWd != null && Number.isFinite(vWd) && vWd > 0) weekdayAvgByMonthKey[ym] = vWd;
-        if (vWe != null && Number.isFinite(vWe) && vWe > 0) weekendAvgByMonthKey[ym] = vWe;
-      }
-      if (Object.keys(weekdayAvgByMonthKey).length > 0 || Object.keys(weekendAvgByMonthKey).length > 0) {
-        usageShapeProfileSnap = { weekdayAvgByMonthKey, weekendAvgByMonthKey };
+      const snap = buildUsageShapeProfileSnap(
+        profileMonthKeys,
+        shapeProfileRow.avgKwhPerDayWeekdayByMonth,
+        shapeProfileRow.avgKwhPerDayWeekendByMonth
+      );
+      if (snap) {
+        usageShapeProfileSnap = snap;
         reasonNotUsed = null;
       } else {
         reasonNotUsed = reasonNotUsed ?? "no_positive_values";
       }
     }
+    if (!usageShapeProfileSnap && timezone && actualIntervals.length > 0) {
+      try {
+        inlineDerivedShapeProfile = deriveUsageShapeProfile(
+          actualIntervals.map((r) => ({
+            tsUtc: String(r.timestamp ?? ""),
+            kwh: Number(r.kwh) || 0,
+          })),
+          timezone,
+          `${startDate}T00:00:00.000Z`,
+          `${endDate}T23:59:59.999Z`
+        );
+        const inlineMonthKeys = Object.keys(inlineDerivedShapeProfile.shapeByMonth96 ?? {})
+          .filter((k) => /^\d{4}-\d{2}$/.test(k))
+          .sort();
+        const inlineSnap = buildUsageShapeProfileSnap(
+          inlineMonthKeys,
+          inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonth,
+          inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonth
+        );
+        if (inlineSnap) {
+          usageShapeProfileSnap = inlineSnap;
+          reasonNotUsed = null;
+        } else {
+          reasonNotUsed = reasonNotUsed ?? "inline_profile_no_positive_values";
+        }
+      } catch {
+        reasonNotUsed = reasonNotUsed ?? "inline_profile_derive_failed";
+      }
+    }
+    if (!usageShapeProfileSnap) {
+      return {
+        dataset: null,
+        error: `usage_shape_profile_required:${reasonNotUsed ?? "missing"}`,
+      };
+    }
     const usageShapeProfileDiag = {
-      found: !!shapeProfileRow,
+      found: !!shapeProfileRow || !!inlineDerivedShapeProfile,
       id: shapeProfileRow?.id ?? null,
-      version: shapeProfileRow?.version ?? null,
+      version: shapeProfileRow?.version ?? (inlineDerivedShapeProfile ? "inline_derived_v1" : null),
       derivedAt: shapeProfileRow?.derivedAt != null ? String(shapeProfileRow.derivedAt) : null,
-      windowStartUtc: shapeProfileRow?.windowStartUtc != null ? String(shapeProfileRow.windowStartUtc) : null,
-      windowEndUtc: shapeProfileRow?.windowEndUtc != null ? String(shapeProfileRow.windowEndUtc) : null,
+      windowStartUtc:
+        shapeProfileRow?.windowStartUtc != null
+          ? String(shapeProfileRow.windowStartUtc)
+          : (inlineDerivedShapeProfile?.windowStartUtc ?? null),
+      windowEndUtc:
+        shapeProfileRow?.windowEndUtc != null
+          ? String(shapeProfileRow.windowEndUtc)
+          : (inlineDerivedShapeProfile?.windowEndUtc ?? null),
       profileMonthKeys: shapeProfileRow?.shapeByMonth96
         ? Object.keys((shapeProfileRow.shapeByMonth96 as Record<string, unknown>) ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort()
-        : [],
-      weekdayAvgLen: shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null
-        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length : null)
-        : null,
-      weekendAvgLen: shapeProfileRow?.avgKwhPerDayWeekendByMonth != null
-        ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length : null)
-        : null,
+        : Object.keys(inlineDerivedShapeProfile?.shapeByMonth96 ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort(),
+      weekdayAvgLen:
+        shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null
+          ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length : null)
+          : Array.isArray(inlineDerivedShapeProfile?.avgKwhPerDayWeekdayByMonth)
+            ? inlineDerivedShapeProfile!.avgKwhPerDayWeekdayByMonth.length
+            : null,
+      weekendAvgLen:
+        shapeProfileRow?.avgKwhPerDayWeekendByMonth != null
+          ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length : null)
+          : Array.isArray(inlineDerivedShapeProfile?.avgKwhPerDayWeekendByMonth)
+            ? inlineDerivedShapeProfile!.avgKwhPerDayWeekendByMonth.length
+            : null,
       canonicalMonths,
       canonicalMonthsLen: canonicalMonths.length,
+      inlineDerivedFromActual: !!inlineDerivedShapeProfile,
       reasonNotUsed,
     };
 
@@ -423,6 +497,7 @@ export async function simulatePastUsageDataset(
         referenceDaysCount,
         shapeMonthsPresent,
         excludedDateKeysCount: excludedDateKeys.size,
+        excludedDateKeysFingerprint,
         leadingMissingDaysCount: pastDayCounts.leadingMissingDays ?? undefined,
         weatherKindUsed: provenance.weatherKindUsed,
         weatherSourceSummary: provenance.weatherSourceSummary,

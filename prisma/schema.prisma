@@ -334,6 +334,32 @@ model UsageSimulatorScenarioEvent {
   @@index([kind])
 }
 
+model SimulationDataAlert {
+  id             String    @id @default(cuid())
+  fingerprint    String    @unique
+  source         String
+  userId         String?
+  userEmail      String?
+  houseId        String?
+  houseLabel     String?
+  scenarioId     String?
+  reasonCode     String
+  reasonMessage  String
+  missingDataJson Json
+  contextJson    Json?
+  seenCount      Int       @default(1)
+  firstSeenAt    DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([resolvedAt, lastSeenAt])
+  @@index([source, resolvedAt])
+  @@index([userId])
+  @@index([houseId])
+}
+
 model NormalizedCurrentPlan {
   id                  String    @id @default(cuid())
   userId              String?
