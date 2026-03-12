@@ -52,6 +52,8 @@ type Usage365Payload = {
   fifteenCurve: Array<{ hhmm: string; avgKw: number }>;
 };
 
+type IntervalPoint = { timestamp: string; kwh: number };
+
 /** Normalize ranges to local date keys (YYYY-MM-DD), inclusive. Inputs are local calendar dates (e.g. from HTML date inputs). We iterate in calendar-day space (no UTC) so output keys match dateKeyInTimezone(ts, timezone) when filtering actual intervals. */
 function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[], _timezone: string): Set<string> {
   const out = new Set<string>();
@@ -984,6 +986,8 @@ export async function POST(req: NextRequest) {
     weatherKind?: "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
     /** Optional benchmark payload from a prior run for regression comparison (copy from report). */
     benchmark?: unknown;
+    /** Include usage365 chart payload (expensive); compare path can disable for performance. */
+    includeUsage365?: boolean;
     /** Explicit write action: regenerate + resave canonical Past artifact for gapfill_lab before compare. */
     rebuildArtifact?: boolean;
   };
@@ -1000,6 +1004,7 @@ export async function POST(req: NextRequest) {
   }
 
   const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const includeUsage365 = body?.includeUsage365 === true;
   const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
   const seed = String(body?.seed ?? "").trim() || null;
   const VALID_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
@@ -1069,19 +1074,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const usage365End = prevCalendarDay(dateKeyInTimezone(new Date().toISOString(), timezone), 2);
-  const usage365Start = prevCalendarDay(usage365End, 364);
-  const usage365Intervals = await getActualIntervalsForRange({
-    houseId: house.id,
-    esiid,
-    startDate: usage365Start,
-    endDate: usage365End,
-  });
-  const usage365 = buildUsage365Payload({
-    intervals: usage365Intervals ?? [],
-    timezone,
-    source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
-  });
+  let usage365: Usage365Payload | undefined = undefined;
+  // Usage365 fetch is expensive and not required for compare metrics.
+  if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
+    const usage365End = prevCalendarDay(dateKeyInTimezone(new Date().toISOString(), timezone), 2);
+    const usage365Start = prevCalendarDay(usage365End, 364);
+    const usage365Intervals = await getActualIntervalsForRange({
+      houseId: house.id,
+      esiid,
+      startDate: usage365Start,
+      endDate: usage365End,
+    });
+    usage365 = buildUsage365Payload({
+      intervals: usage365Intervals ?? [],
+      timezone,
+      source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
+    });
+  }
 
   const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
   const travelDateKeysLocal = normalizeRangesToLocalDateKeysInclusive(travelRangesFromDb, timezone);
@@ -1129,6 +1138,7 @@ export async function POST(req: NextRequest) {
   let candidateWindowStart: string | null = null;
   let candidateWindowEnd: string | null = null;
   let excludedFromTest_travelCount = 0;
+  let candidateIntervalsForTesting: IntervalPoint[] | null = null;
 
   if (testDaysRequested != null) {
     const todayTz = dateKeyInTimezone(new Date().toISOString(), timezone);
@@ -1140,6 +1150,7 @@ export async function POST(req: NextRequest) {
       startDate: candidateStart,
       endDate: candidateEnd,
     });
+    candidateIntervalsForTesting = candidateIntervals ?? [];
     const coverage = summarizeDailyCoverageFromIntervals(candidateIntervals ?? [], timezone);
     const candidateDateKeys = Array.from(coverage.keys()).filter(
       (dk) => (coverage.get(dk)?.pct ?? 0) >= minDayCoveragePct
@@ -1253,12 +1264,15 @@ export async function POST(req: NextRequest) {
   const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
 
-  const actualIntervals = await getActualIntervalsForRange({
-    houseId: house.id,
-    esiid,
-    startDate: fetchStart,
-    endDate: fetchEnd,
-  });
+  const actualIntervals =
+    candidateIntervalsForTesting != null
+      ? candidateIntervalsForTesting
+      : await getActualIntervalsForRange({
+          houseId: house.id,
+          esiid,
+          startDate: fetchStart,
+          endDate: fetchEnd,
+        });
 
   if (!actualIntervals?.length) {
     return NextResponse.json(

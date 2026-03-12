@@ -215,6 +215,7 @@ export default function GapFillLabClient() {
           timezone,
           testRanges: [],
           houseId: houseId || undefined,
+          includeUsage365: true,
         }),
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
@@ -257,12 +258,14 @@ export default function GapFillLabClient() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 295_000);
+      // Keep client timeout slightly above route maxDuration (300s) to avoid premature client aborts.
+      timeoutId = setTimeout(() => controller.abort(), 320_000);
       const body: Record<string, unknown> = {
         email: trimmed,
         timezone,
         houseId: houseId || undefined,
         weatherKind,
+        includeUsage365: false,
       };
       if (testMode === "random_days") {
         body.testDays = testDays;
@@ -301,7 +304,7 @@ export default function GapFillLabClient() {
       }
     } catch (e: any) {
       const msg = e?.name === "AbortError"
-        ? "Request timed out. Compare can take several minutes for heavy windows; try rebuild-and-retry or a shorter range."
+        ? "Request timed out after ~5 minutes. Compare can take several minutes for heavy windows; retry compare or use Rebuild artifact and retry."
         : (e?.message ?? String(e));
       setError(msg);
       setResult(null);
