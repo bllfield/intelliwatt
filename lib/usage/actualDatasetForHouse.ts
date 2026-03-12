@@ -753,21 +753,22 @@ export async function getActualUsageDatasetForHouse(
     greenDataset = null;
   }
   const selected = chooseDataset(smtDataset, greenDataset);
+  const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const canonicalCutoff = new Date(canonicalWindow.startDate + "T00:00:00.000Z");
+  const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
 
   let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
   let stitchedMonthMeta: unknown = null;
   try {
-    if (selected?.summary?.source === "SMT" && esiid && selected.summary.latest) {
-      const latest = new Date(selected.summary.latest);
-      if (Number.isFinite(latest.getTime())) {
-        const cutoff = new Date(latest.getTime() - 365 * DAY_MS);
+    if (selected?.summary?.source === "SMT" && esiid) {
+      if (Number.isFinite(canonicalEnd.getTime())) {
         const bucketBuild = await buildUsageBucketsForEstimate({
           homeId: houseId,
           usageSource: "SMT",
           esiid,
           rawId: null,
-          windowEnd: latest,
-          cutoff,
+          windowEnd: canonicalEnd,
+          cutoff: canonicalCutoff,
           requiredBucketKeys: ["kwh.m.all.total"],
           monthsCount: 12,
           maxStepDays: 2,
@@ -805,12 +806,11 @@ export async function getActualUsageDatasetForHouse(
     const latestIso = selected?.summary?.latest ?? null;
     const latest = latestIso ? new Date(latestIso) : null;
     if (selected?.summary?.source && latest && Number.isFinite(latest.getTime())) {
-      const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
       const cutoff =
         args?.cutoff && Number.isFinite(args.cutoff.getTime())
           ? new Date(args.cutoff.getTime())
-          : new Date(canonicalWindow.startDate + "T00:00:00.000Z");
-      const end = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
+          : canonicalCutoff;
+      const end = canonicalEnd;
       let rawId: string | null = null;
       if (selected.summary.source === "GREEN_BUTTON") {
         const usageClient = usagePrisma as any;
