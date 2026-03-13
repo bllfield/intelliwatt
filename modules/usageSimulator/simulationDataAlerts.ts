@@ -57,6 +57,39 @@ export function classifySimulationFailure(args: {
     };
   }
 
+  if (haystack.includes("artifact_scope_mismatch_rebuild_required")) {
+    return {
+      reasonCode: "ARTIFACT_SCOPE_MISMATCH_REBUILD_REQUIRED",
+      reasonMessage: "Saved simulation artifact mask scope does not match requested ranges.",
+      missingData: ["saved_gapfill_artifact"],
+      userFacingExplanation:
+        "Saved simulation data does not match the selected Test/Vacant date ranges. Re-run compare (or Retry) to rebuild with the current ranges.",
+      shouldAlert: false,
+    };
+  }
+
+  if (haystack.includes("artifact_stale_rebuild_required")) {
+    return {
+      reasonCode: "ARTIFACT_STALE_REBUILD_REQUIRED",
+      reasonMessage: "Saved simulation artifact is stale or incomplete for the requested window.",
+      missingData: ["saved_gapfill_artifact"],
+      userFacingExplanation:
+        "Saved simulation data is stale for this window. Re-run compare (or Retry) to rebuild with current coverage.",
+      shouldAlert: false,
+    };
+  }
+
+  if (haystack.includes("artifact_missing_rebuild_required") || haystack.includes("artifact_missing")) {
+    return {
+      reasonCode: "ARTIFACT_MISSING_REBUILD_REQUIRED",
+      reasonMessage: "Saved simulation artifact is missing and must be rebuilt.",
+      missingData: ["saved_gapfill_artifact"],
+      userFacingExplanation:
+        "No saved simulation data exists for this view yet. Re-run compare (or Retry) to build it.",
+      shouldAlert: false,
+    };
+  }
+
   return {
     reasonCode: "SIMULATION_RUNTIME_ERROR",
     reasonMessage: message || "Simulation failed for an unknown reason.",
