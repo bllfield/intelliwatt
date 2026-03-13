@@ -12,6 +12,7 @@ import {
 } from "@/lib/usageScenario/catalog";
 import { ScenarioUpgradesEditor } from "@/components/upgrades/ScenarioUpgradesEditor";
 
+
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 
 type UsageApiResp =
@@ -57,6 +58,16 @@ type RequirementsResp =
       };
     }
   | { ok: false; error: string };
+
+function normalizeCoverageDate(value: unknown): string | null {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return null;
+  const isoDatePrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDatePrefix?.[1]) return isoDatePrefix[1];
+  const parsed = new Date(raw);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
 
 function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
   if (!props.open) return null;
@@ -198,8 +209,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setActualSource(source === "SMT" || source === "GREEN_BUTTON" ? (source as any) : null);
         setActualCoverage({
           // Keep coverage bounds aligned to the same dataset that provides intervalsCount.
-          start: ds?.summary?.start ?? null,
-          end: ds?.summary?.end ?? null,
+          start: normalizeCoverageDate(ds?.summary?.start),
+          end: normalizeCoverageDate(ds?.summary?.end),
           intervalsCount,
         });
         // If we have interval data, baseline is Actual (read-only). Prefer the actual-baseline simulation mode.
