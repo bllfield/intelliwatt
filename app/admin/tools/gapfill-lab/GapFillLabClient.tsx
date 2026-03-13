@@ -100,6 +100,15 @@ function formatApiError(data: any, status: number): string {
   return parts.join("\n");
 }
 
+function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
+  const code = String(errorCode ?? "").trim();
+  return (
+    code === "artifact_missing_rebuild_required" ||
+    code === "artifact_scope_mismatch_rebuild_required" ||
+    code === "artifact_stale_rebuild_required"
+  );
+}
+
 export default function GapFillLabClient() {
   const [email, setEmail] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
@@ -264,9 +273,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -329,7 +338,7 @@ export default function GapFillLabClient() {
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
-        if ((data as any)?.error === "artifact_missing_rebuild_required") {
+        if (isArtifactRebuildRequiredError((data as any)?.error)) {
           setArtifactMissing(true);
         }
         const errMsg = (data as any)?.error === "test_overlaps_travel"
@@ -343,9 +352,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
@@ -389,7 +398,7 @@ export default function GapFillLabClient() {
         const errMsg = formatApiError(data, res.status);
         setError(errMsg);
         setResult(null);
-        setArtifactMissing((data as any)?.error === "artifact_missing_rebuild_required");
+        setArtifactMissing(isArtifactRebuildRequiredError((data as any)?.error));
         return;
       }
       setArtifactMissing(false);
@@ -397,9 +406,9 @@ export default function GapFillLabClient() {
         if (data.ok && prev?.ok) {
           return {
             ...data,
-            ...(data.houses != null ? {} : prev.houses != null ? { houses: prev.houses } : {}),
+            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
             ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary != null ? {} : prev.pasteSummary != null ? { pasteSummary: prev.pasteSummary } : {}),
+            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
             ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
             ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
             ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
