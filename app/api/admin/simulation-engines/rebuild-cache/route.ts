@@ -7,26 +7,11 @@ import { computePastInputHash, deleteCachedPastDataset, PAST_ENGINE_VERSION } fr
 import { normalizeScenarioKey } from "@/modules/usageSimulator/repo";
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
+import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 
 export const dynamic = "force-dynamic";
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
-const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
-
-function getWindowFromBuildInputs(buildInputs: Record<string, unknown>): { startDate: string; endDate: string } | null {
-  const periods = Array.isArray(buildInputs?.canonicalPeriods) ? buildInputs.canonicalPeriods : [];
-  const first = periods.length > 0 ? String(periods[0]?.startDate ?? "").slice(0, 10) : "";
-  const last = periods.length > 0 ? String(periods[periods.length - 1]?.endDate ?? "").slice(0, 10) : "";
-  if (YYYY_MM_DD.test(first) && YYYY_MM_DD.test(last)) return { startDate: first, endDate: last };
-
-  const months = Array.isArray(buildInputs?.canonicalMonths) ? buildInputs.canonicalMonths : [];
-  const firstMonth = String(months[0] ?? "");
-  const lastMonth = String(months[months.length - 1] ?? "");
-  if (!/^\d{4}-\d{2}$/.test(firstMonth) || !/^\d{4}-\d{2}$/.test(lastMonth)) return null;
-  const [y, m] = lastMonth.split("-").map(Number);
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { startDate: `${firstMonth}-01`, endDate: `${lastMonth}-${String(lastDay).padStart(2, "0")}` };
-}
 
 /**
  * POST: Delete cached Past dataset for house/scenario so next request cold-builds and re-caches.
@@ -105,7 +90,7 @@ export async function POST(req: NextRequest) {
     }
 
     const buildInputs = buildRec.buildInputs as Record<string, unknown>;
-    const window = getWindowFromBuildInputs(buildInputs);
+    const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
     if (!window) {
       return NextResponse.json(
         { ok: false, error: "Could not resolve window from buildInputs (canonicalMonths or canonicalPeriods)." },
