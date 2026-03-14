@@ -850,6 +850,11 @@ export function buildPastSimulatedBaselineV1(args: {
     maxDayDiagnostics?: number;
     out?: PastSimulationDebug;
   };
+  /**
+   * Optional memory-saving mode for artifact-only rebuild flows that do not need
+   * per-simulated-day payloads. Defaults to true for existing callers.
+   */
+  collectSimulatedDayResults?: boolean;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -875,7 +880,7 @@ export function buildPastSimulatedBaselineV1(args: {
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
     const dayIsIncomplete = !dayIsExcluded && !dayIsLeadingMissing && presentSlotCount < INTERVALS_PER_DAY;
     const shouldSimulateDay = dayIsExcluded || dayIsLeadingMissing || dayIsIncomplete;
-    const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing && !dayIsIncomplete;
+    const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing;
     return {
       gridTs,
       dateKey,
@@ -1300,6 +1305,7 @@ export function buildPastSimulatedBaselineV1(args: {
   };
 
   const out: Array<{ timestamp: string; kwh: number }> = [];
+  const collectSimulatedDayResults = args.collectSimulatedDayResults !== false;
   const dayResults: SimulatedDayResult[] = [];
   let totalDays = 0;
   let excludedDays = 0;
@@ -1360,9 +1366,9 @@ export function buildPastSimulatedBaselineV1(args: {
               };
             })()
           : result;
-      dayResults.push(blendedResult);
+      if (collectSimulatedDayResults) dayResults.push(blendedResult);
       for (const iv of blendedResult.intervals) out.push(iv);
-      const mappedFallback = pastDayFallbackToEngineLevel(blendedResult.fallbackLevel);
+      const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
           dateKey,
@@ -1385,17 +1391,17 @@ export function buildPastSimulatedBaselineV1(args: {
           referenceCandidateCount: 0,
           referencePickedCount: 0,
           weatherDistanceAvg: null,
-          poolApplied: blendedResult.poolFreezeProtectKwhAdder > 0,
-          poolKwh: blendedResult.poolFreezeProtectKwhAdder > 0 ? blendedResult.poolFreezeProtectKwhAdder : 0,
-          baseNonHvacKwh: blendedResult.profileSelectedDayKwh,
-          hvacKwh: blendedResult.auxHeatKwhAdder,
-          targetTotalKwh: blendedResult.finalDayKwh,
+          poolApplied: result.poolFreezeProtectKwhAdder > 0,
+          poolKwh: result.poolFreezeProtectKwhAdder > 0 ? result.poolFreezeProtectKwhAdder : 0,
+          baseNonHvacKwh: result.profileSelectedDayKwh,
+          hvacKwh: result.auxHeatKwhAdder,
+          targetTotalKwh: result.finalDayKwh,
           sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-          rawDayKwh: blendedResult.rawDayKwh,
-          weatherAdjustedDayKwh: blendedResult.weatherAdjustedDayKwh,
-          finalDayKwh: blendedResult.finalDayKwh,
-          displayDayKwh: blendedResult.displayDayKwh,
-          intervalSumKwh: blendedResult.intervalSumKwh,
+          rawDayKwh: result.rawDayKwh,
+          weatherAdjustedDayKwh: result.weatherAdjustedDayKwh,
+          finalDayKwh: result.finalDayKwh,
+          displayDayKwh: result.displayDayKwh,
+          intervalSumKwh: result.intervalSumKwh,
         });
       }
     } else {

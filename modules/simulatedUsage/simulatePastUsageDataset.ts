@@ -470,6 +470,7 @@ export async function simulatePastUsageDataset(
     };
 
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
+    const includeSimulatedDayResults = buildPathKind !== "lab_validation";
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
       canonicalDayStartsMs,
@@ -482,6 +483,7 @@ export async function simulatePastUsageDataset(
       timezoneForProfile: timezone ?? undefined,
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
+      collectSimulatedDayResults: includeSimulatedDayResults,
       debug: { out: pastDayCounts as any },
     });
 
@@ -509,7 +511,7 @@ export async function simulatePastUsageDataset(
       {
         timezone: timezone ?? undefined,
         useUtcMonth: true,
-        simulatedDayResults: dayResults,
+        simulatedDayResults: includeSimulatedDayResults ? dayResults : undefined,
       }
     );
 
