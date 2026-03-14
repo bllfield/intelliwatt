@@ -157,6 +157,22 @@ export function classifyPastCacheIntegrity(args: {
     };
   }
   if (cacheDigestMatch === false) {
+    if (typeof cacheTotalDeltaKwh !== "number") {
+      return {
+        cacheIntegrityPass: false,
+        cacheIntegrityReason: "true_corruption",
+        cacheCodecDriftLikely: false,
+        firstDivergenceStage,
+      };
+    }
+    if (cacheTotalDeltaKwh > cacheCodecDriftToleranceKwh) {
+      return {
+        cacheIntegrityPass: false,
+        cacheIntegrityReason: "codec_drift_exceeds_tolerance",
+        cacheCodecDriftLikely: false,
+        firstDivergenceStage,
+      };
+    }
     return {
       cacheIntegrityPass: true,
       cacheIntegrityReason: "codec_drift_within_tolerance",

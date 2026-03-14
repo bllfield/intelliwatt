@@ -1,28 +1,54 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyPastCacheIntegrity } from "@/modules/usageSimulator/parityIntegrity";
+import { deriveCodecTotalDriftToleranceKwh } from "@/modules/usageSimulator/intervalCodec";
 
 describe("classifyPastCacheIntegrity", () => {
-  it("classifies small cache drift as codec_drift_within_tolerance when cold/recalc are healthy", () => {
+  it("classifies full-year codec drift within derived tolerance as expected", () => {
+    const tolerance = deriveCodecTotalDriftToleranceKwh({ intervalCount: 35_040, sigmaMultiplier: 4 });
     const out = classifyPastCacheIntegrity({
       isCacheRestore: true,
       cacheDigestMatch: false,
-      cacheTotalDeltaKwh: 0.03,
-      cacheCodecDriftToleranceKwh: 0.05,
+      cacheTotalDeltaKwh: 0.13,
+      cacheCodecDriftToleranceKwh: tolerance,
       coldParityOk: true,
       productionParityOk: true,
       coldVsRecalcMatch: true,
       coldVsProductionIntervalCountMatch: true,
       coldRecomputedFromIntervals: 100.0,
-      cacheRecomputedFromIntervals: 100.03,
+      cacheRecomputedFromIntervals: 100.13,
       coldRecomputedDailyFromIntervals: 100.0,
-      cacheRecomputedDailyFromIntervals: 100.04,
+      cacheRecomputedDailyFromIntervals: 100.14,
       coldRecomputedMonthlyFromIntervals: 99.7,
-      cacheRecomputedMonthlyFromIntervals: 99.72,
+      cacheRecomputedMonthlyFromIntervals: 99.83,
     });
 
+    expect(tolerance).toBeGreaterThan(0.13);
     expect(out.cacheIntegrityPass).toBe(true);
     expect(out.cacheIntegrityReason).toBe("codec_drift_within_tolerance");
+  });
+
+  it("fails when cache drift exceeds codec-derived tolerance", () => {
+    const tolerance = deriveCodecTotalDriftToleranceKwh({ intervalCount: 35_040, sigmaMultiplier: 4 });
+    const out = classifyPastCacheIntegrity({
+      isCacheRestore: true,
+      cacheDigestMatch: false,
+      cacheTotalDeltaKwh: tolerance + 0.05,
+      cacheCodecDriftToleranceKwh: tolerance,
+      coldParityOk: true,
+      productionParityOk: true,
+      coldVsRecalcMatch: true,
+      coldVsProductionIntervalCountMatch: true,
+      coldRecomputedFromIntervals: 100.0,
+      cacheRecomputedFromIntervals: 100.4,
+      coldRecomputedDailyFromIntervals: 100.0,
+      cacheRecomputedDailyFromIntervals: 100.4,
+      coldRecomputedMonthlyFromIntervals: 100.0,
+      cacheRecomputedMonthlyFromIntervals: 100.4,
+    });
+
+    expect(out.cacheIntegrityPass).toBe(false);
+    expect(out.cacheIntegrityReason).toBe("codec_drift_exceeds_tolerance");
   });
 
   it("classifies daily display rounding accumulation as display_rounding_only", () => {
@@ -30,7 +56,7 @@ describe("classifyPastCacheIntegrity", () => {
       isCacheRestore: true,
       cacheDigestMatch: true,
       cacheTotalDeltaKwh: 0,
-      cacheCodecDriftToleranceKwh: 0.05,
+      cacheCodecDriftToleranceKwh: 0.01,
       coldParityOk: true,
       productionParityOk: true,
       coldVsRecalcMatch: true,
@@ -53,7 +79,7 @@ describe("classifyPastCacheIntegrity", () => {
       isCacheRestore: true,
       cacheDigestMatch: true,
       cacheTotalDeltaKwh: 0,
-      cacheCodecDriftToleranceKwh: 0.05,
+      cacheCodecDriftToleranceKwh: 0.01,
       coldParityOk: true,
       productionParityOk: true,
       coldVsRecalcMatch: true,
@@ -76,7 +102,7 @@ describe("classifyPastCacheIntegrity", () => {
       isCacheRestore: true,
       cacheDigestMatch: false,
       cacheTotalDeltaKwh: 0.01,
-      cacheCodecDriftToleranceKwh: 0.05,
+      cacheCodecDriftToleranceKwh: 0.01,
       coldParityOk: false,
       productionParityOk: true,
       coldVsRecalcMatch: false,

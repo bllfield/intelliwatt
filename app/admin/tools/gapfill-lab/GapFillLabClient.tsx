@@ -196,9 +196,9 @@ export default function GapFillLabClient() {
     return {
       source: "GAPFILL_SIMULATED_TEST_WINDOW",
       timezone: timezone || "America/Chicago",
-      // Coverage should reflect the chart's actual displayed data span.
-      coverageStart: daily[0]?.date ?? (result as any)?.parity?.windowStartUtc ?? null,
-      coverageEnd: daily[daily.length - 1]?.date ?? (result as any)?.parity?.windowEndUtc ?? null,
+      // Prefer shared canonical window metadata from backend for date-label parity with Usage charts.
+      coverageStart: (result as any)?.parity?.windowStartUtc ?? daily[0]?.date ?? null,
+      coverageEnd: (result as any)?.parity?.windowEndUtc ?? daily[daily.length - 1]?.date ?? null,
       intervalCount: Number((result as any)?.diagnostics?.chartIntervalCount ?? (result as any).testIntervalsCount ?? (result as any)?.parity?.intervalCount ?? 0) || 0,
       daily,
       monthly,
@@ -282,14 +282,6 @@ export default function GapFillLabClient() {
     if (data.ok && data.houses?.length) setHouses(data.houses);
     if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
       setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
-    }
-  }
-
-  function mergeTravelRangesFromResponse(data: unknown) {
-    if (!data || typeof data !== "object") return;
-    const payload = data as any;
-    if (payload.ok === true && Array.isArray(payload.travelRangesFromDb)) {
-      setTravelRangesFromDb(payload.travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
     }
   }
 
@@ -393,7 +385,6 @@ export default function GapFillLabClient() {
             setResult(null);
             return;
           }
-          mergeTravelRangesFromResponse(rebuildData);
           setProgressStatus("Rebuild complete, now running compare...");
           const { res: compareRes, data: compareData } = await postGapfill(body);
           if (!compareRes.ok) {
@@ -456,7 +447,6 @@ export default function GapFillLabClient() {
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
         return;
       }
-      mergeTravelRangesFromResponse(rebuildData);
       setProgressStatus("Rebuild complete, now running compare...");
       const { res: compareRes, data: compareData } = await postGapfill(lastCompareBody);
       if (!compareRes.ok) {

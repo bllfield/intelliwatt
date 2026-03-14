@@ -16,11 +16,11 @@ import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
+import { deriveCodecTotalDriftToleranceKwh } from "@/modules/usageSimulator/intervalCodec";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 const BOUNDARY_STUB_SAMPLE = 5;
 const DIAGNOSTIC_INTERVAL_LIMIT = 96;
-const CACHE_CODEC_DRIFT_TOLERANCE_KWH = 0.05;
 
 /** Normalize weatherFallbackReason so match logic and display agree: null/undefined/empty/whitespace → null. */
 function normalizeWeatherFallbackReason(value: unknown): string | null {
@@ -620,9 +620,17 @@ export async function runSimulatorDiagnostic(
       ? coldParityDiag.intervalDigest === productionParityDiag.intervalDigest
       : null;
   const cacheTotalDeltaKwh: number | null =
-    isCacheRestore && typeof coldSummary.totalKwh === "number" && typeof productionSummary.totalKwh === "number"
-      ? Math.round(Math.abs(coldSummary.totalKwh - productionSummary.totalKwh) * 100) / 100
-      : null;
+    isCacheRestore &&
+    typeof coldParityDiag?.recomputedTotalFromIntervals === "number" &&
+    typeof productionParityDiag?.recomputedTotalFromIntervals === "number"
+      ? Math.abs(coldParityDiag.recomputedTotalFromIntervals - productionParityDiag.recomputedTotalFromIntervals)
+      : isCacheRestore && typeof coldSummary.totalKwh === "number" && typeof productionSummary.totalKwh === "number"
+        ? Math.abs(coldSummary.totalKwh - productionSummary.totalKwh)
+        : null;
+  const cacheCodecDriftToleranceKwh =
+    isCacheRestore && Number.isFinite(coldIntervalCount) && coldIntervalCount > 0
+      ? deriveCodecTotalDriftToleranceKwh({ intervalCount: Number(coldIntervalCount), sigmaMultiplier: 4 })
+      : 0.01;
   const coldVsRecalcMatch =
     parity?.coldVsRecalc != null
       ? parity.coldVsRecalc.totalKwhMatch && parity.coldVsRecalc.intervalCountMatch
@@ -632,7 +640,7 @@ export async function runSimulatorDiagnostic(
     isCacheRestore,
     cacheDigestMatch,
     cacheTotalDeltaKwh,
-    cacheCodecDriftToleranceKwh: CACHE_CODEC_DRIFT_TOLERANCE_KWH,
+    cacheCodecDriftToleranceKwh,
     coldParityOk,
     productionParityOk,
     coldVsRecalcMatch,
@@ -651,7 +659,7 @@ export async function runSimulatorDiagnostic(
     coldVsCacheMatch,
     cacheDigestMatch,
     cacheTotalDeltaKwh,
-    cacheCodecDriftToleranceKwh: CACHE_CODEC_DRIFT_TOLERANCE_KWH,
+    cacheCodecDriftToleranceKwh,
     cacheCodecDriftLikely: integrityClassification.cacheCodecDriftLikely,
     cacheIntegrityPass: integrityClassification.cacheIntegrityPass,
     cacheIntegrityReason: integrityClassification.cacheIntegrityReason,

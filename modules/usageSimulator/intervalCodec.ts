@@ -7,6 +7,7 @@
 export const INTERVAL_CODEC_V1 = "v1_delta_varint";
 const KWH_SCALE = 1000; // 0.001 kWh resolution
 const MAX_KWH_SCALED = 65535; // clamp to fit uint16 range for varint
+export const INTERVAL_CODEC_KWH_RESOLUTION = 1 / KWH_SCALE;
 
 function writeVarint(buf: number[], v: number): void {
   let n = Math.floor(v);
@@ -56,9 +57,7 @@ export function encodeIntervalsV1(
   for (let i = 0; i < sorted.length; i++) {
     const ts = new Date(sorted[i]!.timestamp).getTime();
     const sec = Math.round(ts / 1000);
-    const kwhRaw = Math.max(0, Number(sorted[i]!.kwh) || 0);
-    // Round to 0.001 kWh so encode/decode round-trip is deterministic.
-    const kwh = Math.round(kwhRaw * KWH_SCALE) / KWH_SCALE;
+    const kwh = quantizeIntervalKwhForCodec(sorted[i]!.kwh);
     const scaled = Math.min(MAX_KWH_SCALED, Math.round(kwh * KWH_SCALE));
     if (i === 0) {
       writeInt32LE(out, sec);
@@ -71,6 +70,35 @@ export function encodeIntervalsV1(
     writeVarint(out, scaled);
   }
   return { codec: INTERVAL_CODEC_V1, bytes: Buffer.from(out) };
+}
+
+/** Quantize one interval to codec precision/clamp semantics (same as encode path). */
+export function quantizeIntervalKwhForCodec(kwh: number): number {
+  const kwhRaw = Math.max(0, Number(kwh) || 0);
+  const rounded = Math.round(kwhRaw * KWH_SCALE) / KWH_SCALE;
+  const scaled = Math.min(MAX_KWH_SCALED, Math.round(rounded * KWH_SCALE));
+  return scaled / KWH_SCALE;
+}
+
+/**
+ * Codec-derived total drift tolerance for aggregate comparisons:
+ *  - per-interval rounding error is modeled as uniform[-q/2, q/2], q=resolution
+ *  - stddev(sum) = q * sqrt(N / 12)
+ *  - tolerance uses sigmaMultiplier * stddev plus 0.01 kWh aggregate display rounding floor
+ */
+export function deriveCodecTotalDriftToleranceKwh(args: {
+  intervalCount: number;
+  sigmaMultiplier?: number;
+}): number {
+  const n = Math.max(0, Math.floor(Number(args.intervalCount) || 0));
+  const sigmaMultiplier = Number.isFinite(Number(args.sigmaMultiplier))
+    ? Math.max(1, Number(args.sigmaMultiplier))
+    : 4;
+  if (n <= 0) return 0.01;
+  const stddev = INTERVAL_CODEC_KWH_RESOLUTION * Math.sqrt(n / 12);
+  const rawTol = sigmaMultiplier * stddev;
+  const withFloor = Math.max(0.01, rawTol);
+  return Math.round(withFloor * 10000) / 10000;
 }
 
 export function decodeIntervalsV1(

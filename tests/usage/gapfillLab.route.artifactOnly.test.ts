@@ -302,5 +302,31 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(200);
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
+
+  it("bounds Usage365 daily rows to canonical window dates", async () => {
+    getActualIntervalsForRange.mockResolvedValue([
+      { timestamp: "2025-02-28T23:45:00.000Z", kwh: 0.25 },
+      { timestamp: "2025-03-01T00:00:00.000Z", kwh: 0.5 },
+      { timestamp: "2026-02-28T23:45:00.000Z", kwh: 0.75 },
+      { timestamp: "2026-03-01T00:00:00.000Z", kwh: 1.0 },
+    ]);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [],
+        includeUsage365: true,
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    const usageDaily = Array.isArray(body.usage365?.daily) ? body.usage365.daily : [];
+    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-01", "2026-02-28"]);
+    expect(body.usage365?.coverageStart).toBe("2025-03-01");
+    expect(body.usage365?.coverageEnd).toBe("2026-02-28");
+  });
 });
 

@@ -1029,8 +1029,12 @@ export async function POST(req: NextRequest) {
       startDate: canonicalWindow.startDate,
       endDate: canonicalWindow.endDate,
     });
+    const boundedIntervalsForWindow = (intervalsForWindow ?? []).filter((row) => {
+      const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
+      return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
+    });
     usage365 = buildUsage365Payload({
-      intervals: intervalsForWindow ?? [],
+      intervals: boundedIntervalsForWindow,
       timezone,
       source: sourceLabel,
     });
