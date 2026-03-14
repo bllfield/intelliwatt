@@ -105,7 +105,8 @@ function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
   return (
     code === "artifact_missing_rebuild_required" ||
     code === "artifact_scope_mismatch_rebuild_required" ||
-    code === "artifact_stale_rebuild_required"
+    code === "artifact_stale_rebuild_required" ||
+    code === "artifact_compare_join_incomplete_rebuild_required"
   );
 }
 
@@ -231,6 +232,12 @@ export default function GapFillLabClient() {
     if (newHouseId !== houseId) {
       setHouseId(newHouseId);
       setTestRanges([{ ...DEFAULT_RANGE }]);
+      // House selection changes request identity; clear prior run state to avoid stale carry-over.
+      setResult(null);
+      setError(null);
+      setArtifactMissing(false);
+      setLastCompareBody(null);
+      setChartMode("usage365");
     }
   }
 
@@ -269,21 +276,7 @@ export default function GapFillLabClient() {
       if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
         setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
       }
-      setResult((prev) => {
-        if (data.ok && prev?.ok) {
-          return {
-            ...data,
-            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
-            ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
-            ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
-            ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
-            ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
-            ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
-          };
-        }
-        return data;
-      });
+      setResult(data);
     } catch (e: any) {
       setError(e?.name === "AbortError" ? "Request timed out." : (e?.message ?? String(e)));
       setResult(null);
@@ -409,8 +402,8 @@ export default function GapFillLabClient() {
       const msg = e?.name === "AbortError"
         ? "Request timed out after ~5 minutes. Compare can take several minutes for heavy windows; retry compare or use Rebuild artifact and retry."
         : (e?.message ?? String(e));
-      if (attemptedArtifactAutoRebuild) {
-        // Keep rebuild CTA visible when the automatic rebuild attempt fails due to network/timeout/abort.
+      if (attemptedArtifactAutoRebuild || e?.name === "AbortError") {
+        // Keep rebuild CTA visible when automatic rebuild or long compare request fails.
         setArtifactMissing(true);
       }
       setError(msg);

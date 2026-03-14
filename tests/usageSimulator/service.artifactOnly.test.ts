@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const scenarioFindFirst = vi.fn();
 const getHouseAddressForUserHouse = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();

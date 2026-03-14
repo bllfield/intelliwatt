@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const requireAdmin = vi.fn();
 const normalizeEmailSafe = vi.fn();
 const chooseActualSource = vi.fn();
 const getActualIntervalsForRange = vi.fn();
-const inspectPastCacheArtifacts = vi.fn();
-const buildAndSavePastForGapfillLab = vi.fn();
-const getSimulatedUsageForHouseScenario = vi.fn();
+const buildGapfillCompareSimShared = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -46,13 +46,8 @@ vi.mock("@/modules/applianceProfile/repo", () => ({
   getApplianceProfileSimulatedByUserHouse: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock("@/lib/admin/gapfillLabPrime", () => ({
-  inspectPastCacheArtifacts: (...args: any[]) => inspectPastCacheArtifacts(...args),
-  buildAndSavePastForGapfillLab: (...args: any[]) => buildAndSavePastForGapfillLab(...args),
-}));
-
 vi.mock("@/modules/usageSimulator/service", () => ({
-  getSimulatedUsageForHouseScenario: (...args: any[]) => getSimulatedUsageForHouseScenario(...args),
+  buildGapfillCompareSimShared: (...args: any[]) => buildGapfillCompareSimShared(...args),
 }));
 
 vi.mock("@/lib/admin/gapfillLab", () => ({
@@ -104,9 +99,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     normalizeEmailSafe.mockReset();
     chooseActualSource.mockReset();
     getActualIntervalsForRange.mockReset();
-    inspectPastCacheArtifacts.mockReset();
-    buildAndSavePastForGapfillLab.mockReset();
-    getSimulatedUsageForHouseScenario.mockReset();
+    buildGapfillCompareSimShared.mockReset();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
@@ -126,7 +119,15 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {
-    inspectPastCacheArtifacts.mockResolvedValue({ count: 0, latestUpdatedAt: null });
+    buildGapfillCompareSimShared.mockResolvedValue({
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_missing_rebuild_required",
+        message: "No saved gapfill artifact exists.",
+      },
+    });
 
     const req = {
       cookies: { get: () => undefined },
@@ -139,20 +140,28 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
     expect(res.status).toBe(409);
     expect(body.error).toBe("artifact_missing_rebuild_required");
-    expect(buildAndSavePastForGapfillLab).not.toHaveBeenCalled();
-    expect(getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rebuildArtifact: false,
+      })
+    );
   });
 
   it("uses explicit rebuild action and then reads in artifact_only mode", async () => {
-    buildAndSavePastForGapfillLab.mockResolvedValue({ ok: true, inputHash: "h", houseId: "h1" });
-    getSimulatedUsageForHouseScenario.mockResolvedValue({
+    buildGapfillCompareSimShared.mockResolvedValue({
       ok: true,
-      houseId: "h1",
-      scenarioKey: "gapfill_lab",
-      scenarioId: "gapfill_lab",
-      dataset: {
-        series: { intervals15: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }] },
-      },
+      artifactAutoRebuilt: false,
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
     });
 
     const req = {
@@ -168,11 +177,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.rebuilt).toBe(true);
-    expect(buildAndSavePastForGapfillLab).toHaveBeenCalledTimes(1);
-    expect(getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
       expect.objectContaining({
-        readMode: "artifact_only",
-        scenarioId: "gapfill_lab",
+        rebuildArtifact: true,
       })
     );
   });

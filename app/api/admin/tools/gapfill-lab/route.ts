@@ -1347,6 +1347,27 @@ export async function POST(req: NextRequest) {
 
   const simulatedByTs = new Map<string, number>();
   for (const p of sharedSim.simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
+  const missingJoinedActual = actualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
+  if (missingJoinedActual.length > 0) {
+    const classification = classifySimulationFailure({
+      code: "artifact_compare_join_incomplete_rebuild_required",
+      message: "Saved simulation artifact did not produce all simulated timestamps required for compare join.",
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "artifact_compare_join_incomplete_rebuild_required",
+        message:
+          "Saved/rebuilt gapfill artifact is missing simulated points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
+        explanation: classification.userFacingExplanation,
+        missingData: classification.missingData,
+        reasonCode: classification.reasonCode,
+        joinMissingCount: missingJoinedActual.length,
+        joinMissingSampleTs: missingJoinedActual.slice(0, 10).map((p) => p.timestamp),
+      },
+      { status: 409 }
+    );
+  }
 
   const metrics = computeGapFillMetrics({
     actual: actualTestIntervalsCanon,

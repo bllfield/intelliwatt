@@ -79,6 +79,17 @@ export function classifySimulationFailure(args: {
     };
   }
 
+  if (haystack.includes("artifact_compare_join_incomplete_rebuild_required")) {
+    return {
+      reasonCode: "ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED",
+      reasonMessage: "Saved simulation artifact is missing simulated points required for compare joins.",
+      missingData: ["saved_gapfill_artifact"],
+      userFacingExplanation:
+        "Saved simulation data is incomplete for the selected Test intervals. Re-run compare (or Retry) to rebuild and align the artifact.",
+      shouldAlert: false,
+    };
+  }
+
   if (haystack.includes("artifact_missing_rebuild_required") || haystack.includes("artifact_missing")) {
     return {
       reasonCode: "ARTIFACT_MISSING_REBUILD_REQUIRED",
