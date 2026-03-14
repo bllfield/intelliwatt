@@ -211,6 +211,8 @@ export type SimulatePastUsageDatasetArgs = {
   travelRanges: Array<{ startDate: string; endDate: string }>;
   buildInputs: SimulatorBuildInputsV1;
   buildPathKind: BuildPathKind;
+  /** Explicit caller intent; defaults to true to preserve existing behavior. */
+  includeSimulatedDayResults?: boolean;
   /** When provided, skip fetching actual intervals (caller already has them). */
   actualIntervals?: Array<{ timestamp: string; kwh: number }>;
 };
@@ -327,6 +329,7 @@ export async function simulatePastUsageDataset(
     travelRanges,
     buildInputs,
     buildPathKind,
+    includeSimulatedDayResults = true,
     actualIntervals: preloadedIntervals,
   } = args;
 
@@ -470,7 +473,6 @@ export async function simulatePastUsageDataset(
     };
 
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
-    const includeSimulatedDayResults = buildPathKind !== "lab_validation";
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
       canonicalDayStartsMs,
@@ -559,7 +561,7 @@ export async function simulatePastUsageDataset(
       shapeMonthsPresent,
       actualWxByDateKey: actualWxByDateKey,
       stitchedCurve,
-      simulatedDayResults: dayResults,
+      simulatedDayResults: includeSimulatedDayResults ? dayResults : undefined,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));

@@ -276,6 +276,7 @@ export async function buildAndSavePastForGapfillLab(args: {
     endDate,
     timezone,
     buildPathKind: "lab_validation",
+    includeSimulatedDayResults: false,
   });
 
   if (!pastResult.dataset) {

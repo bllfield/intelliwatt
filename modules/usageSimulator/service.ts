@@ -44,7 +44,6 @@ import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulat
 import { canonicalIntervalKey, dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
-import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
@@ -408,6 +407,34 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   const end = `${last}-${String(lastDay).padStart(2, "0")}`;
   const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
   return { start, end, days: Math.max(1, days) };
+}
+
+function resolveWindowFromBuildInputsForPastIdentity(
+  buildInputs: Record<string, unknown>,
+): { startDate: string; endDate: string } | null {
+  const canonicalPeriods = Array.isArray((buildInputs as any)?.canonicalPeriods)
+    ? ((buildInputs as any).canonicalPeriods as Array<{ startDate?: string; endDate?: string }>)
+    : [];
+  if (canonicalPeriods.length > 0) {
+    const periods = canonicalPeriods
+      .map((p) => ({
+        startDate: String(p?.startDate ?? "").slice(0, 10),
+        endDate: String(p?.endDate ?? "").slice(0, 10),
+      }))
+      .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate));
+    if (periods.length > 0) {
+      return {
+        startDate: periods[0].startDate,
+        endDate: periods[periods.length - 1].endDate,
+      };
+    }
+  }
+  const canonicalMonths = Array.isArray((buildInputs as any)?.canonicalMonths)
+    ? ((buildInputs as any).canonicalMonths as string[])
+    : [];
+  const window = canonicalWindowDateRange(canonicalMonths);
+  if (!window) return null;
+  return { startDate: window.start, endDate: window.end };
 }
 
 function monthsIntersectingTravelRanges(
@@ -1105,6 +1132,8 @@ export async function getPastSimulatedDatasetForHouse(args: {
   timezone?: string;
   /** Optional: cold_build (default), recalc, or lab_validation. */
   buildPathKind?: "cold_build" | "recalc" | "lab_validation";
+  /** Explicit caller intent; defaults true to preserve current behavior. */
+  includeSimulatedDayResults?: boolean;
 }): Promise<
   | {
       dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>;
@@ -1113,7 +1142,18 @@ export async function getPastSimulatedDatasetForHouse(args: {
     }
   | { dataset: null; error: string }
 > {
-  const { userId, houseId, esiid, travelRanges, buildInputs, startDate, endDate, timezone, buildPathKind = "cold_build" } = args;
+  const {
+    userId,
+    houseId,
+    esiid,
+    travelRanges,
+    buildInputs,
+    startDate,
+    endDate,
+    timezone,
+    buildPathKind = "cold_build",
+    includeSimulatedDayResults = true,
+  } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
   }
@@ -1128,6 +1168,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       travelRanges,
       buildInputs,
       buildPathKind,
+      includeSimulatedDayResults,
     });
     if (result.dataset === null) {
       return { dataset: null, error: (result as { error: string }).error ?? "simulatePastUsageDataset failed" };
