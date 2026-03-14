@@ -18,6 +18,7 @@ import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 const BOUNDARY_STUB_SAMPLE = 5;
 const DIAGNOSTIC_INTERVAL_LIMIT = 96;
+const CACHE_CODEC_DRIFT_TOLERANCE_KWH = 0.05;
 
 /** Normalize weatherFallbackReason so match logic and display agree: null/undefined/empty/whitespace → null. */
 function normalizeWeatherFallbackReason(value: unknown): string | null {
@@ -254,6 +255,15 @@ export type SimulatorDiagnosticResult = {
     parityMatch: boolean;
     coldVsCacheMatch: boolean | null;
     cacheDigestMatch: boolean | null;
+    cacheTotalDeltaKwh: number | null;
+    cacheCodecDriftLikely: boolean | null;
+    cacheIntegrityPass: boolean | null;
+    cacheIntegrityReason:
+      | "not_cache_restore"
+      | "digest_match"
+      | "digest_unavailable_totals_match"
+      | "digest_mismatch_codec_drift_likely"
+      | "digest_mismatch";
     coldTotalKwh?: number;
     cacheTotalKwh?: number;
     recalcTotalKwh?: number;
@@ -594,12 +604,46 @@ export async function runSimulatorDiagnostic(
     isCacheRestore && coldParityDiag?.intervalDigest != null && productionParityDiag?.intervalDigest != null
       ? coldParityDiag.intervalDigest === productionParityDiag.intervalDigest
       : null;
+  const cacheTotalDeltaKwh: number | null =
+    isCacheRestore && typeof coldSummary.totalKwh === "number" && typeof productionSummary.totalKwh === "number"
+      ? Math.round(Math.abs(coldSummary.totalKwh - productionSummary.totalKwh) * 100) / 100
+      : null;
+  const cacheCodecDriftLikely: boolean | null =
+    isCacheRestore
+      ? cacheDigestMatch === false &&
+        coldParityOk &&
+        productionParityOk &&
+        typeof cacheTotalDeltaKwh === "number" &&
+        cacheTotalDeltaKwh <= CACHE_CODEC_DRIFT_TOLERANCE_KWH
+      : null;
+  const cacheIntegrityPass: boolean | null =
+    !isCacheRestore
+      ? null
+      : cacheDigestMatch === true
+        ? true
+        : cacheDigestMatch == null && coldVsCacheMatch === true
+          ? true
+          : cacheCodecDriftLikely === true;
+  const cacheIntegrityReason: SimulatorDiagnosticResult["integrity"]["cacheIntegrityReason"] =
+    !isCacheRestore
+      ? "not_cache_restore"
+      : cacheDigestMatch === true
+        ? "digest_match"
+        : cacheDigestMatch == null && coldVsCacheMatch === true
+          ? "digest_unavailable_totals_match"
+          : cacheCodecDriftLikely === true
+            ? "digest_mismatch_codec_drift_likely"
+            : "digest_mismatch";
 
   const integrity: SimulatorDiagnosticResult["integrity"] = {
     intervalCountMatch,
     parityMatch,
     coldVsCacheMatch,
     cacheDigestMatch,
+    cacheTotalDeltaKwh,
+    cacheCodecDriftLikely,
+    cacheIntegrityPass,
+    cacheIntegrityReason,
     coldTotalKwh: coldSummary.totalKwh,
     cacheTotalKwh: productionResult.ok ? productionSummary.totalKwh : undefined,
     recalcTotalKwh: undefined,

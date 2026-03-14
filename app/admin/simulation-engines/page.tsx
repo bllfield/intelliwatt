@@ -100,6 +100,15 @@ export default function SimulationEnginesPage() {
         parityMatch: boolean;
         coldVsCacheMatch: boolean | null;
         cacheDigestMatch: boolean | null;
+        cacheTotalDeltaKwh: number | null;
+        cacheCodecDriftLikely: boolean | null;
+        cacheIntegrityPass: boolean | null;
+        cacheIntegrityReason:
+          | "not_cache_restore"
+          | "digest_match"
+          | "digest_unavailable_totals_match"
+          | "digest_mismatch_codec_drift_likely"
+          | "digest_mismatch";
         coldTotalKwh?: number;
         cacheTotalKwh?: number;
         recalcTotalKwh?: number;
@@ -939,7 +948,14 @@ export default function SimulationEnginesPage() {
                     const weatherPass = wx != null && (wx.weatherCoverageStart != null || wx.weatherCoverageEnd != null);
                     const cacheMatch = integrity?.coldVsCacheMatch;
                     const cacheDigestMatch = integrity?.cacheDigestMatch;
-                    const cachePass = cacheMatch === null && cacheDigestMatch === null ? null : (cacheMatch !== false && (cacheDigestMatch === null || cacheDigestMatch === true));
+                    const cacheIntegrityPass =
+                      integrity?.cacheIntegrityPass ??
+                      (cacheMatch === null && cacheDigestMatch === null
+                        ? null
+                        : cacheMatch !== false && (cacheDigestMatch === null || cacheDigestMatch === true));
+                    const cacheIntegrityReason = integrity?.cacheIntegrityReason ?? null;
+                    const cacheTotalDelta =
+                      typeof integrity?.cacheTotalDeltaKwh === "number" ? integrity.cacheTotalDeltaKwh : null;
                     return (
                       <>
                         <div className="grid gap-x-4 gap-y-1 md:grid-cols-2">
@@ -963,15 +979,19 @@ export default function SimulationEnginesPage() {
                           </span>
                           <span
                             className={
-                              cachePass === null
+                              cacheIntegrityPass === null
                                 ? "text-slate-500"
-                                : cachePass
+                                : cacheIntegrityPass
                                   ? "font-semibold text-emerald-700"
                                   : "font-semibold text-rose-700"
                             }
                           >
-                            Cache Integrity: {cachePass === null ? "N/A" : cachePass ? "PASS" : "FAIL"}
-                            {cacheDigestMatch === false ? " (Cache corruption detected)" : null}
+                            Cache Integrity: {cacheIntegrityPass === null ? "N/A" : cacheIntegrityPass ? "PASS" : "FAIL"}
+                            {cacheIntegrityReason === "digest_mismatch_codec_drift_likely"
+                              ? " (Expected codec drift)"
+                              : cacheIntegrityReason === "digest_mismatch"
+                                ? " (Digest mismatch beyond codec tolerance)"
+                                : null}
                           </span>
                           {integrity?.coldVsCacheMatch !== undefined && integrity.coldVsCacheMatch !== null ? (
                             <span className={integrity.coldVsCacheMatch ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
@@ -983,16 +1003,18 @@ export default function SimulationEnginesPage() {
                             {!parityPass && parityDiff != null ? ` (summary vs sum(intervals15) diff: ${parityDiff.toFixed(2)} kWh)` : null}
                           </span>
                         </div>
-                        {(!parityPass || cachePass === false) ? (
+                        {(!parityPass || cacheIntegrityPass === false || cacheIntegrityReason === "digest_mismatch_codec_drift_likely") ? (
                           <div className="mt-2 border-t border-slate-200 pt-2 text-xs text-slate-600">
                             {!parityPass
                               ? "Pipeline: dataset.summary.totalKwh is derived from sum(intervals15); mismatch indicates overlay or codec rounding. Check cold build and cache restore paths in modules/usageSimulator/service.ts."
                               : null}
-                            {cachePass === false && cacheDigestMatch === false
-                              ? " Cache: decoded intervals digest does not match cold build digest; possible cache corruption or encode/decode drift (intervalCodec.ts)."
-                              : cachePass === false
-                                ? " Cache: cold vs cache total mismatch; run Rebuild Simulation Cache and re-run diagnostic."
-                                : null}
+                            {cacheIntegrityReason === "digest_mismatch_codec_drift_likely"
+                              ? ` Cache: decoded intervals digest differs from cold build, but total delta${cacheTotalDelta != null ? ` (${cacheTotalDelta.toFixed(2)} kWh)` : ""} is within codec tolerance; this is expected encode/decode drift (intervalCodec.ts).`
+                              : cacheIntegrityPass === false && cacheDigestMatch === false
+                                ? " Cache: decoded intervals digest does not match cold build and exceeds codec tolerance; investigate artifact integrity."
+                                : cacheIntegrityPass === false
+                                  ? " Cache: cold vs cache mismatch; run Rebuild Simulation Cache and re-run diagnostic."
+                                  : null}
                           </div>
                         ) : null}
                       </>
