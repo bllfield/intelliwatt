@@ -259,7 +259,12 @@ export default function GapFillLabClient() {
   }, [result]);
   const hasUsage365ChartData = Boolean(usage365ChartData?.daily?.length);
   const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
-  const effectiveChartMode: ChartMode = chartMode;
+  const effectiveChartMode: ChartMode =
+    chartMode === "usage365" && !hasUsage365ChartData && hasGapfillChartData
+      ? "gapfill"
+      : chartMode === "gapfill" && !hasGapfillChartData && hasUsage365ChartData
+        ? "usage365"
+        : chartMode;
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -432,7 +437,6 @@ export default function GapFillLabClient() {
       setError("A Gap-Fill request is already running. Wait for it to finish.");
       return;
     }
-    compareInFlightRef.current = true;
     setError(null);
     setProgressStatus(null);
     setArtifactMissing(false);
@@ -446,6 +450,7 @@ export default function GapFillLabClient() {
       setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
       return;
     }
+    compareInFlightRef.current = true;
     setLoading(true);
     let attemptedArtifactAutoRebuild = false;
     try {
