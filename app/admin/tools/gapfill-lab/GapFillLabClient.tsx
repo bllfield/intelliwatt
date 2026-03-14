@@ -285,6 +285,14 @@ export default function GapFillLabClient() {
     }
   }
 
+  function mergeTravelRangesFromResponse(data: unknown) {
+    if (!data || typeof data !== "object") return;
+    const payload = data as any;
+    if (payload.ok === true && Array.isArray(payload.travelRangesFromDb)) {
+      setTravelRangesFromDb(payload.travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
+    }
+  }
+
   function buildCompareBody(trimmedEmail: string, validRanges: RangeRow[]): Record<string, unknown> {
     const body: Record<string, unknown> = {
       email: trimmedEmail,
@@ -385,6 +393,7 @@ export default function GapFillLabClient() {
             setResult(null);
             return;
           }
+          mergeTravelRangesFromResponse(rebuildData);
           setProgressStatus("Rebuild complete, now running compare...");
           const { res: compareRes, data: compareData } = await postGapfill(body);
           if (!compareRes.ok) {
@@ -447,6 +456,7 @@ export default function GapFillLabClient() {
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
         return;
       }
+      mergeTravelRangesFromResponse(rebuildData);
       setProgressStatus("Rebuild complete, now running compare...");
       const { res: compareRes, data: compareData } = await postGapfill(lastCompareBody);
       if (!compareRes.ok) {
