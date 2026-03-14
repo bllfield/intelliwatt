@@ -307,6 +307,7 @@ export default function GapFillLabClient() {
     }
     setLoading(true);
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let attemptedArtifactAutoRebuild = false;
     try {
       const controller = new AbortController();
       // Keep client timeout slightly above route maxDuration (300s) to avoid premature client aborts.
@@ -341,6 +342,7 @@ export default function GapFillLabClient() {
         if (isArtifactRebuildRequiredError((data as any)?.error)) {
           // Explicit self-heal: when artifact read requires rebuild, run one rebuild pass immediately
           // so users do not get stuck in a retry loop for normal compare actions.
+          attemptedArtifactAutoRebuild = true;
           const rebuildBody = { ...body, rebuildArtifact: true };
           const rebuildRes = await fetch("/api/admin/tools/gapfill-lab", {
             method: "POST",
@@ -407,6 +409,10 @@ export default function GapFillLabClient() {
       const msg = e?.name === "AbortError"
         ? "Request timed out after ~5 minutes. Compare can take several minutes for heavy windows; retry compare or use Rebuild artifact and retry."
         : (e?.message ?? String(e));
+      if (attemptedArtifactAutoRebuild) {
+        // Keep rebuild CTA visible when the automatic rebuild attempt fails due to network/timeout/abort.
+        setArtifactMissing(true);
+      }
       setError(msg);
       setResult(null);
     } finally {
