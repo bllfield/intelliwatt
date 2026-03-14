@@ -252,7 +252,11 @@ export default function GapFillLabClient() {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      const data = (await res.json().catch(() => null)) as ApiResponse;
+      const data = (await res.json().catch(() => ({
+        ok: false as const,
+        error: "invalid_json_response",
+        message: `Server returned a non-JSON response (HTTP ${res.status}).`,
+      }))) as ApiResponse;
       return { res, data };
     } finally {
       clearTimeout(timeoutId);
@@ -276,12 +280,6 @@ export default function GapFillLabClient() {
       return data;
     });
     if (data.ok && data.houses?.length) setHouses(data.houses);
-    if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
-      setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
-    }
-  }
-
-  function mergeTravelRangesFromResponse(data: ApiResponse) {
     if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
       setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
     }
@@ -387,7 +385,6 @@ export default function GapFillLabClient() {
             setResult(null);
             return;
           }
-          mergeTravelRangesFromResponse(rebuildData);
           setProgressStatus("Rebuild complete, now running compare...");
           const { res: compareRes, data: compareData } = await postGapfill(body);
           if (!compareRes.ok) {
@@ -450,7 +447,6 @@ export default function GapFillLabClient() {
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
         return;
       }
-      mergeTravelRangesFromResponse(rebuildData);
       setProgressStatus("Rebuild complete, now running compare...");
       const { res: compareRes, data: compareData } = await postGapfill(lastCompareBody);
       if (!compareRes.ok) {
