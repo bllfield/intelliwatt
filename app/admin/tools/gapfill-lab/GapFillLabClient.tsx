@@ -373,6 +373,10 @@ export default function GapFillLabClient() {
         setError(formatApiError(data, res.status));
         return;
       }
+      if (!data.ok) {
+        setError(formatApiError(data, res.status));
+        return;
+      }
       mergeSuccessfulResult(data);
     } catch (e: any) {
       setError(e?.name === "AbortError" ? "Request timed out while loading Usage 365." : (e?.message ?? String(e)));
