@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 
@@ -161,6 +161,8 @@ export default function GapFillLabClient() {
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
   const [chartMode, setChartMode] = useState<ChartMode>("usage365");
+  const compareInFlightRef = useRef(false);
+  const rebuildInFlightRef = useRef(false);
 
   const gapfillChartData = useMemo(() => {
     if (!result || !result.ok) return null;
@@ -257,12 +259,7 @@ export default function GapFillLabClient() {
   }, [result]);
   const hasUsage365ChartData = Boolean(usage365ChartData?.daily?.length);
   const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
-  const effectiveChartMode: ChartMode =
-    chartMode === "usage365" && !hasUsage365ChartData && hasGapfillChartData
-      ? "gapfill"
-      : chartMode === "gapfill" && !hasGapfillChartData && hasUsage365ChartData
-        ? "usage365"
-        : chartMode;
+  const effectiveChartMode: ChartMode = chartMode;
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -431,6 +428,11 @@ export default function GapFillLabClient() {
   }
 
   async function handleRunCompare() {
+    if (compareInFlightRef.current || rebuildInFlightRef.current) {
+      setError("A Gap-Fill request is already running. Wait for it to finish.");
+      return;
+    }
+    compareInFlightRef.current = true;
     setError(null);
     setProgressStatus(null);
     setArtifactMissing(false);
@@ -504,12 +506,19 @@ export default function GapFillLabClient() {
       setResult(null);
     } finally {
       setLoading(false);
+      compareInFlightRef.current = false;
     }
   }
 
   async function handleRebuildAndRetry() {
+    if (compareInFlightRef.current || rebuildInFlightRef.current) {
+      setError("A Gap-Fill request is already running. Wait for it to finish.");
+      return;
+    }
+    rebuildInFlightRef.current = true;
     if (!lastCompareBody) {
       setError("No prior compare request found. Run Compare first.");
+      rebuildInFlightRef.current = false;
       return;
     }
     setRebuildLoading(true);
@@ -544,6 +553,7 @@ export default function GapFillLabClient() {
       setResult(null);
     } finally {
       setRebuildLoading(false);
+      rebuildInFlightRef.current = false;
     }
   }
 
