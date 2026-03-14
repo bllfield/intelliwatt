@@ -6,6 +6,7 @@
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
 import { getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { monthsEndingAt } from "@/modules/manualUsage/anchor";
@@ -17,6 +18,7 @@ import {
   saveCachedPastDataset,
   PAST_ENGINE_VERSION,
 } from "@/modules/usageSimulator/pastCache";
+import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { encodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/intervalCodec";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -25,36 +27,6 @@ import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/vali
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 
 type DateRange = { startDate: string; endDate: string };
-
-function normalizeRangesToLocalDateKeysInclusive(ranges: DateRange[]): Set<string> {
-  const out = new Set<string>();
-  for (const r of ranges ?? []) {
-    const start = (r?.startDate ?? "").slice(0, 10);
-    const end = (r?.endDate ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
-    if (end < start) continue;
-    let y = Number(start.slice(0, 4));
-    let m = Number(start.slice(5, 7));
-    let d = Number(start.slice(8, 10));
-    const endY = Number(end.slice(0, 4));
-    const endM = Number(end.slice(5, 7));
-    const endD = Number(end.slice(8, 10));
-    while (y < endY || (y === endY && m < endM) || (y === endY && m === endM && d <= endD)) {
-      out.add(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
-      const daysInMonth = new Date(y, m, 0).getDate();
-      d += 1;
-      if (d > daysInMonth) {
-        d = 1;
-        m += 1;
-      }
-      if (m > 12) {
-        m = 1;
-        y += 1;
-      }
-    }
-  }
-  return out;
-}
 
 function utcDateKeyFromUtcMs(utcMs: number): string {
   const d = new Date(utcMs);
@@ -195,25 +167,15 @@ export async function buildAndSavePastForGapfillLab(args: {
 
   const result = await getActualUsageDatasetForHouse(houseId, esiid, { skipFullYearIntervalFetch: true });
   const summary = result?.dataset?.summary;
-  if (!summary?.start || !summary?.end) {
+  if (!summary?.end) {
     return { ok: false, error: "no_actual_data", message: "No actual interval data for baseline window." };
   }
-  const startDate = summary.start.slice(0, 10);
-  const endDate = summary.end.slice(0, 10);
+  const anchorEndDate = String(summary.end).slice(0, 10);
 
   const dbTravelRanges = await getTravelRangesFromDb(userId, houseId);
-  const dbLocal = normalizeRangesToLocalDateKeysInclusive(dbTravelRanges);
-  const evalLocal = normalizeRangesToLocalDateKeysInclusive(rangesToMask);
+  const dbLocal = new Set<string>(dbTravelRanges.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone)));
+  const evalLocal = new Set<string>(rangesToMask.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone)));
   const buildExcludedDateKeysLocal = new Set<string>([...Array.from(dbLocal), ...Array.from(evalLocal)]);
-  const buildExcludedUtcSet = buildExcludedUtcDateKeySetFromLocalKeys(
-    buildExcludedDateKeysLocal,
-    startDate,
-    endDate,
-    timezone
-  );
-  const buildExcludedRanges: DateRange[] = Array.from(buildExcludedUtcSet)
-    .sort()
-    .map((d) => ({ startDate: d, endDate: d }));
 
   const [homeProfileRec, applianceProfileRec] = await Promise.all([
     getHomeProfileSimulatedByUserHouse({ userId, houseId }),
@@ -228,8 +190,29 @@ export async function buildAndSavePastForGapfillLab(args: {
   }
 
   const normalizedAppliance = normalizeStoredApplianceProfile(applianceProfileRec.appliancesJson as any);
-  const endMonth = endDate.slice(0, 7);
+  const endMonth = anchorEndDate.slice(0, 7);
   const canonicalMonths12 = monthsEndingAt(endMonth, 12);
+  const canonicalWindowForBuild = resolveWindowFromBuildInputsForPastIdentity({
+    canonicalMonths: canonicalMonths12,
+  });
+  if (!canonicalWindowForBuild) {
+    return {
+      ok: false,
+      error: "canonical_window_unresolved",
+      message: "Could not resolve canonical Past window from build inputs.",
+    };
+  }
+  const startDate = canonicalWindowForBuild.startDate;
+  const endDate = canonicalWindowForBuild.endDate;
+  const buildExcludedUtcSet = buildExcludedUtcDateKeySetFromLocalKeys(
+    buildExcludedDateKeysLocal,
+    startDate,
+    endDate,
+    timezone
+  );
+  const buildExcludedRanges: DateRange[] = Array.from(buildExcludedUtcSet)
+    .sort()
+    .map((d) => ({ startDate: d, endDate: d }));
 
   const buildResult = await buildSimulatorInputs({
     mode: "SMT_BASELINE",

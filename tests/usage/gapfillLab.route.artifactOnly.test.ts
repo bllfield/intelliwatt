@@ -52,6 +52,20 @@ vi.mock("@/modules/usageSimulator/service", () => ({
 
 vi.mock("@/lib/admin/gapfillLab", () => ({
   canonicalIntervalKey: (s: string) => String(s),
+  localDateKeysInRange: (startDate: string, endDate: string) => {
+    const start = String(startDate ?? "").slice(0, 10);
+    const end = String(endDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return [];
+    const out: string[] = [];
+    let cur = new Date(`${start}T00:00:00.000Z`);
+    const last = new Date(`${end}T00:00:00.000Z`);
+    if (Number.isNaN(cur.getTime()) || Number.isNaN(last.getTime())) return [];
+    while (cur.getTime() <= last.getTime()) {
+      out.push(cur.toISOString().slice(0, 10));
+      cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+    }
+    return out;
+  },
   buildDailyWeatherFeaturesFromHourly: vi.fn(),
   computeGapFillMetrics: () => ({
     mae: 0,
