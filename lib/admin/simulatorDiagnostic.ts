@@ -624,7 +624,7 @@ export async function runSimulatorDiagnostic(
         : cacheDigestMatch == null && coldVsCacheMatch === true
           ? true
           : cacheCodecDriftLikely === true;
-  const cacheIntegrityReason: SimulatorDiagnosticResult["integrity"]["cacheIntegrityReason"] =
+  const cacheIntegrityReason: NonNullable<SimulatorDiagnosticResult["integrity"]>["cacheIntegrityReason"] =
     !isCacheRestore
       ? "not_cache_restore"
       : cacheDigestMatch === true
