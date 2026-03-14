@@ -20,11 +20,11 @@ import {
   pickExtremeWeatherTestDateKeys,
 } from "@/lib/admin/gapfillLab";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
+import { resolvePastCanonicalWindowForHouse } from "@/lib/admin/gapfillLabPrime";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -79,11 +79,6 @@ function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
-}
-
-function canonicalGapfillWindow(timezone: string): { startDate: string; endDate: string } {
-  void timezone; // canonical window currently follows shared Chicago usage anchor.
-  return canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
 }
 
 function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
@@ -1005,7 +1000,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const canonicalWindow = canonicalGapfillWindow(timezone);
+  const canonicalWindowResolved = await resolvePastCanonicalWindowForHouse({
+    userId: user.id,
+    houseId: house.id,
+  });
+  if (!canonicalWindowResolved.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: canonicalWindowResolved.error,
+        message: canonicalWindowResolved.message,
+      },
+      { status: 409 }
+    );
+  }
+  const canonicalWindow = {
+    startDate: canonicalWindowResolved.startDate,
+    endDate: canonicalWindowResolved.endDate,
+  };
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
@@ -1315,6 +1327,12 @@ export async function POST(req: NextRequest) {
       explanation: classification.userFacingExplanation,
       missingData: classification.missingData,
       reasonCode: classification.reasonCode,
+      canonicalWindowHelper:
+        (sharedSim.body as any)?.windowHelper ?? canonicalWindowResolved.windowHelper,
+      coverageStart:
+        (sharedSim.body as any)?.windowStartUtc ?? canonicalWindow.startDate,
+      coverageEnd:
+        (sharedSim.body as any)?.windowEndUtc ?? canonicalWindow.endDate,
     };
     return NextResponse.json(mergedBody, { status: sharedSim.status });
   }
@@ -1408,6 +1426,7 @@ export async function POST(req: NextRequest) {
       baseloadDailyKwh: null,
       windowStartUtc: canonicalWindow.startDate,
       windowEndUtc: canonicalWindow.endDate,
+      canonicalWindowHelper: canonicalWindowResolved.windowHelper,
     },
     fullReportText:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +

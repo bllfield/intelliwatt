@@ -237,7 +237,21 @@ export async function buildGapfillCompareSimShared(args: {
       timezone,
     });
     if (!rebuilt.ok) {
-      return { ok: false, status: 400, body: { ok: false, error: rebuilt.error, message: rebuilt.message } };
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          ok: false,
+          error: rebuilt.error,
+          message: rebuilt.message,
+          windowStartUtc: rebuilt.windowStartUtc ?? null,
+          windowEndUtc: rebuilt.windowEndUtc ?? null,
+          missingDateKeys: rebuilt.missingDateKeys ?? [],
+          stubRowCount: rebuilt.stubRowCount ?? null,
+          weatherSourceSummary: rebuilt.weatherSourceSummary ?? null,
+          windowHelper: rebuilt.windowHelper ?? null,
+        },
+      };
     }
   } else {
     const inspect = await inspectPastCacheArtifacts({ houseId, scenarioId: "gapfill_lab" });

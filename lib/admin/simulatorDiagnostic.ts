@@ -9,6 +9,7 @@ import { getPastSimulatedDatasetForHouse, getSimulatedUsageForHouseScenario, rec
 import { getActualIntervalsForRangeWithSource, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { recomputePastAggregatesFromIntervals } from "@/modules/usageSimulator/dataset";
+import { classifyPastCacheIntegrity, type CacheIntegrityReason } from "@/modules/usageSimulator/parityIntegrity";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { computePastInputHash, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
@@ -272,12 +273,7 @@ export type SimulatorDiagnosticResult = {
     cacheCodecDriftToleranceKwh: number;
     cacheCodecDriftLikely: boolean | null;
     cacheIntegrityPass: boolean | null;
-    cacheIntegrityReason:
-      | "not_cache_restore"
-      | "digest_match"
-      | "digest_unavailable_totals_match"
-      | "digest_mismatch_codec_drift_likely"
-      | "digest_mismatch";
+    cacheIntegrityReason: CacheIntegrityReason;
     coldTotalKwh?: number;
     cacheTotalKwh?: number;
     recalcTotalKwh?: number;
@@ -627,49 +623,27 @@ export async function runSimulatorDiagnostic(
     isCacheRestore && typeof coldSummary.totalKwh === "number" && typeof productionSummary.totalKwh === "number"
       ? Math.round(Math.abs(coldSummary.totalKwh - productionSummary.totalKwh) * 100) / 100
       : null;
-  const cacheCodecDriftLikely: boolean | null =
-    isCacheRestore
-      ? cacheDigestMatch === false &&
-        coldParityOk &&
-        productionParityOk &&
-        typeof cacheTotalDeltaKwh === "number" &&
-        cacheTotalDeltaKwh <= CACHE_CODEC_DRIFT_TOLERANCE_KWH
+  const coldVsRecalcMatch =
+    parity?.coldVsRecalc != null
+      ? parity.coldVsRecalc.totalKwhMatch && parity.coldVsRecalc.intervalCountMatch
       : null;
-  const cacheIntegrityPass: boolean | null =
-    !isCacheRestore
-      ? null
-      : cacheDigestMatch === true
-        ? true
-        : cacheDigestMatch == null && coldVsCacheMatch === true
-          ? true
-          : cacheCodecDriftLikely === true;
-  const cacheIntegrityReason: NonNullable<SimulatorDiagnosticResult["integrity"]>["cacheIntegrityReason"] =
-    !isCacheRestore
-      ? "not_cache_restore"
-      : cacheDigestMatch === true
-        ? "digest_match"
-        : cacheDigestMatch == null && coldVsCacheMatch === true
-          ? "digest_unavailable_totals_match"
-          : cacheCodecDriftLikely === true
-            ? "digest_mismatch_codec_drift_likely"
-            : "digest_mismatch";
-  const totalsNearEqual = (a: number | undefined, b: number | undefined): boolean =>
-    typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 0.01 : false;
-  const firstDivergenceStage: NonNullable<SimulatorDiagnosticResult["integrity"]>["firstDivergenceStage"] =
-    !isCacheRestore
-      ? undefined
-      : !totalsNearEqual(coldParityDiag?.recomputedTotalFromIntervals, productionParityDiag?.recomputedTotalFromIntervals)
-        ? "interval_sum"
-        : !totalsNearEqual(coldParityDiag?.recomputedDailyTotalFromIntervals, productionParityDiag?.recomputedDailyTotalFromIntervals)
-          ? "daily_sum"
-          : !totalsNearEqual(
-                coldParityDiag?.recomputedMonthlyTotalFromIntervals,
-                productionParityDiag?.recomputedMonthlyTotalFromIntervals
-              )
-            ? "monthly_sum"
-            : cacheDigestMatch === false
-              ? "digest_only"
-              : "none";
+  const coldVsProductionIntervalCountMatch = parity?.coldVsProduction?.intervalCountMatch ?? null;
+  const integrityClassification = classifyPastCacheIntegrity({
+    isCacheRestore,
+    cacheDigestMatch,
+    cacheTotalDeltaKwh,
+    cacheCodecDriftToleranceKwh: CACHE_CODEC_DRIFT_TOLERANCE_KWH,
+    coldParityOk,
+    productionParityOk,
+    coldVsRecalcMatch,
+    coldVsProductionIntervalCountMatch,
+    coldRecomputedFromIntervals: coldParityDiag?.recomputedTotalFromIntervals,
+    cacheRecomputedFromIntervals: productionParityDiag?.recomputedTotalFromIntervals,
+    coldRecomputedDailyFromIntervals: coldParityDiag?.recomputedDailyTotalFromIntervals,
+    cacheRecomputedDailyFromIntervals: productionParityDiag?.recomputedDailyTotalFromIntervals,
+    coldRecomputedMonthlyFromIntervals: coldParityDiag?.recomputedMonthlyTotalFromIntervals,
+    cacheRecomputedMonthlyFromIntervals: productionParityDiag?.recomputedMonthlyTotalFromIntervals,
+  });
 
   const integrity: SimulatorDiagnosticResult["integrity"] = {
     intervalCountMatch,
@@ -678,9 +652,9 @@ export async function runSimulatorDiagnostic(
     cacheDigestMatch,
     cacheTotalDeltaKwh,
     cacheCodecDriftToleranceKwh: CACHE_CODEC_DRIFT_TOLERANCE_KWH,
-    cacheCodecDriftLikely,
-    cacheIntegrityPass,
-    cacheIntegrityReason,
+    cacheCodecDriftLikely: integrityClassification.cacheCodecDriftLikely,
+    cacheIntegrityPass: integrityClassification.cacheIntegrityPass,
+    cacheIntegrityReason: integrityClassification.cacheIntegrityReason,
     coldTotalKwh: coldSummary.totalKwh,
     cacheTotalKwh: productionResult.ok ? productionSummary.totalKwh : undefined,
     recalcTotalKwh: undefined,
@@ -693,7 +667,7 @@ export async function runSimulatorDiagnostic(
     coldRecomputedMonthlyFromIntervals: coldParityDiag?.recomputedMonthlyTotalFromIntervals,
     cacheRecomputedMonthlyFromIntervals: productionParityDiag?.recomputedMonthlyTotalFromIntervals,
     recalcRecomputedMonthlyFromIntervals: undefined,
-    firstDivergenceStage,
+    firstDivergenceStage: integrityClassification.firstDivergenceStage,
   };
   if (parity?.coldVsRecalc?.recalc) {
     const recalcSide = parity.coldVsRecalc.recalc as {

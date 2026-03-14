@@ -106,10 +106,12 @@ export default function SimulationEnginesPage() {
         cacheIntegrityPass: boolean | null;
         cacheIntegrityReason:
           | "not_cache_restore"
-          | "digest_match"
-          | "digest_unavailable_totals_match"
-          | "digest_mismatch_codec_drift_likely"
-          | "digest_mismatch";
+          | "exact_match"
+          | "codec_drift_within_tolerance"
+          | "codec_drift_exceeds_tolerance"
+          | "display_rounding_only"
+          | "display_month_stitch_only"
+          | "true_corruption";
         coldTotalKwh?: number;
         cacheTotalKwh?: number;
         recalcTotalKwh?: number;
@@ -992,11 +994,17 @@ export default function SimulationEnginesPage() {
                             }
                           >
                             Cache Integrity: {cacheIntegrityPass === null ? "N/A" : cacheIntegrityPass ? "PASS" : "FAIL"}
-                            {cacheIntegrityReason === "digest_mismatch_codec_drift_likely"
-                              ? " (Expected codec drift)"
-                              : cacheIntegrityReason === "digest_mismatch"
-                                ? " (Digest mismatch beyond codec tolerance)"
-                                : null}
+                            {cacheIntegrityReason === "codec_drift_within_tolerance"
+                              ? " (Codec drift within tolerance)"
+                              : cacheIntegrityReason === "codec_drift_exceeds_tolerance"
+                                ? " (Codec drift exceeds tolerance)"
+                                : cacheIntegrityReason === "display_rounding_only"
+                                  ? " (Daily display rounding only)"
+                                  : cacheIntegrityReason === "display_month_stitch_only"
+                                    ? " (Monthly display stitch only)"
+                                    : cacheIntegrityReason === "true_corruption"
+                                      ? " (Unexplained integrity failure)"
+                                      : null}
                           </span>
                           {integrity?.coldVsCacheMatch !== undefined && integrity.coldVsCacheMatch !== null ? (
                             <span className={integrity.coldVsCacheMatch ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
@@ -1013,18 +1021,24 @@ export default function SimulationEnginesPage() {
                             {!parityPass && parityDiff != null ? ` (summary vs sum(intervals15) diff: ${parityDiff.toFixed(2)} kWh)` : null}
                           </span>
                         </div>
-                        {(!parityPass || cacheIntegrityPass === false || cacheIntegrityReason === "digest_mismatch_codec_drift_likely") ? (
+                        {(!parityPass || cacheIntegrityPass === false || cacheIntegrityReason === "codec_drift_within_tolerance" || cacheIntegrityReason === "display_rounding_only" || cacheIntegrityReason === "display_month_stitch_only") ? (
                           <div className="mt-2 border-t border-slate-200 pt-2 text-xs text-slate-600">
                             {!parityPass
                               ? "Pipeline: dataset.summary.totalKwh is derived from sum(intervals15); mismatch indicates overlay or codec rounding. Check cold build and cache restore paths in modules/usageSimulator/service.ts."
                               : null}
-                            {cacheIntegrityReason === "digest_mismatch_codec_drift_likely"
-                              ? ` Cache: decoded intervals digest differs from cold build, but total delta${cacheTotalDelta != null ? ` (${cacheTotalDelta.toFixed(2)} kWh)` : ""} is within codec tolerance; this is expected encode/decode drift (intervalCodec.ts).`
-                              : cacheIntegrityPass === false && cacheDigestMatch === false
-                                ? " Cache: decoded intervals digest does not match cold build and exceeds codec tolerance; investigate artifact integrity."
-                                : cacheIntegrityPass === false
-                                  ? " Cache: cold vs cache mismatch; run Rebuild Simulation Cache and re-run diagnostic."
-                                  : null}
+                            {cacheIntegrityReason === "codec_drift_within_tolerance"
+                              ? ` Cache: decoded intervals differ from cold build, but total drift${cacheTotalDelta != null ? ` (${cacheTotalDelta.toFixed(2)} kWh)` : ""} is within codec policy tolerance; this is expected encode/decode precision behavior (intervalCodec.ts).`
+                              : cacheIntegrityReason === "display_rounding_only"
+                                ? " Cache: interval-source totals are healthy; daily display sums differ only from per-day rounding accumulation."
+                                : cacheIntegrityReason === "display_month_stitch_only"
+                                  ? " Cache: interval-source totals are healthy; monthly display totals differ due to stitched-month presentation math."
+                                  : cacheIntegrityReason === "codec_drift_exceeds_tolerance"
+                                    ? " Cache: decoded intervals drift beyond codec tolerance; rebuild cache and investigate artifact integrity."
+                                    : cacheIntegrityReason === "true_corruption"
+                                      ? " Cache: integrity checks failed beyond codec/display explanations; investigate artifact corruption."
+                                      : cacheIntegrityPass === false
+                                        ? " Cache: cold vs cache mismatch; run Rebuild Simulation Cache and re-run diagnostic."
+                                        : null}
                           </div>
                         ) : null}
                       </>

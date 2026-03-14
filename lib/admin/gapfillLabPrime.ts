@@ -7,9 +7,8 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
-import { getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
+import { getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
-import { monthsEndingAt } from "@/modules/manualUsage/anchor";
 import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
 import type { SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { getPastSimulatedDatasetForHouse } from "@/modules/usageSimulator/service";
@@ -25,6 +24,11 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
+import { enumerateDayStartsMsForWindow, getDayGridTimestamps, dateKeyFromTimestamp } from "@/modules/usageSimulator/pastStitchedCurve";
+import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
+
+const WORKSPACE_PAST_NAME = "Past (Corrected)";
 
 type DateRange = { startDate: string; endDate: string };
 
@@ -108,7 +112,83 @@ async function getTravelRangesFromDb(userId: string, houseId: string): Promise<D
 
 export type PrimeGapfillLabResult =
   | { ok: true; inputHash: string; houseId: string }
-  | { ok: false; error: string; message: string };
+  | {
+      ok: false;
+      error: string;
+      message: string;
+      windowStartUtc?: string | null;
+      windowEndUtc?: string | null;
+      missingDateKeys?: string[];
+      stubRowCount?: number;
+      weatherSourceSummary?: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none";
+      windowHelper?: string;
+    };
+
+export async function resolvePastCanonicalWindowForHouse(args: {
+  userId: string;
+  houseId: string;
+}): Promise<
+  | {
+      ok: true;
+      startDate: string;
+      endDate: string;
+      canonicalMonths: string[];
+      windowHelper: "resolveWindowFromBuildInputsForPastIdentity";
+    }
+  | { ok: false; error: string; message: string }
+> {
+  const scenario = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: { userId: args.userId, houseId: args.houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
+      select: { id: true },
+    })
+    .catch(() => null);
+  if (!scenario?.id) {
+    return {
+      ok: false,
+      error: "past_scenario_not_found",
+      message: "Past (Corrected) scenario was not found for this house.",
+    };
+  }
+  const buildRec = await (prisma as any).usageSimulatorBuild
+    .findUnique({
+      where: {
+        userId_houseId_scenarioKey: {
+          userId: args.userId,
+          houseId: args.houseId,
+          scenarioKey: String(scenario.id),
+        },
+      },
+      select: { buildInputs: true },
+    })
+    .catch(() => null);
+  if (!buildRec?.buildInputs) {
+    return {
+      ok: false,
+      error: "past_build_missing",
+      message: "Past (Corrected) build inputs are missing. Rebuild Past first.",
+    };
+  }
+  const buildInputs = buildRec.buildInputs as Record<string, unknown>;
+  const canonicalMonths = Array.isArray((buildInputs as any)?.canonicalMonths)
+    ? ((buildInputs as any).canonicalMonths as string[]).map((m) => String(m ?? "").trim()).filter((m) => /^\d{4}-\d{2}$/.test(m))
+    : [];
+  const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
+  if (!window || canonicalMonths.length === 0) {
+    return {
+      ok: false,
+      error: "past_window_unresolved",
+      message: "Could not resolve canonical Past window from shared window helper.",
+    };
+  }
+  return {
+    ok: true,
+    startDate: window.startDate,
+    endDate: window.endDate,
+    canonicalMonths,
+    windowHelper: "resolveWindowFromBuildInputsForPastIdentity",
+  };
+}
 
 export async function inspectPastCacheArtifacts(args: {
   houseId: string;
@@ -165,12 +245,14 @@ export async function buildAndSavePastForGapfillLab(args: {
     return { ok: false, error: "no_actual_data", message: "No actual interval data (SMT or Green Button)." };
   }
 
-  const result = await getActualUsageDatasetForHouse(houseId, esiid, { skipFullYearIntervalFetch: true });
-  const summary = result?.dataset?.summary;
-  if (!summary?.end) {
-    return { ok: false, error: "no_actual_data", message: "No actual interval data for baseline window." };
+  const canonicalWindow = await resolvePastCanonicalWindowForHouse({ userId, houseId });
+  if (!canonicalWindow.ok) {
+    return { ok: false, error: canonicalWindow.error, message: canonicalWindow.message };
   }
-  const anchorEndDate = String(summary.end).slice(0, 10);
+  const startDate = canonicalWindow.startDate;
+  const endDate = canonicalWindow.endDate;
+  const canonicalMonths12 = canonicalWindow.canonicalMonths;
+  const windowHelper = canonicalWindow.windowHelper;
 
   const dbTravelRanges = await getTravelRangesFromDb(userId, houseId);
   const dbLocal = new Set<string>(dbTravelRanges.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone)));
@@ -190,20 +272,6 @@ export async function buildAndSavePastForGapfillLab(args: {
   }
 
   const normalizedAppliance = normalizeStoredApplianceProfile(applianceProfileRec.appliancesJson as any);
-  const endMonth = anchorEndDate.slice(0, 7);
-  const canonicalMonths12 = monthsEndingAt(endMonth, 12);
-  const canonicalWindowForBuild = resolveWindowFromBuildInputsForPastIdentity({
-    canonicalMonths: canonicalMonths12,
-  });
-  if (!canonicalWindowForBuild) {
-    return {
-      ok: false,
-      error: "canonical_window_unresolved",
-      message: "Could not resolve canonical Past window from build inputs.",
-    };
-  }
-  const startDate = canonicalWindowForBuild.startDate;
-  const endDate = canonicalWindowForBuild.endDate;
   const buildExcludedUtcSet = buildExcludedUtcDateKeySetFromLocalKeys(
     buildExcludedDateKeysLocal,
     startDate,
@@ -280,6 +348,45 @@ export async function buildAndSavePastForGapfillLab(args: {
   });
 
   if (!pastResult.dataset) {
+    if (String(pastResult.error ?? "").startsWith("actual_weather_required:")) {
+      const canonicalDateKeys = Array.from(
+        new Set(
+          enumerateDayStartsMsForWindow(startDate, endDate)
+            .map((ms) => getDayGridTimestamps(ms)[0] ?? "")
+            .map((ts) => dateKeyFromTimestamp(ts))
+            .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+        )
+      ).sort();
+      const wx = await getHouseWeatherDays({
+        houseId,
+        dateKeys: canonicalDateKeys,
+        kind: "ACTUAL_LAST_YEAR",
+      });
+      const missingDateKeys = canonicalDateKeys.filter((dk) => !wx.has(dk));
+      let stubRowCount = 0;
+      for (const row of Array.from(wx.values())) {
+        if (String((row as any)?.source ?? "").trim() === WEATHER_STUB_SOURCE) stubRowCount += 1;
+      }
+      const weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" =
+        wx.size === 0
+          ? "none"
+          : stubRowCount === 0
+            ? "actual_only"
+            : stubRowCount === wx.size
+              ? "stub_only"
+              : "mixed_actual_and_stub";
+      return {
+        ok: false,
+        error: String(pastResult.error ?? "actual_weather_required"),
+        message: "Past canonical window weather validation failed (actual weather required).",
+        windowStartUtc: startDate,
+        windowEndUtc: endDate,
+        missingDateKeys,
+        stubRowCount,
+        weatherSourceSummary,
+        windowHelper,
+      };
+    }
     return {
       ok: false,
       error: "past_dataset_failed",
