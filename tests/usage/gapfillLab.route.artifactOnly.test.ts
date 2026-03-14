@@ -11,6 +11,8 @@ const buildGapfillCompareSimShared = vi.fn();
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
 const prismaScenarioFindMany = vi.fn();
+const prismaScenarioFindFirst = vi.fn();
+const prismaBuildFindUnique = vi.fn();
 const prismaScenarioEventFindMany = vi.fn();
 
 vi.mock("@/lib/auth/admin", () => ({
@@ -25,7 +27,11 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findFirst: (...args: any[]) => prismaUserFindFirst(...args) },
     houseAddress: { findMany: (...args: any[]) => prismaHouseFindMany(...args), findUnique: vi.fn() },
-    usageSimulatorScenario: { findMany: (...args: any[]) => prismaScenarioFindMany(...args) },
+    usageSimulatorScenario: {
+      findMany: (...args: any[]) => prismaScenarioFindMany(...args),
+      findFirst: (...args: any[]) => prismaScenarioFindFirst(...args),
+    },
+    usageSimulatorBuild: { findUnique: (...args: any[]) => prismaBuildFindUnique(...args) },
     usageSimulatorScenarioEvent: { findMany: (...args: any[]) => prismaScenarioEventFindMany(...args) },
   },
 }));
@@ -117,6 +123,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
+    prismaScenarioFindFirst.mockReset();
+    prismaBuildFindUnique.mockReset();
     prismaScenarioEventFindMany.mockReset();
 
     requireAdmin.mockReturnValue({ ok: true });
@@ -124,6 +132,12 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     prismaUserFindFirst.mockResolvedValue({ id: "u1", email: "user@example.com" });
     prismaHouseFindMany.mockResolvedValue([{ id: "h1", esiid: "1044", addressLine1: "123 Main", addressCity: "Fort Worth", addressState: "TX", addressZip5: "76102", createdAt: new Date() }]);
     prismaScenarioFindMany.mockResolvedValue([]);
+    prismaScenarioFindFirst.mockResolvedValue({ id: "past-s1" });
+    prismaBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        canonicalMonths: ["2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"],
+      },
+    });
     prismaScenarioEventFindMany.mockResolvedValue([]);
     chooseActualSource.mockResolvedValue("SMT");
     getActualIntervalsForRange.mockResolvedValue([

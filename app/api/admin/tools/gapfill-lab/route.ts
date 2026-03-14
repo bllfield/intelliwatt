@@ -3,7 +3,6 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import {
   buildDailyWeatherFeaturesFromHourly,
@@ -1021,36 +1020,21 @@ export async function POST(req: NextRequest) {
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
-    const resolved = await resolveIntervalsLayer({
-      userId: user.id,
+    const sourceLabel = String((source as any)?.source ?? (source as any)?.kind ?? "actual");
+    const intervalsForWindow = await getActualIntervalsForRange({
       houseId: house.id,
-      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
       esiid,
+      startDate: canonicalWindow.startDate,
+      endDate: canonicalWindow.endDate,
     });
-    const ds = resolved?.dataset;
-    if (ds) {
-      const insightsAny = (ds.insights ?? {}) as any;
-      usage365 = {
-        source: String(ds.summary?.source ?? String((source as any)?.source ?? (source as any)?.kind ?? "actual")),
-        timezone,
-        // Keep coverage labels aligned with Usage dashboard canonical window.
-        coverageStart: canonicalWindow.startDate,
-        coverageEnd: canonicalWindow.endDate,
-        intervalCount: Number(ds.summary?.intervalsCount ?? 0) || 0,
-        daily: Array.isArray(ds.daily) ? ds.daily : [],
-        monthly: Array.isArray(ds.monthly) ? ds.monthly : [],
-        weekdayKwh: Number(insightsAny?.weekdayVsWeekend?.weekday ?? 0) || 0,
-        weekendKwh: Number(insightsAny?.weekdayVsWeekend?.weekend ?? 0) || 0,
-        fifteenCurve: Array.isArray(insightsAny?.fifteenMinuteAverages) ? insightsAny.fifteenMinuteAverages : [],
-        stitchedMonth: (insightsAny?.stitchedMonth ?? null) as Usage365Payload["stitchedMonth"],
-      };
-    } else {
-      usage365 = buildUsage365Payload({
-        intervals: [],
-        timezone,
-        source: String((source as any)?.source ?? (source as any)?.kind ?? "actual"),
-      });
-    }
+    usage365 = buildUsage365Payload({
+      intervals: intervalsForWindow ?? [],
+      timezone,
+      source: sourceLabel,
+    });
+    // Keep displayed window aligned to the same backend canonical window helper.
+    usage365.coverageStart = canonicalWindow.startDate;
+    usage365.coverageEnd = canonicalWindow.endDate;
   }
 
   const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
