@@ -7,6 +7,7 @@ const normalizeEmailSafe = vi.fn();
 const chooseActualSource = vi.fn();
 const getActualIntervalsForRange = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
+const getCandidateDateCoverageForSelection = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -101,6 +102,7 @@ vi.mock("@/lib/admin/gapfillLab", () => ({
   getLocalDayOfWeekFromDateKey: vi.fn(),
   mergeDateKeysToRanges: vi.fn(),
   pickRandomTestDateKeys: vi.fn(),
+  getCandidateDateCoverageForSelection: (...args: any[]) => getCandidateDateCoverageForSelection(...args),
   prevCalendarDay: vi.fn((s: string) => s),
   summarizeDailyCoverageFromIntervals: vi.fn(),
   filterCandidateDateKeysBySeason: vi.fn(),
@@ -120,6 +122,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     chooseActualSource.mockReset();
     getActualIntervalsForRange.mockReset();
     buildGapfillCompareSimShared.mockReset();
+    getCandidateDateCoverageForSelection.mockReset();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
@@ -144,6 +147,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
     ]);
+    getCandidateDateCoverageForSelection.mockImplementation(async ({ loadIntervalsForWindow }: any) => {
+      const intervals = await loadIntervalsForWindow();
+      const dateKeys = Array.from(
+        new Set((Array.isArray(intervals) ? intervals : []).map((r: any) => String(r?.timestamp ?? "").slice(0, 10)))
+      ).filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+      return { candidateDateKeys: dateKeys, cacheHit: false, coverageByDay: {} };
+    });
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {

@@ -532,6 +532,91 @@ export function summarizeDailyCoverageFromIntervals(
   return out;
 }
 
+const CANDIDATE_DAY_COVERAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const candidateDayCoverageCache = new Map<
+  string,
+  {
+    createdAtMs: number;
+    candidateDateKeys: string[];
+    coverageByDay: Record<string, { count: number; expected: number; pct: number }>;
+  }
+>();
+
+function buildCandidateDayCoverageCacheKey(args: {
+  houseId: string;
+  scenarioIdentity?: string | null;
+  windowStart: string;
+  windowEnd: string;
+  timezone: string;
+  minDayCoveragePct: number;
+  stratifyByMonth: boolean;
+  stratifyByWeekend: boolean;
+}): string {
+  const pct = Math.round((Number(args.minDayCoveragePct) || 0) * 10000) / 10000;
+  return [
+    `house:${String(args.houseId ?? "").trim()}`,
+    `scenario:${String(args.scenarioIdentity ?? "").trim() || "none"}`,
+    `window:${String(args.windowStart ?? "").trim()}..${String(args.windowEnd ?? "").trim()}`,
+    `tz:${String(args.timezone ?? "").trim()}`,
+    `minCoverage:${pct.toFixed(4)}`,
+    `stratMonth:${args.stratifyByMonth ? "1" : "0"}`,
+    `stratWeekend:${args.stratifyByWeekend ? "1" : "0"}`,
+  ].join("|");
+}
+
+export async function getCandidateDateCoverageForSelection(args: {
+  houseId: string;
+  scenarioIdentity?: string | null;
+  windowStart: string;
+  windowEnd: string;
+  timezone: string;
+  minDayCoveragePct: number;
+  stratifyByMonth: boolean;
+  stratifyByWeekend: boolean;
+  loadIntervalsForWindow: () => Promise<IntervalPoint[]>;
+}): Promise<{
+  candidateDateKeys: string[];
+  cacheHit: boolean;
+  coverageByDay: Record<string, { count: number; expected: number; pct: number }>;
+}> {
+  const key = buildCandidateDayCoverageCacheKey({
+    houseId: args.houseId,
+    scenarioIdentity: args.scenarioIdentity,
+    windowStart: args.windowStart,
+    windowEnd: args.windowEnd,
+    timezone: args.timezone,
+    minDayCoveragePct: args.minDayCoveragePct,
+    stratifyByMonth: args.stratifyByMonth,
+    stratifyByWeekend: args.stratifyByWeekend,
+  });
+  const now = Date.now();
+  const cached = candidateDayCoverageCache.get(key);
+  if (cached && now - cached.createdAtMs <= CANDIDATE_DAY_COVERAGE_CACHE_TTL_MS) {
+    return {
+      candidateDateKeys: [...cached.candidateDateKeys],
+      cacheHit: true,
+      coverageByDay: { ...cached.coverageByDay },
+    };
+  }
+
+  const intervals = await args.loadIntervalsForWindow();
+  const coverage = summarizeDailyCoverageFromIntervals(intervals ?? [], args.timezone);
+  const candidateDateKeys = Array.from(coverage.keys())
+    .filter((dk) => (coverage.get(dk)?.pct ?? 0) >= args.minDayCoveragePct)
+    .sort();
+  const coverageByDay = Object.fromEntries(Array.from(coverage.entries()));
+  candidateDayCoverageCache.set(key, {
+    createdAtMs: now,
+    candidateDateKeys: [...candidateDateKeys],
+    coverageByDay,
+  });
+  return {
+    candidateDateKeys,
+    cacheHit: false,
+    coverageByDay,
+  };
+}
+
 /**
  * Default pool window: centered on midday, spread across runHoursPerDay.
  * Returns inclusive [startHour, endHour] in 0-23 local time.

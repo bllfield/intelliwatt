@@ -11,9 +11,9 @@ import {
   dateKeyInTimezone,
   localDateKeysInRange,
   getLocalDayOfWeekFromDateKey,
+  getCandidateDateCoverageForSelection,
   mergeDateKeysToRanges,
   pickRandomTestDateKeys,
-  summarizeDailyCoverageFromIntervals,
   type DayTotalDiagnostics,
   filterCandidateDateKeysBySeason,
   pickExtremeWeatherTestDateKeys,
@@ -1090,17 +1090,27 @@ export async function POST(req: NextRequest) {
   if (testDaysRequested != null) {
     const candidateEnd = canonicalWindow.endDate;
     const candidateStart = canonicalWindow.startDate;
-    const candidateIntervals = await getActualIntervalsForRange({
+    const coverageSelection = await getCandidateDateCoverageForSelection({
       houseId: house.id,
-      esiid,
-      startDate: candidateStart,
-      endDate: candidateEnd,
+      scenarioIdentity: `gapfill_lab:${canonicalWindowResolved.canonicalMonths.join(",")}`,
+      windowStart: candidateStart,
+      windowEnd: candidateEnd,
+      timezone,
+      minDayCoveragePct,
+      stratifyByMonth,
+      stratifyByWeekend,
+      loadIntervalsForWindow: async () => {
+        const candidateIntervals = await getActualIntervalsForRange({
+          houseId: house.id,
+          esiid,
+          startDate: candidateStart,
+          endDate: candidateEnd,
+        });
+        candidateIntervalsForTesting = candidateIntervals ?? [];
+        return candidateIntervalsForTesting;
+      },
     });
-    candidateIntervalsForTesting = candidateIntervals ?? [];
-    const coverage = summarizeDailyCoverageFromIntervals(candidateIntervals ?? [], timezone);
-    const candidateDateKeys = Array.from(coverage.keys()).filter(
-      (dk) => (coverage.get(dk)?.pct ?? 0) >= minDayCoveragePct
-    ).sort();
+    const candidateDateKeys = coverageSelection.candidateDateKeys;
     if (testMode === "random") {
       seedUsed = `${house.id}-${Date.now()}`;
     } else {
