@@ -328,5 +328,40 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.usage365?.coverageStart).toBe("2025-03-01");
     expect(body.usage365?.coverageEnd).toBe("2026-02-28");
   });
+
+  it("normalizes canonicalPeriods windows to an inclusive 365-day range", async () => {
+    prismaBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        canonicalPeriods: [{ startDate: "2025-03-12", endDate: "2026-03-12" }],
+        canonicalMonths: ["2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03"],
+      },
+    });
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2025-03-12T12:00:00.000Z", kwh: 1.0 },
+      { timestamp: "2025-03-13T12:00:00.000Z", kwh: 2.0 },
+      { timestamp: "2026-03-12T12:00:00.000Z", kwh: 3.0 },
+    ]);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [],
+        includeUsage365: true,
+      }),
+    } as any;
+
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.usage365?.coverageStart).toBe("2025-03-13");
+    expect(body.usage365?.coverageEnd).toBe("2026-03-12");
+    const usageDaily = Array.isArray(body.usage365?.daily) ? body.usage365.daily : [];
+    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-13", "2026-03-12"]);
+    const usageMonthly = Array.isArray(body.usage365?.monthly) ? body.usage365.monthly : [];
+    expect(usageMonthly.length).toBe(12);
+    expect(body.usage365?.stitchedMonth?.yearMonth).toBe("2026-03");
+  });
 });
 

@@ -89,6 +89,30 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
 
+function normalizeDailyRowsToWindow<T extends { date: string }>(
+  rows: T[],
+  coverageStart: string | null,
+  coverageEnd: string | null,
+  maxDays = 365
+): T[] {
+  const start = typeof coverageStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(coverageStart) ? coverageStart : null;
+  const end = typeof coverageEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(coverageEnd) ? coverageEnd : null;
+  const seen = new Set<string>();
+  const filtered = rows
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.date ?? "")))
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .filter((row) => {
+      const d = String(row.date);
+      if (seen.has(d)) return false;
+      seen.add(d);
+      if (start && d < start) return false;
+      if (end && d > end) return false;
+      return true;
+    });
+  const limit = Math.max(1, Math.trunc(Number(maxDays) || 365));
+  return filtered.length > limit ? filtered.slice(filtered.length - limit) : filtered;
+}
+
 function formatApiError(data: any, status: number): string {
   const base = String(data?.message ?? data?.error ?? `Request failed (${status})`);
   const explanation = String(data?.explanation ?? "").trim();
@@ -147,7 +171,7 @@ export default function GapFillLabClient() {
       : [];
     if (!dailyChartRows.length) return null;
 
-    const daily = dailyChartRows
+    const rawDaily = dailyChartRows
       .map((d) => ({
         date: String(d.date ?? ""),
         kwh: Number((d as any).simKwh ?? (d as any).kwh ?? 0) || 0,
@@ -155,6 +179,9 @@ export default function GapFillLabClient() {
       }))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
+    const coverageStart = (result as any)?.parity?.windowStartUtc ?? rawDaily[0]?.date ?? null;
+    const coverageEnd = (result as any)?.parity?.windowEndUtc ?? rawDaily[rawDaily.length - 1]?.date ?? null;
+    const daily = normalizeDailyRowsToWindow(rawDaily, coverageStart, coverageEnd, 365);
 
     if (!daily.length) return null;
 
@@ -199,8 +226,8 @@ export default function GapFillLabClient() {
       source: "GAPFILL_SIMULATED_TEST_WINDOW",
       timezone: timezone || "America/Chicago",
       // Prefer shared canonical window metadata from backend for date-label parity with Usage charts.
-      coverageStart: (result as any)?.parity?.windowStartUtc ?? daily[0]?.date ?? null,
-      coverageEnd: (result as any)?.parity?.windowEndUtc ?? daily[daily.length - 1]?.date ?? null,
+      coverageStart,
+      coverageEnd,
       intervalCount: Number((result as any)?.diagnostics?.chartIntervalCount ?? (result as any).testIntervalsCount ?? (result as any)?.parity?.intervalCount ?? 0) || 0,
       daily,
       monthly,
@@ -210,7 +237,21 @@ export default function GapFillLabClient() {
       stitchedMonth: (result as any)?.diagnostics?.stitchedMonthChartSim ?? null,
     };
   }, [result, timezone]);
-  const hasUsage365ChartData = Boolean(result && result.ok && result.usage365?.daily?.length);
+  const usage365ChartData = useMemo(() => {
+    if (!result || !result.ok || !result.usage365?.daily?.length) return null;
+    const normalizedDaily = normalizeDailyRowsToWindow(
+      result.usage365.daily,
+      result.usage365.coverageStart ?? null,
+      result.usage365.coverageEnd ?? null,
+      365
+    );
+    if (!normalizedDaily.length) return null;
+    return {
+      ...result.usage365,
+      daily: normalizedDaily,
+    };
+  }, [result]);
+  const hasUsage365ChartData = Boolean(usage365ChartData?.daily?.length);
   const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
   const effectiveChartMode: ChartMode =
     chartMode === "usage365" && !hasUsage365ChartData && hasGapfillChartData
@@ -822,24 +863,22 @@ export default function GapFillLabClient() {
                   <button
                     type="button"
                     onClick={() => setChartMode("usage365")}
-                    disabled={!result.usage365?.daily?.length}
                     className={`px-3 py-1.5 rounded text-sm border ${
                       effectiveChartMode === "usage365"
                         ? "bg-brand-navy text-white border-brand-navy"
                         : "bg-white text-brand-navy border-brand-blue/30"
-                    } disabled:opacity-50`}
+                    }`}
                   >
                     Usage (365-day)
                   </button>
                   <button
                     type="button"
                     onClick={() => setChartMode("gapfill")}
-                    disabled={!gapfillChartData?.daily?.length}
                     className={`px-3 py-1.5 rounded text-sm border ${
                       effectiveChartMode === "gapfill"
                         ? "bg-brand-navy text-white border-brand-navy"
                         : "bg-white text-brand-navy border-brand-blue/30"
-                    } disabled:opacity-50`}
+                    }`}
                   >
                     Gap-Fill (simulated test window)
                   </button>
@@ -865,28 +904,32 @@ export default function GapFillLabClient() {
                       coverageEnd={gapfillChartData.coverageEnd}
                     />
                   </>
-                ) : result.usage365?.daily?.length ? (
+                ) : usage365ChartData?.daily?.length ? (
                   <>
                     <p className="text-sm text-brand-navy/70 mb-4">
-                      Source: {result.usage365.source} · {result.usage365.intervalCount.toLocaleString()} intervals ·
-                      {` ${result.usage365.coverageStart ?? "—"} to ${result.usage365.coverageEnd ?? "—"}`}
+                      Source: {usage365ChartData.source} · {usage365ChartData.intervalCount.toLocaleString()} intervals ·
+                      {` ${usage365ChartData.coverageStart ?? "—"} to ${usage365ChartData.coverageEnd ?? "—"}`}
                     </p>
                     <UsageChartsPanel
-                      monthly={result.usage365.monthly}
-                      stitchedMonth={result.usage365.stitchedMonth ?? null}
-                      weekdayKwh={result.usage365.weekdayKwh}
-                      weekendKwh={result.usage365.weekendKwh}
+                      monthly={usage365ChartData.monthly}
+                      stitchedMonth={usage365ChartData.stitchedMonth ?? null}
+                      weekdayKwh={usage365ChartData.weekdayKwh}
+                      weekendKwh={usage365ChartData.weekendKwh}
                       monthlyView={usageMonthlyView}
                       onMonthlyViewChange={setUsageMonthlyView}
                       dailyView={usageDailyView}
                       onDailyViewChange={setUsageDailyView}
-                      daily={result.usage365.daily}
-                      fifteenCurve={result.usage365.fifteenCurve}
-                      coverageStart={result.usage365.coverageStart}
-                      coverageEnd={result.usage365.coverageEnd}
+                      daily={usage365ChartData.daily}
+                      fifteenCurve={usage365ChartData.fifteenCurve}
+                      coverageStart={usage365ChartData.coverageStart}
+                      coverageEnd={usage365ChartData.coverageEnd}
                     />
                   </>
-                ) : null}
+                ) : (
+                  <p className="text-sm text-brand-navy/70">
+                    No chart data for this view yet. Load Usage (365-day) or run Compare.
+                  </p>
+                )}
               </div>
             </details>
           ) : null}

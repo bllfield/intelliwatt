@@ -28,6 +28,8 @@ import {
   classifySimulationFailure,
   recordSimulationDataAlert,
 } from "@/modules/usageSimulator/simulationDataAlerts";
+import { prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
@@ -80,6 +82,21 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function normalizeWindowToInclusiveDays(
+  window: { startDate: string; endDate: string },
+  totalDays = 365
+): { startDate: string; endDate: string } {
+  const endDate = String(window?.endDate ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { startDate: String(window?.startDate ?? "").slice(0, 10), endDate };
+  }
+  const days = Math.max(1, Math.trunc(Number(totalDays) || 365));
+  return {
+    startDate: prevCalendarDayDateKey(endDate, days - 1),
+    endDate,
+  };
+}
+
 function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
   try {
     const d = new Date(tsIso);
@@ -102,10 +119,10 @@ function buildUsage365Payload(args: {
   intervals: Array<{ timestamp: string; kwh: number }>;
   timezone: string;
   source: string;
+  endDate: string;
 }): Usage365Payload {
-  const { intervals, timezone, source } = args;
+  const { intervals, timezone, source, endDate } = args;
   const byDay = new Map<string, number>();
-  const byMonth = new Map<string, number>();
   const slotSums = Array<number>(96).fill(0);
   const slotCounts = Array<number>(96).fill(0);
   let weekdayKwh = 0;
@@ -116,9 +133,7 @@ function buildUsage365Payload(args: {
     const kwh = Number(row?.kwh) || 0;
     const dateKey = dateKeyInTimezone(ts, timezone);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
-    const monthKey = dateKey.slice(0, 7);
     byDay.set(dateKey, (byDay.get(dateKey) ?? 0) + kwh);
-    byMonth.set(monthKey, (byMonth.get(monthKey) ?? 0) + kwh);
     const dow = getLocalDayOfWeekFromDateKey(dateKey, timezone);
     if (dow === 0 || dow === 6) weekendKwh += kwh;
     else weekdayKwh += kwh;
@@ -132,9 +147,17 @@ function buildUsage365Payload(args: {
   const daily = Array.from(byDay.entries())
     .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const monthly = Array.from(byMonth.entries())
-    .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
-    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const monthlyBuild = buildDisplayMonthlyFromIntervalsUtc(
+    intervals.map((row) => ({
+      timestamp: String(row?.timestamp ?? ""),
+      consumption_kwh: Number(row?.kwh) || 0,
+    })),
+    endDate
+  );
+  const monthly = monthlyBuild.monthly.map((m) => ({
+    month: String(m?.month ?? ""),
+    kwh: round2(Number(m?.kwh) || 0),
+  }));
   const fifteenCurve = Array.from({ length: 96 }, (_, slot) => {
     const hour = Math.floor(slot / 4);
     const minute = (slot % 4) * 15;
@@ -154,6 +177,7 @@ function buildUsage365Payload(args: {
     weekdayKwh: round2(weekdayKwh),
     weekendKwh: round2(weekendKwh),
     fifteenCurve,
+    stitchedMonth: monthlyBuild.stitchedMonth,
   };
 }
 
@@ -1015,10 +1039,10 @@ export async function POST(req: NextRequest) {
       { status: 409 }
     );
   }
-  const canonicalWindow = {
+  const canonicalWindow = normalizeWindowToInclusiveDays({
     startDate: canonicalWindowResolved.startDate,
     endDate: canonicalWindowResolved.endDate,
-  };
+  }, 365);
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
@@ -1037,6 +1061,7 @@ export async function POST(req: NextRequest) {
       intervals: boundedIntervalsForWindow,
       timezone,
       source: sourceLabel,
+      endDate: canonicalWindow.endDate,
     });
     // Keep displayed window aligned to the same backend canonical window helper.
     usage365.coverageStart = canonicalWindow.startDate;
@@ -1421,6 +1446,119 @@ export async function POST(req: NextRequest) {
   });
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
   const responseApplianceProfile = sharedSim.applianceProfileFromModel ?? applianceProfile;
+  const fullReport = buildFullReport({
+    reportVersion: REPORT_VERSION,
+    generatedAt: new Date().toISOString(),
+    env: process.env.NODE_ENV ?? "development",
+    houseId: house.id,
+    userId: user.id,
+    email: user.email,
+    houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+    timezone,
+    testRangesInput: testRanges,
+    travelRangesFromDb,
+    guardrailExcludedRanges: mergeDateKeysToRanges(Array.from(guardrailExcludedDateKeysLocal).sort()),
+    listTestDateKeys: testDateKeysSorted,
+    testIntervalsCount: actualTestIntervals.length,
+    testDaysCount: testDateKeysLocal.size,
+    guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+    guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
+    dateKeyDiag: {
+      travelDateKeysLocalCount: travelDateKeysLocal.size,
+      travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
+      testDateKeysLocalCount: testDateKeysLocal.size,
+      testDateKeysLocalSample: sortedSample(testDateKeysLocal),
+      guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+      guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
+      setArithmetic: {
+        onlyTravelCount: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).length,
+        onlyTravelSample: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).sort().slice(0, 10),
+        onlyTestCount: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).length,
+        onlyTestSample: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).sort().slice(0, 10),
+        overlapCount: overlapLocal.size,
+        overlapSample: sortedSample(overlapLocal),
+      },
+    },
+    dataset: {
+      summary: {
+        intervalsCount: Number((sharedSim.modelAssumptions as any)?.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0),
+        start: canonicalWindow.startDate,
+        end: canonicalWindow.endDate,
+      },
+      totals: {
+        netKwh: Number((sharedSim.modelAssumptions as any)?.totalKwh ?? metrics.totalSimKwhMasked ?? 0) || 0,
+      },
+      insights: {
+        baseloadDaily: (sharedSim.modelAssumptions as any)?.baseloadDaily ?? null,
+        baseload: (sharedSim.modelAssumptions as any)?.baseload ?? null,
+        timeOfDayBuckets: [],
+        weekdayVsWeekend: {
+          weekday: Number((sharedSim.modelAssumptions as any)?.weekdayKwh ?? 0) || 0,
+          weekend: Number((sharedSim.modelAssumptions as any)?.weekendKwh ?? 0) || 0,
+        },
+        peakDay: null,
+        peakHour: null,
+      },
+      monthly: sharedSim.simulatedChartMonthly,
+    },
+    buildInputs: {
+      canonicalMonths: canonicalWindowResolved.canonicalMonths,
+    },
+    configHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? "n/a"),
+    excludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+    excludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
+    homeProfile: responseHomeProfile,
+    applianceProfile: responseApplianceProfile,
+    modelAssumptions: sharedSim.modelAssumptions,
+    metrics: {
+      mae: metrics.mae,
+      rmse: metrics.rmse,
+      maxAbs: metrics.maxAbs,
+      wape: metrics.wape,
+      mape: metrics.mape,
+      totalActualKwhMasked: metrics.totalActualKwhMasked,
+      totalSimKwhMasked: metrics.totalSimKwhMasked,
+      deltaKwhMasked: metrics.deltaKwhMasked,
+      mapeFiltered: (metrics as any).mapeFiltered ?? null,
+      mapeFilteredCount: (metrics as any).mapeFilteredCount ?? 0,
+      byMonth: metrics.byMonth,
+      byHour: metrics.byHour,
+      worst10Abs: (metrics as any).worst10Abs ?? [],
+    },
+    diagnostics: {
+      dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
+      top10Under: metrics.diagnostics.top10Under,
+      top10Over: metrics.diagnostics.top10Over,
+      hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
+    },
+    poolHoursLens: null,
+    usageShapeProfileDiag: ((sharedSim.modelAssumptions as any)?.usageShapeProfileDiag ?? null) as any,
+    cacheHit: !rebuildArtifact,
+    cacheSource: rebuildArtifact ? "rebuilt" : "lab",
+    inputHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? ""),
+    intervalDataFingerprint: String((sharedSim.modelAssumptions as any)?.intervalDataFingerprint ?? ""),
+    engineVersion: String((sharedSim.modelAssumptions as any)?.simVersion ?? ""),
+    intervalsCodec: String((sharedSim.modelAssumptions as any)?.intervalsCodec ?? ""),
+    compressedBytesLength: Number((sharedSim.modelAssumptions as any)?.compressedBytesLength ?? 0) || 0,
+    enginePath: "production_past_stitched",
+    expectedTestIntervals: testDateKeysLocal.size * 96,
+    coveragePct: testDateKeysLocal.size > 0 ? actualTestIntervals.length / (testDateKeysLocal.size * 96) : null,
+    joinJoinedCount: actualTestIntervals.length - missingJoinedActual.length,
+    joinMissingCount: missingJoinedActual.length,
+    joinPct: actualTestIntervals.length > 0 ? (actualTestIntervals.length - missingJoinedActual.length) / actualTestIntervals.length : null,
+    joinSampleActualTs: actualTestIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
+    joinSampleSimTs: sharedSim.simulatedTestIntervals.slice(0, 5).map((p) => p.timestamp),
+    testSelectionMode,
+    testDaysRequested: testDaysRequested ?? undefined,
+    testDaysSelected,
+    seedUsed,
+    testMode,
+    candidateDaysAfterModeFilterCount,
+    minDayCoveragePct,
+    candidateWindowStartUtc: candidateWindowStart,
+    candidateWindowEndUtc: candidateWindowEnd,
+    excludedFromTest_travelCount,
+  });
 
   return NextResponse.json({
     ok: true,
@@ -1480,9 +1618,7 @@ export async function POST(req: NextRequest) {
       windowEndUtc: canonicalWindow.endDate,
       canonicalWindowHelper: canonicalWindowResolved.windowHelper,
     },
-    fullReportText:
-      `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
-      `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=gapfill_lab`,
+    fullReportText: fullReport.fullReportText,
     pasteSummary:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
       `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=gapfill_lab`,
