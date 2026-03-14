@@ -1110,6 +1110,7 @@ export async function POST(req: NextRequest) {
         return candidateIntervalsForTesting;
       },
     });
+    candidateIntervalsForTesting = coverageSelection.intervalsForWindow ?? [];
     const candidateDateKeys = coverageSelection.candidateDateKeys;
     if (testMode === "random") {
       seedUsed = `${house.id}-${Date.now()}`;

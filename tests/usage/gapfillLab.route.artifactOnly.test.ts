@@ -152,7 +152,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       const dateKeys = Array.from(
         new Set((Array.isArray(intervals) ? intervals : []).map((r: any) => String(r?.timestamp ?? "").slice(0, 10)))
       ).filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
-      return { candidateDateKeys: dateKeys, cacheHit: false, coverageByDay: {} };
+      return { candidateDateKeys: dateKeys, cacheHit: false, coverageByDay: {}, intervalsForWindow: intervals ?? [] };
     });
   });
 

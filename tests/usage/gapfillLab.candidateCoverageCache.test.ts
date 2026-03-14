@@ -29,6 +29,7 @@ describe("getCandidateDateCoverageForSelection", () => {
     expect(second.cacheHit).toBe(true);
     expect(loadIntervalsForWindow).toHaveBeenCalledTimes(1);
     expect(second.candidateDateKeys).toEqual(first.candidateDateKeys);
+    expect(second.intervalsForWindow).toEqual(first.intervalsForWindow);
   });
 
   it("uses a different cache key when stratification inputs differ", async () => {

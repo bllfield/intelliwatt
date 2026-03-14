@@ -539,6 +539,7 @@ const candidateDayCoverageCache = new Map<
     createdAtMs: number;
     candidateDateKeys: string[];
     coverageByDay: Record<string, { count: number; expected: number; pct: number }>;
+    intervalsForWindow: IntervalPoint[];
   }
 >();
 
@@ -578,6 +579,7 @@ export async function getCandidateDateCoverageForSelection(args: {
   candidateDateKeys: string[];
   cacheHit: boolean;
   coverageByDay: Record<string, { count: number; expected: number; pct: number }>;
+  intervalsForWindow: IntervalPoint[];
 }> {
   const key = buildCandidateDayCoverageCacheKey({
     houseId: args.houseId,
@@ -596,6 +598,7 @@ export async function getCandidateDateCoverageForSelection(args: {
       candidateDateKeys: [...cached.candidateDateKeys],
       cacheHit: true,
       coverageByDay: { ...cached.coverageByDay },
+      intervalsForWindow: [...cached.intervalsForWindow],
     };
   }
 
@@ -609,11 +612,13 @@ export async function getCandidateDateCoverageForSelection(args: {
     createdAtMs: now,
     candidateDateKeys: [...candidateDateKeys],
     coverageByDay,
+    intervalsForWindow: [...(intervals ?? [])],
   });
   return {
     candidateDateKeys,
     cacheHit: false,
     coverageByDay,
+    intervalsForWindow: [...(intervals ?? [])],
   };
 }
 
