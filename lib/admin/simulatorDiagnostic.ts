@@ -8,6 +8,7 @@ import { enumerateDayStartsMsForWindow, dateKeyFromTimestamp, getDayGridTimestam
 import { getPastSimulatedDatasetForHouse, getSimulatedUsageForHouseScenario, recalcSimulatorBuild } from "@/modules/usageSimulator/service";
 import { getActualIntervalsForRangeWithSource, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import { recomputePastAggregatesFromIntervals } from "@/modules/usageSimulator/dataset";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { computePastInputHash, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
@@ -132,16 +133,12 @@ function intervalDigest(intervals15: Array<{ timestamp?: string; kwh?: number }>
   return createHash("sha256").update(parts.join("\n"), "utf8").digest("hex").slice(0, 16);
 }
 
-function recomputedTotalFromIntervals(intervals15: Array<{ timestamp?: string; kwh?: number }>): number | undefined {
-  if (!Array.isArray(intervals15)) return undefined;
-  const sum = intervals15.reduce((s, p) => s + (Number(p?.kwh) ?? 0), 0);
-  return Number.isFinite(sum) ? Math.round(sum * 100) / 100 : undefined;
-}
-
-/** Parity diagnostics derived from a dataset (interval digest, recomputed total, source artifact). */
+/** Parity diagnostics derived from a dataset (digest + shared aggregation recompute). */
 function computeParityDiagnostics(dataset: any): {
   intervalDigest?: string;
   recomputedTotalFromIntervals?: number;
+  recomputedDailyTotalFromIntervals?: number;
+  recomputedMonthlyTotalFromIntervals?: number;
   datasetTotalKwh?: number;
   totalSource: string;
   sourceArtifact: string;
@@ -154,9 +151,25 @@ function computeParityDiagnostics(dataset: any): {
         ? "decoded_cached_intervals"
         : "saved_dataset_json";
   const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+  const curveEndDate =
+    String(dataset?.summary?.end ?? "").slice(0, 10) ||
+    (intervals15.length > 0 ? String(intervals15[intervals15.length - 1]?.timestamp ?? "").slice(0, 10) : "");
+  const simulatedDateKeys = new Set<string>(
+    (Array.isArray(dataset?.daily) ? dataset.daily : [])
+      .filter((d: any) => String(d?.source ?? "").toUpperCase() === "SIMULATED")
+      .map((d: any) => String(d?.date ?? "").slice(0, 10))
+      .filter((dk: string) => YYYY_MM_DD.test(dk))
+  );
+  const recomputed = recomputePastAggregatesFromIntervals({
+    intervals: intervals15,
+    curveEndDate,
+    simulatedDateKeys,
+  });
   return {
     intervalDigest: intervalDigest(intervals15),
-    recomputedTotalFromIntervals: recomputedTotalFromIntervals(intervals15),
+    recomputedTotalFromIntervals: recomputed.intervalSumKwh,
+    recomputedDailyTotalFromIntervals: recomputed.dailySumKwh,
+    recomputedMonthlyTotalFromIntervals: recomputed.monthlySumKwh,
     datasetTotalKwh: typeof dataset?.summary?.totalKwh === "number" ? dataset.summary.totalKwh : undefined,
     totalSource: "dataset_summary",
     sourceArtifact,
@@ -271,6 +284,13 @@ export type SimulatorDiagnosticResult = {
     coldRecomputedFromIntervals?: number;
     cacheRecomputedFromIntervals?: number;
     recalcRecomputedFromIntervals?: number;
+    coldRecomputedDailyFromIntervals?: number;
+    cacheRecomputedDailyFromIntervals?: number;
+    recalcRecomputedDailyFromIntervals?: number;
+    coldRecomputedMonthlyFromIntervals?: number;
+    cacheRecomputedMonthlyFromIntervals?: number;
+    recalcRecomputedMonthlyFromIntervals?: number;
+    firstDivergenceStage?: "none" | "interval_sum" | "daily_sum" | "monthly_sum" | "digest_only";
   };
   gapfillLabNote: {
     enginePath: string;
@@ -633,6 +653,23 @@ export async function runSimulatorDiagnostic(
           : cacheCodecDriftLikely === true
             ? "digest_mismatch_codec_drift_likely"
             : "digest_mismatch";
+  const totalsNearEqual = (a: number | undefined, b: number | undefined): boolean =>
+    typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 0.01 : false;
+  const firstDivergenceStage: NonNullable<SimulatorDiagnosticResult["integrity"]>["firstDivergenceStage"] =
+    !isCacheRestore
+      ? undefined
+      : !totalsNearEqual(coldParityDiag?.recomputedTotalFromIntervals, productionParityDiag?.recomputedTotalFromIntervals)
+        ? "interval_sum"
+        : !totalsNearEqual(coldParityDiag?.recomputedDailyTotalFromIntervals, productionParityDiag?.recomputedDailyTotalFromIntervals)
+          ? "daily_sum"
+          : !totalsNearEqual(
+                coldParityDiag?.recomputedMonthlyTotalFromIntervals,
+                productionParityDiag?.recomputedMonthlyTotalFromIntervals
+              )
+            ? "monthly_sum"
+            : cacheDigestMatch === false
+              ? "digest_only"
+              : "none";
 
   const integrity: SimulatorDiagnosticResult["integrity"] = {
     intervalCountMatch,
@@ -650,11 +687,25 @@ export async function runSimulatorDiagnostic(
     coldRecomputedFromIntervals: coldParityDiag?.recomputedTotalFromIntervals,
     cacheRecomputedFromIntervals: productionParityDiag?.recomputedTotalFromIntervals,
     recalcRecomputedFromIntervals: undefined,
+    coldRecomputedDailyFromIntervals: coldParityDiag?.recomputedDailyTotalFromIntervals,
+    cacheRecomputedDailyFromIntervals: productionParityDiag?.recomputedDailyTotalFromIntervals,
+    recalcRecomputedDailyFromIntervals: undefined,
+    coldRecomputedMonthlyFromIntervals: coldParityDiag?.recomputedMonthlyTotalFromIntervals,
+    cacheRecomputedMonthlyFromIntervals: productionParityDiag?.recomputedMonthlyTotalFromIntervals,
+    recalcRecomputedMonthlyFromIntervals: undefined,
+    firstDivergenceStage,
   };
   if (parity?.coldVsRecalc?.recalc) {
-    const recalcSide = parity.coldVsRecalc.recalc as { totalKwh?: number; recomputedTotalFromIntervals?: number };
+    const recalcSide = parity.coldVsRecalc.recalc as {
+      totalKwh?: number;
+      recomputedTotalFromIntervals?: number;
+      recomputedDailyTotalFromIntervals?: number;
+      recomputedMonthlyTotalFromIntervals?: number;
+    };
     integrity.recalcTotalKwh = recalcSide.totalKwh;
     integrity.recalcRecomputedFromIntervals = recalcSide.recomputedTotalFromIntervals;
+    integrity.recalcRecomputedDailyFromIntervals = recalcSide.recomputedDailyTotalFromIntervals;
+    integrity.recalcRecomputedMonthlyFromIntervals = recalcSide.recomputedMonthlyTotalFromIntervals;
   }
 
   const stitchedIntervalsDataset = productionDatasetForIntervals ?? coldDatasetForIntervals;
@@ -792,6 +843,8 @@ function buildParitySide(args: {
   parityDiagnostics?: {
     intervalDigest?: string;
     recomputedTotalFromIntervals?: number;
+    recomputedDailyTotalFromIntervals?: number;
+    recomputedMonthlyTotalFromIntervals?: number;
     datasetTotalKwh?: number;
     totalSource: string;
     sourceArtifact: string;
@@ -827,6 +880,8 @@ function buildParitySide(args: {
           intervalDigest: parityDiagnostics.intervalDigest,
           datasetTotalKwh: parityDiagnostics.datasetTotalKwh,
           recomputedTotalFromIntervals: parityDiagnostics.recomputedTotalFromIntervals,
+          recomputedDailyTotalFromIntervals: parityDiagnostics.recomputedDailyTotalFromIntervals,
+          recomputedMonthlyTotalFromIntervals: parityDiagnostics.recomputedMonthlyTotalFromIntervals,
           totalSource: parityDiagnostics.totalSource,
           sourceArtifact: parityDiagnostics.sourceArtifact,
         }

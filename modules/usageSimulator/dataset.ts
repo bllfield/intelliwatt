@@ -329,6 +329,80 @@ export function buildDailyFromIntervals(
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+/**
+ * Shared interval aggregation for Past parity/restore:
+ * - interval sum (source-of-truth for summary totals),
+ * - daily totals (from intervals),
+ * - display monthly totals (UTC month, stitched end-month semantics).
+ */
+export function recomputePastAggregatesFromIntervals(args: {
+  intervals: Array<{ timestamp: string; consumption_kwh?: number; kwh?: number }>;
+  curveEndDate?: string | null;
+  simulatedDateKeys?: Set<string>;
+}): {
+  intervalCount: number;
+  intervalSumKwh: number;
+  daily: Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" }>;
+  dailySumKwh: number;
+  monthly: Array<{ month: string; kwh: number }>;
+  monthlySumKwh: number;
+  usageBucketsByMonth: Record<string, Record<string, number>>;
+  stitchedMonth:
+    | {
+        mode: "PRIOR_YEAR_TAIL";
+        yearMonth: string;
+        haveDaysThrough: number;
+        missingDaysFrom: number;
+        missingDaysTo: number;
+        borrowedFromYearMonth: string;
+        completenessRule: string;
+      }
+    | null;
+} {
+  const normalized = (args.intervals ?? []).map((iv) => ({
+    timestamp: String(iv?.timestamp ?? ""),
+    kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
+  }));
+  const intervalCount = normalized.length;
+  const intervalSumKwh = round2(normalized.reduce((s, r) => s + (Number(r.kwh) || 0), 0));
+  const daily = buildDailyFromIntervals(normalized, args.simulatedDateKeys);
+  const dailySumKwh = round2(daily.reduce((s, d) => s + (Number(d?.kwh) || 0), 0));
+  const fallbackCurveEnd =
+    normalized.length > 0 ? String(normalized[normalized.length - 1]?.timestamp ?? "").slice(0, 10) : "";
+  const curveEnd = String(args.curveEndDate ?? "").slice(0, 10) || fallbackCurveEnd;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(curveEnd)) {
+    return {
+      intervalCount,
+      intervalSumKwh,
+      daily,
+      dailySumKwh,
+      monthly: [],
+      monthlySumKwh: 0,
+      usageBucketsByMonth: {},
+      stitchedMonth: null,
+    };
+  }
+  const monthlyBuild = buildDisplayMonthlyFromIntervalsUtc(
+    normalized.map((iv) => ({
+      timestamp: String(iv.timestamp ?? ""),
+      consumption_kwh: Number(iv.kwh) || 0,
+    })),
+    curveEnd
+  );
+  const monthly = monthlyBuild.monthly;
+  const monthlySumKwh = round2(monthly.reduce((s, m) => s + (Number(m?.kwh) || 0), 0));
+  return {
+    intervalCount,
+    intervalSumKwh,
+    daily,
+    dailySumKwh,
+    monthly,
+    monthlySumKwh,
+    usageBucketsByMonth: monthlyBuild.usageBucketsByMonth,
+    stitchedMonth: monthlyBuild.stitchedMonth,
+  };
+}
+
 function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
   const monthTotals = new Map<string, number>();
   for (const iv of intervals ?? []) {

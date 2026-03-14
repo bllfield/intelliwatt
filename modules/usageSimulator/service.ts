@@ -14,7 +14,7 @@ import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
   buildDisplayMonthlyFromIntervalsUtc,
-  buildDailyFromIntervals,
+  recomputePastAggregatesFromIntervals,
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
@@ -154,24 +154,10 @@ function reconcileRestoredDatasetFromDecodedIntervals(args: {
   if (!dataset || typeof dataset !== "object" || !Array.isArray(decodedIntervals) || decodedIntervals.length === 0) {
     return;
   }
-  const decodedTotal = round2Local(
-    decodedIntervals.reduce((sum, row) => sum + (Number(row?.kwh) || 0), 0)
-  );
   const lastDecodedTs = decodedIntervals[decodedIntervals.length - 1]?.timestamp;
   const curveEnd =
     (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) ||
     String((dataset as any)?.summary?.end ?? fallbackEndDate).slice(0, 10);
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(curveEnd)) {
-    const intervalsForMonthly = decodedIntervals.map((p) => ({
-      timestamp: String(p?.timestamp ?? ""),
-      consumption_kwh: Number(p?.kwh) || 0,
-    }));
-    const { monthly: recomputedMonthly, usageBucketsByMonth: recomputedBuckets } =
-      buildDisplayMonthlyFromIntervalsUtc(intervalsForMonthly, curveEnd);
-    (dataset as any).monthly = recomputedMonthly;
-    (dataset as any).usageBucketsByMonth = recomputedBuckets;
-  }
 
   const simDateKeys = new Set<string>(
     (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
@@ -179,16 +165,25 @@ function reconcileRestoredDatasetFromDecodedIntervals(args: {
       .map((d: any) => String(d?.date ?? "").slice(0, 10))
       .filter((dk: string) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
   );
-  (dataset as any).daily = buildDailyFromIntervals(decodedIntervals, simDateKeys);
+  const recomputed = recomputePastAggregatesFromIntervals({
+    intervals: decodedIntervals,
+    curveEndDate: curveEnd,
+    simulatedDateKeys: simDateKeys,
+  });
+  (dataset as any).daily = recomputed.daily;
+  if (recomputed.monthly.length > 0) {
+    (dataset as any).monthly = recomputed.monthly;
+    (dataset as any).usageBucketsByMonth = recomputed.usageBucketsByMonth;
+  }
 
   if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
-  (dataset.summary as any).totalKwh = decodedTotal;
+  (dataset.summary as any).totalKwh = recomputed.intervalSumKwh;
   if ((dataset.summary as any).intervalsCount == null) {
-    (dataset.summary as any).intervalsCount = decodedIntervals.length;
+    (dataset.summary as any).intervalsCount = recomputed.intervalCount;
   }
   if (!dataset.totals || typeof dataset.totals !== "object") (dataset as any).totals = {};
-  (dataset.totals as any).importKwh = decodedTotal;
-  (dataset.totals as any).netKwh = decodedTotal;
+  (dataset.totals as any).importKwh = recomputed.intervalSumKwh;
+  (dataset.totals as any).netKwh = recomputed.intervalSumKwh;
 }
 
 function enumerateDateKeysInclusive(startDate: string, endDate: string): Set<string> {
