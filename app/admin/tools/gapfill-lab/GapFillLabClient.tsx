@@ -126,6 +126,7 @@ export default function GapFillLabClient() {
   const [houses, setHouses] = useState<HouseOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [rebuildLoading, setRebuildLoading] = useState(false);
+  const [progressStatus, setProgressStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [artifactMissing, setArtifactMissing] = useState(false);
   const [lastCompareBody, setLastCompareBody] = useState<Record<string, unknown> | null>(null);
@@ -241,6 +242,67 @@ export default function GapFillLabClient() {
     }
   }
 
+  async function postGapfill(body: Record<string, unknown>, timeoutMs = 320_000): Promise<{ res: Response; data: ApiResponse }> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch("/api/admin/tools/gapfill-lab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const data = (await res.json().catch(() => null)) as ApiResponse;
+      return { res, data };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  function mergeSuccessfulResult(data: ApiResponse) {
+    setResult((prev) => {
+      if (data.ok && prev?.ok) {
+        return {
+          ...data,
+          ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
+          ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
+          ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
+          ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
+          ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
+          ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
+          ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
+        };
+      }
+      return data;
+    });
+    if (data.ok && data.houses?.length) setHouses(data.houses);
+    if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
+      setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
+    }
+  }
+
+  function buildCompareBody(trimmedEmail: string, validRanges: RangeRow[]): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      email: trimmedEmail,
+      timezone,
+      houseId: houseId || undefined,
+      weatherKind,
+      includeUsage365: false,
+    };
+    if (testMode === "random_days") {
+      body.testDays = testDays;
+      body.testMode = randomTestMode;
+      if (seed.trim()) body.seed = seed.trim();
+      body.minDayCoveragePct = minDayCoveragePct / 100;
+      body.stratifyByMonth = stratifyByMonth;
+      body.stratifyByWeekend = stratifyByWeekend;
+      body.testRanges = [];
+    } else {
+      body.testRanges = validRanges;
+    }
+    return body;
+  }
+
   async function handleLookup() {
     setError(null);
     setResult(null);
@@ -287,6 +349,7 @@ export default function GapFillLabClient() {
 
   async function handleRunCompare() {
     setError(null);
+    setProgressStatus(null);
     setArtifactMissing(false);
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
@@ -299,79 +362,43 @@ export default function GapFillLabClient() {
       return;
     }
     setLoading(true);
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let attemptedArtifactAutoRebuild = false;
     try {
-      const controller = new AbortController();
-      // Keep client timeout slightly above route maxDuration (300s) to avoid premature client aborts.
-      timeoutId = setTimeout(() => controller.abort(), 320_000);
-      const body: Record<string, unknown> = {
-        email: trimmed,
-        timezone,
-        houseId: houseId || undefined,
-        weatherKind,
-        includeUsage365: false,
-      };
-      if (testMode === "random_days") {
-        body.testDays = testDays;
-        body.testMode = randomTestMode;
-        if (seed.trim()) body.seed = seed.trim();
-        body.minDayCoveragePct = minDayCoveragePct / 100;
-        body.stratifyByMonth = stratifyByMonth;
-        body.stratifyByWeekend = stratifyByWeekend;
-        body.testRanges = [];
-      } else {
-        body.testRanges = validRanges;
-      }
+      const body = buildCompareBody(trimmed, validRanges);
       setLastCompareBody(body);
-      const res = await fetch("/api/admin/tools/gapfill-lab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      const data = (await res.json().catch(() => null)) as ApiResponse;
+      const { res, data } = await postGapfill(body);
       if (!res.ok) {
         if (isArtifactRebuildRequiredError((data as any)?.error)) {
-          // Explicit self-heal: when artifact read requires rebuild, run one rebuild pass immediately
-          // so users do not get stuck in a retry loop for normal compare actions.
+          // Two-step self-heal: rebuild-only first, then run compare on a second request.
+          // This avoids rebuild+compare in one 300s-bounded request.
           attemptedArtifactAutoRebuild = true;
-          const rebuildBody = { ...body, rebuildArtifact: true };
-          const rebuildRes = await fetch("/api/admin/tools/gapfill-lab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(rebuildBody),
-            signal: controller.signal,
-          });
-          const rebuildData = (await rebuildRes.json().catch(() => null)) as ApiResponse;
-          if (rebuildRes.ok && rebuildData?.ok) {
-            setArtifactMissing(false);
-            setResult((prev) => {
-              if (rebuildData.ok && prev?.ok) {
-                return {
-                  ...rebuildData,
-                  ...(rebuildData.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
-                  ...(rebuildData.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-                  ...(rebuildData.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
-                  ...(rebuildData.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
-                  ...(rebuildData.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
-                  ...(rebuildData.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
-                  ...(rebuildData.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
-                };
-              }
-              return rebuildData;
-            });
-            if (rebuildData.ok && rebuildData.houses?.length) setHouses(rebuildData.houses);
-            if (rebuildData.ok && Array.isArray((rebuildData as any).travelRangesFromDb)) {
-              setTravelRangesFromDb((rebuildData as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
-            }
+          const rebuildBody = { ...body, rebuildArtifact: true, rebuildOnly: true };
+          const { res: rebuildRes, data: rebuildData } = await postGapfill(rebuildBody);
+          if (!rebuildRes.ok) {
+            setProgressStatus(null);
+            setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
+            setError(formatApiError(rebuildData, rebuildRes.status));
+            setResult(null);
             return;
           }
-          setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
-          setError(formatApiError(rebuildData, rebuildRes.status));
-          setResult(null);
+          setProgressStatus("Rebuild complete, now running compare...");
+          const { res: compareRes, data: compareData } = await postGapfill(body);
+          if (!compareRes.ok) {
+            setProgressStatus(null);
+            const errMsg = (compareData as any)?.error === "test_overlaps_travel"
+              ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
+              : formatApiError(compareData, compareRes.status);
+            setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
+            setError(errMsg);
+            setResult(null);
+            return;
+          }
+          setArtifactMissing(false);
+          setProgressStatus(null);
+          mergeSuccessfulResult(compareData);
           return;
         }
+        setProgressStatus(null);
         const errMsg = (data as any)?.error === "test_overlaps_travel"
           ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
           : formatApiError(data, res.status);
@@ -379,28 +406,12 @@ export default function GapFillLabClient() {
         setResult(null);
         return;
       }
-      setResult((prev) => {
-        if (data.ok && prev?.ok) {
-          return {
-            ...data,
-            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
-            ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
-            ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
-            ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
-            ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
-            ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
-          };
-        }
-        return data;
-      });
-      if (data.ok && data.houses?.length) setHouses(data.houses);
-      if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
-        setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
-      }
+      setProgressStatus(null);
+      mergeSuccessfulResult(data);
     } catch (e: any) {
+      setProgressStatus(null);
       const msg = e?.name === "AbortError"
-        ? "Request timed out after ~5 minutes. Compare can take several minutes for heavy windows; retry compare or use Rebuild artifact and retry."
+        ? "Request timed out. Rebuild now runs separately from compare; click Rebuild artifact and retry, then run compare again."
         : (e?.message ?? String(e));
       if (attemptedArtifactAutoRebuild || e?.name === "AbortError") {
         // Keep rebuild CTA visible when automatic rebuild or long compare request fails.
@@ -409,7 +420,6 @@ export default function GapFillLabClient() {
       setError(msg);
       setResult(null);
     } finally {
-      if (timeoutId != null) clearTimeout(timeoutId);
       setLoading(false);
     }
   }
@@ -421,43 +431,33 @@ export default function GapFillLabClient() {
     }
     setRebuildLoading(true);
     setError(null);
+    setProgressStatus(null);
     try {
-      const body = { ...lastCompareBody, rebuildArtifact: true };
-      const res = await fetch("/api/admin/tools/gapfill-lab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json().catch(() => null)) as ApiResponse;
-      if (!res.ok) {
-        const errMsg = formatApiError(data, res.status);
+      const rebuildBody = { ...lastCompareBody, rebuildArtifact: true, rebuildOnly: true };
+      const { res: rebuildRes, data: rebuildData } = await postGapfill(rebuildBody);
+      if (!rebuildRes.ok) {
+        setProgressStatus(null);
+        const errMsg = formatApiError(rebuildData, rebuildRes.status);
         setError(errMsg);
         setResult(null);
-        setArtifactMissing(isArtifactRebuildRequiredError((data as any)?.error));
+        setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
+        return;
+      }
+      setProgressStatus("Rebuild complete, now running compare...");
+      const { res: compareRes, data: compareData } = await postGapfill(lastCompareBody);
+      if (!compareRes.ok) {
+        setProgressStatus(null);
+        setError(formatApiError(compareData, compareRes.status));
+        setResult(null);
+        setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
         return;
       }
       setArtifactMissing(false);
-      setResult((prev) => {
-        if (data.ok && prev?.ok) {
-          return {
-            ...data,
-            ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
-            ...(data.primaryPercentMetric != null ? {} : prev.primaryPercentMetric != null ? { primaryPercentMetric: prev.primaryPercentMetric } : {}),
-            ...(data.pasteSummary ? {} : prev.pasteSummary ? { pasteSummary: prev.pasteSummary } : {}),
-            ...(data.usage365 ? {} : prev.usage365 ? { usage365: prev.usage365 } : {}),
-            ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
-            ...(data.applianceProfile == null && prev.applianceProfile != null ? { applianceProfile: prev.applianceProfile } : {}),
-            ...(data.modelAssumptions == null && prev.modelAssumptions != null ? { modelAssumptions: prev.modelAssumptions } : {}),
-          };
-        }
-        return data;
-      });
-      if (data.ok && data.houses?.length) setHouses(data.houses);
-      if (data.ok && Array.isArray((data as any).travelRangesFromDb)) {
-        setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
-      }
+      setProgressStatus(null);
+      mergeSuccessfulResult(compareData);
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setProgressStatus(null);
+      setError(e?.name === "AbortError" ? "Request timed out while rebuilding or re-running compare. Retry once more." : (e?.message ?? String(e)));
       setResult(null);
     } finally {
       setRebuildLoading(false);
@@ -743,6 +743,9 @@ export default function GapFillLabClient() {
           </button>
           <span className="text-sm text-brand-navy/60">Typically returns in seconds (test-days-only).</span>
         </div>
+        {progressStatus && (
+          <div className="text-sm text-brand-navy/80">{progressStatus}</div>
+        )}
       </div>
 
       {error && (

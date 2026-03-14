@@ -8,6 +8,7 @@ const chooseActualSource = vi.fn();
 const getActualIntervalsForRange = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
 const getCandidateDateCoverageForSelection = vi.fn();
+const buildAndSavePastForGapfillLab = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -56,6 +57,14 @@ vi.mock("@/modules/applianceProfile/repo", () => ({
 vi.mock("@/modules/usageSimulator/service", () => ({
   buildGapfillCompareSimShared: (...args: any[]) => buildGapfillCompareSimShared(...args),
 }));
+
+vi.mock("@/lib/admin/gapfillLabPrime", async () => {
+  const actual = await vi.importActual<any>("@/lib/admin/gapfillLabPrime");
+  return {
+    ...actual,
+    buildAndSavePastForGapfillLab: (...args: any[]) => buildAndSavePastForGapfillLab(...args),
+  };
+});
 
 vi.mock("@/lib/admin/gapfillLab", () => ({
   canonicalIntervalKey: (s: string) => String(s),
@@ -123,6 +132,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     getActualIntervalsForRange.mockReset();
     buildGapfillCompareSimShared.mockReset();
     getCandidateDateCoverageForSelection.mockReset();
+    buildAndSavePastForGapfillLab.mockReset();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
@@ -153,6 +163,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         new Set((Array.isArray(intervals) ? intervals : []).map((r: any) => String(r?.timestamp ?? "").slice(0, 10)))
       ).filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
       return { candidateDateKeys: dateKeys, cacheHit: false, coverageByDay: {}, intervalsForWindow: intervals ?? [] };
+    });
+    buildAndSavePastForGapfillLab.mockResolvedValue({
+      ok: true,
+      inputHash: "ih",
+      houseId: "h1",
     });
   });
 
@@ -220,6 +235,26 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         rebuildArtifact: true,
       })
     );
+  });
+
+  it("supports rebuild-only action without running compare", async () => {
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        rebuildArtifact: true,
+        rebuildOnly: true,
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("rebuild_only");
+    expect(body.rebuilt).toBe(true);
+    expect(buildAndSavePastForGapfillLab).toHaveBeenCalled();
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });
 });
 

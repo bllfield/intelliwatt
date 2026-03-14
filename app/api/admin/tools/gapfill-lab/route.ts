@@ -23,7 +23,7 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDayS
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
-import { resolvePastCanonicalWindowForHouse } from "@/lib/admin/gapfillLabPrime";
+import { buildAndSavePastForGapfillLab, resolvePastCanonicalWindowForHouse } from "@/lib/admin/gapfillLabPrime";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -917,6 +917,8 @@ export async function POST(req: NextRequest) {
     includeUsage365?: boolean;
     /** Explicit write action: regenerate + resave canonical Past artifact for gapfill_lab before compare. */
     rebuildArtifact?: boolean;
+    /** Rebuild artifact only, then return immediately (no compare in same request). */
+    rebuildOnly?: boolean;
   };
   try {
     body = await req.json();
@@ -1110,7 +1112,6 @@ export async function POST(req: NextRequest) {
         return candidateIntervalsForTesting;
       },
     });
-    candidateIntervalsForTesting = coverageSelection.intervalsForWindow ?? [];
     const candidateDateKeys = coverageSelection.candidateDateKeys;
     if (testMode === "random") {
       seedUsed = `${house.id}-${Date.now()}`;
@@ -1299,6 +1300,56 @@ export async function POST(req: NextRequest) {
 
   // Canonical path: compare uses shared simulation artifact orchestration; route keeps compare-only logic.
   const rebuildArtifact = body?.rebuildArtifact === true;
+  const rebuildOnly = body?.rebuildOnly === true;
+  if (rebuildArtifact && rebuildOnly) {
+    const rebuilt = await buildAndSavePastForGapfillLab({
+      userId: user.id,
+      houseId: house.id,
+      rangesToMask: testRangesUsed,
+      timezone,
+    });
+    if (!rebuilt.ok) {
+      const status =
+        rebuilt.error === "house_not_found" || rebuilt.error === "no_actual_data"
+          ? 404
+          : rebuilt.error === "profile_required"
+            ? 400
+            : 500;
+      return NextResponse.json(
+        {
+          ok: false,
+          error: rebuilt.error,
+          message: rebuilt.message,
+          windowStartUtc: rebuilt.windowStartUtc ?? null,
+          windowEndUtc: rebuilt.windowEndUtc ?? null,
+          missingDateKeys: rebuilt.missingDateKeys ?? [],
+          stubRowCount: rebuilt.stubRowCount ?? null,
+          weatherSourceSummary: rebuilt.weatherSourceSummary ?? null,
+          windowHelper: rebuilt.windowHelper ?? null,
+        },
+        { status }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      email: user.email,
+      userId: user.id,
+      house: {
+        id: house.id,
+        label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+      },
+      houses: houses.map((h: any) => ({
+        id: h.id,
+        label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
+      })),
+      timezone,
+      mode: "artifact_only",
+      action: "rebuild_only",
+      rebuilt: true,
+      message: "Gap-Fill Lab artifact rebuilt. Running compare next will read from artifact cache.",
+      travelRangesFromDb,
+    });
+  }
   const sharedSim = await buildGapfillCompareSimShared({
     userId: user.id,
     houseId: house.id,
