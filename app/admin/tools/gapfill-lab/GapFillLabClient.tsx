@@ -124,6 +124,8 @@ export default function GapFillLabClient() {
   const [stratifyByWeekend, setStratifyByWeekend] = useState(true);
   const [houseId, setHouseId] = useState("");
   const [houses, setHouses] = useState<HouseOption[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [usage365Loading, setUsage365Loading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rebuildLoading, setRebuildLoading] = useState(false);
   const [progressStatus, setProgressStatus] = useState<string | null>(null);
@@ -315,7 +317,7 @@ export default function GapFillLabClient() {
       setError("Enter an email address.");
       return;
     }
-    setLoading(true);
+    setLookupLoading(true);
     try {
       const res = await fetch("/api/admin/tools/gapfill-lab", {
         method: "POST",
@@ -325,7 +327,7 @@ export default function GapFillLabClient() {
           timezone,
           testRanges: [],
           houseId: houseId || undefined,
-          includeUsage365: true,
+          includeUsage365: false,
         }),
       });
       const data = (await res.json().catch(() => null)) as ApiResponse;
@@ -347,7 +349,35 @@ export default function GapFillLabClient() {
       setError(e?.name === "AbortError" ? "Request timed out." : (e?.message ?? String(e)));
       setResult(null);
     } finally {
-      setLoading(false);
+      setLookupLoading(false);
+    }
+  }
+
+  async function handleLoadUsage365() {
+    setError(null);
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) {
+      setError("Enter an email address.");
+      return;
+    }
+    setUsage365Loading(true);
+    try {
+      const { res, data } = await postGapfill({
+        email: trimmed,
+        timezone,
+        testRanges: [],
+        houseId: houseId || undefined,
+        includeUsage365: true,
+      });
+      if (!res.ok) {
+        setError(formatApiError(data, res.status));
+        return;
+      }
+      mergeSuccessfulResult(data);
+    } catch (e: any) {
+      setError(e?.name === "AbortError" ? "Request timed out while loading Usage 365." : (e?.message ?? String(e)));
+    } finally {
+      setUsage365Loading(false);
     }
   }
 
@@ -524,10 +554,18 @@ export default function GapFillLabClient() {
           <button
             type="button"
             onClick={handleLookup}
-            disabled={loading}
+            disabled={lookupLoading || loading || rebuildLoading || usage365Loading}
             className="px-4 py-2 bg-brand-blue text-white rounded hover:bg-brand-navy disabled:opacity-50"
           >
-            Lookup
+            {lookupLoading ? "Looking up..." : "Lookup"}
+          </button>
+          <button
+            type="button"
+            onClick={handleLoadUsage365}
+            disabled={usage365Loading || lookupLoading || loading || rebuildLoading}
+            className="px-4 py-2 bg-brand-navy text-white rounded hover:bg-brand-blue disabled:opacity-50"
+          >
+            {usage365Loading ? "Loading Usage 365..." : "Load Usage (365-day)"}
           </button>
         </div>
 
