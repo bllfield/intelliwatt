@@ -229,16 +229,16 @@ export async function GET(req: NextRequest) {
       });
       if (diagnostic.ok) {
         identityContext = {
-          windowStartUtc: diagnostic.context.coverageStart,
-          windowEndUtc: diagnostic.context.coverageEnd,
-          timezone: typeof buildInputs?.timezone === "string" ? buildInputs.timezone : "America/Chicago",
-          inputHash: null,
-          engineVersion: null,
-          intervalDataFingerprint: null,
-          weatherIdentity: null,
-          usageShapeProfileIdentity: null,
-          buildInputsHash: buildRec?.buildInputsHash ?? null,
-          note: "Identity details in this inspect route now come from shared diagnostic/service orchestration.",
+          windowStartUtc: diagnostic.identity.windowStartUtc,
+          windowEndUtc: diagnostic.identity.windowEndUtc,
+          timezone: diagnostic.identity.timezone,
+          inputHash: diagnostic.identity.inputHash,
+          engineVersion: diagnostic.identity.engineVersion,
+          intervalDataFingerprint: diagnostic.identity.intervalDataFingerprint,
+          weatherIdentity: diagnostic.identity.weatherIdentity,
+          usageShapeProfileIdentity: diagnostic.identity.usageShapeProfileIdentity,
+          buildInputsHash: diagnostic.identity.buildInputsHash,
+          note: "Identity details in this inspect route come from shared diagnostic/service orchestration.",
         };
         weatherContext = {
           weatherProvenance: diagnostic.weatherProvenance,

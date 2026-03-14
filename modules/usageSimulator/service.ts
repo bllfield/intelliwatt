@@ -18,6 +18,7 @@ import {
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
+import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from "@/modules/usageScenario/overlay";
 import { listLedgerRows } from "@/modules/upgradesLedger/repo";
@@ -407,34 +408,6 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   const end = `${last}-${String(lastDay).padStart(2, "0")}`;
   const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
   return { start, end, days: Math.max(1, days) };
-}
-
-function resolveWindowFromBuildInputsForPastIdentity(
-  buildInputs: Record<string, unknown>,
-): { startDate: string; endDate: string } | null {
-  const canonicalPeriods = Array.isArray((buildInputs as any)?.canonicalPeriods)
-    ? ((buildInputs as any).canonicalPeriods as Array<{ startDate?: string; endDate?: string }>)
-    : [];
-  if (canonicalPeriods.length > 0) {
-    const periods = canonicalPeriods
-      .map((p) => ({
-        startDate: String(p?.startDate ?? "").slice(0, 10),
-        endDate: String(p?.endDate ?? "").slice(0, 10),
-      }))
-      .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate));
-    if (periods.length > 0) {
-      return {
-        startDate: periods[0].startDate,
-        endDate: periods[periods.length - 1].endDate,
-      };
-    }
-  }
-  const canonicalMonths = Array.isArray((buildInputs as any)?.canonicalMonths)
-    ? ((buildInputs as any).canonicalMonths as string[])
-    : [];
-  const window = canonicalWindowDateRange(canonicalMonths);
-  if (!window) return null;
-  return { startDate: window.start, endDate: window.end };
 }
 
 function monthsIntersectingTravelRanges(

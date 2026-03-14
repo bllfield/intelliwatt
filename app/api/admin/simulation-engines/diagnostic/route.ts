@@ -238,6 +238,7 @@ export async function POST(req: NextRequest) {
       diagnostic: {
         ok: diagnostic.ok,
         context: diagnostic.context,
+        identity: diagnostic.identity,
         pastPath: diagnostic.pastPath,
         weatherProvenance: diagnostic.weatherProvenance,
         stubAudit: diagnostic.stubAudit,

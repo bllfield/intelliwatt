@@ -132,6 +132,66 @@
 - This is a project-level rule for all future work.
 - Canonical source for this rule: `docs/ARCHITECTURE_STANDARDS.md` (`## Single Implementation Rule`).
 
+========================================
+GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)
+========================================
+
+Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must use shared modules below; do not duplicate business logic in routes/tests/tools.
+
+1) Core simulation orchestration:
+- `modules/usageSimulator/service.ts`
+- `modules/simulatedUsage/simulatePastUsageDataset.ts`
+- `modules/simulatedUsage/engine.ts`
+- `modules/simulatedUsage/pastDaySimulator.ts`
+
+2) Past identity/hash/window/cache:
+- `modules/usageSimulator/windowIdentity.ts`
+- `modules/usageSimulator/pastCache.ts`
+- `modules/weather/identity.ts`
+- `lib/usage/actualDatasetForHouse.ts` (`getIntervalDataFingerprint`)
+- `modules/simulatedUsage/simulatePastUsageDataset.ts` (`getUsageShapeProfileIdentityForPast`)
+
+3) Build/dataset/day-grid shared helpers:
+- `modules/usageSimulator/build.ts`
+- `modules/usageSimulator/dataset.ts`
+- `modules/usageSimulator/pastStitchedCurve.ts`
+- `lib/time/chicago.ts`
+
+4) Canonical interval source + persisted artifact reads:
+- `modules/realUsageAdapter/actual.ts`
+- `lib/usage/actualDatasetForHouse.ts`
+- `lib/usage/resolveIntervalsLayer.ts`
+- `lib/usage/intervalSeriesRepo.ts`
+
+5) Usage-shape profile dependencies for sim:
+- `modules/usageShapeProfile/repo.ts`
+- `modules/usageShapeProfile/derive.ts`
+- `modules/usageShapeProfile/actualIntervals.ts`
+- `modules/usageShapeProfile/autoBuild.ts`
+
+6) Admin/shared tooling modules:
+- `lib/admin/gapfillLab.ts`
+- `lib/admin/gapfillLabPrime.ts`
+- `lib/admin/simulatorDiagnostic.ts`
+- `modules/usageSimulator/profileDisplay.ts`
+- `modules/usageSimulator/simulationDataAlerts.ts`
+- `modules/usageSimulator/repo.ts`
+
+Mandatory enforcement rules:
+- Routes, pages, admin tools, and tests may orchestrate and format only; reusable business logic must stay in shared modules.
+- Tests must validate via the same shared modules or route contracts; no test-only duplicate business math.
+- Rebuild/parity/diagnostic paths must be explicit; default reads should be artifact/cache-first where possible.
+- If functionality already exists in one of the shared modules above, Cursor must use or extend that module instead of writing similar logic elsewhere.
+- If a new reusable module is created in the future, it must be added to this canonical registry in all three docs immediately.
+- If this task creates any new reusable shared module or shared helper, Cursor must update the canonical registry in all three docs in the same change before finishing.
+- Any new route/tool/test that depends on GapFill or simulated usage must first check this canonical registry before adding logic.
+- No duplicate code is allowed for date/window logic, weather identity logic, interval source selection, artifact identity/hash logic, profile identity logic, simulation-day generation, stitched Past artifact building, or diagnostic orchestration.
+
+Current drift points to resolve:
+- `app/api/admin/simulation-engines/route.ts` still needs full shared identity payload wiring (`inputHash`, `intervalDataFingerprint`, `weatherIdentity`, `usageShapeProfileIdentity`).
+- `lib/admin/simulatorDiagnostic.ts` / Simulation Engines diagnostic payloads must surface identity values from shared helpers, not placeholders.
+- `modules/usageSimulator/service.ts` must not retain local canonical Past identity/window derivation that duplicates `modules/usageSimulator/windowIdentity.ts`.
+
 ---
 
 

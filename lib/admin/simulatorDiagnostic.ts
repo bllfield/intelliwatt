@@ -6,9 +6,12 @@
 import { createHash } from "crypto";
 import { enumerateDayStartsMsForWindow, dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { getPastSimulatedDatasetForHouse, getSimulatedUsageForHouseScenario, recalcSimulatorBuild } from "@/modules/usageSimulator/service";
-import { getActualIntervalsForRangeWithSource } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRangeWithSource, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
+import { computePastInputHash, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
+import { computePastWeatherIdentity } from "@/modules/weather/identity";
+import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 
@@ -186,6 +189,22 @@ export type SimulatorDiagnosticResult = {
     userId: string;
     travelRangesUsed: Array<{ startDate: string; endDate: string }>;
   };
+  identity: {
+    windowStartUtc: string;
+    windowEndUtc: string;
+    timezone: string;
+    engineVersion: string;
+    buildInputsHash: string | null;
+    intervalDataFingerprint: string;
+    weatherIdentity: string;
+    usageShapeProfileIdentity: {
+      usageShapeProfileId: string | null;
+      usageShapeProfileVersion: string | null;
+      usageShapeProfileDerivedAt: string | null;
+      usageShapeProfileSimHash: string | null;
+    };
+    inputHash: string;
+  };
   pastPath: Record<string, unknown>;
   weatherProvenance: Record<string, unknown>;
   stubAudit: {
@@ -314,6 +333,32 @@ export async function runSimulatorDiagnostic(
         ? filteredOverride
         : travelRangesFromBuild;
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
+  const intervalDataFingerprint = await getIntervalDataFingerprint({
+    houseId,
+    esiid,
+    startDate,
+    endDate,
+  });
+  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+  const weatherIdentity = await computePastWeatherIdentity({
+    houseId,
+    startDate,
+    endDate,
+  });
+  const inputHash = computePastInputHash({
+    engineVersion: PAST_ENGINE_VERSION,
+    windowStartUtc: startDate,
+    windowEndUtc: endDate,
+    timezone,
+    travelRanges,
+    buildInputs: (buildInputs ?? {}) as Record<string, unknown>,
+    intervalDataFingerprint,
+    usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+    usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+    usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+    usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+    weatherIdentity,
+  });
 
   const canonicalDateKeys = canonicalDateKeysFromWindow(startDate, endDate);
   const excludedDateKeys = new Set(
@@ -596,6 +641,22 @@ export async function runSimulatorDiagnostic(
       ...(includeParity && Array.isArray(args.travelRangesOverride) && args.travelRangesOverride.length > 0
         ? { parityNote: "Include parity was true; cold used stored build travelRanges (not UI override) so cold/production/recalc are comparable." }
         : {}),
+    },
+    identity: {
+      windowStartUtc: startDate,
+      windowEndUtc: endDate,
+      timezone,
+      engineVersion: PAST_ENGINE_VERSION,
+      buildInputsHash,
+      intervalDataFingerprint,
+      weatherIdentity,
+      usageShapeProfileIdentity: {
+        usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+        usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+        usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+        usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+      },
+      inputHash,
     },
     pastPath: coldMeta,
     weatherProvenance: {
