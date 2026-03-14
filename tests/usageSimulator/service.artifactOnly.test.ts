@@ -99,6 +99,41 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
+  it("re-derives restored summary total from decoded cached intervals", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash3",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 9999.99,
+          start: "2026-01-01",
+          end: "2026-01-01",
+          latest: "2026-01-01",
+        },
+        totals: { importKwh: 9999.99, netKwh: 9999.99 },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.dataset?.summary?.totalKwh).toBe(0.75);
+      expect(out.dataset?.totals?.importKwh).toBe(0.75);
+      expect(out.dataset?.totals?.netKwh).toBe(0.75);
+    }
+  });
+
   it("artifact_only does not require usageSimulatorScenario row for cache-backed scenarios", async () => {
     scenarioFindFirst.mockResolvedValue(null);
     getLatestCachedPastDatasetByScenario.mockResolvedValue({

@@ -145,6 +145,52 @@ function round2Local(n: number) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function reconcileRestoredDatasetFromDecodedIntervals(args: {
+  dataset: any;
+  decodedIntervals: Array<{ timestamp: string; kwh: number }>;
+  fallbackEndDate: string;
+}) {
+  const { dataset, decodedIntervals, fallbackEndDate } = args;
+  if (!dataset || typeof dataset !== "object" || !Array.isArray(decodedIntervals) || decodedIntervals.length === 0) {
+    return;
+  }
+  const decodedTotal = round2Local(
+    decodedIntervals.reduce((sum, row) => sum + (Number(row?.kwh) || 0), 0)
+  );
+  const lastDecodedTs = decodedIntervals[decodedIntervals.length - 1]?.timestamp;
+  const curveEnd =
+    (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) ||
+    String((dataset as any)?.summary?.end ?? fallbackEndDate).slice(0, 10);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(curveEnd)) {
+    const intervalsForMonthly = decodedIntervals.map((p) => ({
+      timestamp: String(p?.timestamp ?? ""),
+      consumption_kwh: Number(p?.kwh) || 0,
+    }));
+    const { monthly: recomputedMonthly, usageBucketsByMonth: recomputedBuckets } =
+      buildDisplayMonthlyFromIntervalsUtc(intervalsForMonthly, curveEnd);
+    (dataset as any).monthly = recomputedMonthly;
+    (dataset as any).usageBucketsByMonth = recomputedBuckets;
+  }
+
+  const simDateKeys = new Set<string>(
+    (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
+      .filter((d: any) => String(d?.source ?? "").toUpperCase() === "SIMULATED")
+      .map((d: any) => String(d?.date ?? "").slice(0, 10))
+      .filter((dk: string) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  (dataset as any).daily = buildDailyFromIntervals(decodedIntervals, simDateKeys);
+
+  if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
+  (dataset.summary as any).totalKwh = decodedTotal;
+  if ((dataset.summary as any).intervalsCount == null) {
+    (dataset.summary as any).intervalsCount = decodedIntervals.length;
+  }
+  if (!dataset.totals || typeof dataset.totals !== "object") (dataset as any).totals = {};
+  (dataset.totals as any).importKwh = decodedTotal;
+  (dataset.totals as any).netKwh = decodedTotal;
+}
+
 function enumerateDateKeysInclusive(startDate: string, endDate: string): Set<string> {
   const out = new Set<string>();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return out;
@@ -1358,6 +1404,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
             intervals15: decoded,
           },
         };
+        reconcileRestoredDatasetFromDecodedIntervals({
+          dataset: restored,
+          decodedIntervals: decoded,
+          fallbackEndDate: String((latestCached.datasetJson as any)?.summary?.end ?? "").slice(0, 10),
+        });
         const restoredAny = restored as any;
         if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
         restoredAny.meta.artifactReadMode = "artifact_only";
@@ -1462,6 +1513,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
           intervals15: decoded,
         },
       };
+      reconcileRestoredDatasetFromDecodedIntervals({
+        dataset: restored,
+        decodedIntervals: decoded,
+        fallbackEndDate: window.endDate,
+      });
       const restoredAny = restored as any;
       if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
       restoredAny.meta.artifactReadMode = "artifact_only";
@@ -1801,37 +1857,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
             };
             dataset = restored;
-            // Recompute monthly from decoded intervals (UTC month) so totals match daily and no zeros from stale cache.
-            const lastDecodedTs = Array.isArray(decoded) && decoded.length > 0 ? (decoded as Array<{ timestamp?: string }>)[decoded.length - 1]?.timestamp : null;
-            const curveEnd = (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) || String((cached.datasetJson as any)?.summary?.end ?? endDate).slice(0, 10);
-            if (/^\d{4}-\d{2}-\d{2}$/.test(curveEnd) && Array.isArray(decoded) && decoded.length > 0) {
-              const intervalsForMonthly = decoded.map((p: { timestamp: string; kwh: number }) => ({
-                timestamp: String(p?.timestamp ?? ""),
-                consumption_kwh: Number(p?.kwh) || 0,
-              }));
-              const { monthly: recomputedMonthly, usageBucketsByMonth: recomputedBuckets } =
-                buildDisplayMonthlyFromIntervalsUtc(intervalsForMonthly, curveEnd);
-              (dataset as any).monthly = recomputedMonthly;
-              (dataset as any).usageBucketsByMonth = recomputedBuckets;
-              const sumKwh = recomputedMonthly.reduce((s: number, m: { kwh?: number }) => s + (Number(m?.kwh) || 0), 0);
-              if (dataset.summary && typeof dataset.summary === "object") {
-                (dataset.summary as any).totalKwh = Math.round(sumKwh * 100) / 100;
-              }
-              if (dataset.totals && typeof dataset.totals === "object") {
-                const r = Math.round(sumKwh * 100) / 100;
-                (dataset.totals as any).importKwh = r;
-                (dataset.totals as any).netKwh = r;
-              }
-              const simDateKeys = new Set<string>(
-                (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
-                  .filter((d: any) => String(d?.source ?? "").toUpperCase() === "SIMULATED")
-                  .map((d: any) => String(d?.date ?? "").slice(0, 10))
-                  .filter((dk: string) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-              );
-              const recomputedDaily = buildDailyFromIntervals(decoded, simDateKeys);
-              (dataset as any).daily = recomputedDaily;
-              // Keep cache restore on the saved stitched artifact only; no second overlay pass.
-            }
+            reconcileRestoredDatasetFromDecodedIntervals({
+              dataset,
+              decodedIntervals: decoded,
+              fallbackEndDate: endDate,
+            });
+            // Keep cache restore on the saved stitched artifact only; no second overlay pass.
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;
             (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
