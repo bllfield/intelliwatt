@@ -244,6 +244,11 @@ export async function POST(req: NextRequest) {
         parity: diagnostic.parity,
         integrity: diagnostic.integrity,
         gapfillLabNote: diagnostic.gapfillLabNote,
+        rawActualIntervalsMeta: diagnostic.rawActualIntervalsMeta,
+        rawActualIntervals: diagnostic.rawActualIntervals,
+        stitchedPastIntervalsMeta: diagnostic.stitchedPastIntervalsMeta,
+        stitchedPastIntervals: diagnostic.stitchedPastIntervals,
+        firstActualOnlyDayComparison: diagnostic.firstActualOnlyDayComparison,
       },
     };
     return NextResponse.json(payload);

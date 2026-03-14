@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRangeWithSource } from "@/lib/usage/actualDatasetForHouse";
 import { getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -22,6 +22,7 @@ export const dynamic = "force-dynamic";
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 const WORKSPACE_FUTURE_NAME = "Future (What-if)";
+const INSPECT_INTERVAL_LIMIT = 96;
 
 function toBool(v: string | null): boolean {
   const s = String(v ?? "").trim().toLowerCase();
@@ -54,6 +55,46 @@ function datasetDebugView(dataset: any, includeSeries: boolean): any {
       monthlySample: monthly.slice(0, 24),
     },
   };
+}
+
+function summarizeIntervalsSlice(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  includeAll: boolean
+): {
+  rows: Array<{ timestamp: string; kwh: number }>;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  intervalCount: number;
+  truncated: boolean;
+  truncationLimit: number;
+} {
+  const sorted = (intervals ?? [])
+    .map((p) => ({ timestamp: String(p?.timestamp ?? ""), kwh: Number(p?.kwh) || 0 }))
+    .filter((p) => p.timestamp.length > 0)
+    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+  const truncationLimit = includeAll ? sorted.length : INSPECT_INTERVAL_LIMIT;
+  const rows = includeAll ? sorted : sorted.slice(0, INSPECT_INTERVAL_LIMIT);
+  return {
+    rows,
+    coverageStart: sorted[0]?.timestamp ?? null,
+    coverageEnd: sorted[sorted.length - 1]?.timestamp ?? null,
+    intervalCount: sorted.length,
+    truncated: sorted.length > rows.length,
+    truncationLimit,
+  };
+}
+
+function dayTotalFromIntervalsUtc(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  dateKey: string | null
+): number | null {
+  if (!dateKey) return null;
+  const sum = (intervals ?? []).reduce((acc, p) => {
+    const ts = String(p?.timestamp ?? "");
+    if (ts.slice(0, 10) !== dateKey) return acc;
+    return acc + (Number(p?.kwh) || 0);
+  }, 0);
+  return Math.round(sum * 100) / 100;
 }
 
 export async function GET(req: NextRequest) {
@@ -222,6 +263,11 @@ export async function GET(req: NextRequest) {
     let pastPatchPayload: any = null;
     let pastEngineDebug: PastSimulationDebug | null = null;
     let identityContext: any = null;
+    let rawActualIntervalsMeta: any = null;
+    let rawActualIntervals: Array<{ timestamp: string; kwh: number }> = [];
+    let stitchedPastIntervalsMeta: any = null;
+    let stitchedPastIntervals: Array<{ timestamp: string; kwh: number }> = [];
+    let firstActualOnlyDayComparison: any = null;
     if (window) {
       const travelRanges = Array.isArray(buildInputs?.travelRanges) ? buildInputs.travelRanges : [];
       const timezone = typeof buildInputs?.timezone === "string" ? buildInputs.timezone : "America/Chicago";
@@ -274,16 +320,17 @@ export async function GET(req: NextRequest) {
         travelRangesToExcludeDateKeys(Array.isArray(buildInputs?.travelRanges) ? buildInputs.travelRanges : [])
       );
 
-      const [actualWxByDateKey, normalWxByDateKey, actualIntervals] = await Promise.all([
+      const [actualWxByDateKey, normalWxByDateKey, rawActualFetch] = await Promise.all([
         getHouseWeatherDays({ houseId: selectedHouse.id, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
         getHouseWeatherDays({ houseId: selectedHouse.id, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-        getActualIntervalsForRange({
+        getActualIntervalsForRangeWithSource({
           houseId: selectedHouse.id,
           esiid: selectedHouse.esiid ?? null,
           startDate: window.startDate,
           endDate: window.endDate,
         }),
       ]);
+      const actualIntervals = rawActualFetch.intervals ?? [];
 
       const actualKeys = new Set(Array.from(actualWxByDateKey.keys()));
       const normalKeys = new Set(Array.from(normalWxByDateKey.keys()));
@@ -298,6 +345,21 @@ export async function GET(req: NextRequest) {
         missingNormalCount: missingNormal.length,
         missingActualSample: missingActual.slice(0, 30),
         missingNormalSample: missingNormal.slice(0, 30),
+      };
+
+      const rawSection = summarizeIntervalsSlice(actualIntervals, includeSeries);
+      rawActualIntervals = rawSection.rows;
+      rawActualIntervalsMeta = {
+        label: "Raw actual intervals",
+        source:
+          rawActualFetch.source === "SMT" || rawActualFetch.source === "GREEN_BUTTON"
+            ? rawActualFetch.source
+            : "none",
+        coverageStart: rawSection.coverageStart,
+        coverageEnd: rawSection.coverageEnd,
+        intervalCount: rawSection.intervalCount,
+        truncated: rawSection.truncated,
+        truncationLimit: rawSection.truncationLimit,
       };
 
       const homeProfile = homeProfileLive ? { ...homeProfileLive } : buildInputs?.snapshots?.homeProfile ?? null;
@@ -360,6 +422,33 @@ export async function GET(req: NextRequest) {
           implementationRef: "buildPastSimulatedBaselineV1",
         };
       }
+
+      const stitchedAll = Array.isArray(simulation.dataset?.series?.intervals15)
+        ? (simulation.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
+        : [];
+      const stitchedSection = summarizeIntervalsSlice(stitchedAll, includeSeries);
+      stitchedPastIntervals = stitchedSection.rows;
+      stitchedPastIntervalsMeta = {
+        label: "Final stitched Past corrected-baseline intervals",
+        source: "simulation_dataset",
+        coverageStart: stitchedSection.coverageStart,
+        coverageEnd: stitchedSection.coverageEnd,
+        intervalCount: stitchedSection.intervalCount,
+        truncated: stitchedSection.truncated,
+        truncationLimit: stitchedSection.truncationLimit,
+      };
+
+      const excludedDateKeysForCompare = new Set(
+        travelRangesToExcludeDateKeys(Array.isArray(buildInputs?.travelRanges) ? buildInputs.travelRanges : [])
+      );
+      const firstActualOnlyDate = canonicalDateKeys.find((dk) => !excludedDateKeysForCompare.has(dk)) ?? null;
+      firstActualOnlyDayComparison = {
+        date: firstActualOnlyDate,
+        rawActualDayTotalKwh: dayTotalFromIntervalsUtc(actualIntervals, firstActualOnlyDate),
+        stitchedPastDayTotalKwh: dayTotalFromIntervalsUtc(stitchedAll, firstActualOnlyDate),
+        note:
+          "Earliest canonical day that is not in travel/vacant exclusions; compare raw actual vs final stitched Past totals.",
+      };
     }
 
     const applianceProfileLive = normalizeStoredApplianceProfile((applianceRecLive?.appliancesJson as any) ?? null);
@@ -444,6 +533,11 @@ export async function GET(req: NextRequest) {
         identity: identityContext,
         weather: weatherContext,
         pastPatchPayload,
+        rawActualIntervalsMeta,
+        rawActualIntervals,
+        stitchedPastIntervalsMeta,
+        stitchedPastIntervals,
+        firstActualOnlyDayComparison,
       },
     });
   } catch (e: any) {

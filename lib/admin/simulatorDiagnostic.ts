@@ -6,32 +6,21 @@
 import { createHash } from "crypto";
 import { enumerateDayStartsMsForWindow, dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { getPastSimulatedDatasetForHouse, getSimulatedUsageForHouseScenario, recalcSimulatorBuild } from "@/modules/usageSimulator/service";
+import { getActualIntervalsForRangeWithSource } from "@/lib/usage/actualDatasetForHouse";
+import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 const BOUNDARY_STUB_SAMPLE = 5;
+const DIAGNOSTIC_INTERVAL_LIMIT = 96;
 
 /** Normalize weatherFallbackReason so match logic and display agree: null/undefined/empty/whitespace → null. */
 function normalizeWeatherFallbackReason(value: unknown): string | null {
   if (value == null) return null;
   const s = String(value).trim();
   return s === "" ? null : s;
-}
-
-function getWindowFromBuildInputs(buildInputs: any): { startDate: string; endDate: string } | null {
-  const periods = Array.isArray(buildInputs?.canonicalPeriods) ? buildInputs.canonicalPeriods : [];
-  const first = periods.length > 0 ? String(periods[0]?.startDate ?? "").slice(0, 10) : "";
-  const last = periods.length > 0 ? String(periods[periods.length - 1]?.endDate ?? "").slice(0, 10) : "";
-  if (YYYY_MM_DD.test(first) && YYYY_MM_DD.test(last)) return { startDate: first, endDate: last };
-
-  const months = Array.isArray(buildInputs?.canonicalMonths) ? buildInputs.canonicalMonths : [];
-  const firstMonth = String(months[0] ?? "");
-  const lastMonth = String(months[months.length - 1] ?? "");
-  if (!/^\d{4}-\d{2}$/.test(firstMonth) || !/^\d{4}-\d{2}$/.test(lastMonth)) return null;
-  const [y, m] = lastMonth.split("-").map(Number);
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { startDate: `${firstMonth}-01`, endDate: `${lastMonth}-${String(lastDay).padStart(2, "0")}` };
 }
 
 function canonicalDateKeysFromWindow(startDate: string, endDate: string): string[] {
@@ -47,6 +36,51 @@ function canonicalDateKeysFromWindow(startDate: string, endDate: string): string
     keys.push(dk);
   }
   return keys;
+}
+
+function summarizeIntervalsSlice(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  limit: number
+): {
+  rows: Array<{ timestamp: string; kwh: number }>;
+  meta: {
+    coverageStart: string | null;
+    coverageEnd: string | null;
+    intervalCount: number;
+    truncated: boolean;
+    truncationLimit: number;
+  };
+} {
+  const sorted = (intervals ?? [])
+    .map((p) => ({
+      timestamp: String(p?.timestamp ?? ""),
+      kwh: Number(p?.kwh) || 0,
+    }))
+    .filter((p) => p.timestamp.length > 0)
+    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+  const rows = sorted.slice(0, Math.max(0, limit));
+  return {
+    rows,
+    meta: {
+      coverageStart: sorted[0]?.timestamp ?? null,
+      coverageEnd: sorted[sorted.length - 1]?.timestamp ?? null,
+      intervalCount: sorted.length,
+      truncated: sorted.length > rows.length,
+      truncationLimit: Math.max(0, limit),
+    },
+  };
+}
+
+function dayTotalFromIntervalsUtc(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  dateKey: string
+): number {
+  const sum = (intervals ?? []).reduce((acc, p) => {
+    const ts = String(p?.timestamp ?? "");
+    if (ts.slice(0, 10) !== dateKey) return acc;
+    return acc + (Number(p?.kwh) || 0);
+  }, 0);
+  return Math.round(sum * 100) / 100;
 }
 
 function extractMeta(dataset: any): Record<string, unknown> {
@@ -215,6 +249,32 @@ export type SimulatorDiagnosticResult = {
     daySimulationCore?: string;
     note: string;
   };
+  rawActualIntervalsMeta: {
+    label: "Raw actual intervals";
+    source: "SMT" | "GREEN_BUTTON" | "none";
+    coverageStart: string | null;
+    coverageEnd: string | null;
+    intervalCount: number;
+    truncated: boolean;
+    truncationLimit: number;
+  };
+  rawActualIntervals: Array<{ timestamp: string; kwh: number }>;
+  stitchedPastIntervalsMeta: {
+    label: "Final stitched Past corrected-baseline intervals";
+    source: "production_artifact" | "cold_build";
+    coverageStart: string | null;
+    coverageEnd: string | null;
+    intervalCount: number;
+    truncated: boolean;
+    truncationLimit: number;
+  };
+  stitchedPastIntervals: Array<{ timestamp: string; kwh: number }>;
+  firstActualOnlyDayComparison: {
+    date: string | null;
+    rawActualDayTotalKwh: number | null;
+    stitchedPastDayTotalKwh: number | null;
+    note: string;
+  };
 };
 
 export type SimulatorDiagnosticError = {
@@ -227,7 +287,9 @@ export async function runSimulatorDiagnostic(
 ): Promise<SimulatorDiagnosticResult | SimulatorDiagnosticError> {
   const { userId, houseId, esiid, buildInputs, scenarioId, scenarioKey, buildInputsHash, includeParity } = args;
 
-  const windowFromBuild = getWindowFromBuildInputs(buildInputs);
+  const windowFromBuild = resolveWindowFromBuildInputsForPastIdentity(
+    (buildInputs ?? {}) as Record<string, unknown>
+  );
   const startDate = args.startDateOverride && YYYY_MM_DD.test(args.startDateOverride)
     ? args.startDateOverride
     : windowFromBuild?.startDate;
@@ -254,9 +316,27 @@ export async function runSimulatorDiagnostic(
   const timezone = (buildInputs as any)?.timezone ?? "America/Chicago";
 
   const canonicalDateKeys = canonicalDateKeysFromWindow(startDate, endDate);
+  const excludedDateKeys = new Set(
+    travelRangesToExcludeDateKeys(Array.isArray(travelRanges) ? travelRanges : [])
+  );
+  const firstActualOnlyDate = canonicalDateKeys.find((dk) => !excludedDateKeys.has(dk)) ?? null;
+
+  const rawActualFetched = await getActualIntervalsForRangeWithSource({
+    houseId,
+    esiid,
+    startDate,
+    endDate,
+  });
+  const rawActualSource =
+    rawActualFetched.source === "SMT" || rawActualFetched.source === "GREEN_BUTTON"
+      ? rawActualFetched.source
+      : "none";
+  const rawActualIntervalsAll = rawActualFetched.intervals ?? [];
+  const rawActualSection = summarizeIntervalsSlice(rawActualIntervalsAll, DIAGNOSTIC_INTERVAL_LIMIT);
 
   let coldMeta: Record<string, unknown> = {};
   let coldSummary: { totalKwh?: number; intervalsCount?: number } = {};
+  let coldDatasetForIntervals: any | null = null;
   const coldResult = await getPastSimulatedDatasetForHouse({
     userId,
     houseId,
@@ -271,6 +351,7 @@ export async function runSimulatorDiagnostic(
   if (coldResult.dataset) {
     coldMeta = extractMeta(coldResult.dataset);
     coldSummary = extractSummary(coldResult.dataset);
+    coldDatasetForIntervals = coldResult.dataset;
   }
   const coldSimulatedDayResults = Array.isArray((coldResult as { simulatedDayResults?: unknown }).simulatedDayResults)
     ? ((coldResult as { simulatedDayResults?: Array<Record<string, unknown>> }).simulatedDayResults ?? [])
@@ -284,11 +365,13 @@ export async function runSimulatorDiagnostic(
 
   const productionResult = await getSimulatedUsageForHouseScenario({ userId, houseId, scenarioId });
   let productionDatasetForDayParity: any | null = null;
+  let productionDatasetForIntervals: any | null = null;
   const productionMeta = productionResult.ok && productionResult.dataset ? extractMeta(productionResult.dataset) : {};
   const productionSummary = productionResult.ok && productionResult.dataset ? extractSummary(productionResult.dataset) : {};
   const productionParityDiag = productionResult.ok && productionResult.dataset ? computeParityDiagnostics(productionResult.dataset) : undefined;
   if (productionResult.ok && productionResult.dataset) {
     productionDatasetForDayParity = productionResult.dataset;
+    productionDatasetForIntervals = productionResult.dataset;
     (productionResult as { dataset?: unknown }).dataset = undefined;
   }
 
@@ -485,6 +568,20 @@ export async function runSimulatorDiagnostic(
     integrity.recalcRecomputedFromIntervals = recalcSide.recomputedTotalFromIntervals;
   }
 
+  const stitchedIntervalsDataset = productionDatasetForIntervals ?? coldDatasetForIntervals;
+  const stitchedIntervalsAll = Array.isArray(stitchedIntervalsDataset?.series?.intervals15)
+    ? (stitchedIntervalsDataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
+    : [];
+  const stitchedSource: "production_artifact" | "cold_build" = productionDatasetForIntervals ? "production_artifact" : "cold_build";
+  const stitchedSection = summarizeIntervalsSlice(stitchedIntervalsAll, DIAGNOSTIC_INTERVAL_LIMIT);
+  const firstActualOnlyDayComparison = {
+    date: firstActualOnlyDate,
+    rawActualDayTotalKwh: firstActualOnlyDate ? dayTotalFromIntervalsUtc(rawActualIntervalsAll, firstActualOnlyDate) : null,
+    stitchedPastDayTotalKwh: firstActualOnlyDate ? dayTotalFromIntervalsUtc(stitchedIntervalsAll, firstActualOnlyDate) : null,
+    note:
+      "Earliest canonical day that is not in travel/vacant exclusions; compare raw actual vs final stitched Past day totals.",
+  };
+
   return {
     ok: true,
     context: {
@@ -522,6 +619,27 @@ export async function runSimulatorDiagnostic(
       daySimulationCore: "shared_past_day_simulator",
       note: "GapFill Lab compare/read now uses artifact-only reads from the saved gapfill_lab Past artifact via getSimulatedUsageForHouseScenario(readMode=artifact_only), then computes metrics via computeGapFillMetrics. Rebuilds remain explicit actions.",
     },
+    rawActualIntervalsMeta: {
+      label: "Raw actual intervals",
+      source: rawActualSource,
+      coverageStart: rawActualSection.meta.coverageStart,
+      coverageEnd: rawActualSection.meta.coverageEnd,
+      intervalCount: rawActualSection.meta.intervalCount,
+      truncated: rawActualSection.meta.truncated,
+      truncationLimit: rawActualSection.meta.truncationLimit,
+    },
+    rawActualIntervals: rawActualSection.rows,
+    stitchedPastIntervalsMeta: {
+      label: "Final stitched Past corrected-baseline intervals",
+      source: stitchedSource,
+      coverageStart: stitchedSection.meta.coverageStart,
+      coverageEnd: stitchedSection.meta.coverageEnd,
+      intervalCount: stitchedSection.meta.intervalCount,
+      truncated: stitchedSection.meta.truncated,
+      truncationLimit: stitchedSection.meta.truncationLimit,
+    },
+    stitchedPastIntervals: stitchedSection.rows,
+    firstActualOnlyDayComparison,
   };
 }
 
