@@ -4,14 +4,19 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildPastSimulatedBaselineV1, type PastSimulationDebug } from "@/modules/simulatedUsage/engine";
+import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { enumerateDayStartsMsForWindow, dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { recalcSimulatorBuild, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import { computePastInputHash, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
+import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 
 export const dynamic = "force-dynamic";
 
@@ -21,26 +26,6 @@ const WORKSPACE_FUTURE_NAME = "Future (What-if)";
 function toBool(v: string | null): boolean {
   const s = String(v ?? "").trim().toLowerCase();
   return s === "1" || s === "true" || s === "yes";
-}
-
-function safeDate(v: unknown): string | null {
-  const s = String(v ?? "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-}
-
-function getWindowFromBuildInputs(buildInputs: any): { startDate: string; endDate: string } | null {
-  const periods = Array.isArray(buildInputs?.canonicalPeriods) ? buildInputs.canonicalPeriods : [];
-  const first = periods.length > 0 ? safeDate(periods[0]?.startDate) : null;
-  const last = periods.length > 0 ? safeDate(periods[periods.length - 1]?.endDate) : null;
-  if (first && last) return { startDate: first, endDate: last };
-
-  const months = Array.isArray(buildInputs?.canonicalMonths) ? buildInputs.canonicalMonths : [];
-  const firstMonth = String(months[0] ?? "");
-  const lastMonth = String(months[months.length - 1] ?? "");
-  if (!/^\d{4}-\d{2}$/.test(firstMonth) || !/^\d{4}-\d{2}$/.test(lastMonth)) return null;
-  const [y, m] = lastMonth.split("-").map(Number);
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { startDate: `${firstMonth}-01`, endDate: `${lastMonth}-${String(lastDay).padStart(2, "0")}` };
 }
 
 function datasetDebugView(dataset: any, includeSeries: boolean): any {
@@ -231,11 +216,54 @@ export async function GET(req: NextRequest) {
     ]);
 
     const buildInputs = (buildRec?.buildInputs as any) ?? null;
-    const window = getWindowFromBuildInputs(buildInputs);
+    const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs as Record<string, unknown>);
 
     let weatherContext: any = null;
     let pastPatchPayload: any = null;
     let pastEngineDebug: PastSimulationDebug | null = null;
+    let identityContext: any = null;
+    if (window) {
+      const travelRanges = Array.isArray(buildInputs?.travelRanges) ? buildInputs.travelRanges : [];
+      const timezone = typeof buildInputs?.timezone === "string" ? buildInputs.timezone : "America/Chicago";
+      const [intervalDataFingerprint, usageShapeProfileIdentity, weatherIdentity] = await Promise.all([
+        getIntervalDataFingerprint({
+          houseId: selectedHouse.id,
+          esiid: selectedHouse.esiid ?? null,
+          startDate: window.startDate,
+          endDate: window.endDate,
+        }),
+        getUsageShapeProfileIdentityForPast(selectedHouse.id),
+        computePastWeatherIdentity({
+          houseId: selectedHouse.id,
+          startDate: window.startDate,
+          endDate: window.endDate,
+        }),
+      ]);
+      const inputHash = computePastInputHash({
+        engineVersion: PAST_ENGINE_VERSION,
+        windowStartUtc: window.startDate,
+        windowEndUtc: window.endDate,
+        timezone,
+        travelRanges,
+        buildInputs: (buildInputs ?? {}) as Record<string, unknown>,
+        intervalDataFingerprint,
+        usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+        usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+        usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+        usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+        weatherIdentity,
+      });
+      identityContext = {
+        windowStartUtc: window.startDate,
+        windowEndUtc: window.endDate,
+        timezone,
+        inputHash,
+        engineVersion: PAST_ENGINE_VERSION,
+        intervalDataFingerprint,
+        weatherIdentity,
+        usageShapeProfileIdentity,
+      };
+    }
     if (window) {
       const canonicalDayStartsMs = enumerateDayStartsMsForWindow(window.startDate, window.endDate);
       const canonicalDateKeys = canonicalDayStartsMs
@@ -413,6 +441,7 @@ export async function GET(req: NextRequest) {
         applianceProfileBuildSnapshot: buildInputs?.snapshots?.applianceProfile ?? null,
       },
       engineContext: {
+        identity: identityContext,
         weather: weatherContext,
         pastPatchPayload,
       },
