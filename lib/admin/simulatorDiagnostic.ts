@@ -449,14 +449,12 @@ export async function runSimulatorDiagnostic(
       let recalcSummary: { totalKwh?: number; intervalsCount?: number } = {};
       let recalcParityDiag: ReturnType<typeof computeParityDiagnostics> | undefined;
       if (recalcResult.ok) {
-        const afterRecalc = await getSimulatedUsageForHouseScenario({ userId, houseId, scenarioId });
-        if (afterRecalc.ok && afterRecalc.dataset) {
-          recalcMeta = extractMeta(afterRecalc.dataset);
-          recalcSummary = extractSummary(afterRecalc.dataset);
-          recalcParityDiag = computeParityDiagnostics(afterRecalc.dataset);
-          recalcDatasetForDayParity = afterRecalc.dataset;
-          (afterRecalc as { dataset?: unknown }).dataset = undefined;
-        }
+        // Use the fresh recalc output directly so cold-vs-recalc parity is not
+        // influenced by cache-restore reads from getSimulatedUsageForHouseScenario.
+        recalcMeta = extractMeta(recalcResult.dataset);
+        recalcSummary = extractSummary(recalcResult.dataset);
+        recalcParityDiag = computeParityDiagnostics(recalcResult.dataset);
+        recalcDatasetForDayParity = recalcResult.dataset;
       }
       const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
       const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
