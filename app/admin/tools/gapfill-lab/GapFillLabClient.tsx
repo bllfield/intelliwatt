@@ -259,12 +259,7 @@ export default function GapFillLabClient() {
   }, [result]);
   const hasUsage365ChartData = Boolean(usage365ChartData?.daily?.length);
   const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
-  const effectiveChartMode: ChartMode =
-    chartMode === "usage365" && !hasUsage365ChartData && hasGapfillChartData
-      ? "gapfill"
-      : chartMode === "gapfill" && !hasGapfillChartData && hasUsage365ChartData
-        ? "usage365"
-        : chartMode;
+  const effectiveChartMode: ChartMode = chartMode;
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -437,23 +432,25 @@ export default function GapFillLabClient() {
       setError("A Gap-Fill request is already running. Wait for it to finish.");
       return;
     }
-    setError(null);
-    setProgressStatus(null);
-    setArtifactMissing(false);
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) {
-      setError("Enter an email address.");
-      return;
-    }
-    const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
-    if (testMode === "manual_ranges" && !validRanges.length) {
-      setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
-      return;
-    }
     compareInFlightRef.current = true;
-    setLoading(true);
+    let startedCompare = false;
     let attemptedArtifactAutoRebuild = false;
     try {
+      setError(null);
+      setProgressStatus(null);
+      setArtifactMissing(false);
+      const trimmed = email.trim().toLowerCase();
+      if (!trimmed) {
+        setError("Enter an email address.");
+        return;
+      }
+      const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
+      if (testMode === "manual_ranges" && !validRanges.length) {
+        setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
+        return;
+      }
+      startedCompare = true;
+      setLoading(true);
       const body = buildCompareBody(trimmed, validRanges);
       setLastCompareBody(body);
       const { res, data } = await postGapfill(body);
@@ -510,7 +507,7 @@ export default function GapFillLabClient() {
       setError(msg);
       setResult(null);
     } finally {
-      setLoading(false);
+      if (startedCompare) setLoading(false);
       compareInFlightRef.current = false;
     }
   }
