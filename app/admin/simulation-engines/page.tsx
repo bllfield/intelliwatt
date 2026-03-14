@@ -101,6 +101,7 @@ export default function SimulationEnginesPage() {
         coldVsCacheMatch: boolean | null;
         cacheDigestMatch: boolean | null;
         cacheTotalDeltaKwh: number | null;
+        cacheCodecDriftToleranceKwh: number;
         cacheCodecDriftLikely: boolean | null;
         cacheIntegrityPass: boolean | null;
         cacheIntegrityReason:
@@ -956,6 +957,10 @@ export default function SimulationEnginesPage() {
                     const cacheIntegrityReason = integrity?.cacheIntegrityReason ?? null;
                     const cacheTotalDelta =
                       typeof integrity?.cacheTotalDeltaKwh === "number" ? integrity.cacheTotalDeltaKwh : null;
+                    const cacheCodecDriftTolerance =
+                      typeof integrity?.cacheCodecDriftToleranceKwh === "number"
+                        ? integrity.cacheCodecDriftToleranceKwh
+                        : 0.05;
                     return (
                       <>
                         <div className="grid gap-x-4 gap-y-1 md:grid-cols-2">
@@ -996,6 +1001,11 @@ export default function SimulationEnginesPage() {
                           {integrity?.coldVsCacheMatch !== undefined && integrity.coldVsCacheMatch !== null ? (
                             <span className={integrity.coldVsCacheMatch ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
                               Cold Build vs Cache: {integrity.coldVsCacheMatch ? "MATCH" : "MISMATCH"}
+                            </span>
+                          ) : null}
+                          {cacheTotalDelta != null ? (
+                            <span className="text-slate-700">
+                              Cache Drift Delta: {cacheTotalDelta.toFixed(2)} kWh (Tolerance: {cacheCodecDriftTolerance.toFixed(2)} kWh)
                             </span>
                           ) : null}
                           <span className={parityPass ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>

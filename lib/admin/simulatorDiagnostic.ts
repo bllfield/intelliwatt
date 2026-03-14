@@ -256,6 +256,7 @@ export type SimulatorDiagnosticResult = {
     coldVsCacheMatch: boolean | null;
     cacheDigestMatch: boolean | null;
     cacheTotalDeltaKwh: number | null;
+    cacheCodecDriftToleranceKwh: number;
     cacheCodecDriftLikely: boolean | null;
     cacheIntegrityPass: boolean | null;
     cacheIntegrityReason:
@@ -641,6 +642,7 @@ export async function runSimulatorDiagnostic(
     coldVsCacheMatch,
     cacheDigestMatch,
     cacheTotalDeltaKwh,
+    cacheCodecDriftToleranceKwh: CACHE_CODEC_DRIFT_TOLERANCE_KWH,
     cacheCodecDriftLikely,
     cacheIntegrityPass,
     cacheIntegrityReason,
