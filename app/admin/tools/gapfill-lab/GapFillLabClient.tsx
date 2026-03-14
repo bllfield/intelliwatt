@@ -246,8 +246,12 @@ export default function GapFillLabClient() {
       365
     );
     if (!normalizedDaily.length) return null;
+    const normalizedCoverageStart = normalizedDaily[0]?.date ?? result.usage365.coverageStart ?? null;
+    const normalizedCoverageEnd = normalizedDaily[normalizedDaily.length - 1]?.date ?? result.usage365.coverageEnd ?? null;
     return {
       ...result.usage365,
+      coverageStart: normalizedCoverageStart,
+      coverageEnd: normalizedCoverageEnd,
       daily: normalizedDaily,
     };
   }, [result]);
