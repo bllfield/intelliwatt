@@ -747,3 +747,120 @@ Anything not required for the above should be pushed to Phase 2.
 - A prospect can land on the site, click through to the sample dashboard hub, and see all main tools/functions listed and explained.
 - From the hub, they can open separate pages that mirror real dashboard screens, using a real home's data, with clear explanations on each page.
 - The experience is fully read-only and does not require login; implementation reuses existing dashboard UI where possible.
+
+## Post–Past Sim Performance + Read-Path Cleanup Plan
+
+This section is deferred until Past corrected baseline / shared simulation work is fully complete and validated. It captures the next cleanup pass to reduce default heavy reads, enforce explicit heavy actions, and keep all runtime/admin flows on shared modules only. This is a planning section only and is not to be implemented until Past Sim is signed off.
+
+### 1. Global enforcement rule for all future cleanup
+
+- No duplicate business logic is allowed in multiple files.
+- Any logic used in more than one place must live in a shared module.
+- Routes/pages/admin tools may orchestrate inputs and outputs, but must not own reusable business logic.
+- Heavy operations must be explicit whenever possible.
+- Default read paths should prefer:
+  1. saved artifact / cache / lightweight summary read
+  2. shared resolver/service path
+  3. explicit rebuild / deep diagnostic only when requested
+- Weather adjustment math must live only in the shared simulation core.
+- Weather identity/fingerprint logic must live only in a shared weather identity helper.
+- Date/window logic must use shared Chicago/canonical window helpers only.
+
+### 2. Simulation Engines admin cleanup (deferred until Past Sim is done)
+
+Current issue:
+- `/api/admin/simulation-engines` inspect path is still heavier than it should be because default inspect behavior pulls in deep diagnostic work.
+
+Plan after Past Sim signoff:
+- Keep `/api/admin/simulation-engines/diagnostic` as the explicit heavy diagnostic path.
+- Make default inspect/read behavior light and artifact/read-first.
+- Keep parity/cold-build/recalc/weather-audit work behind explicit flags/actions only.
+- Ensure admin inspect uses the same shared canonical window/hash/weather helpers as production and owns only report assembly.
+
+Acceptance:
+- Inspect = light read
+- Diagnostic = explicit heavy path
+- No duplicate canonical logic in admin inspect routes
+
+### 3. Usage runtime payload split (deferred until after Past Sim)
+
+Current issue:
+- `/api/user/usage` default path is shared-module aligned but still heavy because it assembles a rich full dataset, including expensive insight/baseload/weather-related work.
+
+Plan after Past Sim signoff:
+- Keep shared usage modules intact.
+- Split default payload vs advanced payload.
+- Default usage read should return the core series/summary needed for the main user experience.
+- Advanced baseload/weather/extra insight calculations should be explicit or gated by view need.
+- Polling/status flows should prefer the lightweight status endpoint before triggering full usage reloads.
+
+Acceptance:
+- Default usage load is lighter
+- No route-level duplicated usage logic
+- Shared modules remain the only source of truth
+
+### 4. Plans / plan options default-load cleanup (highest-priority post-Past-Sim performance pass)
+
+Current issue:
+- `/dashboard/plans` is the heaviest default read path.
+- Default behavior currently triggers full dataset mode, large page size behavior, and warmup/bootstrap actions more aggressively than needed.
+
+Plan after Past Sim signoff:
+- Make light/paged mode the default Plans experience.
+- Move full dataset mode behind an explicit user action.
+- Make warmup/pipeline/bootstrap behavior explicit or more strictly gated.
+- Preserve cache-first and shared-module estimate behavior.
+- Keep detail/compare compute-on-read behavior, since those are explicit user-intent actions.
+- Do not weaken estimate correctness to gain speed.
+
+Acceptance:
+- Default Plans load is lighter
+- Full dataset + warmup behavior is explicit
+- Shared estimate/build modules remain canonical
+- No new route-level duplicated estimate logic
+
+### 5. Admin / tooling alignment follow-through
+
+After Past Sim signoff, confirm all remaining admin/tooling flows:
+- use shared interval fetch/source modules
+- use shared Past identity/hash/window helpers
+- use shared weather identity helper
+- use shared simulation core where simulation is involved
+- do not keep local duplicate canonical logic in routes
+
+Specifically re-check:
+- Simulation Engines admin paths
+- GapFill admin tools
+- any Usage/Plans admin helpers used during launch validation
+
+Acceptance:
+- Admin tools are presentation/debug glue only
+- Shared modules own canonical logic everywhere
+
+### 6. Execution order after Past Sim signoff
+
+1. Final signoff on Past corrected baseline / shared sim path
+2. Simulation Engines inspect-vs-diagnostic split
+3. Plans default-load cleanup
+4. Usage payload split / light-default cleanup
+5. Final admin/tooling shared-module audit
+6. Final launch performance verification
+
+### 7. Guardrails for implementation
+
+- Do not start this section until Past corrected baseline is complete and signed off.
+- Each cleanup step must be surgical and independently testable.
+- No broad rewrites.
+- No weakening of diagnostic correctness.
+- No duplicate logic allowed while optimizing performance.
+- Prefer additive flags and explicit actions over hidden behavior changes.
+- Every cleanup pass must document:
+  - files changed
+  - shared modules used
+  - heavy default work removed or gated
+  - tests run
+  - remaining known drift points
+
+### 8. Final summary note
+
+This post–Past Sim cleanup phase exists to reduce default heavy work without compromising correctness. The architectural rule remains: shared modules own canonical logic, services orchestrate, and routes/admin tools only assemble request/response behavior.
