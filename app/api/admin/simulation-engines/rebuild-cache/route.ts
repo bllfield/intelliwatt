@@ -6,6 +6,7 @@ import { getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { computePastInputHash, deleteCachedPastDataset, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import { normalizeScenarioKey } from "@/modules/usageSimulator/repo";
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
+import { computePastWeatherIdentity } from "@/modules/weather/identity";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +122,11 @@ export async function POST(req: NextRequest) {
       endDate: window.endDate,
     });
     const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(house.id);
+    const weatherIdentity = await computePastWeatherIdentity({
+      houseId: house.id,
+      startDate: window.startDate,
+      endDate: window.endDate,
+    });
     const inputHash = computePastInputHash({
       engineVersion: PAST_ENGINE_VERSION,
       windowStartUtc: window.startDate,
@@ -133,6 +139,7 @@ export async function POST(req: NextRequest) {
       usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
       usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
       usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+      weatherIdentity,
     });
 
     const scenarioIdForCache = resolvedScenarioId ?? "BASELINE";

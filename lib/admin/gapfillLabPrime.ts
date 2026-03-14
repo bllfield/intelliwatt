@@ -18,6 +18,7 @@ import {
   PAST_ENGINE_VERSION,
 } from "@/modules/usageSimulator/pastCache";
 import { encodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/intervalCodec";
+import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -262,6 +263,11 @@ export async function buildAndSavePastForGapfillLab(args: {
     endDate,
   });
   const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+  const weatherIdentity = await computePastWeatherIdentity({
+    houseId,
+    startDate,
+    endDate,
+  });
   const inputHash = computePastInputHash({
     engineVersion: PAST_ENGINE_VERSION,
     windowStartUtc: startDate,
@@ -274,6 +280,7 @@ export async function buildAndSavePastForGapfillLab(args: {
     usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
     usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
     usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+    weatherIdentity,
   });
 
   const pastResult = await getPastSimulatedDatasetForHouse({

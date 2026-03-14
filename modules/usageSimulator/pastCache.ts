@@ -22,6 +22,8 @@ export type PastInputHashPayload = {
   usageShapeProfileVersion?: string | null;
   usageShapeProfileDerivedAt?: string | null;
   usageShapeProfileSimHash?: string | null;
+  /** Shared weather identity for modeled window. */
+  weatherIdentity?: string | null;
 };
 
 /** Stable hash of buildInputs + travelRanges + timezone + window + engineVersion (base64url). */
@@ -42,6 +44,7 @@ export function computePastInputHash(payload: PastInputHashPayload): string {
     usageShapeProfileVersion: payload.usageShapeProfileVersion ?? "",
     usageShapeProfileDerivedAt: payload.usageShapeProfileDerivedAt ?? "",
     usageShapeProfileSimHash: payload.usageShapeProfileSimHash ?? "",
+    weatherIdentity: payload.weatherIdentity ?? "",
   };
   const json = JSON.stringify(canonical);
   const digest = createHash("sha256").update(json, "utf8").digest();

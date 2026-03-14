@@ -43,6 +43,7 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDayS
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { canonicalIntervalKey, dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
+import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
@@ -406,6 +407,34 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   const end = `${last}-${String(lastDay).padStart(2, "0")}`;
   const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
   return { start, end, days: Math.max(1, days) };
+}
+
+function resolveWindowFromBuildInputsForPastIdentity(
+  buildInputs: Record<string, unknown>,
+): { startDate: string; endDate: string } | null {
+  const canonicalPeriods = Array.isArray((buildInputs as any)?.canonicalPeriods)
+    ? ((buildInputs as any).canonicalPeriods as Array<{ startDate?: string; endDate?: string }>)
+    : [];
+  if (canonicalPeriods.length > 0) {
+    const periods = canonicalPeriods
+      .map((p) => ({
+        startDate: String(p?.startDate ?? "").slice(0, 10),
+        endDate: String(p?.endDate ?? "").slice(0, 10),
+      }))
+      .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate));
+    if (periods.length > 0) {
+      return {
+        startDate: periods[0].startDate,
+        endDate: periods[periods.length - 1].endDate,
+      };
+    }
+  }
+  const canonicalMonths = Array.isArray((buildInputs as any)?.canonicalMonths)
+    ? ((buildInputs as any).canonicalMonths as string[])
+    : [];
+  const window = canonicalWindowDateRange(canonicalMonths);
+  if (!window) return null;
+  return { startDate: window.start, endDate: window.end };
 }
 
 function monthsIntersectingTravelRanges(
@@ -1317,25 +1346,131 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     if (readMode === "artifact_only") {
       const scenarioIdForCache = scenarioId ?? "BASELINE";
-      const latestCached = await getLatestCachedPastDatasetByScenario({
-        houseId: args.houseId,
-        scenarioId: scenarioIdForCache,
-      });
-      if (!latestCached || latestCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+      // Backward-compatible artifact-only support for gapfill_lab, which does not have a usageSimulatorBuild row.
+      if (scenarioIdForCache === "gapfill_lab") {
+        const latestCached = await getLatestCachedPastDatasetByScenario({
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+        });
+        if (!latestCached || latestCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+          return {
+            ok: false,
+            code: "ARTIFACT_MISSING",
+            message: "Persisted artifact not found for this house/scenario. Run explicit rebuild first.",
+            engineVersion: PAST_ENGINE_VERSION,
+          };
+        }
+        const decoded = decodeIntervalsV1(latestCached.intervalsCompressed);
+        const restored = {
+          ...latestCached.datasetJson,
+          series: {
+            ...(typeof (latestCached.datasetJson as any).series === "object" &&
+            (latestCached.datasetJson as any).series !== null
+              ? (latestCached.datasetJson as any).series
+              : {}),
+            intervals15: decoded,
+          },
+        };
+        const restoredAny = restored as any;
+        if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
+        restoredAny.meta.artifactReadMode = "artifact_only";
+        restoredAny.meta.artifactSource = "past_cache";
+        restoredAny.meta.artifactInputHash = latestCached.inputHash;
+        restoredAny.meta.artifactUpdatedAt = latestCached.updatedAt
+          ? latestCached.updatedAt.toISOString()
+          : null;
+        restoredAny.meta.artifactRecomputed = false;
+        const quality = validateSharedSimQuality(restored);
+        if (!quality.ok) {
+          await reportSimulationDataIssue({
+            source: "GAPFILL_LAB",
+            userId: args.userId,
+            houseId: args.houseId,
+            scenarioId,
+            code: "INTERNAL_ERROR",
+            message: quality.message,
+            context: { readMode: "artifact_only" },
+          });
+          return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
+        }
+        return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: restored };
+      }
+
+      const buildRec = await (prisma as any).usageSimulatorBuild
+        .findUnique({
+          where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
+          select: { buildInputs: true },
+        })
+        .catch(() => null);
+      if (!buildRec?.buildInputs) {
         return {
           ok: false,
           code: "ARTIFACT_MISSING",
-          message: "Persisted artifact not found for this house/scenario. Run explicit rebuild first.",
+          message: "Persisted artifact not found for this house/scenario identity. Run explicit rebuild first.",
           engineVersion: PAST_ENGINE_VERSION,
         };
       }
-      const decoded = decodeIntervalsV1(latestCached.intervalsCompressed);
+
+      const buildInputs = buildRec.buildInputs as Record<string, unknown>;
+      const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
+      if (!window) {
+        return {
+          ok: false,
+          code: "ARTIFACT_MISSING",
+          message: "Persisted artifact identity window is unavailable for this house/scenario.",
+          engineVersion: PAST_ENGINE_VERSION,
+        };
+      }
+      const travelRanges = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
+      const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
+      const intervalDataFingerprint = await getIntervalDataFingerprint({
+        houseId: args.houseId,
+        esiid: house.esiid ?? null,
+        startDate: window.startDate,
+        endDate: window.endDate,
+      });
+      const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
+      const weatherIdentity = await computePastWeatherIdentity({
+        houseId: args.houseId,
+        startDate: window.startDate,
+        endDate: window.endDate,
+      });
+      const inputHash = computePastInputHash({
+        engineVersion: PAST_ENGINE_VERSION,
+        windowStartUtc: window.startDate,
+        windowEndUtc: window.endDate,
+        timezone,
+        travelRanges,
+        buildInputs: buildInputs as Record<string, unknown>,
+        intervalDataFingerprint,
+        usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+        usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+        usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+        usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+        weatherIdentity,
+      });
+
+      const exactCached = await getCachedPastDataset({
+        houseId: args.houseId,
+        scenarioId: scenarioIdForCache,
+        inputHash,
+      });
+      if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+        return {
+          ok: false,
+          code: "ARTIFACT_MISSING",
+          message: "Persisted artifact not found for this house/scenario identity. Run explicit rebuild first.",
+          inputHash,
+          engineVersion: PAST_ENGINE_VERSION,
+        };
+      }
+      const decoded = decodeIntervalsV1(exactCached.intervalsCompressed);
       const restored = {
-        ...latestCached.datasetJson,
+        ...exactCached.datasetJson,
         series: {
-          ...(typeof (latestCached.datasetJson as any).series === "object" &&
-          (latestCached.datasetJson as any).series !== null
-            ? (latestCached.datasetJson as any).series
+          ...(typeof (exactCached.datasetJson as any).series === "object" &&
+          (exactCached.datasetJson as any).series !== null
+            ? (exactCached.datasetJson as any).series
             : {}),
           intervals15: decoded,
         },
@@ -1344,15 +1479,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
       restoredAny.meta.artifactReadMode = "artifact_only";
       restoredAny.meta.artifactSource = "past_cache";
-      restoredAny.meta.artifactInputHash = latestCached.inputHash;
-      restoredAny.meta.artifactUpdatedAt = latestCached.updatedAt
-        ? latestCached.updatedAt.toISOString()
-        : null;
+      restoredAny.meta.artifactInputHash = inputHash;
       restoredAny.meta.artifactRecomputed = false;
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {
         await reportSimulationDataIssue({
-          source: scenarioId === "gapfill_lab" ? "GAPFILL_LAB" : "USER_SIMULATION",
+          source: "USER_SIMULATION",
           userId: args.userId,
           houseId: args.houseId,
           scenarioId,
@@ -1501,28 +1633,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
     } else {
-      if (isPastScenario && isSmtBaselineMode && scenarioId) {
-        const pastEventCount = await (prisma as any).usageSimulatorScenarioEvent
-          .count({ where: { scenarioId } })
-          .catch(() => 0);
-        if (!pastEventCount || pastEventCount <= 0) {
-          const baselineRes = await getSimulatedUsageForHouseScenario({
-            userId: args.userId,
-            houseId: args.houseId,
-            scenarioId: null,
-          });
-          if (baselineRes.ok) {
-            dataset = baselineRes.dataset;
-            dataset.meta = {
-              ...(dataset.meta ?? {}),
-              scenarioKey,
-              scenarioId,
-              mirroredFromBaseline: true,
-            };
-          }
-        }
-      }
-
       const pastSimulatedList = (buildInputs as any).pastSimulatedMonths;
       // Never return raw actual for Past + SMT/GB so completeActualIntervalsV1 always runs (Travel/Vacant + missing intervals fill).
       const pastHasNoEvents =
@@ -1653,6 +1763,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
           const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
           const timezone = (buildInputs as any).timezone ?? "America/Chicago";
           const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
+          const weatherIdentity = await computePastWeatherIdentity({
+            houseId: args.houseId,
+            startDate,
+            endDate,
+          });
           const intervalDataFingerprint = await getIntervalDataFingerprint({
             houseId: args.houseId,
             esiid: house.esiid ?? null,
@@ -1671,6 +1786,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
             usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
             usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+            weatherIdentity,
           });
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cacheKeyDiag = {

@@ -14,6 +14,7 @@ describe("past cache hash invalidation", () => {
     usageShapeProfileVersion: "8",
     usageShapeProfileDerivedAt: "2026-03-10T10:00:00.000Z",
     usageShapeProfileSimHash: "shape_hash_a",
+    weatherIdentity: "weather_hash_a",
   };
 
   it("changes when interval fingerprint changes (value-only edits)", () => {
@@ -39,6 +40,15 @@ describe("past cache hash invalidation", () => {
     const b = computePastInputHash({
       ...basePayload,
       usageShapeProfileSimHash: "shape_hash_b",
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it("changes when weather identity changes", () => {
+    const a = computePastInputHash(basePayload);
+    const b = computePastInputHash({
+      ...basePayload,
+      weatherIdentity: "weather_hash_b",
     });
     expect(a).not.toBe(b);
   });
