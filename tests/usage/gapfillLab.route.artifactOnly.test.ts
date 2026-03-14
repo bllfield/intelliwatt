@@ -9,6 +9,8 @@ const getActualIntervalsForRange = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
 const getCandidateDateCoverageForSelection = vi.fn();
 const buildAndSavePastForGapfillLab = vi.fn();
+const mergeDateKeysToRanges = vi.fn();
+const pickRandomTestDateKeys = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -109,8 +111,8 @@ vi.mock("@/lib/admin/gapfillLab", () => ({
   }),
   dateKeyInTimezone: (iso: string) => String(iso).slice(0, 10),
   getLocalDayOfWeekFromDateKey: vi.fn(),
-  mergeDateKeysToRanges: vi.fn(),
-  pickRandomTestDateKeys: vi.fn(),
+  mergeDateKeysToRanges: (...args: any[]) => mergeDateKeysToRanges(...args),
+  pickRandomTestDateKeys: (...args: any[]) => pickRandomTestDateKeys(...args),
   getCandidateDateCoverageForSelection: (...args: any[]) => getCandidateDateCoverageForSelection(...args),
   prevCalendarDay: vi.fn((s: string) => s),
   summarizeDailyCoverageFromIntervals: vi.fn(),
@@ -133,6 +135,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     buildGapfillCompareSimShared.mockReset();
     getCandidateDateCoverageForSelection.mockReset();
     buildAndSavePastForGapfillLab.mockReset();
+    mergeDateKeysToRanges.mockReset();
+    pickRandomTestDateKeys.mockReset();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
@@ -169,6 +173,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       inputHash: "ih",
       houseId: "h1",
     });
+    pickRandomTestDateKeys.mockReturnValue(["2026-01-01"]);
+    mergeDateKeysToRanges.mockReturnValue([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {
@@ -255,6 +261,46 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.rebuilt).toBe(true);
     expect(buildAndSavePastForGapfillLab).toHaveBeenCalled();
     expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+  });
+
+  it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
+    getActualIntervalsForRange.mockReset();
+    getCandidateDateCoverageForSelection.mockResolvedValue({
+      candidateDateKeys: ["2026-01-01"],
+      cacheHit: true,
+      coverageByDay: {},
+      intervalsForWindow: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+    });
+    buildGapfillCompareSimShared.mockResolvedValue({
+      ok: true,
+      artifactAutoRebuilt: false,
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testDays: 1,
+        testMode: "fixed",
+      }),
+    } as any;
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 });
 

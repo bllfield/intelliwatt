@@ -1112,6 +1112,8 @@ export async function POST(req: NextRequest) {
         return candidateIntervalsForTesting;
       },
     });
+    // On cache hits, loadIntervalsForWindow is not invoked; reuse cached intervals to avoid redundant fetch.
+    candidateIntervalsForTesting = coverageSelection.intervalsForWindow ?? [];
     const candidateDateKeys = coverageSelection.candidateDateKeys;
     if (testMode === "random") {
       seedUsed = `${house.id}-${Date.now()}`;
