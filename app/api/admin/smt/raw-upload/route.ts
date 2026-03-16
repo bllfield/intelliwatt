@@ -13,6 +13,29 @@ export const maxDuration = 300; // allow large SMT raw uploads
 
 export const dynamic = 'force-dynamic';
 
+function parseConnectionLimitFromUrl(rawUrl: string | undefined): number | null {
+  const value = String(rawUrl ?? '').trim();
+  if (!value) return null;
+  try {
+    const u = new URL(value);
+    const parsed = Number(u.searchParams.get('connection_limit') ?? '');
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldThrottleInlinePostIngest(): boolean {
+  // In constrained serverless envs (connection_limit=1), running heavy post-ingest
+  // work inline reliably causes pool starvation timeouts. Keep ingest fast and defer.
+  const primaryLimit = parseConnectionLimitFromUrl(process.env.DATABASE_URL);
+  const usageLimit = parseConnectionLimitFromUrl(process.env.USAGE_DATABASE_URL);
+  const minConfiguredLimit = [primaryLimit, usageLimit]
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    .reduce<number | null>((min, v) => (min == null ? v : Math.min(min, v)), null);
+  return minConfiguredLimit != null && minConfiguredLimit <= 1;
+}
+
 async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
   let timer: NodeJS.Timeout | null = null;
   try {
@@ -61,6 +84,8 @@ export async function POST(req: NextRequest) {
   // chunk has been ingested.
   // Default to false so upload/normalize returns fast unless caller explicitly opts in.
   const postIngest: boolean = body.postIngest === true;
+  const throttleInlinePostIngest = shouldThrottleInlinePostIngest();
+  const runInlinePostIngest = postIngest && !throttleInlinePostIngest;
 
   const missing: string[] = [];
 
@@ -234,7 +259,8 @@ export async function POST(req: NextRequest) {
               transactionTimeoutMs: 30_000,
               primaryChunkSize: 5000,
               usageChunkSize: 5000,
-              writeUsageModule: true,
+              // Avoid second-client write pressure in constrained pools.
+              writeUsageModule: !throttleInlinePostIngest,
             });
             inserted = persisted.inserted;
             skipped = persisted.skipped;
@@ -243,7 +269,7 @@ export async function POST(req: NextRequest) {
             throw err;
           }
 
-          if (distinctEsiids.length > 0 && postIngest) {
+          if (distinctEsiids.length > 0 && runInlinePostIngest) {
             // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this upload.
             // Must never fail SMT ingest.
             try {
@@ -302,6 +328,11 @@ export async function POST(req: NextRequest) {
               console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
             }
           }
+          if (distinctEsiids.length > 0 && postIngest && !runInlinePostIngest) {
+            console.warn('[raw-upload:inline] postIngest requested but deferred due to constrained DB pool', {
+              esiids: distinctEsiids.length,
+            });
+          }
 
           // IMPORTANT for debugging/audit: keep the RawSmtFile row (sha256 + storage_path metadata).
           // Raw bytes live in object storage / droplet path referenced by storage_path, not in Postgres.
@@ -316,6 +347,8 @@ export async function POST(req: NextRequest) {
             tsMin: tsMinAll ? tsMinAll.toISOString() : stats.tsMin ?? null,
             tsMax: tsMax.toISOString(),
             diagnostics: stats,
+            postIngestDeferred: postIngest && !runInlinePostIngest,
+            usageDualWriteDeferred: throttleInlinePostIngest,
           };
         }
       }
