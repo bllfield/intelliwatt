@@ -82,9 +82,9 @@ export async function GET(_request: NextRequest) {
         const errCode = String(rawErrCode ?? (err as any)?.name ?? 'INTERNAL_ERROR');
         const errMessage = String((err as any)?.message ?? 'actual interval fetch failed');
         const classification = classifySimulationFailure({
-          // Preserve historical no-actual-data classification when no structured code exists.
-          code: rawErrCode == null ? 'no_actual_data' : errCode,
+          code: errCode,
           message: errMessage,
+          error: String((err as any)?.error ?? ''),
         });
         void recordSimulationDataAlert({
           source: 'USAGE_DASHBOARD',
