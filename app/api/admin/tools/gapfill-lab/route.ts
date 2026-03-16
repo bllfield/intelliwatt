@@ -1032,8 +1032,8 @@ export async function POST(req: NextRequest) {
   const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
   const canonicalWindowHelper = "canonicalUsageWindowChicago";
   let usage365: Usage365Payload | undefined = undefined;
-  // Usage365 fetch is expensive and not required for compare metrics.
-  if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
+  // Usage365 fetch is expensive; only load when explicitly requested.
+  if (includeUsage365) {
     const sourceLabel = String((source as any)?.source ?? (source as any)?.kind ?? "actual");
     const intervalsForWindow = await getActualIntervalsForRange({
       houseId: house.id,

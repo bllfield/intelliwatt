@@ -353,6 +353,24 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 
+  it("keeps plain lookup lightweight when includeUsage365 is false", async () => {
+    getActualIntervalsForRange.mockReset();
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [],
+        includeUsage365: false,
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.usage365).toBeUndefined();
+    expect(getActualIntervalsForRange).not.toHaveBeenCalled();
+  });
+
   it("bounds Usage365 daily rows to shared canonical window dates", async () => {
     getActualIntervalsForRange.mockResolvedValue([
       { timestamp: "2025-02-28T23:45:00.000Z", kwh: 0.25 },
