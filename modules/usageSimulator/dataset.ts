@@ -602,6 +602,21 @@ export type SimulatedUsageDatasetMeta = {
   weatherActualRowCount?: number;
   weatherCoverageStart?: string | null;
   weatherCoverageEnd?: string | null;
+  /** Shared Past path weather integration flag for report wiring. */
+  weatherUsed?: boolean;
+  /** Shared Past path weather integration note for report wiring. */
+  weatherNote?: string;
+  /** Sample of canonical shared-sim per-day diagnostics for Gap-Fill reports. */
+  simulatedDayDiagnosticsSample?: Array<{
+    localDate: string;
+    targetDayKwhBeforeWeather: number;
+    weatherAdjustedDayKwh: number;
+    dayTypeUsed: "weekday" | "weekend" | null;
+    shapeVariantUsed: string | null;
+    finalDayKwh: number;
+    intervalSumKwh: number;
+    fallbackLevel: string | null;
+  }>;
 };
 
 export type SimulatedUsageDataset = {

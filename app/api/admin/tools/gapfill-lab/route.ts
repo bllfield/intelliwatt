@@ -351,6 +351,16 @@ function buildFullReport(args: {
   dayTotalDiagnostics?: DayTotalDiagnostics;
   weatherUsed?: boolean;
   weatherNote?: string;
+  simulatedDayDiagnosticsSample?: Array<{
+    localDate: string;
+    targetDayKwhBeforeWeather: number;
+    weatherAdjustedDayKwh: number;
+    dayTypeUsed: "weekday" | "weekend" | null;
+    shapeVariantUsed: string | null;
+    finalDayKwh: number;
+    intervalSumKwh: number;
+    fallbackLevel: string | null;
+  }>;
   weatherApiData?: Array<{ dateKey: string; kind: string; tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }>;
   weatherKindUsed?: string;
   weatherRowsBySource?: Record<string, number>;
@@ -385,6 +395,33 @@ function buildFullReport(args: {
   const j = args;
   const round2 = (x: number) => Math.round(x * 100) / 100;
   const enginePath = j.enginePath ?? "production_past_stitched";
+  const modelMeta =
+    j.modelAssumptions && typeof j.modelAssumptions === "object" ? (j.modelAssumptions as Record<string, unknown>) : {};
+  const simVersionMapped = String(
+    modelMeta.simVersion ?? (modelMeta as any)?.meta?.simVersion ?? "production_builder"
+  );
+  const derivationVersionMapped = String(
+    modelMeta.derivationVersion ??
+      modelMeta.shapeDerivationVersion ??
+      (modelMeta as any)?.meta?.shapeDerivationVersion ??
+      "v1"
+  );
+  const weekdayWeekendSplitUsedMapped = Boolean(
+    modelMeta.weekdayWeekendSplitUsed ?? (modelMeta as any)?.intradayShape?.weekdayWeekendSplit ?? false
+  );
+  const dayTotalSourceMapped = String(modelMeta.dayTotalSource ?? "fallback_month_avg");
+  const weatherSourceSummaryMapped = String(modelMeta.weatherSourceSummary ?? "").trim();
+  const weatherUsedMapped =
+    enginePath === "production_past_stitched" &&
+    (Boolean(modelMeta.weatherUsed) ||
+      weatherSourceSummaryMapped === "actual_only" ||
+      weatherSourceSummaryMapped === "mixed_actual_and_stub" ||
+      weatherSourceSummaryMapped === "stub_only");
+  const weatherNoteMapped =
+    String(modelMeta.weatherNote ?? "").trim() ||
+    (enginePath === "production_past_stitched"
+      ? `Weather integrated in shared past path (${weatherSourceSummaryMapped || "unknown"}).`
+      : "Weather not integrated in gap-fill test-days profile path.");
   const expectedTestIntervals = j.expectedTestIntervals ?? j.testDaysCount * 96;
   const missingTestIntervals = expectedTestIntervals - j.testIntervalsCount;
   const coveragePct: number | null = j.coveragePct ?? (expectedTestIntervals > 0 ? j.testIntervalsCount / expectedTestIntervals : null);
@@ -484,8 +521,8 @@ function buildFullReport(args: {
       ...(enginePath === "gapfill_test_days_profile"
         ? { daySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE, sameEngineAsPastProduction: true }
         : {}),
-      simVersion: j.modelAssumptions?.meta?.simVersion ?? "production_builder",
-      derivationVersion: j.modelAssumptions?.meta?.shapeDerivationVersion ?? "v1",
+      simVersion: simVersionMapped,
+      derivationVersion: derivationVersionMapped,
       configHash: j.configHash,
       cacheHit: j.cacheHit ?? false,
       userCacheTried: j.userCacheTried ?? false,
@@ -498,8 +535,8 @@ function buildFullReport(args: {
       engineVersion: j.engineVersion ?? null,
       intervalsCodec: j.intervalsCodec ?? null,
       compressedBytesLength: j.compressedBytesLength ?? null,
-      weekdayWeekendSplitUsed: j.modelAssumptions?.intradayShape?.weekdayWeekendSplit ?? false,
-      dayTotalSource: j.modelAssumptions?.dayTotalSource ?? "fallback_month_avg",
+      weekdayWeekendSplitUsed: weekdayWeekendSplitUsedMapped,
+      dayTotalSource: dayTotalSourceMapped,
       ...(j.pastWindowDiag ? { pastWindowDiag: j.pastWindowDiag } : {}),
       pastBuildIntervalsFetchCount: j.pastBuildIntervalsFetchCount ?? undefined,
       ...(j.cacheKeyDiag ? { cacheKeyDiag: j.cacheKeyDiag } : {}),
@@ -524,8 +561,11 @@ function buildFullReport(args: {
       trainingWindowEndUtc: j.trainingWindowEndUtc ?? undefined,
       trainingIntervalsCount: j.trainingIntervalsCount ?? undefined,
       trainingDaysCount: j.trainingDaysCount ?? undefined,
-      weatherUsed: j.weatherUsed ?? false,
-      weatherNote: j.weatherNote ?? "Weather not integrated in gap-fill lab path.",
+      weatherUsed: weatherUsedMapped,
+      weatherNote: weatherNoteMapped,
+      ...(Array.isArray(j.simulatedDayDiagnosticsSample) && j.simulatedDayDiagnosticsSample.length > 0
+        ? { simulatedDayDiagnosticsSample: j.simulatedDayDiagnosticsSample }
+        : {}),
       ...(j.weatherKindUsed != null ? { weatherKindUsed: j.weatherKindUsed } : {}),
       ...(Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0 ? { weatherApiData: j.weatherApiData } : {}),
       ...(j.weatherRowsBySource && Object.keys(j.weatherRowsBySource).length > 0 ? { weatherRowsBySource: j.weatherRowsBySource } : {}),
@@ -671,7 +711,11 @@ function buildFullReport(args: {
   });
 
   section("C) Test window summary (scoring window only)", () => {
-    lines.push("Note: Gap-Fill Lab v3 does not run Past; this section summarizes the scored test window only.");
+    lines.push(
+      enginePath === "gapfill_test_days_profile"
+        ? "Note: Gap-Fill Lab test-days profile path summarizes the scored test window only."
+        : "Note: Gap-Fill Lab production path uses shared Past stitched simulation across the full canonical window; scoring still uses Test Dates only."
+    );
     kv("windowStartUtc", j.dataset.summary?.start);
     kv("windowEndUtc", j.dataset.summary?.end);
     kv("intervalCount", j.dataset.summary?.intervalsCount);
@@ -760,8 +804,16 @@ function buildFullReport(args: {
     lines.push("canonicalMonths: " + (j.buildInputs?.canonicalMonths ?? []).join(", "));
     kv("excludedDateKeysCount", j.excludedDateKeysCount);
     lines.push("excludedDateKeysSample: " + listTrunc(j.excludedDateKeysSample, 10).join(", "));
-    kv("weatherUsed", j.weatherUsed ?? false);
-    lines.push("weatherNote: " + (j.weatherNote ?? "Weather not integrated in gap-fill lab path."));
+    kv("weatherUsed", weatherUsedMapped);
+    lines.push("weatherNote: " + weatherNoteMapped);
+    if (Array.isArray(j.simulatedDayDiagnosticsSample) && j.simulatedDayDiagnosticsSample.length > 0) {
+      lines.push("sharedSimulatedDayDiagnosticsSample (first 10): localDate | targetDayKwhBeforeWeather | weatherAdjustedDayKwh | dayTypeUsed | shapeVariantUsed | finalDayKwh | intervalSumKwh | fallbackLevel");
+      j.simulatedDayDiagnosticsSample.slice(0, 10).forEach((r) =>
+        lines.push(
+          `  ${r.localDate} | ${r.targetDayKwhBeforeWeather} | ${r.weatherAdjustedDayKwh} | ${r.dayTypeUsed ?? "—"} | ${r.shapeVariantUsed ?? "—"} | ${r.finalDayKwh} | ${r.intervalSumKwh} | ${r.fallbackLevel ?? "—"}`
+        )
+      );
+    }
     const dayDiag = j.dayTotalDiagnostics;
     if (dayDiag) {
       lines.push("profileDayTotalFallbackSummary: " + JSON.stringify(dayDiag.profileDayTotalFallbackSummary));
@@ -1530,6 +1582,17 @@ export async function POST(req: NextRequest) {
     },
     poolHoursLens: null,
     usageShapeProfileDiag: ((sharedSim.modelAssumptions as any)?.usageShapeProfileDiag ?? null) as any,
+    simulatedDayDiagnosticsSample:
+      ((sharedSim.modelAssumptions as any)?.simulatedDayDiagnosticsSample ?? []) as Array<{
+        localDate: string;
+        targetDayKwhBeforeWeather: number;
+        weatherAdjustedDayKwh: number;
+        dayTypeUsed: "weekday" | "weekend" | null;
+        shapeVariantUsed: string | null;
+        finalDayKwh: number;
+        intervalSumKwh: number;
+        fallbackLevel: string | null;
+      }>,
     cacheHit: !rebuildArtifact,
     cacheSource: rebuildArtifact ? "rebuilt" : "lab",
     inputHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? ""),

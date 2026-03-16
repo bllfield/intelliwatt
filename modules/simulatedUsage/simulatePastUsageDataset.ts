@@ -472,6 +472,10 @@ export async function simulatePastUsageDataset(
       reasonNotUsed,
     };
 
+    // Lab validation artifacts need shared per-day diagnostics even when callers
+    // omit full simulated-day payloads for response size reasons.
+    const collectSimulatedDayResultsForDiagnostics =
+      includeSimulatedDayResults || buildPathKind === "lab_validation";
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
@@ -485,7 +489,7 @@ export async function simulatePastUsageDataset(
       timezoneForProfile: timezone ?? undefined,
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
-      collectSimulatedDayResults: includeSimulatedDayResults,
+      collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
       debug: { out: pastDayCounts as any },
     });
 
@@ -518,6 +522,20 @@ export async function simulatePastUsageDataset(
     );
 
     if (dataset && typeof dataset.meta === "object") {
+      const simulatedDayDiagnosticsSample = dayResults.slice(0, 40).map((r) => ({
+        localDate: String(r.localDate ?? "").slice(0, 10),
+        targetDayKwhBeforeWeather: Number(r.targetDayKwhBeforeWeather ?? r.rawDayKwh ?? 0) || 0,
+        weatherAdjustedDayKwh: Number(r.weatherAdjustedDayKwh ?? 0) || 0,
+        dayTypeUsed: (r.dayTypeUsed as "weekday" | "weekend" | undefined) ?? null,
+        shapeVariantUsed: r.shapeVariantUsed ?? null,
+        finalDayKwh: Number(r.finalDayKwh ?? 0) || 0,
+        intervalSumKwh: Number(r.intervalSumKwh ?? 0) || 0,
+        fallbackLevel: r.fallbackLevel ?? null,
+      }));
+      const weatherUsed =
+        provenance.weatherSourceSummary === "actual_only" ||
+        provenance.weatherSourceSummary === "mixed_actual_and_stub" ||
+        provenance.weatherSourceSummary === "stub_only";
       dataset.meta = {
         ...dataset.meta,
         buildPathKind,
@@ -553,6 +571,11 @@ export async function simulatePastUsageDataset(
         weatherCoverageEnd: provenance.weatherCoverageEnd,
         weatherStubRowCount: provenance.weatherStubRowCount,
         weatherActualRowCount: provenance.weatherActualRowCount,
+        weatherUsed,
+        weatherNote: weatherUsed
+          ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
+          : "Weather unavailable for shared past path.",
+        simulatedDayDiagnosticsSample,
       };
     }
 
