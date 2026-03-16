@@ -15,6 +15,10 @@ import type {
   PastDayApplianceProfile,
   PastDayWeatherClassification,
   PastDayFallbackLevel,
+  PastShapeVariants,
+  PastDayTypeKey,
+  PastWeatherRegimeKey,
+  PastNeighborDaySample,
 } from "./pastDaySimulatorTypes";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
@@ -65,15 +69,53 @@ const MIN_DAYS_ADJACENT = 6;
 const MIN_DAYS_MONTH_OVERALL = 6;
 const MIN_DAYS_SEASON = 8;
 const MIN_DAYS_GLOBAL_DAYTYPE = 8;
+const MIN_DAYS_NEIGHBOR_DAYTYPE = 3;
+const NEIGHBOR_DOM_RADIUS = 5;
 const GUARDRAIL_MAX_MULT = 1.75;
 const GUARDRAIL_MIN_MULT = 0.45;
 
+function parseLocalDayOfMonth(localDate: string): number | null {
+  const dom = Number(String(localDate ?? "").slice(8, 10));
+  if (!Number.isFinite(dom) || dom < 1 || dom > 31) return null;
+  return dom;
+}
+
+function weightedNeighborDayKwh(args: {
+  targetDayOfMonth: number | null;
+  samples: PastNeighborDaySample[] | undefined;
+}): number | null {
+  const dom = args.targetDayOfMonth;
+  if (dom == null || !Array.isArray(args.samples) || args.samples.length === 0) return null;
+  const scored = args.samples
+    .map((s) => {
+      const sampleDom = Number(s?.dayOfMonth);
+      const dayKwh = Number(s?.dayKwh);
+      if (!Number.isFinite(sampleDom) || !Number.isFinite(dayKwh) || dayKwh <= 0) return null;
+      const dist = Math.abs(sampleDom - dom);
+      if (dist > NEIGHBOR_DOM_RADIUS) return null;
+      const weight = 1 / (1 + dist);
+      return { weight, dayKwh };
+    })
+    .filter((x): x is { weight: number; dayKwh: number } => Boolean(x))
+    .sort((a, b) => b.weight - a.weight);
+  if (scored.length < MIN_DAYS_NEIGHBOR_DAYTYPE) return null;
+  const wSum = scored.reduce((s, r) => s + r.weight, 0);
+  if (!Number.isFinite(wSum) || wSum <= 0) return null;
+  const kwh = scored.reduce((s, r) => s + r.dayKwh * r.weight, 0) / wSum;
+  return Number.isFinite(kwh) && kwh > 0 ? kwh : null;
+}
+
 function selectPastDayTotalWithFallback(args: {
+  localDate: string;
   monthKey: string;
   isWeekend: boolean;
   profile: PastDayProfileLite;
+  neighborDayTotals?: {
+    weekdayByMonth?: Record<string, PastNeighborDaySample[]> | null;
+    weekendByMonth?: Record<string, PastNeighborDaySample[]> | null;
+  } | null;
 }): { targetDayKwh: number; fallbackLevel: PastDayFallbackLevel; rawSelectedDayKwh: number; clampApplied: boolean } {
-  const { monthKey, isWeekend, profile } = args;
+  const { monthKey, isWeekend, profile, localDate, neighborDayTotals } = args;
   const {
     monthKeys,
     avgKwhPerDayWeekdayByMonth,
@@ -110,8 +152,16 @@ function selectPastDayTotalWithFallback(args: {
 
   let rawKwh: number;
   let level: PastDayFallbackLevel;
+  const dom = parseLocalDayOfMonth(localDate);
+  const neighborSamples = isWeekend
+    ? (neighborDayTotals?.weekendByMonth?.[monthKey] ?? [])
+    : (neighborDayTotals?.weekdayByMonth?.[monthKey] ?? []);
+  const neighborKwh = weightedNeighborDayKwh({ targetDayOfMonth: dom, samples: neighborSamples });
 
-  if (sameDayTypeCount >= MIN_DAYS_MONTH_DAYTYPE && Number.isFinite(dayTypeAvg) && dayTypeAvg > 0) {
+  if (neighborKwh != null && Number.isFinite(neighborKwh) && neighborKwh > 0) {
+    rawKwh = neighborKwh;
+    level = "month_daytype_neighbor";
+  } else if (sameDayTypeCount >= MIN_DAYS_MONTH_DAYTYPE && Number.isFinite(dayTypeAvg) && dayTypeAvg > 0) {
     rawKwh = dayTypeAvg;
     level = "month_daytype";
   } else {
@@ -174,6 +224,46 @@ function selectPastDayTotalWithFallback(args: {
     }
   }
   return { targetDayKwh, fallbackLevel: level, rawSelectedDayKwh: rawKwh, clampApplied };
+}
+
+function normalizeShape96Safe(shape: unknown): number[] | null {
+  if (!Array.isArray(shape) || shape.length !== INTERVALS_PER_DAY) return null;
+  const nums = shape.map((v) => Math.max(0, Number(v) || 0));
+  const sum = nums.reduce((a, b) => a + b, 0);
+  if (!Number.isFinite(sum) || sum <= 0) return null;
+  return nums.map((v) => v / sum);
+}
+
+function selectShape96(args: {
+  monthKey: string;
+  dayType: PastDayTypeKey;
+  weatherRegime: PastWeatherRegimeKey;
+  shapeVariants?: PastShapeVariants | null;
+  legacyByMonth96?: Record<string, number[]> | null;
+}): { shape96: number[]; shapeVariantUsed: string } {
+  const { monthKey, dayType, weatherRegime, shapeVariants, legacyByMonth96 } = args;
+  const dayTypeBucket = dayType === "weekend" ? "weekend" : "weekday";
+  const weatherBuckets = shapeVariants?.byMonthWeatherDayType96?.[monthKey]?.[dayTypeBucket];
+  const monthDayType = shapeVariants?.byMonthDayType96?.[monthKey]?.[dayTypeBucket];
+  const monthFlat = shapeVariants?.byMonth96?.[monthKey] ?? legacyByMonth96?.[monthKey];
+  const wwWeather = shapeVariants?.weekdayWeekendWeather96?.[dayTypeBucket];
+  const wwFlat = shapeVariants?.weekdayWeekend96?.[dayTypeBucket];
+
+  const candidateOrder: Array<{ shape: unknown; variant: string }> = [
+    { shape: weatherBuckets?.[weatherRegime], variant: `month_${dayType}_weather_${weatherRegime}` },
+    { shape: monthDayType, variant: `month_${dayType}` },
+    { shape: monthFlat, variant: "month" },
+    { shape: wwWeather?.[weatherRegime], variant: `weekdayweekend_weather_${dayType}_${weatherRegime}` },
+    { shape: wwFlat, variant: `weekdayweekend_${dayType}` },
+  ];
+  for (const cand of candidateOrder) {
+    const normalized = normalizeShape96Safe(cand.shape);
+    if (normalized) return { shape96: normalized, shapeVariantUsed: cand.variant };
+  }
+  return {
+    shape96: Array.from({ length: INTERVALS_PER_DAY }, () => 1 / INTERVALS_PER_DAY),
+    shapeVariantUsed: "uniform_fallback",
+  };
 }
 
 // ----- Weather adjustment (from GapFill Lab) -----
@@ -407,11 +497,15 @@ export function buildPastDaySimulationContext(args: {
   profile: PastDayProfileLite;
   trainingWeatherStats: PastDayTrainingWeatherStats | null;
   weatherByDateKey: Map<string, PastDayWeatherFeatures>;
+  neighborDayTotals?: PastDaySimulationContext["neighborDayTotals"];
+  shapeVariants?: PastDaySimulationContext["shapeVariants"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
     trainingWeatherStats: args.trainingWeatherStats,
     weatherByDateKey: args.weatherByDateKey,
+    neighborDayTotals: args.neighborDayTotals ?? null,
+    shapeVariants: args.shapeVariants ?? null,
   };
 }
 
@@ -429,9 +523,11 @@ export function simulatePastDay(
   const monthKey = localDate.slice(0, 7);
 
   const sel = selectPastDayTotalWithFallback({
+    localDate,
     monthKey,
     isWeekend,
     profile: context.profile,
+    neighborDayTotals: context.neighborDayTotals,
   });
 
   const weatherByDateKey = new Map<string, PastDayWeatherFeatures>();
@@ -447,12 +543,17 @@ export function simulatePastDay(
     applianceProfile: applianceProfile ?? null,
   });
 
-  const shape96 =
-    (shapeByMonth96 && shapeByMonth96[monthKey] && shapeByMonth96[monthKey].length === INTERVALS_PER_DAY
-      ? shapeByMonth96[monthKey]
-      : null) ?? Array.from({ length: INTERVALS_PER_DAY }, () => 1 / INTERVALS_PER_DAY);
-  const sumShape = shape96.reduce((a, b) => a + b, 0) || 1;
-  const normShape = shape96.map((w) => w / sumShape);
+  const weatherRegime: PastWeatherRegimeKey =
+    adj.weatherModeUsed === "heating" || adj.weatherModeUsed === "cooling" ? adj.weatherModeUsed : "neutral";
+  const dayTypeUsed: PastDayTypeKey = isWeekend ? "weekend" : "weekday";
+  const selectedShape = selectShape96({
+    monthKey,
+    dayType: dayTypeUsed,
+    weatherRegime,
+    shapeVariants: context.shapeVariants,
+    legacyByMonth96: shapeByMonth96 ?? null,
+  });
+  const normShape = selectedShape.shape96;
 
   const intervals = gridTimestamps.slice(0, INTERVALS_PER_DAY).map((ts, i) => ({
     timestamp: ts,
@@ -461,7 +562,7 @@ export function simulatePastDay(
   const intervalSumKwh = intervals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
   const displayDayKwh = roundDayKwhDisplay(intervalSumKwh);
   const weatherAdjustedDayKwh =
-    adj.preBlendAdjustedDayKwh ?? (Number(sel.targetDayKwh) || 0) * (Number(adj.weatherSeverityMultiplier) || 0);
+    Number(adj.preBlendAdjustedDayKwh) || (Number(sel.targetDayKwh) || 0) * (Number(adj.weatherSeverityMultiplier) || 0);
 
   return {
     localDate,
@@ -471,6 +572,7 @@ export function simulatePastDay(
     intervalSumKwh,
     displayDayKwh,
     rawDayKwh: sel.targetDayKwh,
+    targetDayKwhBeforeWeather: sel.targetDayKwh,
     weatherAdjustedDayKwh,
     profileSelectedDayKwh: sel.targetDayKwh,
     finalDayKwh: adj.finalSelectedDayKwh,
@@ -481,6 +583,9 @@ export function simulatePastDay(
     dayClassification: adj.dayClassification,
     fallbackLevel: sel.fallbackLevel,
     clampApplied: sel.clampApplied,
+    dayTypeUsed,
+    weatherRegimeUsed: weatherRegime,
+    shapeVariantUsed: selectedShape.shapeVariantUsed,
     shape96Used: normShape,
     auxHeatGate_minTempPassed: adj.auxHeatGate_minTempPassed,
     auxHeatGate_freezeHoursPassed: adj.auxHeatGate_freezeHoursPassed,

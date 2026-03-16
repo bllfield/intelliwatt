@@ -13,6 +13,10 @@ import type {
   PastDayWeatherFeatures,
   PastDayFallbackLevel,
   SimulatedDayResult,
+  PastShapeVariants,
+  PastNeighborDayTotals,
+  PastDayTypeKey,
+  PastWeatherRegimeKey,
 } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
 import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
@@ -20,6 +24,7 @@ import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
   const map: Record<PastDayFallbackLevel, PastFallbackLevel> = {
+    month_daytype_neighbor: "MONTH_DOW",
     month_daytype: "MONTH_DOW",
     adjacent_month_daytype: "MONTH_DOW",
     month_overall: "MONTH",
@@ -154,6 +159,29 @@ function engineWxToPastDayWeather(
     coolingDegreeSeverity: Math.max(0, Number(wx.cdd65) || 0),
     freezeHoursCount,
   };
+}
+
+const SHAPE_WEATHER_SEVERITY_THRESHOLD = 2;
+
+function weatherRegimeForShape(wx: { hdd65: number; cdd65: number } | null): PastWeatherRegimeKey {
+  if (!wx) return "neutral";
+  const hdd = Math.max(0, Number(wx.hdd65) || 0);
+  const cdd = Math.max(0, Number(wx.cdd65) || 0);
+  if (hdd > cdd && hdd > SHAPE_WEATHER_SEVERITY_THRESHOLD) return "heating";
+  if (cdd > hdd && cdd > SHAPE_WEATHER_SEVERITY_THRESHOLD) return "cooling";
+  return "neutral";
+}
+
+function emptyShape96Array(): number[] {
+  return Array.from({ length: INTERVALS_PER_DAY }, () => 0);
+}
+
+function normalizeShape96OrNull(shape: number[] | undefined): number[] | null {
+  if (!Array.isArray(shape) || shape.length !== INTERVALS_PER_DAY) return null;
+  const safe = shape.map((v) => Math.max(0, Number(v) || 0));
+  const sum = safe.reduce((a, b) => a + b, 0);
+  if (!Number.isFinite(sum) || sum <= 0) return null;
+  return safe.map((v) => v / sum);
 }
 
 export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): SimulatedCurve {
@@ -661,7 +689,10 @@ export type PastSimulatedDayDiagnostic = {
   /** When set, indicates the day was simulated with the shared past-day simulator core. */
   sourceOfDaySimulationCore?: string;
   rawDayKwh?: number | null;
+  targetDayKwhBeforeWeather?: number | null;
   weatherAdjustedDayKwh?: number | null;
+  dayTypeUsed?: string | null;
+  shapeVariantUsed?: string | null;
   finalDayKwh?: number | null;
   displayDayKwh?: number | null;
   intervalSumKwh?: number | null;
@@ -1188,24 +1219,107 @@ export function buildPastSimulatedBaselineV1(args: {
         }) as unknown as PastDayTrainingWeatherStats)
       : null;
   const shapeByMonth96Ref: Record<string, number[]> = {};
+  type ShapeAcc = { sum: number[]; count: number };
+  type WeatherShapeAcc = Record<PastWeatherRegimeKey, ShapeAcc>;
+  const makeShapeAcc = (): ShapeAcc => ({ sum: emptyShape96Array(), count: 0 });
+  const makeWeatherShapeAcc = (): WeatherShapeAcc => ({
+    heating: makeShapeAcc(),
+    cooling: makeShapeAcc(),
+    neutral: makeShapeAcc(),
+  });
+  const monthDayTypeAcc: Record<string, Record<PastDayTypeKey, ShapeAcc>> = {};
+  const monthWeatherDayTypeAcc: Record<string, Record<PastDayTypeKey, WeatherShapeAcc>> = {};
+  const weekdayWeekendAcc: Record<PastDayTypeKey, ShapeAcc> = {
+    weekday: makeShapeAcc(),
+    weekend: makeShapeAcc(),
+  };
+  const weekdayWeekendWeatherAcc: Record<PastDayTypeKey, WeatherShapeAcc> = {
+    weekday: makeWeatherShapeAcc(),
+    weekend: makeWeatherShapeAcc(),
+  };
+  const neighborDayTotals: PastNeighborDayTotals = { weekdayByMonth: {}, weekendByMonth: {} };
+  const addShapeToAcc = (acc: ShapeAcc, shape: number[]) => {
+    for (let i = 0; i < INTERVALS_PER_DAY; i++) acc.sum[i] += Number(shape[i]) || 0;
+    acc.count += 1;
+  };
+  for (const d of referenceDays) {
+    const dayType: PastDayTypeKey = d.dow === 0 || d.dow === 6 ? "weekend" : "weekday";
+    const dom = Number(d.dateKey.slice(8, 10));
+    if (Number.isFinite(dom) && dom >= 1 && dom <= 31) {
+      const bucket = dayType === "weekend" ? neighborDayTotals.weekendByMonth : neighborDayTotals.weekdayByMonth;
+      if (!bucket) continue;
+      if (!bucket[d.monthKey]) bucket[d.monthKey] = [];
+      bucket[d.monthKey]!.push({
+        localDate: d.dateKey,
+        dayOfMonth: dom,
+        dayKwh: Number(d.total) || 0,
+      });
+    }
+    const dayTotal = Number(d.total) || 0;
+    if (dayTotal <= 0) continue;
+    const dayShape = d.slotKwh.map((k) => Math.max(0, (Number(k) || 0) / dayTotal));
+    const weatherRegime = weatherRegimeForShape(d.wx);
+    if (!monthDayTypeAcc[d.monthKey]) {
+      monthDayTypeAcc[d.monthKey] = { weekday: makeShapeAcc(), weekend: makeShapeAcc() };
+    }
+    if (!monthWeatherDayTypeAcc[d.monthKey]) {
+      monthWeatherDayTypeAcc[d.monthKey] = { weekday: makeWeatherShapeAcc(), weekend: makeWeatherShapeAcc() };
+    }
+    addShapeToAcc(monthDayTypeAcc[d.monthKey]![dayType], dayShape);
+    addShapeToAcc(monthWeatherDayTypeAcc[d.monthKey]![dayType][weatherRegime], dayShape);
+    addShapeToAcc(weekdayWeekendAcc[dayType], dayShape);
+    addShapeToAcc(weekdayWeekendWeatherAcc[dayType][weatherRegime], dayShape);
+  }
+  const normalizedFromAcc = (acc: ShapeAcc): number[] | null =>
+    acc.count > 0 ? normalizeShape96OrNull(acc.sum.map((v) => v / acc.count)) : null;
   for (const ym of monthKeysRef) {
-    const inMonth = referenceDays.filter((d) => d.monthKey === ym);
-    if (inMonth.length === 0) continue;
-    const shape96 = new Array<number>(96).fill(0);
-    for (const d of inMonth) {
-      for (let h = 0; h < 24; h++) {
-        const q = d.quarterShapeByHour[h] ?? [0.25, 0.25, 0.25, 0.25];
-        for (let i = 0; i < 4; i++) shape96[h * 4 + i] += q[i] ?? 0.25;
+    const wd = monthDayTypeAcc[ym]?.weekday;
+    const we = monthDayTypeAcc[ym]?.weekend;
+    const monthSum = emptyShape96Array();
+    const monthCount = (wd?.count ?? 0) + (we?.count ?? 0);
+    if (wd?.count) for (let i = 0; i < INTERVALS_PER_DAY; i++) monthSum[i] += wd.sum[i];
+    if (we?.count) for (let i = 0; i < INTERVALS_PER_DAY; i++) monthSum[i] += we.sum[i];
+    const normalized =
+      monthCount > 0 ? normalizeShape96OrNull(monthSum.map((v) => v / monthCount)) : null;
+    if (normalized) shapeByMonth96Ref[ym] = normalized;
+  }
+  const shapeVariants: PastShapeVariants = {
+    byMonth96: shapeByMonth96Ref,
+    byMonthDayType96: {},
+    byMonthWeatherDayType96: {},
+    weekdayWeekend96: {},
+    weekdayWeekendWeather96: {},
+  };
+  for (const ym of Object.keys(monthDayTypeAcc)) {
+    const dayTypeBuckets: Record<PastDayTypeKey, number[] | null> = {
+      weekday: normalizedFromAcc(monthDayTypeAcc[ym]!.weekday),
+      weekend: normalizedFromAcc(monthDayTypeAcc[ym]!.weekend),
+    };
+    (shapeVariants.byMonthDayType96 as NonNullable<PastShapeVariants["byMonthDayType96"]>)[ym] = dayTypeBuckets;
+    const weatherBuckets: any = { weekday: {}, weekend: {} };
+    for (const dt of ["weekday", "weekend"] as const) {
+      for (const regime of ["heating", "cooling", "neutral"] as const) {
+        weatherBuckets[dt][regime] = normalizedFromAcc(monthWeatherDayTypeAcc[ym]![dt][regime]);
       }
     }
-    const sum = shape96.reduce((a, b) => a + b, 0) || 1;
-    for (let i = 0; i < 96; i++) shape96[i] /= sum;
-    shapeByMonth96Ref[ym] = shape96;
+    (shapeVariants.byMonthWeatherDayType96 as NonNullable<PastShapeVariants["byMonthWeatherDayType96"]>)[ym] =
+      weatherBuckets;
+  }
+  (shapeVariants.weekdayWeekend96 as any).weekday = normalizedFromAcc(weekdayWeekendAcc.weekday);
+  (shapeVariants.weekdayWeekend96 as any).weekend = normalizedFromAcc(weekdayWeekendAcc.weekend);
+  for (const dt of ["weekday", "weekend"] as const) {
+    (shapeVariants.weekdayWeekendWeather96 as any)[dt] = {
+      heating: normalizedFromAcc(weekdayWeekendWeatherAcc[dt].heating),
+      cooling: normalizedFromAcc(weekdayWeekendWeatherAcc[dt].cooling),
+      neutral: normalizedFromAcc(weekdayWeekendWeatherAcc[dt].neutral),
+    };
   }
   const pastContext = buildPastDaySimulationContext({
     profile: finalProfile,
     trainingWeatherStats: trainingWeatherStatsPast,
     weatherByDateKey: weatherByDateKeyPast,
+    neighborDayTotals,
+    shapeVariants,
   });
 
   const NEAREST_WEATHER_K = 7;
@@ -1398,7 +1512,10 @@ export function buildPastSimulatedBaselineV1(args: {
           targetTotalKwh: result.finalDayKwh,
           sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
           rawDayKwh: result.rawDayKwh,
+          targetDayKwhBeforeWeather: result.targetDayKwhBeforeWeather ?? result.rawDayKwh,
           weatherAdjustedDayKwh: result.weatherAdjustedDayKwh,
+          dayTypeUsed: result.dayTypeUsed ?? (dow === 0 || dow === 6 ? "weekend" : "weekday"),
+          shapeVariantUsed: result.shapeVariantUsed ?? null,
           finalDayKwh: result.finalDayKwh,
           displayDayKwh: result.displayDayKwh,
           intervalSumKwh: result.intervalSumKwh,
@@ -1437,6 +1554,9 @@ export function buildPastSimulatedBaselineV1(args: {
           baseNonHvacKwh: null,
           hvacKwh: null,
           targetTotalKwh: null,
+          targetDayKwhBeforeWeather: null,
+          dayTypeUsed: null,
+          shapeVariantUsed: null,
         });
       }
     }

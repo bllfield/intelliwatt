@@ -28,6 +28,44 @@ export type PastDayProfileLite = {
   monthOverallCountByMonth: Record<string, number>;
 };
 
+export type PastDayTypeKey = "weekday" | "weekend";
+export type PastWeatherRegimeKey = "heating" | "cooling" | "neutral";
+
+export type PastShapeBucket = {
+  weekday?: number[] | null;
+  weekend?: number[] | null;
+};
+
+export type PastShapeWeatherBucket = {
+  heating?: number[] | null;
+  cooling?: number[] | null;
+  neutral?: number[] | null;
+};
+
+export type PastShapeWeatherDayTypeBucket = {
+  weekday?: PastShapeWeatherBucket | null;
+  weekend?: PastShapeWeatherBucket | null;
+};
+
+export type PastShapeVariants = {
+  byMonth96?: Record<string, number[]> | null;
+  byMonthDayType96?: Record<string, PastShapeBucket> | null;
+  byMonthWeatherDayType96?: Record<string, PastShapeWeatherDayTypeBucket> | null;
+  weekdayWeekend96?: PastShapeBucket | null;
+  weekdayWeekendWeather96?: PastShapeWeatherDayTypeBucket | null;
+};
+
+export type PastNeighborDaySample = {
+  localDate: string;
+  dayOfMonth: number;
+  dayKwh: number;
+};
+
+export type PastNeighborDayTotals = {
+  weekdayByMonth?: Record<string, PastNeighborDaySample[]> | null;
+  weekendByMonth?: Record<string, PastNeighborDaySample[]> | null;
+};
+
 /** Training weather aggregates by bucket (month+daytype, season+daytype, global). */
 export type PastDayTrainingWeatherStats = {
   byMonthDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
@@ -49,6 +87,8 @@ export type PastDaySimulationContext = {
   profile: PastDayProfileLite;
   trainingWeatherStats: PastDayTrainingWeatherStats | null;
   weatherByDateKey: Map<string, PastDayWeatherFeatures>;
+  neighborDayTotals?: PastNeighborDayTotals | null;
+  shapeVariants?: PastShapeVariants | null;
 };
 
 /** Request to simulate one past day. */
@@ -80,6 +120,10 @@ export type SimulatedDayResult = {
   fallbackLevel: PastDayFallbackLevel;
   clampApplied: boolean;
   shape96Used: number[];
+  dayTypeUsed?: PastDayTypeKey;
+  shapeVariantUsed?: string;
+  weatherRegimeUsed?: PastWeatherRegimeKey;
+  targetDayKwhBeforeWeather?: number;
   /** Diagnostics: why aux heat did or did not apply. */
   auxHeatGate_minTempPassed?: boolean;
   auxHeatGate_freezeHoursPassed?: boolean;
@@ -102,6 +146,7 @@ export type PastDayWeatherClassification =
   | "freeze_protect_day";
 
 export type PastDayFallbackLevel =
+  | "month_daytype_neighbor"
   | "month_daytype"
   | "adjacent_month_daytype"
   | "month_overall"
