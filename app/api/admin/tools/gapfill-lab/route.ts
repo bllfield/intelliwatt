@@ -84,14 +84,14 @@ function normalizeFifteenCurve96(
       if (minute % 15 !== 0 || minute < 0 || minute > 45) continue;
       const slot = hour * 4 + Math.floor(minute / 15);
       const avgKw = Number((row as any)?.avgKw);
-      bySlot.set(slot, Number.isFinite(avgKw) ? avgKw : 0);
+      bySlot.set(slot, Number.isFinite(avgKw) ? round2(avgKw) : 0);
     }
   }
   return Array.from({ length: 96 }, (_, slot) => {
     const hour = Math.floor(slot / 4);
     const minute = (slot % 4) * 15;
     const hhmm = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-    return { hhmm, avgKw: bySlot.get(slot) ?? 0 };
+    return { hhmm, avgKw: round2(bySlot.get(slot) ?? 0) };
   });
 }
 
