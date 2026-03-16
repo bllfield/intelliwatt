@@ -174,7 +174,7 @@ async function processDeferredPostIngestQueue(args: {
     const rangeStart = new Date(task.rangeStartIso);
     const rangeEnd = new Date(task.rangeEndIso);
     try {
-      await withTaskTimeout(
+      await withTaskTimeoutRequired(
         replayUsageDualWriteForWindow({
           esiid: task.esiid,
           rangeStart,
@@ -189,7 +189,7 @@ async function processDeferredPostIngestQueue(args: {
       });
       for (const h of houses) {
         if (!h?.id) continue;
-        await withTaskTimeout(
+        await withTaskTimeoutRequired(
           ensureCoreMonthlyBuckets({
             homeId: h.id,
             esiid: h.esiid,
@@ -204,7 +204,7 @@ async function processDeferredPostIngestQueue(args: {
       }
       for (const h of houses) {
         if (!h?.id) continue;
-        await withTaskTimeout(
+        await withTaskTimeoutRequired(
           runPlanPipelineForHome({
             homeId: h.id,
             reason: 'usage_present',
@@ -230,6 +230,14 @@ async function processDeferredPostIngestQueue(args: {
   }
   const remaining = await prisma.rawSmtFile.count({ where: { source: DEFERRED_POST_INGEST_SOURCE } });
   return { processed, remaining };
+}
+
+async function withTaskTimeoutRequired<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  const result = await withTaskTimeout(task, timeoutMs, label);
+  if (result === null) {
+    throw new Error(`${label}_failed_or_timed_out`);
+  }
+  return result;
 }
 
 async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
@@ -539,8 +547,9 @@ export async function POST(req: NextRequest) {
             });
           }
           const deferredQueueRun = await processDeferredPostIngestQueue({
-            // Keep each request bounded; gradually drains queue across requests.
-            maxTasks: throttleInlinePostIngest ? 1 : 3,
+            // In constrained pools (connection_limit<=1), avoid retry storms from
+            // deferred bucket/pipeline work on every upload request.
+            maxTasks: throttleInlinePostIngest ? 0 : 3,
           });
 
           // IMPORTANT for debugging/audit: keep the RawSmtFile row (sha256 + storage_path metadata).
@@ -558,6 +567,7 @@ export async function POST(req: NextRequest) {
             diagnostics: stats,
             postIngestDeferred: postIngest && !runInlinePostIngest,
             usageDualWriteDeferred: throttleInlinePostIngest,
+            deferredQueueProcessingSkipped: throttleInlinePostIngest,
             deferredTasksEnqueued,
             deferredTasksProcessed: deferredQueueRun.processed,
             deferredTasksRemaining: deferredQueueRun.remaining,

@@ -14,6 +14,22 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 120;
+const PER_HOUSE_RESOLVE_TIMEOUT_MS = 20_000;
+
+async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}_timeout`)), timeoutMs);
+    });
+    return await Promise.race([task, timeoutPromise]);
+  } catch (err) {
+    console.warn(`[user/usage] ${label} failed/timed out`, err);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export async function GET(_request: NextRequest) {
   try {
@@ -49,22 +65,24 @@ export async function GET(_request: NextRequest) {
     for (const house of houses) {
       let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
       try {
-        const resolved = await resolveIntervalsLayer({
-          userId: user.id,
-          houseId: house.id,
-          layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
-          esiid: house.esiid ?? null,
-        });
+        const resolved = await withTaskTimeout(
+          resolveIntervalsLayer({
+            userId: user.id,
+            houseId: house.id,
+            layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+            esiid: house.esiid ?? null,
+          }),
+          PER_HOUSE_RESOLVE_TIMEOUT_MS,
+          `resolveIntervalsLayer:${house.id}`
+        );
         result = resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } };
       } catch (err) {
         console.warn('[user/usage] actual dataset fetch failed for house', house.id, err);
-        const errCode = String((err as any)?.code ?? (err as any)?.name ?? 'INTERNAL_ERROR');
-        const errMessage = String((err as any)?.message ?? 'actual interval fetch failed');
         const classification = classifySimulationFailure({
-          code: errCode,
-          message: errMessage,
+          code: 'no_actual_data',
+          message: String((err as any)?.message ?? 'actual interval fetch failed'),
         });
-        await recordSimulationDataAlert({
+        void recordSimulationDataAlert({
           source: 'USAGE_DASHBOARD',
           userId: user.id,
           userEmail,
@@ -75,10 +93,9 @@ export async function GET(_request: NextRequest) {
           missingData: classification.missingData,
           context: {
             route: '/api/user/usage',
-            internalCode: errCode,
-            internalMessage: errMessage,
+            internalMessage: String((err as any)?.message ?? ''),
           },
-        });
+        }).catch(() => null);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
       results.push({
