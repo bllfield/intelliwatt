@@ -27,32 +27,6 @@ vi.mock("@/lib/utils/email", () => ({
   normalizeEmailSafe: (...args: any[]) => normalizeEmailSafe(...args),
 }));
 
-vi.mock("@/lib/time/chicago", () => ({
-  canonicalUsageWindowChicago: () => ({ startDate: "2025-03-01", endDate: "2026-02-28" }),
-  prevCalendarDayDateKey: (ymd: string, daysBack: number) => {
-    const key = String(ymd ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
-    const [y, m, d] = key.split("-").map(Number);
-    const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1, 12, 0, 0, 0));
-    dt.setUTCDate(dt.getUTCDate() - Math.max(0, Math.trunc(Number(daysBack) || 0)));
-    return dt.toISOString().slice(0, 10);
-  },
-  monthsEndingAt: (endYm: string, count = 12) => {
-    const out: string[] = [];
-    const m = /^(\d{4})-(\d{2})$/.exec(String(endYm ?? "").trim());
-    if (!m) return out;
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const n = Math.max(1, Math.trunc(Number(count) || 12));
-    for (let i = n - 1; i >= 0; i -= 1) {
-      const dt = new Date(Date.UTC(y, mo - 1, 1));
-      dt.setUTCMonth(dt.getUTCMonth() - i);
-      out.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`);
-    }
-    return out;
-  },
-}));
-
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findFirst: (...args: any[]) => prismaUserFindFirst(...args) },
@@ -355,7 +329,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.usage365?.coverageEnd).toBe("2026-02-28");
   });
 
-  it("uses shared canonical usage window instead of canonicalPeriods span", async () => {
+  it("normalizes canonicalPeriods windows to an inclusive 365-day range", async () => {
     prismaBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         canonicalPeriods: [{ startDate: "2025-03-12", endDate: "2026-03-12" }],
@@ -363,10 +337,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       },
     });
     getActualIntervalsForRange.mockResolvedValueOnce([
-      { timestamp: "2025-02-28T12:00:00.000Z", kwh: 1.0 },
-      { timestamp: "2025-03-01T12:00:00.000Z", kwh: 2.0 },
-      { timestamp: "2026-02-28T12:00:00.000Z", kwh: 3.0 },
-      { timestamp: "2026-03-01T12:00:00.000Z", kwh: 4.0 },
+      { timestamp: "2025-03-12T12:00:00.000Z", kwh: 1.0 },
+      { timestamp: "2025-03-13T12:00:00.000Z", kwh: 2.0 },
+      { timestamp: "2026-03-12T12:00:00.000Z", kwh: 3.0 },
     ]);
 
     const req = {
@@ -382,13 +355,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.usage365?.coverageStart).toBe("2025-03-01");
-    expect(body.usage365?.coverageEnd).toBe("2026-02-28");
+    expect(body.usage365?.coverageStart).toBe("2025-03-13");
+    expect(body.usage365?.coverageEnd).toBe("2026-03-12");
     const usageDaily = Array.isArray(body.usage365?.daily) ? body.usage365.daily : [];
-    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-01", "2026-02-28"]);
+    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-13", "2026-03-12"]);
     const usageMonthly = Array.isArray(body.usage365?.monthly) ? body.usage365.monthly : [];
     expect(usageMonthly.length).toBe(12);
-    expect(body.usage365?.stitchedMonth).toBeNull();
+    expect(body.usage365?.stitchedMonth?.yearMonth).toBe("2026-03");
   });
 });
 

@@ -28,7 +28,7 @@ import {
   classifySimulationFailure,
   recordSimulationDataAlert,
 } from "@/modules/usageSimulator/simulationDataAlerts";
-import { canonicalUsageWindowChicago, monthsEndingAt, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
@@ -1039,12 +1039,12 @@ export async function POST(req: NextRequest) {
       { status: 409 }
     );
   }
-  const canonicalWindow = normalizeWindowToInclusiveDays(
-    canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 }),
-    365
-  );
-  const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
-  const canonicalWindowHelper = "canonicalUsageWindowChicago";
+  const canonicalWindow = normalizeWindowToInclusiveDays({
+    startDate: canonicalWindowResolved.startDate,
+    endDate: canonicalWindowResolved.endDate,
+  }, 365);
+  const canonicalMonths = canonicalWindowResolved.canonicalMonths;
+  const canonicalWindowHelper = canonicalWindowResolved.windowHelper;
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
