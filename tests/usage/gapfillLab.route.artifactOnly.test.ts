@@ -268,6 +268,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
     expect(body.action).toBe("rebuild_only");
     expect(body.rebuilt).toBe(true);
+    expect(body.testRangesUsed).toEqual([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
+    expect(body.testSelectionMode).toBe("manual_ranges");
     expect(buildAndSavePastForGapfillLab).toHaveBeenCalled();
     expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });

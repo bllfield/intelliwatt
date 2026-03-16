@@ -53,6 +53,7 @@ type ApiResponse =
       testDaysRequested?: number;
       testDaysSelected?: number;
       seedUsed?: string | null;
+      testRangesUsed?: RangeRow[];
       testMode?: string;
       candidateDaysAfterModeFilterCount?: number | null;
       minDayCoveragePct?: number;
@@ -122,6 +123,33 @@ function formatApiError(data: any, status: number): string {
   if (explanation) parts.push(`Why: ${explanation}`);
   if (missing.length > 0) parts.push(`Missing data: ${missing.join(", ")}`);
   return parts.join("\n");
+}
+
+function toReplayTestRanges(raw: unknown): RangeRow[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => ({
+      startDate: String((r as any)?.startDate ?? "").slice(0, 10),
+      endDate: String((r as any)?.endDate ?? "").slice(0, 10),
+    }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
+}
+
+function buildCompareBodyAfterRebuild(
+  originalBody: Record<string, unknown>,
+  rebuildData: ApiResponse
+): Record<string, unknown> {
+  const replayRanges = toReplayTestRanges((rebuildData as any)?.testRangesUsed);
+  if (replayRanges.length === 0) return originalBody;
+  const nextBody: Record<string, unknown> = { ...originalBody };
+  delete nextBody.testDays;
+  delete nextBody.testMode;
+  delete nextBody.seed;
+  delete nextBody.minDayCoveragePct;
+  delete nextBody.stratifyByMonth;
+  delete nextBody.stratifyByWeekend;
+  nextBody.testRanges = replayRanges;
+  return nextBody;
 }
 
 function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
@@ -259,7 +287,12 @@ export default function GapFillLabClient() {
   }, [result]);
   const hasUsage365ChartData = Boolean(usage365ChartData?.daily?.length);
   const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
-  const effectiveChartMode: ChartMode = chartMode;
+  const effectiveChartMode: ChartMode =
+    chartMode === "usage365" && !hasUsage365ChartData && hasGapfillChartData
+      ? "gapfill"
+      : chartMode === "gapfill" && !hasGapfillChartData && hasUsage365ChartData
+        ? "usage365"
+        : chartMode;
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -432,25 +465,23 @@ export default function GapFillLabClient() {
       setError("A Gap-Fill request is already running. Wait for it to finish.");
       return;
     }
+    setError(null);
+    setProgressStatus(null);
+    setArtifactMissing(false);
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) {
+      setError("Enter an email address.");
+      return;
+    }
+    const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
+    if (testMode === "manual_ranges" && !validRanges.length) {
+      setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
+      return;
+    }
     compareInFlightRef.current = true;
-    let startedCompare = false;
+    setLoading(true);
     let attemptedArtifactAutoRebuild = false;
     try {
-      setError(null);
-      setProgressStatus(null);
-      setArtifactMissing(false);
-      const trimmed = email.trim().toLowerCase();
-      if (!trimmed) {
-        setError("Enter an email address.");
-        return;
-      }
-      const validRanges = testRanges.filter((r) => r.startDate && r.endDate);
-      if (testMode === "manual_ranges" && !validRanges.length) {
-        setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
-        return;
-      }
-      startedCompare = true;
-      setLoading(true);
       const body = buildCompareBody(trimmed, validRanges);
       setLastCompareBody(body);
       const { res, data } = await postGapfill(body);
@@ -469,7 +500,9 @@ export default function GapFillLabClient() {
             return;
           }
           setProgressStatus("Rebuild complete, now running compare...");
-          const { res: compareRes, data: compareData } = await postGapfill(body);
+          const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
+          setLastCompareBody(compareBody);
+          const { res: compareRes, data: compareData } = await postGapfill(compareBody);
           if (!compareRes.ok) {
             setProgressStatus(null);
             const errMsg = (compareData as any)?.error === "test_overlaps_travel"
@@ -507,7 +540,7 @@ export default function GapFillLabClient() {
       setError(msg);
       setResult(null);
     } finally {
-      if (startedCompare) setLoading(false);
+      setLoading(false);
       compareInFlightRef.current = false;
     }
   }
@@ -538,7 +571,9 @@ export default function GapFillLabClient() {
         return;
       }
       setProgressStatus("Rebuild complete, now running compare...");
-      const { res: compareRes, data: compareData } = await postGapfill(lastCompareBody);
+      const compareBody = buildCompareBodyAfterRebuild(lastCompareBody, rebuildData);
+      setLastCompareBody(compareBody);
+      const { res: compareRes, data: compareData } = await postGapfill(compareBody);
       if (!compareRes.ok) {
         setProgressStatus(null);
         setError(formatApiError(compareData, compareRes.status));

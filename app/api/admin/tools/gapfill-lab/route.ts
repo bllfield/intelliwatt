@@ -28,7 +28,7 @@ import {
   classifySimulationFailure,
   recordSimulationDataAlert,
 } from "@/modules/usageSimulator/simulationDataAlerts";
-import { canonicalUsageWindowForTimezone, monthsEndingAt, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { canonicalUsageWindowChicago, monthsEndingAt, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
@@ -1026,11 +1026,11 @@ export async function POST(req: NextRequest) {
   }
 
   const canonicalWindow = normalizeWindowToInclusiveDays(
-    canonicalUsageWindowForTimezone({ now: new Date(), reliableLagDays: 2, totalDays: 365, timezone }),
+    canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 }),
     365
   );
   const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
-  const canonicalWindowHelper = "canonicalUsageWindowForTimezone";
+  const canonicalWindowHelper = "canonicalUsageWindowChicago";
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
@@ -1366,6 +1366,11 @@ export async function POST(req: NextRequest) {
       action: "rebuild_only",
       rebuilt: true,
       message: "Gap-Fill Lab artifact rebuilt. Running compare next will read from artifact cache.",
+      testRangesUsed,
+      testSelectionMode,
+      testDaysRequested,
+      testDaysSelected,
+      seedUsed,
       travelRangesFromDb,
     });
   }
