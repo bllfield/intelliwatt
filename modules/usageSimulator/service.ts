@@ -384,7 +384,7 @@ export async function buildGapfillCompareSimShared(args: {
   }));
   const simulatedTestIntervals = artifactIntervals.filter((p) => testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
-    chartDateKeysLocal.has(String(p.timestamp ?? "").slice(0, 10))
+    chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
 
   const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
@@ -395,7 +395,7 @@ export async function buildGapfillCompareSimShared(args: {
 
   const simulatedChartDaily = Array.from(
     simulatedChartIntervals.reduce((acc, p) => {
-      const dk = String(p.timestamp ?? "").slice(0, 10);
+      const dk = dateKeyInTimezone(p.timestamp, timezone);
       acc.set(dk, (acc.get(dk) ?? 0) + (Number(p.kwh) || 0));
       return acc;
     }, new Map<string, number>())
