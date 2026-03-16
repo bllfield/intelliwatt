@@ -274,6 +274,45 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });
 
+  it("clips travel fallback scope to canonical window before compare fingerprinting", async () => {
+    prismaScenarioEventFindMany.mockResolvedValueOnce([
+      { payloadJson: { startDate: "2024-01-01", endDate: "2024-01-02" } },
+    ]);
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+
+    const callArg = buildGapfillCompareSimShared.mock.calls.at(-1)?.[0];
+    const fallback = callArg?.fallbackSimulatedDateKeysLocal as Set<string>;
+    expect(fallback.has("2024-01-01")).toBe(false);
+    expect(fallback.has("2024-01-02")).toBe(false);
+    expect(fallback.has("2026-01-01")).toBe(true);
+  });
+
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
     getActualIntervalsForRange.mockReset();
     getCandidateDateCoverageForSelection.mockResolvedValue({

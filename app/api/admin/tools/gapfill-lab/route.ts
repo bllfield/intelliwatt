@@ -1060,6 +1060,10 @@ export async function POST(req: NextRequest) {
   const travelDateKeysLocal = new Set<string>(
     travelRangesFromDb.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
   );
+  // Keep compare scope fingerprint aligned with artifact build exclusions: window-bounded only.
+  const boundedTravelDateKeysLocal = new Set<string>(
+    Array.from(travelDateKeysLocal).filter((dk) => dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate)
+  );
 
   if (testRanges.length === 0 && !testDaysRequested) {
     return NextResponse.json({
@@ -1382,7 +1386,7 @@ export async function POST(req: NextRequest) {
     testRangesUsed,
     testDateKeysLocal,
     fallbackSimulatedDateKeysLocal: new Set<string>([
-      ...Array.from(travelDateKeysLocal),
+      ...Array.from(boundedTravelDateKeysLocal),
       ...Array.from(testDateKeysLocal),
     ]),
     rebuildArtifact,
