@@ -68,6 +68,33 @@ type Usage365Payload = {
 
 type IntervalPoint = { timestamp: string; kwh: number };
 
+function normalizeFifteenCurve96(
+  raw: unknown
+): Array<{ hhmm: string; avgKw: number }> {
+  const bySlot = new Map<number, number>();
+  if (Array.isArray(raw)) {
+    for (const row of raw) {
+      const hhmm = String((row as any)?.hhmm ?? "");
+      const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+      if (!match) continue;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) continue;
+      if (hour < 0 || hour > 23) continue;
+      if (minute % 15 !== 0 || minute < 0 || minute > 45) continue;
+      const slot = hour * 4 + Math.floor(minute / 15);
+      const avgKw = Number((row as any)?.avgKw);
+      bySlot.set(slot, Number.isFinite(avgKw) ? avgKw : 0);
+    }
+  }
+  return Array.from({ length: 96 }, (_, slot) => {
+    const hour = Math.floor(slot / 4);
+    const minute = (slot % 4) * 15;
+    const hhmm = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    return { hhmm, avgKw: bySlot.get(slot) ?? 0 };
+  });
+}
+
 function sortedSample(keys: Set<string>, limit = 10): string[] {
   return Array.from(keys).sort().slice(0, limit);
 }
@@ -1114,12 +1141,9 @@ export async function POST(req: NextRequest) {
             kwh: Number((m as any)?.kwh) || 0,
           }))
         : [];
-      const fifteenCurve = Array.isArray((usageDataset as any)?.insights?.fifteenMinuteAverages)
-        ? (usageDataset as any).insights.fifteenMinuteAverages.map((r: any) => ({
-            hhmm: String(r?.hhmm ?? ""),
-            avgKw: Number(r?.avgKw) || 0,
-          }))
-        : [];
+      const fifteenCurve = normalizeFifteenCurve96(
+        (usageDataset as any)?.insights?.fifteenMinuteAverages
+      );
       usage365 = {
         source: String((usageDataset as any)?.summary?.source ?? sourceLabel),
         timezone,
