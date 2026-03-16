@@ -78,10 +78,12 @@ export async function GET(_request: NextRequest) {
         result = resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } };
       } catch (err) {
         console.warn('[user/usage] actual dataset fetch failed for house', house.id, err);
-        const errCode = String((err as any)?.code ?? (err as any)?.name ?? 'INTERNAL_ERROR');
+        const rawErrCode = (err as any)?.code;
+        const errCode = String(rawErrCode ?? (err as any)?.name ?? 'INTERNAL_ERROR');
         const errMessage = String((err as any)?.message ?? 'actual interval fetch failed');
         const classification = classifySimulationFailure({
-          code: errCode,
+          // Preserve historical no-actual-data classification when no structured code exists.
+          code: rawErrCode == null ? 'no_actual_data' : errCode,
           message: errMessage,
         });
         void recordSimulationDataAlert({
