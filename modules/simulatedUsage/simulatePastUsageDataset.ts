@@ -526,6 +526,8 @@ export async function simulatePastUsageDataset(
         simVersion: PAST_ENGINE_VERSION,
         weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
         dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
+        dayTotalShapingPath: "shared_daytype_neighbor_weather_shaping",
+        curveShapingVersion: "shared_curve_v2",
         usageShapeProfileDiag,
         dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
         intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,

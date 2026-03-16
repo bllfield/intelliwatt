@@ -285,6 +285,11 @@ export async function buildGapfillCompareSimShared(args: {
     simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
       ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
       : [];
+  const artifactCurveShapingVersion =
+    simOut.ok && simOut.dataset ? String((simOut.dataset as any)?.meta?.curveShapingVersion ?? "") : "";
+  const needsCurveShapingRebuild =
+    simOut.ok &&
+    (artifactCurveShapingVersion.length === 0 || artifactCurveShapingVersion !== "shared_curve_v2");
 
   if (
     !rebuildArtifact &&
@@ -300,6 +305,20 @@ export async function buildGapfillCompareSimShared(args: {
         error: "artifact_stale_rebuild_required",
         message:
           "Saved gapfill_lab artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+        mode: "artifact_only",
+        scenarioId: "gapfill_lab",
+      },
+    };
+  }
+  if (!rebuildArtifact && needsCurveShapingRebuild) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_stale_rebuild_required",
+        message:
+          "Saved gapfill_lab artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before inspect/read compare.",
         mode: "artifact_only",
         scenarioId: "gapfill_lab",
       },
@@ -364,7 +383,9 @@ export async function buildGapfillCompareSimShared(args: {
     kwh: Number(p?.kwh) || 0,
   }));
   const simulatedTestIntervals = artifactIntervals.filter((p) => testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
-  const simulatedChartIntervals = artifactIntervals.filter((p) => chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
+  const simulatedChartIntervals = artifactIntervals.filter((p) =>
+    chartDateKeysLocal.has(String(p.timestamp ?? "").slice(0, 10))
+  );
 
   const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
     (Array.isArray((simOut.dataset as any)?.daily) ? (simOut.dataset as any).daily : [])
@@ -374,7 +395,7 @@ export async function buildGapfillCompareSimShared(args: {
 
   const simulatedChartDaily = Array.from(
     simulatedChartIntervals.reduce((acc, p) => {
-      const dk = dateKeyInTimezone(p.timestamp, timezone);
+      const dk = String(p.timestamp ?? "").slice(0, 10);
       acc.set(dk, (acc.get(dk) ?? 0) + (Number(p.kwh) || 0));
       return acc;
     }, new Map<string, number>())

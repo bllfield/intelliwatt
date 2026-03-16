@@ -550,6 +550,8 @@ export type SimulatedUsageDatasetMeta = {
   weekdayWeekendSplitUsed?: boolean;
   /** Past gap-fill: source of daily total for excluded days. */
   dayTotalSource?: "usageShapeProfile_avgKwhPerDayByMonth" | "fallback_month_avg";
+  dayTotalShapingPath?: string;
+  curveShapingVersion?: string;
   /** Gap-fill lab: why UsageShapeProfile was or wasn't used. */
   usageShapeProfileDiag?: {
     found: boolean;
