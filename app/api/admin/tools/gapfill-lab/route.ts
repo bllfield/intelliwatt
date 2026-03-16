@@ -28,7 +28,7 @@ import {
   classifySimulationFailure,
   recordSimulationDataAlert,
 } from "@/modules/usageSimulator/simulationDataAlerts";
-import { prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { canonicalUsageWindowChicago, monthsEndingAt, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
@@ -1039,10 +1039,12 @@ export async function POST(req: NextRequest) {
       { status: 409 }
     );
   }
-  const canonicalWindow = normalizeWindowToInclusiveDays({
-    startDate: canonicalWindowResolved.startDate,
-    endDate: canonicalWindowResolved.endDate,
-  }, 365);
+  const canonicalWindow = normalizeWindowToInclusiveDays(
+    canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 }),
+    365
+  );
+  const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
+  const canonicalWindowHelper = "canonicalUsageWindowChicago";
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive and not required for compare metrics.
   if (includeUsage365 || (testRanges.length === 0 && !testDaysRequested)) {
@@ -1123,7 +1125,7 @@ export async function POST(req: NextRequest) {
     const candidateStart = canonicalWindow.startDate;
     const coverageSelection = await getCandidateDateCoverageForSelection({
       houseId: house.id,
-      scenarioIdentity: `gapfill_lab:${canonicalWindowResolved.canonicalMonths.join(",")}`,
+      scenarioIdentity: `gapfill_lab:${canonicalMonths.join(",")}`,
       windowStart: candidateStart,
       windowEnd: candidateEnd,
       timezone,
@@ -1405,7 +1407,7 @@ export async function POST(req: NextRequest) {
       missingData: classification.missingData,
       reasonCode: classification.reasonCode,
       canonicalWindowHelper:
-        (sharedSim.body as any)?.windowHelper ?? canonicalWindowResolved.windowHelper,
+        (sharedSim.body as any)?.windowHelper ?? canonicalWindowHelper,
       coverageStart:
         (sharedSim.body as any)?.windowStartUtc ?? canonicalWindow.startDate,
       coverageEnd:
@@ -1502,7 +1504,7 @@ export async function POST(req: NextRequest) {
       monthly: sharedSim.simulatedChartMonthly,
     },
     buildInputs: {
-      canonicalMonths: canonicalWindowResolved.canonicalMonths,
+      canonicalMonths,
     },
     configHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? "n/a"),
     excludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
@@ -1616,7 +1618,7 @@ export async function POST(req: NextRequest) {
       baseloadDailyKwh: null,
       windowStartUtc: canonicalWindow.startDate,
       windowEndUtc: canonicalWindow.endDate,
-      canonicalWindowHelper: canonicalWindowResolved.windowHelper,
+      canonicalWindowHelper,
     },
     fullReportText: fullReport.fullReportText,
     pasteSummary:
