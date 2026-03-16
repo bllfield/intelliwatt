@@ -48,20 +48,88 @@ function isPrismaJsonNullLike(v: unknown): boolean {
   return v === (Prisma as any).JsonNull || v === (Prisma as any).DbNull || v === (Prisma as any).AnyNull;
 }
 
+const ENSURE_BUCKETS_ATTEMPT_COOLDOWN_MS = 5 * 60 * 1000;
+const ENSURE_BUCKETS_POOL_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
+const ensureBucketsInFlight = new Set<string>();
+const ensureBucketsLastAttemptMsByKey = new Map<string, number>();
+let suppressEnsureBucketsUntilMs = 0;
+let lastPoolSuppressionLogMs = 0;
+
+function parseConnectionLimitFromUrl(urlRaw: unknown): number | null {
+  const text = String(urlRaw ?? "").trim();
+  if (!text) return null;
+  try {
+    const u = new URL(text);
+    const parsed = Number(u.searchParams.get("connection_limit") ?? "");
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldSkipBestEffortEnsureBucketsForPool(): boolean {
+  const now = Date.now();
+  if (now < suppressEnsureBucketsUntilMs) return true;
+  const usageLimit = parseConnectionLimitFromUrl(process.env.USAGE_DATABASE_URL);
+  const primaryLimit = parseConnectionLimitFromUrl(process.env.DATABASE_URL);
+  const effective = usageLimit ?? primaryLimit;
+  if (effective != null && effective <= 1) {
+    if (now - lastPoolSuppressionLogMs > 60_000) {
+      console.warn("[planComputability] skipping ensureBucketsExist best-effort due to constrained DB pool", {
+        connectionLimit: effective,
+      });
+      lastPoolSuppressionLogMs = now;
+    }
+    suppressEnsureBucketsUntilMs = now + ENSURE_BUCKETS_POOL_FAILURE_COOLDOWN_MS;
+    return true;
+  }
+  return false;
+}
+
+function isConnectionPoolTimeoutError(err: unknown): boolean {
+  const code = String((err as any)?.code ?? "");
+  const message = String((err as any)?.message ?? err ?? "");
+  return code === "P2024" || /connection pool|timed out fetching a new connection/i.test(message);
+}
+
 function bestEffortEnsureBucketsExist(requiredBucketKeys: string[]) {
   // Design+scaffold only: registry side-effect, no change to status logic in this step.
   // IMPORTANT: keep this server-only and best-effort; never let it break dashboard semantics.
   if (!Array.isArray(requiredBucketKeys) || requiredBucketKeys.length === 0) return;
   if (typeof window !== "undefined") return;
+  if (shouldSkipBestEffortEnsureBucketsForPool()) return;
+  const uniqKeys = Array.from(new Set(requiredBucketKeys.map((k) => String(k ?? "").trim()).filter(Boolean))).sort();
+  if (uniqKeys.length === 0) return;
+  const keySig = uniqKeys.join("|");
+  const now = Date.now();
+  const lastAttempt = ensureBucketsLastAttemptMsByKey.get(keySig) ?? 0;
+  if (now - lastAttempt < ENSURE_BUCKETS_ATTEMPT_COOLDOWN_MS) return;
+  if (ensureBucketsInFlight.has(keySig)) return;
+  ensureBucketsInFlight.add(keySig);
+  ensureBucketsLastAttemptMsByKey.set(keySig, now);
 
   void import("@/lib/usage/aggregateMonthlyBuckets")
     .then(({ ensureBucketsExist }) =>
-      ensureBucketsExist({ bucketKeys: requiredBucketKeys }).catch((err: unknown) => {
+      ensureBucketsExist({ bucketKeys: uniqKeys }).catch((err: unknown) => {
+        if (isConnectionPoolTimeoutError(err)) {
+          suppressEnsureBucketsUntilMs = Date.now() + ENSURE_BUCKETS_POOL_FAILURE_COOLDOWN_MS;
+          const nowMs = Date.now();
+          if (nowMs - lastPoolSuppressionLogMs > 60_000) {
+            console.warn("[planComputability] ensureBucketsExist paused after pool timeout (best-effort)", {
+              code: (err as any)?.code ?? null,
+            });
+            lastPoolSuppressionLogMs = nowMs;
+          }
+          return;
+        }
         console.warn("[planComputability] ensureBucketsExist failed (best-effort)", err);
       }),
     )
     .catch((err: unknown) => {
       console.warn("[planComputability] ensureBucketsExist import failed (best-effort)", err);
+    })
+    .finally(() => {
+      ensureBucketsInFlight.delete(keySig);
     });
 }
 
