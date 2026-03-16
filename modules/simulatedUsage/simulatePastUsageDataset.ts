@@ -517,7 +517,7 @@ export async function simulatePastUsageDataset(
       {
         timezone: timezone ?? undefined,
         useUtcMonth: true,
-        simulatedDayResults: includeSimulatedDayResults ? dayResults : undefined,
+        simulatedDayResults: collectSimulatedDayResultsForDiagnostics ? dayResults : undefined,
       }
     );
 
