@@ -13,6 +13,21 @@ export const maxDuration = 300; // allow large SMT raw uploads
 
 export const dynamic = 'force-dynamic';
 
+async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}_timeout`)), timeoutMs);
+    });
+    return await Promise.race([task, timeoutPromise]);
+  } catch (err) {
+    console.error(`[raw-upload:inline] ${label} failed/timed out`, err);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
@@ -44,7 +59,8 @@ export async function POST(req: NextRequest) {
   // When SMT uploads are chunked into multiple raw-upload calls, we should only run
   // expensive "post ingest" steps (bucket aggregation + plan pipeline) once the final
   // chunk has been ingested.
-  const postIngest: boolean = body.postIngest === false ? false : true; // default: true
+  // Default to false so upload/normalize returns fast unless caller explicitly opts in.
+  const postIngest: boolean = body.postIngest === true;
 
   const missing: string[] = [];
 
@@ -241,14 +257,18 @@ export async function POST(req: NextRequest) {
 
               for (const h of houses) {
                 if (!h?.id) continue;
-                await ensureCoreMonthlyBuckets({
-                  homeId: h.id,
-                  esiid: h.esiid,
-                  rangeStart,
-                  rangeEnd,
-                  source: "SMT",
-                  intervalSource: "SMT",
-                });
+                await withTaskTimeout(
+                  ensureCoreMonthlyBuckets({
+                    homeId: h.id,
+                    esiid: h.esiid,
+                    rangeStart,
+                    rangeEnd,
+                    source: "SMT",
+                    intervalSource: "SMT",
+                  }),
+                  20_000,
+                  "ensureCoreMonthlyBuckets"
+                );
               }
             } catch (bucketErr) {
               console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
@@ -263,16 +283,20 @@ export async function POST(req: NextRequest) {
               });
               for (const h of houses) {
                 if (!h?.id) continue;
-                await runPlanPipelineForHome({
-                  homeId: h.id,
-                  reason: 'usage_present',
-                  isRenter: false,
-                  timeBudgetMs: 7000,
-                  maxTemplateOffers: 2,
-                  maxEstimatePlans: 12,
-                  monthlyCadenceDays: 30,
-                  proactiveCooldownMs: 10 * 60 * 1000,
-                });
+                await withTaskTimeout(
+                  runPlanPipelineForHome({
+                    homeId: h.id,
+                    reason: 'usage_present',
+                    isRenter: false,
+                    timeBudgetMs: 7000,
+                    maxTemplateOffers: 2,
+                    maxEstimatePlans: 12,
+                    monthlyCadenceDays: 30,
+                    proactiveCooldownMs: 10 * 60 * 1000,
+                  }),
+                  20_000,
+                  "runPlanPipelineForHome"
+                );
               }
             } catch (pipelineErr) {
               console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
