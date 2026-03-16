@@ -404,7 +404,12 @@ export async function buildGapfillCompareSimShared(args: {
     .map(([date, simKwh]) => ({
       date,
       simKwh: round2Local(simKwh),
-      source: daySourceFromDataset.get(date) ?? (fallbackSimulatedDateKeysLocal?.has(date) ? "SIMULATED" : "ACTUAL"),
+      // In artifact-only lab builds, dataset daily rows may all be tagged ACTUAL
+      // when simulated day artifacts were omitted at build time. Force source from
+      // the requested masked scope first so chart/table labeling remains truthful.
+      source: fallbackSimulatedDateKeysLocal?.has(date)
+        ? "SIMULATED"
+        : (daySourceFromDataset.get(date) ?? "ACTUAL"),
     }));
 
   const monthlyChartBuild = buildDisplayMonthlyFromIntervalsUtc(
