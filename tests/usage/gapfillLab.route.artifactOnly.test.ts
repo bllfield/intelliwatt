@@ -124,6 +124,14 @@ vi.mock("@/lib/sim/weatherProvider", () => ({
   getWeatherForRange: vi.fn(),
 }));
 
+vi.mock("@/lib/time/chicago", async () => {
+  const actual = await vi.importActual<any>("@/lib/time/chicago");
+  return {
+    ...actual,
+    canonicalUsageWindowChicago: vi.fn(() => ({ startDate: "2025-03-13", endDate: "2026-03-12" })),
+  };
+});
+
 import { POST } from "@/app/api/admin/tools/gapfill-lab/route";
 
 describe("gapfill-lab route artifact-only hard lock", () => {
@@ -303,7 +311,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 
-  it("bounds Usage365 daily rows to canonical window dates", async () => {
+  it("bounds Usage365 daily rows to shared canonical window dates", async () => {
     getActualIntervalsForRange.mockResolvedValue([
       { timestamp: "2025-02-28T23:45:00.000Z", kwh: 0.25 },
       { timestamp: "2025-03-01T00:00:00.000Z", kwh: 0.5 },
@@ -324,22 +332,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     const usageDaily = Array.isArray(body.usage365?.daily) ? body.usage365.daily : [];
-    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-01", "2026-02-28"]);
-    expect(body.usage365?.coverageStart).toBe("2025-03-01");
-    expect(body.usage365?.coverageEnd).toBe("2026-02-28");
+    expect(usageDaily.map((d: any) => d.date)).toEqual(["2026-02-28", "2026-03-01"]);
+    expect(body.usage365?.coverageStart).toBe("2025-03-13");
+    expect(body.usage365?.coverageEnd).toBe("2026-03-12");
   });
 
-  it("normalizes canonicalPeriods windows to an inclusive 365-day range", async () => {
-    prismaBuildFindUnique.mockResolvedValueOnce({
-      buildInputs: {
-        canonicalPeriods: [{ startDate: "2025-03-12", endDate: "2026-03-12" }],
-        canonicalMonths: ["2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03"],
-      },
-    });
+  it("uses the shared canonical window helper for Usage365 bounds", async () => {
     getActualIntervalsForRange.mockResolvedValueOnce([
-      { timestamp: "2025-03-12T12:00:00.000Z", kwh: 1.0 },
       { timestamp: "2025-03-13T12:00:00.000Z", kwh: 2.0 },
       { timestamp: "2026-03-12T12:00:00.000Z", kwh: 3.0 },
+      { timestamp: "2026-03-13T12:00:00.000Z", kwh: 4.0 },
     ]);
 
     const req = {
