@@ -152,11 +152,24 @@ export function canonicalUsageWindowChicago(args?: {
   reliableLagDays?: number;
   totalDays?: number;
 }): { startDate: string; endDate: string } {
+  return canonicalUsageWindowForTimezone({
+    ...args,
+    timezone: "America/Chicago",
+  });
+}
+
+export function canonicalUsageWindowForTimezone(args?: {
+  now?: Date;
+  reliableLagDays?: number;
+  totalDays?: number;
+  timezone?: string;
+}): { startDate: string; endDate: string } {
   const now = args?.now ?? new Date();
   const reliableLagDays = Math.max(0, Math.trunc(args?.reliableLagDays ?? 2));
   const totalDays = Math.max(1, Math.trunc(args?.totalDays ?? 365));
-  const todayChicago = chicagoDateKey(now);
-  const endDate = prevCalendarDayDateKey(todayChicago, reliableLagDays);
+  const timezone = String(args?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const todayInTimezone = dateTimePartsInTimezone(now, timezone)?.dateKey ?? chicagoDateKey(now);
+  const endDate = prevCalendarDayDateKey(todayInTimezone, reliableLagDays);
   const startDate = prevCalendarDayDateKey(endDate, totalDays - 1);
   return { startDate, endDate };
 }

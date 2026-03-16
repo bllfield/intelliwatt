@@ -27,7 +27,7 @@ import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/si
 import { enumerateDayStartsMsForWindow, getDayGridTimestamps, dateKeyFromTimestamp } from "@/modules/usageSimulator/pastStitchedCurve";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
-import { canonicalUsageWindowChicago, prevCalendarDayDateKey, monthsEndingAt } from "@/lib/time/chicago";
+import { canonicalUsageWindowForTimezone, prevCalendarDayDateKey, monthsEndingAt } from "@/lib/time/chicago";
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 
@@ -262,13 +262,13 @@ export async function buildAndSavePastForGapfillLab(args: {
   }
 
   const normalizedWindow = normalizeWindowToInclusiveDays(
-    canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 }),
+    canonicalUsageWindowForTimezone({ now: new Date(), reliableLagDays: 2, totalDays: 365, timezone }),
     365
   );
   const startDate = normalizedWindow.startDate;
   const endDate = normalizedWindow.endDate;
   const canonicalMonths12 = monthsEndingAt(endDate.slice(0, 7), 12);
-  const windowHelper = "canonicalUsageWindowChicago";
+  const windowHelper = "canonicalUsageWindowForTimezone";
 
   const dbTravelRanges = await getTravelRangesFromDb(userId, houseId);
   const dbLocal = new Set<string>(dbTravelRanges.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone)));

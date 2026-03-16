@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { canonicalUsageWindowChicago, canonicalUsageWindowForTimezone } from "@/lib/time/chicago";
 
 function dayDiffInclusive(startDate: string, endDate: string): number {
   const s = new Date(`${startDate}T12:00:00.000Z`).getTime();
@@ -28,5 +28,18 @@ describe("canonicalUsageWindowChicago", () => {
       totalDays: 30,
     });
     expect(dayDiffInclusive(out.startDate, out.endDate)).toBe(30);
+  });
+});
+
+describe("canonicalUsageWindowForTimezone", () => {
+  test("uses requested timezone day boundary instead of fixed Chicago boundary", () => {
+    const now = new Date("2026-03-12T04:30:00.000Z");
+    const chicago = canonicalUsageWindowForTimezone({ now, timezone: "America/Chicago" });
+    const newYork = canonicalUsageWindowForTimezone({ now, timezone: "America/New_York" });
+
+    expect(chicago.endDate).toBe("2026-03-09");
+    expect(newYork.endDate).toBe("2026-03-10");
+    expect(dayDiffInclusive(chicago.startDate, chicago.endDate)).toBe(365);
+    expect(dayDiffInclusive(newYork.startDate, newYork.endDate)).toBe(365);
   });
 });

@@ -129,6 +129,7 @@ vi.mock("@/lib/time/chicago", async () => {
   return {
     ...actual,
     canonicalUsageWindowChicago: vi.fn(() => ({ startDate: "2025-03-13", endDate: "2026-03-12" })),
+    canonicalUsageWindowForTimezone: vi.fn(() => ({ startDate: "2025-03-13", endDate: "2026-03-12" })),
   };
 });
 
