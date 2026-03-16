@@ -16,6 +16,8 @@ export const dynamic = 'force-dynamic';
 
 const DEFERRED_POST_INGEST_SOURCE = 'smt-post-ingest-deferred';
 const DEFERRED_POST_INGEST_PREFIX = 'deferred-post-ingest://';
+const THROTTLED_DEFERRED_QUEUE_MIN_INTERVAL_MS = 60_000;
+let throttledDeferredQueueLastRunAtMs = 0;
 
 type DeferredPostIngestTask = {
   esiid: string;
@@ -230,6 +232,17 @@ async function processDeferredPostIngestQueue(args: {
   }
   const remaining = await prisma.rawSmtFile.count({ where: { source: DEFERRED_POST_INGEST_SOURCE } });
   return { processed, remaining };
+}
+
+function deferredQueueMaxTasksForRequest(throttleInlinePostIngest: boolean): number {
+  if (!throttleInlinePostIngest) return 3;
+  const now = Date.now();
+  if (now - throttledDeferredQueueLastRunAtMs < THROTTLED_DEFERRED_QUEUE_MIN_INTERVAL_MS) {
+    return 0;
+  }
+  throttledDeferredQueueLastRunAtMs = now;
+  // Under constrained pools, drain very slowly but never fully starve the queue.
+  return 1;
 }
 
 async function withTaskTimeoutRequired<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -546,10 +559,11 @@ export async function POST(req: NextRequest) {
               tasksEnqueued: deferredTasksEnqueued,
             });
           }
+          const deferredQueueMaxTasks = deferredQueueMaxTasksForRequest(throttleInlinePostIngest);
           const deferredQueueRun = await processDeferredPostIngestQueue({
-            // In constrained pools (connection_limit<=1), avoid retry storms from
-            // deferred bucket/pipeline work on every upload request.
-            maxTasks: throttleInlinePostIngest ? 0 : 3,
+            // In constrained pools (connection_limit<=1), avoid retry storms while
+            // still allowing queued tasks to make incremental progress.
+            maxTasks: deferredQueueMaxTasks,
           });
 
           // IMPORTANT for debugging/audit: keep the RawSmtFile row (sha256 + storage_path metadata).
@@ -567,7 +581,7 @@ export async function POST(req: NextRequest) {
             diagnostics: stats,
             postIngestDeferred: postIngest && !runInlinePostIngest,
             usageDualWriteDeferred: throttleInlinePostIngest,
-            deferredQueueProcessingSkipped: throttleInlinePostIngest,
+            deferredQueueProcessingSkipped: deferredQueueMaxTasks === 0,
             deferredTasksEnqueued,
             deferredTasksProcessed: deferredQueueRun.processed,
             deferredTasksRemaining: deferredQueueRun.remaining,
