@@ -6,6 +6,7 @@ const requireAdmin = vi.fn();
 const normalizeEmailSafe = vi.fn();
 const chooseActualSource = vi.fn();
 const getActualIntervalsForRange = vi.fn();
+const getActualUsageDatasetForHouse = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
 const getCandidateDateCoverageForSelection = vi.fn();
 const buildAndSavePastForGapfillLab = vi.fn();
@@ -42,6 +43,7 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualIntervalsForRange: (...args: any[]) => getActualIntervalsForRange(...args),
+  getActualUsageDatasetForHouse: (...args: any[]) => getActualUsageDatasetForHouse(...args),
 }));
 
 vi.mock("@/modules/realUsageAdapter/actual", () => ({

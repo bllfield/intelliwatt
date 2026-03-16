@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import {
   buildDailyWeatherFeaturesFromHourly,
@@ -1087,22 +1087,71 @@ export async function POST(req: NextRequest) {
   // Usage365 fetch is expensive; only load when explicitly requested.
   if (includeUsage365) {
     const sourceLabel = String((source as any)?.source ?? (source as any)?.kind ?? "actual");
-    const intervalsForWindow = await getActualIntervalsForRange({
-      houseId: house.id,
-      esiid,
-      startDate: canonicalWindow.startDate,
-      endDate: canonicalWindow.endDate,
-    });
-    const boundedIntervalsForWindow = (intervalsForWindow ?? []).filter((row) => {
-      const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
-      return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
-    });
-    usage365 = buildUsage365Payload({
-      intervals: boundedIntervalsForWindow,
-      timezone,
-      source: sourceLabel,
-      endDate: canonicalWindow.endDate,
-    });
+    // Fast path: use lightweight actual dataset aggregation (no full-year interval fetch).
+    let usageDatasetResult:
+      | Awaited<ReturnType<typeof getActualUsageDatasetForHouse>>
+      | null = null;
+    try {
+      usageDatasetResult = await getActualUsageDatasetForHouse(house.id, esiid, {
+        skipFullYearIntervalFetch: true,
+      });
+    } catch {
+      usageDatasetResult = null;
+    }
+    const usageDataset = usageDatasetResult?.dataset ?? null;
+    if (usageDataset) {
+      const boundedDaily = Array.isArray(usageDataset.daily)
+        ? usageDataset.daily
+            .filter((row) => {
+              const dk = String((row as any)?.date ?? "").slice(0, 10);
+              return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
+            })
+            .map((row) => ({ date: String((row as any)?.date ?? "").slice(0, 10), kwh: Number((row as any)?.kwh) || 0 }))
+        : [];
+      const monthlyRows = Array.isArray(usageDataset.monthly)
+        ? usageDataset.monthly.map((m) => ({
+            month: String((m as any)?.month ?? "").slice(0, 7),
+            kwh: Number((m as any)?.kwh) || 0,
+          }))
+        : [];
+      const fifteenCurve = Array.isArray((usageDataset as any)?.insights?.fifteenMinuteAverages)
+        ? (usageDataset as any).insights.fifteenMinuteAverages.map((r: any) => ({
+            hhmm: String(r?.hhmm ?? ""),
+            avgKw: Number(r?.avgKw) || 0,
+          }))
+        : [];
+      usage365 = {
+        source: String((usageDataset as any)?.summary?.source ?? sourceLabel),
+        timezone,
+        coverageStart: canonicalWindow.startDate,
+        coverageEnd: canonicalWindow.endDate,
+        intervalCount: Number((usageDataset as any)?.summary?.intervalsCount ?? 0) || 0,
+        daily: boundedDaily,
+        monthly: monthlyRows,
+        weekdayKwh: Number((usageDataset as any)?.insights?.weekdayVsWeekend?.weekday ?? 0) || 0,
+        weekendKwh: Number((usageDataset as any)?.insights?.weekdayVsWeekend?.weekend ?? 0) || 0,
+        fifteenCurve,
+        stitchedMonth: ((usageDataset as any)?.insights?.stitchedMonth ?? null) as Usage365Payload["stitchedMonth"],
+      };
+    } else {
+      // Fallback: legacy full-interval path.
+      const intervalsForWindow = await getActualIntervalsForRange({
+        houseId: house.id,
+        esiid,
+        startDate: canonicalWindow.startDate,
+        endDate: canonicalWindow.endDate,
+      });
+      const boundedIntervalsForWindow = (intervalsForWindow ?? []).filter((row) => {
+        const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
+        return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
+      });
+      usage365 = buildUsage365Payload({
+        intervals: boundedIntervalsForWindow,
+        timezone,
+        source: sourceLabel,
+        endDate: canonicalWindow.endDate,
+      });
+    }
     // Keep displayed window aligned to the same backend canonical window helper.
     usage365.coverageStart = canonicalWindow.startDate;
     usage365.coverageEnd = canonicalWindow.endDate;
