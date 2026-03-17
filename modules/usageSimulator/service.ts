@@ -2073,8 +2073,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
       };
     }
 
-    // Non-baseline scenario metadata window must match the shared Usage dashboard 365-day canonical window.
-    if (scenarioKey !== "BASELINE" && dataset?.summary) {
+    // Past/Future metadata window override applies only to SMT baseline scenarios.
+    if (
+      scenarioKey !== "BASELINE" &&
+      mode === "SMT_BASELINE" &&
+      isSmtBaselineMode &&
+      dataset?.summary
+    ) {
       const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
       dataset.summary.start = canonicalCoverage.startDate;
       dataset.summary.end = canonicalCoverage.endDate;
