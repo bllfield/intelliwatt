@@ -147,7 +147,8 @@ export async function getSharedPastCoverageWindowForHouse(args: {
 
 function applyCanonicalCoverageMetadataForNonBaseline(
   dataset: any,
-  scenarioKey: string
+  scenarioKey: string,
+  options?: { buildInputs?: unknown }
 ): { startDate: string; endDate: string } | null {
   if (scenarioKey === "BASELINE" || !dataset?.summary) return null;
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
@@ -157,6 +158,22 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
   dataset.meta.coverageStart = canonicalCoverage.startDate;
   dataset.meta.coverageEnd = canonicalCoverage.endDate;
+
+  let excludedDateKeys: Set<string>;
+  if (options?.buildInputs != null) {
+    const excludedRanges = travelRangesFromBuildInputs(options.buildInputs);
+    excludedDateKeys = travelRangesToExcludeDateKeys(excludedRanges);
+  } else {
+    const existingFingerprint = String(dataset.meta.excludedDateKeysFingerprint ?? "");
+    const parsed = existingFingerprint
+      .split(",")
+      .map((dk) => String(dk).trim())
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+    excludedDateKeys = new Set(parsed);
+  }
+  const boundedExcludedDateKeys = boundDateKeysToCoverageWindow(excludedDateKeys, canonicalCoverage);
+  dataset.meta.excludedDateKeysCount = boundedExcludedDateKeys.size;
+  dataset.meta.excludedDateKeysFingerprint = Array.from(boundedExcludedDateKeys).sort().join(",");
   return canonicalCoverage;
 }
 
@@ -1702,7 +1719,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       restoredAny.meta.artifactSource = "past_cache";
       restoredAny.meta.artifactInputHash = inputHash;
       restoredAny.meta.artifactRecomputed = false;
-      applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey);
+      applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, { buildInputs });
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {
         await reportSimulationDataIssue({
@@ -2156,21 +2173,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
     // Non-baseline scenario metadata window must match the shared Usage dashboard 365-day canonical window.
     if (scenarioKey !== "BASELINE" && dataset?.summary) {
       const canonicalCoverage =
-        applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey) ??
+        applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs }) ??
         resolveCanonicalUsage365CoverageWindow();
-      const excludedRanges = travelRangesFromBuildInputs(buildInputs);
-      const boundedExcludedDateKeys = boundDateKeysToCoverageWindow(
-        travelRangesToExcludeDateKeys(excludedRanges),
-        canonicalCoverage
-      );
-      const excludedFingerprint = Array.from(boundedExcludedDateKeys).sort().join(",");
-      dataset.meta = {
-        ...(dataset.meta ?? {}),
-        coverageStart: canonicalCoverage.startDate,
-        coverageEnd: canonicalCoverage.endDate,
-        excludedDateKeysCount: boundedExcludedDateKeys.size,
-        excludedDateKeysFingerprint: excludedFingerprint,
-      };
+      void canonicalCoverage;
     }
 
     // Past and Future baseload come from the built curve (buildSimulatedUsageDatasetFromBuildInputs), which already
