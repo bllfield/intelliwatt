@@ -469,6 +469,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoringActualSource).toBe("actual_usage_test_window_intervals");
     expect(body.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
     expect(body.scoringUsedSharedArtifact).toBe(true);
+    expect(body.comparePulledFromSharedArtifactOnly).toBe(true);
+    expect(body.artifactUsesTestDaysInIdentity).toBe(false);
+    expect(body.artifactUsesTravelDaysInIdentity).toBe(true);
+    expect(body.artifactBuildExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
+    expect(body.scoringExcludedSource).toBe("artifact_meta_excludedDateKeysFingerprint");
   });
 
   it("returns test-window-not-simulated (not join-incomplete) when artifact has no simulated intervals for selected test dates", async () => {
@@ -505,6 +510,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(409);
     expect(body.error).toBe("artifact_test_window_not_simulated");
     expect(body.error).not.toBe("artifact_compare_join_incomplete_rebuild_required");
+    expect(body.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
     expect(String(body.explanation ?? "")).toContain("ACTUAL-only");
   });
 

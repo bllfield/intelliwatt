@@ -1575,22 +1575,36 @@ export async function POST(req: NextRequest) {
   const scoringActualTestIntervalsCanon = actualTestIntervalsCanon.filter((p) =>
     simulatedScoringDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
-  if (scoringActualTestIntervalsCanon.length === 0) {
+  const inferredMissingSimulatedOwnershipCount = Array.from(testDateKeysLocal).filter(
+    (dk) => !simulatedScoringDateKeysLocal.has(dk)
+  ).length;
+  const scoredTestDaysMissingSimulatedOwnershipCountRaw = Number(
+    (sharedSim as any)?.scoredTestDaysMissingSimulatedOwnershipCount
+  );
+  const scoredTestDaysMissingSimulatedOwnershipCount = Number.isFinite(
+    scoredTestDaysMissingSimulatedOwnershipCountRaw
+  )
+    ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
+    : inferredMissingSimulatedOwnershipCount;
+  if (scoredTestDaysMissingSimulatedOwnershipCount > 0) {
     const classification = classifySimulationFailure({
       code: "artifact_test_window_not_simulated",
-      message: "Selected test dates map to ACTUAL-only days in the shared artifact; no simulated scoring intervals are available.",
+      message: "Selected test dates are ACTUAL-owned in shared artifact ownership.",
     });
     return NextResponse.json(
       {
         ok: false,
         error: "artifact_test_window_not_simulated",
         message:
-          "Selected Test Dates are ACTUAL-only in the shared artifact, so there are no simulated scoring intervals to compare. Choose dates that are in simulated/masked scope.",
+          "Selected Test Dates include ACTUAL-owned days in the shared artifact. Choose dates in simulated/masked scope for compare scoring.",
         explanation: classification.userFacingExplanation,
         missingData: classification.missingData,
         reasonCode: classification.reasonCode,
-        actualTestIntervalsCount: actualTestIntervalsCanon.length,
-        simulatedTestIntervalsCount: sharedSim.simulatedTestIntervals.length,
+        scoredTestDaysMissingSimulatedOwnershipCount,
+        scoringExcludedSource:
+          (sharedSim as any)?.scoringExcludedSource ?? "artifact_meta_excludedDateKeysFingerprint",
+        artifactBuildExcludedSource:
+          (sharedSim as any)?.artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint",
       },
       { status: 409 }
     );
@@ -1630,6 +1644,25 @@ export async function POST(req: NextRequest) {
     (sharedSim as any).scoringSimulatedSource ?? "shared_artifact_simulated_intervals15";
   const scoringUsedSharedArtifact =
     (sharedSim as any).scoringUsedSharedArtifact !== false;
+  const scoringExcludedSource =
+    (sharedSim as any).scoringExcludedSource ?? "artifact_meta_excludedDateKeysFingerprint";
+  const artifactBuildExcludedSource =
+    (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
+  const artifactUsesTestDaysInIdentity =
+    (sharedSim as any).artifactUsesTestDaysInIdentity === true;
+  const artifactUsesTravelDaysInIdentity =
+    (sharedSim as any).artifactUsesTravelDaysInIdentity !== false;
+  const sharedArtifactScenarioId =
+    (sharedSim as any).sharedArtifactScenarioId ??
+    (sharedSim as any)?.modelAssumptions?.artifactScenarioId ??
+    null;
+  const sharedArtifactInputHash =
+    (sharedSim as any).sharedArtifactInputHash ??
+    (sharedSim as any)?.modelAssumptions?.artifactInputHash ??
+    (sharedSim as any)?.modelAssumptions?.artifactInputHashUsed ??
+    null;
+  const comparePulledFromSharedArtifactOnly =
+    (sharedSim as any).comparePulledFromSharedArtifactOnly !== false;
   const sharedCoverageWindow = sharedSim.sharedCoverageWindow;
   const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
@@ -1827,6 +1860,14 @@ export async function POST(req: NextRequest) {
     scoringActualSource,
     scoringSimulatedSource,
     scoringUsedSharedArtifact,
+    scoringExcludedSource,
+    artifactBuildExcludedSource,
+    artifactUsesTestDaysInIdentity,
+    artifactUsesTravelDaysInIdentity,
+    sharedArtifactScenarioId,
+    sharedArtifactInputHash,
+    comparePulledFromSharedArtifactOnly,
+    scoredTestDaysMissingSimulatedOwnershipCount,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,

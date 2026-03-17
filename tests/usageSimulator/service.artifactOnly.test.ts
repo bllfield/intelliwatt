@@ -249,5 +249,40 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.simulatedTestIntervals.every((p) => p.kwh === 0.25)).toBe(true);
     }
   });
+
+  it("uses shared excludedDateKeys ownership from artifact metadata for scoring", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-meta-owned-day",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-01",
+        },
+        daily: [{ date: "2026-01-01", source: "ACTUAL" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      travelSimulatedDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.scoringExcludedSource).toBe("artifact_meta_excludedDateKeysFingerprint");
+      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
+    }
+  });
 });
 

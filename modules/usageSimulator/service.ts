@@ -240,8 +240,16 @@ export type GapfillCompareSimSharedResult =
   | {
       ok: true;
       artifactAutoRebuilt: boolean;
-      scoringSimulatedSource: "shared_artifact_simulated_intervals15";
-      scoringUsedSharedArtifact: boolean;
+      scoringSimulatedSource?: "shared_artifact_simulated_intervals15";
+      scoringUsedSharedArtifact?: boolean;
+      artifactBuildExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
+      scoringExcludedSource?: "artifact_meta_excludedDateKeysFingerprint" | "artifact_daily_source_fallback";
+      artifactUsesTestDaysInIdentity?: boolean;
+      artifactUsesTravelDaysInIdentity?: boolean;
+      sharedArtifactScenarioId?: string | null;
+      sharedArtifactInputHash?: string | null;
+      comparePulledFromSharedArtifactOnly?: boolean;
+      scoredTestDaysMissingSimulatedOwnershipCount?: number;
       sharedCoverageWindow: { startDate: string; endDate: string };
       boundedTravelDateKeysLocal: Set<string>;
       artifactIntervals: IntervalPoint[];
@@ -523,21 +531,35 @@ export async function buildGapfillCompareSimShared(args: {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
+  const modelAssumptions = (simOut.dataset as any)?.meta ?? null;
+  const excludedFingerprintFromMeta = String(modelAssumptions?.excludedDateKeysFingerprint ?? "")
+    .split(",")
+    .map((dk) => String(dk).trim())
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
   const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
     (Array.isArray((simOut.dataset as any)?.daily) ? (simOut.dataset as any).daily : [])
       .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
       .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
   );
-  const simulatedDateKeysFromArtifact = new Set<string>(
-    Array.from(daySourceFromDataset.entries())
-      .filter(([, source]) => source === "SIMULATED")
-      .map(([dk]) => dk)
-  );
-  for (const dk of Array.from(boundedTravelDateKeysLocal)) simulatedDateKeysFromArtifact.add(dk);
+  const simulatedDateKeysFromArtifact =
+    excludedFingerprintFromMeta.length > 0
+      ? new Set<string>(excludedFingerprintFromMeta)
+      : new Set<string>(
+          Array.from(daySourceFromDataset.entries())
+            .filter(([, source]) => source === "SIMULATED")
+            .map(([dk]) => dk)
+        );
+  const scoringExcludedSource =
+    excludedFingerprintFromMeta.length > 0
+      ? "artifact_meta_excludedDateKeysFingerprint"
+      : "artifact_daily_source_fallback";
   const simulatedTestIntervals = artifactIntervals.filter((p) => {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     return testDateKeysLocal.has(dk) && simulatedDateKeysFromArtifact.has(dk);
   });
+  const scoredTestDaysMissingSimulatedOwnershipCount = Array.from(testDateKeysLocal).filter(
+    (dk) => !simulatedDateKeysFromArtifact.has(dk)
+  ).length;
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
     chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
@@ -569,7 +591,6 @@ export async function buildGapfillCompareSimShared(args: {
     canonicalWindow.endDate
   );
 
-  const modelAssumptions = (simOut.dataset as any)?.meta ?? null;
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
 
   return {
@@ -577,6 +598,17 @@ export async function buildGapfillCompareSimShared(args: {
     artifactAutoRebuilt,
     scoringSimulatedSource: "shared_artifact_simulated_intervals15",
     scoringUsedSharedArtifact: true,
+    artifactBuildExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
+    scoringExcludedSource,
+    artifactUsesTestDaysInIdentity: false,
+    artifactUsesTravelDaysInIdentity: true,
+    sharedArtifactScenarioId: String(modelAssumptions?.artifactScenarioId ?? pastScenarioId ?? ""),
+    sharedArtifactInputHash:
+      (typeof modelAssumptions?.artifactInputHash === "string" && modelAssumptions.artifactInputHash) ||
+      (typeof modelAssumptions?.artifactInputHashUsed === "string" && modelAssumptions.artifactInputHashUsed) ||
+      null,
+    comparePulledFromSharedArtifactOnly: true,
+    scoredTestDaysMissingSimulatedOwnershipCount,
     sharedCoverageWindow,
     boundedTravelDateKeysLocal,
     artifactIntervals,

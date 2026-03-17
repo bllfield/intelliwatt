@@ -52,5 +52,17 @@ describe("past cache hash invalidation", () => {
     });
     expect(a).not.toBe(b);
   });
+
+  it("does not change for test-selection-only fields outside shared identity", () => {
+    const a = computePastInputHash(basePayload);
+    const b = computePastInputHash({
+      ...(basePayload as any),
+      testDays: 21,
+      testMode: "fixed",
+      testRanges: [{ startDate: "2025-04-01", endDate: "2025-04-07" }],
+      seed: "seed-1",
+    } as any);
+    expect(a).toBe(b);
+  });
 });
 
