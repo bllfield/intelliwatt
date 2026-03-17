@@ -302,6 +302,9 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
+  let rebuiltSimOut:
+    | Extract<Awaited<ReturnType<typeof getSimulatedUsageForHouseScenario>>, { ok: true }>
+    | null = null;
   if (rebuildArtifact) {
     const rebuilt = await getSimulatedUsageForHouseScenario({
       userId,
@@ -322,6 +325,7 @@ export async function buildGapfillCompareSimShared(args: {
         },
       };
     }
+    rebuiltSimOut = rebuilt;
   }
 
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -334,6 +338,16 @@ export async function buildGapfillCompareSimShared(args: {
     readMode: "artifact_only",
   });
   let artifactAutoRebuilt = false;
+  if (
+    rebuildArtifact &&
+    (!simOut.ok || !simOut.dataset?.series?.intervals15) &&
+    rebuiltSimOut?.dataset?.series?.intervals15
+  ) {
+    // Explicit rebuild already produced a valid dataset. Use it directly when
+    // artifact-only read cannot see a materialized cache record yet.
+    simOut = rebuiltSimOut;
+    artifactAutoRebuilt = true;
+  }
   const initialIntervals15 =
     simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
       ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
@@ -2073,7 +2087,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       };
     }
 
-    // All non-baseline scenarios share one canonical metadata window source.
+    // Non-baseline scenario metadata window must match the shared Usage dashboard 365-day canonical window.
     if (scenarioKey !== "BASELINE" && dataset?.summary) {
       const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
       dataset.summary.start = canonicalCoverage.startDate;
