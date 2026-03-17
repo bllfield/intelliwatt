@@ -224,7 +224,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
   });
 
-  it("separates travel-only ownership from compare-mask ownership for cached compare artifacts", async () => {
+  it("returns rebuild-required when cached artifact is missing compare-mask ownership metadata", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-actual-days",
       datasetJson: {
@@ -247,11 +247,44 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       rebuildArtifact: false,
     });
 
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      expect(out.scoringExcludedSource).toBe("artifact_meta_compareMaskDateKeysFingerprint");
-      expect(out.simulatedTestIntervals.length).toBe(72);
-      expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_ownership_metadata_missing_rebuild_required");
+    }
+  });
+
+  it("uses original restored metadata for compatibility validation (not overwritten model assumptions)", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-compare-mismatch",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          compareMaskDateKeysFingerprint: "2026-01-02",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      travelSimulatedDateKeysLocal: new Set<string>(),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_scope_mismatch_rebuild_required");
     }
   });
 

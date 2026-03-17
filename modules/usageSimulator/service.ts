@@ -603,7 +603,7 @@ export async function buildGapfillCompareSimShared(args: {
   }
 
   applyCanonicalCoverageMetadataForNonBaseline(dataset, "gapfill_lab");
-  const restoredMeta = (dataset as any)?.meta ?? {};
+  const restoredMeta = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
   const artifactCurveShapingVersion = String(restoredMeta?.curveShapingVersion ?? "");
   const artifactIntervalsRaw = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
   if (
@@ -674,9 +674,9 @@ export async function buildGapfillCompareSimShared(args: {
     kwh: Number(p?.kwh) || 0,
   }));
   const compareFingerprintFromMetaRaw = String(
-    modelAssumptions?.compareMaskDateKeysFingerprint ?? modelAssumptions?.compareMaskFingerprint ?? ""
+    restoredMeta?.compareMaskDateKeysFingerprint ?? restoredMeta?.compareMaskFingerprint ?? ""
   );
-  const excludedFingerprintFromMeta = String(modelAssumptions?.excludedDateKeysFingerprint ?? "")
+  const excludedFingerprintFromMeta = String(restoredMeta?.excludedDateKeysFingerprint ?? "")
     .split(",")
     .map((dk) => String(dk).trim())
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
