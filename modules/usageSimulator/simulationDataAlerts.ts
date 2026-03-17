@@ -90,6 +90,17 @@ export function classifySimulationFailure(args: {
     };
   }
 
+  if (haystack.includes("artifact_ownership_metadata_missing_rebuild_required")) {
+    return {
+      reasonCode: "ARTIFACT_OWNERSHIP_METADATA_MISSING_REBUILD_REQUIRED",
+      reasonMessage: "Saved simulation artifact is missing strict ownership metadata required for Gap-Fill scoring.",
+      missingData: ["artifact_excludedDateKeysFingerprint"],
+      userFacingExplanation:
+        "Saved simulation data is missing required ownership metadata for strict compare scoring. Re-run compare (or Retry) to rebuild the artifact.",
+      shouldAlert: false,
+    };
+  }
+
   if (haystack.includes("artifact_test_window_not_simulated")) {
     return {
       reasonCode: "ARTIFACT_TEST_WINDOW_NOT_SIMULATED",

@@ -541,18 +541,22 @@ export async function buildGapfillCompareSimShared(args: {
       .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
       .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
   );
-  const simulatedDateKeysFromArtifact =
-    excludedFingerprintFromMeta.length > 0
-      ? new Set<string>(excludedFingerprintFromMeta)
-      : new Set<string>(
-          Array.from(daySourceFromDataset.entries())
-            .filter(([, source]) => source === "SIMULATED")
-            .map(([dk]) => dk)
-        );
-  const scoringExcludedSource =
-    excludedFingerprintFromMeta.length > 0
-      ? "artifact_meta_excludedDateKeysFingerprint"
-      : "artifact_daily_source_fallback";
+  if (excludedFingerprintFromMeta.length === 0) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_ownership_metadata_missing_rebuild_required",
+        message:
+          "Saved shared Past artifact is missing excludedDateKeysFingerprint ownership metadata required for strict Gap-Fill scoring.",
+        mode: "artifact_only",
+        scenarioId: pastScenarioId,
+      },
+    };
+  }
+  const simulatedDateKeysFromArtifact = new Set<string>(excludedFingerprintFromMeta);
+  const scoringExcludedSource = "artifact_meta_excludedDateKeysFingerprint";
   const simulatedTestIntervals = artifactIntervals.filter((p) => {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     return testDateKeysLocal.has(dk) && simulatedDateKeysFromArtifact.has(dk);

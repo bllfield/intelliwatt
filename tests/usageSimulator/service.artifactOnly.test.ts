@@ -186,7 +186,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
   });
 
-  it("does not use ACTUAL-labeled artifact days for simulated scoring intervals", async () => {
+  it("fails with rebuild-required when ownership fingerprint metadata is missing", async () => {
     getLatestCachedPastDatasetByScenario.mockResolvedValue({
       inputHash: "hash-actual-days",
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
@@ -210,12 +210,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       rebuildArtifact: false,
     });
 
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      expect(out.artifactIntervals.length).toBeGreaterThan(0);
-      expect(out.simulatedTestIntervals.length).toBe(0);
-      expect(out.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
-      expect(out.scoringUsedSharedArtifact).toBe(true);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_ownership_metadata_missing_rebuild_required");
     }
   });
 
@@ -225,7 +223,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
-        meta: { curveShapingVersion: "shared_curve_v2" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-01",
+        },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
       },
