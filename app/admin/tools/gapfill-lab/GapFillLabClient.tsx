@@ -358,7 +358,7 @@ export default function GapFillLabClient() {
           ...(Array.isArray(data.byDayType) && data.byDayType.length > 0 ? {} : Array.isArray(prev.byDayType) ? { byDayType: prev.byDayType } : {}),
           ...(Array.isArray(data.worstDays) && data.worstDays.length > 0 ? {} : Array.isArray(prev.worstDays) ? { worstDays: prev.worstDays } : {}),
           ...(data.diagnostics ? {} : prev.diagnostics ? { diagnostics: prev.diagnostics } : {}),
-          ...((data as any).parity ? {} : (prev as any).parity ? { parity: (prev as any).parity } : {}),
+          // Never retain stale parity window metadata across requests.
           ...((data as any).fullReportText ? {} : (prev as any).fullReportText ? { fullReportText: (prev as any).fullReportText } : {}),
           ...((data as any).fullReportJson ? {} : (prev as any).fullReportJson ? { fullReportJson: (prev as any).fullReportJson } : {}),
           ...(data.homeProfile == null && prev.homeProfile != null ? { homeProfile: prev.homeProfile } : {}),
