@@ -2,6 +2,7 @@
  * Prime the Gap-Fill Lab cache (scenarioId "gapfill_lab") so Run Compare gets a cache hit.
  * Used when the user has entered eval ranges: we build with buildExcludedRanges = db ∪ eval
  * and save to gapfill_lab with the same key the lab uses.
+ * This path is intentionally timezone-specific and not the shared canonical reporting window authority.
  */
 
 import { prisma } from "@/lib/db";

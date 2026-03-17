@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { getActualIntervalsForUsageShapeProfile } from "@/modules/usageShapeProfile/actualIntervals";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
@@ -38,7 +38,7 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   });
   if (!house) return { ok: false, reason: "house_not_found" };
 
-  const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const actual = await getActualIntervalsForUsageShapeProfile({
     houseId: house.id,
     esiid: house.esiid ?? null,

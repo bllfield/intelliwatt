@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -474,7 +474,7 @@ export const UsageDashboard: React.FC<Props> = ({
     const ds = activeHouse?.dataset;
     const meta = (ds as any)?.meta ?? {};
     const datasetKind = meta.datasetKind ?? null;
-    const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const start = canonicalWindow.startDate;
     const end = canonicalWindow.endDate;
     const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
@@ -510,7 +510,7 @@ export const UsageDashboard: React.FC<Props> = ({
     const fallbackDailyRaw = daily.length
       ? daily
       : (dataset?.series?.daily ?? []).map((d) => ({ date: toDateKeyFromTimestamp(d.timestamp), kwh: d.kwh }));
-    const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const coverageStart = canonicalWindow.startDate;
     const coverageEnd = canonicalWindow.endDate;
     const dateInRange = (d: string) =>

@@ -11,7 +11,7 @@ import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEs
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -557,7 +557,7 @@ export async function getBaseloadFromActualExcludingDates(args: {
 }
 
 async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: string) {
-  const { startDate, endDate } = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const { startDate, endDate } = resolveCanonicalUsage365CoverageWindow();
   const cutoff = new Date(startDate + "T00:00:00.000Z");
   const end = new Date(endDate + "T23:59:59.999Z");
   const hasRows = await usageClient.greenButtonInterval.findFirst({
@@ -570,7 +570,7 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
 }
 
 async function getSmtWindow(esiid: string) {
-  const { startDate, endDate } = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const { startDate, endDate } = resolveCanonicalUsage365CoverageWindow();
   const cutoff = new Date(startDate + "T00:00:00.000Z");
   const end = new Date(endDate + "T23:59:59.999Z");
   const hasRows = await prisma.smtInterval.findFirst({
@@ -753,7 +753,7 @@ export async function getActualUsageDatasetForHouse(
     greenDataset = null;
   }
   const selected = chooseDataset(smtDataset, greenDataset);
-  const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+  const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const canonicalCutoff = new Date(canonicalWindow.startDate + "T00:00:00.000Z");
   const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { getActualIntervalsForUsageShapeProfile } from "@/modules/usageShapeProfile/actualIntervals";
 import { deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
 import { upsertUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     }
 
     const esiid = house.esiid ? String(house.esiid) : null;
-    const canonicalWindow = canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 });
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
 
     const actual = await getActualIntervalsForUsageShapeProfile({
       houseId: house.id,

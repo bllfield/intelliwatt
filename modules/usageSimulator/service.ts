@@ -138,8 +138,6 @@ async function resolvePastScenarioIdForHouse(args: {
 export async function getSharedPastCoverageWindowForHouse(args: {
   userId: string;
   houseId: string;
-  fallbackStartDate: string;
-  fallbackEndDate: string;
 }): Promise<{ startDate: string; endDate: string }> {
   void args;
   return resolveCanonicalUsage365CoverageWindow();

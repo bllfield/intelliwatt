@@ -31,7 +31,7 @@ import {
   classifySimulationFailure,
   recordSimulationDataAlert,
 } from "@/modules/usageSimulator/simulationDataAlerts";
-import { canonicalUsageWindowChicago, monthsEndingAt, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
@@ -110,21 +110,6 @@ function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
-}
-
-function normalizeWindowToInclusiveDays(
-  window: { startDate: string; endDate: string },
-  totalDays = 365
-): { startDate: string; endDate: string } {
-  const endDate = String(window?.endDate ?? "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return { startDate: String(window?.startDate ?? "").slice(0, 10), endDate };
-  }
-  const days = Math.max(1, Math.trunc(Number(totalDays) || 365));
-  return {
-    startDate: prevCalendarDayDateKey(endDate, days - 1),
-    endDate,
-  };
 }
 
 function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
@@ -1115,18 +1100,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const canonicalWindowFallback = normalizeWindowToInclusiveDays(
-    canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 }),
-    365
-  );
   const canonicalWindow = await getSharedPastCoverageWindowForHouse({
     userId: user.id,
     houseId: house.id,
-    fallbackStartDate: canonicalWindowFallback.startDate,
-    fallbackEndDate: canonicalWindowFallback.endDate,
   });
   const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
-  const canonicalWindowHelper = "canonicalUsageWindowChicago";
+  const canonicalWindowHelper = "resolveCanonicalUsage365CoverageWindow";
   let usage365: Usage365Payload | undefined = undefined;
   // Usage365 fetch is expensive; only load when explicitly requested.
   if (includeUsage365) {
