@@ -1597,6 +1597,13 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
     timezone,
   });
+  const actualTestIntervalsCount = actualTestIntervalsCanon.length;
+  const simulatedTestIntervalsCount = sharedSim.simulatedTestIntervals.length;
+  const scoringActualSource = "actual_usage_test_window_intervals";
+  const scoringSimulatedSource =
+    (sharedSim as any).scoringSimulatedSource ?? "shared_artifact_simulated_intervals15";
+  const scoringUsedSharedArtifact =
+    (sharedSim as any).scoringUsedSharedArtifact !== false;
   const sharedCoverageWindow = sharedSim.sharedCoverageWindow;
   const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
@@ -1789,6 +1796,11 @@ export async function POST(req: NextRequest) {
     artifactUpdatedAt,
     artifactSourceNote,
     testIntervalsCount: actualTestIntervals.length,
+    actualTestIntervalsCount,
+    simulatedTestIntervalsCount,
+    scoringActualSource,
+    scoringSimulatedSource,
+    scoringUsedSharedArtifact,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,

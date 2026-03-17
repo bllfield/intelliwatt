@@ -240,6 +240,8 @@ export type GapfillCompareSimSharedResult =
   | {
       ok: true;
       artifactAutoRebuilt: boolean;
+      scoringSimulatedSource: "shared_artifact_simulated_intervals15";
+      scoringUsedSharedArtifact: boolean;
       sharedCoverageWindow: { startDate: string; endDate: string };
       boundedTravelDateKeysLocal: Set<string>;
       artifactIntervals: IntervalPoint[];
@@ -521,15 +523,23 @@ export async function buildGapfillCompareSimShared(args: {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
-  const simulatedTestIntervals = artifactIntervals.filter((p) => testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
-  const simulatedChartIntervals = artifactIntervals.filter((p) =>
-    chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-  );
-
   const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
     (Array.isArray((simOut.dataset as any)?.daily) ? (simOut.dataset as any).daily : [])
       .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
       .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
+  );
+  const simulatedDateKeysFromArtifact = new Set<string>(
+    Array.from(daySourceFromDataset.entries())
+      .filter(([, source]) => source === "SIMULATED")
+      .map(([dk]) => dk)
+  );
+  for (const dk of Array.from(boundedTravelDateKeysLocal)) simulatedDateKeysFromArtifact.add(dk);
+  const simulatedTestIntervals = artifactIntervals.filter((p) => {
+    const dk = dateKeyInTimezone(p.timestamp, timezone);
+    return testDateKeysLocal.has(dk) && simulatedDateKeysFromArtifact.has(dk);
+  });
+  const simulatedChartIntervals = artifactIntervals.filter((p) =>
+    chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
 
   const simulatedChartDaily = Array.from(
@@ -565,6 +575,8 @@ export async function buildGapfillCompareSimShared(args: {
   return {
     ok: true,
     artifactAutoRebuilt,
+    scoringSimulatedSource: "shared_artifact_simulated_intervals15",
+    scoringUsedSharedArtifact: true,
     sharedCoverageWindow,
     boundedTravelDateKeysLocal,
     artifactIntervals,

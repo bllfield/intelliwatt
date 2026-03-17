@@ -13,6 +13,7 @@ const rebuildGapfillSharedPastArtifact = vi.fn();
 const getCandidateDateCoverageForSelection = vi.fn();
 const mergeDateKeysToRanges = vi.fn();
 const pickRandomTestDateKeys = vi.fn();
+const computeGapFillMetrics = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -82,30 +83,7 @@ vi.mock("@/lib/admin/gapfillLab", () => ({
     return out;
   },
   buildDailyWeatherFeaturesFromHourly: vi.fn(),
-  computeGapFillMetrics: () => ({
-    mae: 0,
-    rmse: 0,
-    mape: 0,
-    wape: 0,
-    maxAbs: 0,
-    totalActualKwhMasked: 1,
-    totalSimKwhMasked: 1,
-    deltaKwhMasked: 0,
-    mapeFiltered: 0,
-    mapeFilteredCount: 0,
-    byMonth: [],
-    byHour: [],
-    byDayType: [],
-    worstDays: [],
-    worst10Abs: [],
-    diagnostics: {
-      dailyTotalsMasked: [],
-      top10Under: [],
-      top10Over: [],
-      hourlyProfileMasked: [],
-      seasonalSplit: { summer: { wape: 0, mae: 0, count: 0 }, winter: { wape: 0, mae: 0, count: 0 }, shoulder: { wape: 0, mae: 0, count: 0 } },
-    },
-  }),
+  computeGapFillMetrics: (...args: any[]) => computeGapFillMetrics(...args),
   dateKeyInTimezone: (iso: string) => String(iso).slice(0, 10),
   getLocalDayOfWeekFromDateKey: vi.fn(),
   mergeDateKeysToRanges: (...args: any[]) => mergeDateKeysToRanges(...args),
@@ -133,6 +111,30 @@ vi.mock("@/lib/time/chicago", async () => {
 import { POST } from "@/app/api/admin/tools/gapfill-lab/route";
 
 describe("gapfill-lab route artifact-only hard lock", () => {
+  const zeroMetrics = () => ({
+    mae: 0,
+    rmse: 0,
+    mape: 0,
+    wape: 0,
+    maxAbs: 0,
+    totalActualKwhMasked: 1,
+    totalSimKwhMasked: 1,
+    deltaKwhMasked: 0,
+    mapeFiltered: 0,
+    mapeFilteredCount: 0,
+    byMonth: [],
+    byHour: [],
+    byDayType: [],
+    worstDays: [],
+    worst10Abs: [],
+    diagnostics: {
+      dailyTotalsMasked: [],
+      top10Under: [],
+      top10Over: [],
+      hourlyProfileMasked: [],
+      seasonalSplit: { summer: { wape: 0, mae: 0, count: 0 }, winter: { wape: 0, mae: 0, count: 0 }, shoulder: { wape: 0, mae: 0, count: 0 } },
+    },
+  });
   beforeEach(() => {
     requireAdmin.mockReset();
     normalizeEmailSafe.mockReset();
@@ -144,6 +146,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     rebuildGapfillSharedPastArtifact.mockReset();
     mergeDateKeysToRanges.mockReset();
     pickRandomTestDateKeys.mockReset();
+    computeGapFillMetrics.mockReset();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
@@ -185,6 +188,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
     pickRandomTestDateKeys.mockReturnValue(["2026-01-01"]);
     mergeDateKeysToRanges.mockReturnValue([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
+    computeGapFillMetrics.mockImplementation(() => zeroMetrics());
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {
@@ -407,6 +411,64 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
     expect(body.scenarioId).toBe("gapfill_lab");
     expect(body.artifactScenarioId).toBeNull();
+  });
+
+  it("does not collapse to zero metrics when simulated scoring intervals differ from actual", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_artifact_simulated_intervals15",
+      scoringUsedSharedArtifact: true,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.75 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.75 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.75 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 1.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 1.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+    computeGapFillMetrics.mockImplementation(({ actual, simulatedByTs }: any) => {
+      const abs = actual.map((p: any) => Math.abs((simulatedByTs.get(p.timestamp) ?? 0) - (Number(p.kwh) || 0)));
+      const mae = abs.reduce((s: number, v: number) => s + v, 0) / Math.max(1, abs.length);
+      return {
+        ...zeroMetrics(),
+        mae,
+        rmse: mae,
+        mape: 100,
+        wape: 100,
+        maxAbs: Math.max(...abs),
+        totalActualKwhMasked: 0.5,
+        totalSimKwhMasked: 1.5,
+        deltaKwhMasked: 1.0,
+      };
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.metrics.mae).toBeGreaterThan(0);
+    expect(body.metrics.wape).toBeGreaterThan(0);
+    expect(body.scoringActualSource).toBe("actual_usage_test_window_intervals");
+    expect(body.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
+    expect(body.scoringUsedSharedArtifact).toBe(true);
   });
 
   it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {

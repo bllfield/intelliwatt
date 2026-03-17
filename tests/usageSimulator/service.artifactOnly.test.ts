@@ -6,6 +6,7 @@ const scenarioFindFirst = vi.fn();
 const getHouseAddressForUserHouse = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();
 const simulatePastUsageDataset = vi.fn();
+const decodeIntervalsV1 = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -32,10 +33,7 @@ vi.mock("@/modules/usageSimulator/pastCache", () => ({
 
 vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
   encodeIntervalsV1: vi.fn(),
-  decodeIntervalsV1: vi.fn(() => [
-    { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
-    { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
-  ]),
+  decodeIntervalsV1: (...args: any[]) => decodeIntervalsV1(...args),
   INTERVAL_CODEC_V1: "v1_delta_varint",
 }));
 
@@ -44,7 +42,7 @@ vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
   getUsageShapeProfileIdentityForPast: vi.fn(),
 }));
 
-import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { buildGapfillCompareSimShared, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 
 describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   beforeEach(() => {
@@ -52,9 +50,14 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     getHouseAddressForUserHouse.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
     simulatePastUsageDataset.mockReset();
+    decodeIntervalsV1.mockReset();
 
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
     scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
+    decodeIntervalsV1.mockReturnValue([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+    ]);
   });
 
   it("returns ARTIFACT_MISSING instead of rebuilding when cache artifact is missing", async () => {
@@ -157,6 +160,94 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(out.ok).toBe(true);
     expect(scenarioFindFirst).not.toHaveBeenCalled();
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
+  function oneDayIntervals96(kwh = 0.25): Array<{ timestamp: string; kwh: number }> {
+    const out: Array<{ timestamp: string; kwh: number }> = [];
+    for (let i = 0; i < 96; i++) {
+      const hh = String(Math.floor(i / 4)).padStart(2, "0");
+      const mm = String((i % 4) * 15).padStart(2, "0");
+      out.push({ timestamp: `2026-01-01T${hh}:${mm}:00.000Z`, kwh });
+    }
+    return out;
+  }
+
+  beforeEach(() => {
+    scenarioFindFirst.mockReset();
+    getHouseAddressForUserHouse.mockReset();
+    getLatestCachedPastDatasetByScenario.mockReset();
+    simulatePastUsageDataset.mockReset();
+    decodeIntervalsV1.mockReset();
+
+    getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
+    scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
+    decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
+  });
+
+  it("does not use ACTUAL-labeled artifact days for simulated scoring intervals", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-actual-days",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2" },
+        daily: [{ date: "2026-01-01", source: "ACTUAL" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      travelSimulatedDateKeysLocal: new Set<string>(),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.artifactIntervals.length).toBeGreaterThan(0);
+      expect(out.simulatedTestIntervals.length).toBe(0);
+      expect(out.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
+      expect(out.scoringUsedSharedArtifact).toBe(true);
+    }
+  });
+
+  it("uses artifact simulated intervals when test day is SIMULATED-labeled", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-sim-days",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2" },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      travelSimulatedDateKeysLocal: new Set<string>(),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.simulatedTestIntervals.every((p) => p.kwh === 0.25)).toBe(true);
+    }
   });
 });
 
