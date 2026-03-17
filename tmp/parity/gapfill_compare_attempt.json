@@ -1,0 +1,17 @@
+{
+    "status":  409,
+    "body":  {
+                 "ok":  false,
+                 "error":  "artifact_missing_rebuild_required",
+                 "message":  "No saved shared Past artifact found. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+                 "code":  "ARTIFACT_MISSING",
+                 "explanation":  "No saved simulation data exists for this view yet. Re-run compare (or Retry) to build it.",
+                 "missingData":  [
+                                     "saved_gapfill_artifact"
+                                 ],
+                 "reasonCode":  "ARTIFACT_MISSING_REBUILD_REQUIRED",
+                 "canonicalWindowHelper":  "canonicalUsageWindowChicago",
+                 "coverageStart":  "2025-03-16",
+                 "coverageEnd":  "2026-03-15"
+             }
+}

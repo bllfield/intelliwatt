@@ -348,6 +348,18 @@ export async function buildGapfillCompareSimShared(args: {
     simOut = rebuiltSimOut;
     artifactAutoRebuilt = true;
   }
+  if (!simOut.ok && simOut.code === "ARTIFACT_MISSING") {
+    const rebuiltOnDemand = await getSimulatedUsageForHouseScenario({
+      userId,
+      houseId,
+      scenarioId: pastScenarioId,
+      readMode: "allow_rebuild",
+    });
+    if (rebuiltOnDemand.ok && rebuiltOnDemand.dataset?.series?.intervals15) {
+      simOut = rebuiltOnDemand;
+      artifactAutoRebuilt = true;
+    }
+  }
   const initialIntervals15 =
     simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
       ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
@@ -592,6 +604,34 @@ function monthsIntersectingTravelRanges(
     }
   }
   return out;
+}
+
+function excludedRangesFromBuildInputs(
+  buildInputs: unknown
+): Array<{ startDate: string; endDate: string }> {
+  const b = (buildInputs ?? {}) as Record<string, unknown>;
+  const collect = (value: unknown): Array<{ startDate: string; endDate: string }> => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((r: any) => ({
+        startDate: String(r?.startDate ?? "").slice(0, 10),
+        endDate: String(r?.endDate ?? "").slice(0, 10),
+      }))
+      .filter(
+        (r) =>
+          /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) &&
+          /^\d{4}-\d{2}-\d{2}$/.test(r.endDate)
+      );
+  };
+
+  const merged = [
+    ...collect((b as any).travelRanges),
+    ...collect((b as any).vacantRanges),
+    ...collect((b as any).vacantDateRanges),
+  ];
+  const uniq = new Map<string, { startDate: string; endDate: string }>();
+  for (const r of merged) uniq.set(`${r.startDate}__${r.endDate}`, r);
+  return Array.from(uniq.values());
 }
 
 function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayload: ManualUsagePayloadAny | null; now?: Date }) {
@@ -2093,10 +2133,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
       dataset.summary.start = canonicalCoverage.startDate;
       dataset.summary.end = canonicalCoverage.endDate;
       dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
+      const excludedRanges = excludedRangesFromBuildInputs(buildInputs);
       const boundedExcludedDateKeys = boundDateKeysToCoverageWindow(
-        travelRangesToExcludeDateKeys(
-          (((buildInputs as any)?.travelRanges ?? []) as Array<{ startDate: string; endDate: string }>)
-        ),
+        travelRangesToExcludeDateKeys(excludedRanges),
         canonicalCoverage
       );
       const excludedFingerprint = Array.from(boundedExcludedDateKeys).sort().join(",");
