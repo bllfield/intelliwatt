@@ -90,6 +90,17 @@ export function classifySimulationFailure(args: {
     };
   }
 
+  if (haystack.includes("artifact_test_window_not_simulated")) {
+    return {
+      reasonCode: "ARTIFACT_TEST_WINDOW_NOT_SIMULATED",
+      reasonMessage: "Selected test dates are ACTUAL-only in the shared artifact and cannot be scored as simulated.",
+      missingData: ["simulated_test_intervals"],
+      userFacingExplanation:
+        "The selected Test Dates are currently ACTUAL-only in the shared artifact, so there are no simulated intervals to score. Choose dates in simulated/masked scope and retry.",
+      shouldAlert: false,
+    };
+  }
+
   if (haystack.includes("artifact_missing_rebuild_required") || haystack.includes("artifact_missing")) {
     return {
       reasonCode: "ARTIFACT_MISSING_REBUILD_REQUIRED",

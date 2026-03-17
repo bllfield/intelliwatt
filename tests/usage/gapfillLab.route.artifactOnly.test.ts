@@ -505,6 +505,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(409);
     expect(body.error).toBe("artifact_test_window_not_simulated");
     expect(body.error).not.toBe("artifact_compare_join_incomplete_rebuild_required");
+    expect(String(body.explanation ?? "")).toContain("ACTUAL-only");
   });
 
   it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {
