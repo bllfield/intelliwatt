@@ -1,0 +1,16 @@
+---
+description: Lock shared simulation window/scope ownership
+alwaysApply: true
+---
+
+# Shared Simulation Window Lock
+
+For simulation metadata and parity work, enforce these non-negotiable rules:
+
+- Use one shared source for non-baseline coverage window metadata: `resolveCanonicalUsage365CoverageWindow()` in `modules/usageSimulator/metadataWindow.ts`.
+- Do not derive coverage windows in route files when shared service metadata is available.
+- For non-baseline scenarios, `dataset.summary.start/end` and `dataset.meta.coverageStart/coverageEnd` must come from the same shared canonical window source.
+- `excludedDateKeysCount` and `excludedDateKeysFingerprint` must be computed from shared travel/vacant ranges bounded to that same shared coverage window.
+- Travel/test scoring logic must never change full-year artifact identity or exclusion scope ownership.
+- If requested behavior conflicts with these rules, stop and ask for explicit user confirmation before changing shared-window ownership.
+- Do not alter this rule's behavior unless the user explicitly asks to update the lock policy.
