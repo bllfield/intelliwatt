@@ -27,15 +27,23 @@ export function resolveReportedCoverageWindow(args: {
 }
 
 export function boundDateKeysToCoverageWindow(
-  dateKeys: Iterable<string>,
+  dateKeys: string[] | ReadonlyArray<string> | Set<string>,
   window: CoverageWindow
 ): Set<string> {
   const out = new Set<string>();
-  for (const dk of dateKeys) {
-    const key = normalizeDateKey(dk);
-    if (!key) continue;
-    if (key >= window.startDate && key <= window.endDate) out.add(key);
+  if (Array.isArray(dateKeys)) {
+    for (let i = 0; i < dateKeys.length; i += 1) {
+      const key = normalizeDateKey(dateKeys[i]);
+      if (!key) continue;
+      if (key >= window.startDate && key <= window.endDate) out.add(key);
+    }
+    return out;
   }
+  dateKeys.forEach((dk) => {
+    const key = normalizeDateKey(dk);
+    if (!key) return;
+    if (key >= window.startDate && key <= window.endDate) out.add(key);
+  });
   return out;
 }
 
