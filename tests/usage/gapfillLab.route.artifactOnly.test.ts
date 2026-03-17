@@ -471,6 +471,42 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoringUsedSharedArtifact).toBe(true);
   });
 
+  it("returns test-window-not-simulated (not join-incomplete) when artifact has no simulated intervals for selected test dates", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_artifact_simulated_intervals15",
+      scoringUsedSharedArtifact: true,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.25, source: "ACTUAL" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.25 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("artifact_test_window_not_simulated");
+    expect(body.error).not.toBe("artifact_compare_join_incomplete_rebuild_required");
+  });
+
   it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {
     prismaScenarioFindMany.mockResolvedValueOnce([{ id: "past-s1" }]);
     prismaScenarioEventFindMany.mockResolvedValueOnce([

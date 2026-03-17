@@ -1569,7 +1569,33 @@ export async function POST(req: NextRequest) {
 
   const simulatedByTs = new Map<string, number>();
   for (const p of sharedSim.simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
-  const missingJoinedActual = actualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
+  const simulatedScoringDateKeysLocal = new Set<string>(
+    sharedSim.simulatedTestIntervals.map((p) => dateKeyInTimezone(p.timestamp, timezone))
+  );
+  const scoringActualTestIntervalsCanon = actualTestIntervalsCanon.filter((p) =>
+    simulatedScoringDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+  );
+  if (scoringActualTestIntervalsCanon.length === 0) {
+    const classification = classifySimulationFailure({
+      code: "artifact_test_window_not_simulated",
+      message: "Selected test dates map to ACTUAL-only days in the shared artifact; no simulated scoring intervals are available.",
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "artifact_test_window_not_simulated",
+        message:
+          "Selected Test Dates are ACTUAL-only in the shared artifact, so there are no simulated scoring intervals to compare. Choose dates that are in simulated/masked scope.",
+        explanation: classification.userFacingExplanation,
+        missingData: classification.missingData,
+        reasonCode: classification.reasonCode,
+        actualTestIntervalsCount: actualTestIntervalsCanon.length,
+        simulatedTestIntervalsCount: sharedSim.simulatedTestIntervals.length,
+      },
+      { status: 409 }
+    );
+  }
+  const missingJoinedActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
   if (missingJoinedActual.length > 0) {
     const classification = classifySimulationFailure({
       code: "artifact_compare_join_incomplete_rebuild_required",
@@ -1592,12 +1618,12 @@ export async function POST(req: NextRequest) {
   }
 
   const metrics = computeGapFillMetrics({
-    actual: actualTestIntervalsCanon,
+    actual: scoringActualTestIntervalsCanon,
     simulated: sharedSim.simulatedTestIntervals,
     simulatedByTs,
     timezone,
   });
-  const actualTestIntervalsCount = actualTestIntervalsCanon.length;
+  const actualTestIntervalsCount = scoringActualTestIntervalsCanon.length;
   const simulatedTestIntervalsCount = sharedSim.simulatedTestIntervals.length;
   const scoringActualSource = "actual_usage_test_window_intervals";
   const scoringSimulatedSource =
