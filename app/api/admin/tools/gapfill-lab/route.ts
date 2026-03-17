@@ -1607,6 +1607,14 @@ export async function POST(req: NextRequest) {
   const artifactInputHashUsed = ma.artifactInputHashUsed ?? null;
   const artifactHashMatch = ma.artifactHashMatch ?? null;
   const artifactScenarioId = ma.artifactScenarioId ?? null;
+  const contextScenarioId =
+    (typeof ma.scenarioId === "string" && ma.scenarioId.trim()) ||
+    (typeof ma.cacheKeyDiag?.scenarioId === "string" && ma.cacheKeyDiag.scenarioId.trim()) ||
+    null;
+  const stableScenarioId =
+    (typeof artifactScenarioId === "string" && artifactScenarioId.trim()) ||
+    contextScenarioId ||
+    "gapfill_lab";
   const artifactCreatedAt = ma.artifactCreatedAt ?? null;
   const artifactUpdatedAt = ma.artifactUpdatedAt ?? null;
   const artifactSourceNote =
@@ -1768,7 +1776,7 @@ export async function POST(req: NextRequest) {
     enginePath: "production_past_stitched",
     cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-    scenarioId: artifactScenarioId,
+    scenarioId: stableScenarioId,
     homeProfile: responseHomeProfile,
     applianceProfile: responseApplianceProfile,
     modelAssumptions: sharedSim.modelAssumptions,
