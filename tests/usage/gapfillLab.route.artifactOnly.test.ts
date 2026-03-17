@@ -273,10 +273,17 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.testRangesUsed).toEqual([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
     expect(body.testSelectionMode).toBe("manual_ranges");
     expect(buildAndSavePastForGapfillLab).toHaveBeenCalled();
+    expect(buildAndSavePastForGapfillLab).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        houseId: "h1",
+        timezone: "America/Chicago",
+      })
+    );
     expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });
 
-  it("clips travel fallback scope to canonical window before compare fingerprinting", async () => {
+  it("uses travel-only scoped exclusion keys (bounded) for artifact fingerprinting", async () => {
     prismaScenarioEventFindMany.mockResolvedValueOnce([
       { payloadJson: { startDate: "2024-01-01", endDate: "2024-01-02" } },
     ]);
@@ -309,10 +316,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
 
     const callArg = buildGapfillCompareSimShared.mock.calls.at(-1)?.[0];
-    const fallback = callArg?.fallbackSimulatedDateKeysLocal as Set<string>;
-    expect(fallback.has("2024-01-01")).toBe(false);
-    expect(fallback.has("2024-01-02")).toBe(false);
-    expect(fallback.has("2026-01-01")).toBe(true);
+    const travelScope = callArg?.travelSimulatedDateKeysLocal as Set<string>;
+    expect(travelScope.has("2024-01-01")).toBe(false);
+    expect(travelScope.has("2024-01-02")).toBe(false);
+    // Test date remains scoring-only; it is not part of full-year artifact exclusion identity.
+    expect(travelScope.has("2026-01-01")).toBe(false);
   });
 
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {

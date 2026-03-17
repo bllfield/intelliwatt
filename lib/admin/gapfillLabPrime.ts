@@ -236,16 +236,18 @@ export async function inspectPastCacheArtifacts(args: {
 }
 
 /**
- * Build Past dataset with buildExcludedRanges = dbTravelRanges ∪ rangesToMask and save to
- * scenarioId "gapfill_lab". Run Compare will then get a cache hit for the same ranges.
+ * Build Past dataset with buildExcludedRanges derived from DB travel/vacant only and save to
+ * scenarioId "gapfill_lab". Run Compare then reads the shared full-year artifact and scores
+ * test dates separately.
  */
 export async function buildAndSavePastForGapfillLab(args: {
   userId: string;
   houseId: string;
-  rangesToMask: DateRange[];
+  /** Accepted for backward-compatible callers; ignored for full-year artifact scope. */
+  rangesToMask?: DateRange[];
   timezone: string;
 }): Promise<PrimeGapfillLabResult> {
-  const { userId, houseId, rangesToMask, timezone } = args;
+  const { userId, houseId, timezone } = args;
 
   const house = await (prisma as any).houseAddress.findFirst({
     where: { id: houseId, archivedAt: null },
@@ -272,8 +274,7 @@ export async function buildAndSavePastForGapfillLab(args: {
 
   const dbTravelRanges = await getTravelRangesFromDb(userId, houseId);
   const dbLocal = new Set<string>(dbTravelRanges.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone)));
-  const evalLocal = new Set<string>(rangesToMask.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone)));
-  const buildExcludedDateKeysLocal = new Set<string>([...Array.from(dbLocal), ...Array.from(evalLocal)]);
+  const buildExcludedDateKeysLocal = dbLocal;
 
   const [homeProfileRec, applianceProfileRec] = await Promise.all([
     getHomeProfileSimulatedByUserHouse({ userId, houseId }),

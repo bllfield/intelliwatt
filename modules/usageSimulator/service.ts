@@ -213,9 +213,8 @@ export async function buildGapfillCompareSimShared(args: {
   houseId: string;
   timezone: string;
   canonicalWindow: { startDate: string; endDate: string };
-  testRangesUsed: DateRange[];
   testDateKeysLocal: Set<string>;
-  fallbackSimulatedDateKeysLocal?: Set<string>;
+  travelSimulatedDateKeysLocal?: Set<string>;
   rebuildArtifact: boolean;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
@@ -223,9 +222,8 @@ export async function buildGapfillCompareSimShared(args: {
     houseId,
     timezone,
     canonicalWindow,
-    testRangesUsed,
     testDateKeysLocal,
-    fallbackSimulatedDateKeysLocal,
+    travelSimulatedDateKeysLocal,
     rebuildArtifact,
   } = args;
 
@@ -233,7 +231,6 @@ export async function buildGapfillCompareSimShared(args: {
     const rebuilt = await buildAndSavePastForGapfillLab({
       userId,
       houseId,
-      rangesToMask: testRangesUsed,
       timezone,
     });
     if (!rebuilt.ok) {
@@ -325,9 +322,9 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
-  const expectedMaskedDayCount = fallbackSimulatedDateKeysLocal?.size ?? null;
+  const expectedMaskedDayCount = travelSimulatedDateKeysLocal?.size ?? null;
   const expectedMaskedFingerprint =
-    fallbackSimulatedDateKeysLocal != null ? Array.from(fallbackSimulatedDateKeysLocal).sort().join(",") : null;
+    travelSimulatedDateKeysLocal != null ? Array.from(travelSimulatedDateKeysLocal).sort().join(",") : null;
   const observedMaskedDayCount =
     simOut.ok && simOut.dataset ? Number((simOut.dataset as any)?.meta?.excludedDateKeysCount ?? NaN) : Number.NaN;
   const observedMaskedFingerprint =
@@ -349,7 +346,7 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_scope_mismatch_rebuild_required",
         message:
-          "Saved gapfill_lab artifact mask scope does not match requested ranges. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+          "Saved gapfill_lab artifact mask scope does not match travel/vacant exclusions. Trigger explicit rebuildArtifact=true before inspect/read compare.",
         mode: "artifact_only",
         scenarioId: "gapfill_lab",
       },
@@ -406,8 +403,8 @@ export async function buildGapfillCompareSimShared(args: {
       simKwh: round2Local(simKwh),
       // In artifact-only lab builds, dataset daily rows may all be tagged ACTUAL
       // when simulated day artifacts were omitted at build time. Force source from
-      // the requested masked scope first so chart/table labeling remains truthful.
-      source: fallbackSimulatedDateKeysLocal?.has(date)
+      // the travel/vacant exclusion scope first so chart/table labeling remains truthful.
+      source: travelSimulatedDateKeysLocal?.has(date)
         ? "SIMULATED"
         : (daySourceFromDataset.get(date) ?? "ACTUAL"),
     }));

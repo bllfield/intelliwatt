@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       email?: string;
       /** inspect = artifact-only read, rebuild = regenerate/resave canonical artifact */
       action?: "inspect" | "rebuild";
-      /** When provided, prime the Gap-Fill Lab cache (gapfill_lab) with db ∪ rangesToMask so Run Compare gets a cache hit. Requires email. */
+      /** Legacy trigger for Gap-Fill Lab prime flow. Exclusion scope is travel/vacant-only in shared build path. Requires email. */
       rangesToMask?: Array<{ startDate?: string; endDate?: string }>;
       timezone?: string;
     };
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           action: "rebuild",
           mode: "write",
-          message: "Gap-Fill Lab cache primed with these ranges. Run Compare will use cache and finish in seconds.",
+          message: "Gap-Fill Lab cache primed using shared travel/vacant artifact scope. Run Compare will use cache and finish in seconds.",
           houseId: result.houseId,
           scenarioId: "gapfill_lab",
           rebuilt: true,

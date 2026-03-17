@@ -1453,7 +1453,6 @@ export async function POST(req: NextRequest) {
     const rebuilt = await buildAndSavePastForGapfillLab({
       userId: user.id,
       houseId: house.id,
-      rangesToMask: testRangesUsed,
       timezone,
     });
     if (!rebuilt.ok) {
@@ -1508,12 +1507,8 @@ export async function POST(req: NextRequest) {
     houseId: house.id,
     timezone,
     canonicalWindow,
-    testRangesUsed,
     testDateKeysLocal,
-    fallbackSimulatedDateKeysLocal: new Set<string>([
-      ...Array.from(boundedTravelDateKeysLocal),
-      ...Array.from(testDateKeysLocal),
-    ]),
+    travelSimulatedDateKeysLocal: boundedTravelDateKeysLocal,
     rebuildArtifact,
   });
   if (!sharedSim.ok) {
