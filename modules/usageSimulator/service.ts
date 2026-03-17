@@ -134,6 +134,64 @@ async function resolvePastScenarioIdForHouse(args: {
   return row?.id ? String(row.id) : null;
 }
 
+export async function getSharedPastCoverageWindowForHouse(args: {
+  userId: string;
+  houseId: string;
+  fallbackStartDate: string;
+  fallbackEndDate: string;
+}): Promise<{ startDate: string; endDate: string }> {
+  const fallbackWindow = resolveReportedCoverageWindow({
+    dataset: null,
+    fallbackStartDate: args.fallbackStartDate,
+    fallbackEndDate: args.fallbackEndDate,
+  });
+
+  const scenarioId = await resolvePastScenarioIdForHouse({
+    userId: args.userId,
+    houseId: args.houseId,
+  });
+  if (!scenarioId) return fallbackWindow;
+
+  const simOut = await getSimulatedUsageForHouseScenario({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId,
+    readMode: "artifact_only",
+  });
+  if (simOut.ok && simOut.dataset) {
+    return resolveReportedCoverageWindow({
+      dataset: simOut.dataset,
+      fallbackStartDate: fallbackWindow.startDate,
+      fallbackEndDate: fallbackWindow.endDate,
+    });
+  }
+
+  const buildRec = await (prisma as any).usageSimulatorBuild
+    .findUnique({
+      where: {
+        userId_houseId_scenarioKey: {
+          userId: args.userId,
+          houseId: args.houseId,
+          scenarioKey: scenarioId,
+        },
+      },
+      select: { buildInputs: true },
+    })
+    .catch(() => null);
+  const buildWindow = resolveWindowFromBuildInputsForPastIdentity(
+    (((buildRec as any)?.buildInputs ?? {}) as Record<string, unknown>)
+  );
+  if (buildWindow?.startDate && buildWindow?.endDate) {
+    return resolveReportedCoverageWindow({
+      dataset: { summary: { start: buildWindow.startDate, end: buildWindow.endDate } },
+      fallbackStartDate: fallbackWindow.startDate,
+      fallbackEndDate: fallbackWindow.endDate,
+    });
+  }
+
+  return fallbackWindow;
+}
+
 export async function rebuildGapfillSharedPastArtifact(args: {
   userId: string;
   houseId: string;

@@ -8,6 +8,7 @@ const chooseActualSource = vi.fn();
 const getActualIntervalsForRange = vi.fn();
 const getActualUsageDatasetForHouse = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
+const getSharedPastCoverageWindowForHouse = vi.fn();
 const rebuildGapfillSharedPastArtifact = vi.fn();
 const getCandidateDateCoverageForSelection = vi.fn();
 const mergeDateKeysToRanges = vi.fn();
@@ -60,6 +61,7 @@ vi.mock("@/modules/applianceProfile/repo", () => ({
 
 vi.mock("@/modules/usageSimulator/service", () => ({
   buildGapfillCompareSimShared: (...args: any[]) => buildGapfillCompareSimShared(...args),
+  getSharedPastCoverageWindowForHouse: (...args: any[]) => getSharedPastCoverageWindowForHouse(...args),
   rebuildGapfillSharedPastArtifact: (...args: any[]) => rebuildGapfillSharedPastArtifact(...args),
 }));
 
@@ -137,6 +139,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     chooseActualSource.mockReset();
     getActualIntervalsForRange.mockReset();
     buildGapfillCompareSimShared.mockReset();
+    getSharedPastCoverageWindowForHouse.mockReset();
     getCandidateDateCoverageForSelection.mockReset();
     rebuildGapfillSharedPastArtifact.mockReset();
     mergeDateKeysToRanges.mockReset();
@@ -161,6 +164,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
     prismaScenarioEventFindMany.mockResolvedValue([]);
     chooseActualSource.mockResolvedValue("SMT");
+    getSharedPastCoverageWindowForHouse.mockResolvedValue({
+      startDate: "2025-03-14",
+      endDate: "2026-03-14",
+    });
     getActualIntervalsForRange.mockResolvedValue([
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
@@ -415,7 +422,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 
-  it("bounds Usage365 daily rows to shared canonical window dates", async () => {
+  it("bounds Usage365 daily rows to shared coverage window dates", async () => {
     getActualIntervalsForRange.mockResolvedValue([
       { timestamp: "2025-02-28T23:45:00.000Z", kwh: 0.25 },
       { timestamp: "2025-03-01T00:00:00.000Z", kwh: 0.5 },
@@ -437,15 +444,15 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
     const usageDaily = Array.isArray(body.usage365?.daily) ? body.usage365.daily : [];
     expect(usageDaily.map((d: any) => d.date)).toEqual(["2026-02-28", "2026-03-01"]);
-    expect(body.usage365?.coverageStart).toBe("2025-03-13");
-    expect(body.usage365?.coverageEnd).toBe("2026-03-12");
+    expect(body.usage365?.coverageStart).toBe("2025-03-14");
+    expect(body.usage365?.coverageEnd).toBe("2026-03-14");
   });
 
-  it("uses the shared canonical window helper for Usage365 bounds", async () => {
+  it("uses shared Past coverage window for Usage365 bounds", async () => {
     getActualIntervalsForRange.mockResolvedValueOnce([
       { timestamp: "2025-03-13T12:00:00.000Z", kwh: 2.0 },
-      { timestamp: "2026-03-12T12:00:00.000Z", kwh: 3.0 },
-      { timestamp: "2026-03-13T12:00:00.000Z", kwh: 4.0 },
+      { timestamp: "2025-03-14T12:00:00.000Z", kwh: 3.0 },
+      { timestamp: "2026-03-14T12:00:00.000Z", kwh: 4.0 },
     ]);
 
     const req = {
@@ -461,10 +468,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.usage365?.coverageStart).toBe("2025-03-13");
-    expect(body.usage365?.coverageEnd).toBe("2026-03-12");
+    expect(body.usage365?.coverageStart).toBe("2025-03-14");
+    expect(body.usage365?.coverageEnd).toBe("2026-03-14");
     const usageDaily = Array.isArray(body.usage365?.daily) ? body.usage365.daily : [];
-    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-13", "2026-03-12"]);
+    expect(usageDaily.map((d: any) => d.date)).toEqual(["2025-03-14", "2026-03-14"]);
     const usageMonthly = Array.isArray(body.usage365?.monthly) ? body.usage365.monthly : [];
     expect(usageMonthly.length).toBe(12);
     expect(body.usage365?.stitchedMonth?.yearMonth).toBe("2026-03");

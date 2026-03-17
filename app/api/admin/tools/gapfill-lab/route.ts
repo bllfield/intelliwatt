@@ -21,7 +21,11 @@ import {
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
-import { buildGapfillCompareSimShared, rebuildGapfillSharedPastArtifact } from "@/modules/usageSimulator/service";
+import {
+  buildGapfillCompareSimShared,
+  getSharedPastCoverageWindowForHouse,
+  rebuildGapfillSharedPastArtifact,
+} from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   classifySimulationFailure,
@@ -1103,10 +1107,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const canonicalWindow = normalizeWindowToInclusiveDays(
+  const canonicalWindowFallback = normalizeWindowToInclusiveDays(
     canonicalUsageWindowChicago({ now: new Date(), reliableLagDays: 2, totalDays: 365 }),
     365
   );
+  const canonicalWindow = await getSharedPastCoverageWindowForHouse({
+    userId: user.id,
+    houseId: house.id,
+    fallbackStartDate: canonicalWindowFallback.startDate,
+    fallbackEndDate: canonicalWindowFallback.endDate,
+  });
   const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
   const canonicalWindowHelper = "canonicalUsageWindowChicago";
   let usage365: Usage365Payload | undefined = undefined;
