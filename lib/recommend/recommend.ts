@@ -1,10 +1,9 @@
-import { PrismaClient, TdspCode, MasterPlan } from '@prisma/client'
+import { TdspCode, MasterPlan } from '@prisma/client'
 import { Interval, QuoteRequest, QuoteResponse, RateModel } from '@/lib/cost/types'
 import { computeBill } from '@/lib/cost/engine'
 import { allowSupplier } from '@/lib/suppliers/controls'
 import { flagBool } from '@/lib/flags'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/db'
 
 export type Recommendation = {
   planId: string

@@ -1,7 +1,6 @@
-import { PrismaClient, MasterPlan } from '@prisma/client'
+import { MasterPlan } from '@prisma/client'
 import { normalizeOffer } from '@/lib/wattbuy/normalize'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/db'
 
 export interface MatchResult {
   type: 'exact' | 'fuzzy' | 'none'

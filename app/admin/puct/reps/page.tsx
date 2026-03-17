@@ -1,10 +1,8 @@
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { parse } from "csv-parse";
 import { RepSearchBox } from "./RepSearchBox";
-
-const prisma = new PrismaClient() as any;
 
 export const dynamic = "force-dynamic";
 

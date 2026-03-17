@@ -50,9 +50,7 @@ import { deriveRateKey, getRateKeyParts } from '@/lib/rates/key';
 import { WattBuyOffer } from '@/lib/offers/match';
 import { fetchEflText } from '@/lib/efl/fetch';
 import { parseEflText } from '@/lib/efl/parse';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
 
 export type UpsertResult =
   | {

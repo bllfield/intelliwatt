@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client'
 import crypto from 'crypto'
 import { flagBool } from '@/lib/flags'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/db'
 
 export type SupplierGateInput = {
   supplierName: string

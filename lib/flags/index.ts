@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/db'
 type Cache = { data: Record<string,string>, ts: number }
 let cache: Cache = { data: {}, ts: 0 }
 const TTL_MS = 30_000

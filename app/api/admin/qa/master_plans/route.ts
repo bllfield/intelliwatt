@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '@/lib/db'
 import { qaAnalyzePlans } from '@/lib/planmaster/qa'
-
-const prisma = new PrismaClient()
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 

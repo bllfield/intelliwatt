@@ -15,9 +15,8 @@
  * - deliveryCentsPerKwh: TDSP volumetric delivery (¢/kWh)
  * - notes: optional string
  */
-import { PrismaClient, TdspCode } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { TdspCode } from '@prisma/client'
+import { prisma } from '@/lib/db'
 
 export type TdspDelivery = {
   effectiveAt?: string

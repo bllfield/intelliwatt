@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/db";
 import { DateTime } from "luxon";
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 
@@ -48,7 +48,6 @@ export async function GET(req: NextRequest) {
 
   const rawTable = process.env.SMT_INTERVAL_TABLE || "SmtInterval";
   const SMT_TABLE = `"${rawTable.replace(/"/g, '""')}"`;
-  const prisma = new PrismaClient();
 
   try {
     // Build WHERE and params for a safe raw query
@@ -155,7 +154,5 @@ export async function GET(req: NextRequest) {
     });
   } catch (e: any) {
     return jsonError(e?.message || "daily-summary failed", 500);
-  } finally {
-    await prisma.$disconnect();
   }
 }
