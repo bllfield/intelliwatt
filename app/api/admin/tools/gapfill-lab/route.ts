@@ -24,7 +24,6 @@ import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDis
 import {
   buildGapfillCompareSimShared,
   getSharedPastCoverageWindowForHouse,
-  rebuildGapfillSharedPastArtifact,
 } from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
@@ -1493,24 +1492,28 @@ export async function POST(req: NextRequest) {
   const rebuildArtifact = body?.rebuildArtifact === true;
   const rebuildOnly = body?.rebuildOnly === true;
   if (rebuildArtifact && rebuildOnly) {
-    const rebuilt = await rebuildGapfillSharedPastArtifact({
+    const rebuiltCompare = await buildGapfillCompareSimShared({
       userId: user.id,
       houseId: house.id,
+      timezone,
+      canonicalWindow,
+      testDateKeysLocal,
+      travelSimulatedDateKeysLocal: travelDateKeysLocal,
+      rebuildArtifact: true,
     });
-    if (!rebuilt.ok) {
-      const status =
-        rebuilt.error === "no_past_scenario"
-          ? 404
-          : rebuilt.error === "past_build_missing"
-            ? 400
-            : 500;
+    if (!rebuiltCompare.ok) {
+      const classification = classifySimulationFailure({
+        code: String((rebuiltCompare.body as any)?.error ?? ""),
+        message: String((rebuiltCompare.body as any)?.message ?? ""),
+      });
       return NextResponse.json(
         {
-          ok: false,
-          error: rebuilt.error,
-          message: rebuilt.message,
+          ...(rebuiltCompare.body as Record<string, unknown>),
+          explanation: classification.userFacingExplanation,
+          missingData: classification.missingData,
+          reasonCode: classification.reasonCode,
         },
-        { status }
+        { status: rebuiltCompare.status }
       );
     }
     return NextResponse.json({
@@ -1529,7 +1532,7 @@ export async function POST(req: NextRequest) {
       mode: "artifact_only",
       action: "rebuild_only",
       rebuilt: true,
-      message: "Shared Past artifact rebuilt. Running compare next will read from the shared artifact cache.",
+      message: "Gap-Fill compare artifact rebuilt with shared simulator logic. Running compare next will read from compare artifact cache.",
       testRangesUsed,
       testSelectionMode,
       testDaysRequested,
@@ -1604,7 +1607,7 @@ export async function POST(req: NextRequest) {
         scoringExcludedSource:
           (sharedSim as any)?.scoringExcludedSource ?? "artifact_meta_excludedDateKeysFingerprint",
         artifactBuildExcludedSource:
-          (sharedSim as any)?.artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint",
+          (sharedSim as any)?.artifactBuildExcludedSource ?? "shared_past_compare_mask_excludedDateKeysFingerprint",
       },
       { status: 409 }
     );
@@ -1647,7 +1650,7 @@ export async function POST(req: NextRequest) {
   const scoringExcludedSource =
     (sharedSim as any).scoringExcludedSource ?? "artifact_meta_excludedDateKeysFingerprint";
   const artifactBuildExcludedSource =
-    (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
+    (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_compare_mask_excludedDateKeysFingerprint";
   const artifactUsesTestDaysInIdentity =
     (sharedSim as any).artifactUsesTestDaysInIdentity === true;
   const artifactUsesTravelDaysInIdentity =

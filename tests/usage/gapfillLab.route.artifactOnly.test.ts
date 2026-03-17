@@ -260,6 +260,20 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("supports rebuild-only action without running compare", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: true,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [],
+      simulatedChartIntervals: [],
+      simulatedChartDaily: [],
+      simulatedChartMonthly: [],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
     const req = {
       cookies: { get: () => undefined },
       json: async () => ({
@@ -277,14 +291,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.rebuilt).toBe(true);
     expect(body.testRangesUsed).toEqual([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
     expect(body.testSelectionMode).toBe("manual_ranges");
-    expect(rebuildGapfillSharedPastArtifact).toHaveBeenCalled();
-    expect(rebuildGapfillSharedPastArtifact).toHaveBeenCalledWith(
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "u1",
         houseId: "h1",
+        rebuildArtifact: true,
       })
     );
-    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });
 
   it("uses shared coverage window and bounded travel count in metadata outputs", async () => {
@@ -472,7 +485,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.comparePulledFromSharedArtifactOnly).toBe(true);
     expect(body.artifactUsesTestDaysInIdentity).toBe(false);
     expect(body.artifactUsesTravelDaysInIdentity).toBe(true);
-    expect(body.artifactBuildExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
+    expect(body.artifactBuildExcludedSource).toBe("shared_past_compare_mask_excludedDateKeysFingerprint");
     expect(body.scoringExcludedSource).toBe("artifact_meta_excludedDateKeysFingerprint");
   });
 

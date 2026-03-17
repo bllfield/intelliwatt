@@ -61,6 +61,7 @@ type ManualUsagePayloadAny = any;
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 const WORKSPACE_FUTURE_NAME = "Future (What-if)";
+const GAPFILL_COMPARE_ARTIFACT_SCOPE = "gapfill_compare";
 
 async function reportSimulationDataIssue(args: {
   source: "GAPFILL_LAB" | "USER_SIMULATION" | "USAGE_DASHBOARD";
@@ -242,8 +243,8 @@ export type GapfillCompareSimSharedResult =
       artifactAutoRebuilt: boolean;
       scoringSimulatedSource?: "shared_artifact_simulated_intervals15";
       scoringUsedSharedArtifact?: boolean;
-      artifactBuildExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
-      scoringExcludedSource?: "artifact_meta_excludedDateKeysFingerprint" | "artifact_daily_source_fallback";
+      artifactBuildExcludedSource?: "shared_past_compare_mask_excludedDateKeysFingerprint";
+      scoringExcludedSource?: "artifact_meta_excludedDateKeysFingerprint";
       artifactUsesTestDaysInIdentity?: boolean;
       artifactUsesTravelDaysInIdentity?: boolean;
       sharedArtifactScenarioId?: string | null;
@@ -343,6 +344,27 @@ function enumerateDateKeysInclusive(startDate: string, endDate: string): Set<str
   return out;
 }
 
+function dateKeysToRanges(dateKeys: Set<string>): DateRange[] {
+  const sorted = Array.from(dateKeys).sort();
+  if (sorted.length === 0) return [];
+  const out: DateRange[] = [];
+  let rangeStart = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const cur = sorted[i];
+    const nextOfPrev = new Date(`${prev}T12:00:00.000Z`);
+    nextOfPrev.setUTCDate(nextOfPrev.getUTCDate() + 1);
+    const expected = nextOfPrev.toISOString().slice(0, 10);
+    if (cur !== expected) {
+      out.push({ startDate: rangeStart, endDate: prev });
+      rangeStart = cur;
+    }
+    prev = cur;
+  }
+  out.push({ startDate: rangeStart, endDate: prev });
+  return out;
+}
+
 export async function buildGapfillCompareSimShared(args: {
   userId: string;
   houseId: string;
@@ -355,7 +377,7 @@ export async function buildGapfillCompareSimShared(args: {
   const {
     userId,
     houseId,
-    timezone,
+    timezone: requestTimezone,
     canonicalWindow,
     testDateKeysLocal,
     travelSimulatedDateKeysLocal,
@@ -375,169 +397,282 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
-  let rebuiltSimOut:
-    | Extract<Awaited<ReturnType<typeof getSimulatedUsageForHouseScenario>>, { ok: true }>
-    | null = null;
-  if (rebuildArtifact) {
-    const rebuilt = await getSimulatedUsageForHouseScenario({
-      userId,
-      houseId,
-      scenarioId: pastScenarioId,
-      readMode: "allow_rebuild",
-    });
-    if (!rebuilt.ok) {
-      return {
-        ok: false,
-        status: rebuilt.code === "SCENARIO_NOT_FOUND" ? 404 : 400,
-        body: {
-          ok: false,
-          error: "past_rebuild_failed",
-          message: rebuilt.message,
-          mode: "artifact_only",
-          scenarioId: pastScenarioId,
-        },
-      };
-    }
-    rebuiltSimOut = rebuilt;
-  }
-
-  const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
-  const expectedChartIntervalCount = chartDateKeysLocal.size * 96;
-
-  let simOut = await getSimulatedUsageForHouseScenario({
-    userId,
-    houseId,
-    scenarioId: pastScenarioId,
-    readMode: "artifact_only",
-  });
-  let artifactAutoRebuilt = false;
-  if (
-    rebuildArtifact &&
-    (!simOut.ok || !simOut.dataset?.series?.intervals15) &&
-    rebuiltSimOut?.dataset?.series?.intervals15
-  ) {
-    // Explicit rebuild already produced a valid dataset. Use it directly when
-    // artifact-only read cannot see a materialized cache record yet.
-    simOut = rebuiltSimOut;
-    artifactAutoRebuilt = true;
-  }
-  const initialIntervals15 =
-    simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
-      ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
-      : [];
-  const artifactCurveShapingVersion =
-    simOut.ok && simOut.dataset ? String((simOut.dataset as any)?.meta?.curveShapingVersion ?? "") : "";
-  const needsCurveShapingRebuild =
-    simOut.ok &&
-    (artifactCurveShapingVersion.length === 0 || artifactCurveShapingVersion !== "shared_curve_v2");
-
-  if (
-    !rebuildArtifact &&
-    simOut.ok &&
-    initialIntervals15.length > 0 &&
-    initialIntervals15.length < expectedChartIntervalCount
-  ) {
+  const house = await getHouseAddressForUserHouse({ userId, houseId }).catch(() => null);
+  if (!house) {
     return {
       ok: false,
-      status: 409,
+      status: 404,
       body: {
         ok: false,
-        error: "artifact_stale_rebuild_required",
-        message:
-          "Saved shared Past artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+        error: "house_not_found",
+        message: "House not found for user.",
+      },
+    };
+  }
+
+  const buildRec = await (prisma as any).usageSimulatorBuild
+    ?.findUnique({
+      where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: pastScenarioId } },
+      select: { buildInputs: true },
+    })
+    ?.catch(() => null);
+  if (!buildRec?.buildInputs) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        ok: false,
+        error: "past_build_missing",
+        message: "Past build inputs are missing. Rebuild Past first.",
         mode: "artifact_only",
         scenarioId: pastScenarioId,
       },
     };
   }
-  if (!rebuildArtifact && needsCurveShapingRebuild) {
+  const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+  const identityWindow = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
+  if (!identityWindow) {
     return {
       ok: false,
       status: 409,
       body: {
         ok: false,
-        error: "artifact_stale_rebuild_required",
-        message:
-          "Saved shared Past artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+        error: "artifact_missing_rebuild_required",
+        message: "Past identity window is unavailable. Trigger explicit rebuildArtifact=true before compare.",
         mode: "artifact_only",
         scenarioId: pastScenarioId,
       },
     };
   }
-
-  const sharedCoverageWindow = resolveReportedCoverageWindow({
-    dataset: simOut.ok ? simOut.dataset : null,
-    fallbackStartDate: canonicalWindow.startDate,
-    fallbackEndDate: canonicalWindow.endDate,
-  });
+  const timezone = String((buildInputs as any)?.timezone ?? requestTimezone ?? "America/Chicago");
+  const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
   const boundedTravelDateKeysLocal =
     travelSimulatedDateKeysLocal != null
       ? boundDateKeysToCoverageWindow(travelSimulatedDateKeysLocal, sharedCoverageWindow)
       : new Set<string>();
+  const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
+  const compareMaskDateKeysLocal = new Set<string>([
+    ...Array.from(boundedTravelDateKeysLocal),
+    ...Array.from(boundedTestDateKeysLocal),
+  ]);
+  const compareMaskFingerprint = Array.from(compareMaskDateKeysLocal).sort().join(",");
+  const compareMaskRanges = dateKeysToRanges(compareMaskDateKeysLocal);
+  const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
+  const expectedChartIntervalCount = chartDateKeysLocal.size * 96;
 
-  const expectedMaskedDayCount = boundedTravelDateKeysLocal.size;
-  const expectedMaskedFingerprint =
-    Array.from(boundedTravelDateKeysLocal).sort().join(",");
-  const observedMaskedDayCount =
-    simOut.ok && simOut.dataset ? Number((simOut.dataset as any)?.meta?.excludedDateKeysCount ?? NaN) : Number.NaN;
-  const observedMaskedFingerprint =
-    simOut.ok && simOut.dataset ? String((simOut.dataset as any)?.meta?.excludedDateKeysFingerprint ?? "") : "";
-  const needsMaskScopeRebuild =
-    simOut.ok &&
-    expectedMaskedDayCount > 0 &&
-    (!Number.isFinite(observedMaskedDayCount) ||
-      observedMaskedDayCount !== expectedMaskedDayCount ||
-      !observedMaskedFingerprint ||
-      observedMaskedFingerprint !== expectedMaskedFingerprint);
+  const intervalDataFingerprint = await getIntervalDataFingerprint({
+    houseId,
+    esiid: house.esiid ?? null,
+    startDate: identityWindow.startDate,
+    endDate: identityWindow.endDate,
+  });
+  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+  const weatherIdentity = await computePastWeatherIdentity({
+    houseId,
+    startDate: identityWindow.startDate,
+    endDate: identityWindow.endDate,
+  });
+  const compareInputHash = computePastInputHash({
+    engineVersion: PAST_ENGINE_VERSION,
+    windowStartUtc: identityWindow.startDate,
+    windowEndUtc: identityWindow.endDate,
+    timezone,
+    travelRanges: compareMaskRanges,
+    buildInputs: buildInputs as Record<string, unknown>,
+    artifactScope: GAPFILL_COMPARE_ARTIFACT_SCOPE,
+    compareMaskFingerprint,
+    intervalDataFingerprint,
+    usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+    usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+    usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+    usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+    weatherIdentity,
+  });
+  const compareScenarioCacheId = `${GAPFILL_COMPARE_ARTIFACT_SCOPE}:${pastScenarioId}`;
 
-  if (!rebuildArtifact && needsMaskScopeRebuild) {
+  let artifactAutoRebuilt = false;
+  let dataset: any = null;
+  const cached = !rebuildArtifact
+    ? await getCachedPastDataset({
+        houseId,
+        scenarioId: compareScenarioCacheId,
+        inputHash: compareInputHash,
+      })
+    : null;
+  if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
+    const decoded = decodeIntervalsV1(cached.intervalsCompressed);
+    dataset = {
+      ...cached.datasetJson,
+      series: {
+        ...(typeof (cached.datasetJson as any).series === "object" &&
+        (cached.datasetJson as any).series !== null
+          ? (cached.datasetJson as any).series
+          : {}),
+        intervals15: decoded,
+      },
+    };
+    reconcileRestoredDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: decoded,
+      fallbackEndDate: identityWindow.endDate,
+    });
+  } else if (!rebuildArtifact) {
     return {
       ok: false,
       status: 409,
       body: {
         ok: false,
-        error: "artifact_scope_mismatch_rebuild_required",
+        error: "artifact_missing_rebuild_required",
         message:
-          "Saved shared Past artifact mask scope does not match travel/vacant exclusions. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+          "No saved compare artifact found for travel/vacant + selected test-day mask scope. Trigger explicit rebuildArtifact=true before compare.",
         mode: "artifact_only",
-        scenarioId: pastScenarioId,
+        scenarioId: compareScenarioCacheId,
       },
     };
+  } else {
+    const pastResult = await getPastSimulatedDatasetForHouse({
+      userId,
+      houseId,
+      esiid: house.esiid ?? null,
+      travelRanges: compareMaskRanges,
+      buildInputs,
+      startDate: identityWindow.startDate,
+      endDate: identityWindow.endDate,
+      timezone,
+      buildPathKind: "lab_validation",
+    });
+    if (pastResult.dataset === null) {
+      return {
+        ok: false,
+        status: 500,
+        body: {
+          ok: false,
+          error: "past_rebuild_failed",
+          message: pastResult.error ?? "Failed to build compare artifact.",
+          mode: "artifact_only",
+          scenarioId: compareScenarioCacheId,
+        },
+      };
+    }
+    dataset = pastResult.dataset;
+    if (!dataset || !Array.isArray(dataset?.series?.intervals15)) {
+      return {
+        ok: false,
+        status: 500,
+        body: {
+          ok: false,
+          error: "artifact_read_failed",
+          message: "Compare artifact build completed, but intervals15 are missing.",
+          mode: "artifact_only",
+          scenarioId: compareScenarioCacheId,
+        },
+      };
+    }
+    const intervals15 = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
+    const { bytes } = encodeIntervalsV1(intervals15);
+    const datasetJsonForStorage = {
+      ...dataset,
+      series: { ...(dataset.series ?? {}), intervals15: [] },
+    };
+    await saveCachedPastDataset({
+      houseId,
+      scenarioId: compareScenarioCacheId,
+      inputHash: compareInputHash,
+      engineVersion: PAST_ENGINE_VERSION,
+      windowStartUtc: identityWindow.startDate,
+      windowEndUtc: identityWindow.endDate,
+      datasetJson: datasetJsonForStorage as Record<string, unknown>,
+      intervalsCodec: INTERVAL_CODEC_V1,
+      intervalsCompressed: bytes,
+    });
+    artifactAutoRebuilt = true;
   }
 
-  if (!simOut.ok || !simOut.dataset?.series?.intervals15) {
-    const status = simOut.ok ? 500 : simOut.code === "ARTIFACT_MISSING" ? 409 : 500;
+  if (!dataset?.series?.intervals15) {
     return {
       ok: false,
-      status,
+      status: 500,
       body: {
         ok: false,
-        error: simOut.ok
-          ? "artifact_read_failed"
-          : simOut.code === "ARTIFACT_MISSING"
-            ? "artifact_missing_rebuild_required"
-            : "artifact_read_failed",
-        message: simOut.ok
-          ? "Saved artifact missing intervals15 series."
-          : simOut.code === "ARTIFACT_MISSING"
-            ? "No saved shared Past artifact found. Trigger explicit rebuildArtifact=true before inspect/read compare."
-            : simOut.message,
-        code: simOut.ok ? "INTERNAL_ERROR" : simOut.code,
+        error: "artifact_read_failed",
+        message: "Saved compare artifact missing intervals15 series.",
+        code: "INTERNAL_ERROR",
       },
     };
   }
 
-  const artifactIntervals = (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).map((p) => ({
+  applyCanonicalCoverageMetadataForNonBaseline(dataset, "gapfill_lab");
+  const restoredMeta = (dataset as any)?.meta ?? {};
+  const artifactCurveShapingVersion = String(restoredMeta?.curveShapingVersion ?? "");
+  const artifactIntervalsRaw = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
+  if (
+    !rebuildArtifact &&
+    artifactIntervalsRaw.length > 0 &&
+    artifactIntervalsRaw.length < expectedChartIntervalCount
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_stale_rebuild_required",
+        message:
+          "Saved compare artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before compare.",
+        mode: "artifact_only",
+        scenarioId: compareScenarioCacheId,
+      },
+    };
+  }
+  if (!rebuildArtifact && (artifactCurveShapingVersion.length === 0 || artifactCurveShapingVersion !== "shared_curve_v2")) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_stale_rebuild_required",
+        message:
+          "Saved compare artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before compare.",
+        mode: "artifact_only",
+        scenarioId: compareScenarioCacheId,
+      },
+    };
+  }
+  const quality = validateSharedSimQuality(dataset);
+  if (!quality.ok) {
+    return {
+      ok: false,
+      status: 500,
+      body: {
+        ok: false,
+        error: "artifact_read_failed",
+        message: quality.message,
+        code: "INTERNAL_ERROR",
+      },
+    };
+  }
+
+  if (!restoredMeta || typeof restoredMeta !== "object") (dataset as any).meta = {};
+  const modelAssumptions = (dataset as any)?.meta ?? {};
+  modelAssumptions.artifactReadMode = "artifact_only";
+  modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
+  modelAssumptions.artifactScope = GAPFILL_COMPARE_ARTIFACT_SCOPE;
+  modelAssumptions.artifactScenarioId = compareScenarioCacheId;
+  modelAssumptions.artifactInputHash = compareInputHash;
+  modelAssumptions.artifactInputHashUsed = compareInputHash;
+  modelAssumptions.requestedInputHash = compareInputHash;
+  modelAssumptions.artifactHashMatch = true;
+  modelAssumptions.compareMaskFingerprint = compareMaskFingerprint;
+
+  const artifactIntervals = (dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).map((p) => ({
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
-  const modelAssumptions = (simOut.dataset as any)?.meta ?? null;
   const excludedFingerprintFromMeta = String(modelAssumptions?.excludedDateKeysFingerprint ?? "")
     .split(",")
     .map((dk) => String(dk).trim())
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
   const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
-    (Array.isArray((simOut.dataset as any)?.daily) ? (simOut.dataset as any).daily : [])
+    (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
       .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
       .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
   );
@@ -551,11 +686,25 @@ export async function buildGapfillCompareSimShared(args: {
         message:
           "Saved shared Past artifact is missing excludedDateKeysFingerprint ownership metadata required for strict Gap-Fill scoring.",
         mode: "artifact_only",
-        scenarioId: pastScenarioId,
+        scenarioId: compareScenarioCacheId,
       },
     };
   }
   const simulatedDateKeysFromArtifact = new Set<string>(excludedFingerprintFromMeta);
+  if (Array.from(simulatedDateKeysFromArtifact).sort().join(",") !== compareMaskFingerprint) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_scope_mismatch_rebuild_required",
+        message:
+          "Saved compare artifact mask scope does not match travel/vacant + selected test-day exclusions. Trigger explicit rebuildArtifact=true before compare.",
+        mode: "artifact_only",
+        scenarioId: compareScenarioCacheId,
+      },
+    };
+  }
   const scoringExcludedSource = "artifact_meta_excludedDateKeysFingerprint";
   const simulatedTestIntervals = artifactIntervals.filter((p) => {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
@@ -602,11 +751,11 @@ export async function buildGapfillCompareSimShared(args: {
     artifactAutoRebuilt,
     scoringSimulatedSource: "shared_artifact_simulated_intervals15",
     scoringUsedSharedArtifact: true,
-    artifactBuildExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
+    artifactBuildExcludedSource: "shared_past_compare_mask_excludedDateKeysFingerprint",
     scoringExcludedSource,
-    artifactUsesTestDaysInIdentity: false,
+    artifactUsesTestDaysInIdentity: true,
     artifactUsesTravelDaysInIdentity: true,
-    sharedArtifactScenarioId: String(modelAssumptions?.artifactScenarioId ?? pastScenarioId ?? ""),
+    sharedArtifactScenarioId: String(modelAssumptions?.artifactScenarioId ?? compareScenarioCacheId),
     sharedArtifactInputHash:
       (typeof modelAssumptions?.artifactInputHash === "string" && modelAssumptions.artifactInputHash) ||
       (typeof modelAssumptions?.artifactInputHashUsed === "string" && modelAssumptions.artifactInputHashUsed) ||

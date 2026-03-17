@@ -3,15 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const scenarioFindFirst = vi.fn();
+const usageSimulatorBuildFindUnique = vi.fn();
 const getHouseAddressForUserHouse = vi.fn();
+const getCachedPastDataset = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();
 const simulatePastUsageDataset = vi.fn();
 const decodeIntervalsV1 = vi.fn();
+const getIntervalDataFingerprint = vi.fn();
+const computePastWeatherIdentity = vi.fn();
+const getUsageShapeProfileIdentityForPast = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     usageSimulatorScenario: {
       findFirst: (...args: any[]) => scenarioFindFirst(...args),
+    },
+    usageSimulatorBuild: {
+      findUnique: (...args: any[]) => usageSimulatorBuildFindUnique(...args),
     },
   },
 }));
@@ -25,7 +33,7 @@ vi.mock("@/modules/usageSimulator/repo", () => ({
 
 vi.mock("@/modules/usageSimulator/pastCache", () => ({
   computePastInputHash: vi.fn(),
-  getCachedPastDataset: vi.fn(),
+  getCachedPastDataset: (...args: any[]) => getCachedPastDataset(...args),
   getLatestCachedPastDatasetByScenario: (...args: any[]) => getLatestCachedPastDatasetByScenario(...args),
   saveCachedPastDataset: vi.fn(),
   PAST_ENGINE_VERSION: "production_past_stitched_v2",
@@ -39,7 +47,16 @@ vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
 
 vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
   simulatePastUsageDataset: (...args: any[]) => simulatePastUsageDataset(...args),
-  getUsageShapeProfileIdentityForPast: vi.fn(),
+  getUsageShapeProfileIdentityForPast: (...args: any[]) => getUsageShapeProfileIdentityForPast(...args),
+}));
+
+vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
+  getActualUsageDatasetForHouse: vi.fn(),
+  getIntervalDataFingerprint: (...args: any[]) => getIntervalDataFingerprint(...args),
+}));
+
+vi.mock("@/modules/weather/identity", () => ({
+  computePastWeatherIdentity: (...args: any[]) => computePastWeatherIdentity(...args),
 }));
 
 import { buildGapfillCompareSimShared, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
@@ -176,20 +193,40 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
   beforeEach(() => {
     scenarioFindFirst.mockReset();
+    usageSimulatorBuildFindUnique.mockReset();
     getHouseAddressForUserHouse.mockReset();
+    getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
     simulatePastUsageDataset.mockReset();
     decodeIntervalsV1.mockReset();
+    getIntervalDataFingerprint.mockReset();
+    computePastWeatherIdentity.mockReset();
+    getUsageShapeProfileIdentityForPast.mockReset();
 
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
     scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
+    usageSimulatorBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+      },
+    });
+    getIntervalDataFingerprint.mockResolvedValue("fp-a");
+    computePastWeatherIdentity.mockResolvedValue("wx-a");
+    getUsageShapeProfileIdentityForPast.mockResolvedValue({
+      usageShapeProfileId: "shape-1",
+      usageShapeProfileVersion: "1",
+      usageShapeProfileDerivedAt: "2026-01-01T00:00:00.000Z",
+      usageShapeProfileSimHash: "shape-hash-1",
+    });
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
   });
 
   it("fails with rebuild-required when ownership fingerprint metadata is missing", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-actual-days",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: { curveShapingVersion: "shared_curve_v2" },
@@ -218,9 +255,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("uses artifact simulated intervals when test day is SIMULATED-labeled", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-sim-days",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
@@ -252,9 +288,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("uses shared excludedDateKeys ownership from artifact metadata for scoring", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-meta-owned-day",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
