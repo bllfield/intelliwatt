@@ -170,6 +170,22 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       message: rebuilt.message,
     };
   }
+  // Rebuild must guarantee artifact-only compare readability. Under constrained DB pools, cache persistence
+  // can fail non-fatally inside the rebuild path; verify artifact materialization before returning success.
+  const verifyArtifact = await getSimulatedUsageForHouseScenario({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId,
+    readMode: "artifact_only",
+  });
+  if (!verifyArtifact.ok || !Array.isArray((verifyArtifact as any)?.dataset?.series?.intervals15)) {
+    return {
+      ok: false,
+      error: "past_rebuild_failed",
+      message:
+        "Past rebuild completed, but the saved artifact is still unavailable for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+    };
+  }
   return { ok: true, scenarioId };
 }
 
