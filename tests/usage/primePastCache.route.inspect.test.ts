@@ -49,7 +49,7 @@ describe("prime-past-cache inspect mode", () => {
     inspectPastCacheArtifacts.mockResolvedValue({ count: 1, latestUpdatedAt: "2026-03-11T00:00:00.000Z" });
   });
 
-  it("returns artifact-only inspect metadata and does not rebuild", async () => {
+  it("returns 410 for deprecated legacy gapfill priming payload", async () => {
     const req = {
       cookies: { get: () => undefined },
       json: async () => ({
@@ -60,13 +60,12 @@ describe("prime-past-cache inspect mode", () => {
     } as any;
 
     const res = await POST(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(410);
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.mode).toBe("artifact_only");
-    expect(body.rebuilt).toBe(false);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("legacy_gapfill_prime_removed");
     expect(buildAndSavePastForGapfillLab).not.toHaveBeenCalled();
-    expect(inspectPastCacheArtifacts).toHaveBeenCalledWith({ houseId: "h1", scenarioId: "gapfill_lab" });
+    expect(inspectPastCacheArtifacts).not.toHaveBeenCalled();
   });
 });
 

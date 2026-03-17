@@ -16,7 +16,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
-import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
+import { inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -64,79 +64,14 @@ export async function POST(req: NextRequest) {
     const action = body?.action === "inspect" ? "inspect" : "rebuild";
 
     if (rangesToMask.length > 0) {
-      const email = String(body?.email ?? "").trim().toLowerCase();
-      if (!email) {
-        return NextResponse.json(
-          { ok: false, error: "email_required", message: "When priming for Gap-Fill Lab (rangesToMask), email is required." },
-          { status: 400 }
-        );
-      }
-      const user = await prisma.user.findFirst({
-        where: { email: { equals: email, mode: "insensitive" } },
-        select: { id: true },
-      });
-      if (!user) {
-        return NextResponse.json(
-          { ok: false, error: "user_not_found", message: "No user with that email." },
-          { status: 404 }
-        );
-      }
-      const houses = await (prisma as any).houseAddress.findMany({
-        where: { userId: user.id, archivedAt: null },
-        orderBy: { updatedAt: "desc" },
-        select: { id: true },
-      });
-      if (!houses?.length) {
-        return NextResponse.json(
-          { ok: false, error: "no_houses", message: "User has no houses." },
-          { status: 404 }
-        );
-      }
-      const houseId = houses[0].id;
-      const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
-      if (action === "inspect") {
-        const inspect = await inspectPastCacheArtifacts({
-          houseId,
-          scenarioId: "gapfill_lab",
-        });
-        return NextResponse.json({
-          ok: true,
-          action: "inspect",
-          mode: "artifact_only",
-          houseId,
-          scenarioId: "gapfill_lab",
-          artifactCount: inspect.count,
-          latestUpdatedAt: inspect.latestUpdatedAt,
-          artifactAvailable: inspect.count > 0,
-          rebuilt: false,
-        });
-      }
-      const result = await buildAndSavePastForGapfillLab({
-        userId: user.id,
-        houseId,
-        rangesToMask,
-        timezone,
-      });
-      if (result.ok) {
-        return NextResponse.json({
-          ok: true,
-          action: "rebuild",
-          mode: "write",
-          message: "Gap-Fill Lab cache primed using shared travel/vacant artifact scope. Run Compare will use cache and finish in seconds.",
-          houseId: result.houseId,
-          scenarioId: "gapfill_lab",
-          rebuilt: true,
-        });
-      }
-      if (result.error === "house_not_found" || result.error === "no_actual_data") {
-        return NextResponse.json({ ok: false, error: result.error, message: result.message }, { status: 404 });
-      }
-      if (result.error === "profile_required") {
-        return NextResponse.json({ ok: false, error: result.error, message: result.message }, { status: 400 });
-      }
       return NextResponse.json(
-        { ok: false, error: result.error, message: result.message },
-        { status: 500 }
+        {
+          ok: false,
+          error: "legacy_gapfill_prime_removed",
+          message:
+            "Legacy Gap-Fill priming via /api/admin/tools/prime-past-cache is removed. Use /api/admin/tools/gapfill-lab with rebuildArtifact=true and rebuildOnly=true.",
+        },
+        { status: 410 }
       );
     }
 

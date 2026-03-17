@@ -504,9 +504,17 @@ export default function GapFillLabClient() {
           const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
           setLastCompareBody(compareBody);
           setArtifactMissing(false);
-          setResult(null);
-          setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
-          setError(null);
+          setProgressStatus("Rebuild complete. Loading compare result from shared artifact...");
+          const { res: compareRes, data: compareData } = await postGapfill(compareBody);
+          if (!compareRes.ok) {
+            setResult(null);
+            setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
+            setError(formatApiError(compareData, compareRes.status));
+            setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
+            return;
+          }
+          setProgressStatus(null);
+          mergeSuccessfulResult(compareData);
           return;
         }
         setProgressStatus(null);

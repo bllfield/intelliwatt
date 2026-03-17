@@ -112,6 +112,16 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function isValidIanaTimezone(tz: unknown): tz is string {
+  if (typeof tz !== "string" || tz.trim().length === 0) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getLocalHourMinuteInTimezone(tsIso: string, tz: string): { hour: number; minute: number } {
   try {
     const d = new Date(tsIso);
@@ -1032,6 +1042,12 @@ export async function POST(req: NextRequest) {
   }
 
   const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  if (!isValidIanaTimezone(timezone)) {
+    return NextResponse.json(
+      { ok: false, error: "invalid_timezone", message: "Timezone must be a valid IANA timezone." },
+      { status: 400 }
+    );
+  }
   const includeUsage365 = body?.includeUsage365 === true;
   const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
   const seed = String(body?.seed ?? "").trim() || null;
@@ -1078,7 +1094,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "no_houses", message: "User has no houses." }, { status: 404 });
   }
 
-  const houseIdParam = (body?.houseId ?? "").trim();
+  const houseIdParam = typeof body?.houseId === "string" ? body.houseId.trim() : "";
   let house = houseIdParam
     ? houses.find((h: any) => h.id === houseIdParam)
     : houses[0];
@@ -1155,26 +1171,32 @@ export async function POST(req: NextRequest) {
       };
     } else {
       // Fallback: legacy full-interval path.
-      const intervalsForWindow = await getActualIntervalsForRange({
-        houseId: house.id,
-        esiid,
-        startDate: canonicalWindow.startDate,
-        endDate: canonicalWindow.endDate,
-      });
-      const boundedIntervalsForWindow = (intervalsForWindow ?? []).filter((row) => {
-        const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
-        return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
-      });
-      usage365 = buildUsage365Payload({
-        intervals: boundedIntervalsForWindow,
-        timezone,
-        source: sourceLabel,
-        endDate: canonicalWindow.endDate,
-      });
+      try {
+        const intervalsForWindow = await getActualIntervalsForRange({
+          houseId: house.id,
+          esiid,
+          startDate: canonicalWindow.startDate,
+          endDate: canonicalWindow.endDate,
+        });
+        const boundedIntervalsForWindow = (intervalsForWindow ?? []).filter((row) => {
+          const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
+          return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
+        });
+        usage365 = buildUsage365Payload({
+          intervals: boundedIntervalsForWindow,
+          timezone,
+          source: sourceLabel,
+          endDate: canonicalWindow.endDate,
+        });
+      } catch {
+        usage365 = undefined;
+      }
     }
     // Keep displayed window aligned to the same backend canonical window helper.
-    usage365.coverageStart = canonicalWindow.startDate;
-    usage365.coverageEnd = canonicalWindow.endDate;
+    if (usage365) {
+      usage365.coverageStart = canonicalWindow.startDate;
+      usage365.coverageEnd = canonicalWindow.endDate;
+    }
   }
 
   const travelRangesFromDb = await getTravelRangesFromDb(user.id, house.id);
@@ -1746,7 +1768,7 @@ export async function POST(req: NextRequest) {
     enginePath: "production_past_stitched",
     cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-    scenarioId: "gapfill_lab",
+    scenarioId: artifactScenarioId,
     homeProfile: responseHomeProfile,
     applianceProfile: responseApplianceProfile,
     modelAssumptions: sharedSim.modelAssumptions,
