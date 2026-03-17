@@ -17,6 +17,7 @@ import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/si
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { deriveCodecTotalDriftToleranceKwh } from "@/modules/usageSimulator/intervalCodec";
+import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 const BOUNDARY_STUB_SAMPLE = 5;
@@ -472,6 +473,21 @@ export async function runSimulatorDiagnostic(
         recalcParityDiag = computeParityDiagnostics(recalcResult.dataset);
         recalcDatasetForDayParity = recalcResult.dataset;
       }
+      const coldCoverage = resolveReportedCoverageWindow({
+        dataset: coldDatasetForIntervals,
+        fallbackStartDate: startDate,
+        fallbackEndDate: endDate,
+      });
+      const productionCoverage = resolveReportedCoverageWindow({
+        dataset: productionDatasetForIntervals,
+        fallbackStartDate: startDate,
+        fallbackEndDate: endDate,
+      });
+      const recalcCoverage = resolveReportedCoverageWindow({
+        dataset: recalcDatasetForDayParity,
+        fallbackStartDate: startDate,
+        fallbackEndDate: endDate,
+      });
       const coldVsProd = compareParity(coldSummary, coldMeta, productionSummary, productionMeta);
       const coldVsRec = compareParity(coldSummary, coldMeta, recalcSummary, recalcMeta);
       const coldSide = buildParitySide({
@@ -481,8 +497,8 @@ export async function runSimulatorDiagnostic(
         scenarioKey,
         buildInputsHash,
         travelRangesUsed: travelRanges,
-        coverageStart: startDate,
-        coverageEnd: endDate,
+        coverageStart: coldCoverage.startDate,
+        coverageEnd: coldCoverage.endDate,
         label: "cold",
         parityDiagnostics: coldParityDiag,
       });
@@ -493,8 +509,8 @@ export async function runSimulatorDiagnostic(
         scenarioKey,
         buildInputsHash,
         travelRangesUsed: travelRanges,
-        coverageStart: String(productionMeta.coverageStart ?? startDate),
-        coverageEnd: String(productionMeta.coverageEnd ?? endDate),
+        coverageStart: productionCoverage.startDate,
+        coverageEnd: productionCoverage.endDate,
         label: "production",
         parityDiagnostics: productionParityDiag,
       });
@@ -505,8 +521,8 @@ export async function runSimulatorDiagnostic(
         scenarioKey,
         buildInputsHash,
         travelRangesUsed: travelRanges,
-        coverageStart: String(recalcMeta.coverageStart ?? startDate),
-        coverageEnd: String(recalcMeta.coverageEnd ?? endDate),
+        coverageStart: recalcCoverage.startDate,
+        coverageEnd: recalcCoverage.endDate,
         label: "recalc",
         parityDiagnostics: recalcParityDiag,
       });

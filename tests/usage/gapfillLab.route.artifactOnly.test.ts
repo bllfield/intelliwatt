@@ -213,6 +213,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     buildGapfillCompareSimShared.mockResolvedValue({
       ok: true,
       artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
@@ -274,13 +276,52 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });
 
-  it("uses travel-only scoped exclusion keys (bounded) for artifact fingerprinting", async () => {
+  it("uses shared coverage window and bounded travel count in metadata outputs", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(["2025-03-14", "2025-03-15", "2025-08-13"]),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: { intervalCount: 1 },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.parity?.windowStartUtc).toBe("2025-03-14");
+    expect(body.parity?.windowEndUtc).toBe("2026-03-14");
+    expect(String(body.fullReportText ?? "")).toContain("windowStartUtc: 2025-03-14");
+    expect(String(body.fullReportText ?? "")).toContain("windowEndUtc: 2026-03-14");
+    expect(String(body.fullReportText ?? "")).toContain("excludedDateKeysCount: 3");
+  });
+
+  it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {
+    prismaScenarioFindMany.mockResolvedValueOnce([{ id: "past-s1" }]);
     prismaScenarioEventFindMany.mockResolvedValueOnce([
       { payloadJson: { startDate: "2024-01-01", endDate: "2024-01-02" } },
     ]);
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
       artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
@@ -308,8 +349,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
 
     const callArg = buildGapfillCompareSimShared.mock.calls.at(-1)?.[0];
     const travelScope = callArg?.travelSimulatedDateKeysLocal as Set<string>;
-    expect(travelScope.has("2024-01-01")).toBe(false);
-    expect(travelScope.has("2024-01-02")).toBe(false);
+    expect(travelScope.has("2024-01-01")).toBe(true);
+    expect(travelScope.has("2024-01-02")).toBe(true);
     // Test date remains scoring-only; it is not part of full-year artifact exclusion identity.
     expect(travelScope.has("2026-01-01")).toBe(false);
   });
@@ -328,6 +369,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     buildGapfillCompareSimShared.mockResolvedValue({
       ok: true,
       artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },

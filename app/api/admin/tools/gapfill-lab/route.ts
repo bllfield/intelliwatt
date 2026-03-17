@@ -1184,10 +1184,6 @@ export async function POST(req: NextRequest) {
   const travelDateKeysLocal = new Set<string>(
     travelRangesFromDb.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
   );
-  // Keep compare scope fingerprint aligned with artifact build exclusions: window-bounded only.
-  const boundedTravelDateKeysLocal = new Set<string>(
-    Array.from(travelDateKeysLocal).filter((dk) => dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate)
-  );
 
   if (testRanges.length === 0 && !testDaysRequested) {
     return NextResponse.json({
@@ -1529,7 +1525,7 @@ export async function POST(req: NextRequest) {
     timezone,
     canonicalWindow,
     testDateKeysLocal,
-    travelSimulatedDateKeysLocal: boundedTravelDateKeysLocal,
+    travelSimulatedDateKeysLocal: travelDateKeysLocal,
     rebuildArtifact,
   });
   if (!sharedSim.ok) {
@@ -1582,6 +1578,8 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
     timezone,
   });
+  const sharedCoverageWindow = sharedSim.sharedCoverageWindow;
+  const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
   const responseApplianceProfile = sharedSim.applianceProfileFromModel ?? applianceProfile;
   const fullReport = buildFullReport({
@@ -1620,8 +1618,8 @@ export async function POST(req: NextRequest) {
     dataset: {
       summary: {
         intervalsCount: Number((sharedSim.modelAssumptions as any)?.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0),
-        start: canonicalWindow.startDate,
-        end: canonicalWindow.endDate,
+        start: sharedCoverageWindow.startDate,
+        end: sharedCoverageWindow.endDate,
       },
       totals: {
         netKwh: Number((sharedSim.modelAssumptions as any)?.totalKwh ?? metrics.totalSimKwhMasked ?? 0) || 0,
@@ -1763,8 +1761,8 @@ export async function POST(req: NextRequest) {
       annualKwh: metrics.totalActualKwhMasked,
       baseloadKwhPer15m: null,
       baseloadDailyKwh: null,
-      windowStartUtc: canonicalWindow.startDate,
-      windowEndUtc: canonicalWindow.endDate,
+      windowStartUtc: sharedCoverageWindow.startDate,
+      windowEndUtc: sharedCoverageWindow.endDate,
       canonicalWindowHelper,
     },
     fullReportText: fullReport.fullReportText,

@@ -51,6 +51,10 @@ import {
   getUsageShapeProfileIdentityForPast,
 } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
+import {
+  boundDateKeysToCoverageWindow,
+  resolveReportedCoverageWindow,
+} from "@/modules/usageSimulator/metadataWindow";
 
 type ManualUsagePayloadAny = any;
 
@@ -162,6 +166,8 @@ export type GapfillCompareSimSharedResult =
   | {
       ok: true;
       artifactAutoRebuilt: boolean;
+      sharedCoverageWindow: { startDate: string; endDate: string };
+      boundedTravelDateKeysLocal: Set<string>;
       artifactIntervals: IntervalPoint[];
       simulatedTestIntervals: IntervalPoint[];
       simulatedChartIntervals: IntervalPoint[];
@@ -361,21 +367,30 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
-  const expectedMaskedDayCount = travelSimulatedDateKeysLocal?.size ?? null;
+  const sharedCoverageWindow = resolveReportedCoverageWindow({
+    dataset: simOut.ok ? simOut.dataset : null,
+    fallbackStartDate: canonicalWindow.startDate,
+    fallbackEndDate: canonicalWindow.endDate,
+  });
+  const boundedTravelDateKeysLocal =
+    travelSimulatedDateKeysLocal != null
+      ? boundDateKeysToCoverageWindow(travelSimulatedDateKeysLocal, sharedCoverageWindow)
+      : new Set<string>();
+
+  const expectedMaskedDayCount = boundedTravelDateKeysLocal.size;
   const expectedMaskedFingerprint =
-    travelSimulatedDateKeysLocal != null ? Array.from(travelSimulatedDateKeysLocal).sort().join(",") : null;
+    Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const observedMaskedDayCount =
     simOut.ok && simOut.dataset ? Number((simOut.dataset as any)?.meta?.excludedDateKeysCount ?? NaN) : Number.NaN;
   const observedMaskedFingerprint =
     simOut.ok && simOut.dataset ? String((simOut.dataset as any)?.meta?.excludedDateKeysFingerprint ?? "") : "";
   const needsMaskScopeRebuild =
     simOut.ok &&
-    expectedMaskedDayCount != null &&
     expectedMaskedDayCount > 0 &&
     (!Number.isFinite(observedMaskedDayCount) ||
       observedMaskedDayCount !== expectedMaskedDayCount ||
       !observedMaskedFingerprint ||
-      (expectedMaskedFingerprint != null && observedMaskedFingerprint !== expectedMaskedFingerprint));
+      observedMaskedFingerprint !== expectedMaskedFingerprint);
 
   if (!rebuildArtifact && needsMaskScopeRebuild) {
     return {
@@ -443,7 +458,7 @@ export async function buildGapfillCompareSimShared(args: {
       // In artifact-only lab builds, dataset daily rows may all be tagged ACTUAL
       // when simulated day artifacts were omitted at build time. Force source from
       // the travel/vacant exclusion scope first so chart/table labeling remains truthful.
-      source: travelSimulatedDateKeysLocal?.has(date)
+      source: boundedTravelDateKeysLocal.has(date)
         ? "SIMULATED"
         : (daySourceFromDataset.get(date) ?? "ACTUAL"),
     }));
@@ -462,6 +477,8 @@ export async function buildGapfillCompareSimShared(args: {
   return {
     ok: true,
     artifactAutoRebuilt,
+    sharedCoverageWindow,
+    boundedTravelDateKeysLocal,
     artifactIntervals,
     simulatedTestIntervals,
     simulatedChartIntervals,
