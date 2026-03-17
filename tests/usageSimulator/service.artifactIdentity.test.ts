@@ -87,37 +87,7 @@ describe("getSimulatedUsageForHouseScenario artifact identity matching", () => {
     computePastInputHash.mockReturnValue("expected-hash");
   });
 
-  it("returns ARTIFACT_MISSING when exact identity artifact is absent (no latest fallback)", async () => {
-    getCachedPastDataset.mockResolvedValue(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "old-hash",
-      updatedAt: new Date("2026-01-02T00:00:00.000Z"),
-      datasetJson: { summary: {}, series: {} },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
-
-    const out = await getSimulatedUsageForHouseScenario({
-      userId: "u1",
-      houseId: "h1",
-      scenarioId: "past_scenario_1",
-      readMode: "artifact_only",
-    });
-
-    expect(out.ok).toBe(false);
-    if (!out.ok) {
-      expect(out.code).toBe("ARTIFACT_MISSING");
-      expect(out.inputHash).toBe("expected-hash");
-    }
-    expect(getCachedPastDataset).toHaveBeenCalledWith({
-      houseId: "h1",
-      scenarioId: "past_scenario_1",
-      inputHash: "expected-hash",
-    });
-    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
-  });
-
-  it("returns artifact when exact identity hash matches", async () => {
+  it("returns artifact with exact_hash_match diagnostics when exact identity hash matches", async () => {
     getCachedPastDataset.mockResolvedValue({
       datasetJson: { summary: { source: "SIMULATED" }, series: {} },
       intervalsCodec: "v1_delta_varint",
@@ -135,9 +105,57 @@ describe("getSimulatedUsageForHouseScenario artifact identity matching", () => {
     if (out.ok) {
       expect(out.dataset?.meta?.artifactReadMode).toBe("artifact_only");
       expect(out.dataset?.meta?.artifactInputHash).toBe("expected-hash");
+      expect(out.dataset?.meta?.artifactSourceMode).toBe("exact_hash_match");
+      expect(out.dataset?.meta?.requestedInputHash).toBe("expected-hash");
+      expect(out.dataset?.meta?.artifactInputHashUsed).toBe("expected-hash");
+      expect(out.dataset?.meta?.artifactHashMatch).toBe(true);
+      expect(out.dataset?.meta?.artifactScenarioId).toBe("past_scenario_1");
       expect(Array.isArray(out.dataset?.series?.intervals15)).toBe(true);
     }
     expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
+  });
+
+  it("returns artifact with latest_by_scenario_fallback diagnostics when latest cached is used", async () => {
+    getCachedPastDataset.mockResolvedValue(null);
+    const updatedAt = new Date("2026-01-02T00:00:00.000Z");
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "old-hash",
+      updatedAt,
+      datasetJson: { summary: { start: "2026-01-01", end: "2026-01-31" }, series: {} },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past_scenario_1",
+      readMode: "artifact_only",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      const meta = out.dataset?.meta ?? {};
+      expect(meta.artifactReadMode).toBe("artifact_only");
+      expect(meta.artifactInputHash).toBe("old-hash");
+      expect(meta.requestedInputHash).toBe("expected-hash");
+      expect(meta.artifactInputHashUsed).toBe("old-hash");
+      expect(meta.artifactHashMatch).toBe(false);
+      expect(meta.artifactSourceMode).toBe("latest_by_scenario_fallback");
+      expect(meta.artifactScenarioId).toBe("past_scenario_1");
+      expect(meta.artifactUpdatedAt).toBe(updatedAt.toISOString());
+      expect(typeof meta.artifactSourceNote).toBe("string");
+      expect(Array.isArray(out.dataset?.series?.intervals15)).toBe(true);
+    }
+    expect(getCachedPastDataset).toHaveBeenCalledWith({
+      houseId: "h1",
+      scenarioId: "past_scenario_1",
+      inputHash: "expected-hash",
+    });
+    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalledWith({
+      houseId: "h1",
+      scenarioId: "past_scenario_1",
+    });
   });
 });
 

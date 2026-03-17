@@ -283,6 +283,14 @@ function buildFullReport(args: {
   homeProfile: any;
   applianceProfile: any;
   modelAssumptions: any;
+  artifactSourceMode: string | null;
+  requestedInputHash: string | null;
+  artifactInputHashUsed: string | null;
+  artifactHashMatch: boolean | null;
+  artifactScenarioId: string | null;
+  artifactCreatedAt: string | null;
+  artifactUpdatedAt: string | null;
+  artifactSourceNote: string | null;
   metrics: {
     mae: number;
     rmse: number;
@@ -1592,6 +1600,21 @@ export async function POST(req: NextRequest) {
   const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
   const responseApplianceProfile = sharedSim.applianceProfileFromModel ?? applianceProfile;
+  const ma = (sharedSim.modelAssumptions as any) ?? {};
+  const artifactSourceMode = String(ma.artifactSourceMode ?? "") || null;
+  const requestedInputHash = ma.requestedInputHash ?? null;
+  const artifactInputHashUsed = ma.artifactInputHashUsed ?? null;
+  const artifactHashMatch = ma.artifactHashMatch ?? null;
+  const artifactScenarioId = ma.artifactScenarioId ?? null;
+  const artifactCreatedAt = ma.artifactCreatedAt ?? null;
+  const artifactUpdatedAt = ma.artifactUpdatedAt ?? null;
+  const artifactSourceNote =
+    ma.artifactSourceNote ??
+    (artifactSourceMode === "latest_by_scenario_fallback"
+      ? "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss)."
+      : artifactSourceMode === "exact_hash_match"
+        ? "Artifact source: exact identity match on Past input hash."
+        : null);
   const fullReport = buildFullReport({
     reportVersion: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
@@ -1650,12 +1673,20 @@ export async function POST(req: NextRequest) {
     buildInputs: {
       canonicalMonths,
     },
-    configHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? "n/a"),
+    configHash: String(ma.artifactInputHash ?? "n/a"),
     excludedDateKeysCount: boundedTravelDateKeysLocal.size,
     excludedDateKeysSample: sortedSample(boundedTravelDateKeysLocal),
     homeProfile: responseHomeProfile,
     applianceProfile: responseApplianceProfile,
     modelAssumptions: sharedSim.modelAssumptions,
+    artifactSourceMode,
+    requestedInputHash,
+    artifactInputHashUsed,
+    artifactHashMatch,
+    artifactScenarioId,
+    artifactCreatedAt,
+    artifactUpdatedAt,
+    artifactSourceNote,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
@@ -1740,6 +1771,14 @@ export async function POST(req: NextRequest) {
     homeProfile: responseHomeProfile,
     applianceProfile: responseApplianceProfile,
     modelAssumptions: sharedSim.modelAssumptions,
+    artifactSourceMode,
+    requestedInputHash,
+    artifactInputHashUsed,
+    artifactHashMatch,
+    artifactScenarioId,
+    artifactCreatedAt,
+    artifactUpdatedAt,
+    artifactSourceNote,
     testIntervalsCount: actualTestIntervals.length,
     metrics: {
       mae: metrics.mae,

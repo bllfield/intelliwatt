@@ -204,22 +204,30 @@ export async function rebuildGapfillSharedPastArtifact(args: {
   }
   // Rebuild must guarantee artifact-only compare readability. Under constrained DB pools, cache persistence
   // can fail non-fatally inside the rebuild path; verify artifact materialization before returning success.
-  const verifyArtifact = await getSimulatedUsageForHouseScenario({
-    userId: args.userId,
-    houseId: args.houseId,
-    scenarioId,
-    readMode: "artifact_only",
-  });
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-  const verifyDataset = verifyArtifact.ok ? (verifyArtifact as any)?.dataset : null;
-  const hasIntervals15 = Array.isArray(verifyDataset?.series?.intervals15);
-  const hasCanonicalCoverage =
-    verifyArtifact.ok &&
-    String(verifyDataset?.summary?.start ?? "") === canonicalCoverage.startDate &&
-    String(verifyDataset?.summary?.end ?? "") === canonicalCoverage.endDate &&
-    String(verifyDataset?.meta?.coverageStart ?? "") === canonicalCoverage.startDate &&
-    String(verifyDataset?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
-  if (!verifyArtifact.ok || !hasIntervals15 || !hasCanonicalCoverage) {
+  async function runVerification(): Promise<{ ok: boolean; dataset: any }> {
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: args.userId,
+      houseId: args.houseId,
+      scenarioId,
+      readMode: "artifact_only",
+    });
+    const dataset = out.ok ? (out as any)?.dataset : null;
+    const hasIntervals15 = Array.isArray(dataset?.series?.intervals15);
+    const hasCanonicalCoverage =
+      out.ok &&
+      String(dataset?.summary?.start ?? "") === canonicalCoverage.startDate &&
+      String(dataset?.summary?.end ?? "") === canonicalCoverage.endDate &&
+      String(dataset?.meta?.coverageStart ?? "") === canonicalCoverage.startDate &&
+      String(dataset?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
+    return { ok: Boolean(out.ok && hasIntervals15 && hasCanonicalCoverage), dataset };
+  }
+  let verification = await runVerification();
+  if (!verification.ok) {
+    await new Promise((r) => setTimeout(r, 800));
+    verification = await runVerification();
+  }
+  if (!verification.ok) {
     return {
       ok: false,
       error: "past_rebuild_failed",
@@ -1612,6 +1620,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ? latestCached.updatedAt.toISOString()
           : null;
         restoredAny.meta.artifactRecomputed = false;
+        restoredAny.meta.artifactScenarioId = scenarioIdForCache;
+        restoredAny.meta.requestedInputHash = null;
+        restoredAny.meta.artifactInputHashUsed = latestCached.inputHash;
+        restoredAny.meta.artifactHashMatch = false;
+        restoredAny.meta.artifactSourceMode = "latest_by_scenario_fallback";
+        restoredAny.meta.artifactCreatedAt = null;
+        restoredAny.meta.artifactSourceNote =
+          "Artifact source: latest cached Past scenario artifact for gapfill_lab (no build identity row).";
         applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey);
         const quality = validateSharedSimQuality(restored);
         if (!quality.ok) {
@@ -1683,11 +1699,25 @@ export async function getSimulatedUsageForHouseScenario(args: {
         weatherIdentity,
       });
 
-      const exactCached = await getCachedPastDataset({
+      let exactCached = await getCachedPastDataset({
         houseId: args.houseId,
         scenarioId: scenarioIdForCache,
         inputHash,
       });
+      // Shared artifact: Sim Past and gapfill-lab both use the same Past scenario (CUID) and same cache.
+      // If exact inputHash miss (e.g. fingerprint drifted), use latest cached artifact for this scenario
+      // so gapfill can see what Sim Past (or rebuild) produced.
+      let artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" = "exact_hash_match";
+      if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+        const latestCached = await getLatestCachedPastDatasetByScenario({
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+        });
+        if (latestCached && latestCached.intervalsCodec === INTERVAL_CODEC_V1) {
+          exactCached = latestCached;
+          artifactSourceMode = "latest_by_scenario_fallback";
+        }
+      }
       if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
         return {
           ok: false,
@@ -1717,8 +1747,23 @@ export async function getSimulatedUsageForHouseScenario(args: {
       if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
       restoredAny.meta.artifactReadMode = "artifact_only";
       restoredAny.meta.artifactSource = "past_cache";
-      restoredAny.meta.artifactInputHash = inputHash;
+      restoredAny.meta.artifactInputHash = (exactCached as any).inputHash ?? inputHash;
       restoredAny.meta.artifactRecomputed = false;
+      restoredAny.meta.artifactScenarioId = scenarioIdForCache;
+      restoredAny.meta.requestedInputHash = inputHash;
+      restoredAny.meta.artifactInputHashUsed = (exactCached as any).inputHash ?? inputHash;
+      restoredAny.meta.artifactHashMatch =
+        String(restoredAny.meta.artifactInputHashUsed ?? "") === String(inputHash ?? "");
+      restoredAny.meta.artifactSourceMode = artifactSourceMode;
+      restoredAny.meta.artifactCreatedAt = null;
+      // best-effort propagation; present when coming from latest-by-scenario helper
+      if ((exactCached as any).updatedAt instanceof Date) {
+        restoredAny.meta.artifactUpdatedAt = (exactCached as any).updatedAt.toISOString();
+      }
+      restoredAny.meta.artifactSourceNote =
+        artifactSourceMode === "exact_hash_match"
+          ? "Artifact source: exact identity match on Past input hash."
+          : "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).";
       applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, { buildInputs });
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {

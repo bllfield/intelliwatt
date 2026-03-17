@@ -297,7 +297,18 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
       simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
       simulatedChartStitchedMonth: null,
-      modelAssumptions: { intervalCount: 1 },
+      modelAssumptions: {
+        intervalCount: 1,
+        artifactSourceMode: "exact_hash_match",
+        requestedInputHash: "hash-1",
+        artifactInputHashUsed: "hash-1",
+        artifactHashMatch: true,
+        artifactScenarioId: "past_s1",
+        artifactCreatedAt: null,
+        artifactUpdatedAt: "2026-01-02T00:00:00.000Z",
+        artifactSourceNote: "Artifact source: exact identity match on Past input hash.",
+        artifactInputHash: "hash-1",
+      },
       homeProfileFromModel: null,
       applianceProfileFromModel: null,
     });
@@ -317,6 +328,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(String(body.fullReportText ?? "")).toContain("windowStartUtc: 2025-03-14");
     expect(String(body.fullReportText ?? "")).toContain("windowEndUtc: 2026-03-14");
     expect(String(body.fullReportText ?? "")).toContain("excludedDateKeysCount: 3");
+  expect(body.artifactSourceMode).toBe("exact_hash_match");
+  expect(body.requestedInputHash).toBe("hash-1");
+  expect(body.artifactInputHashUsed).toBe("hash-1");
+  expect(body.artifactHashMatch).toBe(true);
+  expect(body.artifactScenarioId).toBe("past_s1");
+  expect(body.artifactUpdatedAt).toBe("2026-01-02T00:00:00.000Z");
+  expect(typeof body.artifactSourceNote).toBe("string");
   });
 
   it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {

@@ -158,7 +158,8 @@ function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
     code === "artifact_missing_rebuild_required" ||
     code === "artifact_scope_mismatch_rebuild_required" ||
     code === "artifact_stale_rebuild_required" ||
-    code === "artifact_compare_join_incomplete_rebuild_required"
+    code === "artifact_compare_join_incomplete_rebuild_required" ||
+    code === "past_rebuild_failed"
   );
 }
 
@@ -487,6 +488,7 @@ export default function GapFillLabClient() {
       const { res, data } = await postGapfill(body);
       if (!res.ok) {
         if (isArtifactRebuildRequiredError((data as any)?.error)) {
+          setArtifactMissing(true);
           // Two-step self-heal: rebuild-only first, then run compare on a second request.
           // This avoids rebuild+compare in one 300s-bounded request.
           attemptedArtifactAutoRebuild = true;
