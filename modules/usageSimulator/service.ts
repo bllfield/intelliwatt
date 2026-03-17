@@ -145,6 +145,21 @@ export async function getSharedPastCoverageWindowForHouse(args: {
   return resolveCanonicalUsage365CoverageWindow();
 }
 
+function applyCanonicalCoverageMetadataForNonBaseline(
+  dataset: any,
+  scenarioKey: string
+): { startDate: string; endDate: string } | null {
+  if (scenarioKey === "BASELINE" || !dataset?.summary) return null;
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  dataset.summary.start = canonicalCoverage.startDate;
+  dataset.summary.end = canonicalCoverage.endDate;
+  dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
+  if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
+  dataset.meta.coverageStart = canonicalCoverage.startDate;
+  dataset.meta.coverageEnd = canonicalCoverage.endDate;
+  return canonicalCoverage;
+}
+
 export async function rebuildGapfillSharedPastArtifact(args: {
   userId: string;
   houseId: string;
@@ -178,12 +193,21 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     scenarioId,
     readMode: "artifact_only",
   });
-  if (!verifyArtifact.ok || !Array.isArray((verifyArtifact as any)?.dataset?.series?.intervals15)) {
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const verifyDataset = verifyArtifact.ok ? (verifyArtifact as any)?.dataset : null;
+  const hasIntervals15 = Array.isArray(verifyDataset?.series?.intervals15);
+  const hasCanonicalCoverage =
+    verifyArtifact.ok &&
+    String(verifyDataset?.summary?.start ?? "") === canonicalCoverage.startDate &&
+    String(verifyDataset?.summary?.end ?? "") === canonicalCoverage.endDate &&
+    String(verifyDataset?.meta?.coverageStart ?? "") === canonicalCoverage.startDate &&
+    String(verifyDataset?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
+  if (!verifyArtifact.ok || !hasIntervals15 || !hasCanonicalCoverage) {
     return {
       ok: false,
       error: "past_rebuild_failed",
       message:
-        "Past rebuild completed, but the saved artifact is still unavailable for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+        "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
     };
   }
   return { ok: true, scenarioId };
@@ -1571,6 +1595,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ? latestCached.updatedAt.toISOString()
           : null;
         restoredAny.meta.artifactRecomputed = false;
+        applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey);
         const quality = validateSharedSimQuality(restored);
         if (!quality.ok) {
           await reportSimulationDataIssue({
@@ -1677,6 +1702,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       restoredAny.meta.artifactSource = "past_cache";
       restoredAny.meta.artifactInputHash = inputHash;
       restoredAny.meta.artifactRecomputed = false;
+      applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey);
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {
         await reportSimulationDataIssue({
@@ -2129,10 +2155,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     // Non-baseline scenario metadata window must match the shared Usage dashboard 365-day canonical window.
     if (scenarioKey !== "BASELINE" && dataset?.summary) {
-      const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-      dataset.summary.start = canonicalCoverage.startDate;
-      dataset.summary.end = canonicalCoverage.endDate;
-      dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
+      const canonicalCoverage =
+        applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey) ??
+        resolveCanonicalUsage365CoverageWindow();
       const excludedRanges = travelRangesFromBuildInputs(buildInputs);
       const boundedExcludedDateKeys = boundDateKeysToCoverageWindow(
         travelRangesToExcludeDateKeys(excludedRanges),
