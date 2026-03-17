@@ -1,3 +1,5 @@
+import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+
 export type CoverageWindow = { startDate: string; endDate: string };
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
@@ -45,5 +47,21 @@ export function boundDateKeysToCoverageWindow(
     if (key >= window.startDate && key <= window.endDate) out.add(key);
   });
   return out;
+}
+
+/**
+ * Canonical usage dashboard coverage window (365 inclusive days in America/Chicago).
+ * This is the single shared source used for metadata framing to avoid route/UI drift.
+ */
+export function resolveCanonicalUsage365CoverageWindow(now: Date = new Date()): CoverageWindow {
+  const win = canonicalUsageWindowChicago({
+    now,
+    reliableLagDays: 2,
+    totalDays: 365,
+  });
+  return {
+    startDate: String(win.startDate).slice(0, 10),
+    endDate: String(win.endDate).slice(0, 10),
+  };
 }
 

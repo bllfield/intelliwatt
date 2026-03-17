@@ -53,6 +53,7 @@ import {
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import {
   boundDateKeysToCoverageWindow,
+  resolveCanonicalUsage365CoverageWindow,
   resolveReportedCoverageWindow,
 } from "@/modules/usageSimulator/metadataWindow";
 
@@ -140,56 +141,8 @@ export async function getSharedPastCoverageWindowForHouse(args: {
   fallbackStartDate: string;
   fallbackEndDate: string;
 }): Promise<{ startDate: string; endDate: string }> {
-  const fallbackWindow = resolveReportedCoverageWindow({
-    dataset: null,
-    fallbackStartDate: args.fallbackStartDate,
-    fallbackEndDate: args.fallbackEndDate,
-  });
-
-  const scenarioId = await resolvePastScenarioIdForHouse({
-    userId: args.userId,
-    houseId: args.houseId,
-  });
-  if (!scenarioId) return fallbackWindow;
-
-  const simOut = await getSimulatedUsageForHouseScenario({
-    userId: args.userId,
-    houseId: args.houseId,
-    scenarioId,
-    readMode: "artifact_only",
-  });
-  if (simOut.ok && simOut.dataset) {
-    return resolveReportedCoverageWindow({
-      dataset: simOut.dataset,
-      fallbackStartDate: fallbackWindow.startDate,
-      fallbackEndDate: fallbackWindow.endDate,
-    });
-  }
-
-  const buildRec = await (prisma as any).usageSimulatorBuild
-    .findUnique({
-      where: {
-        userId_houseId_scenarioKey: {
-          userId: args.userId,
-          houseId: args.houseId,
-          scenarioKey: scenarioId,
-        },
-      },
-      select: { buildInputs: true },
-    })
-    .catch(() => null);
-  const buildWindow = resolveWindowFromBuildInputsForPastIdentity(
-    (((buildRec as any)?.buildInputs ?? {}) as Record<string, unknown>)
-  );
-  if (buildWindow?.startDate && buildWindow?.endDate) {
-    return resolveReportedCoverageWindow({
-      dataset: { summary: { start: buildWindow.startDate, end: buildWindow.endDate } },
-      fallbackStartDate: fallbackWindow.startDate,
-      fallbackEndDate: fallbackWindow.endDate,
-    });
-  }
-
-  return fallbackWindow;
+  void args;
+  return resolveCanonicalUsage365CoverageWindow();
 }
 
 export async function rebuildGapfillSharedPastArtifact(args: {
@@ -2120,26 +2073,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
       };
     }
 
-    // Past and Future: show the same date range as SMT/Green Button anchor (e.g. 02/18/2025 – 02/18/2026), not calendar-month window.
+    // Past/Future metadata window must match the shared Usage dashboard 365-day canonical window.
     if (
       scenarioKey !== "BASELINE" &&
       mode === "SMT_BASELINE" &&
       isSmtBaselineMode &&
       dataset?.summary
     ) {
-      try {
-        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, {
-          skipFullYearIntervalFetch: true,
-        });
-        const actualSummary = actualResult?.dataset?.summary;
-        if (actualSummary?.start != null && actualSummary?.end != null) {
-          dataset.summary.start = actualSummary.start;
-          dataset.summary.end = actualSummary.end;
-          dataset.summary.latest = actualSummary.latest ?? actualSummary.end;
-        }
-      } catch {
-        /* ignore; keep built curve dates */
-      }
+      const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+      dataset.summary.start = canonicalCoverage.startDate;
+      dataset.summary.end = canonicalCoverage.endDate;
+      dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
     }
 
     // Past and Future baseload come from the built curve (buildSimulatedUsageDatasetFromBuildInputs), which already
