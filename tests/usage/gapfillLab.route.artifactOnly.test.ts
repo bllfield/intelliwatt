@@ -485,8 +485,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.comparePulledFromSharedArtifactOnly).toBe(true);
     expect(body.artifactUsesTestDaysInIdentity).toBe(false);
     expect(body.artifactUsesTravelDaysInIdentity).toBe(true);
-    expect(body.artifactBuildExcludedSource).toBe("shared_past_compare_mask_excludedDateKeysFingerprint");
-    expect(body.scoringExcludedSource).toBe("artifact_meta_excludedDateKeysFingerprint");
+    expect(body.artifactBuildExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
+    expect(body.scoringExcludedSource).toBe("artifact_meta_compareMaskDateKeysFingerprint");
   });
 
   it("returns test-window-not-simulated (not join-incomplete) when artifact has no simulated intervals for selected test dates", async () => {

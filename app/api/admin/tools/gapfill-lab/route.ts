@@ -1605,9 +1605,9 @@ export async function POST(req: NextRequest) {
         reasonCode: classification.reasonCode,
         scoredTestDaysMissingSimulatedOwnershipCount,
         scoringExcludedSource:
-          (sharedSim as any)?.scoringExcludedSource ?? "artifact_meta_excludedDateKeysFingerprint",
+          (sharedSim as any)?.scoringExcludedSource ?? "artifact_meta_compareMaskDateKeysFingerprint",
         artifactBuildExcludedSource:
-          (sharedSim as any)?.artifactBuildExcludedSource ?? "shared_past_compare_mask_excludedDateKeysFingerprint",
+          (sharedSim as any)?.artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint",
       },
       { status: 409 }
     );
@@ -1648,9 +1648,9 @@ export async function POST(req: NextRequest) {
   const scoringUsedSharedArtifact =
     (sharedSim as any).scoringUsedSharedArtifact !== false;
   const scoringExcludedSource =
-    (sharedSim as any).scoringExcludedSource ?? "artifact_meta_excludedDateKeysFingerprint";
+    (sharedSim as any).scoringExcludedSource ?? "artifact_meta_compareMaskDateKeysFingerprint";
   const artifactBuildExcludedSource =
-    (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_compare_mask_excludedDateKeysFingerprint";
+    (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
   const artifactUsesTestDaysInIdentity =
     (sharedSim as any).artifactUsesTestDaysInIdentity === true;
   const artifactUsesTravelDaysInIdentity =

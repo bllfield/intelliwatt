@@ -243,8 +243,8 @@ export type GapfillCompareSimSharedResult =
       artifactAutoRebuilt: boolean;
       scoringSimulatedSource?: "shared_artifact_simulated_intervals15";
       scoringUsedSharedArtifact?: boolean;
-      artifactBuildExcludedSource?: "shared_past_compare_mask_excludedDateKeysFingerprint";
-      scoringExcludedSource?: "artifact_meta_excludedDateKeysFingerprint";
+      artifactBuildExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
+      scoringExcludedSource?: "artifact_meta_compareMaskDateKeysFingerprint";
       artifactUsesTestDaysInIdentity?: boolean;
       artifactUsesTravelDaysInIdentity?: boolean;
       sharedArtifactScenarioId?: string | null;
@@ -455,6 +455,7 @@ export async function buildGapfillCompareSimShared(args: {
     ...Array.from(boundedTravelDateKeysLocal),
     ...Array.from(boundedTestDateKeysLocal),
   ]);
+  const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const compareMaskFingerprint = Array.from(compareMaskDateKeysLocal).sort().join(",");
   const compareMaskRanges = dateKeysToRanges(compareMaskDateKeysLocal);
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -662,12 +663,24 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.requestedInputHash = compareInputHash;
   modelAssumptions.artifactHashMatch = true;
   modelAssumptions.compareMaskFingerprint = compareMaskFingerprint;
+  modelAssumptions.compareMaskDateKeysFingerprint = compareMaskFingerprint;
+  modelAssumptions.compareMaskDateKeysCount = compareMaskDateKeysLocal.size;
+  // Keep shared travel/vacant ownership metadata travel-only (non-compare semantics).
+  modelAssumptions.excludedDateKeysFingerprint = travelFingerprint;
+  modelAssumptions.excludedDateKeysCount = boundedTravelDateKeysLocal.size;
 
   const artifactIntervals = (dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).map((p) => ({
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
+  const compareFingerprintFromMetaRaw = String(
+    modelAssumptions?.compareMaskDateKeysFingerprint ?? modelAssumptions?.compareMaskFingerprint ?? ""
+  );
   const excludedFingerprintFromMeta = String(modelAssumptions?.excludedDateKeysFingerprint ?? "")
+    .split(",")
+    .map((dk) => String(dk).trim())
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+  const compareFingerprintFromMeta = compareFingerprintFromMetaRaw
     .split(",")
     .map((dk) => String(dk).trim())
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
@@ -676,7 +689,21 @@ export async function buildGapfillCompareSimShared(args: {
       .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
       .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
   );
-  if (excludedFingerprintFromMeta.length === 0) {
+  if (excludedFingerprintFromMeta.join(",") !== travelFingerprint) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_scope_mismatch_rebuild_required",
+        message:
+          "Saved compare artifact travel/vacant ownership metadata does not match shared travel scope. Trigger explicit rebuildArtifact=true before compare.",
+        mode: "artifact_only",
+        scenarioId: compareScenarioCacheId,
+      },
+    };
+  }
+  if (compareFingerprintFromMeta.length === 0) {
     return {
       ok: false,
       status: 409,
@@ -684,13 +711,13 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_ownership_metadata_missing_rebuild_required",
         message:
-          "Saved shared Past artifact is missing excludedDateKeysFingerprint ownership metadata required for strict Gap-Fill scoring.",
+          "Saved compare artifact is missing compareMaskDateKeysFingerprint ownership metadata required for strict Gap-Fill scoring.",
         mode: "artifact_only",
         scenarioId: compareScenarioCacheId,
       },
     };
   }
-  const simulatedDateKeysFromArtifact = new Set<string>(excludedFingerprintFromMeta);
+  const simulatedDateKeysFromArtifact = new Set<string>(compareFingerprintFromMeta);
   if (Array.from(simulatedDateKeysFromArtifact).sort().join(",") !== compareMaskFingerprint) {
     return {
       ok: false,
@@ -705,7 +732,7 @@ export async function buildGapfillCompareSimShared(args: {
       },
     };
   }
-  const scoringExcludedSource = "artifact_meta_excludedDateKeysFingerprint";
+  const scoringExcludedSource = "artifact_meta_compareMaskDateKeysFingerprint";
   const simulatedTestIntervals = artifactIntervals.filter((p) => {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     return testDateKeysLocal.has(dk) && simulatedDateKeysFromArtifact.has(dk);
@@ -751,7 +778,7 @@ export async function buildGapfillCompareSimShared(args: {
     artifactAutoRebuilt,
     scoringSimulatedSource: "shared_artifact_simulated_intervals15",
     scoringUsedSharedArtifact: true,
-    artifactBuildExcludedSource: "shared_past_compare_mask_excludedDateKeysFingerprint",
+    artifactBuildExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
     scoringExcludedSource,
     artifactUsesTestDaysInIdentity: true,
     artifactUsesTravelDaysInIdentity: true,

@@ -224,7 +224,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
   });
 
-  it("fails with rebuild-required when ownership fingerprint metadata is missing", async () => {
+  it("separates travel-only ownership from compare-mask ownership for cached compare artifacts", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-actual-days",
       datasetJson: {
@@ -247,10 +247,11 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       rebuildArtifact: false,
     });
 
-    expect(out.ok).toBe(false);
-    if (!out.ok) {
-      expect(out.status).toBe(409);
-      expect((out.body as any)?.error).toBe("artifact_ownership_metadata_missing_rebuild_required");
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.scoringExcludedSource).toBe("artifact_meta_compareMaskDateKeysFingerprint");
+      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
     }
   });
 
@@ -261,7 +262,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
           curveShapingVersion: "shared_curve_v2",
-          excludedDateKeysFingerprint: "2026-01-01",
+          compareMaskDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
@@ -295,6 +296,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         meta: {
           curveShapingVersion: "shared_curve_v2",
           excludedDateKeysFingerprint: "2026-01-01",
+          compareMaskDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", source: "ACTUAL" }],
         series: {},
@@ -315,7 +317,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.scoringExcludedSource).toBe("artifact_meta_excludedDateKeysFingerprint");
+      expect(out.scoringExcludedSource).toBe("artifact_meta_compareMaskDateKeysFingerprint");
       expect(out.simulatedTestIntervals.length).toBe(72);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
     }
