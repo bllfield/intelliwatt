@@ -42,8 +42,7 @@ function toStartOfDayUtc(dateStr: string): Date {
 }
 
 /**
- * Parse a date string (YYYY-MM-DD) to the last hourly UTC timestamp of that day (23:00:00.000).
- * Weather cache rows are hourly (HH:00), so 23:00 is the deterministic inclusive upper bound.
+ * Parse a date string (YYYY-MM-DD) to end of that day in UTC (23:00:00.000).
  */
 function toEndOfDayUtc(dateStr: string): Date {
   const s = String(dateStr).trim().slice(0, 10);

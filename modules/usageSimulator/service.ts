@@ -162,7 +162,7 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   let excludedDateKeys: Set<string>;
   if (options?.buildInputs != null) {
     const excludedRanges = travelRangesFromBuildInputs(options.buildInputs);
-    excludedDateKeys = travelRangesToExcludeDateKeys(excludedRanges);
+    excludedDateKeys = new Set(travelRangesToExcludeDateKeys(excludedRanges));
   } else {
     const existingFingerprint = String(dataset.meta.excludedDateKeysFingerprint ?? "");
     const parsed = existingFingerprint
