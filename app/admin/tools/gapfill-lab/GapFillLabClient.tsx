@@ -504,6 +504,7 @@ export default function GapFillLabClient() {
           const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
           setLastCompareBody(compareBody);
           setArtifactMissing(false);
+          setResult(null);
           setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
           setError(null);
           return;
@@ -563,6 +564,7 @@ export default function GapFillLabClient() {
       const compareBody = buildCompareBodyAfterRebuild(lastCompareBody, rebuildData);
       setLastCompareBody(compareBody);
       setArtifactMissing(false);
+      setResult(null);
       setProgressStatus("Rebuild complete. Click \"Run Compare\" to load results.");
       setError(null);
       // Do not auto-run compare here; it often times out. User runs compare in a separate request with full timeout budget.
