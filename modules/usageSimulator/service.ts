@@ -348,18 +348,6 @@ export async function buildGapfillCompareSimShared(args: {
     simOut = rebuiltSimOut;
     artifactAutoRebuilt = true;
   }
-  if (!simOut.ok && simOut.code === "ARTIFACT_MISSING") {
-    const rebuiltOnDemand = await getSimulatedUsageForHouseScenario({
-      userId,
-      houseId,
-      scenarioId: pastScenarioId,
-      readMode: "allow_rebuild",
-    });
-    if (rebuiltOnDemand.ok && rebuiltOnDemand.dataset?.series?.intervals15) {
-      simOut = rebuiltOnDemand;
-      artifactAutoRebuilt = true;
-    }
-  }
   const initialIntervals15 =
     simOut.ok && Array.isArray(simOut.dataset?.series?.intervals15)
       ? (simOut.dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>)
