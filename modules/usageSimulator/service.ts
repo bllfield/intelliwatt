@@ -43,7 +43,6 @@ import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { canonicalIntervalKey, dateKeyInTimezone } from "@/lib/admin/gapfillLab";
-import { buildAndSavePastForGapfillLab, inspectPastCacheArtifacts } from "@/lib/admin/gapfillLabPrime";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
@@ -112,6 +111,52 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
 
 type DateRange = { startDate: string; endDate: string };
 type IntervalPoint = { timestamp: string; kwh: number };
+
+async function resolvePastScenarioIdForHouse(args: {
+  userId: string;
+  houseId: string;
+}): Promise<string | null> {
+  const row = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: {
+        userId: args.userId,
+        houseId: args.houseId,
+        name: WORKSPACE_PAST_NAME,
+        archivedAt: null,
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
+  return row?.id ? String(row.id) : null;
+}
+
+export async function rebuildGapfillSharedPastArtifact(args: {
+  userId: string;
+  houseId: string;
+}): Promise<{ ok: true; scenarioId: string } | { ok: false; error: string; message: string }> {
+  const scenarioId = await resolvePastScenarioIdForHouse(args);
+  if (!scenarioId) {
+    return {
+      ok: false,
+      error: "no_past_scenario",
+      message: "No Past (Corrected) scenario for this house. Create/rebuild Past first.",
+    };
+  }
+  const rebuilt = await getSimulatedUsageForHouseScenario({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId,
+    readMode: "allow_rebuild",
+  });
+  if (!rebuilt.ok) {
+    return {
+      ok: false,
+      error: rebuilt.code === "NO_BUILD" ? "past_build_missing" : "past_rebuild_failed",
+      message: rebuilt.message,
+    };
+  }
+  return { ok: true, scenarioId };
+}
 
 export type GapfillCompareSimSharedResult =
   | {
@@ -227,42 +272,36 @@ export async function buildGapfillCompareSimShared(args: {
     rebuildArtifact,
   } = args;
 
+  const pastScenarioId = await resolvePastScenarioIdForHouse({ userId, houseId });
+  if (!pastScenarioId) {
+    return {
+      ok: false,
+      status: 404,
+      body: {
+        ok: false,
+        error: "no_past_scenario",
+        message: "No Past (Corrected) scenario found for this house.",
+      },
+    };
+  }
+
   if (rebuildArtifact) {
-    const rebuilt = await buildAndSavePastForGapfillLab({
+    const rebuilt = await getSimulatedUsageForHouseScenario({
       userId,
       houseId,
-      timezone,
+      scenarioId: pastScenarioId,
+      readMode: "allow_rebuild",
     });
     if (!rebuilt.ok) {
       return {
         ok: false,
-        status: 400,
+        status: rebuilt.code === "SCENARIO_NOT_FOUND" ? 404 : 400,
         body: {
           ok: false,
-          error: rebuilt.error,
+          error: "past_rebuild_failed",
           message: rebuilt.message,
-          windowStartUtc: rebuilt.windowStartUtc ?? null,
-          windowEndUtc: rebuilt.windowEndUtc ?? null,
-          missingDateKeys: rebuilt.missingDateKeys ?? [],
-          stubRowCount: rebuilt.stubRowCount ?? null,
-          weatherSourceSummary: rebuilt.weatherSourceSummary ?? null,
-          windowHelper: rebuilt.windowHelper ?? null,
-        },
-      };
-    }
-  } else {
-    const inspect = await inspectPastCacheArtifacts({ houseId, scenarioId: "gapfill_lab" });
-    if (inspect.count <= 0) {
-      return {
-        ok: false,
-        status: 409,
-        body: {
-          ok: false,
-          error: "artifact_missing_rebuild_required",
-          message:
-            "No saved gapfill_lab artifact found. Trigger explicit rebuildArtifact=true (or prime-past-cache action=rebuild) before inspect/read compare.",
           mode: "artifact_only",
-          scenarioId: "gapfill_lab",
+          scenarioId: pastScenarioId,
         },
       };
     }
@@ -274,7 +313,7 @@ export async function buildGapfillCompareSimShared(args: {
   let simOut = await getSimulatedUsageForHouseScenario({
     userId,
     houseId,
-    scenarioId: "gapfill_lab",
+    scenarioId: pastScenarioId,
     readMode: "artifact_only",
   });
   let artifactAutoRebuilt = false;
@@ -301,9 +340,9 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_stale_rebuild_required",
         message:
-          "Saved gapfill_lab artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+          "Saved shared Past artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before inspect/read compare.",
         mode: "artifact_only",
-        scenarioId: "gapfill_lab",
+        scenarioId: pastScenarioId,
       },
     };
   }
@@ -315,9 +354,9 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_stale_rebuild_required",
         message:
-          "Saved gapfill_lab artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+          "Saved shared Past artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before inspect/read compare.",
         mode: "artifact_only",
-        scenarioId: "gapfill_lab",
+        scenarioId: pastScenarioId,
       },
     };
   }
@@ -346,9 +385,9 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_scope_mismatch_rebuild_required",
         message:
-          "Saved gapfill_lab artifact mask scope does not match travel/vacant exclusions. Trigger explicit rebuildArtifact=true before inspect/read compare.",
+          "Saved shared Past artifact mask scope does not match travel/vacant exclusions. Trigger explicit rebuildArtifact=true before inspect/read compare.",
         mode: "artifact_only",
-        scenarioId: "gapfill_lab",
+        scenarioId: pastScenarioId,
       },
     };
   }
@@ -368,7 +407,7 @@ export async function buildGapfillCompareSimShared(args: {
         message: simOut.ok
           ? "Saved artifact missing intervals15 series."
           : simOut.code === "ARTIFACT_MISSING"
-            ? "No saved gapfill_lab artifact found. Trigger explicit rebuildArtifact=true before inspect/read compare."
+            ? "No saved shared Past artifact found. Trigger explicit rebuildArtifact=true before inspect/read compare."
             : simOut.message,
         code: simOut.ok ? "INTERNAL_ERROR" : simOut.code,
       },

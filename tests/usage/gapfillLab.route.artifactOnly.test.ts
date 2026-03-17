@@ -8,8 +8,8 @@ const chooseActualSource = vi.fn();
 const getActualIntervalsForRange = vi.fn();
 const getActualUsageDatasetForHouse = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
+const rebuildGapfillSharedPastArtifact = vi.fn();
 const getCandidateDateCoverageForSelection = vi.fn();
-const buildAndSavePastForGapfillLab = vi.fn();
 const mergeDateKeysToRanges = vi.fn();
 const pickRandomTestDateKeys = vi.fn();
 
@@ -60,15 +60,8 @@ vi.mock("@/modules/applianceProfile/repo", () => ({
 
 vi.mock("@/modules/usageSimulator/service", () => ({
   buildGapfillCompareSimShared: (...args: any[]) => buildGapfillCompareSimShared(...args),
+  rebuildGapfillSharedPastArtifact: (...args: any[]) => rebuildGapfillSharedPastArtifact(...args),
 }));
-
-vi.mock("@/lib/admin/gapfillLabPrime", async () => {
-  const actual = await vi.importActual<any>("@/lib/admin/gapfillLabPrime");
-  return {
-    ...actual,
-    buildAndSavePastForGapfillLab: (...args: any[]) => buildAndSavePastForGapfillLab(...args),
-  };
-});
 
 vi.mock("@/lib/admin/gapfillLab", () => ({
   canonicalIntervalKey: (s: string) => String(s),
@@ -145,7 +138,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     getActualIntervalsForRange.mockReset();
     buildGapfillCompareSimShared.mockReset();
     getCandidateDateCoverageForSelection.mockReset();
-    buildAndSavePastForGapfillLab.mockReset();
+    rebuildGapfillSharedPastArtifact.mockReset();
     mergeDateKeysToRanges.mockReset();
     pickRandomTestDateKeys.mockReset();
     prismaUserFindFirst.mockReset();
@@ -179,10 +172,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       ).filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
       return { candidateDateKeys: dateKeys, cacheHit: false, coverageByDay: {}, intervalsForWindow: intervals ?? [] };
     });
-    buildAndSavePastForGapfillLab.mockResolvedValue({
+    rebuildGapfillSharedPastArtifact.mockResolvedValue({
       ok: true,
-      inputHash: "ih",
-      houseId: "h1",
+      scenarioId: "past-s1",
     });
     pickRandomTestDateKeys.mockReturnValue(["2026-01-01"]);
     mergeDateKeysToRanges.mockReturnValue([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
@@ -272,12 +264,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.rebuilt).toBe(true);
     expect(body.testRangesUsed).toEqual([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
     expect(body.testSelectionMode).toBe("manual_ranges");
-    expect(buildAndSavePastForGapfillLab).toHaveBeenCalled();
-    expect(buildAndSavePastForGapfillLab).toHaveBeenCalledWith(
+    expect(rebuildGapfillSharedPastArtifact).toHaveBeenCalled();
+    expect(rebuildGapfillSharedPastArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "u1",
         houseId: "h1",
-        timezone: "America/Chicago",
       })
     );
     expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();

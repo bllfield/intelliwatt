@@ -21,9 +21,8 @@ import {
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
-import { buildGapfillCompareSimShared } from "@/modules/usageSimulator/service";
+import { buildGapfillCompareSimShared, rebuildGapfillSharedPastArtifact } from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
-import { buildAndSavePastForGapfillLab } from "@/lib/admin/gapfillLabPrime";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -1479,16 +1478,15 @@ export async function POST(req: NextRequest) {
   const rebuildArtifact = body?.rebuildArtifact === true;
   const rebuildOnly = body?.rebuildOnly === true;
   if (rebuildArtifact && rebuildOnly) {
-    const rebuilt = await buildAndSavePastForGapfillLab({
+    const rebuilt = await rebuildGapfillSharedPastArtifact({
       userId: user.id,
       houseId: house.id,
-      timezone,
     });
     if (!rebuilt.ok) {
       const status =
-        rebuilt.error === "house_not_found" || rebuilt.error === "no_actual_data"
+        rebuilt.error === "no_past_scenario"
           ? 404
-          : rebuilt.error === "profile_required"
+          : rebuilt.error === "past_build_missing"
             ? 400
             : 500;
       return NextResponse.json(
@@ -1496,12 +1494,6 @@ export async function POST(req: NextRequest) {
           ok: false,
           error: rebuilt.error,
           message: rebuilt.message,
-          windowStartUtc: rebuilt.windowStartUtc ?? null,
-          windowEndUtc: rebuilt.windowEndUtc ?? null,
-          missingDateKeys: rebuilt.missingDateKeys ?? [],
-          stubRowCount: rebuilt.stubRowCount ?? null,
-          weatherSourceSummary: rebuilt.weatherSourceSummary ?? null,
-          windowHelper: rebuilt.windowHelper ?? null,
         },
         { status }
       );
@@ -1522,7 +1514,7 @@ export async function POST(req: NextRequest) {
       mode: "artifact_only",
       action: "rebuild_only",
       rebuilt: true,
-      message: "Gap-Fill Lab artifact rebuilt. Running compare next will read from artifact cache.",
+      message: "Shared Past artifact rebuilt. Running compare next will read from the shared artifact cache.",
       testRangesUsed,
       testSelectionMode,
       testDaysRequested,
@@ -1651,8 +1643,8 @@ export async function POST(req: NextRequest) {
       canonicalMonths,
     },
     configHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? "n/a"),
-    excludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-    excludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
+    excludedDateKeysCount: boundedTravelDateKeysLocal.size,
+    excludedDateKeysSample: sortedSample(boundedTravelDateKeysLocal),
     homeProfile: responseHomeProfile,
     applianceProfile: responseApplianceProfile,
     modelAssumptions: sharedSim.modelAssumptions,
