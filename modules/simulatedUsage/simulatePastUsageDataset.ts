@@ -7,6 +7,7 @@
 import { prisma } from "@/lib/db";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import {
   buildCurveFromPatchedIntervals,
   buildSimulatedUsageDatasetFromCurve,
@@ -345,10 +346,15 @@ export async function simulatePastUsageDataset(
         kwh: p.kwh,
       }));
 
-    const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(travelRanges));
-    const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+    // Keep exclusion metadata and downstream simulated-day labeling aligned to the
+    // active usage coverage window only (older travel ranges naturally fall off).
+    const excludedDateKeys = boundDateKeysToCoverageWindow(
+      travelRangesToExcludeDateKeys(travelRanges),
+      { startDate, endDate }
+    );
+    const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
 
     const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
       houseId,
