@@ -501,23 +501,11 @@ export default function GapFillLabClient() {
             setResult(null);
             return;
           }
-          setProgressStatus("Rebuild complete, now running compare...");
           const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
           setLastCompareBody(compareBody);
-          const { res: compareRes, data: compareData } = await postGapfill(compareBody);
-          if (!compareRes.ok) {
-            setProgressStatus(null);
-            const errMsg = (compareData as any)?.error === "test_overlaps_travel"
-              ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
-              : formatApiError(compareData, compareRes.status);
-            setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
-            setError(errMsg);
-            setResult(null);
-            return;
-          }
           setArtifactMissing(false);
-          setProgressStatus(null);
-          mergeSuccessfulResult(compareData);
+          setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
+          setError(null);
           return;
         }
         setProgressStatus(null);
@@ -572,20 +560,12 @@ export default function GapFillLabClient() {
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
         return;
       }
-      setProgressStatus("Rebuild complete, now running compare...");
       const compareBody = buildCompareBodyAfterRebuild(lastCompareBody, rebuildData);
       setLastCompareBody(compareBody);
-      const { res: compareRes, data: compareData } = await postGapfill(compareBody);
-      if (!compareRes.ok) {
-        setProgressStatus(null);
-        setError(formatApiError(compareData, compareRes.status));
-        setResult(null);
-        setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
-        return;
-      }
       setArtifactMissing(false);
-      setProgressStatus(null);
-      mergeSuccessfulResult(compareData);
+      setProgressStatus("Rebuild complete. Click \"Run Compare\" to load results.");
+      setError(null);
+      // Do not auto-run compare here; it often times out. User runs compare in a separate request with full timeout budget.
     } catch (e: any) {
       setProgressStatus(null);
       setError(e?.name === "AbortError" ? "Request timed out while rebuilding or re-running compare. Retry once more." : (e?.message ?? String(e)));
