@@ -1372,15 +1372,44 @@ export async function POST(req: NextRequest) {
   const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
 
-  const actualIntervals =
+  const actualIntervals = await (
     candidateIntervalsForTesting != null
       ? candidateIntervalsForTesting
-      : await getActualIntervalsForRange({
-          houseId: house.id,
-          esiid,
-          startDate: fetchStart,
-          endDate: fetchEnd,
-        });
+      : testSelectionMode === "manual_ranges"
+        ? (() => {
+            // Manual replay after rebuild can contain sparse one-day ranges across the year.
+            // Fetch per merged range to avoid materializing a full-window interval payload.
+            const mergedManualRanges = mergeDateKeysToRanges(testDateKeysSorted);
+            return Promise.all(
+              mergedManualRanges.map((r) =>
+                getActualIntervalsForRange({
+                  houseId: house.id,
+                  esiid,
+                  startDate: r.startDate,
+                  endDate: r.endDate,
+                })
+              )
+            ).then((chunks) => {
+              const byTs = new Map<string, { timestamp: string; kwh: number }>();
+              for (const chunk of chunks) {
+                for (const row of chunk ?? []) {
+                  const ts = String((row as any)?.timestamp ?? "").trim();
+                  if (!ts) continue;
+                  byTs.set(ts, { timestamp: ts, kwh: Number((row as any)?.kwh) || 0 });
+                }
+              }
+              return Array.from(byTs.values()).sort((a, b) =>
+                String(a.timestamp).localeCompare(String(b.timestamp))
+              );
+            });
+          })()
+        : getActualIntervalsForRange({
+            houseId: house.id,
+            esiid,
+            startDate: fetchStart,
+            endDate: fetchEnd,
+          })
+  );
 
   if (!actualIntervals?.length) {
     const classification = classifySimulationFailure({
