@@ -2073,7 +2073,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       };
     }
 
-    // Non-baseline scenario metadata window must match the shared Usage dashboard 365-day canonical window.
+    // All non-baseline scenarios share one canonical metadata window source.
     if (scenarioKey !== "BASELINE" && dataset?.summary) {
       const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
       dataset.summary.start = canonicalCoverage.startDate;
