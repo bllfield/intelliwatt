@@ -606,7 +606,7 @@ function monthsIntersectingTravelRanges(
   return out;
 }
 
-function excludedRangesFromBuildInputs(
+function travelRangesFromBuildInputs(
   buildInputs: unknown
 ): Array<{ startDate: string; endDate: string }> {
   const b = (buildInputs ?? {}) as Record<string, unknown>;
@@ -624,11 +624,7 @@ function excludedRangesFromBuildInputs(
       );
   };
 
-  const merged = [
-    ...collect((b as any).travelRanges),
-    ...collect((b as any).vacantRanges),
-    ...collect((b as any).vacantDateRanges),
-  ];
+  const merged = [...collect((b as any).travelRanges)];
   const uniq = new Map<string, { startDate: string; endDate: string }>();
   for (const r of merged) uniq.set(`${r.startDate}__${r.endDate}`, r);
   return Array.from(uniq.values());
@@ -2133,7 +2129,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       dataset.summary.start = canonicalCoverage.startDate;
       dataset.summary.end = canonicalCoverage.endDate;
       dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
-      const excludedRanges = excludedRangesFromBuildInputs(buildInputs);
+      const excludedRanges = travelRangesFromBuildInputs(buildInputs);
       const boundedExcludedDateKeys = boundDateKeysToCoverageWindow(
         travelRangesToExcludeDateKeys(excludedRanges),
         canonicalCoverage
