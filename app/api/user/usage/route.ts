@@ -14,7 +14,7 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 120;
-const PER_HOUSE_RESOLVE_TIMEOUT_MS = 20_000;
+const PER_HOUSE_RESOLVE_TIMEOUT_MS = 45_000;
 
 async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
   let timer: NodeJS.Timeout | null = null;

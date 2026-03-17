@@ -776,7 +776,7 @@ export const UsageDashboard: React.FC<Props> = ({
       {!hasData ? (
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-neutral-600">
-            {datasetMode === "SIMULATED" ? (
+            {effectiveFetchMode === "SIMULATED" ? (
               <>
                 No simulated dataset yet for this home.{" "}
                 <a className="font-semibold text-brand-blue hover:underline" href="/dashboard/usage/simulated#manual-totals">
