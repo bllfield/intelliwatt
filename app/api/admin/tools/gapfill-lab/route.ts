@@ -1749,7 +1749,7 @@ export async function POST(req: NextRequest) {
     guardrailExcludedRanges: mergeDateKeysToRanges(Array.from(guardrailExcludedDateKeysLocal).sort()),
     listTestDateKeys: testDateKeysSorted,
     testIntervalsCount: actualTestIntervals.length,
-    testDaysCount: scoringTestDateKeysLocal.size,
+    testDaysCount: testDateKeysLocal.size,
     guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
     guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
     dateKeyDiag: {
