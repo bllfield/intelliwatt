@@ -161,6 +161,12 @@ type OrchestratorPhase = {
   errorCode: string | null;
   errorMessage: string | null;
 };
+
+export type NormalizedUiError = {
+  name: string;
+  message: string;
+  isAbortError: boolean;
+};
 const ORCHESTRATOR_PHASE_BLUEPRINT: Array<{ key: OrchestratorPhaseKey; label: string }> = [
   { key: "lookup_inputs", label: "Lookup & Inputs" },
   { key: "usage365_load", label: "Usage 365 Load" },
@@ -191,6 +197,55 @@ function normalizeDailyRowsToWindow<T extends { date: string }>(
     });
   const limit = Math.max(1, Math.trunc(Number(maxDays) || 365));
   return filtered.length > limit ? filtered.slice(filtered.length - limit) : filtered;
+}
+
+export function normalizeUnknownUiError(
+  value: unknown,
+  fallbackMessage = "Unexpected error"
+): NormalizedUiError {
+  const fromObject = value != null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const nameRaw = fromObject && typeof fromObject.name === "string" ? fromObject.name.trim() : "";
+  const messageRaw = fromObject && typeof fromObject.message === "string" ? fromObject.message.trim() : "";
+  const primitiveMessage =
+    typeof value === "string"
+      ? value.trim()
+      : typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
+        ? String(value)
+        : "";
+  const name = nameRaw || "Error";
+  const message = messageRaw || primitiveMessage || fallbackMessage;
+  return {
+    name,
+    message,
+    isAbortError: name === "AbortError",
+  };
+}
+
+export function markActiveOrchestratorPhasesErrored<T extends {
+  status: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  elapsedMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}>(
+  phases: T[],
+  args: { errorCode: string; errorMessage: string; nowMs?: number }
+): T[] {
+  const nowMs = Number.isFinite(args.nowMs) ? Number(args.nowMs) : Date.now();
+  const endedAt = new Date(nowMs).toISOString();
+  return phases.map((phase) => {
+    if (phase.status !== "active") return phase;
+    const startedMs = phase.startedAt ? new Date(phase.startedAt).getTime() : NaN;
+    return {
+      ...phase,
+      status: "error",
+      endedAt,
+      elapsedMs: Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : phase.elapsedMs,
+      errorCode: args.errorCode,
+      errorMessage: args.errorMessage,
+    };
+  });
 }
 
 function formatApiError(data: any, status: number): string {
@@ -1124,38 +1179,29 @@ export default function GapFillLabClient() {
         finishedAt: new Date().toISOString(),
       }));
       setProgressStatus(null);
-    } catch (e: any) {
-      if ((e?.name === "AbortError" || e instanceof Error) && typeof e?.message === "string") {
-        setOrchestratorPhases((prev) =>
-          prev.map((phase) =>
-            phase.status === "active"
-              ? {
-                  ...phase,
-                  status: "error",
-                  endedAt: new Date().toISOString(),
-                  elapsedMs:
-                    phase.startedAt != null
-                      ? Math.max(0, Date.now() - new Date(phase.startedAt).getTime())
-                      : phase.elapsedMs,
-                  errorCode: e?.name === "AbortError" ? "phase_timeout" : "phase_exception",
-                  errorMessage: e?.message ?? String(e),
-                }
-              : phase
-          )
-        );
-      }
+    } catch (e: unknown) {
+      const normalizedError = normalizeUnknownUiError(
+        e,
+        "Pipeline step failed. See Last Attempt Debug + Orchestrator Timeline for details."
+      );
+      setOrchestratorPhases((prev) =>
+        markActiveOrchestratorPhasesErrored(prev, {
+          errorCode: normalizedError.isAbortError ? "phase_timeout" : "phase_exception",
+          errorMessage: normalizedError.message,
+        })
+      );
       setProgressStatus(null);
       const msg =
-        e?.name === "AbortError"
+        normalizedError.isAbortError
           ? "Pipeline step timed out. See Last Attempt Debug + Orchestrator Timeline for failing phase."
-          : (e?.message ?? String(e));
-      if (e?.name === "AbortError") setArtifactMissing(true);
+          : normalizedError.message;
+      if (normalizedError.isAbortError) setArtifactMissing(true);
       setError(msg);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
-        phase: e?.name === "AbortError" ? "orchestrator_timeout" : "orchestrator_exception",
-        errorName: e?.name ?? null,
-        errorMessage: e?.message ?? String(e),
+        phase: normalizedError.isAbortError ? "orchestrator_timeout" : "orchestrator_exception",
+        errorName: normalizedError.name,
+        errorMessage: normalizedError.message,
       }));
     } finally {
       setLoading(false);

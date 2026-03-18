@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 vi.mock("server-only", () => ({}));
+vi.mock("next/link", () => ({
+  default: () => null,
+}));
+vi.mock("@/components/usage/UsageChartsPanel", () => ({
+  UsageChartsPanel: () => null,
+}));
 
 const requireAdmin = vi.fn();
 const normalizeEmailSafe = vi.fn();
@@ -1220,6 +1228,32 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const usageMonthly = Array.isArray(body.usage365?.monthly) ? body.usage365.monthly : [];
     expect(usageMonthly.length).toBe(12);
     expect(body.usage365?.stitchedMonth?.yearMonth).toBe("2026-03");
+  });
+});
+
+describe("GapFillLabClient catch normalization helpers", () => {
+  const clientSource = readFileSync(
+    resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+    "utf8"
+  );
+
+  it("uses explicit unknown-error normalization in compare catch path", () => {
+    expect(clientSource).toContain("function normalizeUnknownUiError(");
+    expect(clientSource).toContain("const normalizedError = normalizeUnknownUiError(");
+    expect(clientSource).toContain("phase: normalizedError.isAbortError ? \"orchestrator_timeout\" : \"orchestrator_exception\"");
+  });
+
+  it("does not require instanceof Error before phase error finalization", () => {
+    expect(clientSource).not.toContain("(e?.name === \"AbortError\" || e instanceof Error) && typeof e?.message === \"string\"");
+    expect(clientSource).toContain("setOrchestratorPhases((prev) =>");
+    expect(clientSource).toContain("markActiveOrchestratorPhasesErrored(prev, {");
+  });
+
+  it("finalizes active phases as error with normalized message", () => {
+    expect(clientSource).toContain("function markActiveOrchestratorPhasesErrored");
+    expect(clientSource).toContain("if (phase.status !== \"active\") return phase;");
+    expect(clientSource).toContain("status: \"error\",");
+    expect(clientSource).toContain("errorMessage: args.errorMessage,");
   });
 });
 
