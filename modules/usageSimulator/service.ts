@@ -61,8 +61,6 @@ type ManualUsagePayloadAny = any;
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 const WORKSPACE_FUTURE_NAME = "Future (What-if)";
-const GAPFILL_COMPARE_ARTIFACT_SCOPE = "gapfill_compare";
-
 async function reportSimulationDataIssue(args: {
   source: "GAPFILL_LAB" | "USER_SIMULATION" | "USAGE_DASHBOARD";
   userId: string;
@@ -244,7 +242,7 @@ export type GapfillCompareSimSharedResult =
       scoringSimulatedSource?: "shared_artifact_simulated_intervals15";
       scoringUsedSharedArtifact?: boolean;
       artifactBuildExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
-      scoringExcludedSource?: "artifact_meta_compareMaskDateKeysFingerprint";
+      scoringExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
       artifactUsesTestDaysInIdentity?: boolean;
       artifactUsesTravelDaysInIdentity?: boolean;
       sharedArtifactScenarioId?: string | null;
@@ -380,7 +378,6 @@ export async function buildGapfillCompareSimShared(args: {
     timezone: requestTimezone,
     canonicalWindow,
     testDateKeysLocal,
-    travelSimulatedDateKeysLocal,
     rebuildArtifact,
   } = args;
 
@@ -445,19 +442,14 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
   const timezone = String((buildInputs as any)?.timezone ?? requestTimezone ?? "America/Chicago");
+  const buildTravelRanges = travelRangesFromBuildInputs(buildInputs);
   const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
-  const boundedTravelDateKeysLocal =
-    travelSimulatedDateKeysLocal != null
-      ? boundDateKeysToCoverageWindow(travelSimulatedDateKeysLocal, sharedCoverageWindow)
-      : new Set<string>();
+  const boundedTravelDateKeysLocal = boundDateKeysToCoverageWindow(
+    new Set<string>(travelRangesToExcludeDateKeys(buildTravelRanges)),
+    sharedCoverageWindow
+  );
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
-  const compareMaskDateKeysLocal = new Set<string>([
-    ...Array.from(boundedTravelDateKeysLocal),
-    ...Array.from(boundedTestDateKeysLocal),
-  ]);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
-  const compareMaskFingerprint = Array.from(compareMaskDateKeysLocal).sort().join(",");
-  const compareMaskRanges = dateKeysToRanges(compareMaskDateKeysLocal);
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
   const expectedChartIntervalCount = chartDateKeysLocal.size * 96;
 
@@ -473,15 +465,13 @@ export async function buildGapfillCompareSimShared(args: {
     startDate: identityWindow.startDate,
     endDate: identityWindow.endDate,
   });
-  const compareInputHash = computePastInputHash({
+  const sharedInputHash = computePastInputHash({
     engineVersion: PAST_ENGINE_VERSION,
     windowStartUtc: identityWindow.startDate,
     windowEndUtc: identityWindow.endDate,
     timezone,
-    travelRanges: compareMaskRanges,
+    travelRanges: buildTravelRanges,
     buildInputs: buildInputs as Record<string, unknown>,
-    artifactScope: GAPFILL_COMPARE_ARTIFACT_SCOPE,
-    compareMaskFingerprint,
     intervalDataFingerprint,
     usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
     usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
@@ -489,15 +479,15 @@ export async function buildGapfillCompareSimShared(args: {
     usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
     weatherIdentity,
   });
-  const compareScenarioCacheId = `${GAPFILL_COMPARE_ARTIFACT_SCOPE}:${pastScenarioId}`;
+  const sharedScenarioCacheId = pastScenarioId;
 
   let artifactAutoRebuilt = false;
   let dataset: any = null;
   const cached = !rebuildArtifact
     ? await getCachedPastDataset({
         houseId,
-        scenarioId: compareScenarioCacheId,
-        inputHash: compareInputHash,
+        scenarioId: sharedScenarioCacheId,
+        inputHash: sharedInputHash,
       })
     : null;
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
@@ -525,9 +515,9 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_missing_rebuild_required",
         message:
-          "No saved compare artifact found for travel/vacant + selected test-day mask scope. Trigger explicit rebuildArtifact=true before compare.",
+          "No saved shared Past artifact found for this identity. Trigger explicit rebuildArtifact=true before compare.",
         mode: "artifact_only",
-        scenarioId: compareScenarioCacheId,
+        scenarioId: sharedScenarioCacheId,
       },
     };
   } else {
@@ -535,7 +525,7 @@ export async function buildGapfillCompareSimShared(args: {
       userId,
       houseId,
       esiid: house.esiid ?? null,
-      travelRanges: compareMaskRanges,
+      travelRanges: buildTravelRanges,
       buildInputs,
       startDate: identityWindow.startDate,
       endDate: identityWindow.endDate,
@@ -549,9 +539,9 @@ export async function buildGapfillCompareSimShared(args: {
         body: {
           ok: false,
           error: "past_rebuild_failed",
-          message: pastResult.error ?? "Failed to build compare artifact.",
+          message: pastResult.error ?? "Failed to build shared Past artifact.",
           mode: "artifact_only",
-          scenarioId: compareScenarioCacheId,
+          scenarioId: sharedScenarioCacheId,
         },
       };
     }
@@ -563,9 +553,9 @@ export async function buildGapfillCompareSimShared(args: {
         body: {
           ok: false,
           error: "artifact_read_failed",
-          message: "Compare artifact build completed, but intervals15 are missing.",
+          message: "Shared Past artifact build completed, but intervals15 are missing.",
           mode: "artifact_only",
-          scenarioId: compareScenarioCacheId,
+          scenarioId: sharedScenarioCacheId,
         },
       };
     }
@@ -577,8 +567,8 @@ export async function buildGapfillCompareSimShared(args: {
     };
     await saveCachedPastDataset({
       houseId,
-      scenarioId: compareScenarioCacheId,
-      inputHash: compareInputHash,
+      scenarioId: sharedScenarioCacheId,
+      inputHash: sharedInputHash,
       engineVersion: PAST_ENGINE_VERSION,
       windowStartUtc: identityWindow.startDate,
       windowEndUtc: identityWindow.endDate,
@@ -596,7 +586,7 @@ export async function buildGapfillCompareSimShared(args: {
       body: {
         ok: false,
         error: "artifact_read_failed",
-        message: "Saved compare artifact missing intervals15 series.",
+        message: "Saved shared Past artifact missing intervals15 series.",
         code: "INTERNAL_ERROR",
       },
     };
@@ -619,9 +609,9 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_stale_rebuild_required",
         message:
-          "Saved compare artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before compare.",
+          "Saved shared Past artifact is stale/incomplete for this canonical window. Trigger explicit rebuildArtifact=true before compare.",
         mode: "artifact_only",
-        scenarioId: compareScenarioCacheId,
+        scenarioId: sharedScenarioCacheId,
       },
     };
   }
@@ -633,9 +623,9 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_stale_rebuild_required",
         message:
-          "Saved compare artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before compare.",
+          "Saved shared Past artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before compare.",
         mode: "artifact_only",
-        scenarioId: compareScenarioCacheId,
+        scenarioId: sharedScenarioCacheId,
       },
     };
   }
@@ -657,16 +647,12 @@ export async function buildGapfillCompareSimShared(args: {
   const modelAssumptions = (dataset as any)?.meta ?? {};
   modelAssumptions.artifactReadMode = "artifact_only";
   modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
-  modelAssumptions.artifactScope = GAPFILL_COMPARE_ARTIFACT_SCOPE;
-  modelAssumptions.artifactScenarioId = compareScenarioCacheId;
-  modelAssumptions.artifactInputHash = compareInputHash;
-  modelAssumptions.artifactInputHashUsed = compareInputHash;
-  modelAssumptions.requestedInputHash = compareInputHash;
+  modelAssumptions.artifactScenarioId = sharedScenarioCacheId;
+  modelAssumptions.artifactInputHash = sharedInputHash;
+  modelAssumptions.artifactInputHashUsed = sharedInputHash;
+  modelAssumptions.requestedInputHash = sharedInputHash;
   modelAssumptions.artifactHashMatch = true;
-  modelAssumptions.compareMaskFingerprint = compareMaskFingerprint;
-  modelAssumptions.compareMaskDateKeysFingerprint = compareMaskFingerprint;
-  modelAssumptions.compareMaskDateKeysCount = compareMaskDateKeysLocal.size;
-  // Keep shared travel/vacant ownership metadata travel-only (non-compare semantics).
+  // Shared ownership metadata is travel/vacant-only.
   modelAssumptions.excludedDateKeysFingerprint = travelFingerprint;
   modelAssumptions.excludedDateKeysCount = boundedTravelDateKeysLocal.size;
 
@@ -674,14 +660,7 @@ export async function buildGapfillCompareSimShared(args: {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
-  const compareFingerprintFromMetaRaw = String(
-    restoredMetaOriginal?.compareMaskDateKeysFingerprint ?? restoredMetaOriginal?.compareMaskFingerprint ?? ""
-  );
   const excludedFingerprintFromMeta = String(restoredMetaOriginal?.excludedDateKeysFingerprint ?? "")
-    .split(",")
-    .map((dk) => String(dk).trim())
-    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
-  const compareFingerprintFromMeta = compareFingerprintFromMetaRaw
     .split(",")
     .map((dk) => String(dk).trim())
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
@@ -698,48 +677,24 @@ export async function buildGapfillCompareSimShared(args: {
         ok: false,
         error: "artifact_scope_mismatch_rebuild_required",
         message:
-          "Saved compare artifact travel/vacant ownership metadata does not match shared travel scope. Trigger explicit rebuildArtifact=true before compare.",
+          "Saved shared Past artifact travel/vacant ownership metadata does not match shared travel scope. Trigger explicit rebuildArtifact=true before compare.",
         mode: "artifact_only",
-        scenarioId: compareScenarioCacheId,
+        scenarioId: sharedScenarioCacheId,
       },
     };
   }
-  if (compareFingerprintFromMeta.length === 0) {
-    return {
-      ok: false,
-      status: 409,
-      body: {
-        ok: false,
-        error: "artifact_ownership_metadata_missing_rebuild_required",
-        message:
-          "Saved compare artifact is missing compareMaskDateKeysFingerprint ownership metadata required for strict Gap-Fill scoring.",
-        mode: "artifact_only",
-        scenarioId: compareScenarioCacheId,
-      },
-    };
-  }
-  const simulatedDateKeysFromArtifact = new Set<string>(compareFingerprintFromMeta);
-  if (Array.from(simulatedDateKeysFromArtifact).sort().join(",") !== compareMaskFingerprint) {
-    return {
-      ok: false,
-      status: 409,
-      body: {
-        ok: false,
-        error: "artifact_scope_mismatch_rebuild_required",
-        message:
-          "Saved compare artifact mask scope does not match travel/vacant + selected test-day exclusions. Trigger explicit rebuildArtifact=true before compare.",
-        mode: "artifact_only",
-        scenarioId: compareScenarioCacheId,
-      },
-    };
-  }
-  const scoringExcludedSource = "artifact_meta_compareMaskDateKeysFingerprint";
+  const scoringExcludedSource = "shared_past_travel_vacant_excludedDateKeysFingerprint";
+  const availableTestDateKeysFromArtifact = new Set<string>(
+    artifactIntervals
+      .map((p) => dateKeyInTimezone(p.timestamp, timezone))
+      .filter((dk) => boundedTestDateKeysLocal.has(dk))
+  );
   const simulatedTestIntervals = artifactIntervals.filter((p) => {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
-    return testDateKeysLocal.has(dk) && simulatedDateKeysFromArtifact.has(dk);
+    return boundedTestDateKeysLocal.has(dk);
   });
-  const scoredTestDaysMissingSimulatedOwnershipCount = Array.from(testDateKeysLocal).filter(
-    (dk) => !simulatedDateKeysFromArtifact.has(dk)
+  const scoredTestDaysMissingSimulatedOwnershipCount = Array.from(boundedTestDateKeysLocal).filter(
+    (dk) => !availableTestDateKeysFromArtifact.has(dk)
   ).length;
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
     chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
@@ -781,9 +736,9 @@ export async function buildGapfillCompareSimShared(args: {
     scoringUsedSharedArtifact: true,
     artifactBuildExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
     scoringExcludedSource,
-    artifactUsesTestDaysInIdentity: true,
+    artifactUsesTestDaysInIdentity: false,
     artifactUsesTravelDaysInIdentity: true,
-    sharedArtifactScenarioId: String(modelAssumptions?.artifactScenarioId ?? compareScenarioCacheId),
+    sharedArtifactScenarioId: String(modelAssumptions?.artifactScenarioId ?? sharedScenarioCacheId),
     sharedArtifactInputHash:
       (typeof modelAssumptions?.artifactInputHash === "string" && modelAssumptions.artifactInputHash) ||
       (typeof modelAssumptions?.artifactInputHashUsed === "string" && modelAssumptions.artifactInputHashUsed) ||
@@ -1946,16 +1901,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
         });
         const latestMeta = ((latestCached as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>;
         const latestExcludedFingerprint = String(latestMeta?.excludedDateKeysFingerprint ?? "");
-        const latestArtifactScope = String(latestMeta?.artifactScope ?? "");
-        const latestCompareFingerprint = String(
-          latestMeta?.compareMaskDateKeysFingerprint ?? latestMeta?.compareMaskFingerprint ?? ""
-        );
         const latestIsFallbackCompatible =
           latestCached != null &&
           latestCached.intervalsCodec === INTERVAL_CODEC_V1 &&
-          latestArtifactScope !== GAPFILL_COMPARE_ARTIFACT_SCOPE &&
-          latestExcludedFingerprint === expectedExcludedFingerprintForFallback &&
-          (latestCompareFingerprint.length === 0 || latestCompareFingerprint === latestExcludedFingerprint);
+          latestExcludedFingerprint === expectedExcludedFingerprintForFallback;
         if (latestIsFallbackCompatible) {
           exactCached = latestCached;
           artifactSourceMode = "latest_by_scenario_fallback";

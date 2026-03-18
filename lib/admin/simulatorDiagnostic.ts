@@ -767,11 +767,11 @@ export async function runSimulatorDiagnostic(
     dayLevelParity,
     integrity,
     gapfillLabNote: {
-      enginePath: "gapfill_test_days_profile",
-      label: "GapFill Lab validation (test-days profile)",
+      enginePath: "production_past_stitched",
+      label: "GapFill Lab scoring (shared Past artifact)",
       sameEngineAsPastProduction: true,
       daySimulationCore: "shared_past_day_simulator",
-      note: "GapFill Lab compare/read now uses artifact-only reads from the saved gapfill_lab Past artifact via getSimulatedUsageForHouseScenario(readMode=artifact_only), then computes metrics via computeGapFillMetrics. Rebuilds remain explicit actions.",
+      note: "GapFill Lab scoring reads the shared Past artifact via shared service paths and computes metrics via computeGapFillMetrics. LEGACY / NON-AUTHORITATIVE labels such as gapfill_test_days_profile are historical naming only and do not indicate a separate artifact or simulator ownership path.",
     },
     rawActualIntervalsMeta: {
       label: "Raw actual intervals",

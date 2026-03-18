@@ -1,8 +1,7 @@
 /**
- * Prime the Gap-Fill Lab cache (scenarioId "gapfill_lab") so Run Compare gets a cache hit.
- * Used when the user has entered eval ranges: we build with buildExcludedRanges = db ∪ eval
- * and save to gapfill_lab with the same key the lab uses.
- * This path is intentionally timezone-specific and not the shared canonical reporting window authority.
+ * LEGACY / NON-AUTHORITATIVE helper retained for backward-compatible tooling paths.
+ * Backward compatibility only; not part of active Gap-Fill compare architecture.
+ * Any cache writes must use the shared Past scenario identity (no gapfill-specific artifact scope).
  */
 
 import { prisma } from "@/lib/db";
@@ -238,8 +237,7 @@ export async function inspectPastCacheArtifacts(args: {
 
 /**
  * Build Past dataset with buildExcludedRanges derived from DB travel/vacant only and save to
- * scenarioId "gapfill_lab". Run Compare then reads the shared full-year artifact and scores
- * test dates separately.
+ * the shared Past scenario identity. Run Compare then scores selected test dates separately.
  */
 export async function buildAndSavePastForGapfillLab(args: {
   userId: string;
@@ -419,10 +417,29 @@ export async function buildAndSavePastForGapfillLab(args: {
     ...dataset,
     series: { ...(dataset.series ?? {}), intervals15: [] },
   };
+  const pastScenario = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: {
+        userId,
+        houseId,
+        name: WORKSPACE_PAST_NAME,
+        archivedAt: null,
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
+  if (!pastScenario?.id) {
+    return {
+      ok: false,
+      error: "no_past_scenario",
+      message: "Past (Corrected) scenario is required before priming shared artifact cache.",
+    };
+  }
+  const sharedScenarioId = String(pastScenario.id);
 
   await saveCachedPastDataset({
     houseId,
-    scenarioId: "gapfill_lab",
+    scenarioId: sharedScenarioId,
     inputHash,
     engineVersion: PAST_ENGINE_VERSION,
     windowStartUtc: startDate,

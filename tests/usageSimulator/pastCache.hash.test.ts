@@ -53,27 +53,14 @@ describe("past cache hash invalidation", () => {
     expect(a).not.toBe(b);
   });
 
-  it("changes when artifact scope changes", () => {
+  it("does not change for legacy compare-scope fields outside shared identity", () => {
     const a = computePastInputHash(basePayload);
     const b = computePastInputHash({
-      ...basePayload,
-      artifactScope: "gapfill_compare",
-    });
-    expect(a).not.toBe(b);
-  });
-
-  it("changes when compare mask fingerprint changes", () => {
-    const a = computePastInputHash({
-      ...basePayload,
+      ...(basePayload as any),
       artifactScope: "gapfill_compare",
       compareMaskFingerprint: "2025-07-01,2025-07-02",
-    });
-    const b = computePastInputHash({
-      ...basePayload,
-      artifactScope: "gapfill_compare",
-      compareMaskFingerprint: "2025-07-01,2025-07-03",
-    });
-    expect(a).not.toBe(b);
+    } as any);
+    expect(a).toBe(b);
   });
 
   it("does not change for test-selection-only fields outside shared identity", () => {

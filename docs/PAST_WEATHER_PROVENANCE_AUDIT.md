@@ -1,11 +1,20 @@
 # Past Weather Provenance Audit
 
+## LEGACY / NON-AUTHORITATIVE NOTE
+
+This document contains historical debugging context. Active architecture authority is:
+
+- Past Sim and Gap-Fill compare use the same shared artifact and shared fingerprint.
+- Travel/vacant days are the only excluded ownership days.
+- Test days remain included in the shared artifact and are selected only for scoring against actual usage.
+- Gap-Fill scoring reads shared simulator output from the same shared service path; it is not a separate artifact workflow.
+
 ## 1. Why GapFill Lab validation is still separate
 
 - **Production Past path** (user-facing Past page, cold build, recalc, and Lab “production Past” priming) uses the **shared Past core**: `simulatePastUsageDataset` → `buildPastSimulatedBaselineV1` → `buildCurveFromPatchedIntervals` → `buildSimulatedUsageDatasetFromCurve`. Engine identifier: `shared_past_day_simulator`.
-- **GapFill Lab validation** (the scoring run that produces WAPE/MAE etc.) uses a **different engine**: `enginePath: gapfill_test_days_profile`, with a test-window compare pipeline that loads intervals then scores via `computeGapFillMetrics`. It does **not** call `simulatePastUsageDataset` or the shared Past day simulator. It scores a small set of test dates using a usage-shape-profile–based simulator, not the full-window Past stitched curve.
+- **LEGACY / NON-AUTHORITATIVE historical note:** older reports used `enginePath: gapfill_test_days_profile` naming. Active implementation uses the shared Past artifact/service path for Gap-Fill scoring; this legacy label does not indicate a separate engine or artifact ownership model.
 
-So the Past page and GapFill Lab validation are **not** the same engine. The UI previously stated “same engine as GapFill Lab validation,” which was incorrect.
+Past page and Gap-Fill scoring now use the same shared simulator output path and shared artifact identity; legacy `gapfill_test_days_profile` wording should be treated as historical naming only.
 
 ## 2. Why the Past-page claim was misleading
 
@@ -72,6 +81,6 @@ So **any** date in the full window with a stub row makes the summary “mixed.�
 | Item | Status |
 |------|--------|
 | Past page “same engine as GapFill Lab validation” | **Removed**; label now shows only “Simulation core: shared_past_day_simulator”. |
-| GapFill Lab validation engine | Still **separate** (`gapfill_test_days_profile`); not the same as shared Past core. |
+| GapFill Lab validation engine | **Shared with Past production path**. Legacy labels like `gapfill_test_days_profile` are historical/non-authoritative naming only. |
 | weatherSourceSummary rule | One stub row in the full Past window → “mixed_actual_and_stub”; rule is strict and conservative. |
 | Recommended next step | If “mixed” is wrong for a house, verify stub vs actual row counts in `HouseDailyWeather` for the canonical date set; if stub rows are stale, run the repair script (see PAST_WEATHER_STUB_REPAIR.md) or fix backfill/coverage. |

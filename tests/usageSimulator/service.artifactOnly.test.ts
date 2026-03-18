@@ -203,7 +203,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
-  it("artifact_only fallback rejects compare-scope polluted latest artifact for production past scenario", async () => {
+  it("artifact_only fallback ignores legacy compare metadata when shared travel fingerprint matches", async () => {
     scenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
     usageSimulatorBuildFindUnique.mockResolvedValue({
       buildInputs: {
@@ -238,8 +238,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       readMode: "artifact_only",
     });
 
-    expect(out.ok).toBe(false);
-    if (!out.ok) expect(out.code).toBe("ARTIFACT_MISSING");
+    expect(out.ok).toBe(true);
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 });
@@ -288,18 +287,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
   });
 
-  it("returns rebuild-required when cached artifact is missing compare-mask ownership metadata", async () => {
-    getCachedPastDataset.mockResolvedValue({
-      inputHash: "hash-actual-days",
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
-        meta: { curveShapingVersion: "shared_curve_v2" },
-        daily: [{ date: "2026-01-01", source: "ACTUAL" }],
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
+  it("returns rebuild-required when shared artifact is missing for the requested identity", async () => {
+    getCachedPastDataset.mockResolvedValue(null);
+    simulatePastUsageDataset.mockResolvedValue(null);
 
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
@@ -314,13 +304,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(false);
     if (!out.ok) {
       expect(out.status).toBe(409);
-      expect((out.body as any)?.error).toBe("artifact_ownership_metadata_missing_rebuild_required");
+      expect((out.body as any)?.error).toBe("artifact_missing_rebuild_required");
     }
   });
 
-  it("uses original restored metadata for compatibility validation (not overwritten model assumptions)", async () => {
+  it("does not enforce legacy compare-mask metadata when shared ownership metadata is valid", async () => {
     getCachedPastDataset.mockResolvedValue({
-      inputHash: "hash-compare-mismatch",
+      inputHash: "hash-actual-days",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
@@ -345,10 +335,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       rebuildArtifact: false,
     });
 
-    expect(out.ok).toBe(false);
-    if (!out.ok) {
-      expect(out.status).toBe(409);
-      expect((out.body as any)?.error).toBe("artifact_scope_mismatch_rebuild_required");
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.artifactUsesTestDaysInIdentity).toBe(false);
     }
   });
 
@@ -361,7 +351,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           curveShapingVersion: "shared_curve_v2",
           // Out-of-window travel fingerprint; canonical normalization would bound this away.
           excludedDateKeysFingerprint: "2024-01-01",
-          compareMaskDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
@@ -394,7 +383,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
           curveShapingVersion: "shared_curve_v2",
-          compareMaskDateKeysFingerprint: "2026-01-01",
+          excludedDateKeysFingerprint: "",
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
@@ -421,6 +410,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("uses shared excludedDateKeys ownership from artifact metadata for scoring", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-meta-owned-day",
       datasetJson: {
@@ -428,7 +425,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         meta: {
           curveShapingVersion: "shared_curve_v2",
           excludedDateKeysFingerprint: "2026-01-01",
-          compareMaskDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", source: "ACTUAL" }],
         series: {},
@@ -449,7 +445,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.scoringExcludedSource).toBe("artifact_meta_compareMaskDateKeysFingerprint");
+      expect(out.scoringExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
       expect(out.simulatedTestIntervals.length).toBe(72);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
     }

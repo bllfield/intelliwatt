@@ -60,10 +60,10 @@ export function classifySimulationFailure(args: {
   if (haystack.includes("artifact_scope_mismatch_rebuild_required")) {
     return {
       reasonCode: "ARTIFACT_SCOPE_MISMATCH_REBUILD_REQUIRED",
-      reasonMessage: "Saved simulation artifact mask scope does not match requested ranges.",
-      missingData: ["saved_gapfill_artifact"],
+      reasonMessage: "Saved shared Past artifact scope does not match requested identity inputs.",
+      missingData: ["saved_shared_past_artifact"],
       userFacingExplanation:
-        "Saved simulation data does not match the selected Test/Vacant date ranges. Re-run compare (or Retry) to rebuild with the current ranges.",
+        "Saved shared Past simulation data does not match the current identity inputs. Re-run compare (or Retry) to rebuild through the shared Past path.",
       shouldAlert: false,
     };
   }
@@ -71,10 +71,10 @@ export function classifySimulationFailure(args: {
   if (haystack.includes("artifact_stale_rebuild_required")) {
     return {
       reasonCode: "ARTIFACT_STALE_REBUILD_REQUIRED",
-      reasonMessage: "Saved simulation artifact is stale or incomplete for the requested window.",
-      missingData: ["saved_gapfill_artifact"],
+      reasonMessage: "Saved shared Past artifact is stale or incomplete for the requested window.",
+      missingData: ["saved_shared_past_artifact"],
       userFacingExplanation:
-        "Saved simulation data is stale for this window. Re-run compare (or Retry) to rebuild with current coverage.",
+        "Saved shared Past simulation data is stale for this window. Re-run compare (or Retry) to rebuild with current coverage.",
       shouldAlert: false,
     };
   }
@@ -82,10 +82,10 @@ export function classifySimulationFailure(args: {
   if (haystack.includes("artifact_compare_join_incomplete_rebuild_required")) {
     return {
       reasonCode: "ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED",
-      reasonMessage: "Saved simulation artifact is missing simulated points required for compare joins.",
-      missingData: ["saved_gapfill_artifact"],
+      reasonMessage: "Saved shared Past artifact is missing points required for compare joins.",
+      missingData: ["saved_shared_past_artifact"],
       userFacingExplanation:
-        "Saved simulation data is incomplete for the selected Test intervals. Re-run compare (or Retry) to rebuild and align the artifact.",
+        "Saved shared Past simulation data is incomplete for the selected test intervals. Re-run compare (or Retry) to rebuild and align the shared artifact.",
       shouldAlert: false,
     };
   }
@@ -93,10 +93,10 @@ export function classifySimulationFailure(args: {
   if (haystack.includes("artifact_ownership_metadata_missing_rebuild_required")) {
     return {
       reasonCode: "ARTIFACT_OWNERSHIP_METADATA_MISSING_REBUILD_REQUIRED",
-      reasonMessage: "Saved simulation artifact is missing strict ownership metadata required for Gap-Fill scoring.",
+      reasonMessage: "Saved shared Past artifact is missing travel/vacant ownership metadata required for Gap-Fill scoring.",
       missingData: ["artifact_excludedDateKeysFingerprint"],
       userFacingExplanation:
-        "Saved simulation data is missing required ownership metadata for strict compare scoring. Re-run compare (or Retry) to rebuild the artifact.",
+        "Saved shared Past simulation data is missing required travel/vacant ownership metadata for scoring. Re-run compare (or Retry) to rebuild the shared artifact.",
       shouldAlert: false,
     };
   }
@@ -104,10 +104,10 @@ export function classifySimulationFailure(args: {
   if (haystack.includes("artifact_test_window_not_simulated")) {
     return {
       reasonCode: "ARTIFACT_TEST_WINDOW_NOT_SIMULATED",
-      reasonMessage: "Selected test dates are ACTUAL-only in the shared artifact and cannot be scored as simulated.",
+      reasonMessage: "Selected test dates are missing required shared Past artifact intervals for scoring.",
       missingData: ["simulated_test_intervals"],
       userFacingExplanation:
-        "The selected Test Dates are currently ACTUAL-only in the shared artifact, so there are no simulated intervals to score. Choose dates in simulated/masked scope and retry.",
+        "The selected Test Dates are missing required shared Past artifact intervals for scoring. Re-run compare (or Retry) to refresh shared Past artifact output, then retry.",
       shouldAlert: false,
     };
   }
@@ -115,10 +115,10 @@ export function classifySimulationFailure(args: {
   if (haystack.includes("artifact_missing_rebuild_required") || haystack.includes("artifact_missing")) {
     return {
       reasonCode: "ARTIFACT_MISSING_REBUILD_REQUIRED",
-      reasonMessage: "Saved simulation artifact is missing and must be rebuilt.",
-      missingData: ["saved_gapfill_artifact"],
+      reasonMessage: "Saved shared Past artifact is missing and must be rebuilt.",
+      missingData: ["saved_shared_past_artifact"],
       userFacingExplanation:
-        "No saved simulation data exists for this view yet. Re-run compare (or Retry) to build it.",
+        "No saved shared Past simulation data exists for this view yet. Re-run compare (or Retry) to build it through the shared service path.",
       shouldAlert: false,
     };
   }

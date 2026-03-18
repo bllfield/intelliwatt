@@ -15,10 +15,6 @@ export type PastInputHashPayload = {
   timezone: string;
   travelRanges: Array<{ startDate: string; endDate: string }>;
   buildInputs: Record<string, unknown>;
-  /** Distinguishes production Past cache from other artifact scopes (e.g. gapfill compare). */
-  artifactScope?: string;
-  /** Canonical day-key fingerprint for compare-specific mask scope. */
-  compareMaskFingerprint?: string;
   /** Fingerprint of actual interval data (count/maxTs/value checksum). */
   intervalDataFingerprint?: string;
   /** Usage-shape identity/version fields used by Past simulation day-total selection. */
@@ -42,8 +38,6 @@ export function computePastInputHash(payload: PastInputHashPayload): string {
       const sb = `${b.startDate}-${b.endDate}`;
       return sa < sb ? -1 : sa > sb ? 1 : 0;
     }),
-    artifactScope: payload.artifactScope ?? "",
-    compareMaskFingerprint: payload.compareMaskFingerprint ?? "",
     buildInputsHash: stableHashObject(payload.buildInputs),
     intervalDataFingerprint: payload.intervalDataFingerprint ?? "",
     usageShapeProfileId: payload.usageShapeProfileId ?? "",

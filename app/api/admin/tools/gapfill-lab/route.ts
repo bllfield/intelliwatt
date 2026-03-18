@@ -348,6 +348,7 @@ function buildFullReport(args: {
     intervalDataFingerprint: string | null;
     scenarioId: string | null;
   };
+  // LEGACY / NON-AUTHORITATIVE: gapfill_test_days_profile may appear in older copied reports.
   enginePath?: "production_past_stitched" | "gapfill_test_days_profile";
   expectedTestIntervals?: number;
   coveragePct?: number | null;
@@ -1023,7 +1024,7 @@ export async function POST(req: NextRequest) {
     benchmark?: unknown;
     /** Include usage365 chart payload (expensive); compare path can disable for performance. */
     includeUsage365?: boolean;
-    /** Explicit write action: regenerate + resave canonical Past artifact for gapfill_lab before compare. */
+    /** Explicit write action: regenerate + resave canonical shared Past artifact before compare. */
     rebuildArtifact?: boolean;
     /** Rebuild artifact only, then return immediately (no compare in same request). */
     rebuildOnly?: boolean;
@@ -1253,7 +1254,7 @@ export async function POST(req: NextRequest) {
     const candidateStart = canonicalWindow.startDate;
     const coverageSelection = await getCandidateDateCoverageForSelection({
       houseId: house.id,
-      scenarioIdentity: `gapfill_lab:${canonicalMonths.join(",")}`,
+      scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
       windowStart: candidateStart,
       windowEnd: candidateEnd,
       timezone,
@@ -1435,7 +1436,7 @@ export async function POST(req: NextRequest) {
       userEmail: user.email,
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-      scenarioId: "gapfill_lab",
+      scenarioId: "past_shared_artifact",
       reasonCode: classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
@@ -1466,7 +1467,7 @@ export async function POST(req: NextRequest) {
       userEmail: user.email,
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-      scenarioId: "gapfill_lab",
+      scenarioId: "past_shared_artifact",
       reasonCode: classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
@@ -1488,7 +1489,7 @@ export async function POST(req: NextRequest) {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
   }));
 
-  // Canonical path: compare uses shared simulation artifact orchestration; route keeps compare-only logic.
+  // Canonical path: Gap-Fill scoring reads the shared Past artifact/service output only.
   const rebuildArtifact = body?.rebuildArtifact === true;
   const rebuildOnly = body?.rebuildOnly === true;
   if (rebuildArtifact && rebuildOnly) {
@@ -1532,7 +1533,8 @@ export async function POST(req: NextRequest) {
       mode: "artifact_only",
       action: "rebuild_only",
       rebuilt: true,
-      message: "Gap-Fill compare artifact rebuilt with shared simulator logic. Running compare next will read from compare artifact cache.",
+      message:
+        "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
       testRangesUsed,
       testSelectionMode,
       testDaysRequested,
@@ -1589,41 +1591,18 @@ export async function POST(req: NextRequest) {
   )
     ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
     : inferredMissingSimulatedOwnershipCount;
-  if (scoredTestDaysMissingSimulatedOwnershipCount > 0) {
-    const classification = classifySimulationFailure({
-      code: "artifact_test_window_not_simulated",
-      message: "Selected test dates are ACTUAL-owned in shared artifact ownership.",
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "artifact_test_window_not_simulated",
-        message:
-          "Selected Test Dates include ACTUAL-owned days in the shared artifact. Choose dates in simulated/masked scope for compare scoring.",
-        explanation: classification.userFacingExplanation,
-        missingData: classification.missingData,
-        reasonCode: classification.reasonCode,
-        scoredTestDaysMissingSimulatedOwnershipCount,
-        scoringExcludedSource:
-          (sharedSim as any)?.scoringExcludedSource ?? "artifact_meta_compareMaskDateKeysFingerprint",
-        artifactBuildExcludedSource:
-          (sharedSim as any)?.artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint",
-      },
-      { status: 409 }
-    );
-  }
   const missingJoinedActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
   if (missingJoinedActual.length > 0) {
     const classification = classifySimulationFailure({
       code: "artifact_compare_join_incomplete_rebuild_required",
-      message: "Saved simulation artifact did not produce all simulated timestamps required for compare join.",
+      message: "Saved shared Past artifact did not produce all simulated timestamps required for compare join.",
     });
     return NextResponse.json(
       {
         ok: false,
         error: "artifact_compare_join_incomplete_rebuild_required",
         message:
-          "Saved/rebuilt gapfill artifact is missing simulated points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
+          "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
         explanation: classification.userFacingExplanation,
         missingData: classification.missingData,
         reasonCode: classification.reasonCode,
@@ -1642,13 +1621,17 @@ export async function POST(req: NextRequest) {
   });
   const actualTestIntervalsCount = scoringActualTestIntervalsCanon.length;
   const simulatedTestIntervalsCount = sharedSim.simulatedTestIntervals.length;
+  const hasScoreableIntervals = simulatedTestIntervalsCount > 0;
+  const scoreableIntervalsMessage = hasScoreableIntervals
+    ? "Selected test days include scoreable intervals from shared Past artifact output."
+    : "Selected test days had no scoreable intervals from shared Past artifact output. This compare completed with zero scored intervals.";
   const scoringActualSource = "actual_usage_test_window_intervals";
   const scoringSimulatedSource =
     (sharedSim as any).scoringSimulatedSource ?? "shared_artifact_simulated_intervals15";
   const scoringUsedSharedArtifact =
     (sharedSim as any).scoringUsedSharedArtifact !== false;
   const scoringExcludedSource =
-    (sharedSim as any).scoringExcludedSource ?? "artifact_meta_compareMaskDateKeysFingerprint";
+    (sharedSim as any).scoringExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
   const artifactBuildExcludedSource =
     (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
   const artifactUsesTestDaysInIdentity =
@@ -1683,7 +1666,7 @@ export async function POST(req: NextRequest) {
   const stableScenarioId =
     (typeof artifactScenarioId === "string" && artifactScenarioId.trim()) ||
     contextScenarioId ||
-    "gapfill_lab";
+    "past_shared_artifact";
   const artifactCreatedAt = ma.artifactCreatedAt ?? null;
   const artifactUpdatedAt = ma.artifactUpdatedAt ?? null;
   const artifactSourceNote =
@@ -1860,6 +1843,8 @@ export async function POST(req: NextRequest) {
     testIntervalsCount: actualTestIntervals.length,
     actualTestIntervalsCount,
     simulatedTestIntervalsCount,
+    hasScoreableIntervals,
+    message: scoreableIntervalsMessage,
     scoringActualSource,
     scoringSimulatedSource,
     scoringUsedSharedArtifact,
@@ -1908,7 +1893,7 @@ export async function POST(req: NextRequest) {
     fullReportText: fullReport.fullReportText,
     pasteSummary:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
-      `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=gapfill_lab`,
+      `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=${stableScenarioId}`,
   });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

@@ -392,7 +392,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.artifactScenarioId).toBeNull();
   });
 
-  it("falls back scenarioId to gapfill_lab when artifact and context scenario ids are missing", async () => {
+  it("falls back scenarioId to past_shared_artifact when artifact and context scenario ids are missing", async () => {
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
       artifactAutoRebuilt: false,
@@ -422,7 +422,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.scenarioId).toBe("gapfill_lab");
+    expect(body.scenarioId).toBe("past_shared_artifact");
     expect(body.artifactScenarioId).toBeNull();
   });
 
@@ -486,10 +486,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.artifactUsesTestDaysInIdentity).toBe(false);
     expect(body.artifactUsesTravelDaysInIdentity).toBe(true);
     expect(body.artifactBuildExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
-    expect(body.scoringExcludedSource).toBe("artifact_meta_compareMaskDateKeysFingerprint");
+    expect(body.scoringExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
+    expect(body.hasScoreableIntervals).toBe(true);
   });
 
-  it("returns test-window-not-simulated (not join-incomplete) when artifact has no simulated intervals for selected test dates", async () => {
+  it("returns success with zero scored intervals when shared artifact has no selected test-date intervals", async () => {
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
       artifactAutoRebuilt: false,
@@ -520,11 +521,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     } as any;
     const res = await POST(req);
     const body = await res.json();
-    expect(res.status).toBe(409);
-    expect(body.error).toBe("artifact_test_window_not_simulated");
-    expect(body.error).not.toBe("artifact_compare_join_incomplete_rebuild_required");
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.actualTestIntervalsCount).toBe(0);
+    expect(body.simulatedTestIntervalsCount).toBe(0);
+    expect(body.hasScoreableIntervals).toBe(false);
+    expect(String(body.message ?? "")).toContain("shared Past artifact output");
     expect(body.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
-    expect(String(body.explanation ?? "")).toContain("ACTUAL-only");
   });
 
   it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {

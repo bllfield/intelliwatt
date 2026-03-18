@@ -294,10 +294,11 @@ Real historical weather is required for solar production adjustments, manual mon
 ### 2.4 Validate shared simulator core usage
 
 - [ ] Validate that user-facing Past baseline uses the shared past-day simulation core
-- [ ] Validate that Gap-Fill Lab and user Past report the same simulator core/version metadata
+- [ ] Validate that Gap-Fill Lab scoring and user Past use the same shared artifact identity/fingerprint and same simulator core/version metadata
 - [ ] Confirm full-year stitched baseline behavior remains correct after simulator-core unification
 - [ ] Confirm Past cache behavior and returned dataset shape remain unchanged after simulator-core unification
 - [ ] Add lightweight simulator core/version metadata to production Past outputs for validation and debugging
+- [ ] LEGACY / NON-AUTHORITATIVE labels (for example `gapfill_test_days_profile`) are treated as historical naming only, not separate artifact ownership
 
 ---
 
