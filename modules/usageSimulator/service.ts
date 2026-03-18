@@ -782,7 +782,13 @@ export async function buildGapfillCompareSimShared(args: {
 
   let restoredMetaNormalized: Record<string, unknown> = {};
   for (let pass = 0; pass < 2; pass++) {
-    applyCanonicalCoverageMetadataForNonBaseline(dataset, "gapfill_lab");
+    // Lightweight selected-days compare reads skip hash recomputation but still
+    // need ownership metadata (excluded fingerprint/count) from current travel ranges.
+    applyCanonicalCoverageMetadataForNonBaseline(
+      dataset,
+      "gapfill_lab",
+      useSelectedDaysLightweightArtifactRead ? { buildInputs } : undefined
+    );
     restoredMetaNormalized = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
     const artifactCurveShapingVersion = String(restoredMetaNormalized?.curveShapingVersion ?? "");
     const artifactIntervalsRaw = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
