@@ -757,6 +757,11 @@ export async function buildGapfillCompareSimShared(args: {
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
     chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
+  const chartMonthKeysLocal = new Set<string>(
+    Array.from(chartDateKeysLocal)
+      .map((dk) => String(dk).slice(0, 7))
+      .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
+  );
   const canonicalDailyInputRows = restoredCanonicalDailyRows ?? (Array.isArray((dataset as any)?.daily)
     ? ((dataset as any).daily as Array<{ date?: string; kwh?: number; source?: string }>)
     : []);
@@ -803,7 +808,7 @@ export async function buildGapfillCompareSimShared(args: {
           month: String(m?.month ?? "").slice(0, 7),
           kwh: round2Local(Number(m?.kwh) || 0),
         }))
-        .filter((m) => /^\d{4}-\d{2}$/.test(m.month))
+        .filter((m) => /^\d{4}-\d{2}$/.test(m.month) && chartMonthKeysLocal.has(m.month))
         .sort((a, b) => (a.month < b.month ? -1 : 1));
   const useDatasetMonthlyAsCanonical = datasetMonthlyRows.length > 0;
   const monthlyChartBuild = !useDatasetMonthlyAsCanonical

@@ -496,7 +496,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           excludedDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", kwh: 9.99, source: "ACTUAL" }],
-        monthly: [{ month: "2026-01", kwh: 333.33 }],
+        monthly: [
+          { month: "2025-12", kwh: 111.11 },
+          { month: "2026-01", kwh: 333.33 },
+        ],
         insights: {
           stitchedMonth: {
             mode: "PRIOR_YEAR_TAIL",
@@ -529,6 +532,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         { date: "2026-01-01", simKwh: 9.99, source: "SIMULATED" },
       ]);
       expect(out.simulatedChartMonthly).toEqual([{ month: "2026-01", kwh: 333.33 }]);
+      expect(out.simulatedChartMonthly.find((m) => m.month === "2025-12")).toBeUndefined();
       expect(out.simulatedChartStitchedMonth?.yearMonth).toBe("2026-01");
       expect((out.modelAssumptions as any)?.gapfillDisplayDailySource).toBe("dataset.daily");
       expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("dataset.monthly");
