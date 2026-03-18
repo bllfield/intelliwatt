@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
+import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 
 vi.mock("server-only", () => ({}));
 
@@ -76,7 +78,6 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     getLatestCachedPastDatasetByScenario.mockReset();
     saveCachedPastDataset.mockReset();
     simulatePastUsageDataset.mockReset();
-    simulatePastSelectedDaysShared.mockReset();
     simulatePastSelectedDaysShared.mockReset();
     encodeIntervalsV1.mockReset();
     decodeIntervalsV1.mockReset();
@@ -1098,6 +1099,181 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const heavyDayKwh = heavyOut.simulatedTestIntervals.reduce((s, p) => s + (Number(p.kwh) || 0), 0);
       expect(Math.round(selectedDayKwh * 100) / 100).toBe(Math.round(heavyDayKwh * 100) / 100);
     }
+  });
+});
+
+describe("buildPastSimulatedBaselineV1 forced selected-day parity", () => {
+  it("keeps present actual slots when a forced day is also incomplete", () => {
+    const day1StartMs = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-01-02T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [
+      ...day1Grid.map((ts) => ({ timestamp: ts, kwh: 1 })),
+      ...day2Grid.slice(0, 12).map((ts, idx) => ({ timestamp: ts, kwh: 3 + idx / 100 })),
+    ];
+    const actualByTs = new Map(actualIntervals.map((p) => [p.timestamp, p.kwh] as const));
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      forceSimulateDateKeys: new Set<string>(["2026-01-02"]),
+      emitAllIntervals: false,
+    });
+
+    expect(out.intervals.length).toBe(96);
+    const simulatedDay2 = out.intervals.filter((p) => dateKeyFromTimestamp(p.timestamp) === "2026-01-02");
+    expect(simulatedDay2.length).toBe(96);
+    for (const ts of day2Grid.slice(0, 12)) {
+      expect(simulatedDay2.find((p) => p.timestamp === ts)?.kwh).toBe(actualByTs.get(ts));
+    }
+  });
+
+  it("matches full-window excluded-day intervals and fallback diagnostics", () => {
+    const day1StartMs = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-01-02T00:00:00.000Z").getTime();
+    const day3StartMs = new Date("2026-01-03T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const day3Grid = getDayGridTimestamps(day3StartMs);
+
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [
+      ...day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.5 + (idx % 8) * 0.02 })),
+      ...day3Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.35 + (idx % 6) * 0.03 })),
+    ];
+    const targetDate = dateKeyFromTimestamp(day2Grid[0]!);
+    const excludedDateKeys = new Set<string>([targetDate]);
+    const commonArgs = {
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs, day3StartMs],
+      excludedDateKeys,
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>([
+        ["2026-01-01", { tAvgF: 42, tMinF: 33, tMaxF: 52, hdd65: 23, cdd65: 0 }],
+        ["2026-01-02", { tAvgF: 41, tMinF: 31, tMaxF: 50, hdd65: 24, cdd65: 0 }],
+        ["2026-01-03", { tAvgF: 45, tMinF: 35, tMaxF: 54, hdd65: 20, cdd65: 0 }],
+      ]),
+    };
+
+    const fullWindow = buildPastSimulatedBaselineV1({
+      ...commonArgs,
+      emitAllIntervals: true,
+    });
+    const selectedDays = buildPastSimulatedBaselineV1({
+      ...commonArgs,
+      forceSimulateDateKeys: new Set<string>([targetDate]),
+      emitAllIntervals: false,
+    });
+
+    const fullTargetIntervals = fullWindow.intervals.filter((p) => dateKeyFromTimestamp(p.timestamp) === targetDate);
+    const selectedTargetIntervals = selectedDays.intervals.filter((p) => dateKeyFromTimestamp(p.timestamp) === targetDate);
+    expect(selectedTargetIntervals.length).toBe(96);
+    expect(fullTargetIntervals.length).toBe(96);
+    expect(selectedTargetIntervals).toEqual(fullTargetIntervals);
+
+    const fullTargetResult = fullWindow.dayResults.find((r) => String(r.localDate).slice(0, 10) === targetDate);
+    const selectedTargetResult = selectedDays.dayResults.find((r) => String(r.localDate).slice(0, 10) === targetDate);
+    expect(selectedTargetResult).toBeTruthy();
+    expect(fullTargetResult).toBeTruthy();
+    expect(selectedTargetResult?.fallbackLevel).toBe(fullTargetResult?.fallbackLevel);
+    expect(selectedTargetResult?.targetDayKwhBeforeWeather).toBeCloseTo(fullTargetResult?.targetDayKwhBeforeWeather ?? 0, 9);
+    expect(selectedTargetResult?.shapeVariantUsed).toBe(fullTargetResult?.shapeVariantUsed);
+    expect(selectedTargetResult?.dayTypeUsed).toBe(fullTargetResult?.dayTypeUsed);
+    expect(selectedTargetResult?.weatherRegimeUsed).toBe(fullTargetResult?.weatherRegimeUsed);
+    expect(selectedTargetResult?.dayClassification).toBe(fullTargetResult?.dayClassification);
+  });
+
+  it("stays aligned with full-window in sparse reference-pool conditions", () => {
+    const day1StartMs = new Date("2026-02-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-02-02T00:00:00.000Z").getTime();
+    const day3StartMs = new Date("2026-02-03T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const day3Grid = getDayGridTimestamps(day3StartMs);
+
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [
+      ...day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.6 + (idx % 12) * 0.015 })),
+    ];
+    const targetDate = dateKeyFromTimestamp(day2Grid[0]!);
+    const excludedDateKeys = new Set<string>([targetDate, dateKeyFromTimestamp(day3Grid[0]!)]);
+    const commonArgs = {
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs, day3StartMs],
+      excludedDateKeys,
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>([
+        ["2026-02-01", { tAvgF: 49, tMinF: 39, tMaxF: 58, hdd65: 16, cdd65: 0 }],
+        ["2026-02-02", { tAvgF: 47, tMinF: 37, tMaxF: 56, hdd65: 18, cdd65: 0 }],
+        ["2026-02-03", { tAvgF: 44, tMinF: 34, tMaxF: 53, hdd65: 21, cdd65: 0 }],
+      ]),
+    };
+
+    const fullWindow = buildPastSimulatedBaselineV1({
+      ...commonArgs,
+      emitAllIntervals: true,
+    });
+    const selectedDays = buildPastSimulatedBaselineV1({
+      ...commonArgs,
+      forceSimulateDateKeys: new Set<string>([targetDate]),
+      emitAllIntervals: false,
+    });
+
+    const fullTargetIntervals = fullWindow.intervals.filter((p) => dateKeyFromTimestamp(p.timestamp) === targetDate);
+    const selectedTargetIntervals = selectedDays.intervals.filter((p) => dateKeyFromTimestamp(p.timestamp) === targetDate);
+    expect(selectedTargetIntervals).toEqual(fullTargetIntervals);
+
+    const fullTargetResult = fullWindow.dayResults.find((r) => String(r.localDate).slice(0, 10) === targetDate);
+    const selectedTargetResult = selectedDays.dayResults.find((r) => String(r.localDate).slice(0, 10) === targetDate);
+    expect(selectedTargetResult?.fallbackLevel).toBe(fullTargetResult?.fallbackLevel);
+    expect(selectedTargetResult?.shapeVariantUsed).toBe(fullTargetResult?.shapeVariantUsed);
+    expect(selectedTargetResult?.targetDayKwhBeforeWeather).toBeCloseTo(fullTargetResult?.targetDayKwhBeforeWeather ?? 0, 9);
+  });
+
+  it("is deterministic for repeated selected-day execution and diagnostics", () => {
+    const day1StartMs = new Date("2026-03-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-03-02T00:00:00.000Z").getTime();
+    const day3StartMs = new Date("2026-03-03T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const day3Grid = getDayGridTimestamps(day3StartMs);
+
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [
+      ...day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.42 + (idx % 5) * 0.011 })),
+      ...day3Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.37 + (idx % 7) * 0.009 })),
+      ...day2Grid.slice(0, 8).map((ts, idx) => ({ timestamp: ts, kwh: 0.8 + idx * 0.01 })),
+    ];
+    const targetDate = dateKeyFromTimestamp(day2Grid[0]!);
+
+    const run = () =>
+      buildPastSimulatedBaselineV1({
+        actualIntervals,
+        canonicalDayStartsMs: [day1StartMs, day2StartMs, day3StartMs],
+        excludedDateKeys: new Set<string>(),
+        dateKeyFromTimestamp,
+        getDayGridTimestamps,
+        collectSimulatedDayResults: true,
+        forceSimulateDateKeys: new Set<string>([targetDate]),
+        emitAllIntervals: false,
+        actualWxByDateKey: new Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>([
+          ["2026-03-01", { tAvgF: 61, tMinF: 50, tMaxF: 71, hdd65: 4, cdd65: 0 }],
+          ["2026-03-02", { tAvgF: 64, tMinF: 53, tMaxF: 73, hdd65: 1, cdd65: 0 }],
+          ["2026-03-03", { tAvgF: 66, tMinF: 55, tMaxF: 75, hdd65: 0, cdd65: 1 }],
+        ]),
+      });
+
+    const first = run();
+    const second = run();
+    expect(first.intervals).toEqual(second.intervals);
+    expect(first.dayResults).toEqual(second.dayResults);
   });
 });
 

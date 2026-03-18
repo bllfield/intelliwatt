@@ -1490,7 +1490,7 @@ export function buildPastSimulatedBaselineV1(args: {
         shapeByMonth96Ref
       );
       const blendedResult =
-        simulatedReason === "INCOMPLETE"
+        day.dayIsIncomplete
           ? (() => {
               const blendedIntervals = result.intervals.map((iv) => {
                 if (actualByTs.has(iv.timestamp)) {
