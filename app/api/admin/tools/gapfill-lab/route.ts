@@ -36,6 +36,8 @@ import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/da
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
+// Keep route compare-core timeout below client timeout so route-side
+// classification (failedStep/reasonCode) reaches UI before browser abort.
 const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 120_000;
 const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
 
@@ -125,11 +127,16 @@ function round2(n: number): number {
 
 type CompareCoreStepKey =
   | "select_test_days"
+  | "map_selected_ranges_to_intervals"
   | "load_actual_usage"
+  | "load_artifact"
   | "build_shared_compare"
   | "join_actual_vs_sim"
   | "build_metrics"
-  | "build_diagnostics";
+  | "summarize_metrics"
+  | "build_diagnostics"
+  | "build_full_report"
+  | "finalize_response";
 
 function startCompareCoreTiming() {
   return {
@@ -1127,11 +1134,6 @@ function buildFullReport(args: {
   return { fullReportJson, fullReportText };
 }
 
-const routeCompareCoreHooks = {
-  buildFullReport: (args: Parameters<typeof buildFullReport>[0]) => buildFullReport(args),
-};
-
-
 export async function POST(req: NextRequest) {
   if (!hasAdminSessionCookie(req)) {
     const gate = requireAdmin(req);
@@ -1498,6 +1500,7 @@ export async function POST(req: NextRequest) {
     testDaysSelected = testDateKeysLocal.size;
   }
   markCompareCoreStep(compareCoreTiming, "select_test_days");
+  markCompareCoreStep(compareCoreTiming, "map_selected_ranges_to_intervals");
 
   if (testDateKeysLocal.size === 0) {
     return NextResponse.json(
@@ -1664,6 +1667,12 @@ export async function POST(req: NextRequest) {
 
   const compareFreshMode: "selected_days" | "full_window" =
     includeDiagnostics || includeFullReportText ? "full_window" : "selected_days";
+  const selectedDaysCoreLightweight =
+    compareFreshMode === "selected_days" && !includeDiagnostics && !includeFullReportText;
+  // Orchestrator already runs explicit artifact_ensure before compare_core.
+  // Skip redundant auto-ensure in lightweight selected-days compare.
+  const autoEnsureArtifactForCompare =
+    selectedDaysCoreLightweight && !rebuildArtifact ? false : true;
   const compareRequestTruth = {
     includeDiagnosticsRequested: includeDiagnostics,
     includeFullReportTextRequested: includeFullReportText,
@@ -1679,7 +1688,7 @@ export async function POST(req: NextRequest) {
         canonicalWindow,
         testDateKeysLocal,
         rebuildArtifact,
-        autoEnsureArtifact: true,
+        autoEnsureArtifact: autoEnsureArtifactForCompare,
         compareFreshMode,
         includeFreshCompareCalc: compareFreshMode === "full_window",
       }),
@@ -1707,11 +1716,13 @@ export async function POST(req: NextRequest) {
           failedStep: "build_shared_compare",
           timeoutMs: timedOut ? ROUTE_COMPARE_SHARED_TIMEOUT_MS : undefined,
           compareRequestTruth,
+          selectedDaysCoreLightweight,
         }),
       },
       { status: timedOut ? 504 : 500 }
     );
   }
+  markCompareCoreStep(compareCoreTiming, "load_artifact");
   markCompareCoreStep(compareCoreTiming, "build_shared_compare");
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
@@ -1956,6 +1967,7 @@ export async function POST(req: NextRequest) {
     timezone,
   });
   markCompareCoreStep(compareCoreTiming, "build_metrics");
+  markCompareCoreStep(compareCoreTiming, "summarize_metrics");
   const requestedTestDaysCount = testDateKeysLocal.size;
   const scoringTestDaysCount = scoringTestDateKeysLocal.size;
   const scoredIntervalsCount = scoringActualTestIntervalsCanon.length;
@@ -2307,7 +2319,7 @@ export async function POST(req: NextRequest) {
     try {
       fullReport = await withTimeout(
         Promise.resolve(
-          routeCompareCoreHooks.buildFullReport({
+          buildFullReport({
             reportVersion: REPORT_VERSION,
             generatedAt: new Date().toISOString(),
             env: process.env.NODE_ENV ?? "development",
@@ -2447,6 +2459,7 @@ export async function POST(req: NextRequest) {
         ROUTE_COMPARE_REPORT_TIMEOUT_MS,
         "compare_core_route_timeout_build_full_report"
       );
+      markCompareCoreStep(compareCoreTiming, "build_full_report");
     } catch (err: unknown) {
       const normalizedError = normalizeRouteError(
         err,
@@ -2467,6 +2480,7 @@ export async function POST(req: NextRequest) {
             failedStep: "build_diagnostics",
             timeoutMs: timedOut ? ROUTE_COMPARE_REPORT_TIMEOUT_MS : undefined,
             compareRequestTruth,
+            selectedDaysCoreLightweight,
           }),
         },
         { status: timedOut ? 504 : 500 }
@@ -2474,6 +2488,7 @@ export async function POST(req: NextRequest) {
     }
   }
   markCompareCoreStep(compareCoreTiming, "build_diagnostics");
+  markCompareCoreStep(compareCoreTiming, "finalize_response");
 
   return NextResponse.json({
     ok: true,
@@ -2537,7 +2552,7 @@ export async function POST(req: NextRequest) {
     compareRequestTruth,
     compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
       compareRequestTruth,
-      selectedDaysCoreLightweight: compareFreshMode === "selected_days" && !includeDiagnostics && !includeFullReportText,
+      selectedDaysCoreLightweight,
     }),
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
@@ -2612,4 +2627,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

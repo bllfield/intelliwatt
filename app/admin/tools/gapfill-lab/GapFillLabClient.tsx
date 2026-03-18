@@ -141,7 +141,9 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
 const GAPFILL_COMPARE_TIMEOUT_MS = 900_000;
-const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 90_000;
+// Keep client timeout above route compare-core timeouts so route step-level
+// timeout classification can return to UI before the browser aborts.
+const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
 const GAPFILL_REBUILD_TIMEOUT_MS = 900_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;

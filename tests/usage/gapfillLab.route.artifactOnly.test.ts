@@ -1054,7 +1054,60 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
       expect.objectContaining({
         compareFreshMode: "selected_days",
+        autoEnsureArtifact: false,
         includeFreshCompareCalc: false,
+      })
+    );
+  });
+
+  it("keeps compare auto-ensure enabled for full-window diagnostics mode", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_fresh_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "full_window",
+      compareCalculationScope: "full_window_shared_path_then_scored_day_filter",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_fresh_calc",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeDiagnostics: true,
+        includeFullReportText: false,
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compareFreshMode: "full_window",
+        autoEnsureArtifact: true,
+        includeFreshCompareCalc: true,
       })
     );
   });
