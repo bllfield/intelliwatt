@@ -1717,7 +1717,7 @@ export async function POST(req: NextRequest) {
     ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
     : inferredMissingSimulatedOwnershipCount;
   const scoringUsedSharedArtifact =
-    (sharedSim as any).scoringUsedSharedArtifact !== false;
+    (sharedSim as any).scoringUsedSharedArtifact === true;
   const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
   const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
   const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
