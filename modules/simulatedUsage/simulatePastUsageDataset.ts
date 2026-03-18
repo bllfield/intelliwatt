@@ -478,10 +478,9 @@ export async function simulatePastUsageDataset(
       reasonNotUsed,
     };
 
-    // Lab validation artifacts need shared per-day diagnostics even when callers
-    // omit full simulated-day payloads for response size reasons.
-    const collectSimulatedDayResultsForDiagnostics =
-      includeSimulatedDayResults || buildPathKind === "lab_validation";
+    // In serverless paths, retaining full per-day simulated diagnostics can trigger
+    // memory pressure for large windows. Only collect when explicitly requested.
+    const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
