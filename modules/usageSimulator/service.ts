@@ -647,13 +647,33 @@ export async function buildGapfillCompareSimShared(args: {
     return { ok: true, dataset: rebuiltDataset };
   }
 
-  const cached = !rebuildArtifact
+  let artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" | null =
+    rebuildArtifact ? null : "exact_hash_match";
+  let cached = !rebuildArtifact
     ? await getCachedPastDataset({
         houseId,
         scenarioId: sharedScenarioCacheId,
         inputHash: sharedInputHash,
       })
     : null;
+  // If exact identity hash misses, fall back to latest scenario artifact when ownership scope
+  // is compatible so compare can read the same shared Past output that rebuild just produced.
+  if (!rebuildArtifact && (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)) {
+    const latestCached = await getLatestCachedPastDatasetByScenario({
+      houseId,
+      scenarioId: sharedScenarioCacheId,
+    });
+    const latestMeta = (((latestCached as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>) ?? {};
+    const latestExcludedFingerprint = String(latestMeta?.excludedDateKeysFingerprint ?? "");
+    const latestIsFallbackCompatible =
+      latestCached != null &&
+      latestCached.intervalsCodec === INTERVAL_CODEC_V1 &&
+      latestExcludedFingerprint === travelFingerprint;
+    if (latestIsFallbackCompatible) {
+      cached = latestCached as any;
+      artifactSourceMode = "latest_by_scenario_fallback";
+    }
+  }
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
     restoredCanonicalDailyRows = Array.isArray((cached.datasetJson as any)?.daily)
       ? (((cached.datasetJson as any).daily as Array<{ date?: string; kwh?: number; source?: string }>).map((d) => ({
@@ -807,13 +827,27 @@ export async function buildGapfillCompareSimShared(args: {
 
   if (!restoredMetaNormalized || typeof restoredMetaNormalized !== "object") (dataset as any).meta = {};
   const modelAssumptions = (dataset as any)?.meta ?? {};
+  const artifactInputHashUsed =
+    !artifactAutoRebuilt && typeof (cached as any)?.inputHash === "string"
+      ? String((cached as any).inputHash)
+      : sharedInputHash;
   modelAssumptions.artifactReadMode = "artifact_only";
   modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
   modelAssumptions.artifactScenarioId = sharedScenarioCacheId;
-  modelAssumptions.artifactInputHash = sharedInputHash;
-  modelAssumptions.artifactInputHashUsed = sharedInputHash;
+  modelAssumptions.artifactInputHash = artifactInputHashUsed;
+  modelAssumptions.artifactInputHashUsed = artifactInputHashUsed;
   modelAssumptions.requestedInputHash = sharedInputHash;
-  modelAssumptions.artifactHashMatch = true;
+  modelAssumptions.artifactHashMatch = artifactInputHashUsed === sharedInputHash;
+  if (artifactSourceMode) {
+    modelAssumptions.artifactSourceMode = artifactSourceMode;
+    modelAssumptions.artifactSourceNote =
+      artifactSourceMode === "exact_hash_match"
+        ? "Artifact source: exact identity match on Past input hash."
+        : "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).";
+  }
+  if (!artifactAutoRebuilt && (cached as any)?.updatedAt instanceof Date) {
+    modelAssumptions.artifactUpdatedAt = ((cached as any).updatedAt as Date).toISOString();
+  }
   // Shared ownership metadata is travel/vacant-only.
   modelAssumptions.excludedDateKeysFingerprint = travelFingerprint;
   modelAssumptions.excludedDateKeysCount = boundedTravelDateKeysLocal.size;

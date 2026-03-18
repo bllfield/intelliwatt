@@ -316,6 +316,46 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("falls back to latest scenario artifact when exact hash misses after rebuild and ownership scope matches", async () => {
+    getCachedPastDataset.mockResolvedValue(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-latest-scenario",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      includeFreshCompareCalc: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedTestIntervals.length).toBeGreaterThan(0);
+      expect((out.modelAssumptions as any)?.artifactSourceMode).toBe("latest_by_scenario_fallback");
+      expect(typeof (out.modelAssumptions as any)?.requestedInputHash).toBe("string");
+      expect((out.modelAssumptions as any)?.artifactInputHashUsed).toBe("hash-latest-scenario");
+      expect((out.modelAssumptions as any)?.requestedInputHash).not.toBe("hash-latest-scenario");
+      expect((out.modelAssumptions as any)?.artifactHashMatch).toBe(false);
+    }
+  });
+
   it("does not enforce legacy compare-mask metadata when shared ownership metadata is valid", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-actual-days",
