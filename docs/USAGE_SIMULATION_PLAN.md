@@ -302,11 +302,11 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 
 ### GapFill Shared Scoring Rule
 
-- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Past Sim and GapFill compare use the same shared artifact identity/fingerprint and the same shared simulator logic path.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill is a holdout validation workflow, not an artifact-building workflow.
-- GapFill may select test days, fetch actual intervals for those days, read the matching simulated intervals from the shared artifact, and compute metrics/reports.
+- GapFill may select test days, fetch actual intervals for those days, read matching simulated intervals from shared simulator output for that artifact identity (cached artifact or fresh shared build), and compute metrics/reports.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

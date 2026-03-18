@@ -113,12 +113,12 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 
 ### GapFill Shared-Artifact Rule
 
-- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Past Sim and GapFill compare use the same shared artifact identity/fingerprint and shared simulator logic path.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - `excludedDateKeysCount` and `excludedDateKeysFingerprint` must describe only travel/vacant exclusions within the shared coverage window.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - Test days do not create a new artifact, do not create a new fingerprint, and do not change artifact identity or ownership metadata.
-- GapFill is a scoring/reporting workflow only. It may select test days, load actual intervals for those days, read the matching simulated intervals from the shared artifact, and compute metrics/reports.
+- GapFill is a scoring/reporting workflow only. It may select test days, load actual intervals for those days, read matching simulated intervals from shared simulator output tied to the shared artifact identity (cached restore or fresh shared build), and compute metrics/reports.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, rebuild simulated intervals locally, or perform simulation math in routes/tools outside the shared modules.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

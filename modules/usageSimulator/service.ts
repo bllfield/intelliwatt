@@ -250,6 +250,9 @@ export type GapfillCompareSimSharedResult =
       comparePulledFromSharedArtifactOnly?: boolean;
       scoredTestDaysMissingSimulatedOwnershipCount?: number;
       compareSharedCalcPath?: string;
+      compareCalculationScope?:
+        | "artifact_read_then_scored_day_filter"
+        | "full_window_shared_path_then_scored_day_filter";
       displaySimSource?: "dataset.daily" | "interval_rebucket_fallback";
       compareSimSource?: "shared_fresh_calc" | "shared_artifact_cache";
       weatherBasisUsed?: string;
@@ -257,6 +260,11 @@ export type GapfillCompareSimSharedResult =
         matches: boolean;
         mismatchCount: number;
         mismatchSampleDates: string[];
+        scope: "scored_test_days_local";
+        granularity: "daily_kwh_rounded_2dp";
+        comparisonBasis:
+          | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
+          | "display_shared_artifact_vs_compare_artifact_filter_only";
       };
       timezoneUsedForScoring: string;
       windowUsedForScoring: { startDate: string; endDate: string };
@@ -829,6 +837,9 @@ export async function buildGapfillCompareSimShared(args: {
     "shared_artifact_simulated_intervals15";
   let comparePulledFromSharedArtifactOnly = true;
   let compareSimSource: "shared_fresh_calc" | "shared_artifact_cache" = "shared_artifact_cache";
+  let compareCalculationScope:
+    | "artifact_read_then_scored_day_filter"
+    | "full_window_shared_path_then_scored_day_filter" = "artifact_read_then_scored_day_filter";
   let weatherBasisUsed = String(
     (modelAssumptions as any)?.weatherSourceSummary ??
     (modelAssumptions as any)?.simulationWeatherSourceOwner ??
@@ -879,6 +890,7 @@ export async function buildGapfillCompareSimShared(args: {
     scoringSimulatedSource = "shared_fresh_simulated_intervals15";
     comparePulledFromSharedArtifactOnly = false;
     compareSimSource = "shared_fresh_calc";
+    compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
     weatherBasisUsed = String(
       ((freshDataset as any)?.meta?.weatherSourceSummary ??
         (freshDataset as any)?.meta?.simulationWeatherSourceOwner ??
@@ -993,10 +1005,19 @@ export async function buildGapfillCompareSimShared(args: {
   const mismatchSampleDates = Array.from(boundedTestDateKeysLocal)
     .filter((dk) => round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== round2Local(displayDailyByDate.get(dk) ?? 0))
     .slice(0, 10);
+  const parityComparisonBasis:
+    | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
+    | "display_shared_artifact_vs_compare_artifact_filter_only" =
+    compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
+      ? "display_shared_artifact_vs_compare_shared_full_window_then_filter"
+      : "display_shared_artifact_vs_compare_artifact_filter_only";
   const displayVsFreshParityForScoredDays = {
     matches: mismatchSampleDates.length === 0,
     mismatchCount: mismatchSampleDates.length,
     mismatchSampleDates,
+    scope: "scored_test_days_local" as const,
+    granularity: "daily_kwh_rounded_2dp" as const,
+    comparisonBasis: parityComparisonBasis,
   };
 
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
@@ -1018,6 +1039,7 @@ export async function buildGapfillCompareSimShared(args: {
     comparePulledFromSharedArtifactOnly,
     scoredTestDaysMissingSimulatedOwnershipCount,
     compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
+    compareCalculationScope,
     displaySimSource: useDatasetDailyAsCanonical ? "dataset.daily" : "interval_rebucket_fallback",
     compareSimSource,
     weatherBasisUsed,

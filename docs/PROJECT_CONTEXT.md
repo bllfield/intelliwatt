@@ -189,10 +189,10 @@ Mandatory enforcement rules:
 
 ### Shared Simulation Architecture Authority
 
-- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Past Sim and GapFill compare use the same shared artifact identity/fingerprint and shared simulator logic path.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
-- GapFill is a scoring/reporting workflow only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- GapFill is a scoring/reporting workflow only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally; scoring reads shared simulator output through cached artifact restore or fresh shared-build path.
 - Route-level or tool-level simulation math is not acceptable when the shared simulator output already exists.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

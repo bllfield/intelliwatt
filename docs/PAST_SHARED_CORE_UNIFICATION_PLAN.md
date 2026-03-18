@@ -2,9 +2,9 @@
 
 ## Overview
 
-Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume the shared simulator output produced for Past.
+Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume output from the shared Past simulator path (cached artifact restore or fresh shared build), not a separate compare artifact.
 
-## Implemented
+## Implemented wiring (verification checklist still open)
 
 - **Shared module** `modules/simulatedUsage/simulatePastUsageDataset.ts`
   - `simulatePastUsageDataset(args)`: single entrypoint; accepts houseId, userId, esiid, startDate, endDate, timezone, travelRanges, buildInputs, buildPathKind (`cold_build` | `recalc` | `lab_validation`), optional preloaded actualIntervals.
@@ -25,10 +25,10 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 
 ## Active architecture authority
 
-- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Past Sim and GapFill compare use the same shared artifact identity/fingerprint and the same shared simulator logic.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
-- GapFill must consume simulated intervals from the shared artifact. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- GapFill must consume simulated intervals from shared simulator output for that artifact identity (cached restore or fresh shared build). It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
   - `simulatePastUsageDataset`

@@ -702,11 +702,102 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");
       expect(out.compareSimSource).toBe("shared_fresh_calc");
+      expect(out.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
       expect(out.comparePulledFromSharedArtifactOnly).toBe(false);
       expect(out.compareSharedCalcPath).toContain("getPastSimulatedDatasetForHouse");
       expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
+      expect(out.displayVsFreshParityForScoredDays?.granularity).toBe("daily_kwh_rounded_2dp");
       expect(out.weatherBasisUsed).toBe("actual_only");
+    }
+  });
+
+  it("returns deterministic fresh compare outputs across repeated calls with identical inputs", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-fresh-repeat",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "", weatherSourceSummary: "actual_only" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { weatherSourceSummary: "actual_only" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: { intervals15: oneDayIntervals96(24 / 72) },
+      },
+      simulatedDayResults: [],
+      actualWxByDateKey: new Map(),
+    });
+    const commonArgs = {
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      includeFreshCompareCalc: true,
+    } as const;
+
+    const outA = await buildGapfillCompareSimShared(commonArgs);
+    const outB = await buildGapfillCompareSimShared(commonArgs);
+    expect(outA.ok).toBe(true);
+    expect(outB.ok).toBe(true);
+    if (outA.ok && outB.ok) {
+      expect(outA.simulatedTestIntervals).toEqual(outB.simulatedTestIntervals);
+      expect(outA.displayVsFreshParityForScoredDays).toEqual(outB.displayVsFreshParityForScoredDays);
+      expect(outA.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
+      expect(outB.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
+    }
+  });
+
+  it("surfaces parity mismatches when display artifact rows diverge from fresh shared-path scoring days", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-fresh-parity-mismatch",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 99, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "", weatherSourceSummary: "actual_only" },
+        daily: [{ date: "2026-01-01", kwh: 99, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 99 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { weatherSourceSummary: "actual_only" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: { intervals15: oneDayIntervals96(24 / 72) },
+      },
+      simulatedDayResults: [],
+      actualWxByDateKey: new Map(),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      includeFreshCompareCalc: true,
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(1);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
     }
   });
 });
