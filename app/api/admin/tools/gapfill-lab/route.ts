@@ -1716,9 +1716,11 @@ export async function POST(req: NextRequest) {
   )
     ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
     : inferredMissingSimulatedOwnershipCount;
+  const scoringUsedSharedArtifact =
+    (sharedSim as any).scoringUsedSharedArtifact !== false;
   const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
   const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
-  const scoringUsesArtifactOnly = (sharedSim as any).scoringUsedSharedArtifact === true;
+  const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
   if (scoringJoinMissingActual.length > 0) {
     if (scoringUsesArtifactOnly) {
       const classification = classifySimulationFailure({
@@ -1783,8 +1785,6 @@ export async function POST(req: NextRequest) {
   const scoringActualSource = "actual_usage_test_window_intervals";
   const scoringSimulatedSource =
     (sharedSim as any).scoringSimulatedSource ?? "shared_artifact_simulated_intervals15";
-  const scoringUsedSharedArtifact =
-    (sharedSim as any).scoringUsedSharedArtifact !== false;
   const scoringExcludedSource =
     (sharedSim as any).scoringExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
   const artifactBuildExcludedSource =
