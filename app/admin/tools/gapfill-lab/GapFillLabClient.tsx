@@ -639,6 +639,7 @@ export default function GapFillLabClient() {
             setProgressStatus(null);
             setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
             setError(formatApiError(rebuildData, rebuildRes.status));
+            setResult(null);
             setLastAttemptDebug((prev) => ({
               ...(prev ?? {}),
               phase: "legacy_rebuild_only_error",
@@ -662,6 +663,7 @@ export default function GapFillLabClient() {
             setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
             setError(formatApiError(compareData, compareRes.status));
             setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
+            setResult(null);
             setLastAttemptDebug((prev) => ({
               ...(prev ?? {}),
               phase: "legacy_compare_after_rebuild_error",
@@ -684,6 +686,7 @@ export default function GapFillLabClient() {
           ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
           : formatApiError(data, res.status);
         setError(errMsg);
+        setResult(null);
         return;
       }
       setProgressStatus(null);
@@ -703,6 +706,7 @@ export default function GapFillLabClient() {
         setArtifactMissing(true);
       }
       setError(msg);
+      setResult(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: e?.name === "AbortError" ? "compare_timeout" : "compare_exception",
@@ -736,6 +740,7 @@ export default function GapFillLabClient() {
         setProgressStatus(null);
         const errMsg = formatApiError(rebuildData, rebuildRes.status);
         setError(errMsg);
+        setResult(null);
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
@@ -756,6 +761,7 @@ export default function GapFillLabClient() {
     } catch (e: any) {
       setProgressStatus(null);
       setError(e?.name === "AbortError" ? "Request timed out while rebuilding or re-running compare. Retry once more." : (e?.message ?? String(e)));
+      setResult(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: e?.name === "AbortError" ? "manual_rebuild_timeout" : "manual_rebuild_exception",
