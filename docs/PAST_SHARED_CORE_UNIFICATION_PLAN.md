@@ -37,6 +37,11 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
 
+Modeling guidance alignment:
+- Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
+- For observed-history reconstruction in this shared Past core, empirical interval history + weather/day-time response is primary.
+- Home/appliance/occupancy details remain required and normalized, but are supportive priors/fallback in observed-history mode; they are primary in overlay and synthetic/sparse-data modes.
+
 ## LEGACY / NON-AUTHORITATIVE
 
 - `gapfill_test_days_profile` may appear as a historical validation label in older notes or diagnostics. It does not represent a separate simulation engine, separate artifact, separate fingerprint, or separate ownership scope.

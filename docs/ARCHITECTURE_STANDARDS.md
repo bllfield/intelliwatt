@@ -178,8 +178,18 @@
   - `buildPastSimulatedBaselineV1`
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
+- Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md` (modeling modes, weighting, weather-response direction, fallback hierarchy).
+- Observed-history reconstruction must prioritize empirical interval + weather/day-time behavior; declared home details are supportive priors/fallback there.
+- Overlay and synthetic/sparse-data modes may weight home/appliance/occupancy details as primary, but must still use shared simulator modules.
+- Do not create separate core sim math by sim option, route, tool, test, admin utility, or script.
 - Do not recreate simulated intervals from shape/target-day totals in other places.
 - Do not create alternate Past baseline compute paths for read/inspect flows.
+
+#### 3a) Shared coverage window ownership lock (non-baseline)
+
+- Non-baseline coverage metadata must come from shared canonical window helpers.
+- `dataset.summary.start/end` and `dataset.meta.coverageStart/coverageEnd` must use the same canonical window source.
+- `excludedDateKeysCount` and `excludedDateKeysFingerprint` must be bounded to that same canonical coverage window.
 
 #### 4) Usage shape profile
 

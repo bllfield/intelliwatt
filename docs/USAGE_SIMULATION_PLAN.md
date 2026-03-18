@@ -14,9 +14,92 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 
 ## Core principles / guardrails
 - **Never silently fabricate “real” usage**: simulated usage must be tagged and surfaced via a clear disclaimer in the UI.
-- **Use all available evidence**: measured usage (even partial), plus home details + appliances, should dominate the simulation.
+- **Mode-weighted evidence**: observed-history reconstruction prioritizes measured interval behavior + weather response; home details/appliances act as context/priors/fallback there, and become primary in overlay/synthetic/sparse-data modes.
 - **Deterministic + auditable**: given the same inputs, we should regenerate the same simulated series (or store the generated series + an inputs hash).
 - **Compatibility with the plan engine**: the generated data must obey the plan engine invariants (e.g., monthly totals match the sum of required period buckets → no `USAGE_BUCKET_SUM_MISMATCH`).
+
+## Canonical Reference Rule
+
+`docs/USAGE_SIMULATION_PLAN.md` is the canonical simulation-logic reference for:
+- modeling modes
+- home-details weighting by mode
+- observed-history priority
+- weather-response direction
+- fallback hierarchy
+
+Other docs should align to this file and stay shorter unless file-specific detail is required.
+
+## Simulation Modeling Modes (Authoritative)
+
+### 1) Observed-History Reconstruction Mode
+
+Used for Past Sim and Gap-Fill compare scoring/reporting over the shared artifact.
+
+Primary drivers:
+- actual interval usage history
+- weather/temperature
+- weekday vs weekend behavior
+- time-of-day behavior
+- similar historical day matching
+
+Secondary/supportive drivers:
+- home details
+- appliance details
+- occupancy details
+- HVAC/thermostat/pool/EV metadata
+
+Rule: when actual interval history is strong, trust empirical house behavior over declared attributes.
+
+### 2) Overlay / Delta Mode
+
+Used for upgrades and scenario deltas (appliance/HVAC/thermostat/pool/EV/envelope/occupancy changes).
+
+Primary drivers:
+- home details
+- appliance details
+- occupancy details
+- HVAC/fuel configuration
+- thermostat settings
+- pool/EV details
+- envelope details
+
+Rule: apply structured add/subtract deltas on top of observed or synthetic baseline behavior.
+
+### 3) Synthetic / Sparse-Data Mode
+
+Used for manual usage simulation, new-build simulation, and sparse-history homes.
+
+Primary drivers:
+- declared home/appliance/occupancy details
+- HVAC/thermostat/fuel/pool/EV configuration
+- weather/temperature
+- learned priors from similar homes (when available)
+
+## Home Details Intake and Usage (Authoritative)
+
+Required structured intake includes at minimum:
+- home age
+- home style
+- square feet
+- stories
+- insulation
+- windows
+- foundation
+- fuel configuration
+- HVAC type
+- heating type
+- thermostat setpoint (summer)
+- thermostat setpoint (winter)
+- pool presence/details
+- EV presence/details
+- LED lights
+- smart thermostat
+- occupants: work, school, home all day, total occupants
+
+Usage weighting by mode:
+- Observed-history reconstruction: context/priors/fallback and diagnostics, not primary truth source when interval history is strong.
+- Overlay mode: primary modeling inputs for delta construction.
+- Synthetic/sparse-data mode: primary modeling inputs for baseline estimation.
 
 ### Shared Module Rule
 
@@ -88,7 +171,7 @@ Do Not Do:
 - Do not attempt to align solar using county/zip boundaries.
 - Do not convert canonical UTC interval timestamps into local time for storage.
 
-## What I understand the task to be
+## LEGACY / NON-AUTHORITATIVE historical planning notes
 - Build new UI flows for:
   - **Manual usage entry** (months of kWh, optional bill amounts)
   - **Home details** (sqft, occupants, insulation level, HVAC type, pool, EV, etc.)
@@ -196,7 +279,7 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - Phase C: Use home details + appliances to improve simulation quality + confidence scoring.
 - Phase D: Merge logic for partial SMT/Green Button so every home has a stable 12‑month calc window.
 
-## Open questions to resolve before coding
+## LEGACY / NON-AUTHORITATIVE historical open questions
 - **Annualization semantics**: Do we want “modeled annual kWh” to be a strict 12-month sum, or a “last-365-days” annualized estimate when history is partial?
 - **Where do we store the canonical interval series** (master DB vs usage module DB)?
 - **How do we pick the calc window** for partial history (still last 365 days ending at latest interval vs “most recent N months” anchored on available data)?
@@ -255,6 +338,11 @@ Applies:
 - Home Details-gated shaping inputs for SMT baseline:
   - HVAC type + heating type
   - Pool toggle + pool pump seasonal runtime details
+
+Observed-history priority guidance:
+- For actual-history reconstruction, empirical behavior (actual intervals + weather + day/time pattern response) is primary.
+- Home details and appliance/occupancy fields are supportive context/priors/fallback in this mode.
+- Weather influence should come from house-specific historical response and similar-day matching, not just broad monthly averages.
 
 Deterministic simulated-day fallback ladder:
 1. `NEAREST_WEATHER` (K-nearest weather reference days from non-excluded, non-leading-missing days; deterministic tie-break by weather distance, temperature distance, then `dateKey`)

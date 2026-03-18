@@ -42,6 +42,8 @@ _Generated from audit; implementation not started. Do not redesign existing admi
 
 **Constraints:** Reuse existing admin patterns and components. Do not replace existing pages. Add new sections/buttons/forms only. Each new capability: name, route (or where it lives), DB model touched (if any), fields editable, validations.
 
+Canonical simulation-logic reference: `docs/USAGE_SIMULATION_PLAN.md`. Admin docs should align to that source and avoid introducing alternate simulation semantics.
+
 ### Shared Module Rule
 
 - It is not allowed to implement the same function in two places.
@@ -61,12 +63,18 @@ For `/admin/simulation-engines`, `/admin/tools/gapfill-lab`, and related tooling
 
 - Tools must inspect the same saved artifacts production uses.
 - Tools are not allowed to compute alternate versions of the same baseline for display.
+- Tools are not allowed to own separate sim math by sim option (Past, GapFill, manual, new-build, overlays). Shared modules own those rules.
 - Tools must clearly show:
   - raw actual source,
   - simulated replacement source,
   - saved stitched Past baseline artifact.
 - Admin rebuild actions may regenerate and resave the canonical artifact.
 - Admin read and inspect actions must use the saved artifact.
+
+### Modeling Mode Alignment (Admin)
+
+- Observed-history reconstruction outputs (Past Sim + GapFill compare) come from shared empirical interval+weather behavior and are inspected, not recomputed, by admin tools.
+- Overlay and synthetic/sparse-data modes may weight declared home/appliance/occupancy details more heavily, but admin tools still consume shared simulator outputs rather than reimplementing modeling logic.
 
 ### Performance Rule for Past Sim and Beyond
 

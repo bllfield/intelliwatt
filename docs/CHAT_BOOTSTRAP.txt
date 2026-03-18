@@ -84,10 +84,24 @@ Shared simulation architecture authority:
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
 
-Current drift points to resolve:
-- `app/api/admin/simulation-engines/route.ts` still needs full shared identity payload wiring (`inputHash`, `intervalDataFingerprint`, `weatherIdentity`, `usageShapeProfileIdentity`).
-- `lib/admin/simulatorDiagnostic.ts` / Simulation Engines diagnostic payloads must surface identity values from shared helpers, not placeholders.
-- `modules/usageSimulator/service.ts` must not retain local canonical Past identity/window derivation that duplicates `modules/usageSimulator/windowIdentity.ts`.
+Simulation modeling authority:
+- Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
+- This bootstrap should stay short and operational; do not redefine modeling logic here.
+- Architecture cleanup is complete for shared-artifact alignment. Current focus is shared simulation-core accuracy.
+- Do not reopen artifact architecture cleanup unless a new active-path bug proves it is necessary.
+
+Modeling mode split (summary):
+- Observed-history reconstruction (Past Sim + GapFill compare): prioritize actual interval history + weather + weekday/weekend + time-of-day + similar-day matching.
+- Overlay/delta mode: apply home/appliance/occupancy/HVAC/thermostat/pool/EV/envelope deltas on top of baseline.
+- Synthetic/sparse-data mode (manual/new-build/low-history): prioritize declared home/appliance/occupancy details + weather + learned priors.
+
+Home details collection (summary):
+- Home details are required and normalized for every home.
+- In observed-history reconstruction they are supportive context/priors/fallback, not the primary truth source when interval history is strong.
+- In overlay and synthetic/sparse-data modes they are primary modeling inputs.
+
+LEGACY / NON-AUTHORITATIVE (historical drift notes retained):
+- Older notes in previous chats/plans may mention unresolved shared wiring items for diagnostics/identity helpers. Treat those as historical context unless a new active-path regression is confirmed in current code.
 
 ========================================
 DATABASE CONNECTION (DO NOT COMMIT SECRETS)

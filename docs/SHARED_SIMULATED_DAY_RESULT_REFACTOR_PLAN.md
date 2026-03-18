@@ -35,6 +35,11 @@ isProject: false
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
 
+Modeling-mode compatibility note:
+- Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
+- This refactor plan must stay compatible with that mode split: observed-history reconstruction prioritizes empirical interval+weather behavior; overlay/synthetic modes weight declared home/appliance/occupancy inputs more heavily.
+- Do not introduce separate sim math paths by sim option, route, tool, or test.
+
 ## LEGACY / NON-AUTHORITATIVE historical drift
 
 - **Core** (`[modules/simulatedUsage/pastDaySimulator.ts](modules/simulatedUsage/pastDaySimulator.ts)`): `simulatePastDay` returns `PastDaySimulationResult` (intervals, profileSelectedDayKwh, finalDayKwh, weather/provenance). `getPastDayResultOnly` returns the same shape without intervals (callers re-apply shape).

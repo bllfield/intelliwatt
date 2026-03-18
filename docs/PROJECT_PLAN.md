@@ -106,10 +106,10 @@ Mandatory enforcement rules:
 - Any new route/tool/test that depends on GapFill or simulated usage must first check this canonical registry before adding logic.
 - No duplicate code is allowed for date/window logic, weather identity logic, interval source selection, artifact identity/hash logic, profile identity logic, simulation-day generation, stitched Past artifact building, or diagnostic orchestration.
 
-Current drift points to resolve:
-- `app/api/admin/simulation-engines/route.ts` still needs full shared identity payload wiring (`inputHash`, `intervalDataFingerprint`, `weatherIdentity`, `usageShapeProfileIdentity`).
-- `lib/admin/simulatorDiagnostic.ts` / Simulation Engines diagnostic payloads must surface identity values from shared helpers, not placeholders.
-- `modules/usageSimulator/service.ts` must not retain local canonical Past identity/window derivation that duplicates `modules/usageSimulator/windowIdentity.ts`.
+LEGACY / NON-AUTHORITATIVE historical drift notes:
+- Older notes referenced unresolved shared identity wiring work in simulation engines diagnostics.
+- Treat these as historical context only; active architecture alignment work is complete unless a new active-path bug is confirmed.
+- Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`; other docs should align to it and stay shorter unless file-specific detail is required.
 
 ### GapFill Shared-Artifact Rule
 
@@ -127,6 +127,13 @@ Current drift points to resolve:
   - `buildPastSimulatedBaselineV1`
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
+
+### Simulation Modeling Modes (authoritative summary)
+
+- **Observed-history reconstruction mode** (Past Sim + GapFill compare): prioritize actual intervals, weather, weekday/weekend, time-of-day, and similar-day empirical behavior.
+- **Overlay/delta mode**: apply structured deltas from home/appliance/occupancy/HVAC/thermostat/pool/EV/envelope factors.
+- **Synthetic/sparse-data mode** (manual/new-build/low-history): prioritize declared home/appliance/occupancy details + weather + learned priors.
+- Home details are required and normalized for all homes; in observed-history reconstruction they are supportive context/priors/fallback, not the primary truth source when strong interval history exists.
 
 #### Process rule before adding logic
 

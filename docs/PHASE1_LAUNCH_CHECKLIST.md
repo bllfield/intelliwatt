@@ -129,7 +129,7 @@ Each block is a unit of work: plan it, then build and test it, then move to the 
 - Battery simulation engine has not been built
 - Battery dispatch logic is not yet integrated into the plan engine
 - Battery charging/discharging policy is not yet modeled for TOU / free-night plans
-- Real weather API is not yet hooked up for simulation
+- Weather integration quality still needs hardening for all launch paths (while retaining truthful fallback behavior where data is unavailable)
 - Competitive-market vs regulated/co-op plan handling is not fully implemented
 - Current-plan impact modeling for regulated/co-op users is not yet integrated into the simulation + pricing flow
 - Side-by-side comparison of with-solar vs without-solar plan results is not yet implemented
@@ -148,6 +148,13 @@ Each block is a unit of work: plan it, then build and test it, then move to the 
 
 - **Current-State Baseline** = Corrected Baseline + applied overlays. This is the main input to the plan engine for Phase 1.
 - **Projected Usage** = Current-State Baseline + scenario overlays. Not required for launch unless needed by launch UI.
+
+### Simulation modeling modes (alignment summary)
+
+- Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
+- Observed-history reconstruction (Past Sim + GapFill compare) should prioritize empirical interval + weather/day-time behavior.
+- Overlay mode should apply structured home/appliance/occupancy/HVAC/thermostat/pool/EV/envelope deltas.
+- Synthetic/sparse-data mode (manual/new-build/low-history) should prioritize declared details + weather + learned priors.
 
 ---
 
@@ -196,19 +203,19 @@ What-if changes the user is considering. Same rule: every overlay must produce a
 
 ### Step 0 — Hook up real weather API (first priority)
 
-Real historical weather is required for solar production adjustments, manual monthly/annual distribution, and new home simulation. The real weather API must be wired and used instead of stub or missing data. Weather integration is required before solar production and final simulations are validated, but simulator pipeline development may proceed before weather is fully integrated.
+Real historical weather is required for solar production adjustments, manual monthly/annual distribution, and new home simulation. Weather quality should be improved for these paths while preserving explicit fallback provenance when weather data is unavailable.
 
 - [ ] Integrate real weather API for simulation use
 - [ ] Use real weather for solar production daily adjustments (Step 6.5)
 - [ ] Use real weather for manual/annual seasonality and distribution where applicable
-- [ ] Remove or bypass stub weather path for production simulation paths
+- [ ] Keep fallback weather path explicit and truthful (stub/mixed/actual provenance), not silent
 - [ ] Document API usage, rate limits, and fallback behavior
 
 **Success criteria:**
 
 - Real weather data is available to simulation pipelines
 - Solar and other weather-dependent simulations use live weather (or validated historical) instead of stub
-- No blocking on stub/missing weather for launch-critical paths
+- No silent blocking on stub/missing weather for launch-critical paths; fallback provenance remains explicit
 
 **Notes / test results:**
 
