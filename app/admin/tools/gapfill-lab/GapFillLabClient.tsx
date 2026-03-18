@@ -701,6 +701,7 @@ export default function GapFillLabClient() {
       setError("Enter an email address.");
       return;
     }
+    setResult(null);
     setLookupLoading(true);
     try {
       const res = await fetch("/api/admin/tools/gapfill-lab", {
@@ -785,6 +786,7 @@ export default function GapFillLabClient() {
       setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
       return;
     }
+    setResult(null);
     compareInFlightRef.current = true;
     setLoading(true);
     setHeavyRetryBody(null);
@@ -1111,6 +1113,7 @@ export default function GapFillLabClient() {
       rebuildInFlightRef.current = false;
       return;
     }
+    setResult(null);
     setRebuildLoading(true);
     setError(null);
     setProgressStatus(null);
