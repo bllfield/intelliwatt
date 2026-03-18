@@ -70,6 +70,15 @@ type Usage365Payload = {
 
 type IntervalPoint = { timestamp: string; kwh: number };
 
+function shiftIsoDateUtc(dateKey: string, deltaDays: number): string {
+  const key = String(dateKey ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
+  const base = new Date(`${key}T12:00:00.000Z`);
+  if (Number.isNaN(base.getTime())) return key;
+  base.setUTCDate(base.getUTCDate() + deltaDays);
+  return base.toISOString().slice(0, 10);
+}
+
 function normalizeFifteenCurve96(
   raw: unknown
 ): Array<{ hhmm: string; avgKw: number }> {
@@ -1449,6 +1458,8 @@ export async function POST(req: NextRequest) {
   const minTestKey = testDateKeysSorted[0] ?? "";
   const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
+  const fetchStartExpanded = shiftIsoDateUtc(fetchStart, -1);
+  const fetchEndExpanded = shiftIsoDateUtc(fetchEnd, 1);
 
   const actualIntervals = await (
     candidateIntervalsForTesting != null
@@ -1463,8 +1474,10 @@ export async function POST(req: NextRequest) {
                 getActualIntervalsForRange({
                   houseId: house.id,
                   esiid,
-                  startDate: r.startDate,
-                  endDate: r.endDate,
+                  // Expand by one UTC day on both sides so local-day filtering can
+                  // include timezone spillover intervals at day boundaries.
+                  startDate: shiftIsoDateUtc(r.startDate, -1),
+                  endDate: shiftIsoDateUtc(r.endDate, 1),
                 })
               )
             ).then((chunks) => {
@@ -1484,8 +1497,10 @@ export async function POST(req: NextRequest) {
         : getActualIntervalsForRange({
             houseId: house.id,
             esiid,
-            startDate: fetchStart,
-            endDate: fetchEnd,
+            // Expand by one UTC day on both sides so local-day filtering can
+            // include timezone spillover intervals at day boundaries.
+            startDate: fetchStartExpanded,
+            endDate: fetchEndExpanded,
           })
   );
 

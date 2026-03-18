@@ -301,6 +301,51 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 
+  it("expands manual-range actual fetch by one day on each side for timezone spillover safety", async () => {
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T05:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T05:15:00.000Z", kwh: 0.25 },
+    ]);
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T05:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T05:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T05:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(getActualIntervalsForRange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startDate: "2025-12-31",
+        endDate: "2026-01-02",
+      })
+    );
+  });
+
   it("uses service-provided scoring date-key selection metadata for actual-vs-sim join filtering", async () => {
     getActualIntervalsForRange.mockResolvedValueOnce([
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
