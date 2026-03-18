@@ -1127,7 +1127,7 @@ function buildFullReport(args: {
   return { fullReportJson, fullReportText };
 }
 
-export const routeCompareCoreHooks = {
+const routeCompareCoreHooks = {
   buildFullReport: (args: Parameters<typeof buildFullReport>[0]) => buildFullReport(args),
 };
 
@@ -2612,3 +2612,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
