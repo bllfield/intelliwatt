@@ -1056,6 +1056,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         compareFreshMode: "selected_days",
         autoEnsureArtifact: false,
         includeFreshCompareCalc: false,
+        selectedDaysLightweightArtifactRead: true,
       })
     );
   });
@@ -1108,6 +1109,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         compareFreshMode: "full_window",
         autoEnsureArtifact: true,
         includeFreshCompareCalc: true,
+        selectedDaysLightweightArtifactRead: false,
       })
     );
   });

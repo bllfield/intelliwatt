@@ -407,6 +407,7 @@ export async function buildGapfillCompareSimShared(args: {
   autoEnsureArtifact?: boolean;
   compareFreshMode?: "selected_days" | "full_window";
   includeFreshCompareCalc?: boolean;
+  selectedDaysLightweightArtifactRead?: boolean;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
     userId,
@@ -418,11 +419,17 @@ export async function buildGapfillCompareSimShared(args: {
     autoEnsureArtifact = false,
     compareFreshMode,
     includeFreshCompareCalc = true,
+    selectedDaysLightweightArtifactRead = false,
   } = args;
   // Keep the request flag for backward-compatible payloads, but default compare scoring
   // mode stays selected-days unless the caller explicitly asks for full_window.
   void includeFreshCompareCalc;
   const effectiveCompareFreshMode = compareFreshMode ?? "selected_days";
+  const useSelectedDaysLightweightArtifactRead =
+    selectedDaysLightweightArtifactRead === true &&
+    effectiveCompareFreshMode === "selected_days" &&
+    !rebuildArtifact &&
+    !autoEnsureArtifact;
 
   const pastScenarioId = await resolvePastScenarioIdForHouse({ userId, houseId });
   if (!pastScenarioId) {
@@ -525,32 +532,35 @@ export async function buildGapfillCompareSimShared(args: {
     }
   }
 
-  const intervalDataFingerprint = await getIntervalDataFingerprint({
-    houseId,
-    esiid: houseResolved.esiid ?? null,
-    startDate: identityWindowResolved.startDate,
-    endDate: identityWindowResolved.endDate,
-  });
-  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
-  const weatherIdentity = await computePastWeatherIdentity({
-    houseId,
-    startDate: identityWindowResolved.startDate,
-    endDate: identityWindowResolved.endDate,
-  });
-  const sharedInputHash = computePastInputHash({
-    engineVersion: PAST_ENGINE_VERSION,
-    windowStartUtc: identityWindowResolved.startDate,
-    windowEndUtc: identityWindowResolved.endDate,
-    timezone,
-    travelRanges: buildTravelRanges,
-    buildInputs: buildInputs as Record<string, unknown>,
-    intervalDataFingerprint,
-    usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
-    usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
-    usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
-    usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
-    weatherIdentity,
-  });
+  let sharedInputHash = "";
+  if (!useSelectedDaysLightweightArtifactRead) {
+    const intervalDataFingerprint = await getIntervalDataFingerprint({
+      houseId,
+      esiid: houseResolved.esiid ?? null,
+      startDate: identityWindowResolved.startDate,
+      endDate: identityWindowResolved.endDate,
+    });
+    const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+    const weatherIdentity = await computePastWeatherIdentity({
+      houseId,
+      startDate: identityWindowResolved.startDate,
+      endDate: identityWindowResolved.endDate,
+    });
+    sharedInputHash = computePastInputHash({
+      engineVersion: PAST_ENGINE_VERSION,
+      windowStartUtc: identityWindowResolved.startDate,
+      windowEndUtc: identityWindowResolved.endDate,
+      timezone,
+      travelRanges: buildTravelRanges,
+      buildInputs: buildInputs as Record<string, unknown>,
+      intervalDataFingerprint,
+      usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+      usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+      usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+      usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+      weatherIdentity,
+    });
+  }
   const sharedScenarioCacheId = pastScenarioId;
 
   let artifactAutoRebuilt = false;
@@ -670,17 +680,26 @@ export async function buildGapfillCompareSimShared(args: {
   }
 
   let artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" | null =
-    rebuildArtifact ? null : "exact_hash_match";
+    rebuildArtifact
+      ? null
+      : useSelectedDaysLightweightArtifactRead
+        ? "latest_by_scenario_fallback"
+        : "exact_hash_match";
   let cached = !rebuildArtifact
-    ? await getCachedPastDataset({
-        houseId,
-        scenarioId: sharedScenarioCacheId,
-        inputHash: sharedInputHash,
-      })
+    ? useSelectedDaysLightweightArtifactRead
+      ? await getLatestCachedPastDatasetByScenario({
+          houseId,
+          scenarioId: sharedScenarioCacheId,
+        })
+      : await getCachedPastDataset({
+          houseId,
+          scenarioId: sharedScenarioCacheId,
+          inputHash: sharedInputHash,
+        })
     : null;
   // If exact identity hash misses, fall back to latest scenario artifact when ownership scope
   // is compatible so compare can read the same shared Past output that rebuild just produced.
-  if (!rebuildArtifact && (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)) {
+  if (!useSelectedDaysLightweightArtifactRead && !rebuildArtifact && (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)) {
     const latestCached = await getLatestCachedPastDatasetByScenario({
       houseId,
       scenarioId: sharedScenarioCacheId,
@@ -854,14 +873,18 @@ export async function buildGapfillCompareSimShared(args: {
   const artifactInputHashUsed =
     !artifactAutoRebuilt && typeof (cached as any)?.inputHash === "string"
       ? String((cached as any).inputHash)
-      : sharedInputHash;
+      : sharedInputHash || null;
+  const requestedInputHash = useSelectedDaysLightweightArtifactRead ? null : sharedInputHash;
   modelAssumptions.artifactReadMode = "artifact_only";
   modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
   modelAssumptions.artifactScenarioId = sharedScenarioCacheId;
   modelAssumptions.artifactInputHash = artifactInputHashUsed;
   modelAssumptions.artifactInputHashUsed = artifactInputHashUsed;
-  modelAssumptions.requestedInputHash = sharedInputHash;
-  modelAssumptions.artifactHashMatch = artifactInputHashUsed === sharedInputHash;
+  modelAssumptions.requestedInputHash = requestedInputHash;
+  modelAssumptions.artifactHashMatch =
+    typeof requestedInputHash === "string" && requestedInputHash.length > 0
+      ? artifactInputHashUsed === requestedInputHash
+      : null;
   if (artifactSourceMode) {
     modelAssumptions.artifactSourceMode = artifactSourceMode;
     modelAssumptions.artifactSourceNote =

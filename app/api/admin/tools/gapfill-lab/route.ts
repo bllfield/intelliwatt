@@ -1691,6 +1691,7 @@ export async function POST(req: NextRequest) {
         autoEnsureArtifact: autoEnsureArtifactForCompare,
         compareFreshMode,
         includeFreshCompareCalc: compareFreshMode === "full_window",
+        selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
       }),
       ROUTE_COMPARE_SHARED_TIMEOUT_MS,
       "compare_core_route_timeout_build_shared_compare"

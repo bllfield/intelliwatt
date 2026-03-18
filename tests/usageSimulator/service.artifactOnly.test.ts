@@ -692,6 +692,44 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("skips identity fingerprint/hash work for explicit selected-days lightweight artifact read", async () => {
+    const computePastInputHashCallsBefore = computePastInputHash.mock.calls.length;
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-latest-lightweight",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    expect(getIntervalDataFingerprint).not.toHaveBeenCalled();
+    expect(computePastWeatherIdentity).not.toHaveBeenCalled();
+    expect(getUsageShapeProfileIdentityForPast).not.toHaveBeenCalled();
+    expect(computePastInputHash.mock.calls.length).toBe(computePastInputHashCallsBefore);
+    expect(getCachedPastDataset).not.toHaveBeenCalled();
+    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalled();
+  });
+
   it("uses shared excludedDateKeys ownership from artifact metadata for scoring", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
