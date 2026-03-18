@@ -613,6 +613,9 @@ export async function buildGapfillCompareSimShared(args: {
       };
     }
     const intervals15 = rebuiltDataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
+    // Persist canonical shared-window ownership metadata with rebuilt artifacts so compare
+    // fallback compatibility checks and scope diagnostics use the same bounded fingerprint.
+    applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
     const { bytes } = encodeIntervalsV1(intervals15);
     const datasetJsonForStorage = {
       ...rebuiltDataset,

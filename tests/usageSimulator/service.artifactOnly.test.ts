@@ -469,6 +469,72 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("autoEnsure rebuild persists canonical excluded fingerprint metadata in saved artifact", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
+    const rebuiltIntervals = oneDayIntervals96(0.25);
+    getCachedPastDataset
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        inputHash: "hash-rebuilt-readback",
+        updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+        datasetJson: {
+          summary: {
+            source: "SIMULATED",
+            intervalsCount: 96,
+            totalKwh: 24,
+            start: "2026-01-01",
+            end: "2026-01-01",
+          },
+          meta: {
+            curveShapingVersion: "shared_curve_v2",
+            excludedDateKeysFingerprint: "2026-01-01",
+            excludedDateKeysCount: 1,
+          },
+          daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+          monthly: [{ month: "2026-01", kwh: 24 }],
+          series: {},
+        },
+        intervalsCodec: "v1_delta_varint",
+        intervalsCompressed: Buffer.from("00", "hex"),
+      });
+    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce(null);
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: { intervals15: rebuiltIntervals },
+      },
+      error: null,
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      autoEnsureArtifact: true,
+      includeFreshCompareCalc: false,
+    });
+
+    expect(out.ok).toBe(true);
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    const saved = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
+    const savedMeta = ((saved as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
+    expect(savedMeta.excludedDateKeysFingerprint).toBe("2026-01-01");
+    expect(savedMeta.excludedDateKeysCount).toBe(1);
+  });
+
   it("does not enforce legacy compare-mask metadata when shared ownership metadata is valid", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-actual-days",
