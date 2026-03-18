@@ -500,8 +500,8 @@ export default function GapFillLabClient() {
       if (!res.ok) {
         if (isArtifactRebuildRequiredError((data as any)?.error)) {
           setArtifactMissing(true);
-          // Two-step self-heal: rebuild-only first, then run compare on a second request.
-          // This avoids rebuild+compare in one 300s-bounded request.
+          // Backstop only: server now auto-ensures shared artifacts in the compare request.
+          // Keep this branch as a legacy safety fallback.
           attemptedArtifactAutoRebuild = true;
           const rebuildBody = { ...body, rebuildArtifact: true, rebuildOnly: true };
           const { res: rebuildRes, data: rebuildData } = await postGapfill(rebuildBody);
@@ -541,7 +541,7 @@ export default function GapFillLabClient() {
     } catch (e: any) {
       setProgressStatus(null);
       const msg = e?.name === "AbortError"
-        ? "Request timed out. Rebuild now runs separately from compare; click Rebuild artifact and retry, then run compare again."
+        ? "Request timed out while ensuring artifacts + compare. Retry once; if it repeats, run Rebuild artifact and retry."
         : (e?.message ?? String(e));
       if (attemptedArtifactAutoRebuild || e?.name === "AbortError") {
         // Keep rebuild CTA visible when automatic rebuild or long compare request fails.

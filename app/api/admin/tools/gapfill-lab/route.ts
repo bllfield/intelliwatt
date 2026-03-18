@@ -1500,6 +1500,7 @@ export async function POST(req: NextRequest) {
       canonicalWindow,
       testDateKeysLocal,
       rebuildArtifact: true,
+      autoEnsureArtifact: true,
     });
     if (!rebuiltCompare.ok) {
       const classification = classifySimulationFailure({
@@ -1549,6 +1550,7 @@ export async function POST(req: NextRequest) {
     canonicalWindow,
     testDateKeysLocal,
     rebuildArtifact,
+    autoEnsureArtifact: true,
   });
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
