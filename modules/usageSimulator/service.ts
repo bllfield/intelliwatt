@@ -602,9 +602,10 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
+  const restoredMetaOriginal = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
   applyCanonicalCoverageMetadataForNonBaseline(dataset, "gapfill_lab");
-  const restoredMeta = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
-  const artifactCurveShapingVersion = String(restoredMeta?.curveShapingVersion ?? "");
+  const restoredMetaNormalized = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
+  const artifactCurveShapingVersion = String(restoredMetaNormalized?.curveShapingVersion ?? "");
   const artifactIntervalsRaw = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
   if (
     !rebuildArtifact &&
@@ -652,7 +653,7 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
-  if (!restoredMeta || typeof restoredMeta !== "object") (dataset as any).meta = {};
+  if (!restoredMetaNormalized || typeof restoredMetaNormalized !== "object") (dataset as any).meta = {};
   const modelAssumptions = (dataset as any)?.meta ?? {};
   modelAssumptions.artifactReadMode = "artifact_only";
   modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
@@ -674,9 +675,9 @@ export async function buildGapfillCompareSimShared(args: {
     kwh: Number(p?.kwh) || 0,
   }));
   const compareFingerprintFromMetaRaw = String(
-    restoredMeta?.compareMaskDateKeysFingerprint ?? restoredMeta?.compareMaskFingerprint ?? ""
+    restoredMetaOriginal?.compareMaskDateKeysFingerprint ?? restoredMetaOriginal?.compareMaskFingerprint ?? ""
   );
-  const excludedFingerprintFromMeta = String(restoredMeta?.excludedDateKeysFingerprint ?? "")
+  const excludedFingerprintFromMeta = String(restoredMetaOriginal?.excludedDateKeysFingerprint ?? "")
     .split(",")
     .map((dk) => String(dk).trim())
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
@@ -1894,6 +1895,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const travelRanges = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
       const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
+      const expectedExcludedFingerprintForFallback = Array.from(
+        boundDateKeysToCoverageWindow(
+          new Set<string>(travelRangesToExcludeDateKeys(travelRanges)),
+          { startDate: window.startDate, endDate: window.endDate }
+        )
+      )
+        .sort()
+        .join(",");
       const intervalDataFingerprint = await getIntervalDataFingerprint({
         houseId: args.houseId,
         esiid: house.esiid ?? null,
@@ -1935,7 +1944,19 @@ export async function getSimulatedUsageForHouseScenario(args: {
           houseId: args.houseId,
           scenarioId: scenarioIdForCache,
         });
-        if (latestCached && latestCached.intervalsCodec === INTERVAL_CODEC_V1) {
+        const latestMeta = ((latestCached as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>;
+        const latestExcludedFingerprint = String(latestMeta?.excludedDateKeysFingerprint ?? "");
+        const latestArtifactScope = String(latestMeta?.artifactScope ?? "");
+        const latestCompareFingerprint = String(
+          latestMeta?.compareMaskDateKeysFingerprint ?? latestMeta?.compareMaskFingerprint ?? ""
+        );
+        const latestIsFallbackCompatible =
+          latestCached != null &&
+          latestCached.intervalsCodec === INTERVAL_CODEC_V1 &&
+          latestArtifactScope !== GAPFILL_COMPARE_ARTIFACT_SCOPE &&
+          latestExcludedFingerprint === expectedExcludedFingerprintForFallback &&
+          (latestCompareFingerprint.length === 0 || latestCompareFingerprint === latestExcludedFingerprint);
+        if (latestIsFallbackCompatible) {
           exactCached = latestCached;
           artifactSourceMode = "latest_by_scenario_fallback";
         }

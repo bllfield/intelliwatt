@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 const scenarioFindFirst = vi.fn();
 const usageSimulatorBuildFindUnique = vi.fn();
 const getHouseAddressForUserHouse = vi.fn();
+const computePastInputHash = vi.fn();
 const getCachedPastDataset = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();
 const simulatePastUsageDataset = vi.fn();
@@ -32,7 +33,7 @@ vi.mock("@/modules/usageSimulator/repo", () => ({
 }));
 
 vi.mock("@/modules/usageSimulator/pastCache", () => ({
-  computePastInputHash: vi.fn(),
+  computePastInputHash: (...args: any[]) => computePastInputHash(...args),
   getCachedPastDataset: (...args: any[]) => getCachedPastDataset(...args),
   getLatestCachedPastDatasetByScenario: (...args: any[]) => getLatestCachedPastDatasetByScenario(...args),
   saveCachedPastDataset: vi.fn(),
@@ -64,13 +65,36 @@ import { buildGapfillCompareSimShared, getSimulatedUsageForHouseScenario } from 
 describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   beforeEach(() => {
     scenarioFindFirst.mockReset();
+    usageSimulatorBuildFindUnique.mockReset();
     getHouseAddressForUserHouse.mockReset();
+    computePastInputHash.mockReset();
+    getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
     simulatePastUsageDataset.mockReset();
     decodeIntervalsV1.mockReset();
+    getIntervalDataFingerprint.mockReset();
+    computePastWeatherIdentity.mockReset();
+    getUsageShapeProfileIdentityForPast.mockReset();
 
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
     scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
+    usageSimulatorBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+      },
+    });
+    computePastInputHash.mockReturnValue("hash-past-expected");
+    getIntervalDataFingerprint.mockResolvedValue("fp-a");
+    computePastWeatherIdentity.mockResolvedValue("wx-a");
+    getUsageShapeProfileIdentityForPast.mockResolvedValue({
+      usageShapeProfileId: "shape-1",
+      usageShapeProfileVersion: "1",
+      usageShapeProfileDerivedAt: "2026-01-01T00:00:00.000Z",
+      usageShapeProfileSimHash: "shape-hash-1",
+    });
     decodeIntervalsV1.mockReturnValue([
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
@@ -178,6 +202,46 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(scenarioFindFirst).not.toHaveBeenCalled();
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
+
+  it("artifact_only fallback rejects compare-scope polluted latest artifact for production past scenario", async () => {
+    scenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
+    usageSimulatorBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
+    computePastInputHash.mockReturnValue("hash-exact-miss");
+    getCachedPastDataset.mockResolvedValue(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-compare-artifact",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          artifactScope: "gapfill_compare",
+          excludedDateKeysFingerprint: "2026-01-01",
+          compareMaskDateKeysFingerprint: "2026-01-01,2026-01-02",
+        },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.code).toBe("ARTIFACT_MISSING");
+    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
 });
 
 describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
@@ -263,6 +327,41 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           curveShapingVersion: "shared_curve_v2",
           excludedDateKeysFingerprint: "",
           compareMaskDateKeysFingerprint: "2026-01-02",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      travelSimulatedDateKeysLocal: new Set<string>(),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_scope_mismatch_rebuild_required");
+    }
+  });
+
+  it("detects original excluded fingerprint mismatch before canonical normalization", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-excluded-pre-normalize-mismatch",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          // Out-of-window travel fingerprint; canonical normalization would bound this away.
+          excludedDateKeysFingerprint: "2024-01-01",
+          compareMaskDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
