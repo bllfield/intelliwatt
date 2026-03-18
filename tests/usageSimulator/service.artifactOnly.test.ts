@@ -340,7 +340,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("detects original excluded fingerprint mismatch before canonical normalization", async () => {
+  it("ignores out-of-window excluded fingerprint residue after canonical normalization", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-excluded-pre-normalize-mismatch",
       datasetJson: {
@@ -349,6 +349,38 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           curveShapingVersion: "shared_curve_v2",
           // Out-of-window travel fingerprint; canonical normalization would bound this away.
           excludedDateKeysFingerprint: "2024-01-01",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedTestIntervals.length).toBe(72);
+    }
+  });
+
+  it("returns scope mismatch when in-window excluded fingerprint conflicts with shared travel scope", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-in-window-excluded-mismatch",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          // In-window day that conflicts with current shared build travel scope ([] in beforeEach).
+          excludedDateKeysFingerprint: "2026-01-01",
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},

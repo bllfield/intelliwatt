@@ -369,6 +369,7 @@ export async function buildGapfillCompareSimShared(args: {
   timezone: string;
   canonicalWindow: { startDate: string; endDate: string };
   testDateKeysLocal: Set<string>;
+  travelSimulatedDateKeysLocal?: Set<string>;
   rebuildArtifact: boolean;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
@@ -591,7 +592,6 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
-  const restoredMetaOriginal = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
   applyCanonicalCoverageMetadataForNonBaseline(dataset, "gapfill_lab");
   const restoredMetaNormalized = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
   const artifactCurveShapingVersion = String(restoredMetaNormalized?.curveShapingVersion ?? "");
@@ -659,7 +659,7 @@ export async function buildGapfillCompareSimShared(args: {
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
-  const excludedFingerprintFromMeta = String(restoredMetaOriginal?.excludedDateKeysFingerprint ?? "")
+  const excludedFingerprintFromMeta = String(restoredMetaNormalized?.excludedDateKeysFingerprint ?? "")
     .split(",")
     .map((dk) => String(dk).trim())
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
