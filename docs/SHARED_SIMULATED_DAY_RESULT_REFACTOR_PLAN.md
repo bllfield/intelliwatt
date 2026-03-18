@@ -1,6 +1,6 @@
 ---
 name: Shared SimulatedDayResult refactor
-overview: Refactor so Past and GapFill share the SAME simulated-day artifact and SAME simulated-day output path. Shared boundary is the simulated-day engine + simulated-day output artifact only. GapFill keeps real held-out actual days for scoring; Past keeps actual SMT for non-travel days; only simulated days come from the shared core.
+overview: Refactor so Past and GapFill use the same shared artifact, the same shared fingerprint, and the same shared simulator output path. GapFill remains scoring/reporting only: it keeps real held-out actual days for scoring and reads matching simulated intervals from the shared artifact; Past keeps actual SMT for non-travel days; only simulated days come from the shared core.
 todos: []
 isProject: false
 ---
@@ -18,13 +18,29 @@ isProject: false
 - **Past:** MUST still use actual SMT intervals for non-travel/non-vacant actual days.
 - **Simulated only:** Only simulated days should come from the shared simulator core. This plan is ONLY for Past corrected baseline.
 - **Goal:** When a day is simulated in GapFill or Past, both use the exact same core module and the exact same simulated day result structure.
+- **Artifact authority:** Past Sim and GapFill compare must use the same shared artifact and the same shared fingerprint. Travel/vacant days are the only excluded ownership days. Test days remain included and are evaluation days only.
+- **No local rebuilds:** GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or reconstruct simulated intervals from `shape * targetDayKwh`.
 
-## Current state
+## Active architecture authority
+
+- There is one shared simulation engine, one shared artifact identity, and one shared fingerprint.
+- Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
+- Test days remain inside the shared artifact population and are only selected by GapFill for scoring against actual usage.
+- GapFill is a scoring/reporting workflow only. It may select test days, fetch actual intervals for those days, read the corresponding simulated intervals from the shared artifact, and compute metrics/reports.
+- Authoritative shared simulator call chain:
+  - `getPastSimulatedDatasetForHouse`
+  - `simulatePastUsageDataset`
+  - `loadWeatherForPastWindow`
+  - `buildPastSimulatedBaselineV1`
+  - `buildCurveFromPatchedIntervals`
+  - `buildSimulatedUsageDatasetFromCurve`
+
+## LEGACY / NON-AUTHORITATIVE historical drift
 
 - **Core** (`[modules/simulatedUsage/pastDaySimulator.ts](modules/simulatedUsage/pastDaySimulator.ts)`): `simulatePastDay` returns `PastDaySimulationResult` (intervals, profileSelectedDayKwh, finalDayKwh, weather/provenance). `getPastDayResultOnly` returns the same shape without intervals (callers re-apply shape).
 - **Past cold**: `[buildPastSimulatedBaselineV1](modules/simulatedUsage/engine.ts)` calls `simulatePastDay` per day, flattens `result.intervals` into one array; `[simulatePastUsageDataset](modules/simulatedUsage/simulatePastUsageDataset.ts)` builds curve from that and `[buildSimulatedUsageDatasetFromCurve](modules/usageSimulator/dataset.ts)` derives daily/monthly/summary from curve.intervals (sum by date, then `buildDisplayMonthlyFromIntervals`).
 - **Cache restore** (`[modules/usageSimulator/service.ts](modules/usageSimulator/service.ts)` ~1320–1405): Decodes intervals only; recomputes daily via `buildDailyFromIntervals(decoded)`, monthly via `buildDisplayMonthlyFromIntervalsUtc`, and summary total from `sum(decoded)`. Same derivation as cold in principle, but a separate code path and no per-day provenance.
-- **GapFill** (`[lib/admin/gapfillLab.ts](lib/admin/gapfillLab.ts)` ~1422–1497): Calls `getPastDayResultOnly` per day for totals, then **recomputes intervals** as `shape96[slot] * targetDayKwh` (different from core's intervals), so display/day totals can drift from Past.
+- **GapFill historical drift** (`[lib/admin/gapfillLab.ts](lib/admin/gapfillLab.ts)` ~1422–1497): Older notes referenced `getPastDayResultOnly` plus local `shape96[slot] * targetDayKwh` interval reconstruction. That behavior is legacy only and is not authoritative for the active architecture.
 - **Diagnostics** (`[lib/admin/simulatorDiagnostic.ts](lib/admin/simulatorDiagnostic.ts)`): Compare dataset-level totals and interval digest; no per-day stage comparison (rawDayKwh, weatherAdjusted, finalDayKwh, displayDayKwh, intervalSumKwh).
 
 ```mermaid
@@ -94,14 +110,15 @@ In `modules/simulatedUsage/simulatePastUsageDataset.ts` and `modules/usageSimula
 - Remove duplicate logic that recomputes simulated daily display totals differently.
 - Keep actual days actual, simulated days simulated.
 
-### 5) GapFill uses same simulated-day artifact
+### 5) GapFill uses same shared artifact and same simulated-day artifact
 
 In `lib/admin/gapfillLab.ts`:
 
 - **Keep:** holdout logic (real actual intervals, exclude from training, compare simulation vs held-out actual).
-- **Change:** For the simulated side, use the exact same canonical shared day simulator and exact same returned intervals/day display values.
-- Do NOT rebuild simulated intervals separately from shape × targetDayKwh if that differs from shared core output.
-- Simulated result for scoring must come directly from the shared simulated-day artifact.
+- **Change:** For the simulated side, use the exact same shared artifact, shared fingerprint, canonical shared day simulator, and canonical returned intervals/day display values.
+- Test days do not create a compare artifact and do not change artifact identity. They only change which days GapFill scores.
+- Do NOT rebuild simulated intervals separately from `shape × targetDayKwh` or any other local reconstruction.
+- Simulated result for scoring must come directly from the shared simulated-day artifact already produced by the shared engine.
 - Actual comparison side remains real held-out SMT intervals.
 
 ### 6) Cache format, storage, and restore: one derivation path
@@ -195,7 +212,7 @@ Do NOT break:
 
 **File:** `[lib/admin/gapfillLab.ts](lib/admin/gapfillLab.ts)` (test-window compare path or equivalent).
 
-- **Today:** For each test day, calls `getPastDayResultOnly` (no intervals), then builds intervals as `shape96[slot] * targetDayKwh`, so intervals and day total can differ from Past.
+- **LEGACY / NON-AUTHORITATIVE:** Older GapFill notes referenced `getPastDayResultOnly` (no intervals) followed by local `shape96[slot] * targetDayKwh` interval reconstruction, which could drift from Past. That is not acceptable in the active architecture.
 - **Change:** For each test day, call `simulatePastDay` with the same grid timestamps and context (or keep using `getPastDayResultOnly` if it is updated to return full `SimulatedDayResult` including intervals). Use `dayResult.intervals15` (or `dayResult.intervals`) for scoring and `dayResult.displayDayKwh` for any displayed day total. Do not recompute intervals from shape × finalDayKwh.
 - **Result:** GapFill and Past show the same intervals and same display day total for the same house/scenario/day.
 
@@ -235,7 +252,7 @@ Do NOT break:
 - **dataset.ts:** `buildSimulatedUsageDatasetFromCurve` and `buildDailyFromIntervals`: ensure daily row kwh is produced by one code path when building from curve (either from dayResults.displayDayKwh when available, or from round2(sum(intervals by date)) using the same round2 as the core). Remove any other place that recomputes "display day total" or "daily row kwh" with different rounding or formula.
 - **service.ts:** Cold path in `getPastSimulatedDatasetForHouse` and overlay block: already sets totalKwh from sum(intervals15). Ensure overlay only replaces monthly cells and then recomputes summary total from that monthly (or from sum intervals) with the same round2; no separate "overlaySum" that ignores intervals.
 - **service.ts cache restore:** Same as above: one place that sets daily/monthly/summary from decoded intervals (and overlay); remove redundant totals logic.
-- **GapFill:** Remove the loop that builds intervals from `shape96[slot] * targetDayKwh`; use core's intervals from SimulatedDayResult.
+- **GapFill:** Remove any loop that builds intervals from `shape96[slot] * targetDayKwh`; use shared-engine intervals from `SimulatedDayResult`.
 - **Comments:** In each consolidated path, add a one-line comment: "Daily display values from shared core SimulatedDayResult (single source of truth for Past and GapFill)."
 
 ---
@@ -372,7 +389,7 @@ Admin tools must inspect the **same saved Past baseline artifact** that producti
 
 ## 10. Success criteria
 
-- For the same house/scenario/date, if that date is **simulated**, Past and GapFill use the **same** shared simulator and **same** simulated-day artifact.
+- For the same house/scenario/date, if that date is **simulated**, Past and GapFill use the **same** shared simulator, **same** shared artifact, **same** shared fingerprint, and **same** simulated-day artifact.
 - GapFill still scores against real held-out actual data.
 - Past still uses real SMT data for real non-travel/non-vacant days.
 - Daily displayed kWh for simulated days is no longer computed differently in different parts of the app.
@@ -409,10 +426,10 @@ After implementation, provide:
 
 ## Plan adjustments made
 
-- **Shared boundary narrowed:** Made explicit that the shared boundary is ONLY the simulated-day engine + simulated-day output artifact. Added that actual SMT days are NOT part of the shared simulator-core contract. Reinforced that this plan is ONLY for Past corrected baseline.
+- **Shared boundary narrowed:** Made explicit that the shared boundary is ONLY the shared simulator output path and shared simulated-day output artifact. Added that actual SMT days are NOT part of the shared simulator-core contract. Reinforced that this plan is ONLY for Past corrected baseline.
 - **Actual day result removed:** Replaced any requirement for the engine to create a minimal "actual" day artifact. Actual days remain actual usage inputs; simulated days use canonical SimulatedDayResult. Any unified per-day display wrapper is a thin downstream/view-model concern, not part of this refactor. Plan focused on simulated-day artifacts only.
 - **Engine return shape tightened:** Engine now returns (1) the stitched full-year interval timeline and (2) SimulatedDayResult[] for simulated dates only. Removed wording that downstream must get one unified artifact list for every day in the full window.
 - **Past baseline storage/retrieval in implementation:** In the cache/storage section, added explicitly: after building the corrected Past baseline, save the stitched full-year baseline intervals into existing Past baseline DB storage; this saved artifact is the canonical production artifact; Past page, cache restore, and diagnostics must read/inspect that saved artifact; they must NOT independently restitch at read time.
 - **Diagnostics/admin tightened:** Admin tools must inspect the SAME saved Past baseline artifact that production pages read. Diagnostics must distinguish raw actual usage source, simulated replacement day source, and saved stitched Past baseline artifact. Additive only; scope remains Past corrected baseline.
 - **Scope boundary reinforced:** In Scope boundary and Important rules, reinforced that this plan is ONLY for Past corrected baseline. No future baseline, final usage, upgrade simulation, solar/battery, or broader scenario-engine changes.
-- **Rest preserved:** GapFill still uses real holdout actual data for scoring; Past still uses actual SMT for non-travel/non-vacant days; GapFill and Past use the same shared simulated-day artifact for simulated days; one shared rounding / one derivation path for simulated-day display totals.
+- **Rest preserved:** GapFill still uses real holdout actual data for scoring; Past still uses actual SMT for non-travel/non-vacant days; GapFill and Past use the same shared artifact, shared fingerprint, and shared simulated-day artifact for simulated days; one shared rounding / one derivation path for simulated-day display totals.

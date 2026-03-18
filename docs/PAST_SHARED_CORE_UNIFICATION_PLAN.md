@@ -2,7 +2,7 @@
 
 ## Overview
 
-Single internal entrypoint for Past simulation (cold build, recalc, GapFill Lab production path) with one shared weather loader and truthful weather provenance.
+Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume the shared simulator output produced for Past.
 
 ## Implemented
 
@@ -23,9 +23,23 @@ Single internal entrypoint for Past simulation (cold build, recalc, GapFill Lab 
 - **UsageDashboard**
   - `getWeatherBasisLabel(meta)` surfaces weatherFallbackReason for stub/mixed (e.g. "no coordinates", "partial coverage", "API unavailable"); does not imply actual weather when summary is stub_only, mixed, or unknown.
 
-## Still separate / pending
+## Active architecture authority
 
-- **gapfill_test_days_profile**: Lab path name for the validation pipeline (test-window interval load → `computeGapFillMetrics`). **Day-total logic is shared**: when using auto_built_lite or profile with lite strength, test-day totals are produced by **getPastDayResultOnly** in `modules/simulatedUsage/pastDaySimulator.ts` (same as Past production’s **simulatePastDay**). So Lab and Past use the **same day-simulation core** (`shared_past_day_simulator`); only the pipeline entry and shape source (profile vs reference-derived) differ. Admin report now exposes `daySimulationCore` and `sameEngineAsPastProduction: true` for the gapfill path.
+- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
+- Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
+- GapFill must consume simulated intervals from the shared artifact. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- Authoritative shared simulator call chain:
+  - `getPastSimulatedDatasetForHouse`
+  - `simulatePastUsageDataset`
+  - `loadWeatherForPastWindow`
+  - `buildPastSimulatedBaselineV1`
+  - `buildCurveFromPatchedIntervals`
+  - `buildSimulatedUsageDatasetFromCurve`
+
+## LEGACY / NON-AUTHORITATIVE
+
+- `gapfill_test_days_profile` may appear as a historical validation label in older notes or diagnostics. It does not represent a separate simulation engine, separate artifact, separate fingerprint, or separate ownership scope.
 
 ## Call graph (production Past)
 
@@ -59,4 +73,4 @@ flowchart LR
 - [ ] **Cache restore parity**: Restored dataset has same daily/monthly as when first built; `buildPathKind: 'cache_restore'`; no re-run of weather backfill on restore.
 - [ ] **Truthful missing_lat_lng stub labeling**: When house has no lat/lng, UI shows stub weather and fallback reason (e.g. "no coordinates"); `weatherSourceSummary` = stub_only, `weatherFallbackReason` = missing_lat_lng.
 - [ ] **Truthful partial coverage labeling**: When some days have actual weather and some stub, UI shows mixed and fallback reason (e.g. "partial coverage") where applicable.
-- [ ] **Lab test-days path**: Day totals use **shared_past_day_simulator** (getPastDayResultOnly); report shows daySimulationCore and sameEngineAsPastProduction: true. Pipeline name remains gapfill_test_days_profile.
+- [ ] **GapFill scoring parity**: Selected test days are scored from the same shared artifact and same shared simulator output used by Past production; reports may expose parity metadata but must not imply a separate engine or artifact.

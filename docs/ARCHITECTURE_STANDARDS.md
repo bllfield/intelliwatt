@@ -167,6 +167,17 @@
   - `modules/simulatedUsage/simulatePastUsageDataset.ts`
   - `modules/usageSimulator/service.ts`
   - `modules/usageSimulator/pastCache.ts`
+- Past Sim and GapFill compare use one shared simulation engine, one shared artifact identity, and one shared fingerprint.
+- Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
+- Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
+- GapFill is scoring/reporting only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- Shared simulator call chain must be documented as:
+  - `getPastSimulatedDatasetForHouse`
+  - `simulatePastUsageDataset`
+  - `loadWeatherForPastWindow`
+  - `buildPastSimulatedBaselineV1`
+  - `buildCurveFromPatchedIntervals`
+  - `buildSimulatedUsageDatasetFromCurve`
 - Do not recreate simulated intervals from shape/target-day totals in other places.
 - Do not create alternate Past baseline compute paths for read/inspect flows.
 

@@ -187,6 +187,21 @@ Mandatory enforcement rules:
 - Any new route/tool/test that depends on GapFill or simulated usage must first check this canonical registry before adding logic.
 - No duplicate code is allowed for date/window logic, weather identity logic, interval source selection, artifact identity/hash logic, profile identity logic, simulation-day generation, stitched Past artifact building, or diagnostic orchestration.
 
+### Shared Simulation Architecture Authority
+
+- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
+- Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
+- GapFill is a scoring/reporting workflow only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- Route-level or tool-level simulation math is not acceptable when the shared simulator output already exists.
+- Authoritative shared simulator call chain:
+  - `getPastSimulatedDatasetForHouse`
+  - `simulatePastUsageDataset`
+  - `loadWeatherForPastWindow`
+  - `buildPastSimulatedBaselineV1`
+  - `buildCurveFromPatchedIntervals`
+  - `buildSimulatedUsageDatasetFromCurve`
+
 Current drift points to resolve:
 - `app/api/admin/simulation-engines/route.ts` still needs full shared identity payload wiring (`inputHash`, `intervalDataFingerprint`, `weatherIdentity`, `usageShapeProfileIdentity`).
 - `lib/admin/simulatorDiagnostic.ts` / Simulation Engines diagnostic payloads must surface identity values from shared helpers, not placeholders.

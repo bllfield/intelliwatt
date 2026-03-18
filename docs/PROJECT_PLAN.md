@@ -111,6 +111,23 @@ Current drift points to resolve:
 - `lib/admin/simulatorDiagnostic.ts` / Simulation Engines diagnostic payloads must surface identity values from shared helpers, not placeholders.
 - `modules/usageSimulator/service.ts` must not retain local canonical Past identity/window derivation that duplicates `modules/usageSimulator/windowIdentity.ts`.
 
+### GapFill Shared-Artifact Rule
+
+- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
+- `excludedDateKeysCount` and `excludedDateKeysFingerprint` must describe only travel/vacant exclusions within the shared coverage window.
+- Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
+- Test days do not create a new artifact, do not create a new fingerprint, and do not change artifact identity or ownership metadata.
+- GapFill is a scoring/reporting workflow only. It may select test days, load actual intervals for those days, read the matching simulated intervals from the shared artifact, and compute metrics/reports.
+- GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, rebuild simulated intervals locally, or perform simulation math in routes/tools outside the shared modules.
+- Authoritative shared simulator call chain:
+  - `getPastSimulatedDatasetForHouse`
+  - `simulatePastUsageDataset`
+  - `loadWeatherForPastWindow`
+  - `buildPastSimulatedBaselineV1`
+  - `buildCurveFromPatchedIntervals`
+  - `buildSimulatedUsageDatasetFromCurve`
+
 #### Process rule before adding logic
 
 - First check whether a shared module already exists for:
@@ -6374,8 +6391,8 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - **Shared Past simulation core** implemented for production cold build and recalc: single entrypoint `modules/simulatedUsage/simulatePastUsageDataset.ts`; cold build and recalc both use it with `useUtcMonth: true`.
 - **Cache restore** preserves truthful provenance metadata; `buildPathKind: cache_restore`; weather defaults to unknown when missing.
-- **GapFill Lab** production Past path uses shared core via `getPastSimulatedDatasetForHouse` with `buildPathKind: lab_validation`.
-- **gapfill_test_days_profile** remains a separate validation path. See `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md` for verification checklist.
+- **GapFill Lab** uses the same shared Past artifact, the same shared fingerprint, and the same shared simulator output via `getPastSimulatedDatasetForHouse` with `buildPathKind: lab_validation`; GapFill remains scoring/reporting only.
+- **LEGACY / NON-AUTHORITATIVE:** `gapfill_test_days_profile` may still appear as a historical label in older notes or diagnostics. It does not represent a separate simulation engine, separate artifact, or separate fingerprint.
 - **Weather backfill** replaces stale STUB_V1 rows when actual Open-Meteo data is available; repair script and procedure for existing bad data: see `docs/PAST_WEATHER_STUB_REPAIR.md`.
-- **Admin simulation diagnostics:** Tool on `/admin/simulation-engines` (Past pipeline diagnostics section) to validate production simulator/weather pipeline for a selected house without shell/droplet: Past path meta, weather provenance, stub audit, cold/cache/recalc parity, weather repair action. GapFill Lab explicitly labeled as separate from Past production.
+- **Admin simulation diagnostics:** Tool on `/admin/simulation-engines` (Past pipeline diagnostics section) validates the shared production simulator/weather pipeline for a selected house without shell/droplet: Past path meta, weather provenance, stub audit, cold/cache/recalc parity, weather repair action, and shared GapFill scoring parity.
 - **Parity fix:** When "Include parity" is checked, cold build uses the stored build's `travelRanges` (not UI override) so cold, production, and recalc are compared on the same inputs; parity cards now show per-side `scenarioId`, `buildInputsHash`, `travelRangesUsed`, `coverageStart`/`coverageEnd`, `buildPathKind`, `source`, `lastBuiltAt`. Cache restore sets `weatherFallbackReason` to `null` when `weatherSourceSummary === "actual_only"` so parity weather metadata matches cold.

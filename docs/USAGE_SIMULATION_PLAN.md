@@ -217,6 +217,22 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - No second overlay pass on top of the saved Past baseline artifact.
 - No alternate rebuild path for the same Past baseline output.
 
+### GapFill Shared Scoring Rule
+
+- Past Sim and GapFill compare use the same shared artifact, the same shared fingerprint, and the same shared simulator logic.
+- Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
+- Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
+- GapFill is a holdout validation workflow, not an artifact-building workflow.
+- GapFill may select test days, fetch actual intervals for those days, read the matching simulated intervals from the shared artifact, and compute metrics/reports.
+- GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- Authoritative shared simulator call chain:
+  - `getPastSimulatedDatasetForHouse`
+  - `simulatePastUsageDataset`
+  - `loadWeatherForPastWindow`
+  - `buildPastSimulatedBaselineV1`
+  - `buildCurveFromPatchedIntervals`
+  - `buildSimulatedUsageDatasetFromCurve`
+
 ### Stage Boundary Rule
 
 - Usage actual intervals = saved source artifact.
