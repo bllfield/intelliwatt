@@ -1252,11 +1252,13 @@ export default function GapFillLabClient() {
                 <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
                   {JSON.stringify(usageShapeDependencyStatus ?? null, null, 2)}
                 </pre>
-                <div className="mt-2 text-sm">
-                  <Link className="text-brand-blue underline" href="/admin/tools/usage-shape-profile">
-                    Open Usage Shape Profile tool
-                  </Link>
-                </div>
+                {usageShapeNeedsAction && (
+                  <div className="mt-2 text-sm">
+                    <Link className="text-brand-blue underline" href="/admin/tools/usage-shape-profile">
+                      Open Usage Shape Profile tool
+                    </Link>
+                  </div>
+                )}
               </div>
               <div className="p-3 rounded border border-brand-blue/20">
                 <div className="font-medium text-brand-navy mb-1">Usage-Shape Profile Diagnostic</div>
