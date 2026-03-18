@@ -792,7 +792,11 @@ export async function buildGapfillCompareSimShared(args: {
     restoredMetaNormalized = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
     const artifactCurveShapingVersion = String(restoredMetaNormalized?.curveShapingVersion ?? "");
     const artifactIntervalsRaw = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
+    // Lightweight selected-days compare reads score from fresh selected-day simulation.
+    // Full-window artifact interval completeness is not required for this mode.
+    const enforceArtifactCompleteness = !useSelectedDaysLightweightArtifactRead;
     const needsRebuildForStaleWindow =
+      enforceArtifactCompleteness &&
       !rebuildArtifact &&
       artifactIntervalsRaw.length > 0 &&
       artifactIntervalsRaw.length < expectedChartIntervalCount;

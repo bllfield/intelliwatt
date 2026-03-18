@@ -775,6 +775,43 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("allows lightweight selected-days reads to proceed with incomplete artifact windows", async () => {
+    // canonicalMonths in beforeEach yields expected full-month interval count (31 * 96),
+    // while decode mock provides only a single day. Lightweight mode should still proceed.
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-latest-lightweight-incomplete",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
+      expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
+    }
+  });
+
   it("uses shared excludedDateKeys ownership from artifact metadata for scoring", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
