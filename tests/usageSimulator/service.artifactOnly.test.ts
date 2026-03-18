@@ -304,6 +304,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
     return out;
   }
+  function oneChicagoLocalDayIntervals96(localDate: string, kwh = 0.25): Array<{ timestamp: string; kwh: number }> {
+    const out: Array<{ timestamp: string; kwh: number }> = [];
+    const startMs = new Date(`${localDate}T06:00:00.000Z`).getTime();
+    for (let i = 0; i < 96; i++) {
+      out.push({ timestamp: new Date(startMs + i * 15 * 60 * 1000).toISOString(), kwh });
+    }
+    return out;
+  }
 
   beforeEach(() => {
     scenarioFindFirst.mockReset();
@@ -340,7 +348,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     encodeIntervalsV1.mockReturnValue({ bytes: Buffer.from("00", "hex") });
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
     simulatePastSelectedDaysShared.mockResolvedValue({
-      simulatedIntervals: oneDayIntervals96(24 / 72),
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [],
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
@@ -576,7 +584,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.simulatedTestIntervals.length).toBe(96);
       expect(out.artifactUsesTestDaysInIdentity).toBe(false);
     }
   });
@@ -610,7 +618,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.simulatedTestIntervals.length).toBe(96);
     }
   });
 
@@ -676,11 +684,11 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.simulatedTestIntervals.length).toBe(96);
       expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
       expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
       expect(out.compareSimSource).toBe("shared_selected_days_calc");
-      expect(out.simulatedTestIntervals.every((p) => p.kwh === 24 / 72)).toBe(true);
+      expect(out.simulatedTestIntervals.every((p) => p.kwh === 24 / 96)).toBe(true);
     }
   });
 
@@ -721,7 +729,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.scoringExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
-      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.simulatedTestIntervals.length).toBe(96);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
     }
   });
@@ -916,7 +924,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         meta: { weatherSourceSummary: "actual_only" },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneDayIntervals96(24 / 72) },
+        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
       },
       simulatedDayResults: [],
       actualWxByDateKey: new Map(),
@@ -967,7 +975,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         meta: { weatherSourceSummary: "actual_only" },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneDayIntervals96(24 / 72) },
+        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
       },
       simulatedDayResults: [],
       actualWxByDateKey: new Map(),
@@ -1014,7 +1022,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         meta: { weatherSourceSummary: "actual_only" },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneDayIntervals96(24 / 72) },
+        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
       },
       simulatedDayResults: [],
       actualWxByDateKey: new Map(),
@@ -1055,9 +1063,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
-    decodeIntervalsV1.mockReturnValue(oneDayIntervals96(24 / 72));
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
     simulatePastSelectedDaysShared.mockResolvedValue({
-      simulatedIntervals: oneDayIntervals96(24 / 72),
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [],
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
@@ -1069,7 +1077,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         meta: { weatherSourceSummary: "actual_only" },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneDayIntervals96(24 / 72) },
+        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
       },
       simulatedDayResults: [],
       actualWxByDateKey: new Map(),

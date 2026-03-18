@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "@/lib/db";
+import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
@@ -649,6 +650,10 @@ export async function simulatePastSelectedDaysShared(
       weatherKindUsed: undefined,
     };
   }
+  const timezoneResolved = String(timezone ?? "").trim();
+  if (!timezoneResolved) {
+    return { simulatedIntervals: null, error: "missing_timezone" };
+  }
   try {
     const actualIntervals =
       preloadedIntervals ??
@@ -692,14 +697,14 @@ export async function simulatePastSelectedDaysShared(
     let reasonNotUsed: string | null = null;
     if (!shapeProfileRow) {
       reasonNotUsed = "profile_not_found";
-    } else if (!timezone) {
+    } else if (!timezoneResolved) {
       reasonNotUsed = "missing_timezone";
     } else if (!shapeProfileRow.shapeByMonth96) {
       reasonNotUsed = "no_shapeByMonth96";
     } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
       reasonNotUsed = "missing_arrays";
     }
-    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
+    if (timezoneResolved && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
       const profileMonthKeys = parseMonthKeysFromShapeByMonth(shapeProfileRow.shapeByMonth96);
       const snap = buildUsageShapeProfileSnapFromMonthContract({
         monthKeys: profileMonthKeys,
@@ -713,14 +718,14 @@ export async function simulatePastSelectedDaysShared(
         reasonNotUsed = reasonNotUsed ?? "no_positive_values";
       }
     }
-    if (!usageShapeProfileSnap && timezone && actualIntervals.length > 0) {
+    if (!usageShapeProfileSnap && timezoneResolved && actualIntervals.length > 0) {
       try {
         inlineDerivedShapeProfile = deriveUsageShapeProfile(
           actualIntervals.map((r) => ({
             tsUtc: String(r.timestamp ?? ""),
             kwh: Number(r.kwh) || 0,
           })),
-          timezone,
+          timezoneResolved,
           `${startDate}T00:00:00.000Z`,
           `${endDate}T23:59:59.999Z`
         );
@@ -748,6 +753,18 @@ export async function simulatePastSelectedDaysShared(
         error: `usage_shape_profile_required:${reasonNotUsed ?? "missing"}`,
       };
     }
+    // Selected local test dates can span two UTC dates. Force simulation for every
+    // UTC day whose 96-slot grid intersects the selected local date keys so join
+    // scoring can materialize a complete local-day interval set.
+    const forcedUtcDateKeys = new Set<string>();
+    for (const dayStartMs of canonicalDayStartsMs) {
+      const gridTs = getDayGridTimestamps(dayStartMs);
+      if (!gridTs.length) continue;
+      const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
+      const intersectsSelectedLocalDay = gridTs.some((ts) => selectedValid.has(dateKeyInTimezone(ts, timezoneResolved)));
+      if (intersectsSelectedLocalDay) forcedUtcDateKeys.add(utcDateKey);
+    }
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: simulatedIntervalsRaw, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
@@ -758,17 +775,22 @@ export async function simulatePastSelectedDaysShared(
       homeProfile: homeProfileForPast,
       applianceProfile: applianceProfileForPast,
       usageShapeProfile: usageShapeProfileSnap ?? undefined,
-      timezoneForProfile: timezone ?? undefined,
+      timezoneForProfile: timezoneResolved,
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: true,
-      forceSimulateDateKeys: selectedValid,
+      forceSimulateDateKeys: forcedUtcDateKeys,
       emitAllIntervals: false,
       debug: { out: pastDayCounts as any },
     });
-    const selectedResults = dayResults.filter((r) => selectedValid.has(String(r.localDate ?? "").slice(0, 10)));
+    const selectedResults = dayResults.filter((r) =>
+      Array.isArray((r as any)?.intervals) &&
+      (r as any).intervals.some((iv: { timestamp?: string }) =>
+        selectedValid.has(dateKeyInTimezone(String(iv?.timestamp ?? ""), timezoneResolved))
+      )
+    );
     const selectedIntervals = simulatedIntervalsRaw.filter((row) =>
-      selectedValid.has(dateKeyFromTimestamp(String(row.timestamp ?? "")))
+      selectedValid.has(dateKeyInTimezone(String(row.timestamp ?? ""), timezoneResolved))
     );
     return {
       simulatedIntervals: selectedIntervals,
