@@ -453,12 +453,17 @@ export default function GapFillLabClient() {
     Boolean(usageShapeDependencyStatus) &&
     String(usageShapeDependencyStatus?.status ?? "").toLowerCase() !== "available";
   const phaseStateByKey = new Map(orchestratorPhases.map((p) => [p.key, p.status] as const));
-  const hybridStepStatus: Array<{ key: string; label: string; state: "done" | "active" | "pending" }> = [
+  const phaseHasError = (...keys: OrchestratorPhaseKey[]) =>
+    keys.some((key) => phaseStateByKey.get(key) === "error");
+  const hybridStepStatus: Array<{ key: string; label: string; state: "done" | "active" | "pending"; failed?: boolean }> = [
     {
       key: "lookup",
       label: "Lookup",
+      failed: phaseHasError("lookup_inputs"),
       state:
-        phaseStateByKey.get("lookup_inputs") === "done"
+        phaseHasError("lookup_inputs")
+          ? "pending"
+          : phaseStateByKey.get("lookup_inputs") === "done"
           ? "done"
           : phaseStateByKey.get("lookup_inputs") === "active"
             ? "active"
@@ -471,8 +476,11 @@ export default function GapFillLabClient() {
     {
       key: "dependency",
       label: "Dependency Check",
+      failed: phaseHasError("usage365_load"),
       state:
-        phaseStateByKey.get("usage365_load") === "done"
+        phaseHasError("usage365_load")
+          ? "pending"
+          : phaseStateByKey.get("usage365_load") === "done"
           ? "done"
           : phaseStateByKey.get("usage365_load") === "active"
             ? "active"
@@ -485,8 +493,11 @@ export default function GapFillLabClient() {
     {
       key: "artifact",
       label: "Artifact Ensure/Rebuild",
+      failed: phaseHasError("artifact_ensure"),
       state:
-        phaseStateByKey.get("artifact_ensure") === "done" ||
+        phaseHasError("artifact_ensure")
+          ? "pending"
+          : phaseStateByKey.get("artifact_ensure") === "done" ||
         truthEnvelope?.artifact ||
         (result && result.ok && (result as any).rebuilt != null)
           ? "done"
@@ -497,8 +508,11 @@ export default function GapFillLabClient() {
     {
       key: "compare",
       label: "Compare",
+      failed: phaseHasError("compare_core", "compare_heavy"),
       state:
-        phaseStateByKey.get("compare_heavy") === "done" ||
+        phaseHasError("compare_core", "compare_heavy")
+          ? "pending"
+          : phaseStateByKey.get("compare_heavy") === "done" ||
         phaseStateByKey.get("compare_core") === "done" ||
         (result && result.ok && result.metrics)
           ? "done"
@@ -1596,14 +1610,16 @@ export default function GapFillLabClient() {
                   <div className="text-brand-navy">{step.label}</div>
                   <div
                     className={`font-semibold ${
-                      step.state === "done"
+                      step.failed
+                        ? "text-rose-700"
+                        : step.state === "done"
                         ? "text-emerald-700"
                         : step.state === "active"
                           ? "text-amber-700"
                           : "text-brand-navy/60"
                     }`}
                   >
-                    {step.state}
+                    {step.failed ? "error" : step.state}
                   </div>
                 </div>
               ))}
