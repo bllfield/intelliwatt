@@ -929,6 +929,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      compareFreshMode: "full_window",
       includeFreshCompareCalc: true,
     });
 
@@ -978,6 +979,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      compareFreshMode: "full_window",
       includeFreshCompareCalc: true,
     } as const;
 
@@ -1025,6 +1027,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      compareFreshMode: "full_window",
       includeFreshCompareCalc: true,
     });
     expect(out.ok).toBe(true);

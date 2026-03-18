@@ -1694,6 +1694,11 @@ export async function POST(req: NextRequest) {
 
   const simulatedByTs = new Map<string, number>();
   for (const p of sharedSim.simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
+  const artifactSimulatedByTs = new Map<string, number>();
+  for (const p of Array.isArray(sharedSim.artifactIntervals) ? sharedSim.artifactIntervals : []) {
+    if (!scoringTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))) continue;
+    artifactSimulatedByTs.set(p.timestamp, p.kwh);
+  }
   const simulatedScoringDateKeysLocal = new Set<string>(
     sharedSim.simulatedTestIntervals.map((p) => dateKeyInTimezone(p.timestamp, scoringTimezone))
   );
@@ -1711,27 +1716,54 @@ export async function POST(req: NextRequest) {
   )
     ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
     : inferredMissingSimulatedOwnershipCount;
-  const missingJoinedActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
-  if (missingJoinedActual.length > 0) {
-    const classification = classifySimulationFailure({
-      code: "artifact_compare_join_incomplete_rebuild_required",
-      message: "Saved shared Past artifact did not produce all simulated timestamps required for compare join.",
-    });
+  const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
+  const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
+  const scoringUsesArtifactOnly = (sharedSim as any).scoringUsedSharedArtifact === true;
+  if (scoringJoinMissingActual.length > 0) {
+    if (scoringUsesArtifactOnly) {
+      const classification = classifySimulationFailure({
+        code: "artifact_compare_join_incomplete_rebuild_required",
+        message: "Saved shared Past artifact did not produce all simulated timestamps required for compare join.",
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "artifact_compare_join_incomplete_rebuild_required",
+          message:
+            "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
+          explanation: classification.userFacingExplanation,
+          missingData: classification.missingData,
+          reasonCode: classification.reasonCode,
+          joinMissingCount: scoringJoinMissingActual.length,
+          joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       {
         ok: false,
-        error: "artifact_compare_join_incomplete_rebuild_required",
+        error: "compare_scoring_join_incomplete",
         message:
-          "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
-        explanation: classification.userFacingExplanation,
-        missingData: classification.missingData,
-        reasonCode: classification.reasonCode,
-        joinMissingCount: missingJoinedActual.length,
-        joinMissingSampleTs: missingJoinedActual.slice(0, 10).map((p) => p.timestamp),
+          "Fresh shared compare scoring output is missing timestamps required for actual-vs-sim join. Retry compare and inspect shared scoring diagnostics.",
+        reasonCode: "COMPARE_SCORING_JOIN_INCOMPLETE",
+        missingData: ["fresh_shared_compare_intervals15"],
+        joinMissingCount: scoringJoinMissingActual.length,
+        joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
       },
       { status: 409 }
     );
   }
+  const artifactDisplayReferenceWarning = !scoringUsesArtifactOnly && artifactJoinMissingActual.length > 0
+    ? {
+        code: "artifact_display_reference_incomplete",
+        message:
+          "Saved shared Past artifact is missing some scored-day join timestamps for display/parity/reference paths, but fresh shared compare scoring completed.",
+        nonBlocking: true,
+        joinMissingCount: artifactJoinMissingActual.length,
+        joinMissingSampleTs: artifactJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
+      }
+    : null;
 
   const metrics = computeGapFillMetrics({
     actual: scoringActualTestIntervalsCanon,
@@ -1746,8 +1778,8 @@ export async function POST(req: NextRequest) {
   const simulatedTestIntervalsCount = sharedSim.simulatedTestIntervals.length;
   const hasScoreableIntervals = simulatedTestIntervalsCount > 0;
   const scoreableIntervalsMessage = hasScoreableIntervals
-    ? "Selected test days include scoreable intervals from shared Past artifact output."
-    : "Selected test days had no scoreable intervals from shared Past artifact output. This compare completed with zero scored intervals.";
+    ? "Selected test days include scoreable intervals from shared compare scoring output."
+    : "Selected test days had no scoreable intervals from shared compare scoring output. This compare completed with zero scored intervals.";
   const scoringActualSource = "actual_usage_test_window_intervals";
   const scoringSimulatedSource =
     (sharedSim as any).scoringSimulatedSource ?? "shared_artifact_simulated_intervals15";
@@ -2046,6 +2078,7 @@ export async function POST(req: NextRequest) {
     scoringTestDaysCount,
     scoredIntervalsCount,
     travelVacantExclusionCount: boundedTravelDateKeysLocal.size,
+    artifactDisplayReferenceWarning,
     usageShapeDependencyStatus: (() => {
       const usageShapeDiag = (sharedSim.modelAssumptions as any)?.usageShapeProfileDiag;
       if (!usageShapeDiag) return { status: "unknown", reason: null };
@@ -2200,9 +2233,12 @@ export async function POST(req: NextRequest) {
     enginePath: "production_past_stitched",
     expectedTestIntervals: scoringTestDateKeysLocal.size * 96,
     coveragePct: scoringTestDateKeysLocal.size > 0 ? actualScoringIntervals.length / (scoringTestDateKeysLocal.size * 96) : null,
-    joinJoinedCount: actualScoringIntervals.length - missingJoinedActual.length,
-    joinMissingCount: missingJoinedActual.length,
-    joinPct: actualScoringIntervals.length > 0 ? (actualScoringIntervals.length - missingJoinedActual.length) / actualScoringIntervals.length : null,
+    joinJoinedCount: actualScoringIntervals.length - scoringJoinMissingActual.length,
+    joinMissingCount: scoringJoinMissingActual.length,
+    joinPct:
+      actualScoringIntervals.length > 0
+        ? (actualScoringIntervals.length - scoringJoinMissingActual.length) / actualScoringIntervals.length
+        : null,
     joinSampleActualTs: actualScoringIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
     joinSampleSimTs: sharedSim.simulatedTestIntervals.slice(0, 5).map((p) => p.timestamp),
     testSelectionMode,
@@ -2276,6 +2312,7 @@ export async function POST(req: NextRequest) {
     compareSimSource,
     weatherBasisUsed,
     compareTruth,
+    artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
     truthEnvelope,

@@ -701,6 +701,8 @@ export default function GapFillLabClient() {
       setError("Enter an email address.");
       return;
     }
+    // New lookup request should not render stale compare truth from a previous run.
+    setResult(null);
     setLookupLoading(true);
     try {
       const res = await fetch("/api/admin/tools/gapfill-lab", {
@@ -785,6 +787,8 @@ export default function GapFillLabClient() {
       setError("Add at least one Test Date range (start and end date), or use Random Test Days.");
       return;
     }
+    // Fresh compare attempt: clear prior merged payload to prevent cross-run truth mixing.
+    setResult(null);
     compareInFlightRef.current = true;
     setLoading(true);
     setHeavyRetryBody(null);
@@ -1111,6 +1115,8 @@ export default function GapFillLabClient() {
       rebuildInFlightRef.current = false;
       return;
     }
+    // Rebuild/retry starts a new attempt context; clear stale compare payload surface first.
+    setResult(null);
     setRebuildLoading(true);
     setError(null);
     setProgressStatus(null);

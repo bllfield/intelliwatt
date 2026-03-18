@@ -419,8 +419,10 @@ export async function buildGapfillCompareSimShared(args: {
     compareFreshMode,
     includeFreshCompareCalc = true,
   } = args;
-  const effectiveCompareFreshMode =
-    compareFreshMode ?? (includeFreshCompareCalc ? "full_window" : "selected_days");
+  // Keep the request flag for backward-compatible payloads, but default compare scoring
+  // mode stays selected-days unless the caller explicitly asks for full_window.
+  void includeFreshCompareCalc;
+  const effectiveCompareFreshMode = compareFreshMode ?? "selected_days";
 
   const pastScenarioId = await resolvePastScenarioIdForHouse({ userId, houseId });
   if (!pastScenarioId) {

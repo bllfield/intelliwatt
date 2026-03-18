@@ -659,7 +659,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.actualTestIntervalsCount).toBe(0);
     expect(body.simulatedTestIntervalsCount).toBe(0);
     expect(body.hasScoreableIntervals).toBe(false);
-    expect(String(body.message ?? "")).toContain("shared Past artifact output");
+    expect(String(body.message ?? "")).toContain("shared compare scoring output");
     expect(body.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
   });
 
@@ -762,6 +762,110 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(409);
     expect(body.error).toBe("artifact_compare_join_incomplete_rebuild_required");
     expect(body.reasonCode).toBe("ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED");
+    expect(body.joinMissingCount).toBeGreaterThan(0);
+  });
+
+  it("keeps compare scoring non-blocking when artifact join is incomplete but fresh scoring join is complete", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      compareSimSource: "shared_selected_days_calc",
+      displaySimSource: "dataset.daily",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      artifactIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.artifactDisplayReferenceWarning).toMatchObject({
+      code: "artifact_display_reference_incomplete",
+      nonBlocking: true,
+      joinMissingCount: 1,
+    });
+    expect(body.truthEnvelope?.artifactDisplayReferenceWarning).toMatchObject({
+      code: "artifact_display_reference_incomplete",
+      nonBlocking: true,
+      joinMissingCount: 1,
+    });
+  });
+
+  it("returns compare_scoring_join_incomplete when fresh selected-day scoring join is incomplete", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      compareSimSource: "shared_selected_days_calc",
+      displaySimSource: "dataset.daily",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      artifactIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedTestIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.25, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.25 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("compare_scoring_join_incomplete");
+    expect(body.reasonCode).toBe("COMPARE_SCORING_JOIN_INCOMPLETE");
+    expect(Array.isArray(body.missingData)).toBe(true);
+    expect(body.missingData).toContain("fresh_shared_compare_intervals15");
     expect(body.joinMissingCount).toBeGreaterThan(0);
   });
 
