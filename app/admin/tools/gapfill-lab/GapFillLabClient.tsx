@@ -121,6 +121,8 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
+const GAPFILL_COMPARE_TIMEOUT_MS = 900_000;
+const GAPFILL_REBUILD_TIMEOUT_MS = 900_000;
 
 function normalizeDailyRowsToWindow<T extends { date: string }>(
   rows: T[],
@@ -612,9 +614,10 @@ export default function GapFillLabClient() {
       setLastAttemptDebug({
         startedAt: new Date().toISOString(),
         phase: "compare_request_started",
+        timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
         requestBody: body,
       });
-      const { res, data } = await postGapfill(body);
+      const { res, data } = await postGapfill(body, GAPFILL_COMPARE_TIMEOUT_MS);
       if (!res.ok) {
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
@@ -632,9 +635,13 @@ export default function GapFillLabClient() {
           setLastAttemptDebug((prev) => ({
             ...(prev ?? {}),
             phase: "legacy_rebuild_only_started",
+            timeoutMs: GAPFILL_REBUILD_TIMEOUT_MS,
             rebuildBody,
           }));
-          const { res: rebuildRes, data: rebuildData } = await postGapfill(rebuildBody);
+          const { res: rebuildRes, data: rebuildData } = await postGapfill(
+            rebuildBody,
+            GAPFILL_REBUILD_TIMEOUT_MS
+          );
           if (!rebuildRes.ok) {
             setProgressStatus(null);
             setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
@@ -657,9 +664,13 @@ export default function GapFillLabClient() {
           setLastAttemptDebug((prev) => ({
             ...(prev ?? {}),
             phase: "legacy_compare_after_rebuild_started",
+            timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
             compareBodyAfterRebuild: compareBody,
           }));
-          const { res: compareRes, data: compareData } = await postGapfill(compareBody);
+          const { res: compareRes, data: compareData } = await postGapfill(
+            compareBody,
+            GAPFILL_COMPARE_TIMEOUT_MS
+          );
           if (!compareRes.ok) {
             setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
             setError(formatApiError(compareData, compareRes.status));
@@ -736,7 +747,16 @@ export default function GapFillLabClient() {
     setProgressStatus(null);
     try {
       const rebuildBody = { ...lastCompareBody, rebuildArtifact: true, rebuildOnly: true };
-      const { res: rebuildRes, data: rebuildData } = await postGapfill(rebuildBody);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: "manual_rebuild_started",
+        timeoutMs: GAPFILL_REBUILD_TIMEOUT_MS,
+        rebuildBody,
+      }));
+      const { res: rebuildRes, data: rebuildData } = await postGapfill(
+        rebuildBody,
+        GAPFILL_REBUILD_TIMEOUT_MS
+      );
       if (!rebuildRes.ok) {
         setProgressStatus(null);
         const errMsg = formatApiError(rebuildData, rebuildRes.status);
