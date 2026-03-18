@@ -770,7 +770,6 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
-      scoringUsedSharedArtifact: false,
       compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
@@ -808,6 +807,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
+    expect(body.scoringUsedSharedArtifact).toBe(false);
     expect(body.artifactDisplayReferenceWarning).toMatchObject({
       code: "artifact_display_reference_incomplete",
       nonBlocking: true,
@@ -825,7 +825,6 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
-      scoringUsedSharedArtifact: false,
       compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",

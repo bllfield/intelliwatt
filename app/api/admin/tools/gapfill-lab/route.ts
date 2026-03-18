@@ -1716,8 +1716,33 @@ export async function POST(req: NextRequest) {
   )
     ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
     : inferredMissingSimulatedOwnershipCount;
-  const scoringUsedSharedArtifact =
-    (sharedSim as any).scoringUsedSharedArtifact !== false;
+  // Normalize optional compare-source booleans so guardrails do not drift when
+  // one field is omitted by mocks/older payload shapes.
+  const rawScoringUsedSharedArtifact = (sharedSim as any).scoringUsedSharedArtifact;
+  const rawComparePulledFromSharedArtifactOnly = (sharedSim as any).comparePulledFromSharedArtifactOnly;
+  const rawCompareFreshModeUsed = String((sharedSim as any).compareFreshModeUsed ?? "");
+  const rawCompareSimSource = String((sharedSim as any).compareSimSource ?? "");
+  const rawScoringSimulatedSource = String((sharedSim as any).scoringSimulatedSource ?? "");
+  const inferredFreshScoringSource =
+    rawCompareFreshModeUsed === "selected_days" ||
+    rawCompareFreshModeUsed === "full_window" ||
+    rawCompareSimSource === "shared_selected_days_calc" ||
+    rawCompareSimSource === "shared_fresh_calc" ||
+    rawScoringSimulatedSource === "shared_selected_days_simulated_intervals15" ||
+    rawScoringSimulatedSource === "shared_fresh_simulated_intervals15";
+  const inferredArtifactScoringSource =
+    rawCompareFreshModeUsed === "artifact_only" ||
+    rawCompareSimSource === "shared_artifact_cache" ||
+    rawScoringSimulatedSource === "shared_artifact_simulated_intervals15";
+  const scoringUsedSharedArtifact = typeof rawScoringUsedSharedArtifact === "boolean"
+    ? rawScoringUsedSharedArtifact
+    : typeof rawComparePulledFromSharedArtifactOnly === "boolean"
+      ? rawComparePulledFromSharedArtifactOnly
+      : inferredFreshScoringSource
+        ? false
+        : inferredArtifactScoringSource
+          ? true
+          : true;
   const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
   const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
   const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
@@ -1802,8 +1827,9 @@ export async function POST(req: NextRequest) {
     (sharedSim as any)?.modelAssumptions?.artifactInputHash ??
     (sharedSim as any)?.modelAssumptions?.artifactInputHashUsed ??
     null;
-  const comparePulledFromSharedArtifactOnly =
-    (sharedSim as any).comparePulledFromSharedArtifactOnly ?? scoringUsedSharedArtifact;
+  const comparePulledFromSharedArtifactOnly = typeof rawComparePulledFromSharedArtifactOnly === "boolean"
+    ? rawComparePulledFromSharedArtifactOnly
+    : scoringUsedSharedArtifact;
   const sharedCoverageWindow = sharedSim.sharedCoverageWindow;
   const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
