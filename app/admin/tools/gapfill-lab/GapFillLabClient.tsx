@@ -696,7 +696,6 @@ export default function GapFillLabClient() {
 
   async function handleLookup() {
     setError(null);
-    setResult(null);
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setError("Enter an email address.");
@@ -718,7 +717,6 @@ export default function GapFillLabClient() {
       const data = (await res.json().catch(() => null)) as ApiResponse;
       if (!res.ok) {
         setError(formatApiError(data, res.status));
-        setResult(null);
         return;
       }
       if (data.ok && data.houses?.length) {
@@ -732,7 +730,6 @@ export default function GapFillLabClient() {
       setResult(data);
     } catch (e: any) {
       setError(e?.name === "AbortError" ? "Request timed out." : (e?.message ?? String(e)));
-      setResult(null);
     } finally {
       setLookupLoading(false);
     }
@@ -844,7 +841,6 @@ export default function GapFillLabClient() {
           errorMessage: formatApiError(lookupData as any, lookupRes.status),
         });
         setError(formatApiError(lookupData as any, lookupRes.status));
-        setResult(null);
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
           phase: "lookup_inputs_error",
@@ -906,7 +902,6 @@ export default function GapFillLabClient() {
         const ensureErrCode = String((ensureData as any)?.error ?? "");
         setArtifactMissing(isArtifactRebuildRequiredError(ensureErrCode));
         setError(formatApiError(ensureData as any, ensureRes.status));
-        setResult(null);
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
           phase: "artifact_ensure_error",
@@ -936,7 +931,6 @@ export default function GapFillLabClient() {
         includeDiagnostics: true,
         includeFullReportText: true,
       });
-      setResult(null);
       startPhase("compare_core", "Running compare core...");
       const { res: coreRes, data: coreData } = await postGapfill(compareBodyBase, GAPFILL_COMPARE_TIMEOUT_MS);
       if (!coreRes.ok || !coreData.ok) {
@@ -947,7 +941,6 @@ export default function GapFillLabClient() {
         const coreErrCode = String((coreData as any)?.error ?? "");
         setArtifactMissing(isArtifactRebuildRequiredError(coreErrCode));
         setError(formatApiError(coreData as any, coreRes.status));
-        setResult(null);
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
           phase: "compare_core_error",
@@ -1010,7 +1003,6 @@ export default function GapFillLabClient() {
           : (e?.message ?? String(e));
       if (e?.name === "AbortError") setArtifactMissing(true);
       setError(msg);
-      setResult(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: e?.name === "AbortError" ? "orchestrator_timeout" : "orchestrator_exception",
@@ -1139,7 +1131,6 @@ export default function GapFillLabClient() {
         setProgressStatus(null);
         const errMsg = formatApiError(rebuildData, rebuildRes.status);
         setError(errMsg);
-        setResult(null);
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
@@ -1153,14 +1144,12 @@ export default function GapFillLabClient() {
       const compareBody = buildCompareBodyAfterRebuild(lastCompareBody, rebuildData);
       setLastCompareBody(compareBody);
       setArtifactMissing(false);
-      setResult(null);
       setProgressStatus("Rebuild complete. Click \"Run Compare\" to load results.");
       setError(null);
       // Do not auto-run compare here; it often times out. User runs compare in a separate request with full timeout budget.
     } catch (e: any) {
       setProgressStatus(null);
       setError(e?.name === "AbortError" ? "Request timed out while rebuilding or re-running compare. Retry once more." : (e?.message ?? String(e)));
-      setResult(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: e?.name === "AbortError" ? "manual_rebuild_timeout" : "manual_rebuild_exception",
