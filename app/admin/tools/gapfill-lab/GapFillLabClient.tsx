@@ -141,6 +141,7 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
 const GAPFILL_COMPARE_TIMEOUT_MS = 900_000;
+const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 90_000;
 const GAPFILL_REBUILD_TIMEOUT_MS = 900_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;
@@ -1054,7 +1055,56 @@ export default function GapFillLabClient() {
       const compareBodyBase = buildCompareBodyAfterRebuild(baseCompareBody, ensureData);
       setLastCompareBody(compareBodyBase);
       startPhase("compare_core", "Running compare core...");
-      const { res: coreRes, data: coreData } = await postGapfill(compareBodyBase, GAPFILL_COMPARE_TIMEOUT_MS);
+      const compareCoreFetchStartedAt = new Date().toISOString();
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        compareCoreBody: compareBodyBase,
+        compareCoreRequestTruth: {
+          includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
+          includeFullReportText: togglesSnapshot.fullDiagnosticsOnCore,
+          compareFreshModeRequested: compareCoreFreshModeRequested,
+          runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+        },
+        compareCoreFetchStartedAt,
+      }));
+      let coreRes: Response;
+      let coreData: ApiResponse;
+      try {
+        const coreResult = await postGapfill(compareBodyBase, GAPFILL_COMPARE_CORE_TIMEOUT_MS);
+        coreRes = coreResult.res;
+        coreData = coreResult.data;
+      } catch (coreErr: unknown) {
+        const normalizedCoreError = normalizeUnknownUiError(
+          coreErr,
+          "Compare core request failed before a response was returned."
+        );
+        const compareCoreFetchSettledAt = new Date().toISOString();
+        const timedOut = normalizedCoreError.isAbortError;
+        finishPhase("compare_core", "error", {
+          errorCode: timedOut ? "compare_core_client_timeout" : "compare_core_client_exception",
+          errorMessage: timedOut
+            ? "Compare core request timed out in client before backend response."
+            : normalizedCoreError.message,
+        });
+        setError(
+          timedOut
+            ? "Compare core request timed out in client. Check Last Attempt Debug for request payload and rerun."
+            : normalizedCoreError.message
+        );
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: timedOut ? "compare_core_timeout" : "compare_core_exception",
+          compareCoreFetchSettledAt,
+          compareCoreTimeoutMs: GAPFILL_COMPARE_CORE_TIMEOUT_MS,
+          coreError: timedOut ? "compare_core_client_timeout" : "compare_core_client_exception",
+          coreMessage: normalizedCoreError.message,
+          coreStatus: null,
+          coreResponse: null,
+        }));
+        setProgressStatus(null);
+        return;
+      }
+      const compareCoreFetchSettledAt = new Date().toISOString();
       if (!coreRes.ok || !coreData.ok) {
         finishPhase("compare_core", "error", {
           errorCode: String((coreData as any)?.error ?? "compare_core_failed"),
@@ -1069,6 +1119,7 @@ export default function GapFillLabClient() {
           coreStatus: coreRes.status,
           coreError: (coreData as any)?.error ?? null,
           coreMessage: (coreData as any)?.message ?? null,
+          compareCoreFetchSettledAt,
           compareCoreBody: compareBodyBase,
           compareCoreRequestTruth: {
             includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
@@ -1086,6 +1137,7 @@ export default function GapFillLabClient() {
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         coreStatus: coreRes.status,
+        compareCoreFetchSettledAt,
         compareCoreBody: compareBodyBase,
         compareCoreRequestTruth: {
           includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,

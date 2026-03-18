@@ -36,6 +36,8 @@ import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/da
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
+const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 120_000;
+const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
@@ -119,6 +121,61 @@ function setIntersect(a: Set<string>, b: Set<string>): Set<string> {
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+type CompareCoreStepKey =
+  | "select_test_days"
+  | "load_actual_usage"
+  | "build_shared_compare"
+  | "join_actual_vs_sim"
+  | "build_metrics"
+  | "build_diagnostics";
+
+function startCompareCoreTiming() {
+  return {
+    startedAtMs: Date.now(),
+    startedAt: new Date().toISOString(),
+    stepsMs: {} as Record<CompareCoreStepKey, number>,
+    lastCompletedStep: null as CompareCoreStepKey | null,
+  };
+}
+
+function markCompareCoreStep(
+  timing: ReturnType<typeof startCompareCoreTiming>,
+  step: CompareCoreStepKey
+) {
+  timing.stepsMs[step] = Math.max(0, Date.now() - timing.startedAtMs);
+  timing.lastCompletedStep = step;
+}
+
+function finalizeCompareCoreTiming(
+  timing: ReturnType<typeof startCompareCoreTiming>,
+  extra?: Record<string, unknown>
+) {
+  return {
+    startedAt: timing.startedAt,
+    endedAt: new Date().toISOString(),
+    elapsedMs: Math.max(0, Date.now() - timing.startedAtMs),
+    lastCompletedStep: timing.lastCompletedStep,
+    stepsMs: timing.stepsMs,
+    ...(extra ?? {}),
+  };
+}
+
+async function withTimeout<T>(task: Promise<T>, timeoutMs: number, timeoutErrorCode: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const err = new Error(timeoutErrorCode);
+      (err as any).code = timeoutErrorCode;
+      reject(err);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([task, timeoutPromise]);
+  } finally {
+    if (timeoutId != null) clearTimeout(timeoutId);
+  }
 }
 
 function safeRatio(numerator: number, denominator: number): number | null {
@@ -1301,6 +1358,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Test Dates = manual ranges or random selection. Vacant/Travel (DB) are always excluded from both training and test.
+  const compareCoreTiming = startCompareCoreTiming();
   let testDateKeysLocal: Set<string> = new Set();
   let testRangesUsed: Array<{ startDate: string; endDate: string }> = [];
   let testSelectionMode: "manual_ranges" | "random_days" = "manual_ranges";
@@ -1419,10 +1477,16 @@ export async function POST(req: NextRequest) {
     testSelectionMode = "manual_ranges";
     testDaysSelected = testDateKeysLocal.size;
   }
+  markCompareCoreStep(compareCoreTiming, "select_test_days");
 
   if (testDateKeysLocal.size === 0) {
     return NextResponse.json(
-      { ok: false, error: "test_ranges_required", message: "At least one valid Test Date range is required (or use Random Test Days)." },
+      {
+        ok: false,
+        error: "test_ranges_required",
+        message: "At least one valid Test Date range is required (or use Random Test Days).",
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
+      },
       { status: 400 }
     );
   }
@@ -1439,6 +1503,7 @@ export async function POST(req: NextRequest) {
         overlapSample: sortedSample(overlapLocal),
         testDateKeysCount: testDateKeysLocal.size,
         travelDateKeysCount: travelDateKeysLocal.size,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
       },
       { status: 400 }
     );
@@ -1546,6 +1611,7 @@ export async function POST(req: NextRequest) {
             endDate: fetchEndExpanded,
           })
   );
+  markCompareCoreStep(compareCoreTiming, "load_actual_usage");
 
   if (!actualIntervals?.length) {
     const classification = classifySimulationFailure({
@@ -1570,6 +1636,7 @@ export async function POST(req: NextRequest) {
         error: "no_actual_data",
         message: "No actual interval data for the test date window.",
         explanation: classification.userFacingExplanation,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
       },
       { status: 400 }
     );
@@ -1582,17 +1649,47 @@ export async function POST(req: NextRequest) {
     includeFullReportTextRequested: includeFullReportText,
     compareFreshModeRequested: compareFreshMode,
   };
-  const sharedSim = await buildGapfillCompareSimShared({
-    userId: user.id,
-    houseId: house.id,
-    timezone,
-    canonicalWindow,
-    testDateKeysLocal,
-    rebuildArtifact,
-    autoEnsureArtifact: true,
-    compareFreshMode,
-    includeFreshCompareCalc: compareFreshMode === "full_window",
-  });
+  let sharedSim: Awaited<ReturnType<typeof buildGapfillCompareSimShared>>;
+  try {
+    sharedSim = await withTimeout(
+      buildGapfillCompareSimShared({
+        userId: user.id,
+        houseId: house.id,
+        timezone,
+        canonicalWindow,
+        testDateKeysLocal,
+        rebuildArtifact,
+        autoEnsureArtifact: true,
+        compareFreshMode,
+        includeFreshCompareCalc: compareFreshMode === "full_window",
+      }),
+      ROUTE_COMPARE_SHARED_TIMEOUT_MS,
+      "compare_core_route_timeout_build_shared_compare"
+    );
+  } catch (err: any) {
+    const timeoutCode = String((err as any)?.code ?? (err as any)?.message ?? "");
+    const timedOut = timeoutCode === "compare_core_route_timeout_build_shared_compare";
+    return NextResponse.json(
+      {
+        ok: false,
+        error: timedOut ? "compare_core_route_timeout" : "compare_core_route_exception",
+        message: timedOut
+          ? "Compare core timed out while building shared compare output."
+          : "Compare core failed while building shared compare output.",
+        missingData: timedOut ? ["buildGapfillCompareSimShared"] : undefined,
+        reasonCode: timedOut
+          ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
+          : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          timeoutMs: timedOut ? ROUTE_COMPARE_SHARED_TIMEOUT_MS : undefined,
+          compareRequestTruth,
+        }),
+      },
+      { status: timedOut ? 504 : 500 }
+    );
+  }
+  markCompareCoreStep(compareCoreTiming, "build_shared_compare");
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
       code: String((sharedSim.body as any)?.error ?? ""),
@@ -1629,9 +1726,22 @@ export async function POST(req: NextRequest) {
         status: sharedSim.status,
         rebuildArtifact,
         testDaysRequested: testDateKeysLocal.size,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          compareRequestTruth,
+        }),
       },
     });
-    return NextResponse.json(mergedBody, { status: sharedSim.status });
+    return NextResponse.json(
+      {
+        ...mergedBody,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          compareRequestTruth,
+        }),
+      },
+      { status: sharedSim.status }
+    );
   }
 
   const scoringTimezone = String((sharedSim as any)?.timezoneUsedForScoring ?? timezone);
@@ -1679,6 +1789,10 @@ export async function POST(req: NextRequest) {
         testDaysRequested: scoringTestDateKeysLocal.size,
         scoringTimezone,
         scoringWindow,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "load_actual_usage",
+          compareRequestTruth,
+        }),
       },
     });
     return NextResponse.json(
@@ -1687,6 +1801,10 @@ export async function POST(req: NextRequest) {
         error: "no_actual_data",
         message: "No actual interval data found for Test dates in this shared scoring window.",
         explanation: classification.userFacingExplanation,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "load_actual_usage",
+          compareRequestTruth,
+        }),
       },
       { status: 400 }
     );
@@ -1753,6 +1871,7 @@ export async function POST(req: NextRequest) {
   const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
   const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
   if (scoringJoinMissingActual.length > 0) {
+    markCompareCoreStep(compareCoreTiming, "join_actual_vs_sim");
     if (scoringUsesArtifactOnly) {
       const classification = classifySimulationFailure({
         code: "artifact_compare_join_incomplete_rebuild_required",
@@ -1769,6 +1888,10 @@ export async function POST(req: NextRequest) {
           reasonCode: classification.reasonCode,
           joinMissingCount: scoringJoinMissingActual.length,
           joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
+          compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+            failedStep: "join_actual_vs_sim",
+            compareRequestTruth,
+          }),
         },
         { status: 409 }
       );
@@ -1783,10 +1906,15 @@ export async function POST(req: NextRequest) {
         missingData: ["fresh_shared_compare_intervals15"],
         joinMissingCount: scoringJoinMissingActual.length,
         joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "join_actual_vs_sim",
+          compareRequestTruth,
+        }),
       },
       { status: 409 }
     );
   }
+  markCompareCoreStep(compareCoreTiming, "join_actual_vs_sim");
   const artifactDisplayReferenceWarning = !scoringUsesArtifactOnly && artifactJoinMissingActual.length > 0
     ? {
         code: "artifact_display_reference_incomplete",
@@ -1804,6 +1932,7 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
     timezone,
   });
+  markCompareCoreStep(compareCoreTiming, "build_metrics");
   const requestedTestDaysCount = testDateKeysLocal.size;
   const scoringTestDaysCount = scoringTestDateKeysLocal.size;
   const scoredIntervalsCount = scoringActualTestIntervalsCanon.length;
@@ -2150,142 +2279,169 @@ export async function POST(req: NextRequest) {
     byFallbackTier: buildBucketRows(byFallbackTierMap),
     byWeatherRegime: buildBucketRows(byWeatherRegimeMap),
   };
-  const fullReport = buildFullReport({
-    reportVersion: REPORT_VERSION,
-    generatedAt: new Date().toISOString(),
-    env: process.env.NODE_ENV ?? "development",
-    houseId: house.id,
-    userId: user.id,
-    email: user.email,
-    houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-    timezone,
-    timezoneUsedForScoring: scoringTimezone,
-    testRangesInput: testRanges,
-    travelRangesFromDb,
-    guardrailExcludedRanges: mergeDateKeysToRanges(Array.from(guardrailExcludedDateKeysLocal).sort()),
-    listTestDateKeys: testDateKeysSorted,
-    testIntervalsCount: actualTestIntervals.length,
-    testDaysCount: testDateKeysLocal.size,
-    guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-    guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
-    dateKeyDiag: {
-      travelDateKeysLocalCount: travelDateKeysLocal.size,
-      travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
-      testDateKeysLocalCount: testDateKeysLocal.size,
-      testDateKeysLocalSample: sortedSample(testDateKeysLocal),
-      guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-      guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
-      setArithmetic: {
-        onlyTravelCount: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).length,
-        onlyTravelSample: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).sort().slice(0, 10),
-        onlyTestCount: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).length,
-        onlyTestSample: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).sort().slice(0, 10),
-        overlapCount: overlapLocal.size,
-        overlapSample: sortedSample(overlapLocal),
-      },
-    },
-    dataset: {
-      summary: {
-        intervalsCount: Number((sharedSim.modelAssumptions as any)?.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0),
-        start: sharedCoverageWindow.startDate,
-        end: sharedCoverageWindow.endDate,
-      },
-      totals: {
-        netKwh: Number((sharedSim.modelAssumptions as any)?.totalKwh ?? metrics.totalSimKwhMasked ?? 0) || 0,
-      },
-      insights: {
-        baseloadDaily: (sharedSim.modelAssumptions as any)?.baseloadDaily ?? null,
-        baseload: (sharedSim.modelAssumptions as any)?.baseload ?? null,
-        timeOfDayBuckets: [],
-        weekdayVsWeekend: {
-          weekday: Number((sharedSim.modelAssumptions as any)?.weekdayKwh ?? 0) || 0,
-          weekend: Number((sharedSim.modelAssumptions as any)?.weekendKwh ?? 0) || 0,
+  let fullReport: ReturnType<typeof buildFullReport> | null = null;
+  if (includeFullReportText) {
+    try {
+      fullReport = await withTimeout(
+        Promise.resolve(
+          buildFullReport({
+            reportVersion: REPORT_VERSION,
+            generatedAt: new Date().toISOString(),
+            env: process.env.NODE_ENV ?? "development",
+            houseId: house.id,
+            userId: user.id,
+            email: user.email,
+            houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+            timezone,
+            timezoneUsedForScoring: scoringTimezone,
+            testRangesInput: testRanges,
+            travelRangesFromDb,
+            guardrailExcludedRanges: mergeDateKeysToRanges(Array.from(guardrailExcludedDateKeysLocal).sort()),
+            listTestDateKeys: testDateKeysSorted,
+            testIntervalsCount: actualTestIntervals.length,
+            testDaysCount: testDateKeysLocal.size,
+            guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+            guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
+            dateKeyDiag: {
+              travelDateKeysLocalCount: travelDateKeysLocal.size,
+              travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
+              testDateKeysLocalCount: testDateKeysLocal.size,
+              testDateKeysLocalSample: sortedSample(testDateKeysLocal),
+              guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
+              guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
+              setArithmetic: {
+                onlyTravelCount: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).length,
+                onlyTravelSample: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).sort().slice(0, 10),
+                onlyTestCount: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).length,
+                onlyTestSample: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).sort().slice(0, 10),
+                overlapCount: overlapLocal.size,
+                overlapSample: sortedSample(overlapLocal),
+              },
+            },
+            dataset: {
+              summary: {
+                intervalsCount: Number((sharedSim.modelAssumptions as any)?.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0),
+                start: sharedCoverageWindow.startDate,
+                end: sharedCoverageWindow.endDate,
+              },
+              totals: {
+                netKwh: Number((sharedSim.modelAssumptions as any)?.totalKwh ?? metrics.totalSimKwhMasked ?? 0) || 0,
+              },
+              insights: {
+                baseloadDaily: (sharedSim.modelAssumptions as any)?.baseloadDaily ?? null,
+                baseload: (sharedSim.modelAssumptions as any)?.baseload ?? null,
+                timeOfDayBuckets: [],
+                weekdayVsWeekend: {
+                  weekday: Number((sharedSim.modelAssumptions as any)?.weekdayKwh ?? 0) || 0,
+                  weekend: Number((sharedSim.modelAssumptions as any)?.weekendKwh ?? 0) || 0,
+                },
+                peakDay: null,
+                peakHour: null,
+              },
+              monthly: sharedSim.simulatedChartMonthly,
+            },
+            buildInputs: {
+              canonicalMonths,
+            },
+            configHash: String(ma.artifactInputHash ?? "n/a"),
+            excludedDateKeysCount: boundedTravelDateKeysLocal.size,
+            excludedDateKeysSample: sortedSample(boundedTravelDateKeysLocal),
+            homeProfile: responseHomeProfile,
+            applianceProfile: responseApplianceProfile,
+            modelAssumptions: sharedSim.modelAssumptions,
+            artifactSourceMode,
+            requestedInputHash,
+            artifactInputHashUsed,
+            artifactHashMatch,
+            artifactScenarioId,
+            artifactCreatedAt,
+            artifactUpdatedAt,
+            artifactSourceNote,
+            metrics: {
+              mae: metrics.mae,
+              rmse: metrics.rmse,
+              maxAbs: metrics.maxAbs,
+              wape: metrics.wape,
+              mape: metrics.mape,
+              totalActualKwhMasked: metrics.totalActualKwhMasked,
+              totalSimKwhMasked: metrics.totalSimKwhMasked,
+              deltaKwhMasked: metrics.deltaKwhMasked,
+              mapeFiltered: (metrics as any).mapeFiltered ?? null,
+              mapeFilteredCount: (metrics as any).mapeFilteredCount ?? 0,
+              byMonth: metrics.byMonth,
+              byHour: metrics.byHour,
+              worst10Abs: (metrics as any).worst10Abs ?? [],
+            },
+            diagnostics: {
+              dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
+              top10Under: metrics.diagnostics.top10Under,
+              top10Over: metrics.diagnostics.top10Over,
+              hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
+            },
+            poolHoursLens: null,
+            usageShapeProfileDiag: ((sharedSim.modelAssumptions as any)?.usageShapeProfileDiag ?? null) as any,
+            simulatedDayDiagnosticsSample:
+              ((sharedSim.modelAssumptions as any)?.simulatedDayDiagnosticsSample ?? []) as Array<{
+                localDate: string;
+                targetDayKwhBeforeWeather: number;
+                weatherAdjustedDayKwh: number;
+                dayTypeUsed: "weekday" | "weekend" | null;
+                shapeVariantUsed: string | null;
+                finalDayKwh: number;
+                intervalSumKwh: number;
+                fallbackLevel: string | null;
+              }>,
+            cacheHit: !rebuildArtifact,
+            cacheSource: rebuildArtifact ? "rebuilt" : "lab",
+            inputHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? ""),
+            intervalDataFingerprint: String((sharedSim.modelAssumptions as any)?.intervalDataFingerprint ?? ""),
+            engineVersion: String((sharedSim.modelAssumptions as any)?.simVersion ?? ""),
+            intervalsCodec: String((sharedSim.modelAssumptions as any)?.intervalsCodec ?? ""),
+            compressedBytesLength: Number((sharedSim.modelAssumptions as any)?.compressedBytesLength ?? 0) || 0,
+            enginePath: "production_past_stitched",
+            expectedTestIntervals: scoringTestDateKeysLocal.size * 96,
+            coveragePct: scoringTestDateKeysLocal.size > 0 ? actualScoringIntervals.length / (scoringTestDateKeysLocal.size * 96) : null,
+            joinJoinedCount: actualScoringIntervals.length - scoringJoinMissingActual.length,
+            joinMissingCount: scoringJoinMissingActual.length,
+            joinPct:
+              actualScoringIntervals.length > 0
+                ? (actualScoringIntervals.length - scoringJoinMissingActual.length) / actualScoringIntervals.length
+                : null,
+            joinSampleActualTs: actualScoringIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
+            joinSampleSimTs: sharedSim.simulatedTestIntervals.slice(0, 5).map((p) => p.timestamp),
+            testSelectionMode,
+            testDaysRequested: testDaysRequested ?? undefined,
+            testDaysSelected,
+            seedUsed,
+            testMode,
+            candidateDaysAfterModeFilterCount,
+            minDayCoveragePct,
+            candidateWindowStartUtc: candidateWindowStart,
+            candidateWindowEndUtc: candidateWindowEnd,
+            excludedFromTest_travelCount,
+          })
+        ),
+        ROUTE_COMPARE_REPORT_TIMEOUT_MS,
+        "compare_core_route_timeout_build_full_report"
+      );
+    } catch {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_core_route_timeout",
+          message: "Compare core timed out while building diagnostics report payload.",
+          reasonCode: "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS",
+          compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+            failedStep: "build_diagnostics",
+            timeoutMs: ROUTE_COMPARE_REPORT_TIMEOUT_MS,
+            compareRequestTruth,
+          }),
         },
-        peakDay: null,
-        peakHour: null,
-      },
-      monthly: sharedSim.simulatedChartMonthly,
-    },
-    buildInputs: {
-      canonicalMonths,
-    },
-    configHash: String(ma.artifactInputHash ?? "n/a"),
-    excludedDateKeysCount: boundedTravelDateKeysLocal.size,
-    excludedDateKeysSample: sortedSample(boundedTravelDateKeysLocal),
-    homeProfile: responseHomeProfile,
-    applianceProfile: responseApplianceProfile,
-    modelAssumptions: sharedSim.modelAssumptions,
-    artifactSourceMode,
-    requestedInputHash,
-    artifactInputHashUsed,
-    artifactHashMatch,
-    artifactScenarioId,
-    artifactCreatedAt,
-    artifactUpdatedAt,
-    artifactSourceNote,
-    metrics: {
-      mae: metrics.mae,
-      rmse: metrics.rmse,
-      maxAbs: metrics.maxAbs,
-      wape: metrics.wape,
-      mape: metrics.mape,
-      totalActualKwhMasked: metrics.totalActualKwhMasked,
-      totalSimKwhMasked: metrics.totalSimKwhMasked,
-      deltaKwhMasked: metrics.deltaKwhMasked,
-      mapeFiltered: (metrics as any).mapeFiltered ?? null,
-      mapeFilteredCount: (metrics as any).mapeFilteredCount ?? 0,
-      byMonth: metrics.byMonth,
-      byHour: metrics.byHour,
-      worst10Abs: (metrics as any).worst10Abs ?? [],
-    },
-    diagnostics: {
-      dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
-      top10Under: metrics.diagnostics.top10Under,
-      top10Over: metrics.diagnostics.top10Over,
-      hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
-    },
-    poolHoursLens: null,
-    usageShapeProfileDiag: ((sharedSim.modelAssumptions as any)?.usageShapeProfileDiag ?? null) as any,
-    simulatedDayDiagnosticsSample:
-      ((sharedSim.modelAssumptions as any)?.simulatedDayDiagnosticsSample ?? []) as Array<{
-        localDate: string;
-        targetDayKwhBeforeWeather: number;
-        weatherAdjustedDayKwh: number;
-        dayTypeUsed: "weekday" | "weekend" | null;
-        shapeVariantUsed: string | null;
-        finalDayKwh: number;
-        intervalSumKwh: number;
-        fallbackLevel: string | null;
-      }>,
-    cacheHit: !rebuildArtifact,
-    cacheSource: rebuildArtifact ? "rebuilt" : "lab",
-    inputHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? ""),
-    intervalDataFingerprint: String((sharedSim.modelAssumptions as any)?.intervalDataFingerprint ?? ""),
-    engineVersion: String((sharedSim.modelAssumptions as any)?.simVersion ?? ""),
-    intervalsCodec: String((sharedSim.modelAssumptions as any)?.intervalsCodec ?? ""),
-    compressedBytesLength: Number((sharedSim.modelAssumptions as any)?.compressedBytesLength ?? 0) || 0,
-    enginePath: "production_past_stitched",
-    expectedTestIntervals: scoringTestDateKeysLocal.size * 96,
-    coveragePct: scoringTestDateKeysLocal.size > 0 ? actualScoringIntervals.length / (scoringTestDateKeysLocal.size * 96) : null,
-    joinJoinedCount: actualScoringIntervals.length - scoringJoinMissingActual.length,
-    joinMissingCount: scoringJoinMissingActual.length,
-    joinPct:
-      actualScoringIntervals.length > 0
-        ? (actualScoringIntervals.length - scoringJoinMissingActual.length) / actualScoringIntervals.length
-        : null,
-    joinSampleActualTs: actualScoringIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
-    joinSampleSimTs: sharedSim.simulatedTestIntervals.slice(0, 5).map((p) => p.timestamp),
-    testSelectionMode,
-    testDaysRequested: testDaysRequested ?? undefined,
-    testDaysSelected,
-    seedUsed,
-    testMode,
-    candidateDaysAfterModeFilterCount,
-    minDayCoveragePct,
-    candidateWindowStartUtc: candidateWindowStart,
-    candidateWindowEndUtc: candidateWindowEnd,
-    excludedFromTest_travelCount,
-  });
+        { status: 504 }
+      );
+    }
+  }
+  markCompareCoreStep(compareCoreTiming, "build_diagnostics");
 
   return NextResponse.json({
     ok: true,
@@ -2347,6 +2503,10 @@ export async function POST(req: NextRequest) {
     weatherBasisUsed,
     compareTruth,
     compareRequestTruth,
+    compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+      compareRequestTruth,
+      selectedDaysCoreLightweight: compareFreshMode === "selected_days" && !includeDiagnostics && !includeFullReportText,
+    }),
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
@@ -2401,7 +2561,7 @@ export async function POST(req: NextRequest) {
       windowEndUtc: sharedCoverageWindow.endDate,
       canonicalWindowHelper,
     },
-    fullReportText: includeFullReportText ? fullReport.fullReportText : undefined,
+    fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
     pasteSummary:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
       `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=${stableScenarioId}`,

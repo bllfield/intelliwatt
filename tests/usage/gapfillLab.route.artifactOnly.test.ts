@@ -879,6 +879,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(Array.isArray(body.missingData)).toBe(true);
     expect(body.missingData).toContain("fresh_shared_compare_intervals15");
     expect(body.joinMissingCount).toBeGreaterThan(0);
+    expect(body.compareCoreTiming?.lastCompletedStep).toBe("join_actual_vs_sim");
+    expect(body.compareCoreTiming?.failedStep).toBe("join_actual_vs_sim");
   });
 
   it("returns compact response by default while keeping integrity/count metadata", async () => {
@@ -944,6 +946,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredIntervalsCount).toBe(2);
     expect(body.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
     expect(body.compareFreshModeUsed).toBe("selected_days");
+    expect(body.compareCoreTiming?.selectedDaysCoreLightweight).toBe(true);
+    expect(body.compareCoreTiming?.stepsMs?.build_shared_compare).toBeTypeOf("number");
+    expect(body.compareCoreTiming?.stepsMs?.build_metrics).toBeTypeOf("number");
+    expect(body.compareCoreTiming?.stepsMs?.build_diagnostics).toBeTypeOf("number");
     expect(body.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.displaySimSource).toBe("dataset.daily");
     expect(body.compareSimSource).toBe("shared_selected_days_calc");
@@ -1115,6 +1121,27 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);
   });
 
+  it("returns route timeout classification with timing envelope when shared compare build stalls", async () => {
+    const timeoutErr: any = new Error("compare_core_route_timeout_build_shared_compare");
+    timeoutErr.code = "compare_core_route_timeout_build_shared_compare";
+    buildGapfillCompareSimShared.mockRejectedValueOnce(timeoutErr);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(504);
+    expect(body.error).toBe("compare_core_route_timeout");
+    expect(body.reasonCode).toBe("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE");
+    expect(body.compareCoreTiming?.failedStep).toBe("build_shared_compare");
+    expect(body.compareCoreTiming?.compareRequestTruth?.compareFreshModeRequested).toBe("selected_days");
+  });
+
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
     getActualIntervalsForRange.mockReset();
     getCandidateDateCoverageForSelection.mockResolvedValue({
@@ -1241,6 +1268,15 @@ describe("GapFillLabClient catch normalization helpers", () => {
     expect(clientSource).toContain("function normalizeUnknownUiError(");
     expect(clientSource).toContain("const normalizedError = normalizeUnknownUiError(");
     expect(clientSource).toContain("phase: normalizedError.isAbortError ? \"orchestrator_timeout\" : \"orchestrator_exception\"");
+  });
+
+  it("records compare_core request before fetch and uses explicit core timeout handling", () => {
+    expect(clientSource).toContain("const compareCoreFetchStartedAt = new Date().toISOString();");
+    expect(clientSource).toContain("compareCoreFetchStartedAt");
+    expect(clientSource).toContain("compareCoreFetchSettledAt");
+    expect(clientSource).toContain("GAPFILL_COMPARE_CORE_TIMEOUT_MS");
+    expect(clientSource).toContain("postGapfill(compareBodyBase, GAPFILL_COMPARE_CORE_TIMEOUT_MS)");
+    expect(clientSource).toContain("compare_core_client_timeout");
   });
 
   it("does not require instanceof Error before phase error finalization", () => {
