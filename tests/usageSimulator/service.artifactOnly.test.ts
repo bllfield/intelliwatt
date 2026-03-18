@@ -246,6 +246,47 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(out.ok).toBe(true);
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
+
+  it("allow_rebuild persists canonical excluded fingerprint metadata on saved shared artifact", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2" },
+        daily: [{ date: "2026-01-01", kwh: 0.75, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    const saved = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
+    const savedMeta = ((saved as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
+    expect(typeof savedMeta.excludedDateKeysFingerprint).toBe("string");
+    expect(typeof savedMeta.excludedDateKeysCount).toBe("number");
+  });
 });
 
 describe("buildGapfillCompareSimShared scoring interval sourcing", () => {

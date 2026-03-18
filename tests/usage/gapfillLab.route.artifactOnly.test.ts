@@ -256,6 +256,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
       expect.objectContaining({
         rebuildArtifact: true,
+        autoEnsureArtifact: true,
       })
     );
   });

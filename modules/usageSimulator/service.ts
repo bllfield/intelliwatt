@@ -2686,6 +2686,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
             dataset = pastResult.dataset;
             if (dataset) {
               if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+              // Persist canonical shared-window ownership metadata with the rebuilt artifact so
+              // later scenario-level fallback compatibility checks can trust the saved fingerprint.
+              if (scenarioKey !== "BASELINE") {
+                applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+              }
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;

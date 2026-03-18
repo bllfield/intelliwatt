@@ -1582,7 +1582,7 @@ export async function POST(req: NextRequest) {
     canonicalWindow,
     testDateKeysLocal,
     rebuildArtifact,
-    autoEnsureArtifact: false,
+    autoEnsureArtifact: true,
     includeFreshCompareCalc: true,
   });
   if (!sharedSim.ok) {
