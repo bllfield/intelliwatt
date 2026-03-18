@@ -207,18 +207,29 @@ export function normalizeUnknownUiError(
   const fromObject = value != null && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const nameRaw = fromObject && typeof fromObject.name === "string" ? fromObject.name.trim() : "";
   const messageRaw = fromObject && typeof fromObject.message === "string" ? fromObject.message.trim() : "";
+  const codeRaw = fromObject && typeof fromObject.code === "string" ? fromObject.code.trim() : "";
+  const objectMessage = (() => {
+    if (!fromObject) return "";
+    try {
+      const json = JSON.stringify(fromObject);
+      return json && json !== "{}" ? json : "";
+    } catch {
+      return "";
+    }
+  })();
   const primitiveMessage =
     typeof value === "string"
       ? value.trim()
       : typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
         ? String(value)
         : "";
-  const name = nameRaw || "Error";
-  const message = messageRaw || primitiveMessage || fallbackMessage;
+  const name = nameRaw || (codeRaw === "ABORT_ERR" ? "AbortError" : "Error");
+  const message = messageRaw || primitiveMessage || objectMessage || fallbackMessage;
+  const abortLikeMessage = message.toLowerCase().includes("abort");
   return {
     name,
     message,
-    isAbortError: name === "AbortError",
+    isAbortError: name === "AbortError" || codeRaw === "ABORT_ERR" || abortLikeMessage,
   };
 }
 
@@ -698,6 +709,14 @@ export default function GapFillLabClient() {
           ),
         } as any)) as ApiResponse;
       return { res, data };
+    } catch (err: unknown) {
+      const normalized = normalizeUnknownUiError(
+        err,
+        "Request failed before server response was received."
+      );
+      const wrapped = new Error(normalized.message);
+      wrapped.name = normalized.name;
+      throw wrapped;
     } finally {
       clearTimeout(timeoutId);
     }
@@ -799,8 +818,9 @@ export default function GapFillLabClient() {
         setTravelRangesFromDb((data as any).travelRangesFromDb.map((r: RangeRow) => ({ startDate: r.startDate, endDate: r.endDate })));
       }
       setResult(data);
-    } catch (e: any) {
-      setError(e?.name === "AbortError" ? "Request timed out." : (e?.message ?? String(e)));
+    } catch (e: unknown) {
+      const normalized = normalizeUnknownUiError(e, "Lookup failed.");
+      setError(normalized.isAbortError ? "Request timed out." : normalized.message);
     } finally {
       setLookupLoading(false);
     }
@@ -831,8 +851,13 @@ export default function GapFillLabClient() {
         return;
       }
       mergeSuccessfulResult(data);
-    } catch (e: any) {
-      setError(e?.name === "AbortError" ? "Request timed out while loading Usage 365." : (e?.message ?? String(e)));
+    } catch (e: unknown) {
+      const normalized = normalizeUnknownUiError(e, "Usage 365 request failed.");
+      setError(
+        normalized.isAbortError
+          ? "Request timed out while loading Usage 365."
+          : normalized.message
+      );
     } finally {
       setUsage365Loading(false);
     }
