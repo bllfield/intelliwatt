@@ -652,6 +652,7 @@ export default function GapFillLabClient() {
           const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
           setLastCompareBody(compareBody);
           setArtifactMissing(false);
+          setResult(null);
           setProgressStatus("Rebuild complete. Loading compare result from shared artifact...");
           setLastAttemptDebug((prev) => ({
             ...(prev ?? {}),
