@@ -785,7 +785,14 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         granularity: "daily_kwh_rounded_2dp",
         comparisonBasis: "display_shared_artifact_vs_compare_selected_days_fresh_calc",
       },
-      travelVacantParitySample: [],
+      travelVacantParitySample: [
+        {
+          localDate: "2025-12-25",
+          displayedPastStyleSimDayKwh: 12.34,
+          freshSharedDayCalcKwh: 12.34,
+          parityMatch: true,
+        },
+      ],
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
       boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
@@ -827,6 +834,18 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.weatherBasisUsed).toBe("actual_only");
     expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
     expect(body.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
+    expect(body.compareTruth?.compareFreshModeUsed).toBe("selected_days");
+    expect(body.compareTruth?.compareFreshModeLabel).toContain("Selected-days");
+    expect(body.compareTruth?.compareCalculationScope).toBe("selected_days_shared_path_only");
+    expect(body.compareTruth?.compareCalculationScopeLabel).toContain("Selected-day-only");
+    expect(body.compareTruth?.architectureNote).toContain("not an isolated route-level per-day simulator");
+    expect(body.travelVacantParitySample?.[0]).toMatchObject({
+      localDate: "2025-12-25",
+      displayedPastStyleSimDayKwh: 12.34,
+      freshSharedDayCalcKwh: 12.34,
+      parityMatch: true,
+    });
+    expect(body.truthEnvelope?.compareTruth?.compareFreshModeUsed).toBe("selected_days");
     expect(body.truthEnvelope?.compareFreshModeUsed).toBe("selected_days");
     expect(body.truthEnvelope?.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.truthEnvelope?.requestedTestDaysCount).toBe(1);
@@ -901,6 +920,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
     expect(body.compareFreshModeUsed).toBe("selected_days");
     expect(body.compareCalculationScope).toBe("selected_days_shared_path_only");
+    expect(body.compareTruth?.compareSimSource).toBe("shared_selected_days_calc");
+    expect(body.compareTruth?.displaySimSource).toBe("dataset.daily");
     expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBe(false);
     expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBe(99);
     expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);

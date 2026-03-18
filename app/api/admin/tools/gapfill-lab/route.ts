@@ -1994,13 +1994,50 @@ export async function POST(req: NextRequest) {
     maeKwh: agg.count > 0 ? round2(agg.totalAbsError / agg.count) : 0,
     wapePct: safeRatio(agg.totalAbsError, agg.totalActual),
   }));
+  const compareFreshModeUsed = (sharedSim as any).compareFreshModeUsed ?? null;
+  const compareCalculationScope = (sharedSim as any).compareCalculationScope ?? null;
+  const compareSharedCalcPath = (sharedSim as any).compareSharedCalcPath ?? null;
+  const compareSimSource = (sharedSim as any).compareSimSource ?? null;
+  const displaySimSource = (sharedSim as any).displaySimSource ?? null;
+  const weatherBasisUsed = (sharedSim as any).weatherBasisUsed ?? null;
+  const compareTruth = {
+    compareFreshModeUsed,
+    compareFreshModeLabel:
+      compareFreshModeUsed === "selected_days"
+        ? "Selected-days fresh shared execution"
+        : compareFreshModeUsed === "full_window"
+          ? "Full-window fresh shared execution"
+          : compareFreshModeUsed === "artifact_only"
+            ? "Artifact-only compare (no fresh shared execution)"
+            : "Unknown compare mode",
+    compareCalculationScope,
+    compareCalculationScopeLabel:
+      compareCalculationScope === "selected_days_shared_path_only"
+        ? "Selected-day-only fresh shared calculation"
+        : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
+          ? "Full-window fresh shared calculation, then scored-day filter"
+          : compareCalculationScope === "artifact_read_then_scored_day_filter"
+            ? "Artifact read, then scored-day filter"
+            : "Unknown compare scope",
+    compareSharedCalcPath,
+    compareSimSource,
+    displaySimSource,
+    weatherBasisUsed,
+    architectureNote:
+      compareCalculationScope === "selected_days_shared_path_only"
+        ? "Selected-days mode still runs through shared past-day simulator core. It is not an isolated route-level per-day simulator."
+        : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
+          ? "Full-window mode runs shared simulator over the full window before filtering to scored days."
+          : "Artifact-only mode reads shared artifact output and filters scored days.",
+  };
   const truthEnvelope = {
-    compareFreshModeUsed: (sharedSim as any).compareFreshModeUsed ?? null,
-    compareCalculationScope: (sharedSim as any).compareCalculationScope ?? null,
-    compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
-    compareSimSource: (sharedSim as any).compareSimSource ?? null,
-    displaySimSource: (sharedSim as any).displaySimSource ?? null,
-    weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
+    compareFreshModeUsed,
+    compareCalculationScope,
+    compareSharedCalcPath,
+    compareSimSource,
+    displaySimSource,
+    weatherBasisUsed,
+    compareTruth,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
     timezoneUsedForScoring: scoringTimezone,
@@ -2232,12 +2269,13 @@ export async function POST(req: NextRequest) {
     requestedTestDaysCount,
     scoringTestDaysCount,
     scoredIntervalsCount,
-    compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
-    compareFreshModeUsed: (sharedSim as any).compareFreshModeUsed ?? null,
-    compareCalculationScope: (sharedSim as any).compareCalculationScope ?? null,
-    displaySimSource: (sharedSim as any).displaySimSource ?? null,
-    compareSimSource: (sharedSim as any).compareSimSource ?? null,
-    weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
+    compareSharedCalcPath,
+    compareFreshModeUsed,
+    compareCalculationScope,
+    displaySimSource,
+    compareSimSource,
+    weatherBasisUsed,
+    compareTruth,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
     truthEnvelope,

@@ -67,6 +67,18 @@ type ApiResponse =
       trainingCoverage?: { expected: number; found: number | null; pct: number | null };
       usage365?: Usage365Payload;
       truthEnvelope?: any;
+      hasScoreableIntervals?: boolean;
+      compareTruth?: {
+        compareFreshModeUsed?: string | null;
+        compareFreshModeLabel?: string | null;
+        compareCalculationScope?: string | null;
+        compareCalculationScopeLabel?: string | null;
+        compareSharedCalcPath?: string | null;
+        compareSimSource?: string | null;
+        displaySimSource?: string | null;
+        weatherBasisUsed?: string | null;
+        architectureNote?: string | null;
+      } | null;
       displaySimulated?: {
         source: string | null;
         coverageStart: string | null;
@@ -114,6 +126,13 @@ const DEFAULT_RANGE: RangeRow = { startDate: "", endDate: "" };
 
 function formatDate(d: string) {
   return d ? new Date(d + "T12:00:00Z").toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
+}
+
+function badgeClass(kind: "ok" | "warn" | "error" | "neutral"): string {
+  if (kind === "ok") return "px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800";
+  if (kind === "warn") return "px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800";
+  if (kind === "error") return "px-2 py-0.5 rounded text-xs font-semibold bg-rose-100 text-rose-800";
+  return "px-2 py-0.5 rounded text-xs font-semibold bg-brand-navy/10 text-brand-navy";
 }
 
 const VALID_RANDOM_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
@@ -452,6 +471,28 @@ export default function GapFillLabClient() {
   const usageShapeNeedsAction =
     Boolean(usageShapeDependencyStatus) &&
     String(usageShapeDependencyStatus?.status ?? "").toLowerCase() !== "available";
+  const compareTruth =
+    result && result.ok
+      ? ((result as any).compareTruth ?? truthEnvelope?.compareTruth ?? null)
+      : null;
+  const travelVacantParitySample: Array<{
+    localDate: string;
+    displayedPastStyleSimDayKwh: number | null;
+    freshSharedDayCalcKwh: number | null;
+    parityMatch: boolean | null;
+  }> =
+    result && result.ok
+      ? (Array.isArray((result as any)?.travelVacantParitySample)
+          ? (result as any).travelVacantParitySample
+          : Array.isArray(truthEnvelope?.travelVacantParitySample)
+            ? truthEnvelope.travelVacantParitySample
+            : [])
+      : [];
+  const noScoreableIntervals = result && result.ok && (result as any).hasScoreableIntervals === false;
+  const mismatchRowsCount = scoredDayTruthRows.filter((row) => row.displayVsFreshParityMatch === false).length;
+  const largeErrorRowsCount = scoredDayTruthRows.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) >= 5).length;
+  const missAttribution = result && result.ok ? ((result as any).missAttributionSummary ?? null) : null;
+  const tuningBreakdowns = result && result.ok ? ((result as any).accuracyTuningBreakdowns ?? null) : null;
   const phaseStateByKey = new Map(orchestratorPhases.map((p) => [p.key, p.status] as const));
   const phaseHasError = (...keys: OrchestratorPhaseKey[]) =>
     keys.some((key) => phaseStateByKey.get(key) === "error");
@@ -1450,6 +1491,58 @@ export default function GapFillLabClient() {
         </div>
       )}
 
+      {(error || usageShapeNeedsAction || noScoreableIntervals || heavyRetryBody) && (
+        <div className="mb-6 p-4 rounded border border-brand-blue/20 bg-white">
+          <div className="font-semibold text-brand-navy mb-2">Failure / Dependency Summary</div>
+          <div className="space-y-2 text-sm">
+            {error && (
+              <div>
+                <span className={badgeClass("error")}>compare failure</span>
+                <span className="ml-2 text-brand-navy/80">
+                  {phaseStateByKey.get("compare_core") === "error"
+                    ? "Compare core failed; see Orchestrator Timeline for exact reason."
+                    : phaseStateByKey.get("compare_heavy") === "error"
+                      ? "Heavy diagnostics failed; core compare may still be valid."
+                      : "Request failed before completion."}
+                </span>
+              </div>
+            )}
+            {heavyRetryBody && (
+              <div>
+                <span className={badgeClass("warn")}>heavy diagnostics retry available</span>
+                <span className="ml-2 text-brand-navy/80">
+                  Core compare has run, but heavy report payload needs retry.
+                </span>
+              </div>
+            )}
+            {artifactMissing && (
+              <div>
+                <span className={badgeClass("warn")}>artifact rebuild required</span>
+                <span className="ml-2 text-brand-navy/80">
+                  Shared artifact is missing/stale/join-incomplete for this run. Use rebuild action.
+                </span>
+              </div>
+            )}
+            {noScoreableIntervals && (
+              <div>
+                <span className={badgeClass("warn")}>no scoreable intervals</span>
+                <span className="ml-2 text-brand-navy/80">
+                  Test date selection did not yield joinable actual-vs-sim intervals.
+                </span>
+              </div>
+            )}
+            {usageShapeNeedsAction && (
+              <div>
+                <span className={badgeClass("warn")}>usage-shape dependency needs action</span>
+                <span className="ml-2 text-brand-navy/80">
+                  Usage-shape profile is missing/not used for this run.
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {orchestratorPhases.some((phase) => phase.status !== "pending") && (
         <details className="mb-6 border border-brand-blue/20 rounded" open>
           <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
@@ -1671,20 +1764,48 @@ export default function GapFillLabClient() {
             <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
               <div className="grid md:grid-cols-2 gap-3">
                 <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Compare mode used</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className={badgeClass("neutral")}>
+                      {String(compareTruth?.compareFreshModeUsed ?? truthEnvelope?.compareFreshModeUsed ?? "—")}
+                    </span>
+                    <span className="text-brand-navy/80">
+                      {String(compareTruth?.compareFreshModeLabel ?? "—")}
+                    </span>
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
                   <div className="text-xs text-brand-navy/70">Calculation scope</div>
-                  <div className="font-mono">{String(truthEnvelope?.compareCalculationScope ?? "—")}</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className={badgeClass("neutral")}>
+                      {String(compareTruth?.compareCalculationScope ?? truthEnvelope?.compareCalculationScope ?? "—")}
+                    </span>
+                  </div>
+                  <div className="text-brand-navy/80 mt-1">
+                    {String(compareTruth?.compareCalculationScopeLabel ?? "—")}
+                  </div>
                 </div>
                 <div className="p-3 rounded border border-brand-blue/20">
                   <div className="text-xs text-brand-navy/70">Shared calc path</div>
-                  <div className="font-mono break-words">{String(truthEnvelope?.compareSharedCalcPath ?? "—")}</div>
+                  <div className="font-mono break-words">{String(compareTruth?.compareSharedCalcPath ?? truthEnvelope?.compareSharedCalcPath ?? "—")}</div>
                 </div>
                 <div className="p-3 rounded border border-brand-blue/20">
                   <div className="text-xs text-brand-navy/70">Compare sim source</div>
-                  <div className="font-mono">{String(truthEnvelope?.compareSimSource ?? "—")}</div>
+                  <div className="font-mono">{String(compareTruth?.compareSimSource ?? truthEnvelope?.compareSimSource ?? "—")}</div>
                 </div>
                 <div className="p-3 rounded border border-brand-blue/20">
                   <div className="text-xs text-brand-navy/70">Display sim source</div>
-                  <div className="font-mono">{String(truthEnvelope?.displaySimSource ?? "—")}</div>
+                  <div className="font-mono">{String(compareTruth?.displaySimSource ?? truthEnvelope?.displaySimSource ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Weather basis used</div>
+                  <div className="font-mono">{String(compareTruth?.weatherBasisUsed ?? truthEnvelope?.weatherBasisUsed ?? "—")}</div>
+                </div>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="text-xs text-brand-navy/70">Architecture note</div>
+                <div className="text-brand-navy/80 mt-1">
+                  {String(compareTruth?.architectureNote ?? "—")}
                 </div>
               </div>
               <div className="p-3 rounded border border-brand-blue/20">
@@ -1695,6 +1816,50 @@ export default function GapFillLabClient() {
                     : "—"}
                 </div>
               </div>
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Travel / Vacant Parity Check
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              {travelVacantParitySample.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border border-brand-blue/20">
+                    <thead>
+                      <tr className="bg-brand-blue/10">
+                        <th className="text-left p-2">Date</th>
+                        <th className="text-right p-2">Display sim kWh</th>
+                        <th className="text-right p-2">Fresh shared kWh</th>
+                        <th className="text-left p-2">Parity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {travelVacantParitySample.map((row) => (
+                        <tr key={row.localDate} className="border-t border-brand-blue/10">
+                          <td className="p-2 font-mono">{row.localDate}</td>
+                          <td className="p-2 text-right font-mono">{row.displayedPastStyleSimDayKwh ?? "—"}</td>
+                          <td className="p-2 text-right font-mono">{row.freshSharedDayCalcKwh ?? "—"}</td>
+                          <td className="p-2">
+                            {row.parityMatch == null ? (
+                              <span className={badgeClass("neutral")}>n/a</span>
+                            ) : row.parityMatch ? (
+                              <span className={badgeClass("ok")}>match</span>
+                            ) : (
+                              <span className={badgeClass("error")}>mismatch</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-brand-navy/70">
+                  No travel/vacant parity sample returned for this run.
+                </p>
+              )}
             </div>
           </details>
 
@@ -1766,18 +1931,29 @@ export default function GapFillLabClient() {
               Scored Day Truth Table
             </summary>
             <div className="p-4 border-t border-brand-blue/20 space-y-3">
+              {scoredDayTruthRows.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  <span className={badgeClass("neutral")}>rows: {scoredDayTruthRows.length}</span>
+                  <span className={badgeClass(mismatchRowsCount > 0 ? "error" : "ok")}>
+                    display-vs-fresh mismatches: {mismatchRowsCount}
+                  </span>
+                  <span className={badgeClass(largeErrorRowsCount > 0 ? "warn" : "ok")}>
+                    |actual-fresh error| ≥ 5 kWh: {largeErrorRowsCount}
+                  </span>
+                </div>
+              )}
               {scoredDayTruthRows.length > 0 ? (
                 <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
                   <table className="w-full text-xs border border-brand-blue/20">
                     <thead>
                       <tr className="bg-brand-blue/10">
                         <th className="text-left p-2">Date</th>
-                        <th className="text-right p-2">Actual</th>
-                        <th className="text-right p-2">Fresh sim</th>
-                        <th className="text-right p-2">Display sim</th>
-                        <th className="text-right p-2">Error</th>
-                        <th className="text-left p-2">Parity</th>
-                        <th className="text-left p-2">Day</th>
+                        <th className="text-right p-2">Actual kWh</th>
+                        <th className="text-right p-2">Fresh compare kWh</th>
+                        <th className="text-right p-2">Display sim kWh</th>
+                        <th className="text-right p-2">Actual-Fresh error</th>
+                        <th className="text-left p-2">Display-Fresh parity</th>
+                        <th className="text-left p-2">Day type</th>
                         <th className="text-right p-2">Avg/Min/Max F</th>
                         <th className="text-right p-2">HDD/CDD</th>
                         <th className="text-left p-2">Weather basis</th>
@@ -1790,15 +1966,25 @@ export default function GapFillLabClient() {
                       </tr>
                     </thead>
                     <tbody>
-                      {scoredDayTruthRows.map((row: any) => (
-                        <tr key={row.localDate} className="border-t border-brand-blue/10">
+                      {scoredDayTruthRows.map((row: any) => {
+                        const absErr = Math.abs(Number(row.actualVsFreshErrorKwh) || 0);
+                        const mismatch = row.displayVsFreshParityMatch === false;
+                        return (
+                        <tr
+                          key={row.localDate}
+                          className={`border-t border-brand-blue/10 ${mismatch ? "bg-rose-50/60" : absErr >= 5 ? "bg-amber-50/50" : ""}`}
+                        >
                           <td className="p-2 font-mono">{row.localDate}</td>
                           <td className="p-2 text-right font-mono">{row.actualDayKwh}</td>
                           <td className="p-2 text-right font-mono">{row.freshCompareSimDayKwh}</td>
                           <td className="p-2 text-right font-mono">{row.displayedPastStyleSimDayKwh}</td>
                           <td className="p-2 text-right font-mono">{row.actualVsFreshErrorKwh}</td>
-                          <td className={`p-2 ${row.displayVsFreshParityMatch ? "text-emerald-700" : "text-rose-700"}`}>
-                            {row.displayVsFreshParityMatch ? "match" : "mismatch"}
+                          <td className="p-2">
+                            {row.displayVsFreshParityMatch ? (
+                              <span className={badgeClass("ok")}>match</span>
+                            ) : (
+                              <span className={badgeClass("error")}>mismatch</span>
+                            )}
                           </td>
                           <td className="p-2">{row.dayType}</td>
                           <td className="p-2 text-right font-mono">
@@ -1808,14 +1994,30 @@ export default function GapFillLabClient() {
                             {row.hdd65 ?? "—"} / {row.cdd65 ?? "—"}
                           </td>
                           <td className="p-2">{row.weatherBasis ?? "—"}</td>
-                          <td className="p-2">{row.fallbackLevel ?? "—"}</td>
-                          <td className="p-2">{row.selectedDayTotalSource ?? "—"}</td>
-                          <td className="p-2">{row.selectedShapeVariant ?? "—"}</td>
-                          <td className="p-2">{row.selectedReferenceMatchTier ?? "—"}</td>
+                          <td className="p-2">
+                            <span className={badgeClass(row.fallbackLevel ? "warn" : "neutral")}>
+                              {row.fallbackLevel ?? "none"}
+                            </span>
+                          </td>
+                          <td className="p-2">
+                            <span className={badgeClass(row.selectedDayTotalSource ? "neutral" : "warn")}>
+                              {row.selectedDayTotalSource ?? "unknown"}
+                            </span>
+                          </td>
+                          <td className="p-2">
+                            <span className={badgeClass(row.selectedShapeVariant ? "neutral" : "warn")}>
+                              {row.selectedShapeVariant ?? "unknown"}
+                            </span>
+                          </td>
+                          <td className="p-2">
+                            <span className={badgeClass(row.selectedReferenceMatchTier ? "neutral" : "warn")}>
+                              {row.selectedReferenceMatchTier ?? "unknown"}
+                            </span>
+                          </td>
                           <td className="p-2 text-right font-mono">{row.selectedMatchSampleCount ?? "—"}</td>
                           <td className="p-2">{row.reasonCode ?? "—"}</td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -1830,6 +2032,86 @@ export default function GapFillLabClient() {
               Accuracy Tuning Snapshot
             </summary>
             <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="font-medium text-brand-navy mb-2">Top miss buckets</div>
+                  {missAttribution?.categories ? (
+                    <div className="space-y-1">
+                      {Object.entries(missAttribution.categories as Record<string, any>)
+                        .sort((a, b) => (Number((b[1] as any)?.count ?? 0) - Number((a[1] as any)?.count ?? 0)))
+                        .slice(0, 6)
+                        .map(([bucket, meta]) => (
+                          <div key={bucket} className="flex items-center justify-between gap-3">
+                            <span className="text-brand-navy/90">{bucket}</span>
+                            <span className={badgeClass(String((meta as any)?.classification ?? "") === "supported" ? "ok" : "warn")}>
+                              {Number((meta as any)?.count ?? 0)} · {String((meta as any)?.classification ?? "heuristic/provisional")}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="text-brand-navy/70">No miss attribution categories returned.</p>
+                  )}
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="font-medium text-brand-navy mb-2">Top worst days</div>
+                  {Array.isArray(missAttribution?.topWorstErrorDates) && missAttribution.topWorstErrorDates.length > 0 ? (
+                    <div className="space-y-1">
+                      {missAttribution.topWorstErrorDates.slice(0, 8).map((d: any) => (
+                        <div key={d.localDate} className="flex items-center justify-between gap-3">
+                          <span className="font-mono">{d.localDate}</span>
+                          <span className="font-mono">{d.absErrorKwh} kWh</span>
+                          <span className={badgeClass("neutral")}>{d.summary ?? "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-brand-navy/70">No worst-day summary returned.</p>
+                  )}
+                </div>
+              </div>
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="font-medium text-brand-navy mb-2">Temperature bands</div>
+                  {Array.isArray(tuningBreakdowns?.byTemperatureBand) && tuningBreakdowns.byTemperatureBand.length > 0 ? (
+                    <div className="space-y-1">
+                      {tuningBreakdowns.byTemperatureBand.slice(0, 6).map((row: any) => (
+                        <div key={row.bucket} className="flex items-center justify-between gap-3">
+                          <span>{row.bucket}</span>
+                          <span className="font-mono">n={row.count} · MAE {row.maeKwh} · WAPE {row.wapePct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-brand-navy/70">No temperature-band breakdown returned.</p>
+                  )}
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="font-medium text-brand-navy mb-2">Weekday / weekend and fallback tier</div>
+                  {Array.isArray(tuningBreakdowns?.byWeekdayWeekend) && tuningBreakdowns.byWeekdayWeekend.length > 0 ? (
+                    <div className="space-y-1 mb-2">
+                      {tuningBreakdowns.byWeekdayWeekend.slice(0, 3).map((row: any) => (
+                        <div key={`day-${row.bucket}`} className="flex items-center justify-between gap-3">
+                          <span>{row.bucket}</span>
+                          <span className="font-mono">n={row.count} · MAE {row.maeKwh}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {Array.isArray(tuningBreakdowns?.byFallbackTier) && tuningBreakdowns.byFallbackTier.length > 0 ? (
+                    <div className="space-y-1">
+                      {tuningBreakdowns.byFallbackTier.slice(0, 6).map((row: any) => (
+                        <div key={`fb-${row.bucket}`} className="flex items-center justify-between gap-3">
+                          <span>{row.bucket}</span>
+                          <span className="font-mono">n={row.count} · MAE {row.maeKwh}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-brand-navy/70">No fallback-tier breakdown returned.</p>
+                  )}
+                </div>
+              </div>
               <div className="p-3 rounded border border-brand-blue/20">
                 <div className="font-medium text-brand-navy mb-1">Miss Attribution Summary</div>
                 <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
