@@ -67,5 +67,23 @@ describe("prime-past-cache inspect mode", () => {
     expect(buildAndSavePastForGapfillLab).not.toHaveBeenCalled();
     expect(inspectPastCacheArtifacts).not.toHaveBeenCalled();
   });
+
+  it("returns server_error classification when inspect path throws and never triggers rebuild flow", async () => {
+    inspectPastCacheArtifacts.mockRejectedValueOnce(new Error("inspect failed"));
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "inspect",
+      }),
+    } as any;
+
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("server_error");
+    expect(buildAndSavePastForGapfillLab).not.toHaveBeenCalled();
+  });
 });
 

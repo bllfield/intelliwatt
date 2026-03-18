@@ -306,6 +306,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(false);
@@ -339,6 +340,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -372,6 +374,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -404,6 +407,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(false);
@@ -436,6 +440,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -476,6 +481,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -509,6 +515,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -543,6 +550,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: true,
+      includeFreshCompareCalc: false,
     });
 
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
@@ -599,6 +607,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -638,6 +647,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
+      includeFreshCompareCalc: false,
     });
 
     expect(out.ok).toBe(true);
@@ -646,6 +656,57 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.simulatedChartMonthly.length).toBeGreaterThan(0);
       expect((out.modelAssumptions as any)?.gapfillDisplayDailySource).toBe("interval_rebucket_fallback");
       expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("interval_rebucket_fallback");
+    }
+  });
+
+  it("uses fresh shared calc intervals for scoring and exposes parity proof metadata", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-fresh-compare",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { weatherSourceSummary: "actual_only" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: { intervals15: oneDayIntervals96(24 / 72) },
+      },
+      simulatedDayResults: [],
+      actualWxByDateKey: new Map(),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      includeFreshCompareCalc: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");
+      expect(out.compareSimSource).toBe("shared_fresh_calc");
+      expect(out.comparePulledFromSharedArtifactOnly).toBe(false);
+      expect(out.compareSharedCalcPath).toContain("getPastSimulatedDatasetForHouse");
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+      expect(out.weatherBasisUsed).toBe("actual_only");
     }
   });
 });

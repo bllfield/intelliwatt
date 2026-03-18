@@ -1058,7 +1058,12 @@ export async function getIntervalDataFingerprint(args: {
         SELECT
           COUNT(*)::text AS count,
           MAX("ts") AS max_ts,
-          md5(COALESCE(string_agg(to_char("ts", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char(kwh, 'FM9999999990.000000'), '|' ORDER BY "ts"), '')) AS value_hash
+          md5(
+            COALESCE(COUNT(*)::text, '0') || ':' ||
+            COALESCE(SUM(hashtextextended(to_char("ts", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char(kwh, 'FM9999999990.000000'), 0)::numeric)::text, '0') || ':' ||
+            COALESCE(MIN(hashtextextended(to_char("ts", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char(kwh, 'FM9999999990.000000'), 0)::bigint)::text, '0') || ':' ||
+            COALESCE(MAX(hashtextextended(to_char("ts", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char(kwh, 'FM9999999990.000000'), 0)::bigint)::text, '0')
+          ) AS value_hash
         FROM iv
       `);
       const r = rows?.[0];
@@ -1079,7 +1084,12 @@ export async function getIntervalDataFingerprint(args: {
       SELECT
         COUNT(*)::text AS count,
         MAX("timestamp") AS max_ts,
-        md5(COALESCE(string_agg(to_char("timestamp", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char("consumptionKwh"::float, 'FM9999999990.000000'), '|' ORDER BY "timestamp"), '')) AS value_hash
+        md5(
+          COALESCE(COUNT(*)::text, '0') || ':' ||
+          COALESCE(SUM(hashtextextended(to_char("timestamp", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char("consumptionKwh"::float, 'FM9999999990.000000'), 0)::numeric)::text, '0') || ':' ||
+          COALESCE(MIN(hashtextextended(to_char("timestamp", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char("consumptionKwh"::float, 'FM9999999990.000000'), 0)::bigint)::text, '0') || ':' ||
+          COALESCE(MAX(hashtextextended(to_char("timestamp", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char("consumptionKwh"::float, 'FM9999999990.000000'), 0)::bigint)::text, '0')
+        ) AS value_hash
       FROM "GreenButtonInterval"
       WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
         AND "timestamp" >= ${start} AND "timestamp" <= ${end}

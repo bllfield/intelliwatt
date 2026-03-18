@@ -24,6 +24,7 @@ import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDis
 import {
   buildGapfillCompareSimShared,
   getSharedPastCoverageWindowForHouse,
+  rebuildGapfillSharedPastArtifact,
 } from "@/modules/usageSimulator/service";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
@@ -1046,6 +1047,10 @@ export async function POST(req: NextRequest) {
     rebuildArtifact?: boolean;
     /** Rebuild artifact only, then return immediately (no compare in same request). */
     rebuildOnly?: boolean;
+    /** Include heavy compare diagnostics payload; defaults false. */
+    includeDiagnostics?: boolean;
+    /** Include full report text payload; defaults false. */
+    includeFullReportText?: boolean;
   };
   try {
     body = await req.json();
@@ -1067,6 +1072,8 @@ export async function POST(req: NextRequest) {
     );
   }
   const includeUsage365 = body?.includeUsage365 === true;
+  const includeDiagnostics = body?.includeDiagnostics === true;
+  const includeFullReportText = body?.includeFullReportText === true;
   const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
   const seed = String(body?.seed ?? "").trim() || null;
   const VALID_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
@@ -1403,28 +1410,25 @@ export async function POST(req: NextRequest) {
   const rebuildArtifact = body?.rebuildArtifact === true;
   const rebuildOnly = body?.rebuildOnly === true;
   if (rebuildArtifact && rebuildOnly) {
-    const rebuiltCompare = await buildGapfillCompareSimShared({
+    const rebuilt = await rebuildGapfillSharedPastArtifact({
       userId: user.id,
       houseId: house.id,
-      timezone,
-      canonicalWindow,
-      testDateKeysLocal,
-      rebuildArtifact: true,
-      autoEnsureArtifact: true,
     });
-    if (!rebuiltCompare.ok) {
+    if (!rebuilt.ok) {
       const classification = classifySimulationFailure({
-        code: String((rebuiltCompare.body as any)?.error ?? ""),
-        message: String((rebuiltCompare.body as any)?.message ?? ""),
+        code: String((rebuilt as any)?.error ?? ""),
+        message: String((rebuilt as any)?.message ?? ""),
       });
       return NextResponse.json(
         {
-          ...(rebuiltCompare.body as Record<string, unknown>),
+          ok: false,
+          error: String((rebuilt as any)?.error ?? "past_rebuild_failed"),
+          message: String((rebuilt as any)?.message ?? "Failed to rebuild shared Past artifact."),
           explanation: classification.userFacingExplanation,
           missingData: classification.missingData,
           reasonCode: classification.reasonCode,
         },
-        { status: rebuiltCompare.status }
+        { status: 500 }
       );
     }
     return NextResponse.json({
@@ -1443,6 +1447,7 @@ export async function POST(req: NextRequest) {
       mode: "artifact_only",
       action: "rebuild_only",
       rebuilt: true,
+      scenarioId: rebuilt.scenarioId,
       message:
         "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
       testRangesUsed,
@@ -1540,6 +1545,7 @@ export async function POST(req: NextRequest) {
     testDateKeysLocal,
     rebuildArtifact,
     autoEnsureArtifact: false,
+    includeFreshCompareCalc: true,
   });
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
@@ -1692,6 +1698,9 @@ export async function POST(req: NextRequest) {
     simulatedByTs,
     timezone,
   });
+  const requestedTestDaysCount = testDateKeysLocal.size;
+  const scoringTestDaysCount = scoringTestDateKeysLocal.size;
+  const scoredIntervalsCount = scoringActualTestIntervalsCanon.length;
   const actualTestIntervalsCount = scoringActualTestIntervalsCanon.length;
   const simulatedTestIntervalsCount = sharedSim.simulatedTestIntervals.length;
   const hasScoreableIntervals = simulatedTestIntervalsCount > 0;
@@ -1932,6 +1941,14 @@ export async function POST(req: NextRequest) {
     sharedArtifactInputHash,
     comparePulledFromSharedArtifactOnly,
     scoredTestDaysMissingSimulatedOwnershipCount,
+    requestedTestDaysCount,
+    scoringTestDaysCount,
+    scoredIntervalsCount,
+    compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
+    displaySimSource: (sharedSim as any).displaySimSource ?? null,
+    compareSimSource: (sharedSim as any).compareSimSource ?? null,
+    weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
+    displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
@@ -1944,18 +1961,23 @@ export async function POST(req: NextRequest) {
     byHour: metrics.byHour,
     byDayType: metrics.byDayType,
     worstDays: metrics.worstDays,
-    diagnostics: {
-      // Chart scope is always the full canonical window for parity with Usage dashboard charts.
-      dailyTotalsChartSim: sharedSim.simulatedChartDaily,
-      monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
-      stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
-      chartIntervalCount: sharedSim.simulatedChartIntervals.length,
-      dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
-      top10Under: metrics.diagnostics.top10Under,
-      top10Over: metrics.diagnostics.top10Over,
-      hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
-      seasonalSplit: metrics.diagnostics.seasonalSplit,
-    },
+    diagnostics: includeDiagnostics
+      ? {
+          // Chart scope is always the full canonical window for parity with Usage dashboard charts.
+          dailyTotalsChartSim: sharedSim.simulatedChartDaily,
+          monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
+          stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
+          chartIntervalCount: sharedSim.simulatedChartIntervals.length,
+          dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
+          top10Under: metrics.diagnostics.top10Under,
+          top10Over: metrics.diagnostics.top10Over,
+          hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
+          seasonalSplit: metrics.diagnostics.seasonalSplit,
+        }
+      : {
+          included: false,
+          chartIntervalCount: sharedSim.simulatedChartIntervals.length,
+        },
     parity: {
       intervalCount: actualScoringIntervals.length,
       testWindowKwh: metrics.totalActualKwhMasked,
@@ -1966,7 +1988,7 @@ export async function POST(req: NextRequest) {
       windowEndUtc: sharedCoverageWindow.endDate,
       canonicalWindowHelper,
     },
-    fullReportText: fullReport.fullReportText,
+    fullReportText: includeFullReportText ? fullReport.fullReportText : undefined,
     pasteSummary:
       `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
       `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=${stableScenarioId}`,

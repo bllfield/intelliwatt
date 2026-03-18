@@ -207,6 +207,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       json: async () => ({
         email: "user@example.com",
         testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeFullReportText: true,
       }),
     } as any;
     const res = await POST(req);
@@ -260,19 +261,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("supports rebuild-only action without running compare", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    rebuildGapfillSharedPastArtifact.mockResolvedValueOnce({
       ok: true,
-      artifactAutoRebuilt: true,
-      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
-      boundedTravelDateKeysLocal: new Set<string>(),
-      simulatedTestIntervals: [],
-      simulatedChartIntervals: [],
-      simulatedChartDaily: [],
-      simulatedChartMonthly: [],
-      simulatedChartStitchedMonth: null,
-      modelAssumptions: null,
-      homeProfileFromModel: null,
-      applianceProfileFromModel: null,
+      scenarioId: "past-s1",
     });
     const req = {
       cookies: { get: () => undefined },
@@ -289,15 +280,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
     expect(body.action).toBe("rebuild_only");
     expect(body.rebuilt).toBe(true);
+    expect(body.scenarioId).toBe("past-s1");
     expect(body.testRangesUsed).toEqual([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
     expect(body.testSelectionMode).toBe("manual_ranges");
-    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
+    expect(rebuildGapfillSharedPastArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "u1",
         houseId: "h1",
-        rebuildArtifact: true,
       })
     );
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 
@@ -332,6 +324,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       json: async () => ({
         email: "user@example.com",
         testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeFullReportText: true,
       }),
     } as any;
     const res = await POST(req);
@@ -382,6 +375,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       json: async () => ({
         email: "user@example.com",
         testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeDiagnostics: true,
+        includeFullReportText: true,
       }),
     } as any;
     const res = await POST(req);
@@ -429,6 +424,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       json: async () => ({
         email: "user@example.com",
         testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeDiagnostics: true,
+        includeFullReportText: true,
       }),
     } as any;
     const res = await POST(req);
@@ -474,6 +471,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       json: async () => ({
         email: "user@example.com",
         testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeDiagnostics: true,
       }),
     } as any;
     const res = await POST(req);
@@ -760,6 +758,59 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.error).toBe("artifact_compare_join_incomplete_rebuild_required");
     expect(body.reasonCode).toBe("ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED");
     expect(body.joinMissingCount).toBeGreaterThan(0);
+  });
+
+  it("returns compact response by default while keeping integrity/count metadata", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_fresh_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_fresh_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: { matches: true, mismatchCount: 0, mismatchSampleDates: [] },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.requestedTestDaysCount).toBe(1);
+    expect(body.scoringTestDaysCount).toBe(1);
+    expect(body.scoredIntervalsCount).toBe(2);
+    expect(body.compareSharedCalcPath).toContain("getPastSimulatedDatasetForHouse");
+    expect(body.displaySimSource).toBe("dataset.daily");
+    expect(body.compareSimSource).toBe("shared_fresh_calc");
+    expect(body.weatherBasisUsed).toBe("actual_only");
+    expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
+    expect(body.diagnostics?.included).toBe(false);
+    expect(body.fullReportText).toBeUndefined();
   });
 
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
