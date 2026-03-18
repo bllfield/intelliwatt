@@ -487,6 +487,12 @@ export async function buildGapfillCompareSimShared(args: {
 
   let artifactAutoRebuilt = false;
   let dataset: any = null;
+  let restoredCanonicalDailyRows:
+    | Array<{ date?: string; kwh?: number; source?: string }>
+    | null = null;
+  let restoredCanonicalMonthlyRows:
+    | Array<{ month?: string; kwh?: number }>
+    | null = null;
   async function rebuildSharedArtifactDataset(): Promise<{
     ok: true;
     dataset: any;
@@ -563,6 +569,19 @@ export async function buildGapfillCompareSimShared(args: {
       })
     : null;
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
+    restoredCanonicalDailyRows = Array.isArray((cached.datasetJson as any)?.daily)
+      ? (((cached.datasetJson as any).daily as Array<{ date?: string; kwh?: number; source?: string }>).map((d) => ({
+          date: d?.date,
+          kwh: d?.kwh,
+          source: d?.source,
+        })))
+      : null;
+    restoredCanonicalMonthlyRows = Array.isArray((cached.datasetJson as any)?.monthly)
+      ? (((cached.datasetJson as any).monthly as Array<{ month?: string; kwh?: number }>).map((m) => ({
+          month: m?.month,
+          kwh: m?.kwh,
+        })))
+      : null;
     const decoded = decodeIntervalsV1(cached.intervalsCompressed);
     dataset = {
       ...cached.datasetJson,
@@ -738,33 +757,83 @@ export async function buildGapfillCompareSimShared(args: {
   const simulatedChartIntervals = artifactIntervals.filter((p) =>
     chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
   );
+  const canonicalDailyInputRows = restoredCanonicalDailyRows ?? (Array.isArray((dataset as any)?.daily)
+    ? ((dataset as any).daily as Array<{ date?: string; kwh?: number; source?: string }>)
+    : []);
+  const datasetDailyRows = canonicalDailyInputRows
+        .map((d) => ({
+          date: String(d?.date ?? "").slice(0, 10),
+          simKwh: round2Local(Number(d?.kwh) || 0),
+        }))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && chartDateKeysLocal.has(d.date))
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const useDatasetDailyAsCanonical = datasetDailyRows.length > 0;
+  const simulatedChartDaily = useDatasetDailyAsCanonical
+    ? datasetDailyRows.map((d) => ({
+        date: d.date,
+        simKwh: d.simKwh,
+        // In artifact-only lab builds, dataset daily rows may all be tagged ACTUAL
+        // when simulated day artifacts were omitted at build time. Force source from
+        // shared travel/vacant ownership metadata first so chart/table labeling remains truthful.
+        source: boundedTravelDateKeysLocal.has(d.date)
+          ? "SIMULATED"
+          : (daySourceFromDataset.get(d.date) ?? "ACTUAL"),
+      }))
+    : Array.from(
+        simulatedChartIntervals.reduce((acc, p) => {
+          const dk = dateKeyInTimezone(p.timestamp, timezone);
+          acc.set(dk, (acc.get(dk) ?? 0) + (Number(p.kwh) || 0));
+          return acc;
+        }, new Map<string, number>())
+      )
+        .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        .map(([date, simKwh]) => ({
+          date,
+          simKwh: round2Local(simKwh),
+          source: boundedTravelDateKeysLocal.has(date)
+            ? "SIMULATED"
+            : (daySourceFromDataset.get(date) ?? "ACTUAL"),
+        }));
 
-  const simulatedChartDaily = Array.from(
-    simulatedChartIntervals.reduce((acc, p) => {
-      const dk = dateKeyInTimezone(p.timestamp, timezone);
-      acc.set(dk, (acc.get(dk) ?? 0) + (Number(p.kwh) || 0));
-      return acc;
-    }, new Map<string, number>())
-  )
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([date, simKwh]) => ({
-      date,
-      simKwh: round2Local(simKwh),
-      // In artifact-only lab builds, dataset daily rows may all be tagged ACTUAL
-      // when simulated day artifacts were omitted at build time. Force source from
-      // the travel/vacant exclusion scope first so chart/table labeling remains truthful.
-      source: boundedTravelDateKeysLocal.has(date)
-        ? "SIMULATED"
-        : (daySourceFromDataset.get(date) ?? "ACTUAL"),
-    }));
-
-  const monthlyChartBuild = buildDisplayMonthlyFromIntervalsUtc(
-    simulatedChartIntervals.map((p) => ({
-      timestamp: String(p.timestamp ?? ""),
-      consumption_kwh: Number(p.kwh) || 0,
-    })),
-    canonicalWindow.endDate
-  );
+  const canonicalMonthlyInputRows = restoredCanonicalMonthlyRows ?? (Array.isArray((dataset as any)?.monthly)
+    ? ((dataset as any).monthly as Array<{ month?: string; kwh?: number }>)
+    : []);
+  const datasetMonthlyRows = canonicalMonthlyInputRows
+        .map((m) => ({
+          month: String(m?.month ?? "").slice(0, 7),
+          kwh: round2Local(Number(m?.kwh) || 0),
+        }))
+        .filter((m) => /^\d{4}-\d{2}$/.test(m.month))
+        .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const useDatasetMonthlyAsCanonical = datasetMonthlyRows.length > 0;
+  const monthlyChartBuild = !useDatasetMonthlyAsCanonical
+    ? buildDisplayMonthlyFromIntervalsUtc(
+        simulatedChartIntervals.map((p) => ({
+          timestamp: String(p.timestamp ?? ""),
+          consumption_kwh: Number(p.kwh) || 0,
+        })),
+        canonicalWindow.endDate
+      )
+    : null;
+  const simulatedChartMonthly = useDatasetMonthlyAsCanonical
+    ? datasetMonthlyRows
+    : monthlyChartBuild?.monthly ?? [];
+  const simulatedChartStitchedMonth =
+    (((dataset as any)?.insights?.stitchedMonth ?? null) as {
+      mode: "PRIOR_YEAR_TAIL";
+      yearMonth: string;
+      haveDaysThrough: number;
+      missingDaysFrom: number;
+      missingDaysTo: number;
+      borrowedFromYearMonth: string;
+      completenessRule: string;
+    } | null) ?? monthlyChartBuild?.stitchedMonth ?? null;
+  modelAssumptions.gapfillDisplayDailySource = useDatasetDailyAsCanonical
+    ? "dataset.daily"
+    : "interval_rebucket_fallback";
+  modelAssumptions.gapfillDisplayMonthlySource = useDatasetMonthlyAsCanonical
+    ? "dataset.monthly"
+    : "interval_rebucket_fallback";
 
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
 
@@ -790,8 +859,8 @@ export async function buildGapfillCompareSimShared(args: {
     simulatedTestIntervals,
     simulatedChartIntervals,
     simulatedChartDaily,
-    simulatedChartMonthly: monthlyChartBuild.monthly,
-    simulatedChartStitchedMonth: monthlyChartBuild.stitchedMonth,
+    simulatedChartMonthly,
+    simulatedChartStitchedMonth,
     modelAssumptions,
     homeProfileFromModel: sharedProfiles.homeProfile,
     applianceProfileFromModel: sharedProfiles.applianceProfile,

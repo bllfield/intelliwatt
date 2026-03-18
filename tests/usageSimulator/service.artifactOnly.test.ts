@@ -477,5 +477,97 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
     }
   });
+
+  it("uses restored dataset daily/monthly rows as canonical display output when present", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-display-canonical",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 9.99, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-01",
+        },
+        daily: [{ date: "2026-01-01", kwh: 9.99, source: "ACTUAL" }],
+        monthly: [{ month: "2026-01", kwh: 333.33 }],
+        insights: {
+          stitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-01",
+            haveDaysThrough: 31,
+            missingDaysFrom: 0,
+            missingDaysTo: 0,
+            borrowedFromYearMonth: "2025-01",
+            completenessRule: "test",
+          },
+        },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedChartDaily).toEqual([
+        { date: "2026-01-01", simKwh: 9.99, source: "SIMULATED" },
+      ]);
+      expect(out.simulatedChartMonthly).toEqual([{ month: "2026-01", kwh: 333.33 }]);
+      expect(out.simulatedChartStitchedMonth?.yearMonth).toBe("2026-01");
+      expect((out.modelAssumptions as any)?.gapfillDisplayDailySource).toBe("dataset.daily");
+      expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("dataset.monthly");
+    }
+  });
+
+  it("falls back to interval rebucketing only when restored daily/monthly rows are unavailable", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-display-fallback",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [],
+        monthly: [],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedChartDaily.length).toBeGreaterThan(0);
+      expect(out.simulatedChartMonthly.length).toBeGreaterThan(0);
+      expect((out.modelAssumptions as any)?.gapfillDisplayDailySource).toBe("interval_rebucket_fallback");
+      expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("interval_rebucket_fallback");
+    }
+  });
 });
 

@@ -355,6 +355,42 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   expect(typeof body.artifactSourceNote).toBe("string");
   });
 
+  it("keeps travel-day displayed kWh identical across shared artifact daily output and gap-fill chart/table output", async () => {
+    const sharedPastDaily = [{ date: "2025-06-01", simKwh: 56.74, source: "SIMULATED" as const }];
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(["2025-06-01"]),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2025-06-01T00:00:00.000Z", kwh: 56.74 / 96 }],
+      simulatedChartDaily: sharedPastDaily,
+      simulatedChartMonthly: [{ month: "2025-06", kwh: 900 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.diagnostics?.dailyTotalsChartSim).toEqual(sharedPastDaily);
+    expect(body.diagnostics?.dailyTotalsChartSim?.[0]?.simKwh).toBe(56.74);
+    expect(body.diagnostics?.dailyTotalsChartSim?.[0]?.source).toBe("SIMULATED");
+  });
+
   it("falls back scenarioId to context scenario id when artifactScenarioId is null", async () => {
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
