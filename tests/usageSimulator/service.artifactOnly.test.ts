@@ -356,6 +356,78 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("clears exact-hash artifact source mode after auto-rebuilding from incompatible fallback", async () => {
+    const rebuiltIntervals = oneDayIntervals96(0.25);
+    getCachedPastDataset
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        inputHash: "hash-rebuilt-readback",
+        updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+        datasetJson: {
+          summary: {
+            source: "SIMULATED",
+            intervalsCount: 96,
+            totalKwh: 24,
+            start: "2026-01-01",
+            end: "2026-01-01",
+          },
+          meta: {
+            curveShapingVersion: "shared_curve_v2",
+            excludedDateKeysFingerprint: "",
+          },
+          daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+          monthly: [{ month: "2026-01", kwh: 24 }],
+          series: {},
+        },
+        intervalsCodec: "v1_delta_varint",
+        intervalsCompressed: Buffer.from("00", "hex"),
+      });
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-incompatible-latest",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-02",
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: { intervals15: rebuiltIntervals },
+      },
+      error: null,
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      autoEnsureArtifact: true,
+      includeFreshCompareCalc: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect((out.modelAssumptions as any)?.artifactSource).toBe("rebuild");
+      expect((out.modelAssumptions as any)?.artifactSourceMode).toBeUndefined();
+      expect((out.modelAssumptions as any)?.artifactSourceNote).toBeUndefined();
+    }
+  });
+
   it("does not enforce legacy compare-mask metadata when shared ownership metadata is valid", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-actual-days",

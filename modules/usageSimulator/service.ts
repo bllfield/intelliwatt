@@ -723,6 +723,7 @@ export async function buildGapfillCompareSimShared(args: {
     if (!rebuilt.ok) return rebuilt;
     dataset = rebuilt.dataset;
     artifactAutoRebuilt = true;
+    artifactSourceMode = null;
   }
 
   if (!dataset?.series?.intervals15) {
@@ -765,6 +766,7 @@ export async function buildGapfillCompareSimShared(args: {
       if (!rebuilt.ok) return rebuilt;
       dataset = rebuilt.dataset;
       artifactAutoRebuilt = true;
+      artifactSourceMode = null;
       continue;
     }
     if (needsRebuildForStaleWindow) {
@@ -844,6 +846,9 @@ export async function buildGapfillCompareSimShared(args: {
       artifactSourceMode === "exact_hash_match"
         ? "Artifact source: exact identity match on Past input hash."
         : "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).";
+  } else {
+    delete modelAssumptions.artifactSourceMode;
+    delete modelAssumptions.artifactSourceNote;
   }
   if (!artifactAutoRebuilt && (cached as any)?.updatedAt instanceof Date) {
     modelAssumptions.artifactUpdatedAt = ((cached as any).updatedAt as Date).toISOString();
