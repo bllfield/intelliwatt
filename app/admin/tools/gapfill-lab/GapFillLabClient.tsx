@@ -693,6 +693,46 @@ export default function GapFillLabClient() {
           mergeSuccessfulResult(compareData);
           return;
         }
+        const isServerNonJson500 =
+          res.status === 500 &&
+          String((data as any)?.error ?? "") === "invalid_json_response";
+        if (isServerNonJson500) {
+          const lightBody = {
+            ...body,
+            includeDiagnostics: false,
+            includeFullReportText: false,
+          };
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: "compare_retry_light_started",
+            timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
+            lightRetryBody: lightBody,
+          }));
+          const { res: lightRes, data: lightData } = await postGapfill(
+            lightBody,
+            GAPFILL_COMPARE_TIMEOUT_MS
+          );
+          if (lightRes.ok) {
+            setProgressStatus(null);
+            setLastAttemptDebug((prev) => ({
+              ...(prev ?? {}),
+              phase: "compare_retry_light_success",
+              lightResponseStatus: lightRes.status,
+            }));
+            mergeSuccessfulResult(lightData);
+            setError(
+              "Primary compare response failed with server 500/non-JSON. Loaded fallback compare output without heavy diagnostics/full report."
+            );
+            return;
+          }
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: "compare_retry_light_error",
+            lightResponseStatus: lightRes.status,
+            lightResponseError: (lightData as any)?.error ?? null,
+            lightResponseMessage: (lightData as any)?.message ?? null,
+          }));
+        }
         setProgressStatus(null);
         const errMsg = (data as any)?.error === "test_overlaps_travel"
           ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
