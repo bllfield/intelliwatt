@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 
@@ -123,6 +123,32 @@ type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
 const GAPFILL_COMPARE_TIMEOUT_MS = 900_000;
 const GAPFILL_REBUILD_TIMEOUT_MS = 900_000;
+const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
+const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;
+type OrchestratorPhaseKey =
+  | "lookup_inputs"
+  | "usage365_load"
+  | "artifact_ensure"
+  | "compare_core"
+  | "compare_heavy";
+type OrchestratorPhaseStatus = "pending" | "active" | "done" | "error" | "skipped";
+type OrchestratorPhase = {
+  key: OrchestratorPhaseKey;
+  label: string;
+  status: OrchestratorPhaseStatus;
+  startedAt: string | null;
+  endedAt: string | null;
+  elapsedMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+const ORCHESTRATOR_PHASE_BLUEPRINT: Array<{ key: OrchestratorPhaseKey; label: string }> = [
+  { key: "lookup_inputs", label: "Lookup & Inputs" },
+  { key: "usage365_load", label: "Usage 365 Load" },
+  { key: "artifact_ensure", label: "Artifact Ensure" },
+  { key: "compare_core", label: "Compare Core" },
+  { key: "compare_heavy", label: "Compare Heavy Report" },
+];
 
 function normalizeDailyRowsToWindow<T extends { date: string }>(
   rows: T[],
@@ -151,11 +177,13 @@ function normalizeDailyRowsToWindow<T extends { date: string }>(
 function formatApiError(data: any, status: number): string {
   const base = String(data?.message ?? data?.error ?? `Request failed (${status})`);
   const explanation = String(data?.explanation ?? "").trim();
+  const detail = String(data?.detail ?? "").trim();
   const missing = Array.isArray(data?.missingData) ? data.missingData.map((v: unknown) => String(v)).filter(Boolean) : [];
-  if (!explanation && missing.length === 0) return base;
+  if (!explanation && missing.length === 0 && !detail) return base;
   const parts: string[] = [base];
   if (explanation) parts.push(`Why: ${explanation}`);
   if (missing.length > 0) parts.push(`Missing data: ${missing.join(", ")}`);
+  if (detail) parts.push(`Detail: ${detail}`);
   return parts.join("\n");
 }
 
@@ -220,6 +248,19 @@ export default function GapFillLabClient() {
   const [artifactMissing, setArtifactMissing] = useState(false);
   const [lastCompareBody, setLastCompareBody] = useState<Record<string, unknown> | null>(null);
   const [lastAttemptDebug, setLastAttemptDebug] = useState<Record<string, unknown> | null>(null);
+  const [orchestratorPhases, setOrchestratorPhases] = useState<OrchestratorPhase[]>(
+    ORCHESTRATOR_PHASE_BLUEPRINT.map((p) => ({
+      key: p.key,
+      label: p.label,
+      status: "pending",
+      startedAt: null,
+      endedAt: null,
+      elapsedMs: null,
+      errorCode: null,
+      errorMessage: null,
+    }))
+  );
+  const [heavyRetryBody, setHeavyRetryBody] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
@@ -227,6 +268,37 @@ export default function GapFillLabClient() {
   const [chartMode, setChartMode] = useState<ChartMode>("usage365");
   const compareInFlightRef = useRef(false);
   const rebuildInFlightRef = useRef(false);
+
+  function resetOrchestratorPhases() {
+    setOrchestratorPhases(
+      ORCHESTRATOR_PHASE_BLUEPRINT.map((p) => ({
+        key: p.key,
+        label: p.label,
+        status: "pending",
+        startedAt: null,
+        endedAt: null,
+        elapsedMs: null,
+        errorCode: null,
+        errorMessage: null,
+      }))
+    );
+  }
+
+  function updateOrchestratorPhase(
+    key: OrchestratorPhaseKey,
+    patch: Partial<OrchestratorPhase>
+  ) {
+    setOrchestratorPhases((prev) =>
+      prev.map((phase) => (phase.key === key ? { ...phase, ...patch } : phase))
+    );
+  }
+
+  useEffect(() => {
+    setLastAttemptDebug((prev) => {
+      if (!prev) return prev;
+      return { ...prev, phaseTimeline: orchestratorPhases };
+    });
+  }, [orchestratorPhases]);
 
   const gapfillChartData = useMemo(() => {
     if (!result || !result.ok) return null;
@@ -380,31 +452,61 @@ export default function GapFillLabClient() {
   const usageShapeNeedsAction =
     Boolean(usageShapeDependencyStatus) &&
     String(usageShapeDependencyStatus?.status ?? "").toLowerCase() !== "available";
+  const phaseStateByKey = new Map(orchestratorPhases.map((p) => [p.key, p.status] as const));
   const hybridStepStatus: Array<{ key: string; label: string; state: "done" | "active" | "pending" }> = [
     {
       key: "lookup",
       label: "Lookup",
-      state: houses.length > 0 ? "done" : lookupLoading ? "active" : "pending",
+      state:
+        phaseStateByKey.get("lookup_inputs") === "done"
+          ? "done"
+          : phaseStateByKey.get("lookup_inputs") === "active"
+            ? "active"
+            : houses.length > 0
+              ? "done"
+              : lookupLoading
+                ? "active"
+                : "pending",
     },
     {
       key: "dependency",
       label: "Dependency Check",
-      state: truthEnvelope ? "done" : (loading || rebuildLoading) ? "active" : "pending",
+      state:
+        phaseStateByKey.get("usage365_load") === "done"
+          ? "done"
+          : phaseStateByKey.get("usage365_load") === "active"
+            ? "active"
+            : truthEnvelope
+              ? "done"
+              : (loading || rebuildLoading)
+                ? "active"
+                : "pending",
     },
     {
       key: "artifact",
       label: "Artifact Ensure/Rebuild",
       state:
-        truthEnvelope?.artifact || (result && result.ok && (result as any).rebuilt != null)
+        phaseStateByKey.get("artifact_ensure") === "done" ||
+        truthEnvelope?.artifact ||
+        (result && result.ok && (result as any).rebuilt != null)
           ? "done"
-          : rebuildLoading
+          : phaseStateByKey.get("artifact_ensure") === "active" || rebuildLoading
             ? "active"
             : "pending",
     },
     {
       key: "compare",
       label: "Compare",
-      state: result && result.ok && result.metrics ? "done" : loading ? "active" : "pending",
+      state:
+        phaseStateByKey.get("compare_heavy") === "done" ||
+        phaseStateByKey.get("compare_core") === "done" ||
+        (result && result.ok && result.metrics)
+          ? "done"
+          : phaseStateByKey.get("compare_heavy") === "active" ||
+            phaseStateByKey.get("compare_core") === "active" ||
+            loading
+            ? "active"
+            : "pending",
     },
   ];
 
@@ -429,6 +531,9 @@ export default function GapFillLabClient() {
       setError(null);
       setArtifactMissing(false);
       setLastCompareBody(null);
+      setLastAttemptDebug(null);
+      setHeavyRetryBody(null);
+      resetOrchestratorPhases();
       setChartMode("usage365");
     }
   }
@@ -443,11 +548,34 @@ export default function GapFillLabClient() {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      const data = (await res.json().catch(() => ({
-        ok: false as const,
-        error: "invalid_json_response",
-        message: `Server returned a non-JSON response (HTTP ${res.status}).`,
-      }))) as ApiResponse;
+      const responseText = await res.text();
+      let parsed: any = null;
+      try {
+        parsed = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        parsed = null;
+      }
+      const requestIdHeaders = {
+        xRequestId: res.headers.get("x-request-id"),
+        xVercelId: res.headers.get("x-vercel-id"),
+        cfRay: res.headers.get("cf-ray"),
+      };
+      const data = (parsed ??
+        ({
+          ok: false as const,
+          error: "invalid_json_response",
+          message: `Server returned a non-JSON response (HTTP ${res.status}).`,
+          detail: JSON.stringify(
+            {
+              status: res.status,
+              statusText: res.statusText || null,
+              requestIdHeaders,
+              bodyPreview: String(responseText ?? "").slice(0, 1200),
+            },
+            null,
+            2
+          ),
+        } as any)) as ApiResponse;
       return { res, data };
     } finally {
       clearTimeout(timeoutId);
@@ -607,161 +735,315 @@ export default function GapFillLabClient() {
     }
     compareInFlightRef.current = true;
     setLoading(true);
-    let attemptedArtifactAutoRebuild = false;
+    setHeavyRetryBody(null);
+    resetOrchestratorPhases();
     try {
-      const body = buildCompareBody(trimmed, validRanges);
-      setLastCompareBody(body);
+      const runStartedAt = new Date().toISOString();
+      const baseCompareBody = buildCompareBody(trimmed, validRanges);
+      setLastCompareBody(baseCompareBody);
       setLastAttemptDebug({
-        startedAt: new Date().toISOString(),
-        phase: "compare_request_started",
-        timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
-        requestBody: body,
+        startedAt: runStartedAt,
+        phase: "orchestrator_started",
+        orchestration: "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy",
+        requestBody: baseCompareBody,
       });
-      const { res, data } = await postGapfill(body, GAPFILL_COMPARE_TIMEOUT_MS);
-      if (!res.ok) {
+      const startByPhase = new Map<OrchestratorPhaseKey, number>();
+      const startPhase = (key: OrchestratorPhaseKey, statusLabel: string) => {
+        const startedAtMs = Date.now();
+        startByPhase.set(key, startedAtMs);
+        updateOrchestratorPhase(key, {
+          status: "active",
+          startedAt: new Date(startedAtMs).toISOString(),
+          endedAt: null,
+          elapsedMs: null,
+          errorCode: null,
+          errorMessage: null,
+        });
+        setProgressStatus(statusLabel);
+      };
+      const finishPhase = (key: OrchestratorPhaseKey, status: "done" | "error", info?: { errorCode?: string | null; errorMessage?: string | null }) => {
+        const endedAtMs = Date.now();
+        const startedAtMs = startByPhase.get(key) ?? endedAtMs;
+        updateOrchestratorPhase(key, {
+          status,
+          endedAt: new Date(endedAtMs).toISOString(),
+          elapsedMs: Math.max(0, endedAtMs - startedAtMs),
+          errorCode: info?.errorCode ?? null,
+          errorMessage: info?.errorMessage ?? null,
+        });
+      };
+
+      // 1) Lookup & Inputs
+      const lookupBody: Record<string, unknown> = {
+        email: trimmed,
+        timezone,
+        houseId: houseId || undefined,
+        testRanges: [],
+        includeUsage365: false,
+      };
+      startPhase("lookup_inputs", "Lookup/Input resolution running...");
+      const { res: lookupRes, data: lookupData } = await postGapfill(lookupBody, GAPFILL_LOOKUP_TIMEOUT_MS);
+      if (!lookupRes.ok || !lookupData.ok) {
+        finishPhase("lookup_inputs", "error", {
+          errorCode: String((lookupData as any)?.error ?? "lookup_failed"),
+          errorMessage: formatApiError(lookupData as any, lookupRes.status),
+        });
+        setError(formatApiError(lookupData as any, lookupRes.status));
+        setResult(null);
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
-          phase: "compare_response_error",
-          responseStatus: res.status,
-          responseError: (data as any)?.error ?? null,
-          responseMessage: (data as any)?.message ?? null,
+          phase: "lookup_inputs_error",
+          lookupStatus: lookupRes.status,
+          lookupError: (lookupData as any)?.error ?? null,
+          lookupMessage: (lookupData as any)?.message ?? null,
+          lookupBody,
         }));
-        if (isArtifactRebuildRequiredError((data as any)?.error)) {
-          setArtifactMissing(true);
-          // Backstop only: server now auto-ensures shared artifacts in the compare request.
-          // Keep this branch as a legacy safety fallback.
-          attemptedArtifactAutoRebuild = true;
-          const rebuildBody = { ...body, rebuildArtifact: true, rebuildOnly: true };
-          setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
-            phase: "legacy_rebuild_only_started",
-            timeoutMs: GAPFILL_REBUILD_TIMEOUT_MS,
-            rebuildBody,
-          }));
-          const { res: rebuildRes, data: rebuildData } = await postGapfill(
-            rebuildBody,
-            GAPFILL_REBUILD_TIMEOUT_MS
-          );
-          if (!rebuildRes.ok) {
-            setProgressStatus(null);
-            setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
-            setError(formatApiError(rebuildData, rebuildRes.status));
-            setResult(null);
-            setLastAttemptDebug((prev) => ({
-              ...(prev ?? {}),
-              phase: "legacy_rebuild_only_error",
-              rebuildStatus: rebuildRes.status,
-              rebuildError: (rebuildData as any)?.error ?? null,
-              rebuildMessage: (rebuildData as any)?.message ?? null,
-            }));
-            return;
-          }
-          const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
-          setLastCompareBody(compareBody);
-          setArtifactMissing(false);
-          setResult(null);
-          setProgressStatus("Rebuild complete. Loading compare result from shared artifact...");
-          setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
-            phase: "legacy_compare_after_rebuild_started",
-            timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
-            compareBodyAfterRebuild: compareBody,
-          }));
-          const { res: compareRes, data: compareData } = await postGapfill(
-            compareBody,
-            GAPFILL_COMPARE_TIMEOUT_MS
-          );
-          if (!compareRes.ok) {
-            setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
-            setError(formatApiError(compareData, compareRes.status));
-            setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
-            setResult(null);
-            setLastAttemptDebug((prev) => ({
-              ...(prev ?? {}),
-              phase: "legacy_compare_after_rebuild_error",
-              compareStatus: compareRes.status,
-              compareError: (compareData as any)?.error ?? null,
-              compareMessage: (compareData as any)?.message ?? null,
-            }));
-            return;
-          }
-          setProgressStatus(null);
-          setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
-            phase: "compare_success_after_legacy_rebuild",
-          }));
-          mergeSuccessfulResult(compareData);
-          return;
-        }
-        const isServerNonJson500 =
-          res.status === 500 &&
-          String((data as any)?.error ?? "") === "invalid_json_response";
-        if (isServerNonJson500) {
-          const lightBody = {
-            ...body,
-            includeDiagnostics: false,
-            includeFullReportText: false,
-          };
-          setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
-            phase: "compare_retry_light_started",
-            timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
-            lightRetryBody: lightBody,
-          }));
-          const { res: lightRes, data: lightData } = await postGapfill(
-            lightBody,
-            GAPFILL_COMPARE_TIMEOUT_MS
-          );
-          if (lightRes.ok) {
-            setProgressStatus(null);
-            setLastAttemptDebug((prev) => ({
-              ...(prev ?? {}),
-              phase: "compare_retry_light_success",
-              lightResponseStatus: lightRes.status,
-            }));
-            mergeSuccessfulResult(lightData);
-            setError(
-              "Primary compare response failed with server 500/non-JSON. Loaded fallback compare output without heavy diagnostics/full report."
-            );
-            return;
-          }
-          setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
-            phase: "compare_retry_light_error",
-            lightResponseStatus: lightRes.status,
-            lightResponseError: (lightData as any)?.error ?? null,
-            lightResponseMessage: (lightData as any)?.message ?? null,
-          }));
-        }
         setProgressStatus(null);
-        const errMsg = (data as any)?.error === "test_overlaps_travel"
-          ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
-          : formatApiError(data, res.status);
-        setError(errMsg);
-        setResult(null);
         return;
       }
-      setProgressStatus(null);
+      finishPhase("lookup_inputs", "done");
+      mergeSuccessfulResult(lookupData);
+
+      // 2) Usage 365 Load
+      const usageBody: Record<string, unknown> = {
+        email: trimmed,
+        timezone,
+        houseId: houseId || undefined,
+        testRanges: [],
+        includeUsage365: true,
+      };
+      startPhase("usage365_load", "Loading Usage 365...");
+      const { res: usageRes, data: usageData } = await postGapfill(usageBody, GAPFILL_USAGE365_TIMEOUT_MS);
+      if (!usageRes.ok || !usageData.ok) {
+        finishPhase("usage365_load", "error", {
+          errorCode: String((usageData as any)?.error ?? "usage365_failed"),
+          errorMessage: formatApiError(usageData as any, usageRes.status),
+        });
+        // Non-blocking: keep pipeline moving, but capture exact failure.
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "usage365_load_error_non_blocking",
+          usageStatus: usageRes.status,
+          usageError: (usageData as any)?.error ?? null,
+          usageMessage: (usageData as any)?.message ?? null,
+          usageBody,
+        }));
+      } else {
+        finishPhase("usage365_load", "done");
+        mergeSuccessfulResult(usageData);
+      }
+
+      // 3) Artifact ensure/rebuild-only
+      startPhase("artifact_ensure", "Ensuring shared artifact...");
+      const ensureBody: Record<string, unknown> = {
+        ...baseCompareBody,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        rebuildArtifact: true,
+        rebuildOnly: true,
+      };
+      const { res: ensureRes, data: ensureData } = await postGapfill(ensureBody, GAPFILL_REBUILD_TIMEOUT_MS);
+      if (!ensureRes.ok || !ensureData.ok) {
+        finishPhase("artifact_ensure", "error", {
+          errorCode: String((ensureData as any)?.error ?? "artifact_ensure_failed"),
+          errorMessage: formatApiError(ensureData as any, ensureRes.status),
+        });
+        const ensureErrCode = String((ensureData as any)?.error ?? "");
+        setArtifactMissing(isArtifactRebuildRequiredError(ensureErrCode));
+        setError(formatApiError(ensureData as any, ensureRes.status));
+        setResult(null);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "artifact_ensure_error",
+          ensureStatus: ensureRes.status,
+          ensureError: (ensureData as any)?.error ?? null,
+          ensureMessage: (ensureData as any)?.message ?? null,
+          ensureBody,
+        }));
+        setProgressStatus(null);
+        return;
+      }
+      finishPhase("artifact_ensure", "done");
+      setArtifactMissing(false);
+
+      // 4) Compare core (lighter payload)
+      const compareBodyBase = buildCompareBodyAfterRebuild(
+        {
+          ...baseCompareBody,
+          includeDiagnostics: false,
+          includeFullReportText: false,
+        },
+        ensureData
+      );
+      setLastCompareBody(compareBodyBase);
+      setHeavyRetryBody({
+        ...compareBodyBase,
+        includeDiagnostics: true,
+        includeFullReportText: true,
+      });
+      setResult(null);
+      startPhase("compare_core", "Running compare core...");
+      const { res: coreRes, data: coreData } = await postGapfill(compareBodyBase, GAPFILL_COMPARE_TIMEOUT_MS);
+      if (!coreRes.ok || !coreData.ok) {
+        finishPhase("compare_core", "error", {
+          errorCode: String((coreData as any)?.error ?? "compare_core_failed"),
+          errorMessage: formatApiError(coreData as any, coreRes.status),
+        });
+        const coreErrCode = String((coreData as any)?.error ?? "");
+        setArtifactMissing(isArtifactRebuildRequiredError(coreErrCode));
+        setError(formatApiError(coreData as any, coreRes.status));
+        setResult(null);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "compare_core_error",
+          coreStatus: coreRes.status,
+          coreError: (coreData as any)?.error ?? null,
+          coreMessage: (coreData as any)?.message ?? null,
+          compareCoreBody: compareBodyBase,
+        }));
+        setProgressStatus(null);
+        return;
+      }
+      finishPhase("compare_core", "done");
+      mergeSuccessfulResult(coreData);
+
+      // 5) Compare heavy report (full diagnostics/text)
+      const compareBodyHeavy = {
+        ...compareBodyBase,
+        includeDiagnostics: true,
+        includeFullReportText: true,
+      };
+      startPhase("compare_heavy", "Building heavy diagnostics report...");
+      const { res: heavyRes, data: heavyData } = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_TIMEOUT_MS);
+      if (!heavyRes.ok || !heavyData.ok) {
+        finishPhase("compare_heavy", "error", {
+          errorCode: String((heavyData as any)?.error ?? "compare_heavy_failed"),
+          errorMessage: formatApiError(heavyData as any, heavyRes.status),
+        });
+        setHeavyRetryBody(compareBodyHeavy);
+        setError(
+          `Core compare completed, but heavy diagnostics/report failed.\n${formatApiError(
+            heavyData as any,
+            heavyRes.status
+          )}`
+        );
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "compare_heavy_error",
+          heavyStatus: heavyRes.status,
+          heavyError: (heavyData as any)?.error ?? null,
+          heavyMessage: (heavyData as any)?.message ?? null,
+          compareHeavyBody: compareBodyHeavy,
+        }));
+        setProgressStatus("Core compare complete. Heavy diagnostics failed; retry heavy report.");
+        return;
+      }
+      finishPhase("compare_heavy", "done");
+      mergeSuccessfulResult(heavyData);
+      setHeavyRetryBody(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
-        phase: "compare_success",
-        responseStatus: res.status,
+        phase: "orchestrator_success",
+        finishedAt: new Date().toISOString(),
       }));
-      mergeSuccessfulResult(data);
+      setProgressStatus(null);
     } catch (e: any) {
       setProgressStatus(null);
-      const msg = e?.name === "AbortError"
-        ? "Request timed out while ensuring artifacts + compare. Retry once; if it repeats, run Rebuild artifact and retry."
-        : (e?.message ?? String(e));
-      if (attemptedArtifactAutoRebuild || e?.name === "AbortError") {
-        // Keep rebuild CTA visible when automatic rebuild or long compare request fails.
-        setArtifactMissing(true);
-      }
+      const msg =
+        e?.name === "AbortError"
+          ? "Pipeline step timed out. See Last Attempt Debug + Orchestrator Timeline for failing phase."
+          : (e?.message ?? String(e));
+      if (e?.name === "AbortError") setArtifactMissing(true);
       setError(msg);
       setResult(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
-        phase: e?.name === "AbortError" ? "compare_timeout" : "compare_exception",
+        phase: e?.name === "AbortError" ? "orchestrator_timeout" : "orchestrator_exception",
+        errorName: e?.name ?? null,
+        errorMessage: e?.message ?? String(e),
+      }));
+    } finally {
+      setLoading(false);
+      compareInFlightRef.current = false;
+    }
+  }
+
+  async function handleRetryHeavyDiagnostics() {
+    if (compareInFlightRef.current || rebuildInFlightRef.current) {
+      setError("A Gap-Fill request is already running. Wait for it to finish.");
+      return;
+    }
+    if (!heavyRetryBody) {
+      setError("No heavy-report retry payload is available. Run Compare first.");
+      return;
+    }
+    compareInFlightRef.current = true;
+    setLoading(true);
+    setError(null);
+    updateOrchestratorPhase("compare_heavy", {
+      status: "active",
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+      elapsedMs: null,
+      errorCode: null,
+      errorMessage: null,
+    });
+    setProgressStatus("Retrying heavy diagnostics report...");
+    try {
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: "compare_heavy_retry_started",
+        timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
+        compareHeavyRetryBody: heavyRetryBody,
+      }));
+      const startedAtMs = Date.now();
+      const { res, data } = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_TIMEOUT_MS);
+      if (!res.ok || !data.ok) {
+        const endedAtMs = Date.now();
+        updateOrchestratorPhase("compare_heavy", {
+          status: "error",
+          endedAt: new Date(endedAtMs).toISOString(),
+          elapsedMs: endedAtMs - startedAtMs,
+          errorCode: String((data as any)?.error ?? "compare_heavy_retry_failed"),
+          errorMessage: formatApiError(data as any, res.status),
+        });
+        setError(formatApiError(data as any, res.status));
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "compare_heavy_retry_error",
+          heavyRetryStatus: res.status,
+          heavyRetryError: (data as any)?.error ?? null,
+          heavyRetryMessage: (data as any)?.message ?? null,
+        }));
+        return;
+      }
+      const endedAtMs = Date.now();
+      updateOrchestratorPhase("compare_heavy", {
+        status: "done",
+        endedAt: new Date(endedAtMs).toISOString(),
+        elapsedMs: endedAtMs - startedAtMs,
+        errorCode: null,
+        errorMessage: null,
+      });
+      mergeSuccessfulResult(data);
+      setHeavyRetryBody(null);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: "compare_heavy_retry_success",
+        heavyRetryStatus: res.status,
+      }));
+      setProgressStatus(null);
+    } catch (e: any) {
+      updateOrchestratorPhase("compare_heavy", {
+        status: "error",
+        endedAt: new Date().toISOString(),
+        errorCode: e?.name ?? "compare_heavy_retry_exception",
+        errorMessage: e?.message ?? String(e),
+      });
+      setError(e?.name === "AbortError" ? "Heavy diagnostics retry timed out." : (e?.message ?? String(e)));
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: "compare_heavy_retry_exception",
         errorName: e?.name ?? null,
         errorMessage: e?.message ?? String(e),
       }));
@@ -785,6 +1067,7 @@ export default function GapFillLabClient() {
     setRebuildLoading(true);
     setError(null);
     setProgressStatus(null);
+    setHeavyRetryBody(null);
     try {
       const rebuildBody = { ...lastCompareBody, rebuildArtifact: true, rebuildOnly: true };
       setLastAttemptDebug((prev) => ({
@@ -1140,7 +1423,56 @@ export default function GapFillLabClient() {
               {rebuildLoading ? "Rebuilding and retrying..." : "Rebuild artifact and retry"}
             </button>
           )}
+          {!artifactMissing && heavyRetryBody && (
+            <button
+              type="button"
+              onClick={handleRetryHeavyDiagnostics}
+              disabled={loading || rebuildLoading}
+              className="mt-3 px-3 py-1.5 bg-brand-navy text-white rounded hover:bg-brand-blue disabled:opacity-50 text-sm"
+            >
+              Retry heavy diagnostics only
+            </button>
+          )}
         </div>
+      )}
+
+      {orchestratorPhases.some((phase) => phase.status !== "pending") && (
+        <details className="mb-6 border border-brand-blue/20 rounded" open>
+          <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+            Orchestrator Timeline
+          </summary>
+          <div className="p-4 border-t border-brand-blue/20 space-y-2">
+            {orchestratorPhases.map((phase) => (
+              <div key={phase.key} className="p-3 border border-brand-blue/20 rounded text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-brand-navy">{phase.label}</div>
+                  <div
+                    className={`font-semibold ${
+                      phase.status === "done"
+                        ? "text-emerald-700"
+                        : phase.status === "active"
+                          ? "text-amber-700"
+                          : phase.status === "error"
+                            ? "text-rose-700"
+                            : "text-brand-navy/60"
+                    }`}
+                  >
+                    {phase.status}
+                  </div>
+                </div>
+                <div className="text-brand-navy/70 mt-1">
+                  {phase.elapsedMs != null ? `elapsed ${phase.elapsedMs} ms` : "elapsed —"}
+                </div>
+                {phase.errorMessage && (
+                  <div className="text-rose-700 mt-1 whitespace-pre-line">
+                    {phase.errorCode ? `${phase.errorCode}: ` : ""}
+                    {phase.errorMessage}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {lastAttemptDebug && (
