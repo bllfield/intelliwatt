@@ -886,6 +886,11 @@ export function buildPastSimulatedBaselineV1(args: {
    * per-simulated-day payloads. Defaults to true for existing callers.
    */
   collectSimulatedDayResults?: boolean;
+  /**
+   * Optional cap for retained simulated-day payloads when collection is enabled.
+   * Useful for lab diagnostics where we only need a bounded sample.
+   */
+  collectSimulatedDayResultsLimit?: number;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -1420,6 +1425,11 @@ export function buildPastSimulatedBaselineV1(args: {
 
   const out: Array<{ timestamp: string; kwh: number }> = [];
   const collectSimulatedDayResults = args.collectSimulatedDayResults !== false;
+  const collectSimulatedDayResultsLimitRaw = Number(args.collectSimulatedDayResultsLimit);
+  const collectSimulatedDayResultsLimit =
+    Number.isFinite(collectSimulatedDayResultsLimitRaw) && collectSimulatedDayResultsLimitRaw >= 0
+      ? Math.floor(collectSimulatedDayResultsLimitRaw)
+      : Number.POSITIVE_INFINITY;
   const dayResults: SimulatedDayResult[] = [];
   let totalDays = 0;
   let excludedDays = 0;
@@ -1480,7 +1490,9 @@ export function buildPastSimulatedBaselineV1(args: {
               };
             })()
           : result;
-      if (collectSimulatedDayResults) dayResults.push(blendedResult);
+      if (collectSimulatedDayResults && dayResults.length < collectSimulatedDayResultsLimit) {
+        dayResults.push(blendedResult);
+      }
       for (const iv of blendedResult.intervals) out.push(iv);
       const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {

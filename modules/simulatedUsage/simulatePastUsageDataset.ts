@@ -478,9 +478,12 @@ export async function simulatePastUsageDataset(
       reasonNotUsed,
     };
 
-    // In serverless paths, retaining full per-day simulated diagnostics can trigger
-    // memory pressure for large windows. Only collect when explicitly requested.
-    const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
+    // Lab validation requires per-day diagnostics, but cap retained rows in memory
+    // unless full simulated-day results were explicitly requested by the caller.
+    const collectSimulatedDayResultsForDiagnostics =
+      includeSimulatedDayResults || buildPathKind === "lab_validation";
+    const collectSimulatedDayResultsLimit =
+      includeSimulatedDayResults || buildPathKind !== "lab_validation" ? undefined : 40;
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
@@ -495,6 +498,7 @@ export async function simulatePastUsageDataset(
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
+      collectSimulatedDayResultsLimit,
       debug: { out: pastDayCounts as any },
     });
 
