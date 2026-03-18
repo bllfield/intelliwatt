@@ -344,11 +344,36 @@ export default function GapFillLabClient() {
         ? "usage365"
         : chartMode;
   const truthEnvelope = result && result.ok ? (result as any).truthEnvelope ?? null : null;
+  const artifactFromEnvelope = truthEnvelope?.artifact ?? null;
+  const artifactFromTopLevel =
+    result && result.ok
+      ? {
+          sourceMode: (result as any)?.artifactSourceMode ?? null,
+          sourceNote: (result as any)?.artifactSourceNote ?? null,
+          requestedInputHash: (result as any)?.requestedInputHash ?? null,
+          artifactInputHashUsed: (result as any)?.artifactInputHashUsed ?? null,
+          artifactHashMatch: (result as any)?.artifactHashMatch ?? null,
+          scenarioId: (result as any)?.artifactScenarioId ?? null,
+          createdAt: (result as any)?.artifactCreatedAt ?? null,
+          updatedAt: (result as any)?.artifactUpdatedAt ?? null,
+          rebuiltRequested: Boolean((result as any)?.rebuilt),
+          autoRebuilt: (result as any)?.artifactAutoRebuilt === true,
+          pathKind:
+            (result as any)?.artifactAutoRebuilt || (result as any)?.rebuilt
+              ? "full_rebuild"
+              : ["exact_hash_match", "latest_by_scenario_fallback"].includes(String((result as any)?.artifactSourceMode ?? ""))
+                ? "cheap_read"
+                : null,
+        }
+      : null;
+  const artifactStatus = artifactFromEnvelope ?? artifactFromTopLevel;
   const scoredDayTruthRows =
     result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
       ? ((result as any).scoredDayTruthRows as Array<any>)
       : [];
   const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
+  const usageShapeDiag =
+    result && result.ok ? ((result as any)?.modelAssumptions?.usageShapeProfileDiag ?? null) : null;
   const usageShapeNeedsAction =
     Boolean(usageShapeDependencyStatus) &&
     String(usageShapeDependencyStatus?.status ?? "").toLowerCase() !== "available";
@@ -466,6 +491,8 @@ export default function GapFillLabClient() {
       houseId: houseId || undefined,
       weatherKind,
       includeUsage365: false,
+      includeDiagnostics: true,
+      includeFullReportText: true,
     };
     if (testMode === "random_days") {
       body.testDays = testDays;
@@ -1114,6 +1141,44 @@ export default function GapFillLabClient() {
 
           <details className="border border-brand-blue/20 rounded" open>
             <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Artifact Processing Status
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Artifact source mode</div>
+                  <div className="font-mono">{String(artifactStatus?.sourceMode ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Artifact path kind</div>
+                  <div className="font-mono">{String(artifactStatus?.pathKind ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Hash alignment</div>
+                  <div className="font-mono">
+                    {artifactStatus?.artifactHashMatch == null
+                      ? "—"
+                      : artifactStatus.artifactHashMatch
+                        ? "match"
+                        : "mismatch"}
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Scenario ID</div>
+                  <div className="font-mono break-all">{String(artifactStatus?.scenarioId ?? "—")}</div>
+                </div>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="font-medium text-brand-navy mb-1">Artifact details</div>
+                <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
+                  {JSON.stringify(artifactStatus ?? null, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
               Shared Module Alignment
             </summary>
             <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
@@ -1187,11 +1252,20 @@ export default function GapFillLabClient() {
                 <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
                   {JSON.stringify(usageShapeDependencyStatus ?? null, null, 2)}
                 </pre>
+                <div className="mt-2 text-sm">
+                  <Link className="text-brand-blue underline" href="/admin/tools/usage-shape-profile">
+                    Open Usage Shape Profile tool
+                  </Link>
+                </div>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="font-medium text-brand-navy mb-1">Usage-Shape Profile Diagnostic</div>
+                <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
+                  {JSON.stringify(usageShapeDiag ?? null, null, 2)}
+                </pre>
                 {usageShapeNeedsAction && (
-                  <div className="mt-2 text-sm">
-                    <Link className="text-brand-blue underline" href="/admin/tools/usage-shape-profile">
-                      Open Usage Shape Profile tool
-                    </Link>
+                  <div className="mt-2 text-xs text-amber-800">
+                    Usage-shape dependency is not available for this run; open the Usage Shape Profile tool to inspect inputs/variables.
                   </div>
                 )}
               </div>
