@@ -1575,6 +1575,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const compareFreshMode: "selected_days" | "full_window" =
+    includeDiagnostics || includeFullReportText ? "full_window" : "selected_days";
   const sharedSim = await buildGapfillCompareSimShared({
     userId: user.id,
     houseId: house.id,
@@ -1583,7 +1585,8 @@ export async function POST(req: NextRequest) {
     testDateKeysLocal,
     rebuildArtifact,
     autoEnsureArtifact: true,
-    includeFreshCompareCalc: true,
+    compareFreshMode,
+    includeFreshCompareCalc: compareFreshMode === "full_window",
   });
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
@@ -1992,12 +1995,14 @@ export async function POST(req: NextRequest) {
     wapePct: safeRatio(agg.totalAbsError, agg.totalActual),
   }));
   const truthEnvelope = {
+    compareFreshModeUsed: (sharedSim as any).compareFreshModeUsed ?? null,
     compareCalculationScope: (sharedSim as any).compareCalculationScope ?? null,
     compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
     compareSimSource: (sharedSim as any).compareSimSource ?? null,
     displaySimSource: (sharedSim as any).displaySimSource ?? null,
     weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
+    travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
     timezoneUsedForScoring: scoringTimezone,
     windowUsedForScoring: scoringWindow,
     requestedTestDaysCount,
@@ -2228,11 +2233,13 @@ export async function POST(req: NextRequest) {
     scoringTestDaysCount,
     scoredIntervalsCount,
     compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
+    compareFreshModeUsed: (sharedSim as any).compareFreshModeUsed ?? null,
     compareCalculationScope: (sharedSim as any).compareCalculationScope ?? null,
     displaySimSource: (sharedSim as any).displaySimSource ?? null,
     compareSimSource: (sharedSim as any).compareSimSource ?? null,
     weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
+    travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
     truthEnvelope,
     displaySimulated: {
       source: (sharedSim as any).displaySimSource ?? null,

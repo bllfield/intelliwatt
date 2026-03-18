@@ -193,6 +193,9 @@ Mandatory enforcement rules:
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill is a scoring/reporting workflow only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally; scoring reads shared simulator output through cached artifact restore or fresh shared-build path.
+- GapFill core/default scoring mode is selected-day fresh shared execution (`compareFreshMode=selected_days`) while chart/table display stays artifact-backed.
+- GapFill full-window fresh shared scoring (`compareFreshMode=full_window`) is retained as an explicit heavy proof path only.
+- Artifact fingerprint ownership and usage-shape profile identity rules are unchanged here; deferred identity/profile contract changes remain out of scope.
 - Route-level or tool-level simulation math is not acceptable when the shared simulator output already exists.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

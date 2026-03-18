@@ -11,7 +11,7 @@ _Generated from audit; implementation not started. Do not redesign existing admi
 | `/admin` | Dashboard; links to all tools | — | — | — |
 | `/admin/efl/fact-cards` | Fact Card Parsing Ops: batch parse, review queue, templates, manual loader | Current-plan DB, EFL storage, RatePlan | Templates, batch queue, manual URL/upload | — |
 | `/admin/efl-review` | Current Plan EFL Quarantine; AI-flagged Fact Cards | EFL review queue (DB) | Resolve/open, queue reason | — |
-| `/admin/tools/gapfill-lab` | Compare selected test days vs actual using shared Past artifact output | Usage DB, shared Past simulation service path, UsageShapeProfile | None (read-only compare + shared artifact prime trigger) | Explicit “baseline build” step test; overlay-application check |
+| `/admin/tools/gapfill-lab` | Compare selected test days vs actual; artifact-backed display + selected-day fresh shared scoring by default (heavy full-window proof optional) | Usage DB, shared Past simulation service path, UsageShapeProfile | None (read-only compare + shared artifact prime trigger) | Explicit “baseline build” step test; overlay-application check |
 | `/admin/tools/usage-shape-profile` | Derive/save usage shape from 15-min intervals | Usage DB, intervals | UsageShapeProfile (save) | — |
 | `/admin/tools/prime-past-cache` (via `/admin/usage`) | Prime shared Past cache used by Past Sim and Gap-Fill compare | getPastSimulatedDatasetForHouse, pastCache | PastSimulatedDatasetCache | — |
 | `/admin/simulation-engines` | Debug Past/Future/New Build by email; payloads, profile, weather, curves | Build inputs, service, simulatedUsage engine | None (debug output only) | Structured “baseline build” test runner; overlay application check |

@@ -307,6 +307,9 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill is a holdout validation workflow, not an artifact-building workflow.
 - GapFill may select test days, fetch actual intervals for those days, read matching simulated intervals from shared simulator output for that artifact identity (cached artifact or fresh shared build), and compute metrics/reports.
+- GapFill compare default scoring path is shared selected-day fresh calculation (`compareFreshMode=selected_days`) while display/chart rows remain shared artifact-backed.
+- Heavy proof mode may explicitly run shared full-window fresh calculation (`compareFreshMode=full_window`) for deeper diagnostics; it is non-default.
+- Artifact identity/fingerprint ownership and usage-shape profile contracts remain unchanged in this step; any further identity changes are deferred.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

@@ -217,6 +217,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
       expect.objectContaining({
         rebuildArtifact: false,
+        compareFreshMode: "full_window",
       })
     );
   });
@@ -257,6 +258,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       expect.objectContaining({
         rebuildArtifact: true,
         autoEnsureArtifact: true,
+        compareFreshMode: "selected_days",
       })
     );
   });
@@ -767,12 +769,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
       artifactAutoRebuilt: false,
-      scoringSimulatedSource: "shared_fresh_simulated_intervals15",
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       scoringUsedSharedArtifact: false,
-      compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
-      compareCalculationScope: "full_window_shared_path_then_scored_day_filter",
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
       displaySimSource: "dataset.daily",
-      compareSimSource: "shared_fresh_calc",
+      compareSimSource: "shared_selected_days_calc",
       weatherBasisUsed: "actual_only",
       displayVsFreshParityForScoredDays: {
         matches: true,
@@ -780,8 +783,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         mismatchSampleDates: [],
         scope: "scored_test_days_local",
         granularity: "daily_kwh_rounded_2dp",
-        comparisonBasis: "display_shared_artifact_vs_compare_shared_full_window_then_filter",
+        comparisonBasis: "display_shared_artifact_vs_compare_selected_days_fresh_calc",
       },
+      travelVacantParitySample: [],
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
       boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
@@ -815,14 +819,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.requestedTestDaysCount).toBe(1);
     expect(body.scoringTestDaysCount).toBe(1);
     expect(body.scoredIntervalsCount).toBe(2);
-    expect(body.compareSharedCalcPath).toContain("getPastSimulatedDatasetForHouse");
-    expect(body.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
+    expect(body.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
+    expect(body.compareFreshModeUsed).toBe("selected_days");
+    expect(body.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.displaySimSource).toBe("dataset.daily");
-    expect(body.compareSimSource).toBe("shared_fresh_calc");
+    expect(body.compareSimSource).toBe("shared_selected_days_calc");
     expect(body.weatherBasisUsed).toBe("actual_only");
     expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
     expect(body.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
-    expect(body.truthEnvelope?.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
+    expect(body.truthEnvelope?.compareFreshModeUsed).toBe("selected_days");
+    expect(body.truthEnvelope?.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.truthEnvelope?.requestedTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoringTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoredIntervalsCount).toBe(2);
@@ -843,12 +849,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
       artifactAutoRebuilt: false,
-      scoringSimulatedSource: "shared_fresh_simulated_intervals15",
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       scoringUsedSharedArtifact: false,
-      compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
-      compareCalculationScope: "full_window_shared_path_then_scored_day_filter",
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
       displaySimSource: "dataset.daily",
-      compareSimSource: "shared_fresh_calc",
+      compareSimSource: "shared_selected_days_calc",
       weatherBasisUsed: "actual_only",
       displayVsFreshParityForScoredDays: {
         matches: false,
@@ -856,8 +863,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         mismatchSampleDates: ["2026-01-01"],
         scope: "scored_test_days_local",
         granularity: "daily_kwh_rounded_2dp",
-        comparisonBasis: "display_shared_artifact_vs_compare_shared_full_window_then_filter",
+        comparisonBasis: "display_shared_artifact_vs_compare_selected_days_fresh_calc",
       },
+      travelVacantParitySample: [],
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
       boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
@@ -891,7 +899,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displayVsFreshParityForScoredDays?.matches).toBe(false);
     expect(body.displayVsFreshParityForScoredDays?.mismatchCount).toBe(1);
     expect(body.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
-    expect(body.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
+    expect(body.compareFreshModeUsed).toBe("selected_days");
+    expect(body.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBe(false);
     expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBe(99);
     expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);

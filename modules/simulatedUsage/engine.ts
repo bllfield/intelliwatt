@@ -671,7 +671,7 @@ export type PastSimulatedDayDiagnostic = {
   monthKey: string;
   dow: number;
   dayType: "ACTUAL" | "SIMULATED";
-  simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" | null;
+  simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" | "FORCED_SELECTED_DAY" | null;
   dayIsExcluded: boolean;
   dayIsLeadingMissing: boolean;
   weatherUsed: boolean;
@@ -891,11 +891,23 @@ export function buildPastSimulatedBaselineV1(args: {
    * Useful for lab diagnostics where we only need a bounded sample.
    */
   collectSimulatedDayResultsLimit?: number;
+  /**
+   * Optional: force simulation for specific local date keys (YYYY-MM-DD).
+   * Forced-simulated days are excluded from reference-day selection.
+   */
+  forceSimulateDateKeys?: Set<string>;
+  /**
+   * Optional: when false, omit passthrough actual intervals for non-simulated days.
+   * Useful for selected-day fresh compare scoring where only simulated-day intervals are needed.
+   */
+  emitAllIntervals?: boolean;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
 } {
   const actualByTs = new Map<string, number>();
+  const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
+  const emitAllIntervals = args.emitAllIntervals !== false;
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
   for (const p of args.actualIntervals ?? []) {
     const ts = String(p?.timestamp ?? "");
@@ -910,17 +922,19 @@ export function buildPastSimulatedBaselineV1(args: {
     const dateKey = gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "";
     const presentSlotCount = gridTs.reduce((acc, ts) => acc + (actualByTs.has(ts) ? 1 : 0), 0);
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
+    const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
     const dayIsLeadingMissing =
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
     const dayIsIncomplete = !dayIsExcluded && !dayIsLeadingMissing && presentSlotCount < INTERVALS_PER_DAY;
-    const shouldSimulateDay = dayIsExcluded || dayIsLeadingMissing || dayIsIncomplete;
-    const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing;
+    const shouldSimulateDay = dayIsForcedSimulate || dayIsExcluded || dayIsLeadingMissing || dayIsIncomplete;
+    const isReferenceDay = !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing;
     return {
       gridTs,
       dateKey,
       presentSlotCount,
+      dayIsForcedSimulate,
       dayIsExcluded,
       dayIsLeadingMissing,
       dayIsIncomplete,
@@ -1453,8 +1467,14 @@ export function buildPastSimulatedBaselineV1(args: {
 
     if (shouldSimulateDay) {
       simulatedDays += 1;
-      const simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" =
-        day.dayIsExcluded ? "EXCLUDED" : day.dayIsLeadingMissing ? "LEADING_MISSING" : "INCOMPLETE";
+      const simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" | "FORCED_SELECTED_DAY" =
+        day.dayIsForcedSimulate
+          ? "FORCED_SELECTED_DAY"
+          : day.dayIsExcluded
+            ? "EXCLUDED"
+            : day.dayIsLeadingMissing
+              ? "LEADING_MISSING"
+              : "INCOMPLETE";
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       const result = simulatePastDay(
@@ -1534,9 +1554,11 @@ export function buildPastSimulatedBaselineV1(args: {
         });
       }
     } else {
-      for (let i = 0; i < INTERVALS_PER_DAY; i++) {
-        const ts = gridTs[i];
-        out.push({ timestamp: ts, kwh: Number(actualByTs.get(ts) ?? 0) || 0 });
+      if (emitAllIntervals) {
+        for (let i = 0; i < INTERVALS_PER_DAY; i++) {
+          const ts = gridTs[i];
+          out.push({ timestamp: ts, kwh: Number(actualByTs.get(ts) ?? 0) || 0 });
+        }
       }
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         const wx = args.actualWxByDateKey?.get(dateKey) ?? null;

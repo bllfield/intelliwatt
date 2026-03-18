@@ -75,6 +75,9 @@ Shared simulation architecture authority:
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill is scoring/reporting only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally; it reads shared simulator output via cached artifact restore or fresh shared-build path.
+- GapFill core/default compare scoring now uses selected-day fresh shared execution (`compareFreshMode=selected_days`) while display data remains artifact-backed.
+- GapFill heavy diagnostics can opt into full-window shared fresh scoring (`compareFreshMode=full_window`); this proof path is non-default.
+- Artifact fingerprint ownership and usage-shape profile identity behavior stay unchanged in this step; deferred identity/profile changes remain out of scope.
 - Route-level or tool-level simulation math is not allowed when shared simulator output already exists.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

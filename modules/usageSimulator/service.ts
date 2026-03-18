@@ -48,6 +48,7 @@ import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDi
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
   simulatePastUsageDataset,
+  simulatePastSelectedDaysShared,
   getUsageShapeProfileIdentityForPast,
 } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
@@ -239,7 +240,10 @@ export type GapfillCompareSimSharedResult =
   | {
       ok: true;
       artifactAutoRebuilt: boolean;
-      scoringSimulatedSource?: "shared_artifact_simulated_intervals15" | "shared_fresh_simulated_intervals15";
+      scoringSimulatedSource?:
+        | "shared_artifact_simulated_intervals15"
+        | "shared_fresh_simulated_intervals15"
+        | "shared_selected_days_simulated_intervals15";
       scoringUsedSharedArtifact?: boolean;
       artifactBuildExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
       scoringExcludedSource?: "shared_past_travel_vacant_excludedDateKeysFingerprint";
@@ -252,9 +256,11 @@ export type GapfillCompareSimSharedResult =
       compareSharedCalcPath?: string;
       compareCalculationScope?:
         | "artifact_read_then_scored_day_filter"
-        | "full_window_shared_path_then_scored_day_filter";
+        | "full_window_shared_path_then_scored_day_filter"
+        | "selected_days_shared_path_only";
       displaySimSource?: "dataset.daily" | "interval_rebucket_fallback";
-      compareSimSource?: "shared_fresh_calc" | "shared_artifact_cache";
+      compareSimSource?: "shared_fresh_calc" | "shared_artifact_cache" | "shared_selected_days_calc";
+      compareFreshModeUsed?: "selected_days" | "full_window" | "artifact_only";
       weatherBasisUsed?: string;
       displayVsFreshParityForScoredDays?: {
         matches: boolean;
@@ -264,8 +270,15 @@ export type GapfillCompareSimSharedResult =
         granularity: "daily_kwh_rounded_2dp";
         comparisonBasis:
           | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
-          | "display_shared_artifact_vs_compare_artifact_filter_only";
+          | "display_shared_artifact_vs_compare_artifact_filter_only"
+          | "display_shared_artifact_vs_compare_selected_days_fresh_calc";
       };
+      travelVacantParitySample?: Array<{
+        localDate: string;
+        displayedPastStyleSimDayKwh: number | null;
+        freshSharedDayCalcKwh: number | null;
+        parityMatch: boolean | null;
+      }>;
       timezoneUsedForScoring: string;
       windowUsedForScoring: { startDate: string; endDate: string };
       scoringTestDateKeysLocal: Set<string>;
@@ -392,6 +405,7 @@ export async function buildGapfillCompareSimShared(args: {
   travelSimulatedDateKeysLocal?: Set<string>;
   rebuildArtifact: boolean;
   autoEnsureArtifact?: boolean;
+  compareFreshMode?: "selected_days" | "full_window";
   includeFreshCompareCalc?: boolean;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
@@ -402,8 +416,11 @@ export async function buildGapfillCompareSimShared(args: {
     testDateKeysLocal,
     rebuildArtifact,
     autoEnsureArtifact = false,
+    compareFreshMode,
     includeFreshCompareCalc = true,
   } = args;
+  const effectiveCompareFreshMode =
+    compareFreshMode ?? (includeFreshCompareCalc ? "full_window" : "selected_days");
 
   const pastScenarioId = await resolvePastScenarioIdForHouse({ userId, houseId });
   if (!pastScenarioId) {
@@ -874,70 +891,135 @@ export async function buildGapfillCompareSimShared(args: {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     return boundedTestDateKeysLocal.has(dk);
   });
+  const deterministicTravelParityDateKeys = Array.from(boundedTravelDateKeysLocal)
+    .filter((dk) => chartDateKeysLocal.has(dk))
+    .sort((a, b) => (a < b ? -1 : 1))
+    .slice(0, 1);
   let simulatedTestIntervals = artifactSimulatedTestIntervals;
-  let scoringSimulatedSource: "shared_artifact_simulated_intervals15" | "shared_fresh_simulated_intervals15" =
-    "shared_artifact_simulated_intervals15";
+  let scoringSimulatedSource:
+    | "shared_artifact_simulated_intervals15"
+    | "shared_fresh_simulated_intervals15"
+    | "shared_selected_days_simulated_intervals15" = "shared_artifact_simulated_intervals15";
   let comparePulledFromSharedArtifactOnly = true;
-  let compareSimSource: "shared_fresh_calc" | "shared_artifact_cache" = "shared_artifact_cache";
+  let compareSimSource: "shared_fresh_calc" | "shared_artifact_cache" | "shared_selected_days_calc" =
+    "shared_artifact_cache";
   let compareCalculationScope:
     | "artifact_read_then_scored_day_filter"
-    | "full_window_shared_path_then_scored_day_filter" = "artifact_read_then_scored_day_filter";
+    | "full_window_shared_path_then_scored_day_filter"
+    | "selected_days_shared_path_only" = "artifact_read_then_scored_day_filter";
+  let compareFreshModeUsed: "selected_days" | "full_window" | "artifact_only" = "artifact_only";
+  let compareSharedCalcPath = "artifact_cache_only";
   let weatherBasisUsed = String(
     (modelAssumptions as any)?.weatherSourceSummary ??
     (modelAssumptions as any)?.simulationWeatherSourceOwner ??
     "unknown"
   );
+  let freshParityIntervals: IntervalPoint[] = [];
 
   let freshDataset: any | null = null;
-  if (includeFreshCompareCalc && boundedTestDateKeysLocal.size > 0) {
-    const freshResult = await getPastSimulatedDatasetForHouse({
-      userId,
-      houseId,
-      esiid: houseResolved.esiid ?? null,
-      travelRanges: buildTravelRanges,
-      buildInputs,
-      // Use the same identity window the shared artifact path uses.
-      startDate: identityWindowResolved.startDate,
-      endDate: identityWindowResolved.endDate,
-      timezone,
-      buildPathKind: "lab_validation",
-      includeSimulatedDayResults: false,
-    });
-    if (freshResult.dataset === null) {
-      return {
-        ok: false,
-        status: 500,
-        body: {
+  if (boundedTestDateKeysLocal.size > 0) {
+    if (effectiveCompareFreshMode === "selected_days") {
+      const selectedFreshExecutionDateKeys = new Set<string>([
+        ...Array.from(boundedTestDateKeysLocal),
+        ...deterministicTravelParityDateKeys,
+      ]);
+      const selectedDaysResult = await simulatePastSelectedDaysShared({
+        userId,
+        houseId,
+        esiid: houseResolved.esiid ?? null,
+        travelRanges: buildTravelRanges,
+        buildInputs,
+        // Use the same identity window and shared context the artifact path uses.
+        startDate: identityWindowResolved.startDate,
+        endDate: identityWindowResolved.endDate,
+        timezone,
+        buildPathKind: "lab_validation",
+        selectedDateKeysLocal: selectedFreshExecutionDateKeys,
+      });
+      if (selectedDaysResult.simulatedIntervals === null) {
+        return {
           ok: false,
-          error: "fresh_compare_simulation_failed",
-          message:
-            freshResult.error ??
-            "Fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
-          mode: "artifact_only",
-          scenarioId: sharedScenarioCacheId,
-        },
-      };
+          status: 500,
+          body: {
+            ok: false,
+            error: "fresh_compare_simulation_failed",
+            message:
+              selectedDaysResult.error ??
+              "Selected-day fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
+            mode: "artifact_only",
+            scenarioId: sharedScenarioCacheId,
+          },
+        };
+      }
+      freshParityIntervals = selectedDaysResult.simulatedIntervals.map((p) => ({
+        timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+        kwh: Number(p?.kwh) || 0,
+      }));
+      simulatedTestIntervals = freshParityIntervals.filter((p) =>
+        boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+      );
+      scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
+      comparePulledFromSharedArtifactOnly = false;
+      compareSimSource = "shared_selected_days_calc";
+      compareCalculationScope = "selected_days_shared_path_only";
+      compareFreshModeUsed = "selected_days";
+      compareSharedCalcPath =
+        "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
+      weatherBasisUsed = String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown";
+    } else {
+      const freshResult = await getPastSimulatedDatasetForHouse({
+        userId,
+        houseId,
+        esiid: houseResolved.esiid ?? null,
+        travelRanges: buildTravelRanges,
+        buildInputs,
+        // Use the same identity window the shared artifact path uses.
+        startDate: identityWindowResolved.startDate,
+        endDate: identityWindowResolved.endDate,
+        timezone,
+        buildPathKind: "lab_validation",
+        includeSimulatedDayResults: false,
+      });
+      if (freshResult.dataset === null) {
+        return {
+          ok: false,
+          status: 500,
+          body: {
+            ok: false,
+            error: "fresh_compare_simulation_failed",
+            message:
+              freshResult.error ??
+              "Fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
+            mode: "artifact_only",
+            scenarioId: sharedScenarioCacheId,
+          },
+        };
+      }
+      freshDataset = freshResult.dataset;
+      const freshIntervalsRaw = Array.isArray((freshDataset as any)?.series?.intervals15)
+        ? ((freshDataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>)
+        : [];
+      const freshIntervals = freshIntervalsRaw.map((p) => ({
+        timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+        kwh: Number(p?.kwh) || 0,
+      }));
+      freshParityIntervals = freshIntervals;
+      simulatedTestIntervals = freshIntervals.filter((p) =>
+        boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+      );
+      scoringSimulatedSource = "shared_fresh_simulated_intervals15";
+      comparePulledFromSharedArtifactOnly = false;
+      compareSimSource = "shared_fresh_calc";
+      compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
+      compareFreshModeUsed = "full_window";
+      compareSharedCalcPath =
+        "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared";
+      weatherBasisUsed = String(
+        ((freshDataset as any)?.meta?.weatherSourceSummary ??
+          (freshDataset as any)?.meta?.simulationWeatherSourceOwner ??
+          weatherBasisUsed) || "unknown"
+      );
     }
-    freshDataset = freshResult.dataset;
-    const freshIntervalsRaw = Array.isArray((freshDataset as any)?.series?.intervals15)
-      ? ((freshDataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>)
-      : [];
-    const freshIntervals = freshIntervalsRaw.map((p) => ({
-      timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-      kwh: Number(p?.kwh) || 0,
-    }));
-    simulatedTestIntervals = freshIntervals.filter((p) =>
-      boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-    );
-    scoringSimulatedSource = "shared_fresh_simulated_intervals15";
-    comparePulledFromSharedArtifactOnly = false;
-    compareSimSource = "shared_fresh_calc";
-    compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
-    weatherBasisUsed = String(
-      ((freshDataset as any)?.meta?.weatherSourceSummary ??
-        (freshDataset as any)?.meta?.simulationWeatherSourceOwner ??
-        weatherBasisUsed) || "unknown"
-    );
   }
   const availableTestDateKeysFromSimulated = new Set<string>(
     simulatedTestIntervals
@@ -1049,10 +1131,13 @@ export async function buildGapfillCompareSimShared(args: {
     .slice(0, 10);
   const parityComparisonBasis:
     | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
-    | "display_shared_artifact_vs_compare_artifact_filter_only" =
+    | "display_shared_artifact_vs_compare_artifact_filter_only"
+    | "display_shared_artifact_vs_compare_selected_days_fresh_calc" =
     compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
       ? "display_shared_artifact_vs_compare_shared_full_window_then_filter"
-      : "display_shared_artifact_vs_compare_artifact_filter_only";
+      : compareCalculationScope === "selected_days_shared_path_only"
+        ? "display_shared_artifact_vs_compare_selected_days_fresh_calc"
+        : "display_shared_artifact_vs_compare_artifact_filter_only";
   const displayVsFreshParityForScoredDays = {
     matches: mismatchSampleDates.length === 0,
     mismatchCount: mismatchSampleDates.length,
@@ -1061,6 +1146,31 @@ export async function buildGapfillCompareSimShared(args: {
     granularity: "daily_kwh_rounded_2dp" as const,
     comparisonBasis: parityComparisonBasis,
   };
+  const freshParityDailyByDate = new Map<string, number>();
+  for (const p of freshParityIntervals) {
+    const dk = dateKeyInTimezone(p.timestamp, timezone);
+    freshParityDailyByDate.set(dk, (freshParityDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
+  }
+  const displayedSimDayKwhByDate = new Map<string, number>(
+    simulatedChartDaily.map((d) => [String(d.date ?? "").slice(0, 10), round2Local(Number(d.simKwh) || 0)])
+  );
+  const travelVacantParitySample = deterministicTravelParityDateKeys.map((dk) => {
+    const displayed = displayedSimDayKwhByDate.has(dk)
+      ? round2Local(Number(displayedSimDayKwhByDate.get(dk) ?? 0))
+      : null;
+    const fresh = freshParityDailyByDate.has(dk)
+      ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
+      : null;
+    return {
+      localDate: dk,
+      displayedPastStyleSimDayKwh: displayed,
+      freshSharedDayCalcKwh: fresh,
+      parityMatch:
+        displayed == null || fresh == null
+          ? null
+          : round2Local(displayed) === round2Local(fresh),
+    };
+  });
 
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
 
@@ -1080,12 +1190,14 @@ export async function buildGapfillCompareSimShared(args: {
       null,
     comparePulledFromSharedArtifactOnly,
     scoredTestDaysMissingSimulatedOwnershipCount,
-    compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
+    compareSharedCalcPath,
     compareCalculationScope,
     displaySimSource: useDatasetDailyAsCanonical ? "dataset.daily" : "interval_rebucket_fallback",
     compareSimSource,
+    compareFreshModeUsed,
     weatherBasisUsed,
     displayVsFreshParityForScoredDays,
+    travelVacantParitySample,
     timezoneUsedForScoring: timezone,
     windowUsedForScoring: sharedCoverageWindow,
     scoringTestDateKeysLocal: boundedTestDateKeysLocal,

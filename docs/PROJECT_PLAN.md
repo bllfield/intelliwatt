@@ -119,6 +119,9 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - Test days do not create a new artifact, do not create a new fingerprint, and do not change artifact identity or ownership metadata.
 - GapFill is a scoring/reporting workflow only. It may select test days, load actual intervals for those days, read matching simulated intervals from shared simulator output tied to the shared artifact identity (cached restore or fresh shared build), and compute metrics/reports.
+- GapFill core compare defaults to selected-day fresh shared scoring (`compareFreshMode=selected_days`) while display rows remain shared artifact output.
+- GapFill heavy diagnostics may explicitly request full-window shared fresh scoring (`compareFreshMode=full_window`) as an optional proof path.
+- Artifact fingerprint ownership and usage-shape identity behavior remain unchanged by this step; deferred identity/profile changes stay out of scope.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, rebuild simulated intervals locally, or perform simulation math in routes/tools outside the shared modules.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
