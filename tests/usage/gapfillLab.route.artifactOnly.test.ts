@@ -214,6 +214,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
     expect(res.status).toBe(409);
     expect(body.error).toBe("artifact_missing_rebuild_required");
+    expect(body.compareRequestTruth).toEqual({
+      includeDiagnosticsRequested: false,
+      includeFullReportTextRequested: true,
+      compareFreshModeRequested: "full_window",
+    });
     expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
       expect.objectContaining({
         rebuildArtifact: false,
@@ -938,6 +943,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
     expect(body.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
     expect(body.compareTruth?.compareFreshModeUsed).toBe("selected_days");
+    expect(body.compareRequestTruth).toEqual({
+      includeDiagnosticsRequested: false,
+      includeFullReportTextRequested: false,
+      compareFreshModeRequested: "selected_days",
+    });
+    expect(body.compareTruth?.compareRequestTruth).toEqual({
+      includeDiagnosticsRequested: false,
+      includeFullReportTextRequested: false,
+      compareFreshModeRequested: "selected_days",
+    });
     expect(body.compareTruth?.compareFreshModeLabel).toContain("Selected-days");
     expect(body.compareTruth?.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.compareTruth?.compareCalculationScopeLabel).toContain("Selected-day-only");
@@ -950,6 +965,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
     expect(body.truthEnvelope?.compareTruth?.compareFreshModeUsed).toBe("selected_days");
     expect(body.truthEnvelope?.compareFreshModeUsed).toBe("selected_days");
+    expect(body.truthEnvelope?.compareRequestTruth).toEqual({
+      includeDiagnosticsRequested: false,
+      includeFullReportTextRequested: false,
+      compareFreshModeRequested: "selected_days",
+    });
     expect(body.truthEnvelope?.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.truthEnvelope?.requestedTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoringTestDaysCount).toBe(1);
@@ -965,6 +985,63 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.accuracyTuningBreakdowns?.source).toBe("scored_day_truth_rows");
     expect(body.diagnostics?.included).toBe(false);
     expect(body.fullReportText).toBeUndefined();
+  });
+
+  it("keeps selected-days compare mode when diagnostics flags are explicitly false", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeDiagnostics: false,
+        includeFullReportText: false,
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.compareRequestTruth).toEqual({
+      includeDiagnosticsRequested: false,
+      includeFullReportTextRequested: false,
+      compareFreshModeRequested: "selected_days",
+    });
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compareFreshMode: "selected_days",
+        includeFreshCompareCalc: false,
+      })
+    );
   });
 
   it("passes through parity mismatch proof metadata from shared compare service", async () => {

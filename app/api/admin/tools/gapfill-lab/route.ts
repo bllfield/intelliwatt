@@ -1577,6 +1577,11 @@ export async function POST(req: NextRequest) {
 
   const compareFreshMode: "selected_days" | "full_window" =
     includeDiagnostics || includeFullReportText ? "full_window" : "selected_days";
+  const compareRequestTruth = {
+    includeDiagnosticsRequested: includeDiagnostics,
+    includeFullReportTextRequested: includeFullReportText,
+    compareFreshModeRequested: compareFreshMode,
+  };
   const sharedSim = await buildGapfillCompareSimShared({
     userId: user.id,
     houseId: house.id,
@@ -1595,6 +1600,7 @@ export async function POST(req: NextRequest) {
     });
     const mergedBody = {
       ...(sharedSim.body as Record<string, unknown>),
+      compareRequestTruth,
       explanation: classification.userFacingExplanation,
       missingData: classification.missingData,
       reasonCode: classification.reasonCode,
@@ -2087,6 +2093,7 @@ export async function POST(req: NextRequest) {
         : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
           ? "Full-window mode runs shared simulator over the full window before filtering to scored days."
           : "Artifact-only mode reads shared artifact output and filters scored days.",
+    compareRequestTruth,
   };
   const truthEnvelope = {
     compareFreshModeUsed,
@@ -2096,6 +2103,7 @@ export async function POST(req: NextRequest) {
     displaySimSource,
     weatherBasisUsed,
     compareTruth,
+    compareRequestTruth,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
     timezoneUsedForScoring: scoringTimezone,
@@ -2338,6 +2346,7 @@ export async function POST(req: NextRequest) {
     compareSimSource,
     weatherBasisUsed,
     compareTruth,
+    compareRequestTruth,
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],

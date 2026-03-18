@@ -233,6 +233,13 @@ function buildCompareBodyAfterRebuild(
   return nextBody;
 }
 
+function resolveCompareFreshModeRequested(args: {
+  includeDiagnostics: boolean;
+  includeFullReportText: boolean;
+}): "selected_days" | "full_window" {
+  return args.includeDiagnostics || args.includeFullReportText ? "full_window" : "selected_days";
+}
+
 function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
   const code = String(errorCode ?? "").trim();
   return (
@@ -673,15 +680,19 @@ export default function GapFillLabClient() {
     }
   }
 
-  function buildCompareBody(trimmedEmail: string, validRanges: RangeRow[]): Record<string, unknown> {
+  function buildCompareBody(
+    trimmedEmail: string,
+    validRanges: RangeRow[],
+    options: { includeDiagnostics: boolean; includeFullReportText: boolean }
+  ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       email: trimmedEmail,
       timezone,
       houseId: houseId || undefined,
       weatherKind,
       includeUsage365: false,
-      includeDiagnostics: true,
-      includeFullReportText: true,
+      includeDiagnostics: options.includeDiagnostics,
+      includeFullReportText: options.includeFullReportText,
     };
     if (testMode === "random_days") {
       body.testDays = testDays;
@@ -796,21 +807,41 @@ export default function GapFillLabClient() {
     resetOrchestratorPhases();
     try {
       const runStartedAt = new Date().toISOString();
-      const baseCompareBody = buildCompareBody(trimmed, validRanges);
+      const togglesSnapshot = {
+        fullDiagnosticsOnEnsure: fullDiagnosticsOnEnsure === true,
+        fullDiagnosticsOnCore: fullDiagnosticsOnCore === true,
+        runHeavyDiagnosticsStep: runHeavyDiagnosticsStep === true,
+      };
+      const baseCompareBody = buildCompareBody(trimmed, validRanges, {
+        includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
+        includeFullReportText: togglesSnapshot.fullDiagnosticsOnCore,
+      });
       setLastCompareBody(baseCompareBody);
+      const compareCoreFreshModeRequested = resolveCompareFreshModeRequested({
+        includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
+        includeFullReportText: togglesSnapshot.fullDiagnosticsOnCore,
+      });
       setLastAttemptDebug({
         startedAt: runStartedAt,
         phase: "orchestrator_started",
         orchestration: "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy",
         requestBody: baseCompareBody,
-        fullDiagnosticsOnEnsure,
-        fullDiagnosticsOnCore,
-        runHeavyDiagnosticsStep,
+        requestTruth: {
+          includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
+          includeFullReportText: togglesSnapshot.fullDiagnosticsOnCore,
+          compareFreshModeRequested: compareCoreFreshModeRequested,
+          runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+        },
+        fullDiagnosticsOnEnsure: togglesSnapshot.fullDiagnosticsOnEnsure,
+        fullDiagnosticsOnCore: togglesSnapshot.fullDiagnosticsOnCore,
+        runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
       });
       const startByPhase = new Map<OrchestratorPhaseKey, number>();
+      let activePhaseKey: OrchestratorPhaseKey | null = null;
       const startPhase = (key: OrchestratorPhaseKey, statusLabel: string) => {
         const startedAtMs = Date.now();
         startByPhase.set(key, startedAtMs);
+        activePhaseKey = key;
         updateOrchestratorPhase(key, {
           status: "active",
           startedAt: new Date(startedAtMs).toISOString(),
@@ -824,6 +855,7 @@ export default function GapFillLabClient() {
       const finishPhase = (key: OrchestratorPhaseKey, status: "done" | "error", info?: { errorCode?: string | null; errorMessage?: string | null }) => {
         const endedAtMs = Date.now();
         const startedAtMs = startByPhase.get(key) ?? endedAtMs;
+        if (activePhaseKey === key) activePhaseKey = null;
         updateOrchestratorPhase(key, {
           status,
           endedAt: new Date(endedAtMs).toISOString(),
@@ -910,8 +942,8 @@ export default function GapFillLabClient() {
       startPhase("artifact_ensure", "Ensuring shared artifact...");
       const ensureBody: Record<string, unknown> = {
         ...baseCompareBody,
-        includeDiagnostics: fullDiagnosticsOnEnsure,
-        includeFullReportText: fullDiagnosticsOnEnsure,
+        includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+        includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
         rebuildArtifact: true,
         rebuildOnly: true,
       };
@@ -931,6 +963,15 @@ export default function GapFillLabClient() {
           ensureError: (ensureData as any)?.error ?? null,
           ensureMessage: (ensureData as any)?.message ?? null,
           ensureBody,
+          ensureRequestTruth: {
+            includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+            includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
+            compareFreshModeRequested: resolveCompareFreshModeRequested({
+              includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+              includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
+            }),
+            runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+          },
           ensureResponse: ensureData,
         }));
         setProgressStatus(null);
@@ -942,18 +983,20 @@ export default function GapFillLabClient() {
         ...(prev ?? {}),
         ensureStatus: ensureRes.status,
         ensureBody,
+        ensureRequestTruth: {
+          includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+          includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
+          compareFreshModeRequested: resolveCompareFreshModeRequested({
+            includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+            includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
+          }),
+          runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+        },
         ensureResponse: ensureData,
       }));
 
       // 4) Compare core (lighter payload)
-      const compareBodyBase = buildCompareBodyAfterRebuild(
-        {
-          ...baseCompareBody,
-          includeDiagnostics: fullDiagnosticsOnCore,
-          includeFullReportText: fullDiagnosticsOnCore,
-        },
-        ensureData
-      );
+      const compareBodyBase = buildCompareBodyAfterRebuild(baseCompareBody, ensureData);
       setLastCompareBody(compareBodyBase);
       startPhase("compare_core", "Running compare core...");
       const { res: coreRes, data: coreData } = await postGapfill(compareBodyBase, GAPFILL_COMPARE_TIMEOUT_MS);
@@ -972,6 +1015,12 @@ export default function GapFillLabClient() {
           coreError: (coreData as any)?.error ?? null,
           coreMessage: (coreData as any)?.message ?? null,
           compareCoreBody: compareBodyBase,
+          compareCoreRequestTruth: {
+            includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
+            includeFullReportText: togglesSnapshot.fullDiagnosticsOnCore,
+            compareFreshModeRequested: compareCoreFreshModeRequested,
+            runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+          },
           coreResponse: coreData,
         }));
         setProgressStatus(null);
@@ -983,11 +1032,17 @@ export default function GapFillLabClient() {
         ...(prev ?? {}),
         coreStatus: coreRes.status,
         compareCoreBody: compareBodyBase,
+        compareCoreRequestTruth: {
+          includeDiagnostics: togglesSnapshot.fullDiagnosticsOnCore,
+          includeFullReportText: togglesSnapshot.fullDiagnosticsOnCore,
+          compareFreshModeRequested: compareCoreFreshModeRequested,
+          runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+        },
         coreResponse: coreData,
       }));
-      if (fullDiagnosticsOnCore || !runHeavyDiagnosticsStep) {
+      if (togglesSnapshot.fullDiagnosticsOnCore || !togglesSnapshot.runHeavyDiagnosticsStep) {
         const nowIso = new Date().toISOString();
-        const skipReason = !runHeavyDiagnosticsStep
+        const skipReason = !togglesSnapshot.runHeavyDiagnosticsStep
           ? "Heavy diagnostics step disabled by toggle."
           : "Heavy step skipped because core already included full diagnostics/report.";
         updateOrchestratorPhase("compare_heavy", {
@@ -1015,6 +1070,10 @@ export default function GapFillLabClient() {
         includeDiagnostics: true,
         includeFullReportText: true,
       };
+      const compareHeavyFreshModeRequested = resolveCompareFreshModeRequested({
+        includeDiagnostics: true,
+        includeFullReportText: true,
+      });
       startPhase("compare_heavy", "Building heavy diagnostics report...");
       const { res: heavyRes, data: heavyData } = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_TIMEOUT_MS);
       if (!heavyRes.ok || !heavyData.ok) {
@@ -1036,6 +1095,12 @@ export default function GapFillLabClient() {
           heavyError: (heavyData as any)?.error ?? null,
           heavyMessage: (heavyData as any)?.message ?? null,
           compareHeavyBody: compareBodyHeavy,
+          compareHeavyRequestTruth: {
+            includeDiagnostics: true,
+            includeFullReportText: true,
+            compareFreshModeRequested: compareHeavyFreshModeRequested,
+            runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+          },
           heavyResponse: heavyData,
         }));
         setProgressStatus("Core compare complete. Heavy diagnostics failed; retry heavy report.");
@@ -1049,11 +1114,36 @@ export default function GapFillLabClient() {
         phase: "orchestrator_success",
         heavyStatus: heavyRes.status,
         compareHeavyBody: compareBodyHeavy,
+        compareHeavyRequestTruth: {
+          includeDiagnostics: true,
+          includeFullReportText: true,
+          compareFreshModeRequested: compareHeavyFreshModeRequested,
+          runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+        },
         heavyResponse: heavyData,
         finishedAt: new Date().toISOString(),
       }));
       setProgressStatus(null);
     } catch (e: any) {
+      if ((e?.name === "AbortError" || e instanceof Error) && typeof e?.message === "string") {
+        setOrchestratorPhases((prev) =>
+          prev.map((phase) =>
+            phase.status === "active"
+              ? {
+                  ...phase,
+                  status: "error",
+                  endedAt: new Date().toISOString(),
+                  elapsedMs:
+                    phase.startedAt != null
+                      ? Math.max(0, Date.now() - new Date(phase.startedAt).getTime())
+                      : phase.elapsedMs,
+                  errorCode: e?.name === "AbortError" ? "phase_timeout" : "phase_exception",
+                  errorMessage: e?.message ?? String(e),
+                }
+              : phase
+          )
+        );
+      }
       setProgressStatus(null);
       const msg =
         e?.name === "AbortError"
