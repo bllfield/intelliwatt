@@ -66,6 +66,38 @@ type ApiResponse =
       excludedFromTraining_testCount?: number;
       trainingCoverage?: { expected: number; found: number | null; pct: number | null };
       usage365?: Usage365Payload;
+      truthEnvelope?: any;
+      displaySimulated?: {
+        source: string | null;
+        coverageStart: string | null;
+        coverageEnd: string | null;
+        daily: Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>;
+        monthly: Array<{ month: string; kwh: number }>;
+        stitchedMonth?: Usage365Payload["stitchedMonth"];
+      };
+      scoredDayTruthRows?: Array<{
+        localDate: string;
+        actualDayKwh: number;
+        freshCompareSimDayKwh: number;
+        displayedPastStyleSimDayKwh: number;
+        actualVsFreshErrorKwh: number;
+        displayVsFreshParityMatch: boolean;
+        dayType: "weekday" | "weekend";
+        weatherBasis: string | null;
+        avgTempF: number | null;
+        minTempF: number | null;
+        maxTempF: number | null;
+        hdd65: number | null;
+        cdd65: number | null;
+        fallbackLevel: string | null;
+        selectedDayTotalSource: string | null;
+        selectedShapeVariant: string | null;
+        selectedReferenceMatchTier: string | null;
+        selectedMatchSampleCount: number | null;
+        reasonCode: string | null;
+      }>;
+      missAttributionSummary?: any;
+      accuracyTuningBreakdowns?: any;
     }
   | {
       ok: false;
@@ -195,7 +227,9 @@ export default function GapFillLabClient() {
 
   const gapfillChartData = useMemo(() => {
     if (!result || !result.ok) return null;
-    const dailyChartRows = Array.isArray((result as any).diagnostics?.dailyTotalsChartSim)
+    const dailyChartRows = Array.isArray((result as any)?.displaySimulated?.daily)
+      ? ((result as any).displaySimulated.daily as Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>)
+      : Array.isArray((result as any).diagnostics?.dailyTotalsChartSim)
       ? ((result as any).diagnostics.dailyTotalsChartSim as Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>)
       : Array.isArray((result as any).diagnostics?.dailyTotalsMasked)
         ? ((result as any).diagnostics.dailyTotalsMasked as Array<{ date: string; simKwh?: number; kwh?: number }>)
@@ -210,13 +244,28 @@ export default function GapFillLabClient() {
       }))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
-    const coverageStart = (result as any)?.parity?.windowStartUtc ?? rawDaily[0]?.date ?? null;
-    const coverageEnd = (result as any)?.parity?.windowEndUtc ?? rawDaily[rawDaily.length - 1]?.date ?? null;
+    const coverageStart =
+      (result as any)?.displaySimulated?.coverageStart ??
+      (result as any)?.truthEnvelope?.windowUsedForScoring?.startDate ??
+      (result as any)?.parity?.windowStartUtc ??
+      rawDaily[0]?.date ??
+      null;
+    const coverageEnd =
+      (result as any)?.displaySimulated?.coverageEnd ??
+      (result as any)?.truthEnvelope?.windowUsedForScoring?.endDate ??
+      (result as any)?.parity?.windowEndUtc ??
+      rawDaily[rawDaily.length - 1]?.date ??
+      null;
     const daily = normalizeDailyRowsToWindow(rawDaily, coverageStart, coverageEnd, 365);
 
     if (!daily.length) return null;
 
-    const monthly = Array.isArray((result as any)?.diagnostics?.monthlyTotalsChartSim)
+    const monthly = Array.isArray((result as any)?.displaySimulated?.monthly)
+      ? ((result as any).displaySimulated.monthly as Array<{ month: string; kwh: number }>)
+          .map((m) => ({ month: String(m.month ?? ""), kwh: Number(m.kwh) || 0 }))
+          .filter((m) => /^\d{4}-\d{2}$/.test(m.month))
+          .sort((a, b) => (a.month < b.month ? -1 : 1))
+      : Array.isArray((result as any)?.diagnostics?.monthlyTotalsChartSim)
       ? ((result as any).diagnostics.monthlyTotalsChartSim as Array<{ month: string; kwh: number }>)
           .map((m) => ({ month: String(m.month ?? ""), kwh: Number(m.kwh) || 0 }))
           .filter((m) => /^\d{4}-\d{2}$/.test(m.month))
@@ -265,7 +314,7 @@ export default function GapFillLabClient() {
       weekdayKwh: weekdayWeekend.weekday,
       weekendKwh: weekdayWeekend.weekend,
       fifteenCurve,
-      stitchedMonth: (result as any)?.diagnostics?.stitchedMonthChartSim ?? null,
+      stitchedMonth: (result as any)?.displaySimulated?.stitchedMonth ?? (result as any)?.diagnostics?.stitchedMonthChartSim ?? null,
     };
   }, [result, timezone]);
   const usage365ChartData = useMemo(() => {
@@ -294,6 +343,42 @@ export default function GapFillLabClient() {
       : chartMode === "gapfill" && !hasGapfillChartData && hasUsage365ChartData
         ? "usage365"
         : chartMode;
+  const truthEnvelope = result && result.ok ? (result as any).truthEnvelope ?? null : null;
+  const scoredDayTruthRows =
+    result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
+      ? ((result as any).scoredDayTruthRows as Array<any>)
+      : [];
+  const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
+  const usageShapeNeedsAction =
+    Boolean(usageShapeDependencyStatus) &&
+    String(usageShapeDependencyStatus?.status ?? "").toLowerCase() !== "available";
+  const hybridStepStatus: Array<{ key: string; label: string; state: "done" | "active" | "pending" }> = [
+    {
+      key: "lookup",
+      label: "Lookup",
+      state: houses.length > 0 ? "done" : lookupLoading ? "active" : "pending",
+    },
+    {
+      key: "dependency",
+      label: "Dependency Check",
+      state: truthEnvelope ? "done" : (loading || rebuildLoading) ? "active" : "pending",
+    },
+    {
+      key: "artifact",
+      label: "Artifact Ensure/Rebuild",
+      state:
+        truthEnvelope?.artifact || (result && result.ok && (result as any).rebuilt != null)
+          ? "done"
+          : rebuildLoading
+            ? "active"
+            : "pending",
+    },
+    {
+      key: "compare",
+      label: "Compare",
+      state: result && result.ok && result.metrics ? "done" : loading ? "active" : "pending",
+    },
+  ];
 
   function addTestRange() {
     setTestRanges((prev) => [...prev, { ...DEFAULT_RANGE }]);
@@ -1005,6 +1090,198 @@ export default function GapFillLabClient() {
             )}
           </div>
 
+          <div className="p-4 rounded border border-brand-blue/20 bg-white">
+            <div className="font-semibold text-brand-navy mb-2">Hybrid Automation Step Status</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {hybridStepStatus.map((step) => (
+                <div key={step.key} className="p-2 border border-brand-blue/20 rounded text-sm">
+                  <div className="text-brand-navy">{step.label}</div>
+                  <div
+                    className={`font-semibold ${
+                      step.state === "done"
+                        ? "text-emerald-700"
+                        : step.state === "active"
+                          ? "text-amber-700"
+                          : "text-brand-navy/60"
+                    }`}
+                  >
+                    {step.state}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Shared Module Alignment
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Calculation scope</div>
+                  <div className="font-mono">{String(truthEnvelope?.compareCalculationScope ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Shared calc path</div>
+                  <div className="font-mono break-words">{String(truthEnvelope?.compareSharedCalcPath ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Compare sim source</div>
+                  <div className="font-mono">{String(truthEnvelope?.compareSimSource ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Display sim source</div>
+                  <div className="font-mono">{String(truthEnvelope?.displaySimSource ?? "—")}</div>
+                </div>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="text-xs text-brand-navy/70">Display vs fresh parity</div>
+                <div className="font-mono">
+                  {truthEnvelope?.displayVsFreshParityForScoredDays
+                    ? JSON.stringify(truthEnvelope.displayVsFreshParityForScoredDays)
+                    : "—"}
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Calculation / Input Truth
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Timezone used for scoring</div>
+                  <div className="font-mono">{String(truthEnvelope?.timezoneUsedForScoring ?? "—")}</div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Scoring window</div>
+                  <div className="font-mono">
+                    {truthEnvelope?.windowUsedForScoring
+                      ? `${truthEnvelope.windowUsedForScoring.startDate} to ${truthEnvelope.windowUsedForScoring.endDate}`
+                      : "—"}
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Requested / scoring / scored intervals</div>
+                  <div className="font-mono">
+                    {String(truthEnvelope?.requestedTestDaysCount ?? "—")} / {String(truthEnvelope?.scoringTestDaysCount ?? "—")} /{" "}
+                    {String(truthEnvelope?.scoredIntervalsCount ?? "—")}
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Travel/vacant exclusion count</div>
+                  <div className="font-mono">{String(truthEnvelope?.travelVacantExclusionCount ?? "—")}</div>
+                </div>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="font-medium text-brand-navy mb-1">Artifact Outcome</div>
+                <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
+                  {JSON.stringify(truthEnvelope?.artifact ?? null, null, 2)}
+                </pre>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="font-medium text-brand-navy mb-1">Usage-Shape Dependency</div>
+                <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
+                  {JSON.stringify(usageShapeDependencyStatus ?? null, null, 2)}
+                </pre>
+                {usageShapeNeedsAction && (
+                  <div className="mt-2 text-sm">
+                    <Link className="text-brand-blue underline" href="/admin/tools/usage-shape-profile">
+                      Open Usage Shape Profile tool
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Scored Day Truth Table
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3">
+              {scoredDayTruthRows.length > 0 ? (
+                <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+                  <table className="w-full text-xs border border-brand-blue/20">
+                    <thead>
+                      <tr className="bg-brand-blue/10">
+                        <th className="text-left p-2">Date</th>
+                        <th className="text-right p-2">Actual</th>
+                        <th className="text-right p-2">Fresh sim</th>
+                        <th className="text-right p-2">Display sim</th>
+                        <th className="text-right p-2">Error</th>
+                        <th className="text-left p-2">Parity</th>
+                        <th className="text-left p-2">Day</th>
+                        <th className="text-right p-2">Avg/Min/Max F</th>
+                        <th className="text-right p-2">HDD/CDD</th>
+                        <th className="text-left p-2">Weather basis</th>
+                        <th className="text-left p-2">Fallback</th>
+                        <th className="text-left p-2">Day total source</th>
+                        <th className="text-left p-2">Shape</th>
+                        <th className="text-left p-2">Reference tier</th>
+                        <th className="text-right p-2">Sample count</th>
+                        <th className="text-left p-2">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scoredDayTruthRows.map((row: any) => (
+                        <tr key={row.localDate} className="border-t border-brand-blue/10">
+                          <td className="p-2 font-mono">{row.localDate}</td>
+                          <td className="p-2 text-right font-mono">{row.actualDayKwh}</td>
+                          <td className="p-2 text-right font-mono">{row.freshCompareSimDayKwh}</td>
+                          <td className="p-2 text-right font-mono">{row.displayedPastStyleSimDayKwh}</td>
+                          <td className="p-2 text-right font-mono">{row.actualVsFreshErrorKwh}</td>
+                          <td className={`p-2 ${row.displayVsFreshParityMatch ? "text-emerald-700" : "text-rose-700"}`}>
+                            {row.displayVsFreshParityMatch ? "match" : "mismatch"}
+                          </td>
+                          <td className="p-2">{row.dayType}</td>
+                          <td className="p-2 text-right font-mono">
+                            {row.avgTempF ?? "—"} / {row.minTempF ?? "—"} / {row.maxTempF ?? "—"}
+                          </td>
+                          <td className="p-2 text-right font-mono">
+                            {row.hdd65 ?? "—"} / {row.cdd65 ?? "—"}
+                          </td>
+                          <td className="p-2">{row.weatherBasis ?? "—"}</td>
+                          <td className="p-2">{row.fallbackLevel ?? "—"}</td>
+                          <td className="p-2">{row.selectedDayTotalSource ?? "—"}</td>
+                          <td className="p-2">{row.selectedShapeVariant ?? "—"}</td>
+                          <td className="p-2">{row.selectedReferenceMatchTier ?? "—"}</td>
+                          <td className="p-2 text-right font-mono">{row.selectedMatchSampleCount ?? "—"}</td>
+                          <td className="p-2">{row.reasonCode ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-brand-navy/70">No scored-day truth rows were returned for this run.</p>
+              )}
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Accuracy Tuning Snapshot
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="font-medium text-brand-navy mb-1">Miss Attribution Summary</div>
+                <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
+                  {JSON.stringify((result as any).missAttributionSummary ?? null, null, 2)}
+                </pre>
+              </div>
+              <div className="p-3 rounded border border-brand-blue/20">
+                <div className="font-medium text-brand-navy mb-1">Accuracy Tuning Breakdowns</div>
+                <pre className="text-xs bg-brand-navy/5 p-2 rounded overflow-x-auto">
+                  {JSON.stringify((result as any).accuracyTuningBreakdowns ?? null, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </details>
+
           {/* Overview */}
           <details className="border border-brand-blue/20 rounded" open>
             <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
@@ -1272,6 +1549,17 @@ export default function GapFillLabClient() {
                   </ul>
                 </div>
               )}
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded">
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Deep Diagnostics / Raw Payload
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20">
+              <pre className="text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto max-h-96 overflow-y-auto">
+                {JSON.stringify(result, null, 2)}
+              </pre>
             </div>
           </details>
 

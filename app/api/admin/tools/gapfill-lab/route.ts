@@ -121,6 +121,44 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function safeRatio(numerator: number, denominator: number): number | null {
+  const d = Number(denominator) || 0;
+  if (d === 0) return null;
+  return round2((Number(numerator) / d) * 100);
+}
+
+function bucketHourBlock(hour: number): "00-05" | "06-11" | "12-17" | "18-23" {
+  if (hour < 6) return "00-05";
+  if (hour < 12) return "06-11";
+  if (hour < 18) return "12-17";
+  return "18-23";
+}
+
+function classifyTemperatureBand(avgTempF: number | null): string {
+  if (avgTempF == null || !Number.isFinite(avgTempF)) return "unknown";
+  if (avgTempF < 40) return "<40F";
+  if (avgTempF < 55) return "40-54F";
+  if (avgTempF < 70) return "55-69F";
+  if (avgTempF < 85) return "70-84F";
+  return ">=85F";
+}
+
+function classifyWeatherRegime(hdd65: number | null, cdd65: number | null): string {
+  const hdd = Number(hdd65);
+  const cdd = Number(cdd65);
+  if (!Number.isFinite(hdd) && !Number.isFinite(cdd)) return "unknown";
+  if ((hdd || 0) > (cdd || 0)) return "heating";
+  if ((cdd || 0) > (hdd || 0)) return "cooling";
+  return "neutral";
+}
+
+function topCounts<T extends string>(rows: Array<{ key: T; count: number }>, limit = 3): Array<{ key: T; count: number }> {
+  return rows
+    .filter((r) => Number.isFinite(r.count) && r.count > 0)
+    .sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key)))
+    .slice(0, limit);
+}
+
 function isValidIanaTimezone(tz: unknown): tz is string {
   if (typeof tz !== "string" || tz.trim().length === 0) return false;
   try {
@@ -1758,6 +1796,251 @@ export async function POST(req: NextRequest) {
       : artifactSourceMode === "exact_hash_match"
         ? "Artifact source: exact identity match on Past input hash."
         : null);
+  const displayDailyRows = Array.isArray(sharedSim.simulatedChartDaily)
+    ? sharedSim.simulatedChartDaily.map((row) => ({
+        date: String((row as any)?.date ?? "").slice(0, 10),
+        simKwh: round2(Number((row as any)?.simKwh ?? 0)),
+        source: String((row as any)?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL",
+      }))
+    : [];
+  const displayDailyByDate = new Map<string, { simKwh: number; source: "ACTUAL" | "SIMULATED" }>(
+    displayDailyRows
+      .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
+      .map((r) => [r.date, { simKwh: r.simKwh, source: r.source as "ACTUAL" | "SIMULATED" }] as const)
+  );
+  const actualDailyByDate = new Map<string, number>();
+  for (const p of scoringActualTestIntervalsCanon) {
+    const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
+    actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
+  }
+  const freshDailyByDate = new Map<string, number>();
+  for (const p of sharedSim.simulatedTestIntervals) {
+    const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
+    if (!scoringTestDateKeysLocal.has(dk)) continue;
+    freshDailyByDate.set(dk, round2((freshDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
+  }
+  const simulatedDayDiagnosticsRaw = Array.isArray((ma as any)?.simulatedDayDiagnosticsSample)
+    ? ((ma as any).simulatedDayDiagnosticsSample as Array<Record<string, unknown>>)
+    : [];
+  const simulatedDiagByDate = new Map<string, Record<string, unknown>>();
+  for (const d of simulatedDayDiagnosticsRaw) {
+    const dk = String((d as any)?.localDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    if (!simulatedDiagByDate.has(dk)) simulatedDiagByDate.set(dk, d);
+  }
+  const weatherApiRows = Array.isArray((ma as any)?.weatherApiData) ? ((ma as any).weatherApiData as Array<Record<string, unknown>>) : [];
+  const weatherByDate = new Map<string, Record<string, unknown>>();
+  for (const w of weatherApiRows) {
+    const dk = String((w as any)?.dateKey ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    if (!weatherByDate.has(dk)) weatherByDate.set(dk, w);
+  }
+  const scoredDayTruthRows = Array.from(scoringTestDateKeysLocal)
+    .sort()
+    .map((date) => {
+      const actualDayKwh = round2(actualDailyByDate.get(date) ?? 0);
+      const freshCompareSimDayKwh = round2(freshDailyByDate.get(date) ?? 0);
+      const displayDay = displayDailyByDate.get(date);
+      const displayedPastStyleSimDayKwh = round2(displayDay?.simKwh ?? 0);
+      const parityMatch = round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
+      const dow = getLocalDayOfWeekFromDateKey(date, scoringTimezone);
+      const weekend = dow === 0 || dow === 6;
+      const weather = weatherByDate.get(date) ?? {};
+      const diag = simulatedDiagByDate.get(date) ?? {};
+      const fallbackLevelRaw = String((diag as any)?.fallbackLevel ?? "").trim();
+      const fallbackLevel = fallbackLevelRaw || null;
+      const sampleCountCandidate = Number(
+        (diag as any)?.selectedMatchSampleCount ??
+          (diag as any)?.matchSampleCount ??
+          (diag as any)?.referenceSampleCount ??
+          (diag as any)?.sampleCountUsed
+      );
+      const sampleCount = Number.isFinite(sampleCountCandidate) ? Math.max(0, Math.trunc(sampleCountCandidate)) : null;
+      const avgTempF = Number((weather as any)?.tAvgF);
+      const minTempF = Number((weather as any)?.tMinF);
+      const maxTempF = Number((weather as any)?.tMaxF);
+      const hdd65 = Number((weather as any)?.hdd65);
+      const cdd65 = Number((weather as any)?.cdd65);
+      return {
+        localDate: date,
+        actualDayKwh,
+        freshCompareSimDayKwh,
+        displayedPastStyleSimDayKwh,
+        actualVsFreshErrorKwh: round2(actualDayKwh - freshCompareSimDayKwh),
+        displayVsFreshParityMatch: parityMatch,
+        dayType: weekend ? "weekend" : "weekday",
+        weatherBasis: String((sharedSim as any).weatherBasisUsed ?? null),
+        avgTempF: Number.isFinite(avgTempF) ? round2(avgTempF) : null,
+        minTempF: Number.isFinite(minTempF) ? round2(minTempF) : null,
+        maxTempF: Number.isFinite(maxTempF) ? round2(maxTempF) : null,
+        hdd65: Number.isFinite(hdd65) ? round2(hdd65) : null,
+        cdd65: Number.isFinite(cdd65) ? round2(cdd65) : null,
+        fallbackLevel,
+        selectedDayTotalSource:
+          String(
+            (diag as any)?.dayTotalSource ??
+              (diag as any)?.selectedDayTotalSource ??
+              (diag as any)?.targetDaySource ??
+              ""
+          ) || null,
+        selectedShapeVariant:
+          String((diag as any)?.shapeVariantUsed ?? (diag as any)?.selectedShapeVariant ?? "") || null,
+        selectedReferenceMatchTier:
+          String(
+            (diag as any)?.selectedReferenceMatchTier ??
+              (diag as any)?.matchTier ??
+              (diag as any)?.referencePoolTier ??
+              ""
+          ) || null,
+        selectedMatchSampleCount: sampleCount,
+        reasonCode:
+          String((diag as any)?.reasonCode ?? (diag as any)?.fallbackReasonCode ?? (diag as any)?.fallbackReason ?? "") || null,
+      };
+    });
+  const scoredRowsWithMiss = scoredDayTruthRows.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) > 0.01);
+  const worstErrorDates = scoredRowsWithMiss
+    .slice()
+    .sort((a, b) => Math.abs(b.actualVsFreshErrorKwh) - Math.abs(a.actualVsFreshErrorKwh))
+    .slice(0, 10)
+    .map((row) => ({
+      localDate: row.localDate,
+      absErrorKwh: round2(Math.abs(row.actualVsFreshErrorKwh)),
+      summary: row.reasonCode ?? row.fallbackLevel ?? row.selectedReferenceMatchTier ?? "no_reason_code",
+    }));
+  const countIf = (pred: (row: (typeof scoredDayTruthRows)[number]) => boolean): number =>
+    scoredRowsWithMiss.reduce((sum, row) => sum + (pred(row) ? 1 : 0), 0);
+  const missAttributionSummary = {
+    source: "scored_day_truth_rows",
+    categories: {
+      dayTotalDominantMiss: {
+        count: countIf((row) => String(row.selectedDayTotalSource ?? "").toLowerCase().includes("fallback")),
+        classification: "heuristic",
+      },
+      shapeDominantMiss: {
+        count: countIf((row) => String(row.selectedShapeVariant ?? "").toLowerCase().includes("fallback")),
+        classification: "heuristic",
+      },
+      weatherResponseMiss: {
+        count: countIf((row) => (row.hdd65 ?? 0) + (row.cdd65 ?? 0) >= 5),
+        classification: "heuristic",
+      },
+      fallbackTierMiss: {
+        count: countIf((row) => Boolean(row.fallbackLevel)),
+        classification: "supported",
+      },
+      sparseBinSampleCountIssue: {
+        count: countIf((row) => (row.selectedMatchSampleCount ?? 999) < 3),
+        classification: "heuristic",
+      },
+      weekdayWeekendMismatchRisk: {
+        count: countIf((row) => String((simulatedDiagByDate.get(row.localDate) as any)?.dayTypeUsed ?? "").toLowerCase() !== row.dayType),
+        classification: "heuristic",
+      },
+    },
+    topWorstErrorDates: worstErrorDates,
+  };
+  const summarizeRows = (rows: typeof scoredDayTruthRows) => {
+    const count = rows.length;
+    const totalActual = round2(rows.reduce((sum, row) => sum + (Number(row.actualDayKwh) || 0), 0));
+    const totalAbsError = round2(rows.reduce((sum, row) => sum + Math.abs(Number(row.actualVsFreshErrorKwh) || 0), 0));
+    return {
+      count,
+      maeKwh: count > 0 ? round2(totalAbsError / count) : 0,
+      wapePct: safeRatio(totalAbsError, totalActual),
+    };
+  };
+  const pushBucketSummary = (
+    map: Map<string, Array<(typeof scoredDayTruthRows)[number]>>,
+    key: string,
+    row: (typeof scoredDayTruthRows)[number]
+  ) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(row);
+  };
+  const byTempBandMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
+  const byDayTypeMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
+  const byMonthMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
+  const byFallbackTierMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
+  const byWeatherRegimeMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
+  for (const row of scoredDayTruthRows) {
+    pushBucketSummary(byTempBandMap, classifyTemperatureBand(row.avgTempF), row);
+    pushBucketSummary(byDayTypeMap, row.dayType, row);
+    pushBucketSummary(byMonthMap, row.localDate.slice(0, 7), row);
+    pushBucketSummary(byFallbackTierMap, row.fallbackLevel ?? "none", row);
+    pushBucketSummary(byWeatherRegimeMap, classifyWeatherRegime(row.hdd65, row.cdd65), row);
+  }
+  const buildBucketRows = (map: Map<string, Array<(typeof scoredDayTruthRows)[number]>>) =>
+    Array.from(map.entries())
+      .map(([bucket, rows]) => ({ bucket, ...summarizeRows(rows) }))
+      .sort((a, b) => b.count - a.count || a.bucket.localeCompare(b.bucket));
+  const intervalHourBlockMap = new Map<string, { count: number; totalActual: number; totalAbsError: number }>();
+  for (const p of scoringActualTestIntervalsCanon) {
+    const local = getLocalHourMinuteInTimezone(p.timestamp, scoringTimezone);
+    const block = bucketHourBlock(local.hour);
+    const simKwh = Number(simulatedByTs.get(p.timestamp) ?? 0);
+    const actualKwh = Number(p.kwh) || 0;
+    const prev = intervalHourBlockMap.get(block) ?? { count: 0, totalActual: 0, totalAbsError: 0 };
+    prev.count += 1;
+    prev.totalActual += actualKwh;
+    prev.totalAbsError += Math.abs(actualKwh - simKwh);
+    intervalHourBlockMap.set(block, prev);
+  }
+  const byHourBlock = Array.from(intervalHourBlockMap.entries()).map(([bucket, agg]) => ({
+    bucket,
+    count: agg.count,
+    maeKwh: agg.count > 0 ? round2(agg.totalAbsError / agg.count) : 0,
+    wapePct: safeRatio(agg.totalAbsError, agg.totalActual),
+  }));
+  const truthEnvelope = {
+    compareCalculationScope: (sharedSim as any).compareCalculationScope ?? null,
+    compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
+    compareSimSource: (sharedSim as any).compareSimSource ?? null,
+    displaySimSource: (sharedSim as any).displaySimSource ?? null,
+    weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
+    displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
+    timezoneUsedForScoring: scoringTimezone,
+    windowUsedForScoring: scoringWindow,
+    requestedTestDaysCount,
+    scoringTestDaysCount,
+    scoredIntervalsCount,
+    travelVacantExclusionCount: boundedTravelDateKeysLocal.size,
+    usageShapeDependencyStatus: (() => {
+      const usageShapeDiag = (sharedSim.modelAssumptions as any)?.usageShapeProfileDiag;
+      if (!usageShapeDiag) return { status: "unknown", reason: null };
+      if (usageShapeDiag.found) return { status: "available", reason: null };
+      return {
+        status: "missing_or_not_used",
+        reason: String(usageShapeDiag.reasonNotUsed ?? "unknown"),
+      };
+    })(),
+    artifact: {
+      sourceMode: artifactSourceMode,
+      sourceNote: artifactSourceNote,
+      requestedInputHash,
+      artifactInputHashUsed,
+      artifactHashMatch,
+      scenarioId: artifactScenarioId ?? stableScenarioId,
+      createdAt: artifactCreatedAt,
+      updatedAt: artifactUpdatedAt,
+      rebuiltRequested: rebuildArtifact,
+      autoRebuilt: sharedSim.artifactAutoRebuilt === true,
+      pathKind:
+        sharedSim.artifactAutoRebuilt || rebuildArtifact
+          ? "full_rebuild"
+          : artifactSourceMode === "exact_hash_match" || artifactSourceMode === "latest_by_scenario_fallback"
+            ? "cheap_read"
+            : "unknown",
+    },
+  };
+  const accuracyTuningBreakdowns = {
+    source: "scored_day_truth_rows",
+    byTemperatureBand: buildBucketRows(byTempBandMap),
+    byWeekdayWeekend: buildBucketRows(byDayTypeMap),
+    byMonth: buildBucketRows(byMonthMap),
+    byHourBlock,
+    byFallbackTier: buildBucketRows(byFallbackTierMap),
+    byWeatherRegime: buildBucketRows(byWeatherRegimeMap),
+  };
   const fullReport = buildFullReport({
     reportVersion: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
@@ -1945,10 +2228,23 @@ export async function POST(req: NextRequest) {
     scoringTestDaysCount,
     scoredIntervalsCount,
     compareSharedCalcPath: (sharedSim as any).compareSharedCalcPath ?? null,
+    compareCalculationScope: (sharedSim as any).compareCalculationScope ?? null,
     displaySimSource: (sharedSim as any).displaySimSource ?? null,
     compareSimSource: (sharedSim as any).compareSimSource ?? null,
     weatherBasisUsed: (sharedSim as any).weatherBasisUsed ?? null,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
+    truthEnvelope,
+    displaySimulated: {
+      source: (sharedSim as any).displaySimSource ?? null,
+      coverageStart: sharedCoverageWindow.startDate,
+      coverageEnd: sharedCoverageWindow.endDate,
+      daily: displayDailyRows,
+      monthly: sharedSim.simulatedChartMonthly,
+      stitchedMonth: sharedSim.simulatedChartStitchedMonth,
+    },
+    scoredDayTruthRows,
+    missAttributionSummary,
+    accuracyTuningBreakdowns,
     metrics: {
       mae: metrics.mae,
       rmse: metrics.rmse,
