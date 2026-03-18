@@ -249,6 +249,9 @@ export type GapfillCompareSimSharedResult =
       sharedArtifactInputHash?: string | null;
       comparePulledFromSharedArtifactOnly?: boolean;
       scoredTestDaysMissingSimulatedOwnershipCount?: number;
+      timezoneUsedForScoring: string;
+      windowUsedForScoring: { startDate: string; endDate: string };
+      scoringTestDateKeysLocal: Set<string>;
       sharedCoverageWindow: { startDate: string; endDate: string };
       boundedTravelDateKeysLocal: Set<string>;
       artifactIntervals: IntervalPoint[];
@@ -493,6 +496,28 @@ export async function buildGapfillCompareSimShared(args: {
   let restoredCanonicalMonthlyRows:
     | Array<{ month?: string; kwh?: number }>
     | null = null;
+  async function verifyRebuiltArtifactReadable(): Promise<boolean> {
+    const runReadback = async () => {
+      const persisted = await getCachedPastDataset({
+        houseId,
+        scenarioId: sharedScenarioCacheId,
+        inputHash: sharedInputHash,
+      });
+      if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) return false;
+      try {
+        const decoded = decodeIntervalsV1(persisted.intervalsCompressed);
+        return Array.isArray(decoded) && decoded.length > 0;
+      } catch {
+        return false;
+      }
+    };
+    let readable = await runReadback();
+    if (!readable) {
+      await new Promise((r) => setTimeout(r, 800));
+      readable = await runReadback();
+    }
+    return readable;
+  }
   async function rebuildSharedArtifactDataset(): Promise<{
     ok: true;
     dataset: any;
@@ -558,6 +583,21 @@ export async function buildGapfillCompareSimShared(args: {
       intervalsCodec: INTERVAL_CODEC_V1,
       intervalsCompressed: bytes,
     });
+    const readbackOk = await verifyRebuiltArtifactReadable();
+    if (!readbackOk) {
+      return {
+        ok: false,
+        status: 500,
+        body: {
+          ok: false,
+          error: "artifact_persist_verify_failed",
+          message:
+            "Shared Past artifact rebuild saved, but readback verification failed for this identity hash. Retry rebuild after cache/database pressure clears.",
+          mode: "artifact_only",
+          scenarioId: sharedScenarioCacheId,
+        },
+      };
+    }
     return { ok: true, dataset: rebuiltDataset };
   }
 
@@ -858,6 +898,9 @@ export async function buildGapfillCompareSimShared(args: {
       null,
     comparePulledFromSharedArtifactOnly: true,
     scoredTestDaysMissingSimulatedOwnershipCount,
+    timezoneUsedForScoring: timezone,
+    windowUsedForScoring: sharedCoverageWindow,
+    scoringTestDateKeysLocal: boundedTestDateKeysLocal,
     sharedCoverageWindow,
     boundedTravelDateKeysLocal,
     artifactIntervals,

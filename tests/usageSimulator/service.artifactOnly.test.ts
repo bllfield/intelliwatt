@@ -8,7 +8,9 @@ const getHouseAddressForUserHouse = vi.fn();
 const computePastInputHash = vi.fn();
 const getCachedPastDataset = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();
+const saveCachedPastDataset = vi.fn();
 const simulatePastUsageDataset = vi.fn();
+const encodeIntervalsV1 = vi.fn();
 const decodeIntervalsV1 = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const computePastWeatherIdentity = vi.fn();
@@ -36,12 +38,12 @@ vi.mock("@/modules/usageSimulator/pastCache", () => ({
   computePastInputHash: (...args: any[]) => computePastInputHash(...args),
   getCachedPastDataset: (...args: any[]) => getCachedPastDataset(...args),
   getLatestCachedPastDatasetByScenario: (...args: any[]) => getLatestCachedPastDatasetByScenario(...args),
-  saveCachedPastDataset: vi.fn(),
+  saveCachedPastDataset: (...args: any[]) => saveCachedPastDataset(...args),
   PAST_ENGINE_VERSION: "production_past_stitched_v2",
 }));
 
 vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
-  encodeIntervalsV1: vi.fn(),
+  encodeIntervalsV1: (...args: any[]) => encodeIntervalsV1(...args),
   decodeIntervalsV1: (...args: any[]) => decodeIntervalsV1(...args),
   INTERVAL_CODEC_V1: "v1_delta_varint",
 }));
@@ -70,7 +72,9 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     computePastInputHash.mockReset();
     getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
+    saveCachedPastDataset.mockReset();
     simulatePastUsageDataset.mockReset();
+    encodeIntervalsV1.mockReset();
     decodeIntervalsV1.mockReset();
     getIntervalDataFingerprint.mockReset();
     computePastWeatherIdentity.mockReset();
@@ -95,6 +99,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       usageShapeProfileDerivedAt: "2026-01-01T00:00:00.000Z",
       usageShapeProfileSimHash: "shape-hash-1",
     });
+    encodeIntervalsV1.mockReturnValue({ bytes: Buffer.from("00", "hex") });
     decodeIntervalsV1.mockReturnValue([
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
@@ -260,7 +265,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     getHouseAddressForUserHouse.mockReset();
     getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
+    saveCachedPastDataset.mockReset();
     simulatePastUsageDataset.mockReset();
+    encodeIntervalsV1.mockReset();
     decodeIntervalsV1.mockReset();
     getIntervalDataFingerprint.mockReset();
     computePastWeatherIdentity.mockReset();
@@ -284,6 +291,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       usageShapeProfileDerivedAt: "2026-01-01T00:00:00.000Z",
       usageShapeProfileSimHash: "shape-hash-1",
     });
+    encodeIntervalsV1.mockReturnValue({ bytes: Buffer.from("00", "hex") });
     decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
   });
 
@@ -475,6 +483,73 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.scoringExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
       expect(out.simulatedTestIntervals.length).toBe(72);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
+    }
+  });
+
+  it("returns scoring timezone/window metadata from the same selection source as simulated intervals", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selection-meta",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.timezoneUsedForScoring).toBe("America/Chicago");
+      expect(out.windowUsedForScoring).toEqual(out.sharedCoverageWindow);
+      expect(out.scoringTestDateKeysLocal).toBeInstanceOf(Set);
+      expect(out.scoringTestDateKeysLocal.has("2026-01-01")).toBe(true);
+    }
+  });
+
+  it("returns explicit rebuild failure when rebuilt artifact cannot be read back by hash", async () => {
+    getCachedPastDataset
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "" },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: { intervals15: oneDayIntervals96(0.25) },
+      },
+      error: null,
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: true,
+    });
+
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(500);
+      expect((out.body as any)?.error).toBe("artifact_persist_verify_failed");
     }
   });
 

@@ -298,6 +298,55 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         rebuildArtifact: true,
       })
     );
+    expect(getActualIntervalsForRange).not.toHaveBeenCalled();
+  });
+
+  it("uses service-provided scoring date-key selection metadata for actual-vs-sim join filtering", async () => {
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.5 },
+    ]);
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-02"]),
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [{ timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.5 }],
+      simulatedChartIntervals: [{ timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.5 }],
+      simulatedChartDaily: [{ date: "2026-01-02", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+    computeGapFillMetrics.mockImplementation(({ actual, simulatedByTs }: any) => {
+      const matched = actual.filter((p: any) => simulatedByTs.has(p.timestamp));
+      return {
+        ...zeroMetrics(),
+        totalActualKwhMasked: matched.reduce((s: number, p: any) => s + (Number(p.kwh) || 0), 0),
+        totalSimKwhMasked: matched.reduce((s: number, p: any) => s + (Number(simulatedByTs.get(p.timestamp)) || 0), 0),
+      };
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.timezoneUsedForScoring).toBe("America/Chicago");
+    expect(body.windowUsedForScoring).toEqual({ startDate: "2025-03-14", endDate: "2026-03-14" });
+    expect(body.actualTestIntervalsCount).toBe(1);
+    expect(body.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
   });
 
   it("uses shared coverage window and bounded travel count in metadata outputs", async () => {

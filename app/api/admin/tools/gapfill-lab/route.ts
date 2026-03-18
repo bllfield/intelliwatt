@@ -245,6 +245,7 @@ function buildFullReport(args: {
   email: string;
   houseLabel: string;
   timezone: string;
+  timezoneUsedForScoring?: string;
   testRangesInput: Array<{ startDate: string; endDate: string }>;
   travelRangesFromDb: Array<{ startDate: string; endDate: string }>;
   guardrailExcludedRanges: Array<{ startDate: string; endDate: string }>;
@@ -482,7 +483,14 @@ function buildFullReport(args: {
     reportVersion: j.reportVersion,
     generatedAt: j.generatedAt,
     env: j.env,
-    identifiers: { houseId: j.houseId, userId: j.userId, email: j.email, houseLabel: j.houseLabel, timezone: j.timezone },
+    identifiers: {
+      houseId: j.houseId,
+      userId: j.userId,
+      email: j.email,
+      houseLabel: j.houseLabel,
+      timezone: j.timezone,
+      timezoneUsedForScoring: j.timezoneUsedForScoring ?? j.timezone,
+    },
     scenario: {
       travelRangesFromDb: j.travelRangesFromDb,
       testRangesInput: j.testRangesInput,
@@ -683,6 +691,7 @@ function buildFullReport(args: {
     kv("email", j.email);
     kv("houseLabel", j.houseLabel);
     kv("timezone", j.timezone);
+    kv("timezoneUsedForScoring", j.timezoneUsedForScoring ?? j.timezone);
   });
 
   section("B) Scenario: Vacant/Travel (DB) vs Test Dates", () => {
@@ -1381,6 +1390,61 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Canonical path: Gap-Fill scoring reads the shared Past artifact/service output only.
+  const rebuildArtifact = body?.rebuildArtifact === true;
+  const rebuildOnly = body?.rebuildOnly === true;
+  if (rebuildArtifact && rebuildOnly) {
+    const rebuiltCompare = await buildGapfillCompareSimShared({
+      userId: user.id,
+      houseId: house.id,
+      timezone,
+      canonicalWindow,
+      testDateKeysLocal,
+      rebuildArtifact: true,
+      autoEnsureArtifact: true,
+    });
+    if (!rebuiltCompare.ok) {
+      const classification = classifySimulationFailure({
+        code: String((rebuiltCompare.body as any)?.error ?? ""),
+        message: String((rebuiltCompare.body as any)?.message ?? ""),
+      });
+      return NextResponse.json(
+        {
+          ...(rebuiltCompare.body as Record<string, unknown>),
+          explanation: classification.userFacingExplanation,
+          missingData: classification.missingData,
+          reasonCode: classification.reasonCode,
+        },
+        { status: rebuiltCompare.status }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      email: user.email,
+      userId: user.id,
+      house: {
+        id: house.id,
+        label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+      },
+      houses: houses.map((h: any) => ({
+        id: h.id,
+        label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
+      })),
+      timezone,
+      mode: "artifact_only",
+      action: "rebuild_only",
+      rebuilt: true,
+      message:
+        "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
+      testRangesUsed,
+      testSelectionMode,
+      testDaysRequested,
+      testDaysSelected,
+      seedUsed,
+      travelRangesFromDb,
+    });
+  }
+
   const testDateKeysSorted = Array.from(testDateKeysLocal).sort();
   const minTestKey = testDateKeysSorted[0] ?? "";
   const fetchStart = minTestKey;
@@ -1453,96 +1517,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const actualTestIntervals = actualIntervals.filter((p) =>
-    testDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-  );
-  if (actualTestIntervals.length === 0) {
-    const classification = classifySimulationFailure({
-      code: "no_actual_data",
-      message: "No actual interval data found for Test dates in this window.",
-    });
-    await recordSimulationDataAlert({
-      source: "GAPFILL_LAB",
-      userId: user.id,
-      userEmail: user.email,
-      houseId: house.id,
-      houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-      scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
-      reasonMessage: classification.reasonMessage,
-      missingData: classification.missingData,
-      context: { fetchStart, fetchEnd, testDaysRequested: testDateKeysLocal.size },
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "no_actual_data",
-        message: "No actual interval data found for Test dates in this window.",
-        explanation: classification.userFacingExplanation,
-      },
-      { status: 400 }
-    );
-  }
-
-  const actualTestIntervalsCanon = actualTestIntervals.map((p) => ({
-    ...p,
-    timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-  }));
-
-  // Canonical path: Gap-Fill scoring reads the shared Past artifact/service output only.
-  const rebuildArtifact = body?.rebuildArtifact === true;
-  const rebuildOnly = body?.rebuildOnly === true;
-  if (rebuildArtifact && rebuildOnly) {
-    const rebuiltCompare = await buildGapfillCompareSimShared({
-      userId: user.id,
-      houseId: house.id,
-      timezone,
-      canonicalWindow,
-      testDateKeysLocal,
-      rebuildArtifact: true,
-      autoEnsureArtifact: true,
-    });
-    if (!rebuiltCompare.ok) {
-      const classification = classifySimulationFailure({
-        code: String((rebuiltCompare.body as any)?.error ?? ""),
-        message: String((rebuiltCompare.body as any)?.message ?? ""),
-      });
-      return NextResponse.json(
-        {
-          ...(rebuiltCompare.body as Record<string, unknown>),
-          explanation: classification.userFacingExplanation,
-          missingData: classification.missingData,
-          reasonCode: classification.reasonCode,
-        },
-        { status: rebuiltCompare.status }
-      );
-    }
-    return NextResponse.json({
-      ok: true,
-      email: user.email,
-      userId: user.id,
-      house: {
-        id: house.id,
-        label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-      },
-      houses: houses.map((h: any) => ({
-        id: h.id,
-        label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
-      })),
-      timezone,
-      mode: "artifact_only",
-      action: "rebuild_only",
-      rebuilt: true,
-      message:
-        "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
-      testRangesUsed,
-      testSelectionMode,
-      testDaysRequested,
-      testDaysSelected,
-      seedUsed,
-      travelRangesFromDb,
-    });
-  }
   const sharedSim = await buildGapfillCompareSimShared({
     userId: user.id,
     houseId: house.id,
@@ -1550,7 +1524,7 @@ export async function POST(req: NextRequest) {
     canonicalWindow,
     testDateKeysLocal,
     rebuildArtifact,
-    autoEnsureArtifact: true,
+    autoEnsureArtifact: false,
   });
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
@@ -1592,15 +1566,79 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(mergedBody, { status: sharedSim.status });
   }
 
+  const scoringTimezone = String((sharedSim as any)?.timezoneUsedForScoring ?? timezone);
+  const scoringWindowRaw = (sharedSim as any)?.windowUsedForScoring;
+  const scoringWindow =
+    scoringWindowRaw &&
+    /^\d{4}-\d{2}-\d{2}$/.test(String(scoringWindowRaw.startDate ?? "")) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(String(scoringWindowRaw.endDate ?? ""))
+      ? {
+          startDate: String(scoringWindowRaw.startDate),
+          endDate: String(scoringWindowRaw.endDate),
+        }
+      : sharedSim.sharedCoverageWindow;
+  const scoringTestDateKeysRaw = (sharedSim as any)?.scoringTestDateKeysLocal;
+  const scoringTestDateKeysLocal = new Set<string>(
+    (scoringTestDateKeysRaw instanceof Set
+      ? Array.from(scoringTestDateKeysRaw)
+      : Array.isArray(scoringTestDateKeysRaw)
+        ? scoringTestDateKeysRaw
+        : Array.from(testDateKeysLocal))
+      .map((dk) => String(dk ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  const actualScoringIntervals = actualIntervals.filter((p) =>
+    scoringTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))
+  );
+  if (actualScoringIntervals.length === 0) {
+    const classification = classifySimulationFailure({
+      code: "no_actual_data",
+      message: "No actual interval data found for Test dates in this shared scoring window.",
+    });
+    await recordSimulationDataAlert({
+      source: "GAPFILL_LAB",
+      userId: user.id,
+      userEmail: user.email,
+      houseId: house.id,
+      houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+      scenarioId: "past_shared_artifact",
+      reasonCode: classification.reasonCode,
+      reasonMessage: classification.reasonMessage,
+      missingData: classification.missingData,
+      context: {
+        fetchStart,
+        fetchEnd,
+        testDaysRequested: scoringTestDateKeysLocal.size,
+        scoringTimezone,
+        scoringWindow,
+      },
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "no_actual_data",
+        message: "No actual interval data found for Test dates in this shared scoring window.",
+        explanation: classification.userFacingExplanation,
+      },
+      { status: 400 }
+    );
+  }
+  const actualScoringIntervalsCanon = actualScoringIntervals.map((p) => ({
+    ...p,
+    timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+  }));
+  const actualTestIntervals = actualScoringIntervals;
+  const actualTestIntervalsCanon = actualScoringIntervalsCanon;
+
   const simulatedByTs = new Map<string, number>();
   for (const p of sharedSim.simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
   const simulatedScoringDateKeysLocal = new Set<string>(
-    sharedSim.simulatedTestIntervals.map((p) => dateKeyInTimezone(p.timestamp, timezone))
+    sharedSim.simulatedTestIntervals.map((p) => dateKeyInTimezone(p.timestamp, scoringTimezone))
   );
-  const scoringActualTestIntervalsCanon = actualTestIntervalsCanon.filter((p) =>
-    simulatedScoringDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+  const scoringActualTestIntervalsCanon = actualScoringIntervalsCanon.filter((p) =>
+    simulatedScoringDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))
   );
-  const inferredMissingSimulatedOwnershipCount = Array.from(testDateKeysLocal).filter(
+  const inferredMissingSimulatedOwnershipCount = Array.from(scoringTestDateKeysLocal).filter(
     (dk) => !simulatedScoringDateKeysLocal.has(dk)
   ).length;
   const scoredTestDaysMissingSimulatedOwnershipCountRaw = Number(
@@ -1705,6 +1743,7 @@ export async function POST(req: NextRequest) {
     email: user.email,
     houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
     timezone,
+    timezoneUsedForScoring: scoringTimezone,
     testRangesInput: testRanges,
     travelRangesFromDb,
     guardrailExcludedRanges: mergeDateKeysToRanges(Array.from(guardrailExcludedDateKeysLocal).sort()),
@@ -1810,12 +1849,12 @@ export async function POST(req: NextRequest) {
     intervalsCodec: String((sharedSim.modelAssumptions as any)?.intervalsCodec ?? ""),
     compressedBytesLength: Number((sharedSim.modelAssumptions as any)?.compressedBytesLength ?? 0) || 0,
     enginePath: "production_past_stitched",
-    expectedTestIntervals: testDateKeysLocal.size * 96,
-    coveragePct: testDateKeysLocal.size > 0 ? actualTestIntervals.length / (testDateKeysLocal.size * 96) : null,
-    joinJoinedCount: actualTestIntervals.length - missingJoinedActual.length,
+    expectedTestIntervals: scoringTestDateKeysLocal.size * 96,
+    coveragePct: scoringTestDateKeysLocal.size > 0 ? actualScoringIntervals.length / (scoringTestDateKeysLocal.size * 96) : null,
+    joinJoinedCount: actualScoringIntervals.length - missingJoinedActual.length,
     joinMissingCount: missingJoinedActual.length,
-    joinPct: actualTestIntervals.length > 0 ? (actualTestIntervals.length - missingJoinedActual.length) / actualTestIntervals.length : null,
-    joinSampleActualTs: actualTestIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
+    joinPct: actualScoringIntervals.length > 0 ? (actualScoringIntervals.length - missingJoinedActual.length) / actualScoringIntervals.length : null,
+    joinSampleActualTs: actualScoringIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
     joinSampleSimTs: sharedSim.simulatedTestIntervals.slice(0, 5).map((p) => p.timestamp),
     testSelectionMode,
     testDaysRequested: testDaysRequested ?? undefined,
@@ -1867,6 +1906,8 @@ export async function POST(req: NextRequest) {
     message: scoreableIntervalsMessage,
     scoringActualSource,
     scoringSimulatedSource,
+    timezoneUsedForScoring: scoringTimezone,
+    windowUsedForScoring: scoringWindow,
     scoringUsedSharedArtifact,
     scoringExcludedSource,
     artifactBuildExcludedSource,
@@ -1901,7 +1942,7 @@ export async function POST(req: NextRequest) {
       seasonalSplit: metrics.diagnostics.seasonalSplit,
     },
     parity: {
-      intervalCount: actualTestIntervals.length,
+      intervalCount: actualScoringIntervals.length,
       testWindowKwh: metrics.totalActualKwhMasked,
       annualKwh: metrics.totalActualKwhMasked,
       baseloadKwhPer15m: null,
