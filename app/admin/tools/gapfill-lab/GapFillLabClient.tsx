@@ -217,6 +217,7 @@ export default function GapFillLabClient() {
   const [error, setError] = useState<string | null>(null);
   const [artifactMissing, setArtifactMissing] = useState(false);
   const [lastCompareBody, setLastCompareBody] = useState<Record<string, unknown> | null>(null);
+  const [lastAttemptDebug, setLastAttemptDebug] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
@@ -608,35 +609,73 @@ export default function GapFillLabClient() {
     try {
       const body = buildCompareBody(trimmed, validRanges);
       setLastCompareBody(body);
+      setLastAttemptDebug({
+        startedAt: new Date().toISOString(),
+        phase: "compare_request_started",
+        requestBody: body,
+      });
       const { res, data } = await postGapfill(body);
       if (!res.ok) {
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "compare_response_error",
+          responseStatus: res.status,
+          responseError: (data as any)?.error ?? null,
+          responseMessage: (data as any)?.message ?? null,
+        }));
         if (isArtifactRebuildRequiredError((data as any)?.error)) {
           setArtifactMissing(true);
           // Backstop only: server now auto-ensures shared artifacts in the compare request.
           // Keep this branch as a legacy safety fallback.
           attemptedArtifactAutoRebuild = true;
           const rebuildBody = { ...body, rebuildArtifact: true, rebuildOnly: true };
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: "legacy_rebuild_only_started",
+            rebuildBody,
+          }));
           const { res: rebuildRes, data: rebuildData } = await postGapfill(rebuildBody);
           if (!rebuildRes.ok) {
             setProgressStatus(null);
             setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
             setError(formatApiError(rebuildData, rebuildRes.status));
-            setResult(null);
+            setLastAttemptDebug((prev) => ({
+              ...(prev ?? {}),
+              phase: "legacy_rebuild_only_error",
+              rebuildStatus: rebuildRes.status,
+              rebuildError: (rebuildData as any)?.error ?? null,
+              rebuildMessage: (rebuildData as any)?.message ?? null,
+            }));
             return;
           }
           const compareBody = buildCompareBodyAfterRebuild(body, rebuildData);
           setLastCompareBody(compareBody);
           setArtifactMissing(false);
           setProgressStatus("Rebuild complete. Loading compare result from shared artifact...");
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: "legacy_compare_after_rebuild_started",
+            compareBodyAfterRebuild: compareBody,
+          }));
           const { res: compareRes, data: compareData } = await postGapfill(compareBody);
           if (!compareRes.ok) {
-            setResult(null);
             setProgressStatus("Rebuild complete. Click \"Run Compare\" again to load results.");
             setError(formatApiError(compareData, compareRes.status));
             setArtifactMissing(isArtifactRebuildRequiredError((compareData as any)?.error));
+            setLastAttemptDebug((prev) => ({
+              ...(prev ?? {}),
+              phase: "legacy_compare_after_rebuild_error",
+              compareStatus: compareRes.status,
+              compareError: (compareData as any)?.error ?? null,
+              compareMessage: (compareData as any)?.message ?? null,
+            }));
             return;
           }
           setProgressStatus(null);
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: "compare_success_after_legacy_rebuild",
+          }));
           mergeSuccessfulResult(compareData);
           return;
         }
@@ -645,10 +684,14 @@ export default function GapFillLabClient() {
           ? "Test Dates overlap Vacant/Travel dates — remove overlap and retry."
           : formatApiError(data, res.status);
         setError(errMsg);
-        setResult(null);
         return;
       }
       setProgressStatus(null);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: "compare_success",
+        responseStatus: res.status,
+      }));
       mergeSuccessfulResult(data);
     } catch (e: any) {
       setProgressStatus(null);
@@ -660,7 +703,12 @@ export default function GapFillLabClient() {
         setArtifactMissing(true);
       }
       setError(msg);
-      setResult(null);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: e?.name === "AbortError" ? "compare_timeout" : "compare_exception",
+        errorName: e?.name ?? null,
+        errorMessage: e?.message ?? String(e),
+      }));
     } finally {
       setLoading(false);
       compareInFlightRef.current = false;
@@ -688,8 +736,14 @@ export default function GapFillLabClient() {
         setProgressStatus(null);
         const errMsg = formatApiError(rebuildData, rebuildRes.status);
         setError(errMsg);
-        setResult(null);
         setArtifactMissing(isArtifactRebuildRequiredError((rebuildData as any)?.error));
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "manual_rebuild_error",
+          rebuildStatus: rebuildRes.status,
+          rebuildError: (rebuildData as any)?.error ?? null,
+          rebuildMessage: (rebuildData as any)?.message ?? null,
+        }));
         return;
       }
       const compareBody = buildCompareBodyAfterRebuild(lastCompareBody, rebuildData);
@@ -702,7 +756,12 @@ export default function GapFillLabClient() {
     } catch (e: any) {
       setProgressStatus(null);
       setError(e?.name === "AbortError" ? "Request timed out while rebuilding or re-running compare. Retry once more." : (e?.message ?? String(e)));
-      setResult(null);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        phase: e?.name === "AbortError" ? "manual_rebuild_timeout" : "manual_rebuild_exception",
+        errorName: e?.name ?? null,
+        errorMessage: e?.message ?? String(e),
+      }));
     } finally {
       setRebuildLoading(false);
       rebuildInFlightRef.current = false;
@@ -1015,6 +1074,19 @@ export default function GapFillLabClient() {
             </button>
           )}
         </div>
+      )}
+
+      {lastAttemptDebug && (
+        <details className="mb-6 border border-brand-blue/20 rounded" open>
+          <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+            Last Attempt Debug
+          </summary>
+          <div className="p-4 border-t border-brand-blue/20">
+            <pre className="text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto max-h-80 overflow-y-auto">
+              {JSON.stringify(lastAttemptDebug, null, 2)}
+            </pre>
+          </div>
+        </details>
       )}
 
       {result && result.ok && (
