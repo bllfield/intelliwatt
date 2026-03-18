@@ -256,6 +256,7 @@ export default function GapFillLabClient() {
   const [minDayCoveragePct, setMinDayCoveragePct] = useState(95);
   const [stratifyByMonth, setStratifyByMonth] = useState(true);
   const [stratifyByWeekend, setStratifyByWeekend] = useState(true);
+  const [fullDiagnosticsOnCore, setFullDiagnosticsOnCore] = useState(false);
   const [houseId, setHouseId] = useState("");
   const [houses, setHouses] = useState<HouseOption[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -800,6 +801,7 @@ export default function GapFillLabClient() {
         phase: "orchestrator_started",
         orchestration: "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy",
         requestBody: baseCompareBody,
+        fullDiagnosticsOnCore,
       });
       const startByPhase = new Map<OrchestratorPhaseKey, number>();
       const startPhase = (key: OrchestratorPhaseKey, statusLabel: string) => {
@@ -890,8 +892,8 @@ export default function GapFillLabClient() {
       startPhase("artifact_ensure", "Ensuring shared artifact...");
       const ensureBody: Record<string, unknown> = {
         ...baseCompareBody,
-        includeDiagnostics: false,
-        includeFullReportText: false,
+        includeDiagnostics: fullDiagnosticsOnCore,
+        includeFullReportText: fullDiagnosticsOnCore,
         rebuildArtifact: true,
         rebuildOnly: true,
       };
@@ -922,17 +924,12 @@ export default function GapFillLabClient() {
       const compareBodyBase = buildCompareBodyAfterRebuild(
         {
           ...baseCompareBody,
-          includeDiagnostics: false,
-          includeFullReportText: false,
+          includeDiagnostics: fullDiagnosticsOnCore,
+          includeFullReportText: fullDiagnosticsOnCore,
         },
         ensureData
       );
       setLastCompareBody(compareBodyBase);
-      setHeavyRetryBody({
-        ...compareBodyBase,
-        includeDiagnostics: true,
-        includeFullReportText: true,
-      });
       startPhase("compare_core", "Running compare core...");
       const { res: coreRes, data: coreData } = await postGapfill(compareBodyBase, GAPFILL_COMPARE_TIMEOUT_MS);
       if (!coreRes.ok || !coreData.ok) {
@@ -956,6 +953,25 @@ export default function GapFillLabClient() {
       }
       finishPhase("compare_core", "done");
       mergeSuccessfulResult(coreData);
+      if (fullDiagnosticsOnCore) {
+        const nowIso = new Date().toISOString();
+        updateOrchestratorPhase("compare_heavy", {
+          status: "done",
+          startedAt: nowIso,
+          endedAt: nowIso,
+          elapsedMs: 0,
+          errorCode: null,
+          errorMessage: null,
+        });
+        setHeavyRetryBody(null);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: "orchestrator_success_core_full_diagnostics",
+          finishedAt: new Date().toISOString(),
+        }));
+        setProgressStatus(null);
+        return;
+      }
 
       // 5) Compare heavy report (full diagnostics/text)
       const compareBodyHeavy = {
@@ -1450,6 +1466,15 @@ export default function GapFillLabClient() {
           >
             {loading ? "Running…" : "Run Compare"}
           </button>
+          <label className="flex items-center gap-2 text-sm text-brand-navy">
+            <input
+              type="checkbox"
+              checked={fullDiagnosticsOnCore}
+              onChange={(e) => setFullDiagnosticsOnCore(e.target.checked)}
+              className="rounded"
+            />
+            Full diagnostics on core compare (skip separate heavy step)
+          </label>
           <span className="text-sm text-brand-navy/60">Typically returns in seconds (test-days-only).</span>
         </div>
         {progressStatus && (
