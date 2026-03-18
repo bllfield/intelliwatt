@@ -256,7 +256,9 @@ export default function GapFillLabClient() {
   const [minDayCoveragePct, setMinDayCoveragePct] = useState(95);
   const [stratifyByMonth, setStratifyByMonth] = useState(true);
   const [stratifyByWeekend, setStratifyByWeekend] = useState(true);
+  const [fullDiagnosticsOnEnsure, setFullDiagnosticsOnEnsure] = useState(false);
   const [fullDiagnosticsOnCore, setFullDiagnosticsOnCore] = useState(false);
+  const [runHeavyDiagnosticsStep, setRunHeavyDiagnosticsStep] = useState(true);
   const [houseId, setHouseId] = useState("");
   const [houses, setHouses] = useState<HouseOption[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -801,7 +803,9 @@ export default function GapFillLabClient() {
         phase: "orchestrator_started",
         orchestration: "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy",
         requestBody: baseCompareBody,
+        fullDiagnosticsOnEnsure,
         fullDiagnosticsOnCore,
+        runHeavyDiagnosticsStep,
       });
       const startByPhase = new Map<OrchestratorPhaseKey, number>();
       const startPhase = (key: OrchestratorPhaseKey, statusLabel: string) => {
@@ -852,12 +856,19 @@ export default function GapFillLabClient() {
           lookupError: (lookupData as any)?.error ?? null,
           lookupMessage: (lookupData as any)?.message ?? null,
           lookupBody,
+          lookupResponse: lookupData,
         }));
         setProgressStatus(null);
         return;
       }
       finishPhase("lookup_inputs", "done");
       mergeSuccessfulResult(lookupData);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        lookupStatus: lookupRes.status,
+        lookupBody,
+        lookupResponse: lookupData,
+      }));
 
       // 2) Usage 365 Load
       const usageBody: Record<string, unknown> = {
@@ -882,18 +893,25 @@ export default function GapFillLabClient() {
           usageError: (usageData as any)?.error ?? null,
           usageMessage: (usageData as any)?.message ?? null,
           usageBody,
+          usageResponse: usageData,
         }));
       } else {
         finishPhase("usage365_load", "done");
         mergeSuccessfulResult(usageData);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          usageStatus: usageRes.status,
+          usageBody,
+          usageResponse: usageData,
+        }));
       }
 
       // 3) Artifact ensure/rebuild-only
       startPhase("artifact_ensure", "Ensuring shared artifact...");
       const ensureBody: Record<string, unknown> = {
         ...baseCompareBody,
-        includeDiagnostics: fullDiagnosticsOnCore,
-        includeFullReportText: fullDiagnosticsOnCore,
+        includeDiagnostics: fullDiagnosticsOnEnsure,
+        includeFullReportText: fullDiagnosticsOnEnsure,
         rebuildArtifact: true,
         rebuildOnly: true,
       };
@@ -913,12 +931,19 @@ export default function GapFillLabClient() {
           ensureError: (ensureData as any)?.error ?? null,
           ensureMessage: (ensureData as any)?.message ?? null,
           ensureBody,
+          ensureResponse: ensureData,
         }));
         setProgressStatus(null);
         return;
       }
       finishPhase("artifact_ensure", "done");
       setArtifactMissing(false);
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        ensureStatus: ensureRes.status,
+        ensureBody,
+        ensureResponse: ensureData,
+      }));
 
       // 4) Compare core (lighter payload)
       const compareBodyBase = buildCompareBodyAfterRebuild(
@@ -947,26 +972,37 @@ export default function GapFillLabClient() {
           coreError: (coreData as any)?.error ?? null,
           coreMessage: (coreData as any)?.message ?? null,
           compareCoreBody: compareBodyBase,
+          coreResponse: coreData,
         }));
         setProgressStatus(null);
         return;
       }
       finishPhase("compare_core", "done");
       mergeSuccessfulResult(coreData);
-      if (fullDiagnosticsOnCore) {
+      setLastAttemptDebug((prev) => ({
+        ...(prev ?? {}),
+        coreStatus: coreRes.status,
+        compareCoreBody: compareBodyBase,
+        coreResponse: coreData,
+      }));
+      if (fullDiagnosticsOnCore || !runHeavyDiagnosticsStep) {
         const nowIso = new Date().toISOString();
+        const skipReason = !runHeavyDiagnosticsStep
+          ? "Heavy diagnostics step disabled by toggle."
+          : "Heavy step skipped because core already included full diagnostics/report.";
         updateOrchestratorPhase("compare_heavy", {
-          status: "done",
+          status: "skipped",
           startedAt: nowIso,
           endedAt: nowIso,
           elapsedMs: 0,
           errorCode: null,
-          errorMessage: null,
+          errorMessage: skipReason,
         });
         setHeavyRetryBody(null);
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
-          phase: "orchestrator_success_core_full_diagnostics",
+          phase: "orchestrator_success_heavy_skipped",
+          compareHeavySkippedReason: skipReason,
           finishedAt: new Date().toISOString(),
         }));
         setProgressStatus(null);
@@ -1000,6 +1036,7 @@ export default function GapFillLabClient() {
           heavyError: (heavyData as any)?.error ?? null,
           heavyMessage: (heavyData as any)?.message ?? null,
           compareHeavyBody: compareBodyHeavy,
+          heavyResponse: heavyData,
         }));
         setProgressStatus("Core compare complete. Heavy diagnostics failed; retry heavy report.");
         return;
@@ -1010,6 +1047,9 @@ export default function GapFillLabClient() {
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: "orchestrator_success",
+        heavyStatus: heavyRes.status,
+        compareHeavyBody: compareBodyHeavy,
+        heavyResponse: heavyData,
         finishedAt: new Date().toISOString(),
       }));
       setProgressStatus(null);
@@ -1469,11 +1509,29 @@ export default function GapFillLabClient() {
           <label className="flex items-center gap-2 text-sm text-brand-navy">
             <input
               type="checkbox"
+              checked={fullDiagnosticsOnEnsure}
+              onChange={(e) => setFullDiagnosticsOnEnsure(e.target.checked)}
+              className="rounded"
+            />
+            Full diagnostics on artifact ensure
+          </label>
+          <label className="flex items-center gap-2 text-sm text-brand-navy">
+            <input
+              type="checkbox"
               checked={fullDiagnosticsOnCore}
               onChange={(e) => setFullDiagnosticsOnCore(e.target.checked)}
               className="rounded"
             />
-            Full diagnostics on core compare (skip separate heavy step)
+            Full diagnostics on core compare
+          </label>
+          <label className="flex items-center gap-2 text-sm text-brand-navy">
+            <input
+              type="checkbox"
+              checked={runHeavyDiagnosticsStep}
+              onChange={(e) => setRunHeavyDiagnosticsStep(e.target.checked)}
+              className="rounded"
+            />
+            Run heavy diagnostics step
           </label>
           <span className="text-sm text-brand-navy/60">Typically returns in seconds (test-days-only).</span>
         </div>
@@ -1595,6 +1653,35 @@ export default function GapFillLabClient() {
                 )}
               </div>
             ))}
+          </div>
+        </details>
+      )}
+
+      {lastAttemptDebug && (
+        <details className="mb-6 border border-brand-blue/20 rounded" open>
+          <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+            Step Request / Response Payloads
+          </summary>
+          <div className="p-4 border-t border-brand-blue/20 space-y-3">
+            {[
+              { key: "lookup_inputs", request: (lastAttemptDebug as any).lookupBody, response: (lastAttemptDebug as any).lookupResponse, status: (lastAttemptDebug as any).lookupStatus },
+              { key: "usage365_load", request: (lastAttemptDebug as any).usageBody, response: (lastAttemptDebug as any).usageResponse, status: (lastAttemptDebug as any).usageStatus },
+              { key: "artifact_ensure", request: (lastAttemptDebug as any).ensureBody, response: (lastAttemptDebug as any).ensureResponse, status: (lastAttemptDebug as any).ensureStatus },
+              { key: "compare_core", request: (lastAttemptDebug as any).compareCoreBody, response: (lastAttemptDebug as any).coreResponse, status: (lastAttemptDebug as any).coreStatus },
+              { key: "compare_heavy", request: (lastAttemptDebug as any).compareHeavyBody, response: (lastAttemptDebug as any).heavyResponse, status: (lastAttemptDebug as any).heavyStatus },
+            ]
+              .filter((row) => row.request != null || row.response != null || row.status != null)
+              .map((row) => (
+                <details key={row.key} className="border border-brand-blue/20 rounded">
+                  <summary className="px-3 py-2 cursor-pointer text-sm font-medium text-brand-navy bg-brand-navy/5">
+                    {row.key}
+                    {row.status != null ? ` (status ${row.status})` : ""}
+                  </summary>
+                  <pre className="text-xs bg-brand-navy/5 p-3 rounded-b overflow-x-auto max-h-72 overflow-y-auto">
+                    {JSON.stringify({ request: row.request ?? null, response: row.response ?? null }, null, 2)}
+                  </pre>
+                </details>
+              ))}
           </div>
         </details>
       )}
