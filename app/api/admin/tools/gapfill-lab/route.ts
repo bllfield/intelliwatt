@@ -1717,7 +1717,7 @@ export async function POST(req: NextRequest) {
     ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
     : inferredMissingSimulatedOwnershipCount;
   const scoringUsedSharedArtifact =
-    (sharedSim as any).scoringUsedSharedArtifact === true;
+    (sharedSim as any).scoringUsedSharedArtifact !== false;
   const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
   const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
   const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
@@ -1803,7 +1803,7 @@ export async function POST(req: NextRequest) {
     (sharedSim as any)?.modelAssumptions?.artifactInputHashUsed ??
     null;
   const comparePulledFromSharedArtifactOnly =
-    (sharedSim as any).comparePulledFromSharedArtifactOnly !== false;
+    (sharedSim as any).comparePulledFromSharedArtifactOnly ?? scoringUsedSharedArtifact;
   const sharedCoverageWindow = sharedSim.sharedCoverageWindow;
   const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
