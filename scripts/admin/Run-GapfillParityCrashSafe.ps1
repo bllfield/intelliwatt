@@ -220,7 +220,8 @@ $report = [pscustomobject]@{
     sameTravelOnlyExclusionScope = $sameScope
   }
   travelDatesCompared = $travelDates
-  parityExact = ($null -eq $firstDivergence)
+  parityEvaluated = ($chartSource -eq "live_gapfill_compare_payload")
+  parityExact = if ($chartSource -eq "live_gapfill_compare_payload") { ($null -eq $firstDivergence) } else { $null }
   firstDivergence = $firstDivergence
   rows = $rows
 }

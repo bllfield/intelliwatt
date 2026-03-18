@@ -11,9 +11,9 @@ _Generated from audit; implementation not started. Do not redesign existing admi
 | `/admin` | Dashboard; links to all tools | — | — | — |
 | `/admin/efl/fact-cards` | Fact Card Parsing Ops: batch parse, review queue, templates, manual loader | Current-plan DB, EFL storage, RatePlan | Templates, batch queue, manual URL/upload | — |
 | `/admin/efl-review` | Current Plan EFL Quarantine; AI-flagged Fact Cards | EFL review queue (DB) | Resolve/open, queue reason | — |
-| `/admin/tools/gapfill-lab` | Compare gap-fill vs actual on Test Dates / masked intervals | Usage DB, getPastSimulatedDatasetForHouse, UsageShapeProfile | None (read-only compare + prime cache trigger) | Explicit “baseline build” step test; overlay-application check |
+| `/admin/tools/gapfill-lab` | Compare selected test days vs actual using shared Past artifact output | Usage DB, shared Past simulation service path, UsageShapeProfile | None (read-only compare + shared artifact prime trigger) | Explicit “baseline build” step test; overlay-application check |
 | `/admin/tools/usage-shape-profile` | Derive/save usage shape from 15-min intervals | Usage DB, intervals | UsageShapeProfile (save) | — |
-| `/admin/tools/prime-past-cache` (via `/admin/usage`) | Prime Past cache for gapfill-lab (scenarioId gapfill_lab) | getPastSimulatedDatasetForHouse, pastCache | PastSimulatedDatasetCache | — |
+| `/admin/tools/prime-past-cache` (via `/admin/usage`) | Prime shared Past cache used by Past Sim and Gap-Fill compare | getPastSimulatedDatasetForHouse, pastCache | PastSimulatedDatasetCache | — |
 | `/admin/simulation-engines` | Debug Past/Future/New Build by email; payloads, profile, weather, curves | Build inputs, service, simulatedUsage engine | None (debug output only) | Structured “baseline build” test runner; overlay application check |
 | `/admin/plan-engine` | Plan Engine Lab: estimate-set, TOU/Free Weekends, backfill | Plan engine, materialized estimates | Backfill/materialize (offers) | Editable TOU/heuristics not exposed here |
 | `/admin/plan-analyzer/tests` | PlanRules/Plan Analyzer smoke tests | Synthetic PlanRules | None | — |
@@ -96,7 +96,7 @@ For `/admin/simulation-engines`, `/admin/tools/gapfill-lab`, and related tooling
 | Capability | Already exists? | If no, add where | DB/model | Fields / behavior | Validations |
 |------------|-----------------|-------------------|----------|--------------------|-------------|
 | Baseline build test (run past_baseline_raw → baseline_corrected only) | **No** | Add section or link on `/admin/simulation-engines` or `/admin/tools/gapfill-lab`: “Run baseline build only” (same inputs as Past, return contract IntervalDataset or summary). | None (read-only) | Email/houseId, window; output: point count, kind, window, coveragePct (from contract). | Window required; email/houseId required. |
-| Gapfill scoring (Test Dates vs actual) | **Yes** | `/admin/tools/gapfill-lab` — “Run Compare” already runs getPastSimulatedDatasetForHouse (or test-days profile) and computeGapFillMetrics. | None | — | — |
+| Gapfill scoring (selected test days vs actual) | **Yes** | `/admin/tools/gapfill-lab` — “Run Compare” already uses shared Past artifact output and `computeGapFillMetrics` for scoring/reporting. | None | — | — |
 | Overlay application check (apply OverlayResult to IntervalDataset, verify clamp/composition) | **No** | New small section on `/admin/simulation-engines` or new page `/admin/tools/overlay-check`: upload or pick base dataset + overlay JSON; call lib/sim/contract applyOverlays; show result + clamp diagnostics. | None | Input: base (or ref to cached), overlays JSON. Output: dataset + clampedCount, clampedSample. | Schema validate OverlayResult; window match. |
 
 ---

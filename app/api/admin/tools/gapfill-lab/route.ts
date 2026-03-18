@@ -1499,7 +1499,6 @@ export async function POST(req: NextRequest) {
       timezone,
       canonicalWindow,
       testDateKeysLocal,
-      travelSimulatedDateKeysLocal: travelDateKeysLocal,
       rebuildArtifact: true,
     });
     if (!rebuiltCompare.ok) {
@@ -1549,7 +1548,6 @@ export async function POST(req: NextRequest) {
     timezone,
     canonicalWindow,
     testDateKeysLocal,
-    travelSimulatedDateKeysLocal: travelDateKeysLocal,
     rebuildArtifact,
   });
   if (!sharedSim.ok) {
@@ -1569,6 +1567,26 @@ export async function POST(req: NextRequest) {
       coverageEnd:
         (sharedSim.body as any)?.windowEndUtc ?? canonicalWindow.endDate,
     };
+    await recordSimulationDataAlert({
+      source: "GAPFILL_LAB",
+      userId: user.id,
+      userEmail: user.email,
+      houseId: house.id,
+      houseLabel:
+        [house.addressLine1, house.addressCity, house.addressState]
+          .filter(Boolean)
+          .join(", ") || house.id,
+      scenarioId: "past_shared_artifact",
+      reasonCode: classification.reasonCode,
+      reasonMessage: classification.reasonMessage,
+      missingData: classification.missingData,
+      context: {
+        error: String((sharedSim.body as any)?.error ?? ""),
+        status: sharedSim.status,
+        rebuildArtifact,
+        testDaysRequested: testDateKeysLocal.size,
+      },
+    });
     return NextResponse.json(mergedBody, { status: sharedSim.status });
   }
 

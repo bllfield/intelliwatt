@@ -530,7 +530,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
   });
 
-  it("forwards raw travel-only exclusion keys to shared module for bounded fingerprinting", async () => {
+  it("does not pass legacy travelSimulatedDateKeysLocal argument to shared module", async () => {
     prismaScenarioFindMany.mockResolvedValueOnce([{ id: "past-s1" }]);
     prismaScenarioEventFindMany.mockResolvedValueOnce([
       { payloadJson: { startDate: "2024-01-01", endDate: "2024-01-02" } },
@@ -566,11 +566,70 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
 
     const callArg = buildGapfillCompareSimShared.mock.calls.at(-1)?.[0];
-    const travelScope = callArg?.travelSimulatedDateKeysLocal as Set<string>;
-    expect(travelScope.has("2024-01-01")).toBe(true);
-    expect(travelScope.has("2024-01-02")).toBe(true);
-    // Test date remains scoring-only; it is not part of full-year artifact exclusion identity.
-    expect(travelScope.has("2026-01-01")).toBe(false);
+    expect(callArg?.travelSimulatedDateKeysLocal).toBeUndefined();
+  });
+
+  it("returns classified stale-rebuild response when shared artifact is stale", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_stale_rebuild_required",
+        message: "Saved shared Past artifact is stale/incomplete for this canonical window.",
+      },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("artifact_stale_rebuild_required");
+    expect(body.reasonCode).toBe("ARTIFACT_STALE_REBUILD_REQUIRED");
+    expect(Array.isArray(body.missingData)).toBe(true);
+  });
+
+  it("returns join-incomplete rebuild-required when simulated join timestamps are missing", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_artifact_simulated_intervals15",
+      scoringUsedSharedArtifact: true,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.25, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.25 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("artifact_compare_join_incomplete_rebuild_required");
+    expect(body.reasonCode).toBe("ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED");
+    expect(body.joinMissingCount).toBeGreaterThan(0);
   });
 
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {

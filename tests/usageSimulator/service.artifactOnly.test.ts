@@ -297,7 +297,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       timezone: "America/Chicago",
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
-      travelSimulatedDateKeysLocal: new Set<string>(),
       rebuildArtifact: false,
     });
 
@@ -331,7 +330,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       timezone: "America/Chicago",
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
-      travelSimulatedDateKeysLocal: new Set<string>(),
       rebuildArtifact: false,
     });
 
@@ -365,7 +363,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       timezone: "America/Chicago",
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
-      travelSimulatedDateKeysLocal: new Set<string>(),
       rebuildArtifact: false,
     });
 
@@ -398,7 +395,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       timezone: "America/Chicago",
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
-      travelSimulatedDateKeysLocal: new Set<string>(),
       rebuildArtifact: false,
     });
 
@@ -439,7 +435,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       timezone: "America/Chicago",
       canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
       testDateKeysLocal: new Set<string>(["2026-01-01"]),
-      travelSimulatedDateKeysLocal: new Set<string>(["2026-01-01"]),
       rebuildArtifact: false,
     });
 

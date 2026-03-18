@@ -369,7 +369,6 @@ export async function buildGapfillCompareSimShared(args: {
   timezone: string;
   canonicalWindow: { startDate: string; endDate: string };
   testDateKeysLocal: Set<string>;
-  travelSimulatedDateKeysLocal?: Set<string>;
   rebuildArtifact: boolean;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
