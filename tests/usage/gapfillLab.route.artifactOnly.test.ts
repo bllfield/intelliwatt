@@ -116,7 +116,8 @@ vi.mock("@/lib/time/chicago", async () => {
   };
 });
 
-import { POST } from "@/app/api/admin/tools/gapfill-lab/route";
+import * as gapfillRoute from "@/app/api/admin/tools/gapfill-lab/route";
+const { POST } = gapfillRoute;
 
 describe("gapfill-lab route artifact-only hard lock", () => {
   const zeroMetrics = () => ({
@@ -155,6 +156,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     mergeDateKeysToRanges.mockReset();
     pickRandomTestDateKeys.mockReset();
     computeGapFillMetrics.mockReset();
+    vi.restoreAllMocks();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
     prismaScenarioFindMany.mockReset();
@@ -1140,6 +1142,120 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.reasonCode).toBe("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE");
     expect(body.compareCoreTiming?.failedStep).toBe("build_shared_compare");
     expect(body.compareCoreTiming?.compareRequestTruth?.compareFreshModeRequested).toBe("selected_days");
+  });
+
+  it("returns diagnostics timeout classification when full report build throws timeout-shaped error", async () => {
+    const originalBuildFullReport = (gapfillRoute as any).routeCompareCoreHooks.buildFullReport;
+    (gapfillRoute as any).routeCompareCoreHooks.buildFullReport = () => {
+      const timeoutErr: any = new Error("compare_core_route_timeout_build_full_report");
+      timeoutErr.code = "compare_core_route_timeout_build_full_report";
+      throw timeoutErr;
+    };
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeFullReportText: true,
+      }),
+    } as any;
+    try {
+      const res = await POST(req);
+      const body = await res.json();
+      expect(res.status).toBe(504);
+      expect(body.error).toBe("compare_core_route_timeout");
+      expect(body.reasonCode).toBe("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS");
+      expect(body.compareCoreTiming?.failedStep).toBe("build_diagnostics");
+      expect(String(body.message ?? "").toLowerCase()).toContain("timed out");
+    } finally {
+      (gapfillRoute as any).routeCompareCoreHooks.buildFullReport = originalBuildFullReport;
+    }
+  });
+
+  it("returns diagnostics exception classification for non-timeout full report failures", async () => {
+    const originalBuildFullReport = (gapfillRoute as any).routeCompareCoreHooks.buildFullReport;
+    (gapfillRoute as any).routeCompareCoreHooks.buildFullReport = () => {
+      const err: any = new Error("boom");
+      err.code = "non_timeout_report_failure";
+      throw err;
+    };
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeFullReportText: true,
+      }),
+    } as any;
+    try {
+      const res = await POST(req);
+      const body = await res.json();
+      expect(res.status).toBe(500);
+      expect(body.error).toBe("compare_core_route_exception");
+      expect(body.reasonCode).toBe("COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS");
+      expect(body.compareCoreTiming?.failedStep).toBe("build_diagnostics");
+      expect(String(body.message ?? "").toLowerCase()).not.toContain("timed out");
+    } finally {
+      (gapfillRoute as any).routeCompareCoreHooks.buildFullReport = originalBuildFullReport;
+    }
   });
 
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {

@@ -178,6 +178,21 @@ async function withTimeout<T>(task: Promise<T>, timeoutMs: number, timeoutErrorC
   }
 }
 
+function normalizeRouteError(value: unknown, fallbackMessage: string): { code: string; message: string } {
+  const fromObject = value != null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const codeRaw = fromObject && typeof fromObject.code === "string" ? fromObject.code.trim() : "";
+  const messageRaw = fromObject && typeof fromObject.message === "string" ? fromObject.message.trim() : "";
+  const primitiveMessage =
+    typeof value === "string"
+      ? value.trim()
+      : typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
+        ? String(value)
+        : "";
+  const message = messageRaw || primitiveMessage || fallbackMessage;
+  const code = codeRaw || messageRaw || fallbackMessage;
+  return { code, message };
+}
+
 function safeRatio(numerator: number, denominator: number): number | null {
   const d = Number(denominator) || 0;
   if (d === 0) return null;
@@ -1112,6 +1127,11 @@ function buildFullReport(args: {
   return { fullReportJson, fullReportText };
 }
 
+export const routeCompareCoreHooks = {
+  buildFullReport: (args: Parameters<typeof buildFullReport>[0]) => buildFullReport(args),
+};
+
+
 export async function POST(req: NextRequest) {
   if (!hasAdminSessionCookie(req)) {
     const gate = requireAdmin(req);
@@ -1666,16 +1686,19 @@ export async function POST(req: NextRequest) {
       ROUTE_COMPARE_SHARED_TIMEOUT_MS,
       "compare_core_route_timeout_build_shared_compare"
     );
-  } catch (err: any) {
-    const timeoutCode = String((err as any)?.code ?? (err as any)?.message ?? "");
-    const timedOut = timeoutCode === "compare_core_route_timeout_build_shared_compare";
+  } catch (err: unknown) {
+    const normalizedError = normalizeRouteError(
+      err,
+      "Compare core failed while building shared compare output."
+    );
+    const timedOut = normalizedError.code === "compare_core_route_timeout_build_shared_compare";
     return NextResponse.json(
       {
         ok: false,
         error: timedOut ? "compare_core_route_timeout" : "compare_core_route_exception",
         message: timedOut
           ? "Compare core timed out while building shared compare output."
-          : "Compare core failed while building shared compare output.",
+          : normalizedError.message,
         missingData: timedOut ? ["buildGapfillCompareSimShared"] : undefined,
         reasonCode: timedOut
           ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
@@ -2284,7 +2307,7 @@ export async function POST(req: NextRequest) {
     try {
       fullReport = await withTimeout(
         Promise.resolve(
-          buildFullReport({
+          routeCompareCoreHooks.buildFullReport({
             reportVersion: REPORT_VERSION,
             generatedAt: new Date().toISOString(),
             env: process.env.NODE_ENV ?? "development",
@@ -2424,20 +2447,29 @@ export async function POST(req: NextRequest) {
         ROUTE_COMPARE_REPORT_TIMEOUT_MS,
         "compare_core_route_timeout_build_full_report"
       );
-    } catch {
+    } catch (err: unknown) {
+      const normalizedError = normalizeRouteError(
+        err,
+        "Compare core failed while building diagnostics report payload."
+      );
+      const timedOut = normalizedError.code === "compare_core_route_timeout_build_full_report";
       return NextResponse.json(
         {
           ok: false,
-          error: "compare_core_route_timeout",
-          message: "Compare core timed out while building diagnostics report payload.",
-          reasonCode: "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS",
+          error: timedOut ? "compare_core_route_timeout" : "compare_core_route_exception",
+          message: timedOut
+            ? "Compare core timed out while building diagnostics report payload."
+            : "Compare core failed while building diagnostics report payload.",
+          reasonCode: timedOut
+            ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
+            : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
           compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
             failedStep: "build_diagnostics",
-            timeoutMs: ROUTE_COMPARE_REPORT_TIMEOUT_MS,
+            timeoutMs: timedOut ? ROUTE_COMPARE_REPORT_TIMEOUT_MS : undefined,
             compareRequestTruth,
           }),
         },
-        { status: 504 }
+        { status: timedOut ? 504 : 500 }
       );
     }
   }
