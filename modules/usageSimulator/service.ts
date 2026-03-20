@@ -1809,8 +1809,10 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.gapfillDisplayMonthlySource = useDatasetMonthlyAsCanonical
     ? "dataset.monthly"
     : "interval_rebucket_fallback";
+  const artifactIntervalsAvailableForExactParity = Array.isArray((dataset as any)?.series?.intervals15)
+    && (dataset as any).series.intervals15.length > 0;
   const canonicalArtifactSimulatedDayTotalsByDate =
-    exactTravelParityRequiresIntervalBackedArtifactTruth && artifactIntervals.length > 0
+    exactTravelParityRequiresIntervalBackedArtifactTruth && artifactIntervalsAvailableForExactParity
       ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset, timezone)
       : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
   if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
