@@ -620,7 +620,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     getCachedPastDataset
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
-        inputHash: "hash-rebuilt-readback",
+        inputHash: "hash-selected-default",
         updatedAt: new Date("2026-03-12T00:00:00.000Z"),
         datasetJson: {
           summary: {
@@ -683,6 +683,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       expect((out.modelAssumptions as any)?.artifactSource).toBe("rebuild");
       expect((out.modelAssumptions as any)?.artifactSourceMode).toBe("exact_hash_match");
+      expect((out.modelAssumptions as any)?.artifactInputHashUsed).toBe("hash-selected-default");
+      expect((out.modelAssumptions as any)?.artifactInputHash).toBe("hash-selected-default");
       expect((out.modelAssumptions as any)?.artifactSourceNote).toBe(
         "Artifact source: exact identity match on Past input hash."
       );
@@ -702,7 +704,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     getCachedPastDataset
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
-        inputHash: "hash-rebuilt-readback",
+        inputHash: "hash-selected-default",
         updatedAt: new Date("2026-03-12T00:00:00.000Z"),
         datasetJson: {
           summary: {

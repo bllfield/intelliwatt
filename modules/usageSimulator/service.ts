@@ -927,6 +927,7 @@ export async function buildGapfillCompareSimShared(args: {
   async function rebuildSharedArtifactDataset(): Promise<{
     ok: true;
     dataset: any;
+    cached: CachedPastDataset;
   } | {
     ok: false;
     status: number;
@@ -1015,6 +1016,7 @@ export async function buildGapfillCompareSimShared(args: {
     }
     return {
       ok: true,
+      cached: persistedExactArtifact,
       dataset: restoreCachedArtifactDataset({
         cached: persistedExactArtifact,
         useSelectedDaysLightweightArtifactRead,
@@ -1133,6 +1135,7 @@ export async function buildGapfillCompareSimShared(args: {
     }
     const rebuilt = await rebuildSharedArtifactDataset();
     if (!rebuilt.ok) return rebuilt;
+    cached = rebuilt.cached;
     dataset = rebuilt.dataset;
     artifactAutoRebuilt = true;
     artifactSourceMode =
@@ -1188,6 +1191,7 @@ export async function buildGapfillCompareSimShared(args: {
     if (shouldAutoRebuildNow) {
       const rebuilt = await rebuildSharedArtifactDataset();
       if (!rebuilt.ok) return rebuilt;
+      cached = rebuilt.cached;
       dataset = rebuilt.dataset;
       artifactAutoRebuilt = true;
       artifactSourceMode =
