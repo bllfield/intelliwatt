@@ -870,8 +870,19 @@ export async function buildGapfillCompareSimShared(args: {
     }
   }
 
-  let sharedInputHash = "";
-  if (!useSelectedDaysLightweightArtifactRead) {
+  const sharedScenarioCacheId = pastScenarioId;
+  const requestedArtifactScenarioId =
+    typeof artifactExactScenarioId === "string" && artifactExactScenarioId.trim()
+      ? artifactExactScenarioId.trim()
+      : sharedScenarioCacheId;
+  const requestedArtifactInputHash =
+    typeof artifactExactInputHash === "string" && artifactExactInputHash.trim()
+      ? artifactExactInputHash.trim()
+      : "";
+  const exactArtifactIdentityRequested = requestedArtifactInputHash.length > 0;
+  const exactArtifactReadRequired = exactArtifactIdentityRequested && requireExactArtifactMatch === true;
+  let sharedInputHash = exactArtifactIdentityRequested ? requestedArtifactInputHash : "";
+  if (!useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested) {
     const intervalDataFingerprint = await getIntervalDataFingerprint({
       houseId,
       esiid: houseResolved.esiid ?? null,
@@ -899,17 +910,6 @@ export async function buildGapfillCompareSimShared(args: {
       weatherIdentity,
     });
   }
-  const sharedScenarioCacheId = pastScenarioId;
-  const requestedArtifactScenarioId =
-    typeof artifactExactScenarioId === "string" && artifactExactScenarioId.trim()
-      ? artifactExactScenarioId.trim()
-      : sharedScenarioCacheId;
-  const requestedArtifactInputHash =
-    typeof artifactExactInputHash === "string" && artifactExactInputHash.trim()
-      ? artifactExactInputHash.trim()
-      : "";
-  const exactArtifactIdentityRequested = requestedArtifactInputHash.length > 0;
-  const exactArtifactReadRequired = exactArtifactIdentityRequested && requireExactArtifactMatch === true;
   const artifactIdentitySourceNormalized =
     artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
       ? artifactIdentitySource
@@ -1303,7 +1303,9 @@ export async function buildGapfillCompareSimShared(args: {
   const artifactInputHashUsed =
     typeof (cached as any)?.inputHash === "string"
       ? String((cached as any).inputHash)
-      : sharedInputHash || null;
+      : exactArtifactIdentityRequested
+        ? null
+        : sharedInputHash || null;
   const requestedInputHash = exactArtifactIdentityRequested
     ? requestedArtifactInputHash
     : useSelectedDaysLightweightArtifactRead
@@ -1565,6 +1567,8 @@ export async function buildGapfillCompareSimShared(args: {
       };
     };
     if (effectiveCompareFreshMode === "selected_days") {
+      const requireExactTravelParityFullWindowFreshCalc =
+        exactArtifactReadRequired && travelVacantParityDateKeysLocal.length > 0;
       const runSelectedDaysFreshExecution = async (selectedDateKeysLocal: Set<string>) => {
         if (selectedDateKeysLocal.size === 0) {
           return {
@@ -1605,74 +1609,105 @@ export async function buildGapfillCompareSimShared(args: {
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
         };
       };
-      const selectedTestDaysResult = await runSelectedDaysFreshExecution(boundedTestDateKeysLocal);
-      if (!selectedTestDaysResult.ok) {
-        return {
-          ok: false,
-          status: 500,
-          body: {
-            ok: false,
-            error: "fresh_compare_simulation_failed",
-            message: selectedTestDaysResult.error,
-            mode: "artifact_only",
-            scenarioId: sharedScenarioCacheId,
-          },
-        };
-      }
-      simulatedTestIntervals = selectedTestDaysResult.simulatedIntervals;
-      const requireExactTravelParityFullWindowFreshCalc =
-        exactArtifactReadRequired && travelVacantParityDateKeysLocal.length > 0;
-      const selectedTravelParityResult = requireExactTravelParityFullWindowFreshCalc
-        ? await runFullWindowFreshExecution()
-        : await runSelectedDaysFreshExecution(new Set<string>(travelVacantParityDateKeysLocal));
-      if (!selectedTravelParityResult.ok) {
-        return {
-          ok: false,
-          status: 500,
-          body: {
-            ok: false,
-            error: "fresh_compare_simulation_failed",
-            message: selectedTravelParityResult.error,
-            mode: "artifact_only",
-            scenarioId: sharedScenarioCacheId,
-          },
-        };
-      }
       if (requireExactTravelParityFullWindowFreshCalc) {
-        freshDataset = selectedTravelParityResult.dataset;
-      }
-      freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
-      scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
-      comparePulledFromSharedArtifactOnly = false;
-      compareSimSource = "shared_selected_days_calc";
-      compareCalculationScope = "selected_days_shared_path_only";
-      compareFreshModeUsed = "selected_days";
-      compareSharedCalcPath =
-        requireExactTravelParityFullWindowFreshCalc
-          ? "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)+getPastSimulatedDatasetForHouse(simulatePastUsageDataset exact_travel_parity)->buildGapfillCompareSimShared"
-          : "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
-      weatherBasisUsed =
-        boundedTestDateKeysLocal.size > 0
-          ? selectedTestDaysResult.weatherSourceSummary
-          : selectedTravelParityResult.weatherSourceSummary;
-      const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
-      if (selectedWeatherRange.length > 0) {
-        const selectedDaysWeather = await loadWeatherForPastWindow({
-          houseId,
-          startDate: selectedWeatherRange[0]!,
-          endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
-          canonicalDateKeys: selectedWeatherRange,
-        });
+        const freshResult = await runFullWindowFreshExecution();
+        if (!freshResult.ok) {
+          return {
+            ok: false,
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_simulation_failed",
+              message: freshResult.error,
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+            },
+          };
+        }
+        freshDataset = freshResult.dataset;
+        freshParityIntervals = freshResult.simulatedIntervals;
+        simulatedTestIntervals = freshResult.simulatedIntervals.filter((p) =>
+          boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
+        );
+        scoringSimulatedSource = "shared_fresh_simulated_intervals15";
+        comparePulledFromSharedArtifactOnly = false;
+        compareSimSource = "shared_fresh_calc";
+        compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
+        compareFreshModeUsed = "full_window";
+        compareSharedCalcPath =
+          "getPastSimulatedDatasetForHouse(simulatePastUsageDataset exact_travel_parity_and_selected_day_scoring)->buildGapfillCompareSimShared";
+        weatherBasisUsed = freshResult.weatherSourceSummary;
         const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
           scoredDateKeysLocal: boundedTestDateKeysLocal,
-          weatherByDateKey: selectedDaysWeather.actualWxByDateKey,
-          weatherBasisUsed: String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed,
-          weatherKindUsed: selectedDaysWeather.provenance.weatherKindUsed ?? null,
-          weatherProviderName: selectedDaysWeather.provenance.weatherProviderName ?? null,
-          weatherFallbackReason: selectedDaysWeather.provenance.weatherFallbackReason ?? null,
+          weatherByDateKey: freshResult.actualWxByDateKey,
+          weatherBasisUsed,
+          weatherKindUsed: String(((freshDataset as any)?.meta?.weatherKindUsed ?? "") || "") || null,
+          weatherProviderName: String(((freshDataset as any)?.meta?.weatherProviderName ?? "") || "") || null,
+          weatherFallbackReason: String(((freshDataset as any)?.meta?.weatherFallbackReason ?? "") || "") || null,
         });
         scoredDayWeatherRows = scoredDayWeatherPayload.rows;
         scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
+      } else {
+        const selectedTestDaysResult = await runSelectedDaysFreshExecution(boundedTestDateKeysLocal);
+        if (!selectedTestDaysResult.ok) {
+          return {
+            ok: false,
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_simulation_failed",
+              message: selectedTestDaysResult.error,
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+            },
+          };
+        }
+        simulatedTestIntervals = selectedTestDaysResult.simulatedIntervals;
+        const selectedTravelParityResult = await runSelectedDaysFreshExecution(new Set<string>(travelVacantParityDateKeysLocal));
+        if (!selectedTravelParityResult.ok) {
+          return {
+            ok: false,
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_simulation_failed",
+              message: selectedTravelParityResult.error,
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+            },
+          };
+        }
+        freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
+        scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
+        comparePulledFromSharedArtifactOnly = false;
+        compareSimSource = "shared_selected_days_calc";
+        compareCalculationScope = "selected_days_shared_path_only";
+        compareFreshModeUsed = "selected_days";
+        compareSharedCalcPath =
+          "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
+        weatherBasisUsed =
+          boundedTestDateKeysLocal.size > 0
+            ? selectedTestDaysResult.weatherSourceSummary
+            : selectedTravelParityResult.weatherSourceSummary;
+        const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
+        if (selectedWeatherRange.length > 0) {
+          const selectedDaysWeather = await loadWeatherForPastWindow({
+            houseId,
+            startDate: selectedWeatherRange[0]!,
+            endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
+            canonicalDateKeys: selectedWeatherRange,
+          });
+          const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
+            scoredDateKeysLocal: boundedTestDateKeysLocal,
+            weatherByDateKey: selectedDaysWeather.actualWxByDateKey,
+            weatherBasisUsed: String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed,
+            weatherKindUsed: selectedDaysWeather.provenance.weatherKindUsed ?? null,
+            weatherProviderName: selectedDaysWeather.provenance.weatherProviderName ?? null,
+            weatherFallbackReason: selectedDaysWeather.provenance.weatherFallbackReason ?? null,
+          });
+          scoredDayWeatherRows = scoredDayWeatherPayload.rows;
+          scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
+        }
       }
     } else {
       const freshResult = await runFullWindowFreshExecution();
