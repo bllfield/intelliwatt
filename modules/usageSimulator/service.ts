@@ -898,7 +898,7 @@ export async function buildGapfillCompareSimShared(args: {
       : null;
   const summaryIntervalsCount = Number((dataset as any)?.summary?.intervalsCount);
   if (Number.isFinite(summaryIntervalsCount) && summaryIntervalsCount > 0) {
-    modelAssumptions.intervalCount = Math.trunc(summaryIntervalsCount);
+    modelAssumptions.artifactStoredIntervalCount = Math.trunc(summaryIntervalsCount);
   }
   if (artifactSourceMode) {
     modelAssumptions.artifactSourceMode = artifactSourceMode;
@@ -1072,6 +1072,7 @@ export async function buildGapfillCompareSimShared(args: {
   const simulatedChartIntervals = useSelectedDaysLightweightArtifactRead
     ? []
     : artifactIntervals.filter((p) => chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
+  modelAssumptions.intervalCount = simulatedChartIntervals.length;
   const chartMonthKeysLocal = new Set<string>(
     Array.from(chartDateKeysLocal)
       .map((dk) => String(dk).slice(0, 7))

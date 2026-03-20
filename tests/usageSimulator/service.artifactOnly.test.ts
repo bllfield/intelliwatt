@@ -811,6 +811,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
       expect(out.artifactIntervals).toEqual([]);
       expect(out.simulatedChartIntervals).toEqual([]);
+      expect((out.modelAssumptions as any)?.intervalCount).toBe(0);
+      expect((out.modelAssumptions as any)?.artifactStoredIntervalCount).toBe(2);
     }
     expect(decodeIntervalsV1).not.toHaveBeenCalled();
   });

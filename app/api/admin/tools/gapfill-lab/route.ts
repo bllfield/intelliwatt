@@ -2031,7 +2031,9 @@ export async function POST(req: NextRequest) {
       : artifactSourceMode === "exact_hash_match"
         ? "Artifact source: exact identity match on Past input hash."
         : null);
-  const chartIntervalCount = Number(ma.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0) || 0;
+  const chartIntervalCount = Array.isArray(sharedSim.simulatedChartIntervals)
+    ? sharedSim.simulatedChartIntervals.length
+    : Number(ma.intervalCount ?? 0) || 0;
   const displayDailyRows = Array.isArray(sharedSim.simulatedChartDaily)
     ? sharedSim.simulatedChartDaily.map((row) => ({
         date: String((row as any)?.date ?? "").slice(0, 10),
