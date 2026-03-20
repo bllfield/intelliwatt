@@ -1479,45 +1479,74 @@ export async function buildGapfillCompareSimShared(args: {
     boundedTestDateKeysLocal.size > 0 || travelVacantParityDateKeysLocal.length > 0;
   if (needsFreshCompareForParity) {
     if (effectiveCompareFreshMode === "selected_days") {
-      const selectedFreshExecutionDateKeys = new Set<string>([
-        ...Array.from(boundedTestDateKeysLocal),
-        ...travelVacantParityDateKeysLocal,
-      ]);
-      const selectedDaysResult = await simulatePastSelectedDaysShared({
-        userId,
-        houseId,
-        esiid: houseResolved.esiid ?? null,
-        travelRanges: buildTravelRanges,
-        buildInputs,
-        // Use the same identity window and shared context the artifact path uses.
-        startDate: identityWindowResolved.startDate,
-        endDate: identityWindowResolved.endDate,
-        timezone,
-        buildPathKind: "lab_validation",
-        selectedDateKeysLocal: selectedFreshExecutionDateKeys,
-      });
-      if (selectedDaysResult.simulatedIntervals === null) {
+      const runSelectedDaysFreshExecution = async (selectedDateKeysLocal: Set<string>) => {
+        if (selectedDateKeysLocal.size === 0) {
+          return {
+            ok: true as const,
+            simulatedIntervals: [] as Array<{ timestamp: string; kwh: number }>,
+            weatherSourceSummary: weatherBasisUsed,
+          };
+        }
+        const selectedDaysResult = await simulatePastSelectedDaysShared({
+          userId,
+          houseId,
+          esiid: houseResolved.esiid ?? null,
+          travelRanges: buildTravelRanges,
+          buildInputs,
+          // Use the same identity window and shared context the artifact path uses.
+          startDate: identityWindowResolved.startDate,
+          endDate: identityWindowResolved.endDate,
+          timezone,
+          buildPathKind: "lab_validation",
+          selectedDateKeysLocal,
+        });
+        if (selectedDaysResult.simulatedIntervals === null) {
+          return {
+            ok: false as const,
+            error:
+              selectedDaysResult.error ??
+              "Selected-day fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
+          };
+        }
+        return {
+          ok: true as const,
+          simulatedIntervals: selectedDaysResult.simulatedIntervals.map((p) => ({
+            timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+            kwh: Number(p?.kwh) || 0,
+          })),
+          weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
+        };
+      };
+      const selectedTestDaysResult = await runSelectedDaysFreshExecution(boundedTestDateKeysLocal);
+      if (!selectedTestDaysResult.ok) {
         return {
           ok: false,
           status: 500,
           body: {
             ok: false,
             error: "fresh_compare_simulation_failed",
-            message:
-              selectedDaysResult.error ??
-              "Selected-day fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
+            message: selectedTestDaysResult.error,
             mode: "artifact_only",
             scenarioId: sharedScenarioCacheId,
           },
         };
       }
-      freshParityIntervals = selectedDaysResult.simulatedIntervals.map((p) => ({
-        timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-        kwh: Number(p?.kwh) || 0,
-      }));
-      simulatedTestIntervals = freshParityIntervals.filter((p) =>
-        boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-      );
+      simulatedTestIntervals = selectedTestDaysResult.simulatedIntervals;
+      const selectedTravelParityResult = await runSelectedDaysFreshExecution(new Set<string>(travelVacantParityDateKeysLocal));
+      if (!selectedTravelParityResult.ok) {
+        return {
+          ok: false,
+          status: 500,
+          body: {
+            ok: false,
+            error: "fresh_compare_simulation_failed",
+            message: selectedTravelParityResult.error,
+            mode: "artifact_only",
+            scenarioId: sharedScenarioCacheId,
+          },
+        };
+      }
+      freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
       scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
       comparePulledFromSharedArtifactOnly = false;
       compareSimSource = "shared_selected_days_calc";
@@ -1525,7 +1554,10 @@ export async function buildGapfillCompareSimShared(args: {
       compareFreshModeUsed = "selected_days";
       compareSharedCalcPath =
         "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
-      weatherBasisUsed = String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown";
+      weatherBasisUsed =
+        boundedTestDateKeysLocal.size > 0
+          ? selectedTestDaysResult.weatherSourceSummary
+          : selectedTravelParityResult.weatherSourceSummary;
       const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
       if (selectedWeatherRange.length > 0) {
         const selectedDaysWeather = await loadWeatherForPastWindow({

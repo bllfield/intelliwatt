@@ -1929,16 +1929,15 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
-    simulatePastSelectedDaysShared.mockResolvedValue({
-      simulatedIntervals: [
-        ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
-      ],
-      simulatedDayResults: [],
-      pastDayCounts: {},
-      weatherSourceSummary: "actual_only",
-      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+      const selected = Array.from((selectedDateKeysLocal ?? []) as string[]).sort();
+      return {
+        simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+        simulatedDayResults: [],
+        pastDayCounts: {},
+        weatherSourceSummary: "actual_only",
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+      };
     });
 
     const out = await buildGapfillCompareSimShared({
@@ -1955,10 +1954,16 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      const latestCall = simulatePastSelectedDaysShared.mock.calls.at(-1);
-      expect(latestCall).toBeTruthy();
-      const selectedDateKeysLocal = (latestCall?.[0] as any)?.selectedDateKeysLocal;
-      expect(Array.from(selectedDateKeysLocal ?? []).sort()).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
+      const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(-2);
+      expect(selectedDaysCalls).toHaveLength(2);
+      const scoringCallDateKeys = Array.from(
+        (((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
+      ).sort();
+      const parityCallDateKeys = Array.from(
+        (((selectedDaysCalls[1] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
+      ).sort();
+      expect(scoringCallDateKeys).toEqual(["2026-01-01"]);
+      expect(parityCallDateKeys).toEqual(["2026-01-03", "2026-01-04"]);
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
