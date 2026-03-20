@@ -324,9 +324,71 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     };
   }
   const resolvedScenarioId = scenarioId;
-  // Rebuild must guarantee artifact-only compare readability. Under constrained DB pools, cache persistence
-  // can fail non-fatally inside the rebuild path; verify artifact materialization before returning success.
+  const house = await getHouseAddressForUserHouse({
+    userId: args.userId,
+    houseId: args.houseId,
+  }).catch(() => null);
+  if (!house) {
+    return {
+      ok: false,
+      error: "house_not_found",
+      message: "House not found for user.",
+    };
+  }
+  const houseResolved = house;
+  const buildRec = await (prisma as any).usageSimulatorBuild
+    ?.findUnique({
+      where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: resolvedScenarioId } },
+      select: { buildInputs: true },
+    })
+    ?.catch(() => null);
+  if (!buildRec?.buildInputs) {
+    return {
+      ok: false,
+      error: "past_build_missing",
+      message: "Past build inputs are missing. Rebuild Past first.",
+    };
+  }
+  const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+  const identityWindow = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
+  if (!identityWindow) {
+    return {
+      ok: false,
+      error: "past_build_missing",
+      message: "Past identity window is unavailable. Rebuild Past first.",
+    };
+  }
+  const identityWindowResolved = identityWindow;
+  const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
+  const buildTravelRanges = travelRangesFromBuildInputs(buildInputs);
+  const intervalDataFingerprint = await getIntervalDataFingerprint({
+    houseId: args.houseId,
+    esiid: houseResolved.esiid ?? null,
+    startDate: identityWindowResolved.startDate,
+    endDate: identityWindowResolved.endDate,
+  });
+  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
+  const weatherIdentity = await computePastWeatherIdentity({
+    houseId: args.houseId,
+    startDate: identityWindowResolved.startDate,
+    endDate: identityWindowResolved.endDate,
+  });
+  const exactInputHash = computePastInputHash({
+    engineVersion: PAST_ENGINE_VERSION,
+    windowStartUtc: identityWindowResolved.startDate,
+    windowEndUtc: identityWindowResolved.endDate,
+    timezone,
+    travelRanges: buildTravelRanges,
+    buildInputs: buildInputs as Record<string, unknown>,
+    intervalDataFingerprint,
+    usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+    usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+    usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+    usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+    weatherIdentity,
+  });
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+
   async function runVerification(inputHash: string): Promise<{ ok: boolean; dataset: any }> {
     const persisted = await getCachedPastDataset({
       houseId: args.houseId,
@@ -341,14 +403,163 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       useSelectedDaysLightweightArtifactRead: false,
       fallbackEndDate: canonicalCoverage.endDate,
     }).dataset;
-    const dataset = restored;
-    const hasIntervals15 = Array.isArray(dataset?.series?.intervals15);
+    const hasIntervals15 = Array.isArray(restored?.series?.intervals15);
     const hasCanonicalCoverage =
-      String(dataset?.summary?.start ?? "") === canonicalCoverage.startDate &&
-      String(dataset?.summary?.end ?? "") === canonicalCoverage.endDate &&
-      String(dataset?.meta?.coverageStart ?? "") === canonicalCoverage.startDate &&
-      String(dataset?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
-    return { ok: Boolean(hasIntervals15 && hasCanonicalCoverage), dataset };
+      String(restored?.summary?.start ?? "") === canonicalCoverage.startDate &&
+      String(restored?.summary?.end ?? "") === canonicalCoverage.endDate &&
+      String(restored?.meta?.coverageStart ?? "") === canonicalCoverage.startDate &&
+      String(restored?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
+    return { ok: Boolean(hasIntervals15 && hasCanonicalCoverage), dataset: restored };
+  }
+
+  async function persistRebuiltArtifact(): Promise<
+    | { ok: true; artifactSourceNote: string | null }
+    | { ok: false; error: string; message: string }
+  > {
+    const pastResult = await simulatePastFullWindowShared({
+      userId: args.userId,
+      houseId: args.houseId,
+      esiid: houseResolved.esiid ?? null,
+      travelRanges: buildTravelRanges,
+      buildInputs,
+      startDate: identityWindowResolved.startDate,
+      endDate: identityWindowResolved.endDate,
+      timezone,
+      buildPathKind: "lab_validation",
+      includeSimulatedDayResults: false,
+    });
+    if (pastResult.simulatedIntervals === null) {
+      return {
+        ok: false,
+        error: "past_rebuild_failed",
+        message: pastResult.error ?? "Failed to build shared Past artifact.",
+      };
+    }
+    const intervals15 = (pastResult.simulatedIntervals ?? [])
+      .map((row) => ({
+        timestamp: String(row?.timestamp ?? ""),
+        kwh: Number(row?.kwh) || 0,
+      }))
+      .filter((row) => row.timestamp.length > 0);
+    if (intervals15.length === 0) {
+      return {
+        ok: false,
+        error: "artifact_read_failed",
+        message: "Shared Past artifact build completed, but intervals15 are missing.",
+      };
+    }
+    const simulatedDateKeys = boundDateKeysToCoverageWindow(
+      new Set<string>(travelRangesToExcludeDateKeys(buildTravelRanges)),
+      canonicalCoverage
+    );
+    const recomputed = recomputePastAggregatesFromIntervals({
+      intervals: intervals15,
+      curveEndDate: canonicalCoverage.endDate,
+      simulatedDateKeys,
+    });
+    const rebuiltDataset: any = {
+      summary: {
+        source: "SIMULATED",
+        intervalsCount: recomputed.intervalCount,
+        totalKwh: recomputed.intervalSumKwh,
+        start: canonicalCoverage.startDate,
+        end: canonicalCoverage.endDate,
+        latest: `${canonicalCoverage.endDate}T23:59:59.999Z`,
+      },
+      series: {
+        intervals15,
+        hourly: [],
+        daily: recomputed.daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: Number(d.kwh) || 0 })),
+        monthly: recomputed.monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: Number(m.kwh) || 0 })),
+        annual: [
+          {
+            timestamp: `${canonicalCoverage.endDate.slice(0, 4)}-01-01T00:00:00.000Z`,
+            kwh: recomputed.monthlySumKwh,
+          },
+        ],
+      },
+      daily: recomputed.daily,
+      monthly: recomputed.monthly,
+      totals: {
+        importKwh: recomputed.intervalSumKwh,
+        exportKwh: 0,
+        netKwh: recomputed.intervalSumKwh,
+      },
+      insights: {
+        stitchedMonth: recomputed.stitchedMonth,
+      },
+      meta: {
+        datasetKind: "SIMULATED",
+        baseKind: (buildInputs as any)?.baseKind ?? null,
+        mode: (buildInputs as any)?.mode ?? null,
+        canonicalEndMonth: (buildInputs as any)?.canonicalEndMonth ?? null,
+        notes: Array.isArray((buildInputs as any)?.notes) ? (buildInputs as any).notes : [],
+        filledMonths: Array.isArray((buildInputs as any)?.filledMonths) ? (buildInputs as any).filledMonths : [],
+        excludedDays: Array.from(simulatedDateKeys).sort(),
+        renormalized: false,
+        dayTotalSource: "usage_shape_profile",
+        usageShapeProfileDiag: { reasonNotUsed: null },
+        weatherSourceSummary: String(pastResult.weatherSourceSummary ?? "unknown"),
+        weatherKindUsed: pastResult.weatherKindUsed ?? null,
+        weatherProviderName: pastResult.weatherProviderName ?? null,
+        weatherFallbackReason: pastResult.weatherFallbackReason ?? null,
+        sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+        buildPathKind: "lab_validation",
+        pastBuildIntervalsFetchCount: 1,
+        dailyRowCount: recomputed.daily.length,
+        intervalCount: recomputed.intervalCount,
+        coverageStart: canonicalCoverage.startDate,
+        coverageEnd: canonicalCoverage.endDate,
+      },
+      usageBucketsByMonth: recomputed.usageBucketsByMonth,
+    };
+    applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
+    const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(
+      rebuiltDataset,
+      timezone
+    );
+    const { bytes } = encodeIntervalsV1(intervals15);
+    const datasetJsonForStorage = {
+      ...rebuiltDataset,
+      canonicalArtifactSimulatedDayTotalsByDate,
+      meta: {
+        ...((rebuiltDataset as any)?.meta ?? {}),
+        canonicalArtifactSimulatedDayTotalsByDate,
+      },
+      series: { ...(rebuiltDataset.series ?? {}), intervals15: [] },
+    };
+    await saveCachedPastDataset({
+      houseId: args.houseId,
+      scenarioId: resolvedScenarioId,
+      inputHash: exactInputHash,
+      engineVersion: PAST_ENGINE_VERSION,
+      windowStartUtc: identityWindowResolved.startDate,
+      windowEndUtc: identityWindowResolved.endDate,
+      datasetJson: datasetJsonForStorage as Record<string, unknown>,
+      intervalsCodec: INTERVAL_CODEC_V1,
+      intervalsCompressed: bytes,
+    });
+    let verification = await runVerification(exactInputHash);
+    if (!verification.ok) {
+      await new Promise((r) => setTimeout(r, 800));
+      verification = await runVerification(exactInputHash);
+    }
+    if (!verification.ok) {
+      return {
+        ok: false,
+        error: "artifact_persist_verify_failed",
+        message:
+          "Shared Past artifact rebuild saved, but readback verification failed for this identity hash. Retry rebuild after cache/database pressure clears.",
+      };
+    }
+    const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
+    return {
+      ok: true,
+      artifactSourceNote:
+        typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
+          ? String(verificationMeta.artifactSourceNote)
+          : "Artifact source: exact identity match on Past input hash.",
+    };
   }
 
   async function runEnsureAttempt(forceRebuildArtifact: boolean): Promise<
@@ -360,63 +571,42 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       }
     | { ok: false; error: string; message: string; retryable: boolean }
   > {
-    const ensured = await getSimulatedUsageForHouseScenario({
-      userId: args.userId,
-      houseId: args.houseId,
-      scenarioId: resolvedScenarioId,
-      readMode: "allow_rebuild",
-      forceRebuildArtifact,
-    });
-    if (!ensured.ok) {
+    if (!forceRebuildArtifact) {
+      const verification = await runVerification(exactInputHash);
+      if (!verification.ok) {
+        return {
+          ok: false,
+          error: "past_rebuild_failed",
+          message:
+            "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+          retryable: true,
+        };
+      }
+      const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
       return {
-        ok: false,
-        error: ensured.code === "NO_BUILD" ? "past_build_missing" : "past_rebuild_failed",
-        message: ensured.message,
-        retryable: ensured.code !== "NO_BUILD",
+        ok: true,
+        rebuilt: false,
+        exactInputHash,
+        artifactSourceNote:
+          typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
+            ? String(verificationMeta.artifactSourceNote)
+            : "Artifact source: exact identity match on Past input hash.",
       };
     }
-    const ensuredMeta = ((((ensured as any)?.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
-    const exactInputHash =
-      typeof ensuredMeta.artifactInputHashUsed === "string" && String(ensuredMeta.artifactInputHashUsed).trim()
-        ? String(ensuredMeta.artifactInputHashUsed).trim()
-        : typeof ensuredMeta.artifactInputHash === "string" && String(ensuredMeta.artifactInputHash).trim()
-          ? String(ensuredMeta.artifactInputHash).trim()
-          : null;
-    if (!exactInputHash) {
+    const rebuilt = await persistRebuiltArtifact();
+    if (!rebuilt.ok) {
       return {
         ok: false,
-        error: "past_rebuild_failed",
-        message:
-          "Past rebuild completed, but the exact rebuilt artifact identity hash was not available for same-run handoff.",
-        retryable: !forceRebuildArtifact,
+        error: rebuilt.error,
+        message: rebuilt.message,
+        retryable: false,
       };
     }
-    let verification = await runVerification(exactInputHash);
-    if (!verification.ok) {
-      await new Promise((r) => setTimeout(r, 800));
-      verification = await runVerification(exactInputHash);
-    }
-    if (!verification.ok) {
-      return {
-        ok: false,
-        error: "past_rebuild_failed",
-        message:
-          "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
-        retryable: !forceRebuildArtifact,
-      };
-    }
-    const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
     return {
       ok: true,
-      rebuilt:
-        forceRebuildArtifact ||
-        ensuredMeta.artifactRecomputed === true ||
-        String(ensuredMeta.artifactSource ?? "") === "rebuild",
+      rebuilt: true,
       exactInputHash,
-      artifactSourceNote:
-        typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
-          ? String(verificationMeta.artifactSourceNote)
-          : "Artifact source: exact identity match on Past input hash.",
+      artifactSourceNote: rebuilt.artifactSourceNote,
     };
   }
 

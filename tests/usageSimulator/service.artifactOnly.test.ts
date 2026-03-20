@@ -410,52 +410,17 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
         intervalsCodec: "v1_delta_varint",
         intervalsCompressed: Buffer.from("00", "hex"),
       });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-stale-fallback",
-      updatedAt: new Date("2026-03-17T00:00:00.000Z"),
-      datasetJson: {
-        summary: {
-          source: "SIMULATED",
-          intervalsCount: 2,
-          totalKwh: 0.75,
-          start: canonicalCoverage.startDate,
-          end: canonicalCoverage.endDate,
-        },
-        meta: {
-          curveShapingVersion: "shared_curve_v2",
-          coverageStart: canonicalCoverage.startDate,
-          coverageEnd: canonicalCoverage.endDate,
-        },
-        daily: [{ date: "2026-01-01", kwh: 0.75, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 0.75 }],
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: {
-          source: "SIMULATED",
-          intervalsCount: 2,
-          totalKwh: 0.75,
-          start: canonicalCoverage.startDate,
-          end: canonicalCoverage.endDate,
-        },
-        meta: { curveShapingVersion: "shared_curve_v2" },
-        daily: [
-          { date: "2026-01-01", kwh: 0.5, source: "SIMULATED" },
-          { date: "2026-01-02", kwh: 0.25, source: "SIMULATED" },
-        ],
-        monthly: [{ month: "2026-01", kwh: 0.75 }],
-        series: {
-          intervals15: [
-            { timestamp: "2026-03-14T00:00:00.000Z", kwh: 0.25 },
-            { timestamp: "2026-03-14T00:15:00.000Z", kwh: 0.5 },
-          ],
-        },
-      },
-      error: null,
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: [
+        { timestamp: "2026-03-14T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-03-14T00:15:00.000Z", kwh: 0.5 },
+      ],
+      pastDayCounts: {},
+      actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "stub",
+      weatherFallbackReason: null,
     });
 
     const out = await rebuildGapfillSharedPastArtifact({
@@ -476,6 +441,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       scenarioId: "past-s1",
       inputHash: "hash-rebuilt-exact",
     });
+    expect(simulatePastFullWindowShared).toHaveBeenCalledTimes(1);
   });
 
   it("uses the exact cached artifact for artifact ensure when the persisted identity is already valid", async () => {
@@ -528,9 +494,9 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       expect(out.artifactHashMatch).toBe(true);
       expect(out.artifactSourceMode).toBe("exact_hash_match");
     }
-    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
     expect(saveCachedPastDataset).not.toHaveBeenCalled();
-    expect(getCachedPastDataset).toHaveBeenCalledTimes(2);
+    expect(getCachedPastDataset).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to a forced rebuild when the exact cached artifact cannot be verified", async () => {
@@ -592,31 +558,18 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     getCachedPastDataset
       .mockResolvedValueOnce(invalidCached)
       .mockResolvedValueOnce(invalidCached)
-      .mockResolvedValueOnce(invalidCached)
       .mockResolvedValueOnce(rebuiltPersisted);
-    simulatePastUsageDataset.mockResolvedValueOnce({
-      dataset: {
-        summary: {
-          source: "SIMULATED",
-          intervalsCount: 2,
-          totalKwh: 0.75,
-          start: canonicalCoverage.startDate,
-          end: canonicalCoverage.endDate,
-        },
-        meta: { curveShapingVersion: "shared_curve_v2" },
-        daily: [
-          { date: "2026-01-01", kwh: 0.5, source: "SIMULATED" },
-          { date: "2026-01-02", kwh: 0.25, source: "SIMULATED" },
-        ],
-        monthly: [{ month: "2026-01", kwh: 0.75 }],
-        series: {
-          intervals15: [
-            { timestamp: "2026-03-14T00:00:00.000Z", kwh: 0.25 },
-            { timestamp: "2026-03-14T00:15:00.000Z", kwh: 0.5 },
-          ],
-        },
-      },
-      error: null,
+    simulatePastFullWindowShared.mockResolvedValueOnce({
+      simulatedIntervals: [
+        { timestamp: "2026-03-14T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-03-14T00:15:00.000Z", kwh: 0.5 },
+      ],
+      pastDayCounts: {},
+      actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "stub",
+      weatherFallbackReason: null,
     });
 
     const out = await rebuildGapfillSharedPastArtifact({
@@ -632,9 +585,9 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       expect(out.artifactHashMatch).toBe(true);
       expect(out.artifactSourceMode).toBe("exact_hash_match");
     }
-    expect(simulatePastUsageDataset).toHaveBeenCalledTimes(1);
+    expect(simulatePastFullWindowShared).toHaveBeenCalledTimes(1);
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
-    expect(getCachedPastDataset).toHaveBeenCalledTimes(4);
+    expect(getCachedPastDataset).toHaveBeenCalledTimes(3);
   });
 });
 
