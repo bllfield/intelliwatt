@@ -105,6 +105,9 @@ type ScoredDayTruthRow = {
   reasonCode: string | null;
 };
 
+const EMPTY_SCORED_DAY_WEATHER_ROWS: ScoredDayWeatherRow[] = [];
+const EMPTY_SCORED_DAY_TRUTH_ROWS: ScoredDayTruthRow[] = [];
+
 type ApiResponse =
   | {
       ok: true;
@@ -224,8 +227,8 @@ export function extractCompareCoreScoredDayWeather(result: ApiResponse | null): 
           ? ((result as any).scoredDayWeatherRows as ScoredDayWeatherRow[])
           : Array.isArray((truthEnvelope as any)?.scoredDayWeatherRows)
             ? ((truthEnvelope as any).scoredDayWeatherRows as ScoredDayWeatherRow[])
-            : [])
-      : [];
+            : EMPTY_SCORED_DAY_WEATHER_ROWS)
+      : EMPTY_SCORED_DAY_WEATHER_ROWS;
   const truth =
     result && result.ok
       ? (((result as any)?.scoredDayWeatherTruth ?? (truthEnvelope as any)?.scoredDayWeatherTruth ?? null) as ScoredDayWeatherTruth | null)
@@ -740,12 +743,17 @@ export default function GapFillLabClient() {
         }
       : null;
   const artifactStatus = artifactFromEnvelope ?? artifactFromTopLevel;
-  const scoredDayTruthRows =
-    result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
-      ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
-      : [];
-  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } =
-    extractCompareCoreScoredDayWeather(result);
+  const scoredDayTruthRows = useMemo(
+    () =>
+      result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
+        ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
+        : EMPTY_SCORED_DAY_TRUTH_ROWS,
+    [result]
+  );
+  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } = useMemo(
+    () => extractCompareCoreScoredDayWeather(result),
+    [result]
+  );
   const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
   const usageShapeDiag =
     result && result.ok ? ((result as any)?.modelAssumptions?.usageShapeProfileDiag ?? null) : null;

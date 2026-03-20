@@ -2172,8 +2172,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
       "utf8"
     );
+    expect(clientSource).toContain("const EMPTY_SCORED_DAY_WEATHER_ROWS");
+    expect(clientSource).toContain("const EMPTY_SCORED_DAY_TRUTH_ROWS");
     expect(clientSource).toContain("Compare-Core Weather Truth");
     expect(clientSource).toContain("extractCompareCoreScoredDayWeather(result)");
+    expect(clientSource).toContain("const scoredDayTruthRows = useMemo(");
     expect(clientSource).toContain("mergeScoredDayTruthRowsWithCompareCoreWeather(");
     expect(clientSource).toContain("compareCoreScoredDayWeatherRows.length > 0");
     expect(clientSource).toContain('row.weatherSourceUsed ?? "—"');

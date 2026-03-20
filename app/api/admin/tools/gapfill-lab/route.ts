@@ -1740,7 +1740,7 @@ export async function POST(req: NextRequest) {
           message: String((rebuilt as any)?.message ?? "Failed to rebuild shared Past artifact."),
           explanation: classification.userFacingExplanation,
           missingData: classification.missingData,
-          reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
+          reasonCode: classification.reasonCode,
         },
         { status: 500 }
       );
@@ -1842,7 +1842,7 @@ export async function POST(req: NextRequest) {
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
       scenarioId: "past_shared_artifact",
-      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
+      reasonCode: classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
       context: { fetchStart, fetchEnd, testDaysRequested: testDateKeysLocal.size },
@@ -2041,7 +2041,7 @@ export async function POST(req: NextRequest) {
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
       scenarioId: "past_shared_artifact",
-      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
+      reasonCode: classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
       context: {
@@ -2149,7 +2149,7 @@ export async function POST(req: NextRequest) {
             "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
           explanation: classification.userFacingExplanation,
           missingData: classification.missingData,
-          reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
+          reasonCode: classification.reasonCode,
           joinMissingCount: scoringJoinMissingActual.length,
           joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
           compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {

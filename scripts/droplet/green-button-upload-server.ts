@@ -688,6 +688,11 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
 
     // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
     try {
+      const content = (() => {
+        const bytes = new Uint8Array(buffer.byteLength);
+        bytes.set(buffer);
+        return bytes;
+      })();
       const upserted = await usagePrisma.rawGreenButton.upsert({
         where: { sha256 },
         update: {},
@@ -699,7 +704,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
           filename,
           mimeType,
           sizeBytes: buffer.length,
-          content: buffer,
+          content,
           sha256,
           capturedAt: new Date(),
         },

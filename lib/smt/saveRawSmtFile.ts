@@ -11,13 +11,21 @@ export type SaveRawSmtFileInput = {
 export async function saveRawSmtFile(input: SaveRawSmtFileInput) {
   // Idempotency by sha256 (unique)
   try {
+    const content =
+      input.content != null
+        ? (() => {
+            const bytes = new Uint8Array(input.content.byteLength);
+            bytes.set(input.content);
+            return bytes;
+          })()
+        : null;
     const created = await prisma.rawSmtFile.create({
       data: {
         filename: input.filename,
         storage_path: input.sourcePath ?? null,
         size_bytes: input.size,
         sha256: input.sha256,
-        content: input.content ?? null,
+        content,
       },
       select: { id: true, sha256: true },
     });

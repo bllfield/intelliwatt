@@ -177,9 +177,9 @@ export function UsageChartsPanel(props: {
                       <XAxis dataKey="label" />
                       <YAxis />
                       <Tooltip
-                        formatter={(value: number, key) => {
+                        formatter={(value, key) => {
                           const label = key === "consumed" ? "Imported" : "Exported";
-                          return `${(value as number).toFixed(1)} kWh (${label})`;
+                          return `${Number(value ?? 0).toFixed(1)} kWh (${label})`;
                         }}
                       />
                       <Legend />
@@ -293,9 +293,9 @@ export function UsageChartsPanel(props: {
                     <XAxis dataKey="label" />
                     <YAxis />
                     <Tooltip
-                      formatter={(value: number, key) => {
+                      formatter={(value, key) => {
                         const label = key === "consumed" ? "Imported" : "Exported";
-                        return `${(value as number).toFixed(1)} kWh (${label})`;
+                        return `${Number(value ?? 0).toFixed(1)} kWh (${label})`;
                       }}
                     />
                     <Legend />
@@ -373,7 +373,7 @@ export function UsageChartsPanel(props: {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
                   <YAxis />
-                  <Tooltip formatter={(value: number) => `${(value as number).toFixed(2)} kW`} />
+                  <Tooltip formatter={(value) => `${Number(value ?? 0).toFixed(2)} kW`} />
                   <Legend />
                   <Line type="monotone" dataKey="avgKw" stroke="#6366F1" dot={false} strokeWidth={2} />
                 </LineChart>
