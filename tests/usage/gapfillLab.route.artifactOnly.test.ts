@@ -917,9 +917,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         matches: true,
         mismatchCount: 0,
         mismatchSampleDates: [],
+        missingDisplaySimCount: 0,
+        complete: true,
+        parityDisplaySourceUsed: "display_daily_simulated_rows_only",
+        parityDisplayValueKind: "artifact_simulated_day_total",
         scope: "scored_test_days_local",
         granularity: "daily_kwh_rounded_2dp",
-        comparisonBasis: "display_shared_artifact_vs_compare_selected_days_fresh_calc",
+        comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
       },
       travelVacantParitySample: [
         {
@@ -987,6 +991,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.compareSimSource).toBe("shared_selected_days_calc");
     expect(body.weatherBasisUsed).toBe("actual_only");
     expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
+    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
     expect(body.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
     expect(body.compareTruth?.compareFreshModeUsed).toBe("selected_days");
     expect(body.compareRequestTruth).toEqual({
@@ -1222,9 +1227,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         matches: false,
         mismatchCount: 1,
         mismatchSampleDates: ["2026-01-01"],
+        missingDisplaySimCount: 0,
+        complete: true,
+        parityDisplaySourceUsed: "display_daily_simulated_rows_only",
+        parityDisplayValueKind: "artifact_simulated_day_total",
         scope: "scored_test_days_local",
         granularity: "daily_kwh_rounded_2dp",
-        comparisonBasis: "display_shared_artifact_vs_compare_selected_days_fresh_calc",
+        comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
       },
       travelVacantParitySample: [],
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -1267,6 +1276,73 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBe(false);
     expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBe(99);
     expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);
+  });
+
+  it("does not use ACTUAL display rows as scored-day parity references", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: {
+        matches: true,
+        mismatchCount: 0,
+        mismatchSampleDates: [],
+        missingDisplaySimCount: 1,
+        missingDisplaySimSampleDates: ["2026-01-01"],
+        comparableDateCount: 0,
+        complete: false,
+        parityDisplaySourceUsed: "display_daily_simulated_rows_only",
+        parityDisplayValueKind: "artifact_simulated_day_total",
+        scope: "scored_test_days_local",
+        granularity: "daily_kwh_rounded_2dp",
+        comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
+      },
+      travelVacantParitySample: [],
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 99, source: "ACTUAL" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 99 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
+    expect(body.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(1);
+    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual(["2026-01-01"]);
+    expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.parityDisplayValueKind).toBe("missing_display_sim_reference");
+    expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).toBe("ACTUAL");
   });
 
   it("passes exact artifact identity request fields into shared compare build", async () => {

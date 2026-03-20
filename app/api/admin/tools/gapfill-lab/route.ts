@@ -2140,6 +2140,11 @@ export async function POST(req: NextRequest) {
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
       .map((r) => [r.date, { simKwh: r.simKwh, source: r.source as "ACTUAL" | "SIMULATED" }] as const)
   );
+  const parityDisplayDailyByDate = new Map<string, { simKwh: number; source: "SIMULATED" }>(
+    displayDailyRows
+      .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.source === "SIMULATED")
+      .map((r) => [r.date, { simKwh: r.simKwh, source: "SIMULATED" as const }] as const)
+  );
   const actualDailyByDate = new Map<string, number>();
   for (const p of scoringActualTestIntervalsCanon) {
     const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
@@ -2173,8 +2178,13 @@ export async function POST(req: NextRequest) {
       const actualDayKwh = round2(actualDailyByDate.get(date) ?? 0);
       const freshCompareSimDayKwh = round2(freshDailyByDate.get(date) ?? 0);
       const displayDay = displayDailyByDate.get(date);
-      const displayedPastStyleSimDayKwh = round2(displayDay?.simKwh ?? 0);
-      const parityMatch = round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
+      const parityDisplayDay = parityDisplayDailyByDate.get(date);
+      const displayedPastStyleSimDayKwh =
+        parityDisplayDay && parityDisplayDay.source === "SIMULATED"
+          ? round2(parityDisplayDay.simKwh)
+          : null;
+      const parityMatch =
+        displayedPastStyleSimDayKwh == null ? null : round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
       const dow = getLocalDayOfWeekFromDateKey(date, scoringTimezone);
       const weekend = dow === 0 || dow === 6;
       const weather = weatherByDate.get(date) ?? {};
@@ -2200,6 +2210,12 @@ export async function POST(req: NextRequest) {
         displayedPastStyleSimDayKwh,
         actualVsFreshErrorKwh: round2(actualDayKwh - freshCompareSimDayKwh),
         displayVsFreshParityMatch: parityMatch,
+        parityDisplaySourceUsed:
+          ((sharedSim as any)?.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed as string | undefined) ??
+          "display_daily_simulated_rows_only",
+        parityDisplayValueKind:
+          displayedPastStyleSimDayKwh == null ? "missing_display_sim_reference" : "artifact_simulated_day_total",
+        scoredDayDisplaySource: displayDay?.source ?? null,
         dayType: weekend ? "weekend" : "weekday",
         weatherBasis: String((sharedSim as any).weatherBasisUsed ?? null),
         avgTempF: Number.isFinite(avgTempF) ? round2(avgTempF) : null,

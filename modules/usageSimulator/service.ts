@@ -315,12 +315,19 @@ export type GapfillCompareSimSharedResult =
         matches: boolean;
         mismatchCount: number;
         mismatchSampleDates: string[];
+        missingDisplaySimCount?: number;
+        missingDisplaySimSampleDates?: string[];
+        comparableDateCount?: number;
+        complete?: boolean;
         scope: "scored_test_days_local";
         granularity: "daily_kwh_rounded_2dp";
+        parityDisplaySourceUsed?: "display_daily_simulated_rows_only";
+        parityDisplayValueKind?: "artifact_simulated_day_total";
         comparisonBasis:
           | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
           | "display_shared_artifact_vs_compare_artifact_filter_only"
-          | "display_shared_artifact_vs_compare_selected_days_fresh_calc";
+          | "display_shared_artifact_vs_compare_selected_days_fresh_calc"
+          | "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc";
       };
       travelVacantParitySample?: Array<{
         localDate: string;
@@ -1377,29 +1384,44 @@ export async function buildGapfillCompareSimShared(args: {
     if (!boundedTestDateKeysLocal.has(dk)) continue;
     freshDailyTotalsByDate.set(dk, (freshDailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
   }
-  const displayDailyByDate = new Map<string, number>(
+  const parityDisplayDailyByDate = new Map<string, number>(
     simulatedChartDaily
+      .filter((d) => String((d as any)?.source ?? "").toUpperCase() === "SIMULATED")
       .map((d) => [String(d.date ?? "").slice(0, 10), round2Local(Number(d.simKwh) || 0)] as const)
       .filter(([dk]) => boundedTestDateKeysLocal.has(dk))
   );
+  const missingDisplaySimSampleDates = Array.from(boundedTestDateKeysLocal)
+    .filter((dk) => !parityDisplayDailyByDate.has(dk))
+    .slice(0, 10);
   const mismatchSampleDates = Array.from(boundedTestDateKeysLocal)
-    .filter((dk) => round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== round2Local(displayDailyByDate.get(dk) ?? 0))
+    .filter(
+      (dk) =>
+        parityDisplayDailyByDate.has(dk) &&
+        round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== round2Local(parityDisplayDailyByDate.get(dk) ?? 0)
+    )
     .slice(0, 10);
   const parityComparisonBasis:
     | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
     | "display_shared_artifact_vs_compare_artifact_filter_only"
-    | "display_shared_artifact_vs_compare_selected_days_fresh_calc" =
+    | "display_shared_artifact_vs_compare_selected_days_fresh_calc"
+    | "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc" =
     compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
       ? "display_shared_artifact_vs_compare_shared_full_window_then_filter"
       : compareCalculationScope === "selected_days_shared_path_only"
-        ? "display_shared_artifact_vs_compare_selected_days_fresh_calc"
+        ? "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
         : "display_shared_artifact_vs_compare_artifact_filter_only";
   const displayVsFreshParityForScoredDays = {
     matches: mismatchSampleDates.length === 0,
     mismatchCount: mismatchSampleDates.length,
     mismatchSampleDates,
+    missingDisplaySimCount: missingDisplaySimSampleDates.length,
+    missingDisplaySimSampleDates,
+    comparableDateCount: Math.max(0, boundedTestDateKeysLocal.size - missingDisplaySimSampleDates.length),
+    complete: missingDisplaySimSampleDates.length === 0,
     scope: "scored_test_days_local" as const,
     granularity: "daily_kwh_rounded_2dp" as const,
+    parityDisplaySourceUsed: "display_daily_simulated_rows_only" as const,
+    parityDisplayValueKind: "artifact_simulated_day_total" as const,
     comparisonBasis: parityComparisonBasis,
   };
   const freshParityDailyByDate = new Map<string, number>();
