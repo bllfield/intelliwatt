@@ -2757,9 +2757,6 @@ export async function POST(req: NextRequest) {
       fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
       missAttributionSummary,
       accuracyTuningBreakdowns,
-      compareCoreTiming: compareCoreTimingEnvelope,
-      compareCoreMode,
-      compareCoreStepTimings: compareCoreTiming.stepsMs,
       heavyTruth: {
         source: "heavy_only_compact",
         artifactSourceMode,

@@ -1644,6 +1644,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain('if ((data as any).responseMode === "heavy_only_compact")');
     expect(clientSource).toContain("heavyStartedAt");
     expect(clientSource).toContain("heavyStepsMs");
+    expect(clientSource).toContain("compareCoreMode: prev.compareCoreMode");
+    expect(clientSource).toContain("compareCoreTiming: (prev as any).compareCoreTiming");
+    expect(clientSource).toContain("compareCoreStepTimings: prev.compareCoreStepTimings");
     expect(clientSource).toContain("...prev,");
   });
 
@@ -1735,6 +1738,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactExactIdentityResolved: true,
       parityAvailability: "available",
     });
+    expect(body.compareCoreTiming).toBeUndefined();
+    expect(body.compareCoreStepTimings).toBeUndefined();
     expect(body.usage365).toBeUndefined();
     expect(body.displaySimulated).toBeUndefined();
     expect(body.scoredDayTruthRows).toBeUndefined();
