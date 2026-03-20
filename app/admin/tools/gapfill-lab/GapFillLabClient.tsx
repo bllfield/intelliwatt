@@ -97,6 +97,30 @@ type ApiResponse =
         missingDateCount: number;
         missingDateSample: string[];
       };
+      travelVacantParityRows?: Array<{
+        localDate: string;
+        artifactCanonicalSimDayKwh: number | null;
+        freshSharedDayCalcKwh: number | null;
+        parityMatch: boolean | null;
+        artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
+        freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
+        parityReasonCode: string;
+      }>;
+      travelVacantParityTruth?: {
+        availability: string;
+        reasonCode: string;
+        explanation: string;
+        source: string;
+        comparisonBasis: string;
+        requestedDateCount: number;
+        validatedDateCount: number;
+        mismatchCount: number;
+        missingArtifactReferenceCount: number;
+        missingFreshCompareCount: number;
+        requestedDateSample: string[];
+        exactProofRequired: boolean;
+        exactProofSatisfied: boolean;
+      };
       heavyStartedAt?: string;
       heavyEndedAt?: string;
       heavyElapsedMs?: number;
@@ -113,6 +137,10 @@ type ApiResponse =
         compareSimSource?: string | null;
         displaySimSource?: string | null;
         weatherBasisUsed?: string | null;
+        travelVacantParitySource?: string | null;
+        travelVacantParityComparisonBasis?: string | null;
+        travelVacantParityAvailability?: string | null;
+        travelVacantParityExactProofSatisfied?: boolean | null;
         architectureNote?: string | null;
       } | null;
       displaySimulated?: {
@@ -669,19 +697,26 @@ export default function GapFillLabClient() {
     result && result.ok
       ? ((result as any).compareTruth ?? truthEnvelope?.compareTruth ?? null)
       : null;
-  const travelVacantParitySample: Array<{
+  const travelVacantParityRows: Array<{
     localDate: string;
-    displayedPastStyleSimDayKwh: number | null;
+    artifactCanonicalSimDayKwh: number | null;
     freshSharedDayCalcKwh: number | null;
     parityMatch: boolean | null;
+    artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
+    freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
+    parityReasonCode: string;
   }> =
     result && result.ok
-      ? (Array.isArray((result as any)?.travelVacantParitySample)
-          ? (result as any).travelVacantParitySample
-          : Array.isArray(truthEnvelope?.travelVacantParitySample)
-            ? truthEnvelope.travelVacantParitySample
+      ? (Array.isArray((result as any)?.travelVacantParityRows)
+          ? (result as any).travelVacantParityRows
+          : Array.isArray((truthEnvelope as any)?.travelVacantParityRows)
+            ? (truthEnvelope as any).travelVacantParityRows
             : [])
       : [];
+  const travelVacantParityTruth =
+    result && result.ok
+      ? ((result as any)?.travelVacantParityTruth ?? (truthEnvelope as any)?.travelVacantParityTruth ?? null)
+      : null;
   const noScoreableIntervals = result && result.ok && (result as any).hasScoreableIntervals === false;
   const mismatchRowsCount = scoredDayTruthRows.filter((row) => row.displayVsFreshParityMatch === false).length;
   const largeErrorRowsCount = scoredDayTruthRows.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) >= 5).length;
@@ -1740,7 +1775,7 @@ export default function GapFillLabClient() {
         <div>
           <label className="block text-sm font-medium text-brand-navy mb-2">Vacant/Travel (DB)</label>
           <p className="text-sm text-brand-navy/60 mb-2">
-            Vacant/Travel (DB) are guardrails so we don’t accidentally test on customer-travel days. Only Test Dates are scored against actual intervals.
+            Vacant/Travel (DB) still guard scored actual days, and compare also validates those dates through the shared Past simulation path against canonical artifact simulated-day totals.
           </p>
           {travelRangesFromDb.length > 0 ? (
             <div className="p-3 rounded border border-brand-blue/20 bg-brand-navy/5 space-y-1">
@@ -2333,6 +2368,12 @@ export default function GapFillLabClient() {
                   <div className="text-xs text-brand-navy/70">Weather basis used</div>
                   <div className="font-mono">{String(compareTruth?.weatherBasisUsed ?? truthEnvelope?.weatherBasisUsed ?? "—")}</div>
                 </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70">Travel/vacant parity</div>
+                  <div className="font-mono">
+                    {String(compareTruth?.travelVacantParityAvailability ?? travelVacantParityTruth?.availability ?? "—")}
+                  </div>
+                </div>
               </div>
               <div className="p-3 rounded border border-brand-blue/20">
                 <div className="text-xs text-brand-navy/70">Architecture note</div>
@@ -2356,23 +2397,42 @@ export default function GapFillLabClient() {
               Travel / Vacant Parity Check
             </summary>
             <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
-              {travelVacantParitySample.length > 0 ? (
+              {travelVacantParityTruth && (
+                <div className="flex flex-wrap gap-2">
+                  <span className={badgeClass(travelVacantParityTruth.exactProofSatisfied ? "ok" : "warn")}>
+                    availability: {travelVacantParityTruth.availability}
+                  </span>
+                  <span className={badgeClass("neutral")}>requested: {travelVacantParityTruth.requestedDateCount}</span>
+                  <span className={badgeClass(travelVacantParityTruth.validatedDateCount > 0 ? "ok" : "neutral")}>
+                    validated: {travelVacantParityTruth.validatedDateCount}
+                  </span>
+                  <span className={badgeClass(travelVacantParityTruth.mismatchCount > 0 ? "error" : "ok")}>
+                    mismatches: {travelVacantParityTruth.mismatchCount}
+                  </span>
+                </div>
+              )}
+              {travelVacantParityRows.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs border border-brand-blue/20">
                     <thead>
                       <tr className="bg-brand-blue/10">
                         <th className="text-left p-2">Date</th>
-                        <th className="text-right p-2">Display sim kWh</th>
+                        <th className="text-right p-2">Artifact canonical sim kWh</th>
                         <th className="text-right p-2">Fresh shared kWh</th>
+                        <th className="text-left p-2">Artifact ref</th>
+                        <th className="text-left p-2">Fresh output</th>
                         <th className="text-left p-2">Parity</th>
+                        <th className="text-left p-2">Reason</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {travelVacantParitySample.map((row) => (
+                      {travelVacantParityRows.map((row) => (
                         <tr key={row.localDate} className="border-t border-brand-blue/10">
                           <td className="p-2 font-mono">{row.localDate}</td>
-                          <td className="p-2 text-right font-mono">{row.displayedPastStyleSimDayKwh ?? "—"}</td>
+                          <td className="p-2 text-right font-mono">{row.artifactCanonicalSimDayKwh ?? "—"}</td>
                           <td className="p-2 text-right font-mono">{row.freshSharedDayCalcKwh ?? "—"}</td>
+                          <td className="p-2">{row.artifactReferenceAvailability}</td>
+                          <td className="p-2">{row.freshCompareAvailability}</td>
                           <td className="p-2">
                             {row.parityMatch == null ? (
                               <span className={badgeClass("neutral")}>n/a</span>
@@ -2382,6 +2442,7 @@ export default function GapFillLabClient() {
                               <span className={badgeClass("error")}>mismatch</span>
                             )}
                           </td>
+                          <td className="p-2">{row.parityReasonCode}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2389,7 +2450,7 @@ export default function GapFillLabClient() {
                 </div>
               ) : (
                 <p className="text-brand-navy/70">
-                  No travel/vacant parity sample returned for this run.
+                  No DB travel/vacant parity rows were returned for this run.
                 </p>
               )}
             </div>

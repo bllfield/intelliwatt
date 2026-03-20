@@ -1589,6 +1589,104 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("executes DB travel/vacant dates through shared selected-days compare for canonical parity validation", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
+      },
+    });
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 24 * 5,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-03,2026-01-04",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-03": 24,
+            "2026-01-04": 24,
+          },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "ACTUAL" },
+          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 120 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: [
+        ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+      ],
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      const latestCall = simulatePastSelectedDaysShared.mock.calls.at(-1);
+      expect(latestCall).toBeTruthy();
+      const selectedDateKeysLocal = (latestCall?.[0] as any)?.selectedDateKeysLocal;
+      expect(Array.from(selectedDateKeysLocal ?? []).sort()).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
+      expect(out.travelVacantParityTruth).toMatchObject({
+        availability: "validated",
+        requestedDateCount: 2,
+        validatedDateCount: 2,
+        mismatchCount: 0,
+        missingArtifactReferenceCount: 0,
+        missingFreshCompareCount: 0,
+        exactProofSatisfied: true,
+      });
+      expect(out.travelVacantParityRows).toEqual([
+        expect.objectContaining({
+          localDate: "2026-01-03",
+          artifactCanonicalSimDayKwh: 24,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+        expect.objectContaining({
+          localDate: "2026-01-04",
+          artifactCanonicalSimDayKwh: 24,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+      ]);
+      expect(out.scoredDayWeatherRows?.map((row) => row.localDate)).toEqual(["2026-01-01"]);
+      expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(["2026-01-01"]);
+    }
+  });
+
   it("reports full missing-reference totals when simulated artifact days are missing canonical references", async () => {
     const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
     getLatestCachedPastDatasetByScenario.mockResolvedValue({

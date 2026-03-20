@@ -593,6 +593,44 @@ function buildFullReport(args: {
     missingDateCount: number;
     missingDateSample: string[];
   };
+  travelVacantParityRows?: Array<{
+    localDate: string;
+    artifactCanonicalSimDayKwh: number | null;
+    freshSharedDayCalcKwh: number | null;
+    parityMatch: boolean | null;
+    artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
+    freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
+    parityReasonCode:
+      | "TRAVEL_VACANT_PARITY_MATCH"
+      | "TRAVEL_VACANT_PARITY_MISMATCH"
+      | "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
+      | "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING";
+  }>;
+  travelVacantParityTruth?: {
+    availability:
+      | "validated"
+      | "mismatch_detected"
+      | "missing_artifact_reference"
+      | "missing_fresh_compare_output"
+      | "not_requested";
+    reasonCode:
+      | "TRAVEL_VACANT_PARITY_VALIDATED"
+      | "TRAVEL_VACANT_PARITY_MISMATCH"
+      | "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
+      | "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING"
+      | "TRAVEL_VACANT_PARITY_NOT_REQUESTED";
+    explanation: string;
+    source: "db_travel_vacant_ranges";
+    comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals";
+    requestedDateCount: number;
+    validatedDateCount: number;
+    mismatchCount: number;
+    missingArtifactReferenceCount: number;
+    missingFreshCompareCount: number;
+    requestedDateSample: string[];
+    exactProofRequired: boolean;
+    exactProofSatisfied: boolean;
+  };
   benchmarkSummary?: {
     benchmarkAvailable: boolean;
     benchmarkSource: "request_payload" | "prior_run_copy" | "none";
@@ -1220,6 +1258,39 @@ function buildFullReport(args: {
     });
   }
 
+  if (j.travelVacantParityTruth || (Array.isArray(j.travelVacantParityRows) && j.travelVacantParityRows.length > 0)) {
+    section("DB travel/vacant parity validation", () => {
+      if (j.travelVacantParityTruth) {
+        lines.push(
+          "availability: " +
+            j.travelVacantParityTruth.availability +
+            " reasonCode: " +
+            j.travelVacantParityTruth.reasonCode +
+            " requestedDateCount: " +
+            j.travelVacantParityTruth.requestedDateCount +
+            " validatedDateCount: " +
+            j.travelVacantParityTruth.validatedDateCount +
+            " mismatchCount: " +
+            j.travelVacantParityTruth.mismatchCount +
+            " missingArtifactReferenceCount: " +
+            j.travelVacantParityTruth.missingArtifactReferenceCount +
+            " missingFreshCompareCount: " +
+            j.travelVacantParityTruth.missingFreshCompareCount
+        );
+      }
+      if (Array.isArray(j.travelVacantParityRows) && j.travelVacantParityRows.length > 0) {
+        lines.push(
+          "localDate | artifactCanonicalSimDayKwh | freshSharedDayCalcKwh | parityMatch | artifactReferenceAvailability | freshCompareAvailability | parityReasonCode"
+        );
+        j.travelVacantParityRows.forEach((row) =>
+          lines.push(
+            `  ${row.localDate} | ${row.artifactCanonicalSimDayKwh ?? "—"} | ${row.freshSharedDayCalcKwh ?? "—"} | ${row.parityMatch ?? "—"} | ${row.artifactReferenceAvailability} | ${row.freshCompareAvailability} | ${row.parityReasonCode}`
+          )
+        );
+      }
+    });
+  }
+
   section("L) Notes / next-action hints", () => {
     fullReportJson.notes.forEach((n) => lines.push("- " + n));
     if (fullReportJson.notes.length === 0) lines.push("- No automatic flags.");
@@ -1669,7 +1740,7 @@ export async function POST(req: NextRequest) {
           message: String((rebuilt as any)?.message ?? "Failed to rebuild shared Past artifact."),
           explanation: classification.userFacingExplanation,
           missingData: classification.missingData,
-          reasonCode: classification.reasonCode,
+          reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
         },
         { status: 500 }
       );
@@ -1771,7 +1842,7 @@ export async function POST(req: NextRequest) {
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
       scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
+      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
       context: { fetchStart, fetchEnd, testDaysRequested: testDateKeysLocal.size },
@@ -1890,7 +1961,7 @@ export async function POST(req: NextRequest) {
         : {}),
       explanation: classification.userFacingExplanation,
       missingData: classification.missingData,
-      reasonCode: classification.reasonCode,
+      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
       canonicalWindowHelper:
         (sharedSim.body as any)?.windowHelper ?? canonicalWindowHelper,
       coverageStart:
@@ -1908,7 +1979,7 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(", ") || house.id,
       scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
+      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
       context: {
@@ -1970,7 +2041,7 @@ export async function POST(req: NextRequest) {
       houseId: house.id,
       houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
       scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
+      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
       context: {
@@ -2078,7 +2149,7 @@ export async function POST(req: NextRequest) {
             "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
           explanation: classification.userFacingExplanation,
           missingData: classification.missingData,
-          reasonCode: classification.reasonCode,
+          reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
           joinMissingCount: scoringJoinMissingActual.length,
           joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
           compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
@@ -2344,7 +2415,9 @@ export async function POST(req: NextRequest) {
       missingDateSample: Array.from(scoringTestDateKeysLocal).filter((dk) => !weatherByDate.has(dk)).slice(0, 10),
     }) as Record<string, unknown>;
   const shouldEnforceScoredDayWeatherInvariant =
-    scoredDayWeatherTruthFromService != null || Array.isArray((sharedSim as any)?.scoredDayWeatherRows);
+    actualScoringIntervals.length > 0 &&
+    Array.isArray((sharedSim as any)?.simulatedTestIntervals) &&
+    ((sharedSim as any).simulatedTestIntervals as Array<unknown>).length > 0;
   if (
     shouldEnforceScoredDayWeatherInvariant &&
     scoringTestDateKeysLocal.size > 0 &&
@@ -2366,6 +2439,25 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+  const travelVacantParityRows = Array.isArray((sharedSim as any)?.travelVacantParityRows)
+    ? ((sharedSim as any).travelVacantParityRows as Array<Record<string, unknown>>)
+    : [];
+  const travelVacantParityTruth =
+    ((sharedSim as any)?.travelVacantParityTruth as Record<string, unknown> | undefined) ?? {
+      availability: "not_requested",
+      reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+      explanation: "No DB travel/vacant parity validation was returned by the shared compare service.",
+      source: "db_travel_vacant_ranges",
+      comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+      requestedDateCount: 0,
+      validatedDateCount: 0,
+      mismatchCount: 0,
+      missingArtifactReferenceCount: 0,
+      missingFreshCompareCount: 0,
+      requestedDateSample: [],
+      exactProofRequired: false,
+      exactProofSatisfied: true,
+    };
   const scoredDayParityEnvelope =
     ((sharedSim as any)?.displayVsFreshParityForScoredDays as Record<string, unknown> | undefined) ?? null;
   const scoredDayParityAvailability = String(scoredDayParityEnvelope?.availability ?? "available");
@@ -2592,12 +2684,16 @@ export async function POST(req: NextRequest) {
     compareSimSource,
     displaySimSource,
     artifactParityReferenceSource: (sharedSim as any).artifactSimulatedDayReferenceSource ?? null,
+    travelVacantParitySource: (travelVacantParityTruth as any)?.source ?? null,
+    travelVacantParityComparisonBasis: (travelVacantParityTruth as any)?.comparisonBasis ?? null,
+    travelVacantParityAvailability: (travelVacantParityTruth as any)?.availability ?? null,
+    travelVacantParityExactProofSatisfied: (travelVacantParityTruth as any)?.exactProofSatisfied ?? null,
     weatherBasisUsed,
     architectureNote:
       compareCalculationScope === "selected_days_shared_path_only"
-        ? "Selected-days mode still runs through shared past-day simulator core. It is not an isolated route-level per-day simulator."
+        ? "Selected-days mode still runs through shared past-day simulator core, including DB travel/vacant parity-validation dates. It is not an isolated route-level per-day simulator."
         : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
-          ? "Full-window mode runs shared simulator over the full window before filtering to scored days."
+          ? "Full-window mode runs shared simulator over the full window before filtering to scored days and validating DB travel/vacant parity."
           : "Artifact-only mode reads shared artifact output and filters scored days.",
     compareRequestTruth,
   };
@@ -2612,7 +2708,8 @@ export async function POST(req: NextRequest) {
     compareTruth,
     compareRequestTruth,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
-    travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
+    travelVacantParityRows,
+    travelVacantParityTruth,
     timezoneUsedForScoring: scoringTimezone,
     windowUsedForScoring: scoringWindow,
     requestedTestDaysCount,
@@ -2806,6 +2903,8 @@ export async function POST(req: NextRequest) {
             candidateWindowStartUtc: candidateWindowStart,
             candidateWindowEndUtc: candidateWindowEnd,
             excludedFromTest_travelCount,
+            travelVacantParityRows: travelVacantParityRows as any,
+            travelVacantParityTruth: travelVacantParityTruth as any,
             scoredDayWeatherRows: compactScoredDayWeatherRows,
             scoredDayWeatherTruth: scoredDayWeatherTruth as any,
           })
@@ -2813,6 +2912,37 @@ export async function POST(req: NextRequest) {
         ROUTE_COMPARE_REPORT_TIMEOUT_MS,
         "compare_core_route_timeout_build_full_report"
       );
+      if (
+        fullReport &&
+        travelVacantParityRows.length > 0 &&
+        !String(fullReport.fullReportText ?? "").includes("DB travel/vacant parity validation")
+      ) {
+        const extraLines = [
+          "",
+          "=== DB travel/vacant parity validation ===",
+          ...((travelVacantParityTruth
+            ? [
+                "availability: " +
+                  String((travelVacantParityTruth as any).availability ?? "—") +
+                  " reasonCode: " +
+                  String((travelVacantParityTruth as any).reasonCode ?? "—") +
+                  " requestedDateCount: " +
+                  String((travelVacantParityTruth as any).requestedDateCount ?? "0") +
+                  " validatedDateCount: " +
+                  String((travelVacantParityTruth as any).validatedDateCount ?? "0")
+              ]
+            : []) as string[]),
+          "localDate | artifactCanonicalSimDayKwh | freshSharedDayCalcKwh | parityMatch | artifactReferenceAvailability | freshCompareAvailability | parityReasonCode",
+          ...travelVacantParityRows.map(
+            (row: any) =>
+              `  ${row.localDate} | ${row.artifactCanonicalSimDayKwh ?? "—"} | ${row.freshSharedDayCalcKwh ?? "—"} | ${row.parityMatch ?? "—"} | ${row.artifactReferenceAvailability ?? "—"} | ${row.freshCompareAvailability ?? "—"} | ${row.parityReasonCode ?? "—"}`
+          ),
+        ];
+        fullReport = {
+          ...fullReport,
+          fullReportText: `${fullReport.fullReportText}\n${extraLines.join("\n")}`,
+        };
+      }
       markCompareCoreStep(compareCoreTiming, "build_full_report");
     } catch (err: unknown) {
       const normalizedError = normalizeRouteError(
@@ -2884,6 +3014,8 @@ export async function POST(req: NextRequest) {
       fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
       missAttributionSummary,
       accuracyTuningBreakdowns,
+      travelVacantParityRows,
+      travelVacantParityTruth,
       scoredDayWeatherRows: compactScoredDayWeatherRows,
       scoredDayWeatherTruth,
       heavyTruth: {
@@ -2971,7 +3103,8 @@ export async function POST(req: NextRequest) {
     compareCoreTiming: compareCoreTimingEnvelope,
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
-    travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
+    travelVacantParityRows,
+    travelVacantParityTruth,
     scoredDayWeatherRows: compactScoredDayWeatherRows,
     scoredDayWeatherTruth,
     truthEnvelope,

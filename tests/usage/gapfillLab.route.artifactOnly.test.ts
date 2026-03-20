@@ -143,6 +143,60 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       seasonalSplit: { summer: { wape: 0, mae: 0, count: 0 }, winter: { wape: 0, mae: 0, count: 0 }, shoulder: { wape: 0, mae: 0, count: 0 } },
     },
   });
+  const withSharedWeatherDefaults = (result: any) => {
+    if (!result || result.ok !== true) return result;
+    const omitSharedWeather = result.__omitSharedWeather === true;
+    const cleanedResult =
+      "__omitSharedWeather" in result
+        ? Object.fromEntries(Object.entries(result).filter(([key]) => key !== "__omitSharedWeather"))
+        : result;
+    if (omitSharedWeather) return cleanedResult;
+    if (Array.isArray(cleanedResult.scoredDayWeatherRows) || cleanedResult.scoredDayWeatherTruth) return cleanedResult;
+    const scoringDateKeys = Array.from(
+      new Set<string>([
+        ...Array.from(cleanedResult.scoringTestDateKeysLocal ?? []).map((dk) => String(dk ?? "").slice(0, 10)),
+        ...((Array.isArray(cleanedResult.simulatedTestIntervals)
+          ? cleanedResult.simulatedTestIntervals
+          : []
+        ) as Array<{ timestamp?: string }>).map((row) => String(row?.timestamp ?? "").slice(0, 10)),
+        ...((Array.isArray(cleanedResult.simulatedChartDaily)
+          ? cleanedResult.simulatedChartDaily
+          : []
+        ) as Array<{ date?: string; source?: string }>).map((row) => String(row?.date ?? "").slice(0, 10)),
+      ])
+    ).filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(String(dk ?? "")));
+    if (scoringDateKeys.length === 0) return cleanedResult;
+    return {
+      ...cleanedResult,
+      scoredDayWeatherRows: scoringDateKeys.map((localDate) => ({
+        localDate,
+        avgTempF: 51,
+        minTempF: 41,
+        maxTempF: 61,
+        hdd65: 14,
+        cdd65: 0,
+        weatherBasisUsed: cleanedResult.weatherBasisUsed ?? "actual_only",
+        weatherKindUsed: "actual",
+        weatherSourceUsed: "open_meteo",
+        weatherProviderName: "Open-Meteo",
+        weatherFallbackReason: null,
+      })),
+      scoredDayWeatherTruth: {
+        availability: "available",
+        reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+        explanation: "Compact scored-day weather truth is available from the shared compare execution.",
+        source: "shared_compare_scored_day_weather",
+        scoredDateCount: scoringDateKeys.length,
+        weatherRowCount: scoringDateKeys.length,
+        missingDateCount: 0,
+        missingDateSample: [],
+      },
+    };
+  };
+  const mockCompareResult = (result: any) =>
+    buildGapfillCompareSimShared.mockResolvedValue(withSharedWeatherDefaults(result));
+  const mockCompareResultOnce = (result: any) =>
+    buildGapfillCompareSimShared.mockResolvedValueOnce(withSharedWeatherDefaults(result));
   beforeEach(() => {
     requireAdmin.mockReset();
     normalizeEmailSafe.mockReset();
@@ -207,7 +261,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {
-    buildGapfillCompareSimShared.mockResolvedValue({
+    mockCompareResult({
       ok: false,
       status: 409,
       body: {
@@ -243,7 +297,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("uses explicit rebuild action and then reads in artifact_only mode", async () => {
-    buildGapfillCompareSimShared.mockResolvedValue({
+    mockCompareResult({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -332,7 +386,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       { timestamp: "2026-01-01T05:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T05:15:00.000Z", kwh: 0.25 },
     ]);
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       timezoneUsedForScoring: "America/Chicago",
@@ -378,7 +432,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.5 },
     ]);
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       timezoneUsedForScoring: "America/Chicago",
@@ -424,7 +478,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("uses shared coverage window and bounded travel count in metadata outputs", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -482,7 +536,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
 
   it("keeps travel-day displayed kWh identical across shared artifact daily output and gap-fill chart/table output", async () => {
     const sharedPastDaily = [{ date: "2025-06-01", simKwh: 56.74, source: "SIMULATED" as const }];
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -520,7 +574,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("falls back scenarioId to context scenario id when artifactScenarioId is null", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -557,7 +611,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("falls back scenarioId to past_shared_artifact when artifact and context scenario ids are missing", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -591,7 +645,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("does not collapse to zero metrics when simulated scoring intervals differ from actual", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_artifact_simulated_intervals15",
@@ -655,7 +709,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns success with zero scored intervals when shared artifact has no selected test-date intervals", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_artifact_simulated_intervals15",
@@ -699,7 +753,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     prismaScenarioEventFindMany.mockResolvedValueOnce([
       { payloadJson: { startDate: "2024-01-01", endDate: "2024-01-02" } },
     ]);
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -734,7 +788,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns classified stale-rebuild response when shared artifact is stale", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: false,
       status: 409,
       body: {
@@ -760,7 +814,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns join-incomplete rebuild-required when simulated join timestamps are missing", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_artifact_simulated_intervals15",
@@ -797,7 +851,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("keeps compare scoring non-blocking when artifact join is incomplete but fresh scoring join is complete", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -852,7 +906,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns compare_scoring_join_incomplete when fresh selected-day scoring join is incomplete", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -902,7 +956,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns compact response by default while keeping integrity/count metadata", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -950,14 +1004,33 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         granularity: "daily_kwh_rounded_2dp",
         comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
       },
-      travelVacantParitySample: [
+      travelVacantParityRows: [
         {
           localDate: "2025-12-25",
-          displayedPastStyleSimDayKwh: 12.34,
+          artifactCanonicalSimDayKwh: 12.34,
           freshSharedDayCalcKwh: 12.34,
           parityMatch: true,
+          artifactReferenceAvailability: "available",
+          freshCompareAvailability: "available",
+          parityReasonCode: "TRAVEL_VACANT_PARITY_MATCH",
         },
       ],
+      travelVacantParityTruth: {
+        availability: "validated",
+        reasonCode: "TRAVEL_VACANT_PARITY_VALIDATED",
+        explanation:
+          "DB travel/vacant parity validation proved canonical artifact simulated-day totals match fresh shared compare totals for the validated dates.",
+        source: "db_travel_vacant_ranges",
+        comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+        requestedDateCount: 1,
+        validatedDateCount: 1,
+        mismatchCount: 0,
+        missingArtifactReferenceCount: 0,
+        missingFreshCompareCount: 0,
+        requestedDateSample: ["2025-12-25"],
+        exactProofRequired: false,
+        exactProofSatisfied: true,
+      },
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
       boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
@@ -1058,12 +1131,19 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.compareTruth?.compareCalculationScopeLabel).toContain("Selected-day-only");
     expect(body.compareTruth?.architectureNote).toContain("not an isolated route-level per-day simulator");
     expect(body.compareTruth?.artifactParityReferenceSource).toBe("canonical_artifact_simulated_day_totals");
-    expect(body.travelVacantParitySample?.[0]).toMatchObject({
+    expect(body.travelVacantParityRows?.[0]).toMatchObject({
       localDate: "2025-12-25",
-      displayedPastStyleSimDayKwh: 12.34,
+      artifactCanonicalSimDayKwh: 12.34,
       freshSharedDayCalcKwh: 12.34,
       parityMatch: true,
     });
+    expect(body.travelVacantParityTruth).toMatchObject({
+      availability: "validated",
+      reasonCode: "TRAVEL_VACANT_PARITY_VALIDATED",
+      validatedDateCount: 1,
+    });
+    expect(body.compareTruth?.travelVacantParityAvailability).toBe("validated");
+    expect(body.compareTruth?.travelVacantParityExactProofSatisfied).toBe(true);
     expect(body.truthEnvelope?.compareTruth?.compareFreshModeUsed).toBe("selected_days");
     expect(body.truthEnvelope?.compareFreshModeUsed).toBe("selected_days");
     expect(body.truthEnvelope?.compareRequestTruth).toEqual({
@@ -1121,7 +1201,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("keeps selected-days compare mode when diagnostics flags are explicitly false", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -1180,7 +1260,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("fails explicitly when shared compare succeeds without scored-day weather truth", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
+      __omitSharedWeather: true,
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -1240,8 +1321,125 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
   });
 
+  it("fails explicitly when shared compare omits scored-day weather fields even if legacy weatherApiData exists", async () => {
+    mockCompareResultOnce({
+      __omitSharedWeather: true,
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: {
+        weatherApiData: [
+          {
+            dateKey: "2026-01-01",
+            kind: "ACTUAL_LAST_YEAR",
+            tAvgF: 51,
+            tMinF: 41,
+            tMaxF: 61,
+            hdd65: 14,
+            cdd65: 0,
+            source: "OPEN_METEO",
+          },
+        ],
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("compare_core_weather_truth_missing");
+    expect(body.reasonCode).toBe("COMPARE_CORE_WEATHER_TRUTH_MISSING");
+    expect(body.scoredDayWeatherTruth).toMatchObject({
+      availability: "missing_expected_scored_day_weather",
+      missingDateCount: 1,
+      missingDateSample: ["2026-01-01"],
+    });
+    expect(body.scoredDayWeatherRows).toBeUndefined();
+  });
+
+  it("blocks contradictory success when exact travel/vacant parity proof cannot be established", async () => {
+    mockCompareResultOnce({
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "travel_vacant_parity_proof_failed",
+        message:
+          "Compare requires exact shared artifact parity proof, but DB travel/vacant parity could not be proven against fresh shared compare output.",
+        reasonCode: "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING",
+        travelVacantParityTruth: {
+          availability: "missing_artifact_reference",
+          reasonCode: "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING",
+          explanation:
+            "Canonical artifact simulated-day totals were missing for one or more DB travel/vacant parity dates.",
+          source: "db_travel_vacant_ranges",
+          comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+          requestedDateCount: 1,
+          validatedDateCount: 0,
+          mismatchCount: 0,
+          missingArtifactReferenceCount: 1,
+          missingFreshCompareCount: 0,
+          requestedDateSample: ["2025-12-25"],
+          exactProofRequired: true,
+          exactProofSatisfied: false,
+        },
+      },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        requestedInputHash: "hash-1",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("travel_vacant_parity_proof_failed");
+    expect(body.reasonCode).toBe("TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING");
+    expect(body.travelVacantParityTruth).toMatchObject({
+      availability: "missing_artifact_reference",
+      exactProofRequired: true,
+      exactProofSatisfied: false,
+    });
+  });
+
   it("keeps compare auto-ensure enabled for full-window diagnostics mode", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_fresh_simulated_intervals15",
@@ -1294,7 +1492,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("reports zero chart interval count for lightweight selected-days responses with no chart intervals", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -1353,7 +1551,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("passes through parity mismatch proof metadata from shared compare service", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -1422,7 +1620,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("preserves full parity totals while mismatch and missing samples stay capped", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -1487,7 +1685,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("marks scored actual days as not-applicable parity when no artifact simulated-day reference exists", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
@@ -1563,7 +1761,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("passes exact artifact identity request fields into shared compare build", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -1627,7 +1825,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns explicit artifact request truth when exact same-run artifact identity cannot be resolved", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: false,
       status: 409,
       body: {
@@ -1669,7 +1867,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("fails instead of returning contradictory exact-match success truth", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
@@ -1755,7 +1953,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   });
 
   it("returns a compact heavy-only response with heavy timing fields for merge-on-top-of-core", async () => {
-    buildGapfillCompareSimShared.mockResolvedValueOnce({
+    mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_fresh_simulated_intervals15",
@@ -1807,7 +2005,33 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         granularity: "daily_kwh_rounded_2dp",
         comparisonBasis: "display_shared_artifact_vs_compare_shared_full_window_then_filter",
       },
-      travelVacantParitySample: [],
+      travelVacantParityRows: [
+        {
+          localDate: "2025-12-25",
+          artifactCanonicalSimDayKwh: 12.34,
+          freshSharedDayCalcKwh: 12.34,
+          parityMatch: true,
+          artifactReferenceAvailability: "available",
+          freshCompareAvailability: "available",
+          parityReasonCode: "TRAVEL_VACANT_PARITY_MATCH",
+        },
+      ],
+      travelVacantParityTruth: {
+        availability: "validated",
+        reasonCode: "TRAVEL_VACANT_PARITY_VALIDATED",
+        explanation:
+          "DB travel/vacant parity validation proved canonical artifact simulated-day totals match fresh shared compare totals for the validated dates.",
+        source: "db_travel_vacant_ranges",
+        comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+        requestedDateCount: 1,
+        validatedDateCount: 1,
+        mismatchCount: 0,
+        missingArtifactReferenceCount: 0,
+        missingFreshCompareCount: 0,
+        requestedDateSample: ["2025-12-25"],
+        exactProofRequired: false,
+        exactProofSatisfied: true,
+      },
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
       boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
@@ -1873,6 +2097,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       hdd65: 17,
       weatherBasisUsed: "actual_only",
     });
+    expect(body.travelVacantParityRows?.[0]).toMatchObject({
+      localDate: "2025-12-25",
+      artifactCanonicalSimDayKwh: 12.34,
+      freshSharedDayCalcKwh: 12.34,
+      parityMatch: true,
+    });
+    expect(body.travelVacantParityTruth?.availability).toBe("validated");
     expect(body.scoredDayWeatherTruth?.availability).toBe("available");
     expect(String(body.fullReportText ?? "")).toContain("Scored-day weather truth");
     expect(String(body.fullReportText ?? "")).toContain("2026-01-01 | 48 | 38 | 58 | 17 | 0 | actual_only");
@@ -1946,7 +2177,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
     });
-    buildGapfillCompareSimShared.mockResolvedValue({
+    mockCompareResult({
       ok: true,
       artifactAutoRebuilt: false,
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },

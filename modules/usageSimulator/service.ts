@@ -141,6 +141,44 @@ type ScoredDayWeatherTruth = {
   missingDateCount: number;
   missingDateSample: string[];
 };
+type TravelVacantParityRow = {
+  localDate: string;
+  artifactCanonicalSimDayKwh: number | null;
+  freshSharedDayCalcKwh: number | null;
+  parityMatch: boolean | null;
+  artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
+  freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
+  parityReasonCode:
+    | "TRAVEL_VACANT_PARITY_MATCH"
+    | "TRAVEL_VACANT_PARITY_MISMATCH"
+    | "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
+    | "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING";
+};
+type TravelVacantParityTruth = {
+  availability:
+    | "validated"
+    | "mismatch_detected"
+    | "missing_artifact_reference"
+    | "missing_fresh_compare_output"
+    | "not_requested";
+  reasonCode:
+    | "TRAVEL_VACANT_PARITY_VALIDATED"
+    | "TRAVEL_VACANT_PARITY_MISMATCH"
+    | "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
+    | "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING"
+    | "TRAVEL_VACANT_PARITY_NOT_REQUESTED";
+  explanation: string;
+  source: "db_travel_vacant_ranges";
+  comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals";
+  requestedDateCount: number;
+  validatedDateCount: number;
+  mismatchCount: number;
+  missingArtifactReferenceCount: number;
+  missingFreshCompareCount: number;
+  requestedDateSample: string[];
+  exactProofRequired: boolean;
+  exactProofSatisfied: boolean;
+};
 
 function buildScoredDayWeatherPayload(args: {
   scoredDateKeysLocal: Set<string>;
@@ -396,6 +434,8 @@ export type GapfillCompareSimSharedResult =
       weatherBasisUsed?: string;
       artifactSimulatedDayReferenceSource?: "canonical_artifact_simulated_day_totals";
       artifactSimulatedDayReferenceRows?: Array<{ date: string; simKwh: number }>;
+      travelVacantParityRows?: TravelVacantParityRow[];
+      travelVacantParityTruth?: TravelVacantParityTruth;
       scoredDayWeatherRows?: ScoredDayWeatherRow[];
       scoredDayWeatherTruth?: ScoredDayWeatherTruth;
       displayVsFreshParityForScoredDays?: {
@@ -425,12 +465,6 @@ export type GapfillCompareSimSharedResult =
           | "display_shared_artifact_vs_compare_selected_days_fresh_calc"
           | "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc";
       };
-      travelVacantParitySample?: Array<{
-        localDate: string;
-        displayedPastStyleSimDayKwh: number | null;
-        freshSharedDayCalcKwh: number | null;
-        parityMatch: boolean | null;
-      }>;
       timezoneUsedForScoring: string;
       windowUsedForScoring: { startDate: string; endDate: string };
       scoringTestDateKeysLocal: Set<string>;
@@ -1307,13 +1341,12 @@ export async function buildGapfillCompareSimShared(args: {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     return boundedTestDateKeysLocal.has(dk);
   });
-  const deterministicTravelParityDateKeys = Array.from(boundedTravelDateKeysLocal)
+  const travelVacantParityDateKeysLocal = Array.from(boundedTravelDateKeysLocal)
     .filter((dk) => chartDateKeysLocal.has(dk))
-    .sort((a, b) => (a < b ? -1 : 1))
-    .slice(0, 1);
+    .sort((a, b) => (a < b ? -1 : 1));
   const useSelectedDaysLightweightDisplayRows = selectedDaysLightweightArtifactRead === true;
   const displayDateKeysLocal = useSelectedDaysLightweightDisplayRows
-    ? new Set<string>([...Array.from(boundedTestDateKeysLocal), ...deterministicTravelParityDateKeys])
+    ? new Set<string>(Array.from(boundedTestDateKeysLocal))
     : chartDateKeysLocal;
   let simulatedTestIntervals = artifactSimulatedTestIntervals;
   let scoringSimulatedSource:
@@ -1345,14 +1378,38 @@ export async function buildGapfillCompareSimShared(args: {
     missingDateCount: boundedTestDateKeysLocal.size,
     missingDateSample: Array.from(boundedTestDateKeysLocal).sort().slice(0, 10),
   };
+  let travelVacantParityRows: TravelVacantParityRow[] = [];
+  let travelVacantParityTruth: TravelVacantParityTruth = {
+    availability: travelVacantParityDateKeysLocal.length > 0 ? "missing_fresh_compare_output" : "not_requested",
+    reasonCode:
+      travelVacantParityDateKeysLocal.length > 0
+        ? "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING"
+        : "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+    explanation:
+      travelVacantParityDateKeysLocal.length > 0
+        ? "Shared compare has not yet produced travel/vacant parity validation output."
+        : "No DB travel/vacant dates were available for parity validation in this coverage window.",
+    source: "db_travel_vacant_ranges",
+    comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+    requestedDateCount: travelVacantParityDateKeysLocal.length,
+    validatedDateCount: 0,
+    mismatchCount: 0,
+    missingArtifactReferenceCount: 0,
+    missingFreshCompareCount: travelVacantParityDateKeysLocal.length,
+    requestedDateSample: travelVacantParityDateKeysLocal.slice(0, 10),
+    exactProofRequired: exactArtifactReadRequired,
+    exactProofSatisfied: travelVacantParityDateKeysLocal.length === 0,
+  };
   let freshParityIntervals: IntervalPoint[] = [];
 
   let freshDataset: any | null = null;
-  if (boundedTestDateKeysLocal.size > 0) {
+  const needsFreshCompareForParity =
+    boundedTestDateKeysLocal.size > 0 || travelVacantParityDateKeysLocal.length > 0;
+  if (needsFreshCompareForParity) {
     if (effectiveCompareFreshMode === "selected_days") {
       const selectedFreshExecutionDateKeys = new Set<string>([
         ...Array.from(boundedTestDateKeysLocal),
-        ...deterministicTravelParityDateKeys,
+        ...travelVacantParityDateKeysLocal,
       ]);
       const selectedDaysResult = await simulatePastSelectedDaysShared({
         userId,
@@ -1595,6 +1652,7 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.artifactReferenceDayCountUsed = artifactSimulatedDayReferenceRows.filter((row) =>
     boundedTestDateKeysLocal.has(row.date)
   ).length;
+  modelAssumptions.travelVacantParityDateCount = travelVacantParityDateKeysLocal.length;
 
   const freshDailyTotalsByDate = new Map<string, number>();
   for (const p of simulatedTestIntervals) {
@@ -1602,10 +1660,13 @@ export async function buildGapfillCompareSimShared(args: {
     if (!boundedTestDateKeysLocal.has(dk)) continue;
     freshDailyTotalsByDate.set(dk, (freshDailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
   }
+  const canonicalArtifactDailyByDate = new Map<string, number>(
+    Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
+      .map(([date, simKwh]) => [String(date).slice(0, 10), round2Local(Number(simKwh) || 0)] as const)
+      .filter(([dk]) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
   const parityDisplayDailyByDate = new Map<string, number>(
-    artifactSimulatedDayReferenceRows
-      .map((d) => [String(d.date ?? "").slice(0, 10), round2Local(Number(d.simKwh) || 0)] as const)
-      .filter(([dk]) => boundedTestDateKeysLocal.has(dk))
+    Array.from(canonicalArtifactDailyByDate.entries()).filter(([dk]) => boundedTestDateKeysLocal.has(dk))
   );
   const allMissingDisplaySimDates = Array.from(boundedTestDateKeysLocal).filter((dk) => !parityDisplayDailyByDate.has(dk));
   const missingDisplaySimDatesBackedByActualArtifactRows = allMissingDisplaySimDates.filter(
@@ -1679,26 +1740,145 @@ export async function buildGapfillCompareSimShared(args: {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     freshParityDailyByDate.set(dk, (freshParityDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
   }
-  const displayedSimDayKwhByDate = new Map<string, number>(
-    simulatedChartDaily.map((d) => [String(d.date ?? "").slice(0, 10), round2Local(Number(d.simKwh) || 0)])
-  );
-  const travelVacantParitySample = deterministicTravelParityDateKeys.map((dk) => {
-    const displayed = displayedSimDayKwhByDate.has(dk)
-      ? round2Local(Number(displayedSimDayKwhByDate.get(dk) ?? 0))
+  travelVacantParityRows = travelVacantParityDateKeysLocal.map((dk) => {
+    const artifactCanonicalSimDayKwh = canonicalArtifactDailyByDate.has(dk)
+      ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
       : null;
-    const fresh = freshParityDailyByDate.has(dk)
+    const freshSharedDayCalcKwh = freshParityDailyByDate.has(dk)
       ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
       : null;
+    const parityMatch =
+      artifactCanonicalSimDayKwh == null || freshSharedDayCalcKwh == null
+        ? null
+        : round2Local(artifactCanonicalSimDayKwh) === round2Local(freshSharedDayCalcKwh);
     return {
       localDate: dk,
-      displayedPastStyleSimDayKwh: displayed,
-      freshSharedDayCalcKwh: fresh,
-      parityMatch:
-        displayed == null || fresh == null
-          ? null
-          : round2Local(displayed) === round2Local(fresh),
+      artifactCanonicalSimDayKwh,
+      freshSharedDayCalcKwh,
+      parityMatch,
+      artifactReferenceAvailability:
+        artifactCanonicalSimDayKwh == null ? "missing_canonical_artifact_day_total" : "available",
+      freshCompareAvailability:
+        freshSharedDayCalcKwh == null ? "missing_fresh_shared_compare_output" : "available",
+      parityReasonCode:
+        artifactCanonicalSimDayKwh == null
+          ? "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
+          : freshSharedDayCalcKwh == null
+            ? "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING"
+            : parityMatch
+              ? "TRAVEL_VACANT_PARITY_MATCH"
+              : "TRAVEL_VACANT_PARITY_MISMATCH",
     };
   });
+  const travelVacantParityMissingArtifactCount = travelVacantParityRows.filter(
+    (row) => row.artifactReferenceAvailability !== "available"
+  ).length;
+  const travelVacantParityMissingFreshCount = travelVacantParityRows.filter(
+    (row) => row.freshCompareAvailability !== "available"
+  ).length;
+  const travelVacantParityMismatchCount = travelVacantParityRows.filter((row) => row.parityMatch === false).length;
+  const travelVacantParityValidatedCount = travelVacantParityRows.filter((row) => row.parityMatch === true).length;
+  travelVacantParityTruth =
+    travelVacantParityDateKeysLocal.length === 0
+      ? {
+          availability: "not_requested",
+          reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+          explanation: "No DB travel/vacant dates were available for parity validation in this coverage window.",
+          source: "db_travel_vacant_ranges",
+          comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+          requestedDateCount: 0,
+          validatedDateCount: 0,
+          mismatchCount: 0,
+          missingArtifactReferenceCount: 0,
+          missingFreshCompareCount: 0,
+          requestedDateSample: [],
+          exactProofRequired: exactArtifactReadRequired,
+          exactProofSatisfied: true,
+        }
+      : travelVacantParityMissingFreshCount > 0
+        ? {
+            availability: "missing_fresh_compare_output",
+            reasonCode: "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING",
+            explanation: "Shared compare did not produce fresh simulated day totals for one or more DB travel/vacant parity dates.",
+            source: "db_travel_vacant_ranges",
+            comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+            requestedDateCount: travelVacantParityDateKeysLocal.length,
+            validatedDateCount: travelVacantParityValidatedCount,
+            mismatchCount: travelVacantParityMismatchCount,
+            missingArtifactReferenceCount: travelVacantParityMissingArtifactCount,
+            missingFreshCompareCount: travelVacantParityMissingFreshCount,
+            requestedDateSample: travelVacantParityDateKeysLocal.slice(0, 10),
+            exactProofRequired: exactArtifactReadRequired,
+            exactProofSatisfied: false,
+          }
+        : travelVacantParityMissingArtifactCount > 0
+          ? {
+              availability: "missing_artifact_reference",
+              reasonCode: "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING",
+              explanation: "Canonical artifact simulated-day totals were missing for one or more DB travel/vacant parity dates.",
+              source: "db_travel_vacant_ranges",
+              comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+              requestedDateCount: travelVacantParityDateKeysLocal.length,
+              validatedDateCount: travelVacantParityValidatedCount,
+              mismatchCount: travelVacantParityMismatchCount,
+              missingArtifactReferenceCount: travelVacantParityMissingArtifactCount,
+              missingFreshCompareCount: travelVacantParityMissingFreshCount,
+              requestedDateSample: travelVacantParityDateKeysLocal.slice(0, 10),
+              exactProofRequired: exactArtifactReadRequired,
+              exactProofSatisfied: false,
+            }
+          : travelVacantParityMismatchCount > 0
+            ? {
+                availability: "mismatch_detected",
+                reasonCode: "TRAVEL_VACANT_PARITY_MISMATCH",
+                explanation: "DB travel/vacant parity validation found a mismatch between canonical artifact totals and fresh shared compare totals.",
+                source: "db_travel_vacant_ranges",
+                comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+                requestedDateCount: travelVacantParityDateKeysLocal.length,
+                validatedDateCount: travelVacantParityValidatedCount,
+                mismatchCount: travelVacantParityMismatchCount,
+                missingArtifactReferenceCount: 0,
+                missingFreshCompareCount: 0,
+                requestedDateSample: travelVacantParityDateKeysLocal.slice(0, 10),
+                exactProofRequired: exactArtifactReadRequired,
+                exactProofSatisfied: false,
+              }
+            : {
+                availability: "validated",
+                reasonCode: "TRAVEL_VACANT_PARITY_VALIDATED",
+                explanation: "DB travel/vacant parity validation proved canonical artifact simulated-day totals match fresh shared compare totals for the validated dates.",
+                source: "db_travel_vacant_ranges",
+                comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+                requestedDateCount: travelVacantParityDateKeysLocal.length,
+                validatedDateCount: travelVacantParityValidatedCount,
+                mismatchCount: 0,
+                missingArtifactReferenceCount: 0,
+                missingFreshCompareCount: 0,
+                requestedDateSample: travelVacantParityDateKeysLocal.slice(0, 10),
+                exactProofRequired: exactArtifactReadRequired,
+                exactProofSatisfied: true,
+              };
+  modelAssumptions.travelVacantParityValidatedCount = travelVacantParityValidatedCount;
+  modelAssumptions.travelVacantParityMismatchCount = travelVacantParityMismatchCount;
+  modelAssumptions.travelVacantParityMissingArtifactReferenceCount = travelVacantParityMissingArtifactCount;
+  modelAssumptions.travelVacantParityMissingFreshCompareCount = travelVacantParityMissingFreshCount;
+  if (exactArtifactReadRequired && travelVacantParityTruth.exactProofSatisfied !== true) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "travel_vacant_parity_proof_failed",
+        message:
+          "Compare requires exact shared artifact parity proof, but DB travel/vacant parity could not be proven against fresh shared compare output.",
+        mode: "artifact_only",
+        scenarioId: sharedScenarioCacheId,
+        reasonCode: travelVacantParityTruth.reasonCode,
+        travelVacantParityTruth,
+        travelVacantParityRows: travelVacantParityRows.slice(0, 25),
+      },
+    };
+  }
 
   const responseModelAssumptions =
     useSelectedDaysLightweightArtifactRead && effectiveCompareFreshMode === "selected_days"
@@ -1752,10 +1932,11 @@ export async function buildGapfillCompareSimShared(args: {
     weatherBasisUsed,
     artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
     artifactSimulatedDayReferenceRows,
+    travelVacantParityRows,
+    travelVacantParityTruth,
     scoredDayWeatherRows,
     scoredDayWeatherTruth,
     displayVsFreshParityForScoredDays,
-    travelVacantParitySample,
     timezoneUsedForScoring: timezone,
     windowUsedForScoring: sharedCoverageWindow,
     scoringTestDateKeysLocal: boundedTestDateKeysLocal,

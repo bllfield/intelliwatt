@@ -116,9 +116,11 @@
 - No local database connection needed
 - Migration scripts have been applied
 - Gap-Fill Lab `compare_core` in selected-days mode is expected to stay lightweight: shared simulator math remains authoritative, but the core response should avoid full-window diagnostic/weather payloads and other heavy report-only structures.
+- Gap-Fill Lab DB travel/vacant ranges are not guardrails only: compare-core must execute the bounded DB travel dates through the same shared simulator family used by Past Sim so canonical artifact simulated-day totals can be validated against fresh shared compare day totals.
 - Gap-Fill Lab selected-days scored actual days should not be reported as missing artifact simulated-day parity defects when the artifact only stores canonical simulated-day totals for true simulated ownership days (for example travel/vacant patches); surface an explicit not-applicable parity state instead.
 - Gap-Fill Lab heavy diagnostics retries should return a compact merge-only payload with heavy timing fields, rather than re-sending the entire core compare response.
 - Gap-Fill Lab compare-core must include compact scored-day weather truth for the scored local dates, owned by the shared compare/service path; heavy report may expand that truth, but route/UI layers must not recompute scored-day weather on their own.
+- Gap-Fill Lab must fail explicitly when a run claims DB travel/vacant parity validation or exact shared artifact proof but the canonical artifact day totals or fresh shared compare day totals needed for that proof are missing.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
