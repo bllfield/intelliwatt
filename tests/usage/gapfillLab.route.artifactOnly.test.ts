@@ -1289,6 +1289,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         artifactInputHashUsed: "hash-forwarded",
         artifactHashMatch: true,
         artifactScenarioId: "past-s1",
+        artifactRequestedScenarioId: "past-s1",
+        artifactExactIdentityResolved: true,
+        artifactSameRunEnsureIdentity: true,
+        artifactFallbackOccurred: false,
+        artifactExactIdentifierUsed: "past-s1:hash-forwarded",
       },
       homeProfileFromModel: null,
       applianceProfileFromModel: null,
@@ -1368,6 +1373,77 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
     expect(body.fallbackOccurred).toBe(false);
     expect(body.fallbackReason).toBe("requested_exact_identity_not_found");
+  });
+
+  it("fails instead of returning contradictory exact-match success truth", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: {
+        artifactSourceMode: "exact_hash_match",
+        requestedInputHash: "hash-contradictory",
+        artifactInputHashUsed: null,
+        artifactHashMatch: false,
+        artifactScenarioId: "past-s1",
+        artifactExactIdentityResolved: false,
+        artifactSameRunEnsureIdentity: true,
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        requestedInputHash: "hash-contradictory",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("artifact_exact_identity_unresolved");
+    expect(body.reasonCode).toBe("ARTIFACT_EXACT_IDENTITY_UNRESOLVED");
+    expect(body.artifactTruth).toMatchObject({
+      sourceMode: "exact_hash_match",
+      requestedInputHash: "hash-contradictory",
+      artifactInputHashUsed: null,
+      artifactHashMatch: false,
+      exactIdentityResolved: false,
+      sameRunEnsureArtifact: true,
+    });
+  });
+
+  it("classifies heavy diagnostics client timeout, fetch failure, and exception explicitly in client source", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain("compare_heavy_client_timeout");
+    expect(clientSource).toContain("compare_heavy_client_fetch_failure");
+    expect(clientSource).toContain("compare_heavy_client_exception");
+    expect(clientSource).toContain("compare_heavy_timeout");
+    expect(clientSource).toContain("compare_heavy_fetch_failure");
+    expect(clientSource).toContain("heavyFailureKind");
+    expect(clientSource).toContain("\"route_timeout\"");
+    expect(clientSource).toContain("\"route_exception\"");
   });
 
   it("returns route timeout classification with timing envelope when shared compare build stalls", async () => {

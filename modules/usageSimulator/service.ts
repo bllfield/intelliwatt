@@ -1058,6 +1058,59 @@ export async function buildGapfillCompareSimShared(args: {
     artifactSourceMode === "latest_by_scenario_fallback" ? artifactFallbackReason : null;
   modelAssumptions.artifactExactIdentifierUsed =
     artifactInputHashUsed && sharedScenarioCacheId ? `${sharedScenarioCacheId}:${artifactInputHashUsed}` : null;
+  const hasContradictoryExactHashTruth =
+    artifactSourceMode === "exact_hash_match" &&
+    (!artifactInputHashUsed ||
+      (typeof requestedInputHash === "string" &&
+        requestedInputHash.length > 0 &&
+        artifactInputHashUsed !== requestedInputHash) ||
+      modelAssumptions.artifactHashMatch !== true);
+  if (exactArtifactReadRequired && modelAssumptions.artifactExactIdentityResolved !== true) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_exact_identity_unresolved",
+        message:
+          "Compare requires an exact shared Past artifact identity, but the resolved artifact truth could not be proven after cache lookup.",
+        mode: "artifact_only",
+        scenarioId: sharedScenarioCacheId,
+        requestedArtifactScenarioId,
+        requestedInputHash,
+        artifactInputHashUsed,
+        artifactHashMatch: modelAssumptions.artifactHashMatch,
+        artifactSourceMode,
+        artifactIdentitySource: artifactIdentitySourceNormalized,
+        exactIdentityResolved: modelAssumptions.artifactExactIdentityResolved,
+        fallbackOccurred: modelAssumptions.artifactFallbackOccurred,
+        fallbackReason: modelAssumptions.artifactFallbackReason,
+      },
+    };
+  }
+  if (hasContradictoryExactHashTruth) {
+    return {
+      ok: false,
+      status: exactArtifactReadRequired ? 409 : 500,
+      body: {
+        ok: false,
+        error: "artifact_truth_invariant_failed",
+        message:
+          "Shared Past artifact truth is contradictory: compare cannot report exact hash match without a resolved artifact input hash and positive hash match.",
+        mode: "artifact_only",
+        scenarioId: sharedScenarioCacheId,
+        requestedArtifactScenarioId,
+        requestedInputHash,
+        artifactInputHashUsed,
+        artifactHashMatch: modelAssumptions.artifactHashMatch,
+        artifactSourceMode,
+        artifactIdentitySource: artifactIdentitySourceNormalized,
+        exactIdentityResolved: modelAssumptions.artifactExactIdentityResolved,
+        fallbackOccurred: modelAssumptions.artifactFallbackOccurred,
+        fallbackReason: modelAssumptions.artifactFallbackReason,
+      },
+    };
+  }
   const summaryIntervalsCount = Number((dataset as any)?.summary?.intervalsCount);
   if (Number.isFinite(summaryIntervalsCount) && summaryIntervalsCount > 0) {
     modelAssumptions.artifactStoredIntervalCount = Math.trunc(summaryIntervalsCount);

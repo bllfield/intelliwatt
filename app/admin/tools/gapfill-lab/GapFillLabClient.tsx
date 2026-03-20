@@ -235,6 +235,59 @@ export function normalizeUnknownUiError(
   };
 }
 
+export function classifyHeavyDiagnosticsUiFailure(value: unknown): {
+  errorCode:
+    | "compare_heavy_client_timeout"
+    | "compare_heavy_client_fetch_failure"
+    | "compare_heavy_client_exception";
+  failureKind: "client_timeout" | "fetch_failure" | "client_exception";
+  phase:
+    | "compare_heavy_timeout"
+    | "compare_heavy_fetch_failure"
+    | "compare_heavy_exception"
+    | "compare_heavy_retry_timeout"
+    | "compare_heavy_retry_fetch_failure"
+    | "compare_heavy_retry_exception";
+  message: string;
+  normalized: NormalizedUiError;
+} {
+  const normalized = normalizeUnknownUiError(
+    value,
+    "Heavy diagnostics request failed before a response was returned."
+  );
+  const lowerMessage = normalized.message.toLowerCase();
+  if (normalized.isAbortError) {
+    return {
+      errorCode: "compare_heavy_client_timeout",
+      failureKind: "client_timeout",
+      phase: "compare_heavy_timeout",
+      message: "Heavy diagnostics request timed out in client before backend response.",
+      normalized,
+    };
+  }
+  if (
+    normalized.name === "TypeError" ||
+    lowerMessage.includes("failed to fetch") ||
+    lowerMessage.includes("networkerror") ||
+    lowerMessage.includes("network error")
+  ) {
+    return {
+      errorCode: "compare_heavy_client_fetch_failure",
+      failureKind: "fetch_failure",
+      phase: "compare_heavy_fetch_failure",
+      message: normalized.message || "Heavy diagnostics request failed in the network/fetch layer.",
+      normalized,
+    };
+  }
+  return {
+    errorCode: "compare_heavy_client_exception",
+    failureKind: "client_exception",
+    phase: "compare_heavy_exception",
+    message: normalized.message,
+    normalized,
+  };
+}
+
 export function markActiveOrchestratorPhasesErrored<T extends {
   status: string;
   startedAt: string | null;
@@ -1228,7 +1281,39 @@ export default function GapFillLabClient() {
         includeFullReportText: true,
       });
       startPhase("compare_heavy", "Building heavy diagnostics report...");
-      const { res: heavyRes, data: heavyData } = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_TIMEOUT_MS);
+      let heavyRes: Response;
+      let heavyData: ApiResponse;
+      try {
+        const heavyResult = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_TIMEOUT_MS);
+        heavyRes = heavyResult.res;
+        heavyData = heavyResult.data;
+      } catch (heavyErr: unknown) {
+        const failure = classifyHeavyDiagnosticsUiFailure(heavyErr);
+        finishPhase("compare_heavy", "error", {
+          errorCode: failure.errorCode,
+          errorMessage: failure.message,
+        });
+        setHeavyRetryBody(compareBodyHeavy);
+        setError(`Core compare completed, but heavy diagnostics/report failed.\n${failure.message}`);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: failure.phase,
+          heavyStatus: null,
+          heavyError: failure.errorCode,
+          heavyMessage: failure.message,
+          heavyFailureKind: failure.failureKind,
+          compareHeavyBody: compareBodyHeavy,
+          compareHeavyRequestTruth: {
+            includeDiagnostics: true,
+            includeFullReportText: true,
+            compareFreshModeRequested: compareHeavyFreshModeRequested,
+            runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
+          },
+          heavyResponse: null,
+        }));
+        setProgressStatus("Core compare complete. Heavy diagnostics failed; retry heavy report.");
+        return;
+      }
       if (!heavyRes.ok || !heavyData.ok) {
         finishPhase("compare_heavy", "error", {
           errorCode: String((heavyData as any)?.error ?? "compare_heavy_failed"),
@@ -1247,6 +1332,12 @@ export default function GapFillLabClient() {
           heavyStatus: heavyRes.status,
           heavyError: (heavyData as any)?.error ?? null,
           heavyMessage: (heavyData as any)?.message ?? null,
+          heavyFailureKind:
+            heavyRes.status === 504 || String((heavyData as any)?.error ?? "") === "compare_core_route_timeout"
+              ? "route_timeout"
+              : String((heavyData as any)?.error ?? "") === "compare_core_route_exception"
+                ? "route_exception"
+                : "route_error_response",
           compareHeavyBody: compareBodyHeavy,
           compareHeavyRequestTruth: {
             includeDiagnostics: true,
@@ -1336,7 +1427,35 @@ export default function GapFillLabClient() {
         compareHeavyRetryBody: heavyRetryBody,
       }));
       const startedAtMs = Date.now();
-      const { res, data } = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_TIMEOUT_MS);
+      let res: Response;
+      let data: ApiResponse;
+      try {
+        const retryResult = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_TIMEOUT_MS);
+        res = retryResult.res;
+        data = retryResult.data;
+      } catch (e: unknown) {
+        const failure = classifyHeavyDiagnosticsUiFailure(e);
+        updateOrchestratorPhase("compare_heavy", {
+          status: "error",
+          endedAt: new Date().toISOString(),
+          errorCode: failure.errorCode,
+          errorMessage: failure.message,
+        });
+        setError(failure.message);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase:
+            failure.failureKind === "client_timeout"
+              ? "compare_heavy_retry_timeout"
+              : failure.failureKind === "fetch_failure"
+                ? "compare_heavy_retry_fetch_failure"
+                : "compare_heavy_retry_exception",
+          heavyRetryError: failure.errorCode,
+          heavyRetryMessage: failure.message,
+          heavyRetryFailureKind: failure.failureKind,
+        }));
+        return;
+      }
       if (!res.ok || !data.ok) {
         const endedAtMs = Date.now();
         updateOrchestratorPhase("compare_heavy", {
@@ -1353,6 +1472,12 @@ export default function GapFillLabClient() {
           heavyRetryStatus: res.status,
           heavyRetryError: (data as any)?.error ?? null,
           heavyRetryMessage: (data as any)?.message ?? null,
+          heavyRetryFailureKind:
+            res.status === 504 || String((data as any)?.error ?? "") === "compare_core_route_timeout"
+              ? "route_timeout"
+              : String((data as any)?.error ?? "") === "compare_core_route_exception"
+                ? "route_exception"
+                : "route_error_response",
         }));
         return;
       }
@@ -1373,18 +1498,22 @@ export default function GapFillLabClient() {
       }));
       setProgressStatus(null);
     } catch (e: any) {
+      const normalized = normalizeUnknownUiError(
+        e,
+        "Heavy diagnostics retry failed after the request started."
+      );
       updateOrchestratorPhase("compare_heavy", {
         status: "error",
         endedAt: new Date().toISOString(),
-        errorCode: e?.name ?? "compare_heavy_retry_exception",
-        errorMessage: e?.message ?? String(e),
+        errorCode: normalized.name ?? "compare_heavy_retry_exception",
+        errorMessage: normalized.message,
       });
-      setError(e?.name === "AbortError" ? "Heavy diagnostics retry timed out." : (e?.message ?? String(e)));
+      setError(normalized.message);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: "compare_heavy_retry_exception",
-        errorName: e?.name ?? null,
-        errorMessage: e?.message ?? String(e),
+        errorName: normalized.name ?? null,
+        errorMessage: normalized.message,
       }));
     } finally {
       setLoading(false);

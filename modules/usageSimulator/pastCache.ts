@@ -67,6 +67,8 @@ function stableHashObject(obj: Record<string, unknown>): string {
 }
 
 export type CachedPastDataset = {
+  inputHash?: string;
+  updatedAt?: Date | null;
   datasetJson: Record<string, unknown>;
   intervalsCodec: string;
   intervalsCompressed: Buffer;
@@ -107,11 +109,13 @@ export async function getCachedPastDataset(args: {
           inputHash: args.inputHash,
         },
       },
-      select: { datasetJson: true, intervalsCodec: true, intervalsCompressed: true },
+      select: { inputHash: true, updatedAt: true, datasetJson: true, intervalsCodec: true, intervalsCompressed: true },
     })
     .catch(() => null);
   if (!row?.datasetJson || !row?.intervalsCompressed) return null;
   return {
+    inputHash: String(row.inputHash ?? args.inputHash ?? ""),
+    updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
     datasetJson: row.datasetJson as Record<string, unknown>,
     intervalsCodec: String(row.intervalsCodec ?? ""),
     intervalsCompressed: Buffer.isBuffer(row.intervalsCompressed)

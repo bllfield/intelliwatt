@@ -2075,6 +2075,49 @@ export async function POST(req: NextRequest) {
     (artifactInputHashUsed && (artifactScenarioId ?? stableScenarioId)
       ? `${artifactScenarioId ?? stableScenarioId}:${artifactInputHashUsed}`
       : null);
+  const hasContradictoryExactArtifactTruth =
+    artifactSourceMode === "exact_hash_match" &&
+    (!artifactInputHashUsed ||
+      artifactHashMatch !== true ||
+      (typeof requestedInputHash === "string" &&
+        requestedInputHash.length > 0 &&
+        artifactInputHashUsed !== requestedInputHash) ||
+      (requireExactArtifactMatch && artifactExactIdentityResolved !== true));
+  if (hasContradictoryExactArtifactTruth) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: requireExactArtifactMatch ? "artifact_exact_identity_unresolved" : "artifact_truth_invariant_failed",
+        message: requireExactArtifactMatch
+          ? "Compare required an exact shared Past artifact identity, but the returned artifact truth could not prove that exact match."
+          : "Compare returned contradictory artifact truth and cannot report success.",
+        reasonCode: requireExactArtifactMatch
+          ? "ARTIFACT_EXACT_IDENTITY_UNRESOLVED"
+          : "ARTIFACT_TRUTH_INVARIANT_FAILED",
+        compareRequestTruth,
+        artifactRequestTruth,
+        artifactTruth: {
+          sourceMode: artifactSourceMode,
+          requestedInputHash,
+          artifactInputHashUsed,
+          artifactHashMatch,
+          requestedScenarioId: artifactRequestedScenarioId,
+          scenarioId: artifactScenarioId ?? stableScenarioId,
+          exactIdentifierUsed: artifactExactIdentifierUsed,
+          exactIdentityResolved: artifactExactIdentityResolved,
+          sameRunEnsureArtifact: artifactSameRunEnsureIdentity,
+          fallbackOccurred: artifactFallbackOccurred,
+          fallbackReason: artifactFallbackReason,
+        },
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          compareRequestTruth,
+          selectedDaysCoreLightweight,
+        }),
+      },
+      { status: requireExactArtifactMatch ? 409 : 500 }
+    );
+  }
   const artifactSourceNote =
     ma.artifactSourceNote ??
     (artifactSourceMode === "latest_by_scenario_fallback"
