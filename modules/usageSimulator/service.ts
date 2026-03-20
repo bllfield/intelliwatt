@@ -516,7 +516,10 @@ function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalA
   return out;
 }
 
-function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
+function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(
+  dataset: any,
+  timezone?: string | null
+): CanonicalArtifactSimulatedDayTotalsByDate {
   const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
   const dailyRows = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
   const simulatedOwnershipDates = new Set<string>(
@@ -528,6 +531,37 @@ function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset: any)
   for (const row of dailyRows) {
     const dk = String((row as any)?.date ?? "").slice(0, 10);
     const source = String((row as any)?.source ?? "").toUpperCase();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && source === "SIMULATED") simulatedOwnershipDates.add(dk);
+  }
+  const timezoneResolved = typeof timezone === "string" && timezone.trim().length > 0 ? timezone.trim() : null;
+  const intervals15 = Array.isArray((dataset as any)?.series?.intervals15)
+    ? ((dataset as any).series.intervals15 as Array<Record<string, unknown>>)
+    : [];
+  if (timezoneResolved && simulatedOwnershipDates.size > 0 && intervals15.length > 0) {
+    const intervalSumsByLocalDate = new Map<string, number>();
+    for (const row of intervals15) {
+      const timestamp = String((row as any)?.timestamp ?? "").trim();
+      if (!timestamp) continue;
+      const dk = dateKeyInTimezone(timestamp, timezoneResolved);
+      if (!simulatedOwnershipDates.has(dk)) continue;
+      intervalSumsByLocalDate.set(dk, (intervalSumsByLocalDate.get(dk) ?? 0) + (Number((row as any)?.kwh) || 0));
+    }
+    if (intervalSumsByLocalDate.size > 0) {
+      for (const [dk, kwh] of Array.from(intervalSumsByLocalDate.entries())) out[dk] = round2Local(kwh);
+      for (const row of dailyRows) {
+        const dk = String((row as any)?.date ?? "").slice(0, 10);
+        const source = String((row as any)?.source ?? "").toUpperCase();
+        const kwh = Number((row as any)?.kwh);
+        const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh) || dk in out) continue;
+        out[dk] = round2Local(kwh);
+      }
+      return out;
+    }
+  }
+  for (const row of dailyRows) {
+    const dk = String((row as any)?.date ?? "").slice(0, 10);
+    const source = String((row as any)?.source ?? "").toUpperCase();
     const kwh = Number((row as any)?.kwh);
     const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh)) continue;
@@ -536,7 +570,10 @@ function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset: any)
   return out;
 }
 
-function attachCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
+function attachCanonicalArtifactSimulatedDayTotalsByDate(
+  dataset: any,
+  timezone?: string | null
+): CanonicalArtifactSimulatedDayTotalsByDate {
   if (!dataset || typeof dataset !== "object") return {};
   if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
   const existing = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
@@ -545,7 +582,7 @@ function attachCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): Canonica
     (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = existing;
     return existing;
   }
-  const built = buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset);
+  const built = buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset, timezone);
   (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
   (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
   return built;
@@ -977,7 +1014,7 @@ export async function buildGapfillCompareSimShared(args: {
     // Persist canonical shared-window ownership metadata with rebuilt artifacts so compare
     // fallback compatibility checks and scope diagnostics use the same bounded fingerprint.
     applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
-    const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset);
+    const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset, timezone);
     const { bytes } = encodeIntervalsV1(intervals15);
     const datasetJsonForStorage = {
       ...rebuiltDataset,
@@ -3664,7 +3701,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               if (scenarioKey !== "BASELINE") {
                 applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
               }
-              attachCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+              attachCanonicalArtifactSimulatedDayTotalsByDate(dataset, timezone);
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
@@ -3676,7 +3713,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);
-            const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+            const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(dataset, timezone);
             const datasetJsonForStorage = {
               ...dataset,
               canonicalArtifactSimulatedDayTotalsByDate,

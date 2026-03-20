@@ -691,7 +691,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("clears exact-hash artifact source mode after auto-rebuilding from incompatible fallback", async () => {
-    const rebuiltIntervals = oneDayIntervals96(0.25);
+    const rebuiltIntervals = oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96);
     getCachedPastDataset
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -775,7 +775,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
       },
     });
-    const rebuiltIntervals = oneDayIntervals96(0.25);
+    const rebuiltIntervals = oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96);
     getCachedPastDataset
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -806,7 +806,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       dataset: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
         meta: { curveShapingVersion: "shared_curve_v2" },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        daily: [{ date: "2026-01-01", kwh: 99, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
         series: { intervals15: rebuiltIntervals },
       },
