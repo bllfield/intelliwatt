@@ -2141,8 +2141,14 @@ export async function POST(req: NextRequest) {
       .map((r) => [r.date, { simKwh: r.simKwh, source: r.source as "ACTUAL" | "SIMULATED" }] as const)
   );
   const parityDisplayDailyByDate = new Map<string, { simKwh: number; source: "SIMULATED" }>(
-    displayDailyRows
-      .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.source === "SIMULATED")
+    (Array.isArray((sharedSim as any)?.artifactSimulatedDayReferenceRows)
+      ? ((sharedSim as any).artifactSimulatedDayReferenceRows as Array<Record<string, unknown>>)
+      : [])
+      .map((row) => ({
+        date: String((row as any)?.date ?? "").slice(0, 10),
+        simKwh: round2(Number((row as any)?.simKwh ?? 0)),
+      }))
+      .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
       .map((r) => [r.date, { simKwh: r.simKwh, source: "SIMULATED" as const }] as const)
   );
   const actualDailyByDate = new Map<string, number>();
@@ -2212,7 +2218,10 @@ export async function POST(req: NextRequest) {
         displayVsFreshParityMatch: parityMatch,
         parityDisplaySourceUsed:
           ((sharedSim as any)?.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed as string | undefined) ??
-          "display_daily_simulated_rows_only",
+          "canonical_artifact_simulated_day_totals",
+        artifactSimulatedDayReferenceSource:
+          ((sharedSim as any)?.artifactSimulatedDayReferenceSource as string | undefined) ??
+          "canonical_artifact_simulated_day_totals",
         parityDisplayValueKind:
           displayedPastStyleSimDayKwh == null ? "missing_display_sim_reference" : "artifact_simulated_day_total",
         scoredDayDisplaySource: displayDay?.source ?? null,
@@ -2367,6 +2376,7 @@ export async function POST(req: NextRequest) {
     compareSharedCalcPath,
     compareSimSource,
     displaySimSource,
+    artifactParityReferenceSource: (sharedSim as any).artifactSimulatedDayReferenceSource ?? null,
     weatherBasisUsed,
     architectureNote:
       compareCalculationScope === "selected_days_shared_path_only"
@@ -2382,6 +2392,7 @@ export async function POST(req: NextRequest) {
     compareSharedCalcPath,
     compareSimSource,
     displaySimSource,
+    artifactParityReferenceSource: (sharedSim as any).artifactSimulatedDayReferenceSource ?? null,
     weatherBasisUsed,
     compareTruth,
     compareRequestTruth,

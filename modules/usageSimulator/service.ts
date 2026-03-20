@@ -32,6 +32,7 @@ import {
   getLatestCachedPastDatasetByScenario,
   saveCachedPastDataset,
   PAST_ENGINE_VERSION,
+  type CanonicalArtifactSimulatedDayTotalsByDate,
 } from "@/modules/usageSimulator/pastCache";
 import { encodeIntervalsV1, decodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/intervalCodec";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
@@ -311,6 +312,8 @@ export type GapfillCompareSimSharedResult =
       compareSimSource?: "shared_fresh_calc" | "shared_artifact_cache" | "shared_selected_days_calc";
       compareFreshModeUsed?: "selected_days" | "full_window" | "artifact_only";
       weatherBasisUsed?: string;
+      artifactSimulatedDayReferenceSource?: "canonical_artifact_simulated_day_totals";
+      artifactSimulatedDayReferenceRows?: Array<{ date: string; simKwh: number }>;
       displayVsFreshParityForScoredDays?: {
         matches: boolean;
         mismatchCount: number;
@@ -321,7 +324,7 @@ export type GapfillCompareSimSharedResult =
         complete?: boolean;
         scope: "scored_test_days_local";
         granularity: "daily_kwh_rounded_2dp";
-        parityDisplaySourceUsed?: "display_daily_simulated_rows_only";
+        parityDisplaySourceUsed?: "canonical_artifact_simulated_day_totals";
         parityDisplayValueKind?: "artifact_simulated_day_total";
         comparisonBasis:
           | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
@@ -366,6 +369,58 @@ export type GapfillCompareSimSharedResult =
 
 function round2Local(n: number) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
+
+function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
+  const raw =
+    (dataset as any)?.meta?.[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] ??
+    (dataset as any)?.[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
+  for (const [date, value] of Object.entries(raw as Record<string, unknown>)) {
+    const dk = String(date ?? "").slice(0, 10);
+    const kwh = Number(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !Number.isFinite(kwh)) continue;
+    out[dk] = round2Local(kwh);
+  }
+  return out;
+}
+
+function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
+  const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
+  const dailyRows = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
+  const simulatedOwnershipDates = new Set<string>(
+    String((dataset as any)?.meta?.excludedDateKeysFingerprint ?? "")
+      .split(",")
+      .map((dk) => String(dk ?? "").trim())
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  for (const row of dailyRows) {
+    const dk = String((row as any)?.date ?? "").slice(0, 10);
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    const kwh = Number((row as any)?.kwh);
+    const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh)) continue;
+    out[dk] = round2Local(kwh);
+  }
+  return out;
+}
+
+function attachCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
+  if (!dataset || typeof dataset !== "object") return {};
+  if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
+  const existing = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  if (Object.keys(existing).length > 0 || CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY in ((dataset as any).meta ?? {})) {
+    (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = existing;
+    (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = existing;
+    return existing;
+  }
+  const built = buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset);
+  (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
+  (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
+  return built;
 }
 
 function reconcileRestoredDatasetFromDecodedIntervals(args: {
@@ -747,9 +802,15 @@ export async function buildGapfillCompareSimShared(args: {
     // Persist canonical shared-window ownership metadata with rebuilt artifacts so compare
     // fallback compatibility checks and scope diagnostics use the same bounded fingerprint.
     applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
+    const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset);
     const { bytes } = encodeIntervalsV1(intervals15);
     const datasetJsonForStorage = {
       ...rebuiltDataset,
+      canonicalArtifactSimulatedDayTotalsByDate,
+      meta: {
+        ...((rebuiltDataset as any)?.meta ?? {}),
+        canonicalArtifactSimulatedDayTotalsByDate,
+      },
       series: { ...(rebuiltDataset.series ?? {}), intervals15: [] },
     };
     await saveCachedPastDataset({
@@ -1377,6 +1438,13 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.gapfillDisplayMonthlySource = useDatasetMonthlyAsCanonical
     ? "dataset.monthly"
     : "interval_rebucket_fallback";
+  const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  const artifactSimulatedDayReferenceRows = Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
+    .map(([date, simKwh]) => ({ date: String(date).slice(0, 10), simKwh: round2Local(Number(simKwh) || 0) }))
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && chartDateKeysLocal.has(row.date))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  modelAssumptions.artifactSimulatedDayReferenceSource = "canonical_artifact_simulated_day_totals";
+  modelAssumptions.artifactSimulatedDayReferenceCount = Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length;
 
   const freshDailyTotalsByDate = new Map<string, number>();
   for (const p of simulatedTestIntervals) {
@@ -1385,21 +1453,19 @@ export async function buildGapfillCompareSimShared(args: {
     freshDailyTotalsByDate.set(dk, (freshDailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
   }
   const parityDisplayDailyByDate = new Map<string, number>(
-    simulatedChartDaily
-      .filter((d) => String((d as any)?.source ?? "").toUpperCase() === "SIMULATED")
+    artifactSimulatedDayReferenceRows
       .map((d) => [String(d.date ?? "").slice(0, 10), round2Local(Number(d.simKwh) || 0)] as const)
       .filter(([dk]) => boundedTestDateKeysLocal.has(dk))
   );
-  const missingDisplaySimSampleDates = Array.from(boundedTestDateKeysLocal)
-    .filter((dk) => !parityDisplayDailyByDate.has(dk))
-    .slice(0, 10);
-  const mismatchSampleDates = Array.from(boundedTestDateKeysLocal)
-    .filter(
-      (dk) =>
-        parityDisplayDailyByDate.has(dk) &&
-        round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== round2Local(parityDisplayDailyByDate.get(dk) ?? 0)
-    )
-    .slice(0, 10);
+  const allMissingDisplaySimDates = Array.from(boundedTestDateKeysLocal).filter((dk) => !parityDisplayDailyByDate.has(dk));
+  const allMismatchDates = Array.from(boundedTestDateKeysLocal).filter(
+    (dk) =>
+      parityDisplayDailyByDate.has(dk) &&
+      round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== round2Local(parityDisplayDailyByDate.get(dk) ?? 0)
+  );
+  const comparableDateCount = Math.max(0, boundedTestDateKeysLocal.size - allMissingDisplaySimDates.length);
+  const missingDisplaySimSampleDates = allMissingDisplaySimDates.slice(0, 10);
+  const mismatchSampleDates = allMismatchDates.slice(0, 10);
   const parityComparisonBasis:
     | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
     | "display_shared_artifact_vs_compare_artifact_filter_only"
@@ -1411,16 +1477,16 @@ export async function buildGapfillCompareSimShared(args: {
         ? "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
         : "display_shared_artifact_vs_compare_artifact_filter_only";
   const displayVsFreshParityForScoredDays = {
-    matches: mismatchSampleDates.length === 0,
-    mismatchCount: mismatchSampleDates.length,
+    matches: allMismatchDates.length === 0,
+    mismatchCount: allMismatchDates.length,
     mismatchSampleDates,
-    missingDisplaySimCount: missingDisplaySimSampleDates.length,
+    missingDisplaySimCount: allMissingDisplaySimDates.length,
     missingDisplaySimSampleDates,
-    comparableDateCount: Math.max(0, boundedTestDateKeysLocal.size - missingDisplaySimSampleDates.length),
-    complete: missingDisplaySimSampleDates.length === 0,
+    comparableDateCount,
+    complete: allMismatchDates.length === 0 && allMissingDisplaySimDates.length === 0,
     scope: "scored_test_days_local" as const,
     granularity: "daily_kwh_rounded_2dp" as const,
-    parityDisplaySourceUsed: "display_daily_simulated_rows_only" as const,
+    parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals" as const,
     parityDisplayValueKind: "artifact_simulated_day_total" as const,
     comparisonBasis: parityComparisonBasis,
   };
@@ -1474,6 +1540,8 @@ export async function buildGapfillCompareSimShared(args: {
     compareSimSource,
     compareFreshModeUsed,
     weatherBasisUsed,
+    artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+    artifactSimulatedDayReferenceRows,
     displayVsFreshParityForScoredDays,
     travelVacantParitySample,
     timezoneUsedForScoring: timezone,
@@ -3084,6 +3152,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               if (scenarioKey !== "BASELINE") {
                 applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
               }
+              attachCanonicalArtifactSimulatedDayTotalsByDate(dataset);
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
@@ -3095,8 +3164,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
             }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);
+            const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(dataset);
             const datasetJsonForStorage = {
               ...dataset,
+              canonicalArtifactSimulatedDayTotalsByDate,
+              meta: {
+                ...((dataset as any)?.meta ?? {}),
+                canonicalArtifactSimulatedDayTotalsByDate,
+              },
               series: { ...(dataset.series ?? {}), intervals15: [] },
             };
             await saveCachedPastDataset({
@@ -3469,3 +3544,6 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
     canonicalEndMonth: canonical.endMonth,
   };
 }
+
+
+

@@ -289,8 +289,14 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
     const saved = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
     const savedMeta = ((saved as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
+    const savedCanonicalDayTotals =
+      ((saved as any).datasetJson?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown> | undefined) ??
+      (savedMeta.canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown> | undefined);
     expect(typeof savedMeta.excludedDateKeysFingerprint).toBe("string");
     expect(typeof savedMeta.excludedDateKeysCount).toBe("number");
+    expect(savedCanonicalDayTotals).toEqual({
+      "2026-01-01": 0.75,
+    });
   });
 });
 
@@ -553,8 +559,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
     const saved = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
     const savedMeta = ((saved as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
+    const savedCanonicalDayTotals =
+      ((saved as any).datasetJson?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown> | undefined) ??
+      (savedMeta.canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown> | undefined);
     expect(savedMeta.excludedDateKeysFingerprint).toBe("2026-01-01");
     expect(savedMeta.excludedDateKeysCount).toBe(1);
+    expect(savedCanonicalDayTotals).toEqual({
+      "2026-01-01": 24,
+    });
   });
 
   it("does not enforce legacy compare-mask metadata when shared ownership metadata is valid", async () => {
@@ -1144,6 +1156,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           curveShapingVersion: "shared_curve_v2",
           excludedDateKeysFingerprint: "",
           weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
         },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
@@ -1197,7 +1210,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       inputHash: "hash-selected-default",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "", weatherSourceSummary: "actual_only" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+        },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 24 }],
         series: {},
@@ -1244,7 +1262,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       inputHash: "hash-selected-default",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 99, start: "2026-01-01", end: "2026-01-01" },
-        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "", weatherSourceSummary: "actual_only" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 99 },
+        },
         daily: [{ date: "2026-01-01", kwh: 99, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 99 }],
         series: {},
@@ -1280,6 +1303,59 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(1);
       expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
+    }
+  });
+
+  it("reports full mismatch totals while capping mismatch samples at ten dates", async () => {
+    const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96 * testDates.length, totalKwh: 99 * testDates.length, start: testDates[0], end: testDates[testDates.length - 1] },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: Object.fromEntries(testDates.map((date) => [date, 99])),
+        },
+        daily: testDates.map((date) => ({ date, kwh: 99, source: "SIMULATED" })),
+        monthly: [{ month: "2026-01", kwh: 99 * testDates.length }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: testDates.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: testDates[0], endDate: testDates[testDates.length - 1] },
+      testDateKeysLocal: new Set<string>(testDates),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(12);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toHaveLength(10);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(testDates.slice(0, 10));
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(12);
+      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
     }
   });
 
@@ -1321,11 +1397,114 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(1);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual(["2026-01-01"]);
-      expect(out.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed).toBe("display_daily_simulated_rows_only");
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
+      expect(out.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed).toBe("canonical_artifact_simulated_day_totals");
+      expect(out.artifactSimulatedDayReferenceSource).toBe("canonical_artifact_simulated_day_totals");
       expect(out.displayVsFreshParityForScoredDays?.parityDisplayValueKind).toBe("artifact_simulated_day_total");
       expect(out.displayVsFreshParityForScoredDays?.comparisonBasis).toBe(
         "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
       );
+    }
+  });
+
+  it("uses stored canonical artifact simulated-day totals for lightweight parity without decoding intervals", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 99, source: "ACTUAL" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(decodeIntervalsV1).not.toHaveBeenCalled();
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed).toBe(
+        "canonical_artifact_simulated_day_totals"
+      );
+      expect(out.artifactSimulatedDayReferenceSource).toBe("canonical_artifact_simulated_day_totals");
+      expect(out.artifactSimulatedDayReferenceRows).toEqual([{ date: "2026-01-01", simKwh: 24 }]);
+    }
+  });
+
+  it("reports full missing-display totals while capping missing-date samples at ten dates", async () => {
+    const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96 * testDates.length, totalKwh: 24 * testDates.length, start: testDates[0], end: testDates[testDates.length - 1] },
+        meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "", weatherSourceSummary: "actual_only" },
+        daily: testDates.map((date) => ({ date, kwh: 24, source: "ACTUAL" })),
+        monthly: [{ month: "2026-01", kwh: 24 * testDates.length }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: testDates.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: testDates[0], endDate: testDates[testDates.length - 1] },
+      testDateKeysLocal: new Set<string>(testDates),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(12);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toHaveLength(10);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual(testDates.slice(0, 10));
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
     }
   });
 

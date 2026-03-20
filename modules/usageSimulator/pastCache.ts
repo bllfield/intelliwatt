@@ -74,6 +74,9 @@ export type CachedPastDataset = {
   intervalsCompressed: Buffer;
 };
 
+/** Compact canonical artifact-owned simulated-day totals for lightweight parity/reference reads. */
+export type CanonicalArtifactSimulatedDayTotalsByDate = Record<string, number>;
+
 /** Guard: usage client may not have cache table (e.g. old generate or no USAGE_DATABASE_URL). */
 function getCacheModel(): {
   findUnique: (args: any) => Promise<any>;
