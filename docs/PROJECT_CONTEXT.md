@@ -118,6 +118,7 @@
 - Gap-Fill Lab `compare_core` in selected-days mode is expected to stay lightweight: shared simulator math remains authoritative, but the core response should avoid full-window diagnostic/weather payloads and other heavy report-only structures.
 - Gap-Fill Lab selected-days scored actual days should not be reported as missing artifact simulated-day parity defects when the artifact only stores canonical simulated-day totals for true simulated ownership days (for example travel/vacant patches); surface an explicit not-applicable parity state instead.
 - Gap-Fill Lab heavy diagnostics retries should return a compact merge-only payload with heavy timing fields, rather than re-sending the entire core compare response.
+- Gap-Fill Lab compare-core must include compact scored-day weather truth for the scored local dates, owned by the shared compare/service path; heavy report may expand that truth, but route/UI layers must not recompute scored-day weather on their own.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.

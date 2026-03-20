@@ -74,6 +74,29 @@ type ApiResponse =
       selectedFreshIntervalCount?: number;
       selectedActualIntervalCount?: number;
       artifactReferenceDayCount?: number;
+      scoredDayWeatherRows?: Array<{
+        localDate: string;
+        avgTempF: number | null;
+        minTempF: number | null;
+        maxTempF: number | null;
+        hdd65: number | null;
+        cdd65: number | null;
+        weatherBasisUsed: string | null;
+        weatherKindUsed: string | null;
+        weatherSourceUsed: string | null;
+        weatherProviderName: string | null;
+        weatherFallbackReason: string | null;
+      }>;
+      scoredDayWeatherTruth?: {
+        availability: string;
+        reasonCode: string;
+        explanation: string;
+        source: string;
+        scoredDateCount: number;
+        weatherRowCount: number;
+        missingDateCount: number;
+        missingDateSample: string[];
+      };
       heavyStartedAt?: string;
       heavyEndedAt?: string;
       heavyElapsedMs?: number;
@@ -111,6 +134,8 @@ type ApiResponse =
         parityReasonCode?: string | null;
         dayType: "weekday" | "weekend";
         weatherBasis: string | null;
+        weatherSourceUsed?: string | null;
+        weatherFallbackReason?: string | null;
         avgTempF: number | null;
         minTempF: number | null;
         maxTempF: number | null;

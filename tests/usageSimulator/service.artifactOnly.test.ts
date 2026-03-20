@@ -13,6 +13,7 @@ const getLatestCachedPastDatasetByScenario = vi.fn();
 const saveCachedPastDataset = vi.fn();
 const simulatePastUsageDataset = vi.fn();
 const simulatePastSelectedDaysShared = vi.fn();
+const loadWeatherForPastWindow = vi.fn();
 const encodeIntervalsV1 = vi.fn();
 const decodeIntervalsV1 = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
@@ -55,6 +56,7 @@ vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
   simulatePastUsageDataset: (...args: any[]) => simulatePastUsageDataset(...args),
   simulatePastSelectedDaysShared: (...args: any[]) => simulatePastSelectedDaysShared(...args),
   getUsageShapeProfileIdentityForPast: (...args: any[]) => getUsageShapeProfileIdentityForPast(...args),
+  loadWeatherForPastWindow: (...args: any[]) => loadWeatherForPastWindow(...args),
 }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
@@ -79,6 +81,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     saveCachedPastDataset.mockReset();
     simulatePastUsageDataset.mockReset();
     simulatePastSelectedDaysShared.mockReset();
+    loadWeatherForPastWindow.mockReset();
     encodeIntervalsV1.mockReset();
     decodeIntervalsV1.mockReset();
     getIntervalDataFingerprint.mockReset();
@@ -109,6 +112,25 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
     ]);
+    loadWeatherForPastWindow.mockImplementation(async ({ canonicalDateKeys }: any) => ({
+      actualWxByDateKey: new Map(
+        (canonicalDateKeys ?? []).map((dateKey: string) => [
+          dateKey,
+          { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" },
+        ])
+      ),
+      normalWxByDateKey: new Map(),
+      provenance: {
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+        weatherSourceSummary: "actual_only",
+        weatherFallbackReason: null,
+        weatherProviderName: "OPEN_METEO",
+        weatherCoverageStart: canonicalDateKeys?.[0] ?? null,
+        weatherCoverageEnd: canonicalDateKeys?.[(canonicalDateKeys?.length ?? 1) - 1] ?? null,
+        weatherStubRowCount: 0,
+        weatherActualRowCount: Array.isArray(canonicalDateKeys) ? canonicalDateKeys.length : 0,
+      },
+    }));
   });
 
   it("returns ARTIFACT_MISSING instead of rebuilding when cache artifact is missing", async () => {
@@ -1455,6 +1477,18 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect(out.scoredDayWeatherTruth?.availability).toBe("available");
+      expect(out.scoredDayWeatherRows).toEqual([
+        expect.objectContaining({
+          localDate: "2026-01-01",
+          avgTempF: 50,
+          minTempF: 40,
+          maxTempF: 60,
+          hdd65: 15,
+          cdd65: 0,
+          weatherBasisUsed: "actual_only",
+        }),
+      ]);
       expect(out.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed).toBe(
         "canonical_artifact_simulated_day_totals"
       );
@@ -1536,6 +1570,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(selectedDates);
       expect(out.artifactSimulatedDayReferenceRows?.map((row) => row.date)).toEqual(selectedDates);
+      expect(out.scoredDayWeatherRows?.map((row) => row.localDate)).toEqual(selectedDates);
+      expect(out.scoredDayWeatherRows?.every((row) => row.weatherBasisUsed === "actual_only")).toBe(true);
+      expect(out.scoredDayWeatherTruth).toMatchObject({
+        availability: "available",
+        scoredDateCount: 2,
+        weatherRowCount: 2,
+        missingDateCount: 0,
+      });
       expect(out.simulatedChartMonthly).toEqual([{ month: "2026-01", kwh: 744 }]);
       expect((out as any).selectedDaysRequestedCount ?? (out.modelAssumptions as any)?.selectedDaysRequestedCount).toBe(2);
       expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(2);

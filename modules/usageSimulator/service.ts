@@ -51,6 +51,7 @@ import {
   simulatePastUsageDataset,
   simulatePastSelectedDaysShared,
   getUsageShapeProfileIdentityForPast,
+  loadWeatherForPastWindow,
 } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import {
@@ -117,6 +118,87 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
 
 type DateRange = { startDate: string; endDate: string };
 type IntervalPoint = { timestamp: string; kwh: number };
+type ScoredDayWeatherRow = {
+  localDate: string;
+  avgTempF: number | null;
+  minTempF: number | null;
+  maxTempF: number | null;
+  hdd65: number | null;
+  cdd65: number | null;
+  weatherBasisUsed: string | null;
+  weatherKindUsed: string | null;
+  weatherSourceUsed: string | null;
+  weatherProviderName: string | null;
+  weatherFallbackReason: string | null;
+};
+type ScoredDayWeatherTruth = {
+  availability: "available" | "missing_expected_scored_day_weather";
+  reasonCode: "SCORED_DAY_WEATHER_AVAILABLE" | "SCORED_DAY_WEATHER_MISSING";
+  explanation: string;
+  source: "shared_compare_scored_day_weather";
+  scoredDateCount: number;
+  weatherRowCount: number;
+  missingDateCount: number;
+  missingDateSample: string[];
+};
+
+function buildScoredDayWeatherPayload(args: {
+  scoredDateKeysLocal: Set<string>;
+  weatherByDateKey?: Map<string, { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }> | null;
+  weatherBasisUsed: string | null;
+  weatherKindUsed?: string | null;
+  weatherProviderName?: string | null;
+  weatherFallbackReason?: string | null;
+}): { rows: ScoredDayWeatherRow[]; truth: ScoredDayWeatherTruth } {
+  const scoredDates = Array.from(args.scoredDateKeysLocal ?? [])
+    .map((dk) => String(dk ?? "").slice(0, 10))
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    .sort();
+  const rows: ScoredDayWeatherRow[] = [];
+  const missingDateSample: string[] = [];
+  for (const localDate of scoredDates) {
+    const wx = args.weatherByDateKey?.get(localDate) ?? null;
+    if (!wx) {
+      if (missingDateSample.length < 10) missingDateSample.push(localDate);
+      continue;
+    }
+    const avgTempF = Number(wx.tAvgF);
+    const minTempF = Number(wx.tMinF);
+    const maxTempF = Number(wx.tMaxF);
+    const hdd65 = Number(wx.hdd65);
+    const cdd65 = Number(wx.cdd65);
+    rows.push({
+      localDate,
+      avgTempF: Number.isFinite(avgTempF) ? round2Local(avgTempF) : null,
+      minTempF: Number.isFinite(minTempF) ? round2Local(minTempF) : null,
+      maxTempF: Number.isFinite(maxTempF) ? round2Local(maxTempF) : null,
+      hdd65: Number.isFinite(hdd65) ? round2Local(hdd65) : null,
+      cdd65: Number.isFinite(cdd65) ? round2Local(cdd65) : null,
+      weatherBasisUsed: args.weatherBasisUsed ?? null,
+      weatherKindUsed: args.weatherKindUsed ?? null,
+      weatherSourceUsed: String(wx.source ?? "").trim() || null,
+      weatherProviderName: args.weatherProviderName ?? null,
+      weatherFallbackReason: args.weatherFallbackReason ?? null,
+    });
+  }
+  const missingDateCount = Math.max(0, scoredDates.length - rows.length);
+  return {
+    rows,
+    truth: {
+      availability: missingDateCount === 0 ? "available" : "missing_expected_scored_day_weather",
+      reasonCode: missingDateCount === 0 ? "SCORED_DAY_WEATHER_AVAILABLE" : "SCORED_DAY_WEATHER_MISSING",
+      explanation:
+        missingDateCount === 0
+          ? "Compact scored-day weather truth is available from the shared compare execution."
+          : "Shared compare completed without compact weather truth for one or more scored dates.",
+      source: "shared_compare_scored_day_weather",
+      scoredDateCount: scoredDates.length,
+      weatherRowCount: rows.length,
+      missingDateCount,
+      missingDateSample,
+    },
+  };
+}
 
 async function resolvePastScenarioIdForHouse(args: {
   userId: string;
@@ -314,6 +396,8 @@ export type GapfillCompareSimSharedResult =
       weatherBasisUsed?: string;
       artifactSimulatedDayReferenceSource?: "canonical_artifact_simulated_day_totals";
       artifactSimulatedDayReferenceRows?: Array<{ date: string; simKwh: number }>;
+      scoredDayWeatherRows?: ScoredDayWeatherRow[];
+      scoredDayWeatherTruth?: ScoredDayWeatherTruth;
       displayVsFreshParityForScoredDays?: {
         matches: boolean | null;
         mismatchCount: number;
@@ -1250,6 +1334,17 @@ export async function buildGapfillCompareSimShared(args: {
     (modelAssumptions as any)?.simulationWeatherSourceOwner ??
     "unknown"
   );
+  let scoredDayWeatherRows: ScoredDayWeatherRow[] = [];
+  let scoredDayWeatherTruth: ScoredDayWeatherTruth = {
+    availability: "missing_expected_scored_day_weather",
+    reasonCode: "SCORED_DAY_WEATHER_MISSING",
+    explanation: "Shared compare has not yet produced compact scored-day weather truth.",
+    source: "shared_compare_scored_day_weather",
+    scoredDateCount: boundedTestDateKeysLocal.size,
+    weatherRowCount: 0,
+    missingDateCount: boundedTestDateKeysLocal.size,
+    missingDateSample: Array.from(boundedTestDateKeysLocal).sort().slice(0, 10),
+  };
   let freshParityIntervals: IntervalPoint[] = [];
 
   let freshDataset: any | null = null;
@@ -1302,6 +1397,25 @@ export async function buildGapfillCompareSimShared(args: {
       compareSharedCalcPath =
         "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
       weatherBasisUsed = String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown";
+      const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
+      if (selectedWeatherRange.length > 0) {
+        const selectedDaysWeather = await loadWeatherForPastWindow({
+          houseId,
+          startDate: selectedWeatherRange[0]!,
+          endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
+          canonicalDateKeys: selectedWeatherRange,
+        });
+        const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
+          scoredDateKeysLocal: boundedTestDateKeysLocal,
+          weatherByDateKey: selectedDaysWeather.actualWxByDateKey,
+          weatherBasisUsed: String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed,
+          weatherKindUsed: selectedDaysWeather.provenance.weatherKindUsed ?? null,
+          weatherProviderName: selectedDaysWeather.provenance.weatherProviderName ?? null,
+          weatherFallbackReason: selectedDaysWeather.provenance.weatherFallbackReason ?? null,
+        });
+        scoredDayWeatherRows = scoredDayWeatherPayload.rows;
+        scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
+      }
     } else {
       const freshResult = await getPastSimulatedDatasetForHouse({
         userId,
@@ -1355,6 +1469,16 @@ export async function buildGapfillCompareSimShared(args: {
           (freshDataset as any)?.meta?.simulationWeatherSourceOwner ??
           weatherBasisUsed) || "unknown"
       );
+      const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
+        scoredDateKeysLocal: boundedTestDateKeysLocal,
+        weatherByDateKey: freshResult.actualWxByDateKey ?? null,
+        weatherBasisUsed,
+        weatherKindUsed: String(((freshDataset as any)?.meta?.weatherKindUsed ?? "") || "") || null,
+        weatherProviderName: String(((freshDataset as any)?.meta?.weatherProviderName ?? "") || "") || null,
+        weatherFallbackReason: String(((freshDataset as any)?.meta?.weatherFallbackReason ?? "") || "") || null,
+      });
+      scoredDayWeatherRows = scoredDayWeatherPayload.rows;
+      scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
     }
   }
   const availableTestDateKeysFromSimulated = new Set<string>(
@@ -1628,6 +1752,8 @@ export async function buildGapfillCompareSimShared(args: {
     weatherBasisUsed,
     artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
     artifactSimulatedDayReferenceRows,
+    scoredDayWeatherRows,
+    scoredDayWeatherTruth,
     displayVsFreshParityForScoredDays,
     travelVacantParitySample,
     timezoneUsedForScoring: timezone,
@@ -2425,6 +2551,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
   | {
       dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>;
       simulatedDayResults?: SimulatedDayResult[];
+      actualWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }>;
       error?: undefined;
     }
   | { dataset: null; error: string }
@@ -2478,7 +2605,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
         ])
       );
     }
-    return { dataset, simulatedDayResults: result.simulatedDayResults };
+    return { dataset, simulatedDayResults: result.simulatedDayResults, actualWxByDateKey };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.warn("[usageSimulator/service] getPastSimulatedDatasetForHouse failed", { houseId, err: e });

@@ -913,6 +913,31 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       displaySimSource: "dataset.daily",
       compareSimSource: "shared_selected_days_calc",
       weatherBasisUsed: "actual_only",
+      scoredDayWeatherRows: [
+        {
+          localDate: "2026-01-01",
+          avgTempF: 51,
+          minTempF: 41,
+          maxTempF: 61,
+          hdd65: 14,
+          cdd65: 0,
+          weatherBasisUsed: "actual_only",
+          weatherKindUsed: "ACTUAL_LAST_YEAR",
+          weatherSourceUsed: "OPEN_METEO",
+          weatherProviderName: "OPEN_METEO",
+          weatherFallbackReason: null,
+        },
+      ],
+      scoredDayWeatherTruth: {
+        availability: "available",
+        reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+        explanation: "Compact scored-day weather truth is available from the shared compare execution.",
+        source: "shared_compare_scored_day_weather",
+        scoredDateCount: 1,
+        weatherRowCount: 1,
+        missingDateCount: 0,
+        missingDateSample: [],
+      },
       displayVsFreshParityForScoredDays: {
         matches: true,
         mismatchCount: 0,
@@ -1062,10 +1087,28 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
     expect(body.displaySimulated?.daily?.[0]?.date).toBe("2026-01-01");
     expect(body.displaySimulated?.monthly?.[0]?.month).toBe("2026-01");
+    expect(body.scoredDayWeatherRows?.[0]).toMatchObject({
+      localDate: "2026-01-01",
+      avgTempF: 51,
+      minTempF: 41,
+      maxTempF: 61,
+      hdd65: 14,
+      cdd65: 0,
+      weatherBasisUsed: "actual_only",
+    });
+    expect(body.scoredDayWeatherTruth).toMatchObject({
+      availability: "available",
+      reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+    });
     expect(Array.isArray(body.scoredDayTruthRows)).toBe(true);
     expect(body.scoredDayTruthRows?.[0]).toMatchObject({
       localDate: "2026-01-01",
       displayVsFreshParityMatch: true,
+      avgTempF: 51,
+      minTempF: 41,
+      maxTempF: 61,
+      hdd65: 14,
+      cdd65: 0,
     });
     expect(body.missAttributionSummary?.source).toBe("scored_day_truth_rows");
     expect(body.accuracyTuningBreakdowns?.source).toBe("scored_day_truth_rows");
@@ -1134,6 +1177,67 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         selectedDaysLightweightArtifactRead: true,
       })
     );
+  });
+
+  it("fails explicitly when shared compare succeeds without scored-day weather truth", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      scoredDayWeatherRows: [],
+      scoredDayWeatherTruth: {
+        availability: "missing_expected_scored_day_weather",
+        reasonCode: "SCORED_DAY_WEATHER_MISSING",
+        explanation: "Shared compare completed without compact weather truth for one or more scored dates.",
+        source: "shared_compare_scored_day_weather",
+        scoredDateCount: 1,
+        weatherRowCount: 0,
+        missingDateCount: 1,
+        missingDateSample: ["2026-01-01"],
+      },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("compare_core_weather_truth_missing");
+    expect(body.reasonCode).toBe("COMPARE_CORE_WEATHER_TRUTH_MISSING");
+    expect(body.scoredDayWeatherTruth).toMatchObject({
+      availability: "missing_expected_scored_day_weather",
+      missingDateCount: 1,
+      missingDateSample: ["2026-01-01"],
+    });
   });
 
   it("keeps compare auto-ensure enabled for full-window diagnostics mode", async () => {
@@ -1662,6 +1766,31 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       displaySimSource: "dataset.daily",
       compareSimSource: "shared_fresh_calc",
       weatherBasisUsed: "actual_only",
+      scoredDayWeatherRows: [
+        {
+          localDate: "2026-01-01",
+          avgTempF: 48,
+          minTempF: 38,
+          maxTempF: 58,
+          hdd65: 17,
+          cdd65: 0,
+          weatherBasisUsed: "actual_only",
+          weatherKindUsed: "ACTUAL_LAST_YEAR",
+          weatherSourceUsed: "OPEN_METEO",
+          weatherProviderName: "OPEN_METEO",
+          weatherFallbackReason: null,
+        },
+      ],
+      scoredDayWeatherTruth: {
+        availability: "available",
+        reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+        explanation: "Compact scored-day weather truth is available from the shared compare execution.",
+        source: "shared_compare_scored_day_weather",
+        scoredDateCount: 1,
+        weatherRowCount: 1,
+        missingDateCount: 0,
+        missingDateSample: [],
+      },
       displayVsFreshParityForScoredDays: {
         matches: true,
         mismatchCount: 0,
@@ -1738,6 +1867,15 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactExactIdentityResolved: true,
       parityAvailability: "available",
     });
+    expect(body.scoredDayWeatherRows?.[0]).toMatchObject({
+      localDate: "2026-01-01",
+      avgTempF: 48,
+      hdd65: 17,
+      weatherBasisUsed: "actual_only",
+    });
+    expect(body.scoredDayWeatherTruth?.availability).toBe("available");
+    expect(String(body.fullReportText ?? "")).toContain("Scored-day weather truth");
+    expect(String(body.fullReportText ?? "")).toContain("2026-01-01 | 48 | 38 | 58 | 17 | 0 | actual_only");
     expect(body.compareCoreTiming).toBeUndefined();
     expect(body.compareCoreStepTimings).toBeUndefined();
     expect(body.usage365).toBeUndefined();

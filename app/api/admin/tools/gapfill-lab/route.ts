@@ -570,6 +570,29 @@ function buildFullReport(args: {
   reportWeatherSourceOwner?: string;
   simulationAndReportWeatherMatch?: boolean;
   weatherValidationFingerprint?: { firstRow: string; lastRow: string; rowCount: number };
+  scoredDayWeatherRows?: Array<{
+    localDate: string;
+    avgTempF: number | null;
+    minTempF: number | null;
+    maxTempF: number | null;
+    hdd65: number | null;
+    cdd65: number | null;
+    weatherBasisUsed: string | null;
+    weatherKindUsed: string | null;
+    weatherSourceUsed: string | null;
+    weatherProviderName: string | null;
+    weatherFallbackReason: string | null;
+  }>;
+  scoredDayWeatherTruth?: {
+    availability: "available" | "missing_expected_scored_day_weather";
+    reasonCode: "SCORED_DAY_WEATHER_AVAILABLE" | "SCORED_DAY_WEATHER_MISSING";
+    explanation: string;
+    source: "shared_compare_scored_day_weather";
+    scoredDateCount: number;
+    weatherRowCount: number;
+    missingDateCount: number;
+    missingDateSample: string[];
+  };
   benchmarkSummary?: {
     benchmarkAvailable: boolean;
     benchmarkSource: "request_payload" | "prior_run_copy" | "none";
@@ -774,6 +797,10 @@ function buildFullReport(args: {
         : {}),
       ...(j.weatherKindUsed != null ? { weatherKindUsed: j.weatherKindUsed } : {}),
       ...(Array.isArray(j.weatherApiData) && j.weatherApiData.length > 0 ? { weatherApiData: j.weatherApiData } : {}),
+      ...(Array.isArray(j.scoredDayWeatherRows) && j.scoredDayWeatherRows.length > 0
+        ? { scoredDayWeatherRows: j.scoredDayWeatherRows }
+        : {}),
+      ...(j.scoredDayWeatherTruth ? { scoredDayWeatherTruth: j.scoredDayWeatherTruth } : {}),
       ...(j.weatherRowsBySource && Object.keys(j.weatherRowsBySource).length > 0 ? { weatherRowsBySource: j.weatherRowsBySource } : {}),
       ...(Array.isArray(j.weatherSourcesSeen) && j.weatherSourcesSeen.length > 0 ? { weatherSourcesSeen: j.weatherSourcesSeen } : {}),
       ...(j.weatherSourceMismatchDetected === true ? { weatherSourceMismatchDetected: true } : {}),
@@ -1159,6 +1186,36 @@ function buildFullReport(args: {
         );
       } else {
         lines.push("(no per-date weather rows)");
+      }
+    });
+  }
+
+  if (j.scoredDayWeatherTruth || (Array.isArray(j.scoredDayWeatherRows) && j.scoredDayWeatherRows.length > 0)) {
+    section("Scored-day weather truth", () => {
+      if (j.scoredDayWeatherTruth) {
+        lines.push(
+          "availability: " +
+            j.scoredDayWeatherTruth.availability +
+            " reasonCode: " +
+            j.scoredDayWeatherTruth.reasonCode +
+            " weatherRowCount: " +
+            j.scoredDayWeatherTruth.weatherRowCount +
+            " missingDateCount: " +
+            j.scoredDayWeatherTruth.missingDateCount
+        );
+        if (Array.isArray(j.scoredDayWeatherTruth.missingDateSample) && j.scoredDayWeatherTruth.missingDateSample.length > 0) {
+          lines.push("missingDateSample: " + j.scoredDayWeatherTruth.missingDateSample.join(", "));
+        }
+      }
+      if (Array.isArray(j.scoredDayWeatherRows) && j.scoredDayWeatherRows.length > 0) {
+        lines.push(
+          "localDate | avgTempF | minTempF | maxTempF | hdd65 | cdd65 | weatherBasisUsed | weatherKindUsed | weatherSourceUsed | weatherProviderName | weatherFallbackReason"
+        );
+        j.scoredDayWeatherRows.forEach((row) =>
+          lines.push(
+            `  ${row.localDate} | ${row.avgTempF ?? "—"} | ${row.minTempF ?? "—"} | ${row.maxTempF ?? "—"} | ${row.hdd65 ?? "—"} | ${row.cdd65 ?? "—"} | ${row.weatherBasisUsed ?? "—"} | ${row.weatherKindUsed ?? "—"} | ${row.weatherSourceUsed ?? "—"} | ${row.weatherProviderName ?? "—"} | ${row.weatherFallbackReason ?? "—"}`
+          )
+        );
       }
     });
   }
@@ -2238,11 +2295,89 @@ export async function POST(req: NextRequest) {
     if (!simulatedDiagByDate.has(dk)) simulatedDiagByDate.set(dk, d);
   }
   const weatherApiRows = Array.isArray((ma as any)?.weatherApiData) ? ((ma as any).weatherApiData as Array<Record<string, unknown>>) : [];
+  const compactScoredDayWeatherRows: Array<{
+    localDate: string;
+    avgTempF: number | null;
+    minTempF: number | null;
+    maxTempF: number | null;
+    hdd65: number | null;
+    cdd65: number | null;
+    weatherBasisUsed: string | null;
+    weatherKindUsed: string | null;
+    weatherSourceUsed: string | null;
+    weatherProviderName: string | null;
+    weatherFallbackReason: string | null;
+  }> = Array.isArray((sharedSim as any)?.scoredDayWeatherRows)
+    ? ((sharedSim as any).scoredDayWeatherRows as Array<{
+        localDate: string;
+        avgTempF: number | null;
+        minTempF: number | null;
+        maxTempF: number | null;
+        hdd65: number | null;
+        cdd65: number | null;
+        weatherBasisUsed: string | null;
+        weatherKindUsed: string | null;
+        weatherSourceUsed: string | null;
+        weatherProviderName: string | null;
+        weatherFallbackReason: string | null;
+      }>)
+    : weatherApiRows.map((w) => ({
+        localDate: String((w as any)?.dateKey ?? "").slice(0, 10),
+        avgTempF: Number((w as any)?.tAvgF ?? NaN),
+        minTempF: Number((w as any)?.tMinF ?? NaN),
+        maxTempF: Number((w as any)?.tMaxF ?? NaN),
+        hdd65: Number((w as any)?.hdd65 ?? NaN),
+        cdd65: Number((w as any)?.cdd65 ?? NaN),
+        weatherBasisUsed: String((sharedSim as any).weatherBasisUsed ?? null),
+        weatherKindUsed: String((ma as any)?.weatherKindUsed ?? ""),
+        weatherSourceUsed: String((w as any)?.source ?? ""),
+        weatherProviderName: String((ma as any)?.weatherProviderName ?? ""),
+        weatherFallbackReason: String((ma as any)?.weatherFallbackReason ?? ""),
+      }));
   const weatherByDate = new Map<string, Record<string, unknown>>();
-  for (const w of weatherApiRows) {
-    const dk = String((w as any)?.dateKey ?? "").slice(0, 10);
+  for (const w of compactScoredDayWeatherRows) {
+    const dk = String((w as any)?.localDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
     if (!weatherByDate.has(dk)) weatherByDate.set(dk, w);
+  }
+  const scoredDayWeatherTruthFromService =
+    ((sharedSim as any)?.scoredDayWeatherTruth as Record<string, unknown> | undefined) ?? null;
+  const scoredDayWeatherTruth =
+    (scoredDayWeatherTruthFromService ?? {
+      availability: weatherByDate.size === scoringTestDateKeysLocal.size ? "available" : "missing_expected_scored_day_weather",
+      reasonCode: weatherByDate.size === scoringTestDateKeysLocal.size ? "SCORED_DAY_WEATHER_AVAILABLE" : "SCORED_DAY_WEATHER_MISSING",
+      explanation:
+        weatherByDate.size === scoringTestDateKeysLocal.size
+          ? "Compact scored-day weather truth is available from the shared compare execution."
+          : "Shared compare completed without compact weather truth for one or more scored dates.",
+      source: "shared_compare_scored_day_weather",
+      scoredDateCount: scoringTestDateKeysLocal.size,
+      weatherRowCount: weatherByDate.size,
+      missingDateCount: Math.max(0, scoringTestDateKeysLocal.size - weatherByDate.size),
+      missingDateSample: Array.from(scoringTestDateKeysLocal).filter((dk) => !weatherByDate.has(dk)).slice(0, 10),
+    }) as Record<string, unknown>;
+  const shouldEnforceScoredDayWeatherInvariant =
+    scoredDayWeatherTruthFromService != null || Array.isArray((sharedSim as any)?.scoredDayWeatherRows);
+  if (
+    shouldEnforceScoredDayWeatherInvariant &&
+    scoringTestDateKeysLocal.size > 0 &&
+    String(scoredDayWeatherTruth.availability ?? "") !== "available"
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "compare_core_weather_truth_missing",
+        message: "Compare core completed without compact scored-day weather truth for one or more scored dates.",
+        reasonCode: "COMPARE_CORE_WEATHER_TRUTH_MISSING",
+        scoredDayWeatherTruth,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          compareRequestTruth,
+          selectedDaysCoreLightweight,
+        }),
+      },
+      { status: 500 }
+    );
   }
   const scoredDayParityEnvelope =
     ((sharedSim as any)?.displayVsFreshParityForScoredDays as Record<string, unknown> | undefined) ?? null;
@@ -2279,9 +2414,9 @@ export async function POST(req: NextRequest) {
           (diag as any)?.sampleCountUsed
       );
       const sampleCount = Number.isFinite(sampleCountCandidate) ? Math.max(0, Math.trunc(sampleCountCandidate)) : null;
-      const avgTempF = Number((weather as any)?.tAvgF);
-      const minTempF = Number((weather as any)?.tMinF);
-      const maxTempF = Number((weather as any)?.tMaxF);
+      const avgTempF = Number((weather as any)?.avgTempF);
+      const minTempF = Number((weather as any)?.minTempF);
+      const maxTempF = Number((weather as any)?.maxTempF);
       const hdd65 = Number((weather as any)?.hdd65);
       const cdd65 = Number((weather as any)?.cdd65);
       return {
@@ -2316,7 +2451,10 @@ export async function POST(req: NextRequest) {
               : "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE",
         scoredDayDisplaySource: displayDay?.source ?? null,
         dayType: weekend ? "weekend" : "weekday",
-        weatherBasis: String((sharedSim as any).weatherBasisUsed ?? null),
+        weatherBasis:
+          String((weather as any)?.weatherBasisUsed ?? (sharedSim as any).weatherBasisUsed ?? "") || null,
+        weatherSourceUsed: String((weather as any)?.weatherSourceUsed ?? "") || null,
+        weatherFallbackReason: String((weather as any)?.weatherFallbackReason ?? "") || null,
         avgTempF: Number.isFinite(avgTempF) ? round2(avgTempF) : null,
         minTempF: Number.isFinite(minTempF) ? round2(minTempF) : null,
         maxTempF: Number.isFinite(maxTempF) ? round2(maxTempF) : null,
@@ -2681,6 +2819,8 @@ export async function POST(req: NextRequest) {
             candidateWindowStartUtc: candidateWindowStart,
             candidateWindowEndUtc: candidateWindowEnd,
             excludedFromTest_travelCount,
+            scoredDayWeatherRows: compactScoredDayWeatherRows,
+            scoredDayWeatherTruth: scoredDayWeatherTruth as any,
           })
         ),
         ROUTE_COMPARE_REPORT_TIMEOUT_MS,
@@ -2757,6 +2897,8 @@ export async function POST(req: NextRequest) {
       fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
       missAttributionSummary,
       accuracyTuningBreakdowns,
+      scoredDayWeatherRows: compactScoredDayWeatherRows,
+      scoredDayWeatherTruth,
       heavyTruth: {
         source: "heavy_only_compact",
         artifactSourceMode,
@@ -2843,6 +2985,8 @@ export async function POST(req: NextRequest) {
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],
+    scoredDayWeatherRows: compactScoredDayWeatherRows,
+    scoredDayWeatherTruth,
     truthEnvelope,
     displaySimulated: {
       source: (sharedSim as any).displaySimSource ?? null,
