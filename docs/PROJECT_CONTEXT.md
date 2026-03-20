@@ -121,6 +121,8 @@
 - Gap-Fill Lab heavy diagnostics retries should return a compact merge-only payload with heavy timing fields, rather than re-sending the entire core compare response.
 - Gap-Fill Lab compare-core must include compact scored-day weather truth for the scored local dates, owned by the shared compare/service path; heavy report may expand that truth, but route/UI layers must not recompute scored-day weather on their own.
 - Gap-Fill Lab must fail explicitly when a run claims DB travel/vacant parity validation or exact shared artifact proof but the canonical artifact day totals or fresh shared compare day totals needed for that proof are missing.
+- Gap-Fill Lab exact compare requests that inherit identity from `same_run_artifact_ensure` must prove exact hash ownership before compare proceeds: `artifactSourceMode` must be exact, `requestedInputHash` must equal `artifactInputHashUsed`, and fallback identity handoff must fail early with `artifact_exact_identity_unresolved` / `ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED`.
+- Gap-Fill Lab travel/vacant parity must read canonical artifact references from the exact artifact row's persisted `canonicalArtifactSimulatedDayTotalsByDate`; if exact identity is unresolved, do not continue into travel/vacant parity validation.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.

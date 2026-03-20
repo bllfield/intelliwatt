@@ -593,44 +593,6 @@ function buildFullReport(args: {
     missingDateCount: number;
     missingDateSample: string[];
   };
-  travelVacantParityRows?: Array<{
-    localDate: string;
-    artifactCanonicalSimDayKwh: number | null;
-    freshSharedDayCalcKwh: number | null;
-    parityMatch: boolean | null;
-    artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
-    freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
-    parityReasonCode:
-      | "TRAVEL_VACANT_PARITY_MATCH"
-      | "TRAVEL_VACANT_PARITY_MISMATCH"
-      | "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
-      | "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING";
-  }>;
-  travelVacantParityTruth?: {
-    availability:
-      | "validated"
-      | "mismatch_detected"
-      | "missing_artifact_reference"
-      | "missing_fresh_compare_output"
-      | "not_requested";
-    reasonCode:
-      | "TRAVEL_VACANT_PARITY_VALIDATED"
-      | "TRAVEL_VACANT_PARITY_MISMATCH"
-      | "TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING"
-      | "TRAVEL_VACANT_FRESH_COMPARE_OUTPUT_MISSING"
-      | "TRAVEL_VACANT_PARITY_NOT_REQUESTED";
-    explanation: string;
-    source: "db_travel_vacant_ranges";
-    comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals";
-    requestedDateCount: number;
-    validatedDateCount: number;
-    mismatchCount: number;
-    missingArtifactReferenceCount: number;
-    missingFreshCompareCount: number;
-    requestedDateSample: string[];
-    exactProofRequired: boolean;
-    exactProofSatisfied: boolean;
-  };
   benchmarkSummary?: {
     benchmarkAvailable: boolean;
     benchmarkSource: "request_payload" | "prior_run_copy" | "none";
@@ -1252,39 +1214,6 @@ function buildFullReport(args: {
         j.scoredDayWeatherRows.forEach((row) =>
           lines.push(
             `  ${row.localDate} | ${row.avgTempF ?? "—"} | ${row.minTempF ?? "—"} | ${row.maxTempF ?? "—"} | ${row.hdd65 ?? "—"} | ${row.cdd65 ?? "—"} | ${row.weatherBasisUsed ?? "—"} | ${row.weatherKindUsed ?? "—"} | ${row.weatherSourceUsed ?? "—"} | ${row.weatherProviderName ?? "—"} | ${row.weatherFallbackReason ?? "—"}`
-          )
-        );
-      }
-    });
-  }
-
-  if (j.travelVacantParityTruth || (Array.isArray(j.travelVacantParityRows) && j.travelVacantParityRows.length > 0)) {
-    section("DB travel/vacant parity validation", () => {
-      if (j.travelVacantParityTruth) {
-        lines.push(
-          "availability: " +
-            j.travelVacantParityTruth.availability +
-            " reasonCode: " +
-            j.travelVacantParityTruth.reasonCode +
-            " requestedDateCount: " +
-            j.travelVacantParityTruth.requestedDateCount +
-            " validatedDateCount: " +
-            j.travelVacantParityTruth.validatedDateCount +
-            " mismatchCount: " +
-            j.travelVacantParityTruth.mismatchCount +
-            " missingArtifactReferenceCount: " +
-            j.travelVacantParityTruth.missingArtifactReferenceCount +
-            " missingFreshCompareCount: " +
-            j.travelVacantParityTruth.missingFreshCompareCount
-        );
-      }
-      if (Array.isArray(j.travelVacantParityRows) && j.travelVacantParityRows.length > 0) {
-        lines.push(
-          "localDate | artifactCanonicalSimDayKwh | freshSharedDayCalcKwh | parityMatch | artifactReferenceAvailability | freshCompareAvailability | parityReasonCode"
-        );
-        j.travelVacantParityRows.forEach((row) =>
-          lines.push(
-            `  ${row.localDate} | ${row.artifactCanonicalSimDayKwh ?? "—"} | ${row.freshSharedDayCalcKwh ?? "—"} | ${row.parityMatch ?? "—"} | ${row.artifactReferenceAvailability} | ${row.freshCompareAvailability} | ${row.parityReasonCode}`
           )
         );
       }
@@ -1979,7 +1908,7 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(", ") || house.id,
       scenarioId: "past_shared_artifact",
-      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
+      reasonCode: classification.reasonCode,
       reasonMessage: classification.reasonMessage,
       missingData: classification.missingData,
       context: {
@@ -2266,6 +2195,49 @@ export async function POST(req: NextRequest) {
     (artifactInputHashUsed && (artifactScenarioId ?? stableScenarioId)
       ? `${artifactScenarioId ?? stableScenarioId}:${artifactInputHashUsed}`
       : null);
+  const sameRunExactHandoffRequired =
+    requireExactArtifactMatch &&
+    artifactIdentitySourceUsed === "same_run_artifact_ensure";
+  const sameRunExactHandoffResolved =
+    sameRunExactHandoffRequired &&
+    artifactSourceMode === "exact_hash_match" &&
+    artifactHashMatch === true &&
+    typeof requestedInputHash === "string" &&
+    requestedInputHash.length > 0 &&
+    artifactInputHashUsed === requestedInputHash &&
+    artifactExactIdentityResolved === true;
+  if (sameRunExactHandoffRequired && !sameRunExactHandoffResolved) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "artifact_exact_identity_unresolved",
+        message:
+          "Compare required the exact shared Past artifact identity returned by same-run artifact ensure, but that handoff was not proven as an exact hash match.",
+        reasonCode: "ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED",
+        compareRequestTruth,
+        artifactRequestTruth,
+        artifactTruth: {
+          sourceMode: artifactSourceMode,
+          requestedInputHash,
+          artifactInputHashUsed,
+          artifactHashMatch,
+          requestedScenarioId: artifactRequestedScenarioId,
+          scenarioId: artifactScenarioId ?? stableScenarioId,
+          exactIdentifierUsed: artifactExactIdentifierUsed,
+          exactIdentityResolved: artifactExactIdentityResolved,
+          sameRunEnsureArtifact: artifactSameRunEnsureIdentity,
+          fallbackOccurred: artifactFallbackOccurred,
+          fallbackReason: artifactFallbackReason,
+        },
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          compareRequestTruth,
+          selectedDaysCoreLightweight,
+        }),
+      },
+      { status: 409 }
+    );
+  }
   const hasContradictoryExactArtifactTruth =
     artifactSourceMode === "exact_hash_match" &&
     (!artifactInputHashUsed ||
@@ -2415,9 +2387,7 @@ export async function POST(req: NextRequest) {
       missingDateSample: Array.from(scoringTestDateKeysLocal).filter((dk) => !weatherByDate.has(dk)).slice(0, 10),
     }) as Record<string, unknown>;
   const shouldEnforceScoredDayWeatherInvariant =
-    actualScoringIntervals.length > 0 &&
-    Array.isArray((sharedSim as any)?.simulatedTestIntervals) &&
-    ((sharedSim as any).simulatedTestIntervals as Array<unknown>).length > 0;
+    actualScoringIntervals.length > 0 && Array.isArray(sharedSim.simulatedTestIntervals) && sharedSim.simulatedTestIntervals.length > 0;
   if (
     shouldEnforceScoredDayWeatherInvariant &&
     scoringTestDateKeysLocal.size > 0 &&
@@ -2903,8 +2873,6 @@ export async function POST(req: NextRequest) {
             candidateWindowStartUtc: candidateWindowStart,
             candidateWindowEndUtc: candidateWindowEnd,
             excludedFromTest_travelCount,
-            travelVacantParityRows: travelVacantParityRows as any,
-            travelVacantParityTruth: travelVacantParityTruth as any,
             scoredDayWeatherRows: compactScoredDayWeatherRows,
             scoredDayWeatherTruth: scoredDayWeatherTruth as any,
           })
@@ -2912,37 +2880,6 @@ export async function POST(req: NextRequest) {
         ROUTE_COMPARE_REPORT_TIMEOUT_MS,
         "compare_core_route_timeout_build_full_report"
       );
-      if (
-        fullReport &&
-        travelVacantParityRows.length > 0 &&
-        !String(fullReport.fullReportText ?? "").includes("DB travel/vacant parity validation")
-      ) {
-        const extraLines = [
-          "",
-          "=== DB travel/vacant parity validation ===",
-          ...((travelVacantParityTruth
-            ? [
-                "availability: " +
-                  String((travelVacantParityTruth as any).availability ?? "—") +
-                  " reasonCode: " +
-                  String((travelVacantParityTruth as any).reasonCode ?? "—") +
-                  " requestedDateCount: " +
-                  String((travelVacantParityTruth as any).requestedDateCount ?? "0") +
-                  " validatedDateCount: " +
-                  String((travelVacantParityTruth as any).validatedDateCount ?? "0")
-              ]
-            : []) as string[]),
-          "localDate | artifactCanonicalSimDayKwh | freshSharedDayCalcKwh | parityMatch | artifactReferenceAvailability | freshCompareAvailability | parityReasonCode",
-          ...travelVacantParityRows.map(
-            (row: any) =>
-              `  ${row.localDate} | ${row.artifactCanonicalSimDayKwh ?? "—"} | ${row.freshSharedDayCalcKwh ?? "—"} | ${row.parityMatch ?? "—"} | ${row.artifactReferenceAvailability ?? "—"} | ${row.freshCompareAvailability ?? "—"} | ${row.parityReasonCode ?? "—"}`
-          ),
-        ];
-        fullReport = {
-          ...fullReport,
-          fullReportText: `${fullReport.fullReportText}\n${extraLines.join("\n")}`,
-        };
-      }
       markCompareCoreStep(compareCoreTiming, "build_full_report");
     } catch (err: unknown) {
       const normalizedError = normalizeRouteError(

@@ -32,6 +32,7 @@ import {
   getLatestCachedPastDatasetByScenario,
   saveCachedPastDataset,
   PAST_ENGINE_VERSION,
+  type CachedPastDataset,
   type CanonicalArtifactSimulatedDayTotalsByDate,
 } from "@/modules/usageSimulator/pastCache";
 import { encodeIntervalsV1, decodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/intervalCodec";
@@ -320,10 +321,11 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       message: "No Past (Corrected) scenario for this house. Create/rebuild Past first.",
     };
   }
+  const resolvedScenarioId = scenarioId;
   const rebuilt = await getSimulatedUsageForHouseScenario({
     userId: args.userId,
     houseId: args.houseId,
-    scenarioId,
+    scenarioId: resolvedScenarioId,
     readMode: "allow_rebuild",
   });
   if (!rebuilt.ok) {
@@ -333,25 +335,47 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       message: rebuilt.message,
     };
   }
+  const rebuiltMeta = ((((rebuilt as any)?.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
+  const exactRebuiltInputHash =
+    typeof rebuiltMeta.artifactInputHashUsed === "string" && String(rebuiltMeta.artifactInputHashUsed).trim()
+      ? String(rebuiltMeta.artifactInputHashUsed).trim()
+      : typeof rebuiltMeta.artifactInputHash === "string" && String(rebuiltMeta.artifactInputHash).trim()
+        ? String(rebuiltMeta.artifactInputHash).trim()
+        : null;
+  if (!exactRebuiltInputHash) {
+    return {
+      ok: false,
+      error: "past_rebuild_failed",
+      message:
+        "Past rebuild completed, but the exact rebuilt artifact identity hash was not available for same-run handoff.",
+    };
+  }
+  const resolvedExactRebuiltInputHash = exactRebuiltInputHash;
   // Rebuild must guarantee artifact-only compare readability. Under constrained DB pools, cache persistence
   // can fail non-fatally inside the rebuild path; verify artifact materialization before returning success.
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   async function runVerification(): Promise<{ ok: boolean; dataset: any }> {
-    const out = await getSimulatedUsageForHouseScenario({
-      userId: args.userId,
+    const persisted = await getCachedPastDataset({
       houseId: args.houseId,
-      scenarioId,
-      readMode: "artifact_only",
+      scenarioId: resolvedScenarioId,
+      inputHash: resolvedExactRebuiltInputHash,
     });
-    const dataset = out.ok ? (out as any)?.dataset : null;
+    if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) {
+      return { ok: false, dataset: null };
+    }
+    const restored = restoreCachedArtifactDataset({
+      cached: persisted,
+      useSelectedDaysLightweightArtifactRead: false,
+      fallbackEndDate: canonicalCoverage.endDate,
+    }).dataset;
+    const dataset = restored;
     const hasIntervals15 = Array.isArray(dataset?.series?.intervals15);
     const hasCanonicalCoverage =
-      out.ok &&
       String(dataset?.summary?.start ?? "") === canonicalCoverage.startDate &&
       String(dataset?.summary?.end ?? "") === canonicalCoverage.endDate &&
       String(dataset?.meta?.coverageStart ?? "") === canonicalCoverage.startDate &&
       String(dataset?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
-    return { ok: Boolean(out.ok && hasIntervals15 && hasCanonicalCoverage), dataset };
+    return { ok: Boolean(hasIntervals15 && hasCanonicalCoverage), dataset };
   }
   let verification = await runVerification();
   if (!verification.ok) {
@@ -367,42 +391,18 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     };
   }
   const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
-  const requestedInputHash =
-    typeof verificationMeta.requestedInputHash === "string" && String(verificationMeta.requestedInputHash).trim()
-      ? String(verificationMeta.requestedInputHash).trim()
-      : typeof verificationMeta.artifactInputHash === "string" && String(verificationMeta.artifactInputHash).trim()
-        ? String(verificationMeta.artifactInputHash).trim()
-        : null;
-  const artifactInputHashUsed =
-    typeof verificationMeta.artifactInputHashUsed === "string" && String(verificationMeta.artifactInputHashUsed).trim()
-      ? String(verificationMeta.artifactInputHashUsed).trim()
-      : typeof verificationMeta.artifactInputHash === "string" && String(verificationMeta.artifactInputHash).trim()
-        ? String(verificationMeta.artifactInputHash).trim()
-        : null;
-  const artifactSourceModeRaw = String(verificationMeta.artifactSourceMode ?? "").trim();
-  const artifactSourceMode =
-    artifactSourceModeRaw === "exact_hash_match" || artifactSourceModeRaw === "latest_by_scenario_fallback"
-      ? artifactSourceModeRaw
-      : artifactInputHashUsed
-        ? "exact_hash_match"
-        : null;
   return {
     ok: true,
-    scenarioId,
-    artifactScenarioId: scenarioId,
-    requestedInputHash,
-    artifactInputHashUsed,
-    artifactHashMatch:
-      requestedInputHash && artifactInputHashUsed ? requestedInputHash === artifactInputHashUsed : null,
-    artifactSourceMode,
+    scenarioId: resolvedScenarioId,
+    artifactScenarioId: resolvedScenarioId,
+    requestedInputHash: resolvedExactRebuiltInputHash,
+    artifactInputHashUsed: resolvedExactRebuiltInputHash,
+    artifactHashMatch: true,
+    artifactSourceMode: "exact_hash_match",
     artifactSourceNote:
       typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
         ? String(verificationMeta.artifactSourceNote)
-        : artifactSourceMode === "exact_hash_match"
-          ? "Artifact source: exact identity match on Past input hash."
-          : artifactSourceMode === "latest_by_scenario_fallback"
-            ? "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss)."
-            : null,
+        : "Artifact source: exact identity match on Past input hash.",
   };
 }
 
@@ -548,6 +548,53 @@ function attachCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): Canonica
   (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
   (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
   return built;
+}
+
+function restoreCachedArtifactDataset(args: {
+  cached: CachedPastDataset;
+  useSelectedDaysLightweightArtifactRead: boolean;
+  fallbackEndDate: string;
+}): {
+  dataset: any;
+  restoredCanonicalDailyRows: Array<{ date?: string; kwh?: number; source?: string }> | null;
+  restoredCanonicalMonthlyRows: Array<{ month?: string; kwh?: number }> | null;
+} {
+  const { cached, useSelectedDaysLightweightArtifactRead, fallbackEndDate } = args;
+  const restoredCanonicalDailyRows = Array.isArray((cached.datasetJson as any)?.daily)
+    ? (((cached.datasetJson as any).daily as Array<{ date?: string; kwh?: number; source?: string }>).map((d) => ({
+        date: d?.date,
+        kwh: d?.kwh,
+        source: d?.source,
+      })))
+    : null;
+  const restoredCanonicalMonthlyRows = Array.isArray((cached.datasetJson as any)?.monthly)
+    ? (((cached.datasetJson as any).monthly as Array<{ month?: string; kwh?: number }>).map((m) => ({
+        month: m?.month,
+        kwh: m?.kwh,
+      })))
+    : null;
+  const dataset = {
+    ...cached.datasetJson,
+    series: {
+      ...(typeof (cached.datasetJson as any).series === "object" &&
+      (cached.datasetJson as any).series !== null
+        ? (cached.datasetJson as any).series
+        : {}),
+      intervals15: useSelectedDaysLightweightArtifactRead ? [] : decodeIntervalsV1(cached.intervalsCompressed),
+    },
+  };
+  if (!useSelectedDaysLightweightArtifactRead) {
+    reconcileRestoredDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>,
+      fallbackEndDate,
+    });
+  }
+  return {
+    dataset,
+    restoredCanonicalDailyRows,
+    restoredCanonicalMonthlyRows,
+  };
 }
 
 function reconcileRestoredDatasetFromDecodedIntervals(args: {
@@ -855,19 +902,19 @@ export async function buildGapfillCompareSimShared(args: {
   let restoredCanonicalMonthlyRows:
     | Array<{ month?: string; kwh?: number }>
     | null = null;
-  async function verifyRebuiltArtifactReadable(): Promise<boolean> {
+  async function verifyRebuiltArtifactReadable(): Promise<CachedPastDataset | null> {
     const runReadback = async () => {
       const persisted = await getCachedPastDataset({
         houseId,
         scenarioId: sharedScenarioCacheId,
         inputHash: sharedInputHash,
       });
-      if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) return false;
+      if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) return null;
       try {
         const decoded = decodeIntervalsV1(persisted.intervalsCompressed);
-        return Array.isArray(decoded) && decoded.length > 0;
+        return Array.isArray(decoded) && decoded.length > 0 ? persisted : null;
       } catch {
-        return false;
+        return null;
       }
     };
     let readable = await runReadback();
@@ -951,8 +998,8 @@ export async function buildGapfillCompareSimShared(args: {
       intervalsCodec: INTERVAL_CODEC_V1,
       intervalsCompressed: bytes,
     });
-    const readbackOk = await verifyRebuiltArtifactReadable();
-    if (!readbackOk) {
+    const persistedExactArtifact = await verifyRebuiltArtifactReadable();
+    if (!persistedExactArtifact) {
       return {
         ok: false,
         status: 500,
@@ -966,7 +1013,14 @@ export async function buildGapfillCompareSimShared(args: {
         },
       };
     }
-    return { ok: true, dataset: rebuiltDataset };
+    return {
+      ok: true,
+      dataset: restoreCachedArtifactDataset({
+        cached: persistedExactArtifact,
+        useSelectedDaysLightweightArtifactRead,
+        fallbackEndDate: identityWindowResolved.endDate,
+      }).dataset,
+    };
   }
 
   let artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" | null =
@@ -1054,36 +1108,14 @@ export async function buildGapfillCompareSimShared(args: {
     }
   }
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
-    restoredCanonicalDailyRows = Array.isArray((cached.datasetJson as any)?.daily)
-      ? (((cached.datasetJson as any).daily as Array<{ date?: string; kwh?: number; source?: string }>).map((d) => ({
-          date: d?.date,
-          kwh: d?.kwh,
-          source: d?.source,
-        })))
-      : null;
-    restoredCanonicalMonthlyRows = Array.isArray((cached.datasetJson as any)?.monthly)
-      ? (((cached.datasetJson as any).monthly as Array<{ month?: string; kwh?: number }>).map((m) => ({
-          month: m?.month,
-          kwh: m?.kwh,
-        })))
-      : null;
-    dataset = {
-      ...cached.datasetJson,
-      series: {
-        ...(typeof (cached.datasetJson as any).series === "object" &&
-        (cached.datasetJson as any).series !== null
-          ? (cached.datasetJson as any).series
-          : {}),
-        intervals15: useSelectedDaysLightweightArtifactRead ? [] : decodeIntervalsV1(cached.intervalsCompressed),
-      },
-    };
-    if (!useSelectedDaysLightweightArtifactRead) {
-      reconcileRestoredDatasetFromDecodedIntervals({
-        dataset,
-        decodedIntervals: dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>,
-        fallbackEndDate: identityWindow.endDate,
-      });
-    }
+    const restored = restoreCachedArtifactDataset({
+      cached,
+      useSelectedDaysLightweightArtifactRead,
+      fallbackEndDate: identityWindow.endDate,
+    });
+    restoredCanonicalDailyRows = restored.restoredCanonicalDailyRows;
+    restoredCanonicalMonthlyRows = restored.restoredCanonicalMonthlyRows;
+    dataset = restored.dataset;
   } else {
     if (!rebuildArtifact && !autoEnsureArtifact) {
       return {
@@ -1103,7 +1135,9 @@ export async function buildGapfillCompareSimShared(args: {
     if (!rebuilt.ok) return rebuilt;
     dataset = rebuilt.dataset;
     artifactAutoRebuilt = true;
-    artifactSourceMode = null;
+    artifactSourceMode =
+      useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested ? null : "exact_hash_match";
+    artifactFallbackReason = null;
   }
 
   if (!dataset?.series?.intervals15) {
@@ -1156,7 +1190,9 @@ export async function buildGapfillCompareSimShared(args: {
       if (!rebuilt.ok) return rebuilt;
       dataset = rebuilt.dataset;
       artifactAutoRebuilt = true;
-      artifactSourceMode = null;
+      artifactSourceMode =
+        useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested ? null : "exact_hash_match";
+      artifactFallbackReason = null;
       continue;
     }
     if (needsRebuildForStaleWindow) {
@@ -1220,7 +1256,7 @@ export async function buildGapfillCompareSimShared(args: {
   if (!restoredMetaNormalized || typeof restoredMetaNormalized !== "object") (dataset as any).meta = {};
   const modelAssumptions = (dataset as any)?.meta ?? {};
   const artifactInputHashUsed =
-    !artifactAutoRebuilt && typeof (cached as any)?.inputHash === "string"
+    typeof (cached as any)?.inputHash === "string"
       ? String((cached as any).inputHash)
       : sharedInputHash || null;
   const requestedInputHash = exactArtifactIdentityRequested
@@ -1260,6 +1296,40 @@ export async function buildGapfillCompareSimShared(args: {
         requestedInputHash.length > 0 &&
         artifactInputHashUsed !== requestedInputHash) ||
       modelAssumptions.artifactHashMatch !== true);
+  const sameRunExactHandoffRequired =
+    exactArtifactReadRequired && artifactIdentitySourceNormalized === "same_run_artifact_ensure";
+  const sameRunExactHandoffResolved =
+    sameRunExactHandoffRequired &&
+    artifactSourceMode === "exact_hash_match" &&
+    typeof requestedInputHash === "string" &&
+    requestedInputHash.length > 0 &&
+    artifactInputHashUsed === requestedInputHash &&
+    modelAssumptions.artifactHashMatch === true &&
+    modelAssumptions.artifactExactIdentityResolved === true;
+  if (sameRunExactHandoffRequired && !sameRunExactHandoffResolved) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_exact_identity_unresolved",
+        message:
+          "Compare requires the exact shared Past artifact identity returned by same-run artifact ensure, but that handoff was not proven as an exact hash match.",
+        mode: "artifact_only",
+        scenarioId: sharedScenarioCacheId,
+        requestedArtifactScenarioId,
+        requestedInputHash,
+        artifactInputHashUsed,
+        artifactHashMatch: modelAssumptions.artifactHashMatch,
+        artifactSourceMode,
+        artifactIdentitySource: artifactIdentitySourceNormalized,
+        exactIdentityResolved: modelAssumptions.artifactExactIdentityResolved,
+        fallbackOccurred: modelAssumptions.artifactFallbackOccurred,
+        fallbackReason: modelAssumptions.artifactFallbackReason,
+        reasonCode: "ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED",
+      },
+    };
+  }
   if (exactArtifactReadRequired && modelAssumptions.artifactExactIdentityResolved !== true) {
     return {
       ok: false,
@@ -1280,6 +1350,7 @@ export async function buildGapfillCompareSimShared(args: {
         exactIdentityResolved: modelAssumptions.artifactExactIdentityResolved,
         fallbackOccurred: modelAssumptions.artifactFallbackOccurred,
         fallbackReason: modelAssumptions.artifactFallbackReason,
+        reasonCode: "ARTIFACT_EXACT_IDENTITY_UNRESOLVED",
       },
     };
   }
@@ -3579,6 +3650,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
               intervalsCodec: INTERVAL_CODEC_V1,
               intervalsCompressed: bytes,
             });
+            if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+            (dataset.meta as any).artifactReadMode = "allow_rebuild";
+            (dataset.meta as any).artifactSource = "rebuild";
+            (dataset.meta as any).artifactInputHash = inputHash;
+            (dataset.meta as any).artifactInputHashUsed = inputHash;
+            (dataset.meta as any).requestedInputHash = inputHash;
+            (dataset.meta as any).artifactHashMatch = true;
+            (dataset.meta as any).artifactScenarioId = scenarioIdForCache;
+            (dataset.meta as any).artifactSourceMode = "exact_hash_match";
+            (dataset.meta as any).artifactSourceNote = "Artifact source: exact identity match on Past input hash.";
+            (dataset.meta as any).artifactRecomputed = true;
           }
         }
       }

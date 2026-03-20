@@ -1923,6 +1923,66 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
   });
 
+  it("fails early when same-run exact compare receives fallback artifact identity truth", async () => {
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: {
+        artifactSourceMode: "latest_by_scenario_fallback",
+        requestedInputHash: "hash-requested",
+        artifactInputHashUsed: "hash-fallback",
+        artifactHashMatch: false,
+        artifactScenarioId: "past-s1",
+        artifactExactIdentityResolved: false,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        artifactSameRunEnsureIdentity: true,
+        artifactFallbackOccurred: true,
+        artifactFallbackReason: "requested_exact_identity_not_found_fell_back_to_latest_by_scenario",
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        requestedInputHash: "hash-requested",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("artifact_exact_identity_unresolved");
+    expect(body.reasonCode).toBe("ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED");
+    expect(body.artifactTruth).toMatchObject({
+      sourceMode: "latest_by_scenario_fallback",
+      requestedInputHash: "hash-requested",
+      artifactInputHashUsed: "hash-fallback",
+      artifactHashMatch: false,
+      sameRunEnsureArtifact: true,
+      fallbackOccurred: true,
+    });
+  });
+
   it("classifies heavy diagnostics client timeout, fetch failure, and exception explicitly in client source", () => {
     const clientSource = readFileSync(
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
