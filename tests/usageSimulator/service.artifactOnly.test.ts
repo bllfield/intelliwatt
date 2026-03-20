@@ -465,6 +465,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
+      expect(out.rebuilt).toBe(true);
       expect(out.requestedInputHash).toBe("hash-rebuilt-exact");
       expect(out.artifactInputHashUsed).toBe("hash-rebuilt-exact");
       expect(out.artifactHashMatch).toBe(true);
@@ -477,9 +478,9 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     });
   });
 
-  it("forces a fresh rebuild for artifact ensure even when an exact cache hit exists", async () => {
+  it("uses the exact cached artifact for artifact ensure when the persisted identity is already valid", async () => {
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    getCachedPastDataset.mockResolvedValueOnce({
+    const exactCached = {
       inputHash: "hash-rebuilt-exact",
       updatedAt: new Date("2026-03-18T00:00:00.000Z"),
       datasetJson: {
@@ -509,7 +510,90 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       },
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getCachedPastDataset
+      .mockResolvedValueOnce(exactCached)
+      .mockResolvedValueOnce(exactCached);
+
+    const out = await rebuildGapfillSharedPastArtifact({
+      userId: "u1",
+      houseId: "h1",
     });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.rebuilt).toBe(false);
+      expect(out.requestedInputHash).toBe("hash-rebuilt-exact");
+      expect(out.artifactInputHashUsed).toBe("hash-rebuilt-exact");
+      expect(out.artifactHashMatch).toBe(true);
+      expect(out.artifactSourceMode).toBe("exact_hash_match");
+    }
+    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    expect(saveCachedPastDataset).not.toHaveBeenCalled();
+    expect(getCachedPastDataset).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to a forced rebuild when the exact cached artifact cannot be verified", async () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    const invalidCached = {
+      inputHash: "hash-rebuilt-exact",
+      updatedAt: new Date("2026-03-18T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: "2026-01-01",
+          end: "2026-01-02",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          coverageStart: "2026-01-01",
+          coverageEnd: "2026-01-02",
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.5, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    const rebuiltPersisted = {
+      inputHash: "hash-rebuilt-exact",
+      updatedAt: new Date("2026-03-18T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: canonicalCoverage.startDate,
+          end: canonicalCoverage.endDate,
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          coverageStart: canonicalCoverage.startDate,
+          coverageEnd: canonicalCoverage.endDate,
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-01": 0.5,
+            "2026-01-02": 0.25,
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.5, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {},
+        canonicalArtifactSimulatedDayTotalsByDate: {
+          "2026-01-01": 0.5,
+          "2026-01-02": 0.25,
+        },
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getCachedPastDataset
+      .mockResolvedValueOnce(invalidCached)
+      .mockResolvedValueOnce(invalidCached)
+      .mockResolvedValueOnce(invalidCached)
+      .mockResolvedValueOnce(rebuiltPersisted);
     simulatePastUsageDataset.mockResolvedValueOnce({
       dataset: {
         summary: {
@@ -542,6 +626,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
+      expect(out.rebuilt).toBe(true);
       expect(out.requestedInputHash).toBe("hash-rebuilt-exact");
       expect(out.artifactInputHashUsed).toBe("hash-rebuilt-exact");
       expect(out.artifactHashMatch).toBe(true);
@@ -549,7 +634,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     }
     expect(simulatePastUsageDataset).toHaveBeenCalledTimes(1);
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
-    expect(getCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(getCachedPastDataset).toHaveBeenCalledTimes(4);
   });
 });
 

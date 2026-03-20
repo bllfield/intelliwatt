@@ -304,6 +304,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
 }): Promise<
   | {
       ok: true;
+      rebuilt: boolean;
       scenarioId: string;
       artifactScenarioId: string;
       requestedInputHash: string | null;
@@ -323,44 +324,14 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     };
   }
   const resolvedScenarioId = scenarioId;
-  const rebuilt = await getSimulatedUsageForHouseScenario({
-    userId: args.userId,
-    houseId: args.houseId,
-    scenarioId: resolvedScenarioId,
-    readMode: "allow_rebuild",
-    forceRebuildArtifact: true,
-  });
-  if (!rebuilt.ok) {
-    return {
-      ok: false,
-      error: rebuilt.code === "NO_BUILD" ? "past_build_missing" : "past_rebuild_failed",
-      message: rebuilt.message,
-    };
-  }
-  const rebuiltMeta = ((((rebuilt as any)?.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
-  const exactRebuiltInputHash =
-    typeof rebuiltMeta.artifactInputHashUsed === "string" && String(rebuiltMeta.artifactInputHashUsed).trim()
-      ? String(rebuiltMeta.artifactInputHashUsed).trim()
-      : typeof rebuiltMeta.artifactInputHash === "string" && String(rebuiltMeta.artifactInputHash).trim()
-        ? String(rebuiltMeta.artifactInputHash).trim()
-        : null;
-  if (!exactRebuiltInputHash) {
-    return {
-      ok: false,
-      error: "past_rebuild_failed",
-      message:
-        "Past rebuild completed, but the exact rebuilt artifact identity hash was not available for same-run handoff.",
-    };
-  }
-  const resolvedExactRebuiltInputHash = exactRebuiltInputHash;
   // Rebuild must guarantee artifact-only compare readability. Under constrained DB pools, cache persistence
   // can fail non-fatally inside the rebuild path; verify artifact materialization before returning success.
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-  async function runVerification(): Promise<{ ok: boolean; dataset: any }> {
+  async function runVerification(inputHash: string): Promise<{ ok: boolean; dataset: any }> {
     const persisted = await getCachedPastDataset({
       houseId: args.houseId,
       scenarioId: resolvedScenarioId,
-      inputHash: resolvedExactRebuiltInputHash,
+      inputHash,
     });
     if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) {
       return { ok: false, dataset: null };
@@ -379,32 +350,115 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       String(dataset?.meta?.coverageEnd ?? "") === canonicalCoverage.endDate;
     return { ok: Boolean(hasIntervals15 && hasCanonicalCoverage), dataset };
   }
-  let verification = await runVerification();
-  if (!verification.ok) {
-    await new Promise((r) => setTimeout(r, 800));
-    verification = await runVerification();
-  }
-  if (!verification.ok) {
+
+  async function runEnsureAttempt(forceRebuildArtifact: boolean): Promise<
+    | {
+        ok: true;
+        rebuilt: boolean;
+        exactInputHash: string;
+        artifactSourceNote: string | null;
+      }
+    | { ok: false; error: string; message: string; retryable: boolean }
+  > {
+    const ensured = await getSimulatedUsageForHouseScenario({
+      userId: args.userId,
+      houseId: args.houseId,
+      scenarioId: resolvedScenarioId,
+      readMode: "allow_rebuild",
+      forceRebuildArtifact,
+    });
+    if (!ensured.ok) {
+      return {
+        ok: false,
+        error: ensured.code === "NO_BUILD" ? "past_build_missing" : "past_rebuild_failed",
+        message: ensured.message,
+        retryable: ensured.code !== "NO_BUILD",
+      };
+    }
+    const ensuredMeta = ((((ensured as any)?.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
+    const exactInputHash =
+      typeof ensuredMeta.artifactInputHashUsed === "string" && String(ensuredMeta.artifactInputHashUsed).trim()
+        ? String(ensuredMeta.artifactInputHashUsed).trim()
+        : typeof ensuredMeta.artifactInputHash === "string" && String(ensuredMeta.artifactInputHash).trim()
+          ? String(ensuredMeta.artifactInputHash).trim()
+          : null;
+    if (!exactInputHash) {
+      return {
+        ok: false,
+        error: "past_rebuild_failed",
+        message:
+          "Past rebuild completed, but the exact rebuilt artifact identity hash was not available for same-run handoff.",
+        retryable: !forceRebuildArtifact,
+      };
+    }
+    let verification = await runVerification(exactInputHash);
+    if (!verification.ok) {
+      await new Promise((r) => setTimeout(r, 800));
+      verification = await runVerification(exactInputHash);
+    }
+    if (!verification.ok) {
+      return {
+        ok: false,
+        error: "past_rebuild_failed",
+        message:
+          "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+        retryable: !forceRebuildArtifact,
+      };
+    }
+    const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
     return {
-      ok: false,
-      error: "past_rebuild_failed",
-      message:
-        "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+      ok: true,
+      rebuilt:
+        forceRebuildArtifact ||
+        ensuredMeta.artifactRecomputed === true ||
+        String(ensuredMeta.artifactSource ?? "") === "rebuild",
+      exactInputHash,
+      artifactSourceNote:
+        typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
+          ? String(verificationMeta.artifactSourceNote)
+          : "Artifact source: exact identity match on Past input hash.",
     };
   }
-  const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
+
+  const ensured = await runEnsureAttempt(false);
+  if (!ensured.ok) {
+    if (!ensured.retryable) {
+      return {
+        ok: false,
+        error: ensured.error,
+        message: ensured.message,
+      };
+    }
+    const rebuilt = await runEnsureAttempt(true);
+    if (!rebuilt.ok) {
+      return {
+        ok: false,
+        error: rebuilt.error,
+        message: rebuilt.message,
+      };
+    }
+    return {
+      ok: true,
+      rebuilt: rebuilt.rebuilt,
+      scenarioId: resolvedScenarioId,
+      artifactScenarioId: resolvedScenarioId,
+      requestedInputHash: rebuilt.exactInputHash,
+      artifactInputHashUsed: rebuilt.exactInputHash,
+      artifactHashMatch: true,
+      artifactSourceMode: "exact_hash_match",
+      artifactSourceNote: rebuilt.artifactSourceNote,
+    };
+  }
   return {
     ok: true,
+    rebuilt: ensured.rebuilt,
     scenarioId: resolvedScenarioId,
     artifactScenarioId: resolvedScenarioId,
-    requestedInputHash: resolvedExactRebuiltInputHash,
-    artifactInputHashUsed: resolvedExactRebuiltInputHash,
+    requestedInputHash: ensured.exactInputHash,
+    artifactInputHashUsed: ensured.exactInputHash,
     artifactHashMatch: true,
     artifactSourceMode: "exact_hash_match",
-    artifactSourceNote:
-      typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
-        ? String(verificationMeta.artifactSourceNote)
-        : "Artifact source: exact identity match on Past input hash.",
+    artifactSourceNote: ensured.artifactSourceNote,
   };
 }
 

@@ -340,6 +340,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
   it("supports rebuild-only action without running compare", async () => {
     rebuildGapfillSharedPastArtifact.mockResolvedValueOnce({
       ok: true,
+      rebuilt: true,
       scenarioId: "past-s1",
       artifactScenarioId: "past-s1",
       requestedInputHash: "hash-ensure-1",
@@ -2056,6 +2057,19 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("\"route_exception\"");
   });
 
+  it("classifies artifact ensure client timeout, fetch failure, and exception explicitly in client source", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain("artifact_ensure_client_timeout");
+    expect(clientSource).toContain("artifact_ensure_client_fetch_failure");
+    expect(clientSource).toContain("artifact_ensure_client_exception");
+    expect(clientSource).toContain("artifact_ensure_timeout");
+    expect(clientSource).toContain("artifact_ensure_fetch_failure");
+    expect(clientSource).toContain("classifyArtifactEnsureUiFailure");
+  });
+
   it("requests and merges compact heavy-only responses in client source", () => {
     const clientSource = readFileSync(
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
@@ -2259,6 +2273,29 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.compareCoreTiming?.compareRequestTruth?.compareFreshModeRequested).toBe("selected_days");
   });
 
+  it("returns route timeout classification when rebuild-only artifact ensure stalls", async () => {
+    const timeoutErr: any = new Error("artifact_ensure_route_timeout_rebuild_shared_artifact");
+    timeoutErr.code = "artifact_ensure_route_timeout_rebuild_shared_artifact";
+    rebuildGapfillSharedPastArtifact.mockRejectedValueOnce(timeoutErr);
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        rebuildArtifact: true,
+        rebuildOnly: true,
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(504);
+    expect(body.error).toBe("artifact_ensure_route_timeout");
+    expect(body.reasonCode).toBe("ARTIFACT_ENSURE_ROUTE_TIMEOUT");
+    expect(body.timeoutMs).toBe(120000);
+    expect(body.missingData).toEqual(["rebuildGapfillSharedPastArtifact"]);
+  });
+
   it("classifies diagnostics full-report timeout vs non-timeout distinctly in source", () => {
     const routeSource = readFileSync(
       resolve(process.cwd(), "app/api/admin/tools/gapfill-lab/route.ts"),
@@ -2290,13 +2327,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
       "utf8"
     );
-    expect(clientSource).toContain("const EMPTY_SCORED_DAY_WEATHER_ROWS");
-    expect(clientSource).toContain("const EMPTY_SCORED_DAY_TRUTH_ROWS");
     expect(clientSource).toContain("Compare-Core Weather Truth");
     expect(clientSource).toContain("extractCompareCoreScoredDayWeather(result)");
-    expect(clientSource).toContain("const scoredDayTruthRows = useMemo(");
+    expect(clientSource).toContain("const scoredDayTruthRowsForDisplay = useMemo(");
     expect(clientSource).toContain("mergeScoredDayTruthRowsWithCompareCoreWeather(");
-    expect(clientSource).toContain("compareCoreScoredDayWeatherRows.length > 0");
+    expect(clientSource).toContain("compareCoreScoredDayWeatherTruth");
     expect(clientSource).toContain('row.weatherSourceUsed ?? "—"');
   });
 

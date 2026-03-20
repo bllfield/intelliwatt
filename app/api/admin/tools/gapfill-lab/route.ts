@@ -38,6 +38,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
 // Keep route compare-core timeout below client timeout so route-side
 // classification (failedStep/reasonCode) reaches UI before browser abort.
+const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
 const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 120_000;
 const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
 
@@ -1653,10 +1654,38 @@ export async function POST(req: NextRequest) {
   const rebuildArtifact = body?.rebuildArtifact === true;
   const rebuildOnly = body?.rebuildOnly === true;
   if (rebuildArtifact && rebuildOnly) {
-    const rebuilt = await rebuildGapfillSharedPastArtifact({
-      userId: user.id,
-      houseId: house.id,
-    });
+    let rebuilt: Awaited<ReturnType<typeof rebuildGapfillSharedPastArtifact>>;
+    try {
+      rebuilt = await withTimeout(
+        rebuildGapfillSharedPastArtifact({
+          userId: user.id,
+          houseId: house.id,
+        }),
+        ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+        "artifact_ensure_route_timeout_rebuild_shared_artifact"
+      );
+    } catch (err: unknown) {
+      const normalizedError = normalizeRouteError(
+        err,
+        "Artifact ensure failed while rebuilding shared Past artifact."
+      );
+      const timedOut = normalizedError.code === "artifact_ensure_route_timeout_rebuild_shared_artifact";
+      return NextResponse.json(
+        {
+          ok: false,
+          error: timedOut ? "artifact_ensure_route_timeout" : "artifact_ensure_route_exception",
+          message: timedOut
+            ? "Artifact ensure timed out while rebuilding shared Past artifact."
+            : normalizedError.message,
+          missingData: timedOut ? ["rebuildGapfillSharedPastArtifact"] : undefined,
+          reasonCode: timedOut
+            ? "ARTIFACT_ENSURE_ROUTE_TIMEOUT"
+            : "ARTIFACT_ENSURE_ROUTE_EXCEPTION",
+          timeoutMs: timedOut ? ROUTE_REBUILD_SHARED_TIMEOUT_MS : undefined,
+        },
+        { status: timedOut ? 504 : 500 }
+      );
+    }
     if (!rebuilt.ok) {
       const classification = classifySimulationFailure({
         code: String((rebuilt as any)?.error ?? ""),
@@ -1689,7 +1718,7 @@ export async function POST(req: NextRequest) {
       timezone,
       mode: "artifact_only",
       action: "rebuild_only",
-      rebuilt: true,
+      rebuilt: rebuilt.rebuilt === true,
       scenarioId: rebuilt.scenarioId,
       artifactScenarioId: rebuilt.artifactScenarioId,
       requestedInputHash: rebuilt.requestedInputHash,
@@ -1698,7 +1727,9 @@ export async function POST(req: NextRequest) {
       artifactSourceMode: rebuilt.artifactSourceMode,
       artifactSourceNote: rebuilt.artifactSourceNote,
       message:
-        "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
+        rebuilt.rebuilt === true
+          ? "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output."
+          : "Shared Past artifact exact identity was already available, so artifact ensure skipped a redundant rebuild.",
       testRangesUsed,
       testSelectionMode,
       testDaysRequested,
@@ -2248,7 +2279,7 @@ export async function POST(req: NextRequest) {
       (typeof requestedInputHash === "string" &&
         requestedInputHash.length > 0 &&
         artifactInputHashUsed !== requestedInputHash) ||
-      (requireExactArtifactMatch && artifactExactIdentityResolved !== true));
+      (requireExactArtifactMatch && sameRunExactHashRequested && artifactExactIdentityResolved !== true));
   if (hasContradictoryExactArtifactTruth) {
     return NextResponse.json(
       {

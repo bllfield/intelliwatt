@@ -105,9 +105,6 @@ type ScoredDayTruthRow = {
   reasonCode: string | null;
 };
 
-const EMPTY_SCORED_DAY_WEATHER_ROWS: ScoredDayWeatherRow[] = [];
-const EMPTY_SCORED_DAY_TRUTH_ROWS: ScoredDayTruthRow[] = [];
-
 type ApiResponse =
   | {
       ok: true;
@@ -227,8 +224,8 @@ export function extractCompareCoreScoredDayWeather(result: ApiResponse | null): 
           ? ((result as any).scoredDayWeatherRows as ScoredDayWeatherRow[])
           : Array.isArray((truthEnvelope as any)?.scoredDayWeatherRows)
             ? ((truthEnvelope as any).scoredDayWeatherRows as ScoredDayWeatherRow[])
-            : EMPTY_SCORED_DAY_WEATHER_ROWS)
-      : EMPTY_SCORED_DAY_WEATHER_ROWS;
+            : [])
+      : [];
   const truth =
     result && result.ok
       ? (((result as any)?.scoredDayWeatherTruth ?? (truthEnvelope as any)?.scoredDayWeatherTruth ?? null) as ScoredDayWeatherTruth | null)
@@ -275,7 +272,7 @@ const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 195_000;
 // Keep client timeout above route compare-core timeouts so route step-level
 // timeout classification can return to UI before the browser aborts.
 const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
-const GAPFILL_REBUILD_TIMEOUT_MS = 900_000;
+const GAPFILL_REBUILD_TIMEOUT_MS = 150_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;
 type OrchestratorPhaseKey =
@@ -414,6 +411,48 @@ export function classifyHeavyDiagnosticsUiFailure(value: unknown): {
     errorCode: "compare_heavy_client_exception",
     failureKind: "client_exception",
     phase: "compare_heavy_exception",
+    message: normalized.message,
+    normalized,
+  };
+}
+
+export function classifyArtifactEnsureUiFailure(value: unknown): {
+  errorCode:
+    | "artifact_ensure_client_timeout"
+    | "artifact_ensure_client_fetch_failure"
+    | "artifact_ensure_client_exception";
+  failureKind: "client_timeout" | "fetch_failure" | "client_exception";
+  phase: "artifact_ensure_timeout" | "artifact_ensure_fetch_failure" | "artifact_ensure_exception";
+  message: string;
+  normalized: NormalizedUiError;
+} {
+  const normalized = normalizeUnknownUiError(
+    value,
+    "Artifact ensure request failed before a response was returned."
+  );
+  const lowerMessage = normalized.message.toLowerCase();
+  if (normalized.isAbortError) {
+    return {
+      errorCode: "artifact_ensure_client_timeout",
+      failureKind: "client_timeout",
+      phase: "artifact_ensure_timeout",
+      message: "Artifact ensure request timed out in client before backend response.",
+      normalized,
+    };
+  }
+  if (lowerMessage.includes("failed to fetch")) {
+    return {
+      errorCode: "artifact_ensure_client_fetch_failure",
+      failureKind: "fetch_failure",
+      phase: "artifact_ensure_fetch_failure",
+      message: "Artifact ensure request failed to fetch before backend response.",
+      normalized,
+    };
+  }
+  return {
+    errorCode: "artifact_ensure_client_exception",
+    failureKind: "client_exception",
+    phase: "artifact_ensure_exception",
     message: normalized.message,
     normalized,
   };
@@ -743,17 +782,12 @@ export default function GapFillLabClient() {
         }
       : null;
   const artifactStatus = artifactFromEnvelope ?? artifactFromTopLevel;
-  const scoredDayTruthRows = useMemo(
-    () =>
-      result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
-        ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
-        : EMPTY_SCORED_DAY_TRUTH_ROWS,
-    [result]
-  );
-  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } = useMemo(
-    () => extractCompareCoreScoredDayWeather(result),
-    [result]
-  );
+  const scoredDayTruthRows =
+    result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
+      ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
+      : [];
+  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } =
+    extractCompareCoreScoredDayWeather(result);
   const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
   const usageShapeDiag =
     result && result.ok ? ((result as any)?.modelAssumptions?.usageShapeProfileDiag ?? null) : null;
@@ -1269,7 +1303,39 @@ export default function GapFillLabClient() {
         rebuildArtifact: true,
         rebuildOnly: true,
       };
-      const { res: ensureRes, data: ensureData } = await postGapfill(ensureBody, GAPFILL_REBUILD_TIMEOUT_MS);
+      let ensureRes: Response;
+      let ensureData: ApiResponse;
+      try {
+        const ensureResult = await postGapfill(ensureBody, GAPFILL_REBUILD_TIMEOUT_MS);
+        ensureRes = ensureResult.res;
+        ensureData = ensureResult.data;
+      } catch (ensureErr: unknown) {
+        const failure = classifyArtifactEnsureUiFailure(ensureErr);
+        finishPhase("artifact_ensure", "error", {
+          errorCode: failure.errorCode,
+          errorMessage: failure.message,
+        });
+        setArtifactMissing(true);
+        setError(failure.message);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: failure.phase,
+          ensureBody,
+          ensureFailureKind: failure.failureKind,
+          ensureError: failure.errorCode,
+          ensureMessage: failure.message,
+          ensureRequestTruth: {
+            includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+            includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
+            compareFreshModeRequested: resolveCompareFreshModeRequested({
+              includeDiagnostics: togglesSnapshot.fullDiagnosticsOnEnsure,
+              includeFullReportText: togglesSnapshot.fullDiagnosticsOnEnsure,
+            }),
+          },
+        }));
+        setProgressStatus(null);
+        return;
+      }
       if (!ensureRes.ok || !ensureData.ok) {
         finishPhase("artifact_ensure", "error", {
           errorCode: String((ensureData as any)?.error ?? "artifact_ensure_failed"),
