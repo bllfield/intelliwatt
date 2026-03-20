@@ -756,7 +756,7 @@ export async function buildGapfillCompareSimShared(args: {
   // mode stays selected-days unless the caller explicitly asks for full_window.
   void includeFreshCompareCalc;
   const effectiveCompareFreshMode = compareFreshMode ?? "selected_days";
-  const useSelectedDaysLightweightArtifactRead =
+  let useSelectedDaysLightweightArtifactRead =
     selectedDaysLightweightArtifactRead === true &&
     effectiveCompareFreshMode === "selected_days" &&
     !rebuildArtifact &&
@@ -831,6 +831,13 @@ export async function buildGapfillCompareSimShared(args: {
     new Set<string>(travelRangesToExcludeDateKeys(buildTravelRanges)),
     sharedCoverageWindow
   );
+  const exactTravelParityRequiresIntervalBackedArtifactTruth =
+    requireExactArtifactMatch && boundedTravelDateKeysLocal.size > 0;
+  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    // Exact travel/vacant parity must read the exact cached artifact intervals rather than relying
+    // on lightweight metadata-only day totals. Display rows can still remain compact later.
+    useSelectedDaysLightweightArtifactRead = false;
+  }
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -1074,18 +1081,18 @@ export async function buildGapfillCompareSimShared(args: {
       ? "lightweight_compare_without_exact_identity_uses_latest_scenario_artifact"
       : null;
   let cached = !rebuildArtifact
-    ? useSelectedDaysLightweightArtifactRead
-      ? exactArtifactIdentityRequested
-        ? await getCachedPastDataset({
-            houseId,
-            scenarioId: requestedArtifactScenarioId,
-            inputHash: requestedArtifactInputHash,
-          })
-        : await getLatestCachedPastDatasetByScenario({
+    ? exactArtifactIdentityRequested
+      ? await getCachedPastDataset({
+          houseId,
+          scenarioId: requestedArtifactScenarioId,
+          inputHash: requestedArtifactInputHash,
+        })
+      : useSelectedDaysLightweightArtifactRead
+        ? await getLatestCachedPastDatasetByScenario({
             houseId,
             scenarioId: sharedScenarioCacheId,
           })
-      : await getCachedPastDataset({
+        : await getCachedPastDataset({
           houseId,
           scenarioId: sharedScenarioCacheId,
           inputHash: sharedInputHash,
@@ -1802,7 +1809,15 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.gapfillDisplayMonthlySource = useDatasetMonthlyAsCanonical
     ? "dataset.monthly"
     : "interval_rebucket_fallback";
-  const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  const canonicalArtifactSimulatedDayTotalsByDate =
+    exactTravelParityRequiresIntervalBackedArtifactTruth && artifactIntervals.length > 0
+      ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset, timezone)
+      : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
+    (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
+    (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
+  }
   let artifactSimulatedDayReferenceRows = Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
     .map(([date, simKwh]) => ({ date: String(date).slice(0, 10), simKwh: round2Local(Number(simKwh) || 0) }))
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && displayDateKeysLocal.has(row.date))

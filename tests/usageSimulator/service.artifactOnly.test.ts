@@ -2031,6 +2031,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
+    decodeIntervalsV1.mockReturnValue([
+      ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
+    ]);
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [],
@@ -2124,6 +2131,133 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         }),
       ]);
       expect(out.scoredDayWeatherRows?.map((row) => row.localDate)).toEqual(["2026-01-01"]);
+    }
+  });
+
+  it("recomputes exact travel parity artifact day totals from decoded artifact intervals instead of stale stored metadata", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
+      },
+    });
+    decodeIntervalsV1.mockReturnValue([
+      ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
+    ]);
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-exact-stale-meta",
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 120,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-03,2026-01-04",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-03": 23.78,
+            "2026-01-04": 23.81,
+          },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "ACTUAL" },
+          { date: "2026-01-03", kwh: 23.78, source: "SIMULATED" },
+          { date: "2026-01-04", kwh: 23.81, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 95.59 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 2,
+          totalKwh: 48,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          weatherSourceSummary: "actual_only",
+          weatherKindUsed: "ACTUAL_LAST_YEAR",
+          weatherProviderName: "OPEN_METEO",
+          weatherFallbackReason: null,
+        },
+        daily: [
+          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 48 }],
+        series: {
+          intervals15: [
+            ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+            ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+          ],
+        },
+      },
+      actualWxByDateKey: new Map([
+        ["2026-01-03", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
+        ["2026-01-04", { tAvgF: 51, tMinF: 41, tMaxF: 61, hdd65: 14, cdd65: 0, source: "OPEN_METEO" }],
+      ]),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      artifactExactScenarioId: "gapfill_lab",
+      artifactExactInputHash: "hash-selected-exact-stale-meta",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(decodeIntervalsV1).toHaveBeenCalled();
+      expect(out.travelVacantParityTruth).toMatchObject({
+        availability: "validated",
+        mismatchCount: 0,
+        exactProofSatisfied: true,
+      });
+      expect(out.travelVacantParityRows).toEqual([
+        expect.objectContaining({
+          localDate: "2026-01-03",
+          artifactCanonicalSimDayKwh: 24,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+        expect.objectContaining({
+          localDate: "2026-01-04",
+          artifactCanonicalSimDayKwh: 24,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+      ]);
     }
   });
 
