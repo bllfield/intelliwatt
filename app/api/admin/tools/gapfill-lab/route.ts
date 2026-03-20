@@ -38,7 +38,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
 // Keep route compare-core timeout below client timeout so route-side
 // classification (failedStep/reasonCode) reaches UI before browser abort.
-const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
+const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 240_000;
 const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 120_000;
 const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
 
@@ -2279,7 +2279,7 @@ export async function POST(req: NextRequest) {
       (typeof requestedInputHash === "string" &&
         requestedInputHash.length > 0 &&
         artifactInputHashUsed !== requestedInputHash) ||
-      (requireExactArtifactMatch && sameRunExactHashRequested && artifactExactIdentityResolved !== true));
+      (requireExactArtifactMatch && artifactExactIdentityResolved !== true));
   if (hasContradictoryExactArtifactTruth) {
     return NextResponse.json(
       {
