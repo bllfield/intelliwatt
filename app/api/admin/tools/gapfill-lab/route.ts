@@ -2195,8 +2195,11 @@ export async function POST(req: NextRequest) {
     (artifactInputHashUsed && (artifactScenarioId ?? stableScenarioId)
       ? `${artifactScenarioId ?? stableScenarioId}:${artifactInputHashUsed}`
       : null);
+  const sameRunExactHashRequested =
+    typeof requestedInputHash === "string" && requestedInputHash.length > 0;
   const sameRunExactHandoffRequired =
     requireExactArtifactMatch &&
+    sameRunExactHashRequested &&
     artifactIdentitySourceUsed === "same_run_artifact_ensure";
   const sameRunExactHandoffResolved =
     sameRunExactHandoffRequired &&

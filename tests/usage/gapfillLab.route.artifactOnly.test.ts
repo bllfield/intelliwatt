@@ -1983,6 +1983,64 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
   });
 
+  it("does not require same-run exact handoff when no exact artifact hash was requested", async () => {
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: {
+        artifactSourceMode: "latest_by_scenario_fallback",
+        requestedInputHash: null,
+        artifactInputHashUsed: "hash-fallback",
+        artifactHashMatch: null,
+        artifactScenarioId: "past-s1",
+        artifactExactIdentityResolved: false,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        artifactSameRunEnsureIdentity: true,
+        artifactFallbackOccurred: true,
+        artifactFallbackReason: "lightweight_compare_without_exact_identity_uses_latest_scenario_artifact",
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.artifactRequestTruth).toEqual({
+      requestedInputHash: null,
+      requestedArtifactScenarioId: null,
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+    });
+    expect(body.artifactSourceMode).toBe("latest_by_scenario_fallback");
+    expect(body.requestedInputHash).toBeNull();
+    expect(body.artifactInputHashUsed).toBe("hash-fallback");
+  });
+
   it("classifies heavy diagnostics client timeout, fetch failure, and exception explicitly in client source", () => {
     const clientSource = readFileSync(
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
