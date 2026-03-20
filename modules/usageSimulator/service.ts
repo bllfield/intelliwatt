@@ -49,6 +49,7 @@ import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
+  simulatePastFullWindowShared,
   simulatePastUsageDataset,
   simulatePastSelectedDaysShared,
   getUsageShapeProfileIdentityForPast,
@@ -1520,12 +1521,11 @@ export async function buildGapfillCompareSimShared(args: {
   };
   let freshParityIntervals: IntervalPoint[] = [];
 
-  let freshDataset: any | null = null;
   const needsFreshCompareForParity =
     boundedTestDateKeysLocal.size > 0 || travelVacantParityDateKeysLocal.length > 0;
   if (needsFreshCompareForParity) {
     const runFullWindowFreshExecution = async () => {
-      const freshResult = await getPastSimulatedDatasetForHouse({
+      const freshResult = await simulatePastFullWindowShared({
         userId,
         houseId,
         esiid: houseResolved.esiid ?? null,
@@ -1538,7 +1538,7 @@ export async function buildGapfillCompareSimShared(args: {
         buildPathKind: "lab_validation",
         includeSimulatedDayResults: false,
       });
-      if (freshResult.dataset === null) {
+      if (freshResult.simulatedIntervals === null) {
         return {
           ok: false as const,
           error:
@@ -1546,24 +1546,18 @@ export async function buildGapfillCompareSimShared(args: {
             "Fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
         };
       }
-      const nextFreshDataset = freshResult.dataset;
-      const freshIntervalsRaw = Array.isArray((nextFreshDataset as any)?.series?.intervals15)
-        ? ((nextFreshDataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>)
-        : [];
-      const freshIntervals = freshIntervalsRaw.map((p) => ({
+      const freshIntervals = freshResult.simulatedIntervals.map((p) => ({
         timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
         kwh: Number(p?.kwh) || 0,
       }));
       return {
         ok: true as const,
-        dataset: nextFreshDataset,
+        weatherKindUsed: freshResult.weatherKindUsed,
+        weatherProviderName: freshResult.weatherProviderName,
+        weatherFallbackReason: freshResult.weatherFallbackReason,
         actualWxByDateKey: freshResult.actualWxByDateKey ?? null,
         simulatedIntervals: freshIntervals,
-        weatherSourceSummary: String(
-          ((nextFreshDataset as any)?.meta?.weatherSourceSummary ??
-            (nextFreshDataset as any)?.meta?.simulationWeatherSourceOwner ??
-            weatherBasisUsed) || "unknown"
-        ),
+        weatherSourceSummary: String(freshResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
       };
     };
     if (effectiveCompareFreshMode === "selected_days") {
@@ -1624,7 +1618,6 @@ export async function buildGapfillCompareSimShared(args: {
             },
           };
         }
-        freshDataset = freshResult.dataset;
         freshParityIntervals = freshResult.simulatedIntervals;
         simulatedTestIntervals = freshResult.simulatedIntervals.filter((p) =>
           boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
@@ -1635,15 +1628,15 @@ export async function buildGapfillCompareSimShared(args: {
         compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
         compareFreshModeUsed = "full_window";
         compareSharedCalcPath =
-          "getPastSimulatedDatasetForHouse(simulatePastUsageDataset exact_travel_parity_and_selected_day_scoring)->buildGapfillCompareSimShared";
+          "simulatePastFullWindowShared(buildPastSimulatedBaselineV1->simulatePastDay exact_travel_parity_and_selected_day_scoring)->buildGapfillCompareSimShared";
         weatherBasisUsed = freshResult.weatherSourceSummary;
         const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
           scoredDateKeysLocal: boundedTestDateKeysLocal,
           weatherByDateKey: freshResult.actualWxByDateKey,
           weatherBasisUsed,
-          weatherKindUsed: String(((freshDataset as any)?.meta?.weatherKindUsed ?? "") || "") || null,
-          weatherProviderName: String(((freshDataset as any)?.meta?.weatherProviderName ?? "") || "") || null,
-          weatherFallbackReason: String(((freshDataset as any)?.meta?.weatherFallbackReason ?? "") || "") || null,
+          weatherKindUsed: String(freshResult.weatherKindUsed ?? "") || null,
+          weatherProviderName: String(freshResult.weatherProviderName ?? "") || null,
+          weatherFallbackReason: String(freshResult.weatherFallbackReason ?? "") || null,
         });
         scoredDayWeatherRows = scoredDayWeatherPayload.rows;
         scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
@@ -1725,7 +1718,6 @@ export async function buildGapfillCompareSimShared(args: {
           },
         };
       }
-      freshDataset = freshResult.dataset;
       freshParityIntervals = freshResult.simulatedIntervals;
       simulatedTestIntervals = freshResult.simulatedIntervals.filter((p) =>
         boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
@@ -1736,15 +1728,15 @@ export async function buildGapfillCompareSimShared(args: {
       compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
       compareFreshModeUsed = "full_window";
       compareSharedCalcPath =
-        "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared";
+        "simulatePastFullWindowShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
       weatherBasisUsed = freshResult.weatherSourceSummary;
       const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
         scoredDateKeysLocal: boundedTestDateKeysLocal,
         weatherByDateKey: freshResult.actualWxByDateKey,
         weatherBasisUsed,
-        weatherKindUsed: String(((freshDataset as any)?.meta?.weatherKindUsed ?? "") || "") || null,
-        weatherProviderName: String(((freshDataset as any)?.meta?.weatherProviderName ?? "") || "") || null,
-        weatherFallbackReason: String(((freshDataset as any)?.meta?.weatherFallbackReason ?? "") || "") || null,
+        weatherKindUsed: String(freshResult.weatherKindUsed ?? "") || null,
+        weatherProviderName: String(freshResult.weatherProviderName ?? "") || null,
+        weatherFallbackReason: String(freshResult.weatherFallbackReason ?? "") || null,
       });
       scoredDayWeatherRows = scoredDayWeatherPayload.rows;
       scoredDayWeatherTruth = scoredDayWeatherPayload.truth;

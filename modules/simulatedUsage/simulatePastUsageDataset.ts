@@ -244,6 +244,17 @@ export type SimulatePastSelectedDaysResult = {
   weatherKindUsed: string | undefined;
 };
 
+export type SimulatePastFullWindowSharedResult = {
+  simulatedIntervals: Array<{ timestamp: string; kwh: number }>;
+  simulatedDayResults?: SimulatedDayResult[];
+  pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
+  actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
+  weatherKindUsed: string | undefined;
+  weatherProviderName: string | null;
+  weatherFallbackReason: string | null;
+};
+
 export type UsageShapeProfileIdentity = {
   usageShapeProfileId: string | null;
   usageShapeProfileVersion: string | null;
@@ -610,6 +621,159 @@ export async function simulatePastUsageDataset(
     const err = e instanceof Error ? e : new Error(String(e));
     console.warn("[simulatePastUsageDataset] failed", { houseId, err: e });
     return { dataset: null, error: err.message };
+  }
+}
+
+export async function simulatePastFullWindowShared(
+  args: SimulatePastUsageDatasetArgs
+): Promise<SimulatePastFullWindowSharedResult | { simulatedIntervals: null; error: string }> {
+  const {
+    houseId,
+    userId,
+    esiid,
+    startDate,
+    endDate,
+    timezone,
+    travelRanges,
+    buildInputs,
+    actualIntervals: preloadedIntervals,
+    includeSimulatedDayResults = false,
+  } = args;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { simulatedIntervals: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
+  }
+  try {
+    const actualIntervals =
+      preloadedIntervals ??
+      (await getActualIntervalsForRange({ houseId, esiid, startDate, endDate })).map((p) => ({
+        timestamp: p.timestamp,
+        kwh: p.kwh,
+      }));
+    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+    const excludedDateKeys = boundDateKeysToCoverageWindow(
+      travelRangesToExcludeDateKeys(travelRanges),
+      { startDate, endDate }
+    );
+    const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
+      houseId,
+      startDate,
+      endDate,
+      canonicalDateKeys,
+    });
+    if (provenance.weatherSourceSummary !== "actual_only") {
+      return {
+        simulatedIntervals: null,
+        error: `actual_weather_required:${provenance.weatherSourceSummary}`,
+      };
+    }
+
+    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
+      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
+      getLatestUsageShapeProfile(houseId).catch(() => null),
+    ]);
+    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
+    const applianceProfileForPast =
+      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
+        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
+        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+
+    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
+    let inlineDerivedShapeProfile:
+      | ReturnType<typeof deriveUsageShapeProfile>
+      | null = null;
+    let reasonNotUsed: string | null = null;
+    if (!shapeProfileRow) {
+      reasonNotUsed = "profile_not_found";
+    } else if (!timezone) {
+      reasonNotUsed = "missing_timezone";
+    } else if (!shapeProfileRow.shapeByMonth96) {
+      reasonNotUsed = "no_shapeByMonth96";
+    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
+      reasonNotUsed = "missing_arrays";
+    }
+    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
+      const profileMonthKeys = parseMonthKeysFromShapeByMonth(shapeProfileRow.shapeByMonth96);
+      const snap = buildUsageShapeProfileSnapFromMonthContract({
+        monthKeys: profileMonthKeys,
+        weekdayVals: shapeProfileRow.avgKwhPerDayWeekdayByMonth,
+        weekendVals: shapeProfileRow.avgKwhPerDayWeekendByMonth,
+      });
+      if (snap) {
+        usageShapeProfileSnap = snap;
+        reasonNotUsed = null;
+      } else {
+        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
+      }
+    }
+    if (!usageShapeProfileSnap && timezone && actualIntervals.length > 0) {
+      try {
+        inlineDerivedShapeProfile = deriveUsageShapeProfile(
+          actualIntervals.map((r) => ({
+            tsUtc: String(r.timestamp ?? ""),
+            kwh: Number(r.kwh) || 0,
+          })),
+          timezone,
+          `${startDate}T00:00:00.000Z`,
+          `${endDate}T23:59:59.999Z`
+        );
+        const inlineMonthKeys = parseMonthKeysFromShapeByMonth(inlineDerivedShapeProfile.shapeByMonth96);
+        const inlineSnap = buildUsageShapeProfileSnapFromMonthContract({
+          monthKeys: inlineMonthKeys,
+          weekdayVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonth,
+          weekendVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonth,
+          weekdayByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonthKey,
+          weekendByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonthKey,
+        });
+        if (inlineSnap) {
+          usageShapeProfileSnap = inlineSnap;
+          reasonNotUsed = null;
+        } else {
+          reasonNotUsed = reasonNotUsed ?? "inline_profile_no_positive_values";
+        }
+      } catch {
+        reasonNotUsed = reasonNotUsed ?? "inline_profile_derive_failed";
+      }
+    }
+    if (!usageShapeProfileSnap) {
+      return {
+        simulatedIntervals: null,
+        error: `usage_shape_profile_required:${reasonNotUsed ?? "missing"}`,
+      };
+    }
+
+    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
+    const { intervals: simulatedIntervals, dayResults } = buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs,
+      excludedDateKeys,
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      homeProfile: homeProfileForPast,
+      applianceProfile: applianceProfileForPast,
+      usageShapeProfile: usageShapeProfileSnap ?? undefined,
+      timezoneForProfile: timezone ?? undefined,
+      actualWxByDateKey,
+      _normalWxByDateKey: normalWxByDateKey,
+      collectSimulatedDayResults: includeSimulatedDayResults,
+      debug: { out: pastDayCounts as any },
+    });
+
+    return {
+      simulatedIntervals,
+      simulatedDayResults: includeSimulatedDayResults ? dayResults : undefined,
+      pastDayCounts,
+      actualWxByDateKey,
+      weatherSourceSummary: provenance.weatherSourceSummary,
+      weatherKindUsed: provenance.weatherKindUsed,
+      weatherProviderName: provenance.weatherProviderName,
+      weatherFallbackReason: provenance.weatherFallbackReason,
+    };
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.warn("[simulatePastFullWindowShared] failed", { houseId, err: e });
+    return { simulatedIntervals: null, error: err.message };
   }
 }
 

@@ -12,6 +12,7 @@ const computePastInputHash = vi.fn();
 const getCachedPastDataset = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();
 const saveCachedPastDataset = vi.fn();
+const simulatePastFullWindowShared = vi.fn();
 const simulatePastUsageDataset = vi.fn();
 const simulatePastSelectedDaysShared = vi.fn();
 const loadWeatherForPastWindow = vi.fn();
@@ -54,6 +55,7 @@ vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
 }));
 
 vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
+  simulatePastFullWindowShared: (...args: any[]) => simulatePastFullWindowShared(...args),
   simulatePastUsageDataset: (...args: any[]) => simulatePastUsageDataset(...args),
   simulatePastSelectedDaysShared: (...args: any[]) => simulatePastSelectedDaysShared(...args),
   getUsageShapeProfileIdentityForPast: (...args: any[]) => getUsageShapeProfileIdentityForPast(...args),
@@ -84,6 +86,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
     saveCachedPastDataset.mockReset();
+    simulatePastFullWindowShared.mockReset();
     simulatePastUsageDataset.mockReset();
     simulatePastSelectedDaysShared.mockReset();
     loadWeatherForPastWindow.mockReset();
@@ -336,6 +339,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
     saveCachedPastDataset.mockReset();
+    simulatePastFullWindowShared.mockReset();
     simulatePastUsageDataset.mockReset();
     simulatePastSelectedDaysShared.mockReset();
     loadWeatherForPastWindow.mockReset();
@@ -576,6 +580,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
     saveCachedPastDataset.mockReset();
+    simulatePastFullWindowShared.mockReset();
     simulatePastUsageDataset.mockReset();
     loadWeatherForPastWindow.mockReset();
     encodeIntervalsV1.mockReset();
@@ -1487,16 +1492,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: { weatherSourceSummary: "actual_only" },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
-      },
-      simulatedDayResults: [],
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
     });
 
     const out = await buildGapfillCompareSimShared({
@@ -1516,7 +1518,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.compareSimSource).toBe("shared_fresh_calc");
       expect(out.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
       expect(out.comparePulledFromSharedArtifactOnly).toBe(false);
-      expect(out.compareSharedCalcPath).toContain("getPastSimulatedDatasetForHouse");
+      expect(out.compareSharedCalcPath).toContain("simulatePastFullWindowShared");
       expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
@@ -1545,16 +1547,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: { weatherSourceSummary: "actual_only" },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
-      },
-      simulatedDayResults: [],
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
     });
     const commonArgs = {
       userId: "u1",
@@ -1597,16 +1596,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: { weatherSourceSummary: "actual_only" },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
-      },
-      simulatedDayResults: [],
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
     });
 
     const out = await buildGapfillCompareSimShared({
@@ -2038,45 +2034,26 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
       ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
     ]);
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: {
-          source: "SIMULATED",
-          intervalsCount: 96 * 5,
-          totalKwh: 24 * 5,
-          start: "2026-01-01",
-          end: "2026-01-05",
-        },
-        meta: {
-          weatherSourceSummary: "actual_only",
-          weatherKindUsed: "ACTUAL_LAST_YEAR",
-          weatherProviderName: "OPEN_METEO",
-          weatherFallbackReason: null,
-        },
-        daily: [
-          { date: "2026-01-01", kwh: 24, source: "SIMULATED" },
-          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
-          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
-        ],
-        monthly: [{ month: "2026-01", kwh: 120 }],
-        series: {
-          intervals15: [
-            ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
-            ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
-            ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
-            ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
-            ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
-          ],
-        },
-      },
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: [
+        ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
+      ],
       actualWxByDateKey: new Map([
         ["2026-01-01", { tAvgF: 49, tMinF: 39, tMaxF: 59, hdd65: 16, cdd65: 0, source: "OPEN_METEO" }],
         ["2026-01-03", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
         ["2026-01-04", { tAvgF: 51, tMinF: 41, tMaxF: 61, hdd65: 14, cdd65: 0, source: "OPEN_METEO" }],
       ]),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
     });
     const selectedDaysCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
-    const fullWindowCallsBefore = simulatePastUsageDataset.mock.calls.length;
+    const fullWindowCallsBefore = simulatePastFullWindowShared.mock.calls.length;
     const intervalFingerprintCallsBefore = getIntervalDataFingerprint.mock.calls.length;
     const weatherIdentityCallsBefore = computePastWeatherIdentity.mock.calls.length;
     const usageShapeIdentityCallsBefore = getUsageShapeProfileIdentityForPast.mock.calls.length;
@@ -2100,7 +2077,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
-      const fullWindowCalls = simulatePastUsageDataset.mock.calls.slice(fullWindowCallsBefore);
+      const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(selectedDaysCalls).toHaveLength(0);
       expect(fullWindowCalls).toHaveLength(1);
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
@@ -2109,7 +2086,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(decodeIntervalsV1).toHaveBeenCalled();
       expect(out.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
       expect(out.compareFreshModeUsed).toBe("full_window");
-      expect(out.compareSharedCalcPath).toContain("exact_travel_parity_and_selected_day_scoring");
+      expect(out.compareSharedCalcPath).toContain("simulatePastFullWindowShared");
       expect(out.compareSimSource).toBe("shared_fresh_calc");
       expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");
       expect(out.travelVacantParityTruth).toMatchObject({
@@ -2202,37 +2179,19 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
     });
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: {
-          source: "SIMULATED",
-          intervalsCount: 96 * 2,
-          totalKwh: 48,
-          start: "2026-01-01",
-          end: "2026-01-05",
-        },
-        meta: {
-          weatherSourceSummary: "actual_only",
-          weatherKindUsed: "ACTUAL_LAST_YEAR",
-          weatherProviderName: "OPEN_METEO",
-          weatherFallbackReason: null,
-        },
-        daily: [
-          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
-          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
-        ],
-        monthly: [{ month: "2026-01", kwh: 48 }],
-        series: {
-          intervals15: [
-            ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
-            ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
-          ],
-        },
-      },
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: [
+        ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+      ],
       actualWxByDateKey: new Map([
         ["2026-01-03", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
         ["2026-01-04", { tAvgF: 51, tMinF: 41, tMaxF: 61, hdd65: 14, cdd65: 0, source: "OPEN_METEO" }],
       ]),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
     });
 
     const out = await buildGapfillCompareSimShared({
@@ -2350,16 +2309,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
     });
-    simulatePastUsageDataset.mockResolvedValue({
-      dataset: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: { weatherSourceSummary: "actual_only" },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 24 }],
-        series: { intervals15: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96) },
-      },
-      simulatedDayResults: [],
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
     });
 
     const sharedArgs = {
