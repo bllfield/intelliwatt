@@ -1992,7 +1992,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("uses full-window fresh shared execution for exact travel parity while keeping scored days on selected-days compare", async () => {
+  it("forces full-year artifact identity work for exact travel parity while keeping scored days on selected-days compare", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -2105,9 +2105,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const fullWindowCalls = simulatePastUsageDataset.mock.calls.slice(fullWindowCallsBefore);
       expect(selectedDaysCalls).toHaveLength(1);
       expect(fullWindowCalls).toHaveLength(1);
-      expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
-      expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
-      expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
+      expect(getIntervalDataFingerprint.mock.calls.length).toBeGreaterThan(intervalFingerprintCallsBefore);
+      expect(computePastWeatherIdentity.mock.calls.length).toBeGreaterThan(weatherIdentityCallsBefore);
+      expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBeGreaterThan(usageShapeIdentityCallsBefore);
       expect(decodeIntervalsV1).toHaveBeenCalled();
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[])

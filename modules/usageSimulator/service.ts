@@ -756,7 +756,7 @@ export async function buildGapfillCompareSimShared(args: {
   // mode stays selected-days unless the caller explicitly asks for full_window.
   void includeFreshCompareCalc;
   const effectiveCompareFreshMode = compareFreshMode ?? "selected_days";
-  const useSelectedDaysLightweightArtifactRead =
+  let useSelectedDaysLightweightArtifactRead =
     selectedDaysLightweightArtifactRead === true &&
     effectiveCompareFreshMode === "selected_days" &&
     !rebuildArtifact &&
@@ -833,6 +833,11 @@ export async function buildGapfillCompareSimShared(args: {
   );
   const exactTravelParityRequiresIntervalBackedArtifactTruth =
     requireExactArtifactMatch && boundedTravelDateKeysLocal.size > 0;
+  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    // Exact travel/vacant parity must preserve full-year artifact identity ownership rather than
+    // allowing selected-days lightweight reads to change how the artifact is selected.
+    useSelectedDaysLightweightArtifactRead = false;
+  }
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
