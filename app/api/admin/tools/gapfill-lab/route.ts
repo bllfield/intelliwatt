@@ -171,6 +171,24 @@ function finalizeCompareCoreTiming(
   };
 }
 
+function buildHeavyTiming(
+  timing: ReturnType<typeof startCompareCoreTiming>,
+  extra?: {
+    heavyFailedStep?: CompareCoreStepKey;
+    heavyResponseMode?: "heavy_only_compact";
+  }
+) {
+  return {
+    heavyStartedAt: timing.startedAt,
+    heavyEndedAt: new Date().toISOString(),
+    heavyElapsedMs: Math.max(0, Date.now() - timing.startedAtMs),
+    heavyLastCompletedStep: timing.lastCompletedStep,
+    heavyStepsMs: timing.stepsMs,
+    ...(extra?.heavyFailedStep ? { heavyFailedStep: extra.heavyFailedStep } : {}),
+    ...(extra?.heavyResponseMode ? { responseMode: extra.heavyResponseMode } : {}),
+  };
+}
+
 function buildSelectedDaysCoreResponseModelAssumptions(modelAssumptions: any): Record<string, unknown> | null {
   if (!modelAssumptions || typeof modelAssumptions !== "object") return null;
   const out: Record<string, unknown> = { ...(modelAssumptions as Record<string, unknown>) };
@@ -1188,6 +1206,8 @@ export async function POST(req: NextRequest) {
     includeDiagnostics?: boolean;
     /** Include full report text payload; defaults false. */
     includeFullReportText?: boolean;
+    /** Request compact heavy-only response shaping for merge onto an existing core result. */
+    responseMode?: "heavy_only_compact";
     /** Optional exact artifact identity forwarded from same-run artifact ensure. */
     requestedInputHash?: unknown;
     artifactScenarioId?: unknown;
@@ -1216,6 +1236,8 @@ export async function POST(req: NextRequest) {
   const includeUsage365 = body?.includeUsage365 === true;
   const includeDiagnostics = body?.includeDiagnostics === true;
   const includeFullReportText = body?.includeFullReportText === true;
+  const heavyOnlyCompactResponse =
+    body?.responseMode === "heavy_only_compact" && includeDiagnostics && includeFullReportText;
   const requestedArtifactInputHash =
     typeof body?.requestedInputHash === "string" && body.requestedInputHash.trim()
       ? body.requestedInputHash.trim()
@@ -1775,6 +1797,12 @@ export async function POST(req: NextRequest) {
         reasonCode: timedOut
           ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
           : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
+        ...(heavyOnlyCompactResponse
+          ? buildHeavyTiming(compareCoreTiming, {
+              heavyFailedStep: "build_shared_compare",
+              heavyResponseMode: "heavy_only_compact",
+            })
+          : {}),
         compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
           failedStep: "build_shared_compare",
           timeoutMs: timedOut ? ROUTE_COMPARE_SHARED_TIMEOUT_MS : undefined,
@@ -1797,6 +1825,12 @@ export async function POST(req: NextRequest) {
       ...(sharedSim.body as Record<string, unknown>),
       compareRequestTruth,
       artifactRequestTruth,
+      ...(heavyOnlyCompactResponse
+        ? buildHeavyTiming(compareCoreTiming, {
+            heavyFailedStep: "build_shared_compare",
+            heavyResponseMode: "heavy_only_compact",
+          })
+        : {}),
       explanation: classification.userFacingExplanation,
       missingData: classification.missingData,
       reasonCode: classification.reasonCode,
@@ -2210,6 +2244,9 @@ export async function POST(req: NextRequest) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
     if (!weatherByDate.has(dk)) weatherByDate.set(dk, w);
   }
+  const scoredDayParityEnvelope =
+    ((sharedSim as any)?.displayVsFreshParityForScoredDays as Record<string, unknown> | undefined) ?? null;
+  const scoredDayParityAvailability = String(scoredDayParityEnvelope?.availability ?? "available");
   const scoredDayTruthRows = Array.from(scoringTestDateKeysLocal)
     .sort()
     .map((date) => {
@@ -2217,12 +2254,18 @@ export async function POST(req: NextRequest) {
       const freshCompareSimDayKwh = round2(freshDailyByDate.get(date) ?? 0);
       const displayDay = displayDailyByDate.get(date);
       const parityDisplayDay = parityDisplayDailyByDate.get(date);
+      const parityNotApplicableForScoredActualDay =
+        !parityDisplayDay &&
+        scoredDayParityAvailability === "not_applicable_scored_actual_days" &&
+        displayDay?.source === "ACTUAL";
       const displayedPastStyleSimDayKwh =
         parityDisplayDay && parityDisplayDay.source === "SIMULATED"
           ? round2(parityDisplayDay.simKwh)
           : null;
       const parityMatch =
-        displayedPastStyleSimDayKwh == null ? null : round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
+        parityNotApplicableForScoredActualDay || displayedPastStyleSimDayKwh == null
+          ? null
+          : round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
       const dow = getLocalDayOfWeekFromDateKey(date, scoringTimezone);
       const weekend = dow === 0 || dow === 6;
       const weather = weatherByDate.get(date) ?? {};
@@ -2248,6 +2291,11 @@ export async function POST(req: NextRequest) {
         displayedPastStyleSimDayKwh,
         actualVsFreshErrorKwh: round2(actualDayKwh - freshCompareSimDayKwh),
         displayVsFreshParityMatch: parityMatch,
+        parityAvailability: parityNotApplicableForScoredActualDay
+          ? "not_applicable_scored_actual_days"
+          : displayedPastStyleSimDayKwh == null
+            ? "missing_expected_reference"
+            : "available",
         parityDisplaySourceUsed:
           ((sharedSim as any)?.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed as string | undefined) ??
           "canonical_artifact_simulated_day_totals",
@@ -2255,7 +2303,17 @@ export async function POST(req: NextRequest) {
           ((sharedSim as any)?.artifactSimulatedDayReferenceSource as string | undefined) ??
           "canonical_artifact_simulated_day_totals",
         parityDisplayValueKind:
-          displayedPastStyleSimDayKwh == null ? "missing_display_sim_reference" : "artifact_simulated_day_total",
+          parityNotApplicableForScoredActualDay
+            ? "not_applicable_scored_actual_day"
+            : displayedPastStyleSimDayKwh == null
+              ? "missing_display_sim_reference"
+              : "artifact_simulated_day_total",
+        parityReasonCode:
+          parityNotApplicableForScoredActualDay
+            ? "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS"
+            : displayedPastStyleSimDayKwh == null
+              ? "ARTIFACT_SIMULATED_REFERENCE_MISSING"
+              : "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE",
         scoredDayDisplaySource: displayDay?.source ?? null,
         dayType: weekend ? "weekend" : "weekday",
         weatherBasis: String((sharedSim as any).weatherBasisUsed ?? null),
@@ -2645,6 +2703,12 @@ export async function POST(req: NextRequest) {
           reasonCode: timedOut
             ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
             : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
+          ...(heavyOnlyCompactResponse
+            ? buildHeavyTiming(compareCoreTiming, {
+                heavyFailedStep: "build_full_report",
+                heavyResponseMode: "heavy_only_compact",
+              })
+            : {}),
           compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
             failedStep: "build_diagnostics",
             timeoutMs: timedOut ? ROUTE_COMPARE_REPORT_TIMEOUT_MS : undefined,
@@ -2658,6 +2722,59 @@ export async function POST(req: NextRequest) {
   }
   markCompareCoreStep(compareCoreTiming, "build_diagnostics");
   markCompareCoreStep(compareCoreTiming, "finalize_response");
+  const compareCoreTimingEnvelope = finalizeCompareCoreTiming(compareCoreTiming, {
+    compareRequestTruth,
+    selectedDaysCoreLightweight,
+    compareCoreMode,
+    selectedDaysRequestedCount: requestedTestDaysCount,
+    selectedDaysScoredCount: scoringTestDaysCount,
+    freshSimIntervalCountSelectedDays: simulatedTestIntervalsCount,
+    actualIntervalCountSelectedDays: actualTestIntervalsCount,
+    artifactReferenceDayCountUsed,
+    compareCorePhaseStep: "finalize_response",
+    compareCorePhaseElapsedMsByStep: compareCoreTiming.stepsMs,
+  });
+  if (heavyOnlyCompactResponse) {
+    return NextResponse.json({
+      ok: true,
+      responseMode: "heavy_only_compact",
+      diagnostics: includeDiagnostics
+        ? {
+            dailyTotalsChartSim: sharedSim.simulatedChartDaily,
+            monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
+            stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
+            chartIntervalCount,
+            dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
+            top10Under: metrics.diagnostics.top10Under,
+            top10Over: metrics.diagnostics.top10Over,
+            hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
+            seasonalSplit: metrics.diagnostics.seasonalSplit,
+          }
+        : {
+            included: false,
+            chartIntervalCount,
+          },
+      fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
+      missAttributionSummary,
+      accuracyTuningBreakdowns,
+      compareCoreTiming: compareCoreTimingEnvelope,
+      compareCoreMode,
+      compareCoreStepTimings: compareCoreTiming.stepsMs,
+      heavyTruth: {
+        source: "heavy_only_compact",
+        artifactSourceMode,
+        artifactHashMatch,
+        artifactExactIdentityResolved,
+        parityAvailability:
+          ((sharedSim as any)?.displayVsFreshParityForScoredDays?.availability as string | undefined) ?? null,
+        parityReasonCode:
+          ((sharedSim as any)?.displayVsFreshParityForScoredDays?.reasonCode as string | undefined) ?? null,
+      },
+      ...buildHeavyTiming(compareCoreTiming, {
+        heavyResponseMode: "heavy_only_compact",
+      }),
+    });
+  }
 
   return NextResponse.json({
     ok: true,
@@ -2725,18 +2842,7 @@ export async function POST(req: NextRequest) {
     compareTruth,
     compareRequestTruth,
     artifactRequestTruth,
-    compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-      compareRequestTruth,
-      selectedDaysCoreLightweight,
-      compareCoreMode,
-      selectedDaysRequestedCount: requestedTestDaysCount,
-      selectedDaysScoredCount: scoringTestDaysCount,
-      freshSimIntervalCountSelectedDays: simulatedTestIntervalsCount,
-      actualIntervalCountSelectedDays: actualTestIntervalsCount,
-      artifactReferenceDayCountUsed,
-      compareCorePhaseStep: "finalize_response",
-      compareCorePhaseElapsedMsByStep: compareCoreTiming.stepsMs,
-    }),
+    compareCoreTiming: compareCoreTimingEnvelope,
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
     travelVacantParitySample: (sharedSim as any).travelVacantParitySample ?? [],

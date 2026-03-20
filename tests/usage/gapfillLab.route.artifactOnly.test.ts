@@ -1382,7 +1382,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displayVsFreshParityForScoredDays?.complete).toBe(false);
   });
 
-  it("does not use ACTUAL display rows as scored-day parity references", async () => {
+  it("marks scored actual days as not-applicable parity when no artifact simulated-day reference exists", async () => {
     buildGapfillCompareSimShared.mockResolvedValueOnce({
       ok: true,
       artifactAutoRebuilt: false,
@@ -1395,15 +1395,17 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       compareSimSource: "shared_selected_days_calc",
       weatherBasisUsed: "actual_only",
       displayVsFreshParityForScoredDays: {
-        matches: true,
+        matches: null,
         mismatchCount: 0,
         mismatchSampleDates: [],
         missingDisplaySimCount: 0,
         missingDisplaySimSampleDates: [],
-        comparableDateCount: 1,
-        complete: true,
+        comparableDateCount: 0,
+        complete: null,
+        availability: "not_applicable_scored_actual_days",
+        reasonCode: "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS",
         parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
-        parityDisplayValueKind: "artifact_simulated_day_total",
+        parityDisplayValueKind: "not_applicable_scored_actual_day",
         scope: "scored_test_days_local",
         granularity: "daily_kwh_rounded_2dp",
         comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
@@ -1416,7 +1418,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
-      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      artifactSimulatedDayReferenceRows: [],
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
       simulatedChartDaily: [{ date: "2026-01-01", simKwh: 99, source: "ACTUAL" }],
       simulatedChartMonthly: [{ month: "2026-01", kwh: 99 }],
@@ -1441,13 +1443,17 @@ describe("gapfill-lab route artifact-only hard lock", () => {
 
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.displayVsFreshParityForScoredDays?.matches).toBe(true);
+    expect(body.displayVsFreshParityForScoredDays?.matches).toBeNull();
     expect(body.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
     expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
     expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual([]);
-    expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBe(0.5);
-    expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBe(true);
-    expect(body.scoredDayTruthRows?.[0]?.parityDisplayValueKind).toBe("artifact_simulated_day_total");
+    expect(body.displayVsFreshParityForScoredDays?.availability).toBe("not_applicable_scored_actual_days");
+    expect(body.displayVsFreshParityForScoredDays?.reasonCode).toBe("SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS");
+    expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.parityAvailability).toBe("not_applicable_scored_actual_days");
+    expect(body.scoredDayTruthRows?.[0]?.parityReasonCode).toBe("SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS");
+    expect(body.scoredDayTruthRows?.[0]?.parityDisplayValueKind).toBe("not_applicable_scored_actual_day");
     expect(body.scoredDayTruthRows?.[0]?.artifactSimulatedDayReferenceSource).toBe("canonical_artifact_simulated_day_totals");
     expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).toBe("ACTUAL");
   });
@@ -1627,6 +1633,116 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("heavyFailureKind");
     expect(clientSource).toContain("\"route_timeout\"");
     expect(clientSource).toContain("\"route_exception\"");
+  });
+
+  it("requests and merges compact heavy-only responses in client source", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain('responseMode: "heavy_only_compact"');
+    expect(clientSource).toContain('if ((data as any).responseMode === "heavy_only_compact")');
+    expect(clientSource).toContain("heavyStartedAt");
+    expect(clientSource).toContain("heavyStepsMs");
+    expect(clientSource).toContain("...prev,");
+  });
+
+  it("returns a compact heavy-only response with heavy timing fields for merge-on-top-of-core", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_fresh_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      compareSharedCalcPath: "getPastSimulatedDatasetForHouse(simulatePastUsageDataset)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "full_window",
+      compareCalculationScope: "full_window_shared_path_then_scored_day_filter",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_fresh_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: {
+        matches: true,
+        mismatchCount: 0,
+        mismatchSampleDates: [],
+        missingDisplaySimCount: 0,
+        missingDisplaySimSampleDates: [],
+        comparableDateCount: 1,
+        complete: true,
+        availability: "available",
+        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE",
+        parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+        parityDisplayValueKind: "artifact_simulated_day_total",
+        scope: "scored_test_days_local",
+        granularity: "daily_kwh_rounded_2dp",
+        comparisonBasis: "display_shared_artifact_vs_compare_shared_full_window_then_filter",
+      },
+      travelVacantParitySample: [],
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: {
+        artifactSourceMode: "exact_hash_match",
+        requestedInputHash: "hash-1",
+        artifactInputHashUsed: "hash-1",
+        artifactHashMatch: true,
+        artifactScenarioId: "past-s1",
+        artifactExactIdentityResolved: true,
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        includeDiagnostics: true,
+        includeFullReportText: true,
+        responseMode: "heavy_only_compact",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.responseMode).toBe("heavy_only_compact");
+    expect(body.diagnostics?.dailyTotalsChartSim?.[0]?.date).toBe("2026-01-01");
+    expect(typeof body.fullReportText).toBe("string");
+    expect(body.missAttributionSummary?.source).toBe("scored_day_truth_rows");
+    expect(body.accuracyTuningBreakdowns?.source).toBe("scored_day_truth_rows");
+    expect(body.heavyStartedAt).toBeTypeOf("string");
+    expect(body.heavyEndedAt).toBeTypeOf("string");
+    expect(body.heavyElapsedMs).toBeTypeOf("number");
+    expect(body.heavyLastCompletedStep).toBe("finalize_response");
+    expect(body.heavyStepsMs?.build_full_report).toBeTypeOf("number");
+    expect(body.heavyTruth).toMatchObject({
+      source: "heavy_only_compact",
+      artifactSourceMode: "exact_hash_match",
+      artifactHashMatch: true,
+      artifactExactIdentityResolved: true,
+      parityAvailability: "available",
+    });
+    expect(body.usage365).toBeUndefined();
+    expect(body.displaySimulated).toBeUndefined();
+    expect(body.scoredDayTruthRows).toBeUndefined();
+    expect(body.byMonth).toBeUndefined();
+    expect(body.byHour).toBeUndefined();
+    expect(body.byDayType).toBeUndefined();
+    expect(body.worstDays).toBeUndefined();
+    expect(body.modelAssumptions).toBeUndefined();
   });
 
   it("returns route timeout classification with timing envelope when shared compare build stalls", async () => {

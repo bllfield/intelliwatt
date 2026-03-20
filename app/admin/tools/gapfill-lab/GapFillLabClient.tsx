@@ -45,6 +45,7 @@ type ApiResponse =
       worstDays: any[];
       diagnostics: any;
       pasteSummary: string;
+      responseMode?: "heavy_only_compact";
       fullReportText?: string;
       fullReportJson?: { scenario?: { testRangesInput?: RangeRow[]; testSelectionMode?: string } } | null;
       message?: string;
@@ -73,6 +74,13 @@ type ApiResponse =
       selectedFreshIntervalCount?: number;
       selectedActualIntervalCount?: number;
       artifactReferenceDayCount?: number;
+      heavyStartedAt?: string;
+      heavyEndedAt?: string;
+      heavyElapsedMs?: number;
+      heavyLastCompletedStep?: string | null;
+      heavyStepsMs?: Record<string, number>;
+      heavyFailedStep?: string;
+      heavyTruth?: any;
       compareTruth?: {
         compareFreshModeUsed?: string | null;
         compareFreshModeLabel?: string | null;
@@ -96,9 +104,11 @@ type ApiResponse =
         localDate: string;
         actualDayKwh: number;
         freshCompareSimDayKwh: number;
-        displayedPastStyleSimDayKwh: number;
+        displayedPastStyleSimDayKwh: number | null;
         actualVsFreshErrorKwh: number;
-        displayVsFreshParityMatch: boolean;
+        displayVsFreshParityMatch: boolean | null;
+        parityAvailability?: string | null;
+        parityReasonCode?: string | null;
         dayType: "weekday" | "weekend";
         weatherBasis: string | null;
         avgTempF: number | null;
@@ -807,6 +817,27 @@ export default function GapFillLabClient() {
   function mergeSuccessfulResult(data: ApiResponse) {
     setResult((prev) => {
       if (data.ok && prev?.ok) {
+        if ((data as any).responseMode === "heavy_only_compact") {
+          return {
+            ...prev,
+            ...data,
+            diagnostics: data.diagnostics ?? prev.diagnostics,
+            fullReportText: (data as any).fullReportText ?? (prev as any).fullReportText,
+            fullReportJson: (data as any).fullReportJson ?? (prev as any).fullReportJson,
+            missAttributionSummary: data.missAttributionSummary ?? prev.missAttributionSummary,
+            accuracyTuningBreakdowns: data.accuracyTuningBreakdowns ?? prev.accuracyTuningBreakdowns,
+            compareCoreTiming: (data as any).compareCoreTiming ?? (prev as any).compareCoreTiming,
+            compareCoreMode: data.compareCoreMode ?? prev.compareCoreMode,
+            compareCoreStepTimings: data.compareCoreStepTimings ?? prev.compareCoreStepTimings,
+            heavyStartedAt: (data as any).heavyStartedAt ?? (prev as any).heavyStartedAt,
+            heavyEndedAt: (data as any).heavyEndedAt ?? (prev as any).heavyEndedAt,
+            heavyElapsedMs: (data as any).heavyElapsedMs ?? (prev as any).heavyElapsedMs,
+            heavyLastCompletedStep: (data as any).heavyLastCompletedStep ?? (prev as any).heavyLastCompletedStep,
+            heavyStepsMs: (data as any).heavyStepsMs ?? (prev as any).heavyStepsMs,
+            heavyFailedStep: (data as any).heavyFailedStep ?? (prev as any).heavyFailedStep,
+            heavyTruth: (data as any).heavyTruth ?? (prev as any).heavyTruth,
+          } as ApiResponse;
+        }
         return {
           ...data,
           ...(data.houses?.length ? {} : prev.houses?.length ? { houses: prev.houses } : {}),
@@ -1283,6 +1314,7 @@ export default function GapFillLabClient() {
         ...compareBodyBase,
         includeDiagnostics: true,
         includeFullReportText: true,
+        responseMode: "heavy_only_compact" as const,
       };
       const compareHeavyFreshModeRequested = resolveCompareFreshModeRequested({
         includeDiagnostics: true,

@@ -31,7 +31,9 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - GapFill must consume simulated intervals from shared simulator output for that artifact identity (cached restore or fresh shared build). It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
 - GapFill default scoring mode is selected-day fresh shared execution (`compareFreshMode=selected_days`) with artifact-backed display output retained.
 - Lightweight selected-days `compare_core` must reduce early: keep selected-day actual/simulated intervals, canonical artifact simulated-day totals, and compact truth metadata only; do not serialize full-window diagnostics/weather arrays in the core response.
+- For selected-days scored actual rows, artifact simulated-day parity is `not_applicable_scored_actual_days` unless a canonical artifact simulated-day reference actually exists for those dates; do not count missing simulated references against scored actual-day parity.
 - Full-window fresh shared compare remains available as an explicit heavy proof mode (`compareFreshMode=full_window`), not a default route path.
+- Heavy diagnostics/report retries should use compact merge-only response shaping so the heavy step returns diagnostics/report data without re-serializing the full core payload.
 - Artifact fingerprint ownership and usage-shape identity contracts are unchanged by this step; deferred profile/hash contract work remains separate.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
