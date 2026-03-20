@@ -194,6 +194,12 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     rebuildGapfillSharedPastArtifact.mockResolvedValue({
       ok: true,
       scenarioId: "past-s1",
+      artifactScenarioId: "past-s1",
+      requestedInputHash: "hash-ensure-default",
+      artifactInputHashUsed: "hash-ensure-default",
+      artifactHashMatch: true,
+      artifactSourceMode: "exact_hash_match",
+      artifactSourceNote: "Artifact source: exact identity match on Past input hash.",
     });
     pickRandomTestDateKeys.mockReturnValue(["2026-01-01"]);
     mergeDateKeysToRanges.mockReturnValue([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
@@ -281,6 +287,12 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     rebuildGapfillSharedPastArtifact.mockResolvedValueOnce({
       ok: true,
       scenarioId: "past-s1",
+      artifactScenarioId: "past-s1",
+      requestedInputHash: "hash-ensure-1",
+      artifactInputHashUsed: "hash-ensure-1",
+      artifactHashMatch: true,
+      artifactSourceMode: "exact_hash_match",
+      artifactSourceNote: "Artifact source: exact identity match on Past input hash.",
     });
     const req = {
       cookies: { get: () => undefined },
@@ -298,6 +310,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.action).toBe("rebuild_only");
     expect(body.rebuilt).toBe(true);
     expect(body.scenarioId).toBe("past-s1");
+    expect(body.artifactScenarioId).toBe("past-s1");
+    expect(body.requestedInputHash).toBe("hash-ensure-1");
+    expect(body.artifactInputHashUsed).toBe("hash-ensure-1");
+    expect(body.artifactHashMatch).toBe(true);
+    expect(body.artifactSourceMode).toBe("exact_hash_match");
     expect(body.testRangesUsed).toEqual([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
     expect(body.testSelectionMode).toBe("manual_ranges");
     expect(rebuildGapfillSharedPastArtifact).toHaveBeenCalledWith(
@@ -922,7 +939,21 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
       simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
       simulatedChartStitchedMonth: null,
-      modelAssumptions: null,
+      modelAssumptions: {
+        artifactSourceMode: "exact_hash_match",
+        requestedInputHash: "hash-1",
+        artifactInputHashUsed: "hash-1",
+        artifactHashMatch: true,
+        artifactScenarioId: "past-s1",
+        artifactRequestedScenarioId: "past-s1",
+        artifactExactIdentityRequested: true,
+        artifactExactIdentityResolved: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        artifactSameRunEnsureIdentity: true,
+        artifactFallbackOccurred: false,
+        artifactFallbackReason: null,
+        artifactExactIdentifierUsed: "past-s1:hash-1",
+      },
       homeProfileFromModel: null,
       applianceProfileFromModel: null,
       scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
@@ -989,6 +1020,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.truthEnvelope?.requestedTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoringTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoredIntervalsCount).toBe(2);
+    expect(body.truthEnvelope?.artifact).toMatchObject({
+      requestedInputHash: "hash-1",
+      requestedScenarioId: "past-s1",
+      exactIdentifierUsed: "past-s1:hash-1",
+      exactIdentityRequested: true,
+      exactIdentityResolved: true,
+      sameRunEnsureArtifact: true,
+      compareUsedSameRunEnsureArtifact: true,
+      fallbackOccurred: false,
+    });
     expect(body.displaySimulated?.daily?.[0]?.date).toBe("2026-01-01");
     expect(body.displaySimulated?.monthly?.[0]?.month).toBe("2026-01");
     expect(Array.isArray(body.scoredDayTruthRows)).toBe(true);
@@ -1226,6 +1267,107 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBe(false);
     expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBe(99);
     expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);
+  });
+
+  it("passes exact artifact identity request fields into shared compare build", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: {
+        artifactSourceMode: "exact_hash_match",
+        requestedInputHash: "hash-forwarded",
+        artifactInputHashUsed: "hash-forwarded",
+        artifactHashMatch: true,
+        artifactScenarioId: "past-s1",
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        requestedInputHash: "hash-forwarded",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactExactInputHash: "hash-forwarded",
+        artifactExactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+      })
+    );
+    expect(body.artifactRequestTruth).toEqual({
+      requestedInputHash: "hash-forwarded",
+      requestedArtifactScenarioId: "past-s1",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+    });
+  });
+
+  it("returns explicit artifact request truth when exact same-run artifact identity cannot be resolved", async () => {
+    buildGapfillCompareSimShared.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_exact_identity_missing_rebuild_required",
+        message: "Compare expected the exact shared Past artifact rebuilt earlier in this run, but it could not be read.",
+        requestedArtifactScenarioId: "past-s1",
+        requestedInputHash: "hash-missing",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        fallbackOccurred: false,
+        fallbackReason: "requested_exact_identity_not_found",
+      },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        requestedInputHash: "hash-missing",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("artifact_exact_identity_missing_rebuild_required");
+    expect(body.artifactRequestTruth).toEqual({
+      requestedInputHash: "hash-missing",
+      requestedArtifactScenarioId: "past-s1",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+    });
+    expect(body.fallbackOccurred).toBe(false);
+    expect(body.fallbackReason).toBe("requested_exact_identity_not_found");
   });
 
   it("returns route timeout classification with timing envelope when shared compare build stalls", async () => {

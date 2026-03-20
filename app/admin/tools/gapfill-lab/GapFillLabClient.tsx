@@ -290,15 +290,34 @@ function buildCompareBodyAfterRebuild(
   rebuildData: ApiResponse
 ): Record<string, unknown> {
   const replayRanges = toReplayTestRanges((rebuildData as any)?.testRangesUsed);
-  if (replayRanges.length === 0) return originalBody;
   const nextBody: Record<string, unknown> = { ...originalBody };
-  delete nextBody.testDays;
-  delete nextBody.testMode;
-  delete nextBody.seed;
-  delete nextBody.minDayCoveragePct;
-  delete nextBody.stratifyByMonth;
-  delete nextBody.stratifyByWeekend;
-  nextBody.testRanges = replayRanges;
+  if (replayRanges.length > 0) {
+    delete nextBody.testDays;
+    delete nextBody.testMode;
+    delete nextBody.seed;
+    delete nextBody.minDayCoveragePct;
+    delete nextBody.stratifyByMonth;
+    delete nextBody.stratifyByWeekend;
+    nextBody.testRanges = replayRanges;
+  }
+  const exactArtifactInputHash =
+    typeof (rebuildData as any)?.artifactInputHashUsed === "string" && String((rebuildData as any)?.artifactInputHashUsed).trim()
+      ? String((rebuildData as any)?.artifactInputHashUsed).trim()
+      : typeof (rebuildData as any)?.requestedInputHash === "string" && String((rebuildData as any)?.requestedInputHash).trim()
+        ? String((rebuildData as any)?.requestedInputHash).trim()
+        : "";
+  const exactArtifactScenarioId =
+    typeof (rebuildData as any)?.artifactScenarioId === "string" && String((rebuildData as any)?.artifactScenarioId).trim()
+      ? String((rebuildData as any)?.artifactScenarioId).trim()
+      : typeof (rebuildData as any)?.scenarioId === "string" && String((rebuildData as any)?.scenarioId).trim()
+        ? String((rebuildData as any)?.scenarioId).trim()
+        : "";
+  if (exactArtifactInputHash) {
+    nextBody.requestedInputHash = exactArtifactInputHash;
+    nextBody.requireExactArtifactMatch = true;
+    nextBody.artifactIdentitySource = "same_run_artifact_ensure";
+    if (exactArtifactScenarioId) nextBody.artifactScenarioId = exactArtifactScenarioId;
+  }
   return nextBody;
 }
 

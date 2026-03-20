@@ -694,7 +694,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
   it("skips identity fingerprint/hash work for explicit selected-days lightweight artifact read", async () => {
     const computePastInputHashCallsBefore = computePastInputHash.mock.calls.length;
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-latest-lightweight",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
@@ -719,6 +719,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       compareFreshMode: "selected_days",
       includeFreshCompareCalc: false,
       selectedDaysLightweightArtifactRead: true,
+      artifactExactScenarioId: "gapfill_lab",
+      artifactExactInputHash: "hash-latest-lightweight",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
     });
 
     expect(out.ok).toBe(true);
@@ -726,8 +730,66 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(computePastWeatherIdentity).not.toHaveBeenCalled();
     expect(getUsageShapeProfileIdentityForPast).not.toHaveBeenCalled();
     expect(computePastInputHash.mock.calls.length).toBe(computePastInputHashCallsBefore);
-    expect(getCachedPastDataset).not.toHaveBeenCalled();
-    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalled();
+    expect(getCachedPastDataset).toHaveBeenCalledWith({
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      inputHash: "hash-latest-lightweight",
+    });
+    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalledTimes(1);
+    if (out.ok) {
+      expect((out.modelAssumptions as any)?.requestedInputHash).toBe("hash-latest-lightweight");
+      expect((out.modelAssumptions as any)?.artifactSourceMode).toBe("exact_hash_match");
+      expect((out.modelAssumptions as any)?.artifactHashMatch).toBe(true);
+      expect((out.modelAssumptions as any)?.artifactSameRunEnsureIdentity).toBe(true);
+      expect((out.modelAssumptions as any)?.artifactFallbackOccurred).toBe(false);
+    }
+  });
+
+  it("fails loudly instead of silently falling back when same-run exact lightweight artifact identity is missing", async () => {
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce({
+      inputHash: "hash-stale-latest",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      artifactExactScenarioId: "gapfill_lab",
+      artifactExactInputHash: "hash-missing",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_exact_identity_missing_rebuild_required");
+      expect((out.body as any)?.requestedArtifactScenarioId).toBe("gapfill_lab");
+      expect((out.body as any)?.requestedInputHash).toBe("hash-missing");
+      expect((out.body as any)?.fallbackOccurred).toBe(false);
+      expect((out.body as any)?.fallbackReason).toBe("requested_exact_identity_not_found");
+    }
+    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalledTimes(1);
   });
 
   it("recomputes excluded fingerprint from current travel ranges during lightweight artifact reads", async () => {
@@ -929,7 +991,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("uses restored dataset daily/monthly rows as canonical display output when present", async () => {
-    decodeIntervalsV1.mockReturnValueOnce(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -1416,4 +1477,3 @@ describe("buildPastSimulatedBaselineV1 forced selected-day parity", () => {
     expect(first.dayResults).toEqual(second.dayResults);
   });
 });
-

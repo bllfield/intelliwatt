@@ -1168,6 +1168,11 @@ export async function POST(req: NextRequest) {
     includeDiagnostics?: boolean;
     /** Include full report text payload; defaults false. */
     includeFullReportText?: boolean;
+    /** Optional exact artifact identity forwarded from same-run artifact ensure. */
+    requestedInputHash?: unknown;
+    artifactScenarioId?: unknown;
+    requireExactArtifactMatch?: unknown;
+    artifactIdentitySource?: unknown;
   };
   try {
     body = await req.json();
@@ -1191,6 +1196,19 @@ export async function POST(req: NextRequest) {
   const includeUsage365 = body?.includeUsage365 === true;
   const includeDiagnostics = body?.includeDiagnostics === true;
   const includeFullReportText = body?.includeFullReportText === true;
+  const requestedArtifactInputHash =
+    typeof body?.requestedInputHash === "string" && body.requestedInputHash.trim()
+      ? body.requestedInputHash.trim()
+      : null;
+  const requestedArtifactScenarioId =
+    typeof body?.artifactScenarioId === "string" && body.artifactScenarioId.trim()
+      ? body.artifactScenarioId.trim()
+      : null;
+  const requireExactArtifactMatch = body?.requireExactArtifactMatch === true;
+  const artifactIdentitySource =
+    typeof body?.artifactIdentitySource === "string" && body.artifactIdentitySource.trim()
+      ? body.artifactIdentitySource.trim()
+      : null;
   const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
   const seed = String(body?.seed ?? "").trim() || null;
   const VALID_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
@@ -1574,6 +1592,12 @@ export async function POST(req: NextRequest) {
       action: "rebuild_only",
       rebuilt: true,
       scenarioId: rebuilt.scenarioId,
+      artifactScenarioId: rebuilt.artifactScenarioId,
+      requestedInputHash: rebuilt.requestedInputHash,
+      artifactInputHashUsed: rebuilt.artifactInputHashUsed,
+      artifactHashMatch: rebuilt.artifactHashMatch,
+      artifactSourceMode: rebuilt.artifactSourceMode,
+      artifactSourceNote: rebuilt.artifactSourceNote,
       message:
         "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
       testRangesUsed,
@@ -1678,6 +1702,12 @@ export async function POST(req: NextRequest) {
     includeFullReportTextRequested: includeFullReportText,
     compareFreshModeRequested: compareFreshMode,
   };
+  const artifactRequestTruth = {
+    requestedInputHash: requestedArtifactInputHash,
+    requestedArtifactScenarioId,
+    requireExactArtifactMatch,
+    artifactIdentitySource,
+  };
   let sharedSim: Awaited<ReturnType<typeof buildGapfillCompareSimShared>>;
   try {
     sharedSim = await withTimeout(
@@ -1692,6 +1722,13 @@ export async function POST(req: NextRequest) {
         compareFreshMode,
         includeFreshCompareCalc: compareFreshMode === "full_window",
         selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
+        artifactExactScenarioId: requestedArtifactScenarioId,
+        artifactExactInputHash: requestedArtifactInputHash,
+        requireExactArtifactMatch,
+        artifactIdentitySource:
+          artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
+            ? artifactIdentitySource
+            : null,
       }),
       ROUTE_COMPARE_SHARED_TIMEOUT_MS,
       "compare_core_route_timeout_build_shared_compare"
@@ -1719,6 +1756,7 @@ export async function POST(req: NextRequest) {
           compareRequestTruth,
           selectedDaysCoreLightweight,
         }),
+        artifactRequestTruth,
       },
       { status: timedOut ? 504 : 500 }
     );
@@ -1733,6 +1771,7 @@ export async function POST(req: NextRequest) {
     const mergedBody = {
       ...(sharedSim.body as Record<string, unknown>),
       compareRequestTruth,
+      artifactRequestTruth,
       explanation: classification.userFacingExplanation,
       missingData: classification.missingData,
       reasonCode: classification.reasonCode,
@@ -2024,6 +2063,18 @@ export async function POST(req: NextRequest) {
     "past_shared_artifact";
   const artifactCreatedAt = ma.artifactCreatedAt ?? null;
   const artifactUpdatedAt = ma.artifactUpdatedAt ?? null;
+  const artifactRequestedScenarioId = ma.artifactRequestedScenarioId ?? null;
+  const artifactExactIdentityRequested = ma.artifactExactIdentityRequested === true;
+  const artifactExactIdentityResolved = ma.artifactExactIdentityResolved === true;
+  const artifactIdentitySourceUsed = ma.artifactIdentitySource ?? null;
+  const artifactSameRunEnsureIdentity = ma.artifactSameRunEnsureIdentity === true;
+  const artifactFallbackOccurred = ma.artifactFallbackOccurred === true;
+  const artifactFallbackReason = ma.artifactFallbackReason ?? null;
+  const artifactExactIdentifierUsed =
+    ma.artifactExactIdentifierUsed ??
+    (artifactInputHashUsed && (artifactScenarioId ?? stableScenarioId)
+      ? `${artifactScenarioId ?? stableScenarioId}:${artifactInputHashUsed}`
+      : null);
   const artifactSourceNote =
     ma.artifactSourceNote ??
     (artifactSourceMode === "latest_by_scenario_fallback"
@@ -2297,9 +2348,18 @@ export async function POST(req: NextRequest) {
       sourceMode: artifactSourceMode,
       sourceNote: artifactSourceNote,
       requestedInputHash,
+      requestedScenarioId: artifactRequestedScenarioId,
       artifactInputHashUsed,
       artifactHashMatch,
       scenarioId: artifactScenarioId ?? stableScenarioId,
+      exactIdentifierUsed: artifactExactIdentifierUsed,
+      exactIdentityRequested: artifactExactIdentityRequested,
+      exactIdentityResolved: artifactExactIdentityResolved,
+      identitySource: artifactIdentitySourceUsed,
+      sameRunEnsureArtifact: artifactSameRunEnsureIdentity,
+      compareUsedSameRunEnsureArtifact: artifactSameRunEnsureIdentity && artifactExactIdentityResolved,
+      fallbackOccurred: artifactFallbackOccurred,
+      fallbackReason: artifactFallbackReason,
       createdAt: artifactCreatedAt,
       updatedAt: artifactUpdatedAt,
       rebuiltRequested: rebuildArtifact,
@@ -2557,6 +2617,7 @@ export async function POST(req: NextRequest) {
     weatherBasisUsed,
     compareTruth,
     compareRequestTruth,
+    artifactRequestTruth,
     compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
       compareRequestTruth,
       selectedDaysCoreLightweight,

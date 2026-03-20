@@ -178,7 +178,19 @@ function applyCanonicalCoverageMetadataForNonBaseline(
 export async function rebuildGapfillSharedPastArtifact(args: {
   userId: string;
   houseId: string;
-}): Promise<{ ok: true; scenarioId: string } | { ok: false; error: string; message: string }> {
+}): Promise<
+  | {
+      ok: true;
+      scenarioId: string;
+      artifactScenarioId: string;
+      requestedInputHash: string | null;
+      artifactInputHashUsed: string | null;
+      artifactHashMatch: boolean | null;
+      artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" | null;
+      artifactSourceNote: string | null;
+    }
+  | { ok: false; error: string; message: string }
+> {
   const scenarioId = await resolvePastScenarioIdForHouse(args);
   if (!scenarioId) {
     return {
@@ -233,7 +245,44 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
     };
   }
-  return { ok: true, scenarioId };
+  const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
+  const requestedInputHash =
+    typeof verificationMeta.requestedInputHash === "string" && String(verificationMeta.requestedInputHash).trim()
+      ? String(verificationMeta.requestedInputHash).trim()
+      : typeof verificationMeta.artifactInputHash === "string" && String(verificationMeta.artifactInputHash).trim()
+        ? String(verificationMeta.artifactInputHash).trim()
+        : null;
+  const artifactInputHashUsed =
+    typeof verificationMeta.artifactInputHashUsed === "string" && String(verificationMeta.artifactInputHashUsed).trim()
+      ? String(verificationMeta.artifactInputHashUsed).trim()
+      : typeof verificationMeta.artifactInputHash === "string" && String(verificationMeta.artifactInputHash).trim()
+        ? String(verificationMeta.artifactInputHash).trim()
+        : null;
+  const artifactSourceModeRaw = String(verificationMeta.artifactSourceMode ?? "").trim();
+  const artifactSourceMode =
+    artifactSourceModeRaw === "exact_hash_match" || artifactSourceModeRaw === "latest_by_scenario_fallback"
+      ? artifactSourceModeRaw
+      : artifactInputHashUsed
+        ? "exact_hash_match"
+        : null;
+  return {
+    ok: true,
+    scenarioId,
+    artifactScenarioId: scenarioId,
+    requestedInputHash,
+    artifactInputHashUsed,
+    artifactHashMatch:
+      requestedInputHash && artifactInputHashUsed ? requestedInputHash === artifactInputHashUsed : null,
+    artifactSourceMode,
+    artifactSourceNote:
+      typeof verificationMeta.artifactSourceNote === "string" && String(verificationMeta.artifactSourceNote).trim()
+        ? String(verificationMeta.artifactSourceNote)
+        : artifactSourceMode === "exact_hash_match"
+          ? "Artifact source: exact identity match on Past input hash."
+          : artifactSourceMode === "latest_by_scenario_fallback"
+            ? "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss)."
+            : null,
+  };
 }
 
 export type GapfillCompareSimSharedResult =
@@ -408,6 +457,10 @@ export async function buildGapfillCompareSimShared(args: {
   compareFreshMode?: "selected_days" | "full_window";
   includeFreshCompareCalc?: boolean;
   selectedDaysLightweightArtifactRead?: boolean;
+  artifactExactScenarioId?: string | null;
+  artifactExactInputHash?: string | null;
+  requireExactArtifactMatch?: boolean;
+  artifactIdentitySource?: "same_run_artifact_ensure" | "manual_request" | null;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
     userId,
@@ -420,6 +473,10 @@ export async function buildGapfillCompareSimShared(args: {
     compareFreshMode,
     includeFreshCompareCalc = true,
     selectedDaysLightweightArtifactRead = false,
+    artifactExactScenarioId = null,
+    artifactExactInputHash = null,
+    requireExactArtifactMatch = false,
+    artifactIdentitySource = null,
   } = args;
   // Keep the request flag for backward-compatible payloads, but default compare scoring
   // mode stays selected-days unless the caller explicitly asks for full_window.
@@ -562,6 +619,44 @@ export async function buildGapfillCompareSimShared(args: {
     });
   }
   const sharedScenarioCacheId = pastScenarioId;
+  const requestedArtifactScenarioId =
+    typeof artifactExactScenarioId === "string" && artifactExactScenarioId.trim()
+      ? artifactExactScenarioId.trim()
+      : sharedScenarioCacheId;
+  const requestedArtifactInputHash =
+    typeof artifactExactInputHash === "string" && artifactExactInputHash.trim()
+      ? artifactExactInputHash.trim()
+      : "";
+  const exactArtifactIdentityRequested = requestedArtifactInputHash.length > 0;
+  const exactArtifactReadRequired = exactArtifactIdentityRequested && requireExactArtifactMatch === true;
+  const artifactIdentitySourceNormalized =
+    artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
+      ? artifactIdentitySource
+      : null;
+  if (
+    useSelectedDaysLightweightArtifactRead &&
+    exactArtifactIdentityRequested &&
+    requestedArtifactScenarioId !== sharedScenarioCacheId
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        ok: false,
+        error: "artifact_exact_identity_mismatch_rebuild_required",
+        message:
+          "Compare expected an exact shared Past artifact identity from artifact ensure, but the requested scenario does not match the active Past scenario.",
+        mode: "artifact_only",
+        scenarioId: sharedScenarioCacheId,
+        requestedArtifactScenarioId,
+        requestedInputHash: requestedArtifactInputHash,
+        requireExactArtifactMatch: exactArtifactReadRequired,
+        artifactIdentitySource: artifactIdentitySourceNormalized,
+        fallbackOccurred: false,
+        fallbackReason: "requested_exact_scenario_mismatch",
+      },
+    };
+  }
 
   let artifactAutoRebuilt = false;
   let dataset: any = null;
@@ -683,20 +778,67 @@ export async function buildGapfillCompareSimShared(args: {
     rebuildArtifact
       ? null
       : useSelectedDaysLightweightArtifactRead
-        ? "latest_by_scenario_fallback"
+        ? exactArtifactIdentityRequested
+          ? "exact_hash_match"
+          : "latest_by_scenario_fallback"
         : "exact_hash_match";
+  let artifactFallbackReason: string | null =
+    !rebuildArtifact && useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested
+      ? "lightweight_compare_without_exact_identity_uses_latest_scenario_artifact"
+      : null;
   let cached = !rebuildArtifact
     ? useSelectedDaysLightweightArtifactRead
-      ? await getLatestCachedPastDatasetByScenario({
-          houseId,
-          scenarioId: sharedScenarioCacheId,
-        })
+      ? exactArtifactIdentityRequested
+        ? await getCachedPastDataset({
+            houseId,
+            scenarioId: requestedArtifactScenarioId,
+            inputHash: requestedArtifactInputHash,
+          })
+        : await getLatestCachedPastDatasetByScenario({
+            houseId,
+            scenarioId: sharedScenarioCacheId,
+          })
       : await getCachedPastDataset({
           houseId,
           scenarioId: sharedScenarioCacheId,
           inputHash: sharedInputHash,
         })
     : null;
+  if (
+    useSelectedDaysLightweightArtifactRead &&
+    exactArtifactIdentityRequested &&
+    (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)
+  ) {
+    if (exactArtifactReadRequired) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          ok: false,
+          error: "artifact_exact_identity_missing_rebuild_required",
+          message:
+            "Compare expected the exact shared Past artifact rebuilt earlier in this run, but that scenario/inputHash could not be read. Re-run artifact ensure before compare.",
+          mode: "artifact_only",
+          scenarioId: sharedScenarioCacheId,
+          requestedArtifactScenarioId,
+          requestedInputHash: requestedArtifactInputHash,
+          requireExactArtifactMatch: true,
+          artifactIdentitySource: artifactIdentitySourceNormalized,
+          artifactSourceMode: "exact_hash_match",
+          fallbackOccurred: false,
+          fallbackReason: "requested_exact_identity_not_found",
+        },
+      };
+    }
+    cached = await getLatestCachedPastDatasetByScenario({
+      houseId,
+      scenarioId: sharedScenarioCacheId,
+    });
+    if (cached) {
+      artifactSourceMode = "latest_by_scenario_fallback";
+      artifactFallbackReason = "requested_exact_identity_not_found_fell_back_to_latest_by_scenario";
+    }
+  }
   // If exact identity hash misses, fall back to latest scenario artifact when ownership scope
   // is compatible so compare can read the same shared Past output that rebuild just produced.
   if (!useSelectedDaysLightweightArtifactRead && !rebuildArtifact && (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)) {
@@ -713,6 +855,7 @@ export async function buildGapfillCompareSimShared(args: {
     if (latestIsFallbackCompatible) {
       cached = latestCached as any;
       artifactSourceMode = "latest_by_scenario_fallback";
+      artifactFallbackReason = "exact_hash_miss_fell_back_to_latest_by_scenario";
     }
   }
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
@@ -885,7 +1028,11 @@ export async function buildGapfillCompareSimShared(args: {
     !artifactAutoRebuilt && typeof (cached as any)?.inputHash === "string"
       ? String((cached as any).inputHash)
       : sharedInputHash || null;
-  const requestedInputHash = useSelectedDaysLightweightArtifactRead ? null : sharedInputHash;
+  const requestedInputHash = exactArtifactIdentityRequested
+    ? requestedArtifactInputHash
+    : useSelectedDaysLightweightArtifactRead
+      ? null
+      : sharedInputHash;
   modelAssumptions.artifactReadMode = "artifact_only";
   modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
   modelAssumptions.artifactScenarioId = sharedScenarioCacheId;
@@ -896,6 +1043,21 @@ export async function buildGapfillCompareSimShared(args: {
     typeof requestedInputHash === "string" && requestedInputHash.length > 0
       ? artifactInputHashUsed === requestedInputHash
       : null;
+  modelAssumptions.artifactRequestedScenarioId = exactArtifactIdentityRequested
+    ? requestedArtifactScenarioId
+    : null;
+  modelAssumptions.artifactExactIdentityRequested = exactArtifactIdentityRequested;
+  modelAssumptions.artifactExactIdentityResolved =
+    exactArtifactIdentityRequested &&
+    String(artifactInputHashUsed ?? "") === requestedArtifactInputHash &&
+    requestedArtifactScenarioId === sharedScenarioCacheId;
+  modelAssumptions.artifactIdentitySource = artifactIdentitySourceNormalized;
+  modelAssumptions.artifactSameRunEnsureIdentity = artifactIdentitySourceNormalized === "same_run_artifact_ensure";
+  modelAssumptions.artifactFallbackOccurred = artifactSourceMode === "latest_by_scenario_fallback";
+  modelAssumptions.artifactFallbackReason =
+    artifactSourceMode === "latest_by_scenario_fallback" ? artifactFallbackReason : null;
+  modelAssumptions.artifactExactIdentifierUsed =
+    artifactInputHashUsed && sharedScenarioCacheId ? `${sharedScenarioCacheId}:${artifactInputHashUsed}` : null;
   const summaryIntervalsCount = Number((dataset as any)?.summary?.intervalsCount);
   if (Number.isFinite(summaryIntervalsCount) && summaryIntervalsCount > 0) {
     modelAssumptions.artifactStoredIntervalCount = Math.trunc(summaryIntervalsCount);
