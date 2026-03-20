@@ -809,7 +809,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
       expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
+      expect(out.artifactIntervals).toEqual([]);
+      expect(out.simulatedChartIntervals).toEqual([]);
     }
+    expect(decodeIntervalsV1).not.toHaveBeenCalled();
   });
 
   it("uses shared excludedDateKeys ownership from artifact metadata for scoring", async () => {

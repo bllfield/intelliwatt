@@ -729,7 +729,6 @@ export async function buildGapfillCompareSimShared(args: {
           kwh: m?.kwh,
         })))
       : null;
-    const decoded = decodeIntervalsV1(cached.intervalsCompressed);
     dataset = {
       ...cached.datasetJson,
       series: {
@@ -737,14 +736,16 @@ export async function buildGapfillCompareSimShared(args: {
         (cached.datasetJson as any).series !== null
           ? (cached.datasetJson as any).series
           : {}),
-        intervals15: decoded,
+        intervals15: useSelectedDaysLightweightArtifactRead ? [] : decodeIntervalsV1(cached.intervalsCompressed),
       },
     };
-    reconcileRestoredDatasetFromDecodedIntervals({
-      dataset,
-      decodedIntervals: decoded,
-      fallbackEndDate: identityWindow.endDate,
-    });
+    if (!useSelectedDaysLightweightArtifactRead) {
+      reconcileRestoredDatasetFromDecodedIntervals({
+        dataset,
+        decodedIntervals: dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>,
+        fallbackEndDate: identityWindow.endDate,
+      });
+    }
   } else {
     if (!rebuildArtifact && !autoEnsureArtifact) {
       return {
@@ -895,6 +896,10 @@ export async function buildGapfillCompareSimShared(args: {
     typeof requestedInputHash === "string" && requestedInputHash.length > 0
       ? artifactInputHashUsed === requestedInputHash
       : null;
+  const summaryIntervalsCount = Number((dataset as any)?.summary?.intervalsCount);
+  if (Number.isFinite(summaryIntervalsCount) && summaryIntervalsCount > 0) {
+    modelAssumptions.intervalCount = Math.trunc(summaryIntervalsCount);
+  }
   if (artifactSourceMode) {
     modelAssumptions.artifactSourceMode = artifactSourceMode;
     modelAssumptions.artifactSourceNote =
@@ -912,7 +917,7 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.excludedDateKeysFingerprint = travelFingerprint;
   modelAssumptions.excludedDateKeysCount = boundedTravelDateKeysLocal.size;
 
-  const artifactIntervals = (dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).map((p) => ({
+  const artifactIntervals = ((dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>) ?? []).map((p) => ({
     timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
     kwh: Number(p?.kwh) || 0,
   }));
@@ -1064,9 +1069,9 @@ export async function buildGapfillCompareSimShared(args: {
   const scoredTestDaysMissingSimulatedOwnershipCount = Array.from(boundedTestDateKeysLocal).filter(
     (dk) => !availableTestDateKeysFromSimulated.has(dk)
   ).length;
-  const simulatedChartIntervals = artifactIntervals.filter((p) =>
-    chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-  );
+  const simulatedChartIntervals = useSelectedDaysLightweightArtifactRead
+    ? []
+    : artifactIntervals.filter((p) => chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
   const chartMonthKeysLocal = new Set<string>(
     Array.from(chartDateKeysLocal)
       .map((dk) => String(dk).slice(0, 7))

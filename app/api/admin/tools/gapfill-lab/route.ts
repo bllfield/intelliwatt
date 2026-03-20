@@ -1903,7 +1903,10 @@ export async function POST(req: NextRequest) {
           ? true
           : true;
   const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
-  const artifactJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp));
+  const artifactJoinMissingActual =
+    artifactSimulatedByTs.size > 0
+      ? scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp))
+      : [];
   const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
   if (scoringJoinMissingActual.length > 0) {
     markCompareCoreStep(compareCoreTiming, "join_actual_vs_sim");
@@ -2028,6 +2031,7 @@ export async function POST(req: NextRequest) {
       : artifactSourceMode === "exact_hash_match"
         ? "Artifact source: exact identity match on Past input hash."
         : null);
+  const chartIntervalCount = Number(ma.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0) || 0;
   const displayDailyRows = Array.isArray(sharedSim.simulatedChartDaily)
     ? sharedSim.simulatedChartDaily.map((row) => ({
         date: String((row as any)?.date ?? "").slice(0, 10),
@@ -2356,7 +2360,7 @@ export async function POST(req: NextRequest) {
             },
             dataset: {
               summary: {
-                intervalsCount: Number((sharedSim.modelAssumptions as any)?.intervalCount ?? sharedSim.simulatedChartIntervals.length ?? 0),
+                intervalsCount: chartIntervalCount,
                 start: sharedCoverageWindow.startDate,
                 end: sharedCoverageWindow.endDate,
               },
@@ -2588,7 +2592,7 @@ export async function POST(req: NextRequest) {
           dailyTotalsChartSim: sharedSim.simulatedChartDaily,
           monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
           stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
-          chartIntervalCount: sharedSim.simulatedChartIntervals.length,
+          chartIntervalCount,
           dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
           top10Under: metrics.diagnostics.top10Under,
           top10Over: metrics.diagnostics.top10Over,
@@ -2597,7 +2601,7 @@ export async function POST(req: NextRequest) {
         }
       : {
           included: false,
-          chartIntervalCount: sharedSim.simulatedChartIntervals.length,
+          chartIntervalCount,
         },
     parity: {
       intervalCount: actualScoringIntervals.length,
