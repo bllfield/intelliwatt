@@ -327,6 +327,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     houseId: args.houseId,
     scenarioId: resolvedScenarioId,
     readMode: "allow_rebuild",
+    forceRebuildArtifact: true,
   });
   if (!rebuilt.ok) {
     return {
@@ -3006,6 +3007,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
   houseId: string;
   scenarioId?: string | null;
   readMode?: "artifact_only" | "allow_rebuild";
+  forceRebuildArtifact?: boolean;
 }): Promise<
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | {
@@ -3020,6 +3022,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
     const readMode = args.readMode ?? "allow_rebuild";
+    const forceRebuildArtifact = args.forceRebuildArtifact === true;
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
@@ -3540,11 +3543,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
             usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
             scenarioId: scenarioIdForCache,
           };
-          const cached = await getCachedPastDataset({
-            houseId: args.houseId,
-            scenarioId: scenarioIdForCache,
-            inputHash,
-          });
+          const cached = forceRebuildArtifact
+            ? null
+            : await getCachedPastDataset({
+                houseId: args.houseId,
+                scenarioId: scenarioIdForCache,
+                inputHash,
+              });
           if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
             const decoded = decodeIntervalsV1(cached.intervalsCompressed);
             const restored = {

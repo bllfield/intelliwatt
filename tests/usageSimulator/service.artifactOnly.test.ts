@@ -473,9 +473,9 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     });
   });
 
-  it("returns the exact cached artifact identity when allow_rebuild reuses an exact cache hit", async () => {
+  it("forces a fresh rebuild for artifact ensure even when an exact cache hit exists", async () => {
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    getCachedPastDataset.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValueOnce({
       inputHash: "hash-rebuilt-exact",
       updatedAt: new Date("2026-03-18T00:00:00.000Z"),
       datasetJson: {
@@ -506,6 +506,30 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: canonicalCoverage.startDate,
+          end: canonicalCoverage.endDate,
+        },
+        meta: { curveShapingVersion: "shared_curve_v2" },
+        daily: [
+          { date: "2026-01-01", kwh: 0.5, source: "SIMULATED" },
+          { date: "2026-01-02", kwh: 0.25, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-03-14T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-03-14T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      error: null,
+    });
 
     const out = await rebuildGapfillSharedPastArtifact({
       userId: "u1",
@@ -519,7 +543,9 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       expect(out.artifactHashMatch).toBe(true);
       expect(out.artifactSourceMode).toBe("exact_hash_match");
     }
-    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    expect(simulatePastUsageDataset).toHaveBeenCalledTimes(1);
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(getCachedPastDataset).toHaveBeenCalledTimes(1);
   });
 });
 
