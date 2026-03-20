@@ -982,6 +982,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.simulatedChartDaily).toEqual([
         { date: "2026-01-01", simKwh: 9.99, source: "SIMULATED" },
       ]);
+      expect(out.simulatedChartIntervals.length).toBeGreaterThan(0);
+      expect((out.modelAssumptions as any)?.intervalCount).toBe(out.simulatedChartIntervals.length);
+      expect((out.modelAssumptions as any)?.artifactStoredIntervalCount).toBe(96);
       expect(out.simulatedChartMonthly).toEqual([{ month: "2026-01", kwh: 333.33 }]);
       expect(out.simulatedChartMonthly.find((m) => m.month === "2025-12")).toBeUndefined();
       expect(out.simulatedChartStitchedMonth?.yearMonth).toBe("2026-01");
