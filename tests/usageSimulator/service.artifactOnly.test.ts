@@ -929,6 +929,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("uses restored dataset daily/monthly rows as canonical display output when present", async () => {
+    decodeIntervalsV1.mockReturnValueOnce(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
