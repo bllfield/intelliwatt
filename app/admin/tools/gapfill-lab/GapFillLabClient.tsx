@@ -68,6 +68,11 @@ type ApiResponse =
       usage365?: Usage365Payload;
       truthEnvelope?: any;
       hasScoreableIntervals?: boolean;
+      compareCoreMode?: string;
+      compareCoreStepTimings?: Record<string, number>;
+      selectedFreshIntervalCount?: number;
+      selectedActualIntervalCount?: number;
+      artifactReferenceDayCount?: number;
       compareTruth?: {
         compareFreshModeUsed?: string | null;
         compareFreshModeLabel?: string | null;

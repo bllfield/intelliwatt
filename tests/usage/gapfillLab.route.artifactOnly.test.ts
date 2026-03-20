@@ -959,6 +959,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         artifactFallbackOccurred: false,
         artifactFallbackReason: null,
         artifactExactIdentifierUsed: "past-s1:hash-1",
+        usageShapeProfileDiag: { found: true, reasonNotUsed: null },
+        weatherApiData: [
+          { dateKey: "2026-01-01", tAvgF: 51 },
+          { dateKey: "2026-01-02", tAvgF: 52 },
+        ],
+        simulatedDayDiagnosticsSample: [
+          { localDate: "2026-01-01", fallbackLevel: null },
+          { localDate: "2026-01-02", fallbackLevel: "fallback" },
+        ],
+        dayTotalDiagnostics: { heavy: true },
       },
       homeProfileFromModel: null,
       applianceProfileFromModel: null,
@@ -984,7 +994,19 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredIntervalsCount).toBe(2);
     expect(body.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
     expect(body.compareFreshModeUsed).toBe("selected_days");
+    expect(body.compareCoreMode).toBe("selected_days_core_lightweight");
+    expect(body.compareCoreStepTimings).toEqual(body.compareCoreTiming?.stepsMs);
+    expect(body.selectedFreshIntervalCount).toBe(2);
+    expect(body.selectedActualIntervalCount).toBe(2);
+    expect(body.artifactReferenceDayCount).toBe(1);
     expect(body.compareCoreTiming?.selectedDaysCoreLightweight).toBe(true);
+    expect(body.compareCoreTiming?.selectedDaysRequestedCount).toBe(1);
+    expect(body.compareCoreTiming?.selectedDaysScoredCount).toBe(1);
+    expect(body.compareCoreTiming?.freshSimIntervalCountSelectedDays).toBe(2);
+    expect(body.compareCoreTiming?.actualIntervalCountSelectedDays).toBe(2);
+    expect(body.compareCoreTiming?.artifactReferenceDayCountUsed).toBe(1);
+    expect(body.compareCoreTiming?.compareCorePhaseStep).toBe("finalize_response");
+    expect(body.compareCoreTiming?.compareCorePhaseElapsedMsByStep).toEqual(body.compareCoreTiming?.stepsMs);
     expect(body.compareCoreTiming?.stepsMs?.build_shared_compare).toBeTypeOf("number");
     expect(body.compareCoreTiming?.stepsMs?.build_metrics).toBeTypeOf("number");
     expect(body.compareCoreTiming?.stepsMs?.build_diagnostics).toBeTypeOf("number");
@@ -1048,6 +1070,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.missAttributionSummary?.source).toBe("scored_day_truth_rows");
     expect(body.accuracyTuningBreakdowns?.source).toBe("scored_day_truth_rows");
     expect(body.diagnostics?.included).toBe(false);
+    expect(body.modelAssumptions?.usageShapeProfileDiag).toEqual({ found: true, reasonNotUsed: null });
+    expect(body.modelAssumptions?.weatherApiData).toBeUndefined();
+    expect(body.modelAssumptions?.simulatedDayDiagnosticsSample).toBeUndefined();
+    expect(body.modelAssumptions?.dayTotalDiagnostics).toBeUndefined();
     expect(body.fullReportText).toBeUndefined();
   });
 
@@ -1186,7 +1212,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
       simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
       simulatedChartStitchedMonth: null,
-      modelAssumptions: { intervalCount: 0, artifactStoredIntervalCount: 999 },
+      modelAssumptions: {
+        intervalCount: 0,
+        artifactStoredIntervalCount: 999,
+        usageShapeProfileDiag: { found: true, reasonNotUsed: null },
+      },
       homeProfileFromModel: null,
       applianceProfileFromModel: null,
       scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
@@ -1212,6 +1242,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(Array.isArray(body.displaySimulated?.daily)).toBe(true);
     expect(body.modelAssumptions?.intervalCount).toBe(0);
     expect(body.modelAssumptions?.artifactStoredIntervalCount).toBe(999);
+    expect(body.modelAssumptions?.usageShapeProfileDiag).toEqual({ found: true, reasonNotUsed: null });
+    expect(body.modelAssumptions?.weatherApiData).toBeUndefined();
+    expect(body.modelAssumptions?.simulatedDayDiagnosticsSample).toBeUndefined();
+    expect(body.modelAssumptions?.dayTotalDiagnostics).toBeUndefined();
   });
 
   it("passes through parity mismatch proof metadata from shared compare service", async () => {

@@ -1218,6 +1218,10 @@ export async function buildGapfillCompareSimShared(args: {
     .filter((dk) => chartDateKeysLocal.has(dk))
     .sort((a, b) => (a < b ? -1 : 1))
     .slice(0, 1);
+  const useSelectedDaysLightweightDisplayRows = selectedDaysLightweightArtifactRead === true;
+  const displayDateKeysLocal = useSelectedDaysLightweightDisplayRows
+    ? new Set<string>([...Array.from(boundedTestDateKeysLocal), ...deterministicTravelParityDateKeys])
+    : chartDateKeysLocal;
   let simulatedTestIntervals = artifactSimulatedTestIntervals;
   let scoringSimulatedSource:
     | "shared_artifact_simulated_intervals15"
@@ -1354,10 +1358,10 @@ export async function buildGapfillCompareSimShared(args: {
   ).length;
   const simulatedChartIntervals = useSelectedDaysLightweightArtifactRead
     ? []
-    : artifactIntervals.filter((p) => chartDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
+    : artifactIntervals.filter((p) => displayDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone)));
   modelAssumptions.intervalCount = simulatedChartIntervals.length;
   const chartMonthKeysLocal = new Set<string>(
-    Array.from(chartDateKeysLocal)
+    Array.from(displayDateKeysLocal)
       .map((dk) => String(dk).slice(0, 7))
       .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
   );
@@ -1369,10 +1373,10 @@ export async function buildGapfillCompareSimShared(args: {
           date: String(d?.date ?? "").slice(0, 10),
           simKwh: round2Local(Number(d?.kwh) || 0),
         }))
-        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && chartDateKeysLocal.has(d.date))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && displayDateKeysLocal.has(d.date))
         .sort((a, b) => (a.date < b.date ? -1 : 1));
   const useDatasetDailyAsCanonical = datasetDailyRows.length > 0;
-  const simulatedChartDaily = useDatasetDailyAsCanonical
+  let simulatedChartDaily = useDatasetDailyAsCanonical
     ? datasetDailyRows.map((d) => ({
         date: d.date,
         simKwh: d.simKwh,
@@ -1419,7 +1423,7 @@ export async function buildGapfillCompareSimShared(args: {
         canonicalWindow.endDate
       )
     : null;
-  const simulatedChartMonthly = useDatasetMonthlyAsCanonical
+  let simulatedChartMonthly = useDatasetMonthlyAsCanonical
     ? datasetMonthlyRows
     : monthlyChartBuild?.monthly ?? [];
   const simulatedChartStitchedMonth =
@@ -1439,12 +1443,25 @@ export async function buildGapfillCompareSimShared(args: {
     ? "dataset.monthly"
     : "interval_rebucket_fallback";
   const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
-  const artifactSimulatedDayReferenceRows = Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
+  let artifactSimulatedDayReferenceRows = Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
     .map(([date, simKwh]) => ({ date: String(date).slice(0, 10), simKwh: round2Local(Number(simKwh) || 0) }))
-    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && chartDateKeysLocal.has(row.date))
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && displayDateKeysLocal.has(row.date))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (useSelectedDaysLightweightDisplayRows) {
+    simulatedChartDaily = simulatedChartDaily.filter((row) => displayDateKeysLocal.has(String(row.date ?? "").slice(0, 10)));
+    simulatedChartMonthly = simulatedChartMonthly.filter((row) => chartMonthKeysLocal.has(String(row.month ?? "").slice(0, 7)));
+    artifactSimulatedDayReferenceRows = artifactSimulatedDayReferenceRows.filter((row) =>
+      displayDateKeysLocal.has(String(row.date ?? "").slice(0, 10))
+    );
+  }
   modelAssumptions.artifactSimulatedDayReferenceSource = "canonical_artifact_simulated_day_totals";
   modelAssumptions.artifactSimulatedDayReferenceCount = Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length;
+  modelAssumptions.selectedDaysRequestedCount = boundedTestDateKeysLocal.size;
+  modelAssumptions.selectedDaysScoredCount = availableTestDateKeysFromSimulated.size;
+  modelAssumptions.freshSimIntervalCountSelectedDays = simulatedTestIntervals.length;
+  modelAssumptions.artifactReferenceDayCountUsed = artifactSimulatedDayReferenceRows.filter((row) =>
+    boundedTestDateKeysLocal.has(row.date)
+  ).length;
 
   const freshDailyTotalsByDate = new Map<string, number>();
   for (const p of simulatedTestIntervals) {
@@ -1516,6 +1533,32 @@ export async function buildGapfillCompareSimShared(args: {
     };
   });
 
+  const responseModelAssumptions =
+    useSelectedDaysLightweightArtifactRead && effectiveCompareFreshMode === "selected_days"
+      ? (() => {
+          const out: Record<string, unknown> = { ...(modelAssumptions as Record<string, unknown>) };
+          const selectedDateKeySet = new Set<string>(
+            Array.from(boundedTestDateKeysLocal)
+              .map((dk) => String(dk ?? "").slice(0, 10))
+              .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+          );
+          if (Array.isArray(out.simulatedDayDiagnosticsSample)) {
+            const filtered = (out.simulatedDayDiagnosticsSample as Array<Record<string, unknown>>).filter((row) =>
+              selectedDateKeySet.has(String((row as any)?.localDate ?? "").slice(0, 10))
+            );
+            if (filtered.length > 0) out.simulatedDayDiagnosticsSample = filtered;
+            else delete out.simulatedDayDiagnosticsSample;
+          }
+          if (Array.isArray(out.weatherApiData)) {
+            const filtered = (out.weatherApiData as Array<Record<string, unknown>>).filter((row) =>
+              selectedDateKeySet.has(String((row as any)?.dateKey ?? "").slice(0, 10))
+            );
+            if (filtered.length > 0) out.weatherApiData = filtered;
+            else delete out.weatherApiData;
+          }
+          return out;
+        })()
+      : modelAssumptions;
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
 
   return {
@@ -1555,7 +1598,7 @@ export async function buildGapfillCompareSimShared(args: {
     simulatedChartDaily,
     simulatedChartMonthly,
     simulatedChartStitchedMonth,
-    modelAssumptions,
+    modelAssumptions: responseModelAssumptions,
     homeProfileFromModel: sharedProfiles.homeProfile,
     applianceProfileFromModel: sharedProfiles.applianceProfile,
   };
@@ -3544,6 +3587,3 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
     canonicalEndMonth: canonical.endMonth,
   };
 }
-
-
-

@@ -165,8 +165,28 @@ function finalizeCompareCoreTiming(
     elapsedMs: Math.max(0, Date.now() - timing.startedAtMs),
     lastCompletedStep: timing.lastCompletedStep,
     stepsMs: timing.stepsMs,
+    compareCoreStepTimings: timing.stepsMs,
+    ...(typeof (extra as any)?.failedStep === "string" ? { compareCoreFailedStep: (extra as any).failedStep } : {}),
     ...(extra ?? {}),
   };
+}
+
+function buildSelectedDaysCoreResponseModelAssumptions(modelAssumptions: any): Record<string, unknown> | null {
+  if (!modelAssumptions || typeof modelAssumptions !== "object") return null;
+  const out: Record<string, unknown> = { ...(modelAssumptions as Record<string, unknown>) };
+  delete out.weatherApiData;
+  delete out.simulatedDayDiagnosticsSample;
+  delete out.dayTotalDiagnostics;
+  delete out.weatherRowsBySource;
+  delete out.weatherSourcesSeen;
+  delete out.weatherSourceMismatchDetected;
+  delete out.weatherRowCount;
+  delete out.weatherKindUsed;
+  delete out.weatherValidationFingerprint;
+  delete out.simulationWeatherSourceOwner;
+  delete out.reportWeatherSourceOwner;
+  delete out.benchmarkPayloadForCopy;
+  return out;
 }
 
 async function withTimeout<T>(task: Promise<T>, timeoutMs: number, timeoutErrorCode: string): Promise<T> {
@@ -1693,6 +1713,11 @@ export async function POST(req: NextRequest) {
     includeDiagnostics || includeFullReportText ? "full_window" : "selected_days";
   const selectedDaysCoreLightweight =
     compareFreshMode === "selected_days" && !includeDiagnostics && !includeFullReportText;
+  const compareCoreMode = selectedDaysCoreLightweight
+    ? "selected_days_core_lightweight"
+    : compareFreshMode === "full_window"
+      ? "full_window_compare_core"
+      : "selected_days_compare_core";
   // Orchestrator already runs explicit artifact_ensure before compare_core.
   // Skip redundant auto-ensure in lightweight selected-days compare.
   const autoEnsureArtifactForCompare =
@@ -2047,7 +2072,11 @@ export async function POST(req: NextRequest) {
   const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
   const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
   const responseApplianceProfile = sharedSim.applianceProfileFromModel ?? applianceProfile;
-  const ma = (sharedSim.modelAssumptions as any) ?? {};
+  const rawModelAssumptions = (sharedSim.modelAssumptions as any) ?? {};
+  const responseModelAssumptions = selectedDaysCoreLightweight
+    ? buildSelectedDaysCoreResponseModelAssumptions(rawModelAssumptions)
+    : rawModelAssumptions;
+  const ma = rawModelAssumptions;
   const artifactSourceMode = String(ma.artifactSourceMode ?? "") || null;
   const requestedInputHash = ma.requestedInputHash ?? null;
   const artifactInputHashUsed = ma.artifactInputHashUsed ?? null;
@@ -2151,6 +2180,9 @@ export async function POST(req: NextRequest) {
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
       .map((r) => [r.date, { simKwh: r.simKwh, source: "SIMULATED" as const }] as const)
   );
+  const artifactReferenceDayCountUsed = Array.from(scoringTestDateKeysLocal).filter((dk) =>
+    parityDisplayDailyByDate.has(dk)
+  ).length;
   const actualDailyByDate = new Map<string, number>();
   for (const p of scoringActualTestIntervalsCanon) {
     const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
@@ -2168,14 +2200,14 @@ export async function POST(req: NextRequest) {
   const simulatedDiagByDate = new Map<string, Record<string, unknown>>();
   for (const d of simulatedDayDiagnosticsRaw) {
     const dk = String((d as any)?.localDate ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
     if (!simulatedDiagByDate.has(dk)) simulatedDiagByDate.set(dk, d);
   }
   const weatherApiRows = Array.isArray((ma as any)?.weatherApiData) ? ((ma as any).weatherApiData as Array<Record<string, unknown>>) : [];
   const weatherByDate = new Map<string, Record<string, unknown>>();
   for (const w of weatherApiRows) {
     const dk = String((w as any)?.dateKey ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
     if (!weatherByDate.has(dk)) weatherByDate.set(dk, w);
   }
   const scoredDayTruthRows = Array.from(scoringTestDateKeysLocal)
@@ -2649,7 +2681,7 @@ export async function POST(req: NextRequest) {
     scenarioId: stableScenarioId,
     homeProfile: responseHomeProfile,
     applianceProfile: responseApplianceProfile,
-    modelAssumptions: sharedSim.modelAssumptions,
+    modelAssumptions: responseModelAssumptions,
     artifactSourceMode,
     requestedInputHash,
     artifactInputHashUsed,
@@ -2682,6 +2714,11 @@ export async function POST(req: NextRequest) {
     compareSharedCalcPath,
     compareFreshModeUsed,
     compareCalculationScope,
+    compareCoreMode,
+    compareCoreStepTimings: compareCoreTiming.stepsMs,
+    selectedFreshIntervalCount: simulatedTestIntervalsCount,
+    selectedActualIntervalCount: actualTestIntervalsCount,
+    artifactReferenceDayCount: artifactReferenceDayCountUsed,
     displaySimSource,
     compareSimSource,
     weatherBasisUsed,
@@ -2691,6 +2728,14 @@ export async function POST(req: NextRequest) {
     compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
       compareRequestTruth,
       selectedDaysCoreLightweight,
+      compareCoreMode,
+      selectedDaysRequestedCount: requestedTestDaysCount,
+      selectedDaysScoredCount: scoringTestDaysCount,
+      freshSimIntervalCountSelectedDays: simulatedTestIntervalsCount,
+      actualIntervalCountSelectedDays: actualTestIntervalsCount,
+      artifactReferenceDayCountUsed,
+      compareCorePhaseStep: "finalize_response",
+      compareCorePhaseElapsedMsByStep: compareCoreTiming.stepsMs,
     }),
     artifactDisplayReferenceWarning,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,

@@ -115,6 +115,7 @@
 - Use Production API only for read-only verified flows
 - No local database connection needed
 - Migration scripts have been applied
+- Gap-Fill Lab `compare_core` in selected-days mode is expected to stay lightweight: shared simulator math remains authoritative, but the core response should avoid full-window diagnostic/weather payloads and other heavy report-only structures.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.

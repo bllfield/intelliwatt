@@ -1461,6 +1461,90 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("scopes lightweight selected-days display and artifact reference rows to scored days only", async () => {
+    const allDates = Array.from({ length: 31 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
+    const selectedDates = ["2026-01-05", "2026-01-20"];
+    getCachedPastDataset.mockResolvedValue(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      updatedAt: new Date("2026-01-31T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * allDates.length,
+          totalKwh: 24 * allDates.length,
+          start: allDates[0],
+          end: allDates[allDates.length - 1],
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: Object.fromEntries(allDates.map((date) => [date, 24])),
+          weatherApiData: allDates.map((date) => ({
+            dateKey: date,
+            kind: "actual",
+            tAvgF: 50,
+            tMinF: 40,
+            tMaxF: 60,
+            hdd65: 15,
+            cdd65: 0,
+            source: "weather",
+          })),
+          simulatedDayDiagnosticsSample: allDates.map((date) => ({
+            localDate: date,
+            targetDayKwhBeforeWeather: 24,
+            weatherAdjustedDayKwh: 24,
+            dayTypeUsed: "weekday",
+            shapeVariantUsed: "shared",
+            finalDayKwh: 24,
+            intervalSumKwh: 24,
+            fallbackLevel: null,
+          })),
+        },
+        daily: allDates.map((date) => ({ date, kwh: 24, source: "SIMULATED" })),
+        monthly: [{ month: "2026-01", kwh: 24 * allDates.length }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: selectedDates.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-31" },
+      testDateKeysLocal: new Set<string>(selectedDates),
+      rebuildArtifact: false,
+      autoEnsureArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(selectedDates);
+      expect(out.artifactSimulatedDayReferenceRows?.map((row) => row.date)).toEqual(selectedDates);
+      expect(out.simulatedChartMonthly).toEqual([{ month: "2026-01", kwh: 744 }]);
+      expect((out as any).selectedDaysRequestedCount ?? (out.modelAssumptions as any)?.selectedDaysRequestedCount).toBe(2);
+      expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(2);
+      expect((out as any).freshSimIntervalCountSelectedDays ?? (out.modelAssumptions as any)?.freshSimIntervalCountSelectedDays).toBe(192);
+      expect((out as any).artifactReferenceDayCountUsed ?? (out.modelAssumptions as any)?.artifactReferenceDayCountUsed).toBe(2);
+      expect((out.modelAssumptions as any)?.weatherApiData?.map((row: any) => row.dateKey)).toEqual(selectedDates);
+      expect((out.modelAssumptions as any)?.simulatedDayDiagnosticsSample?.map((row: any) => row.localDate)).toEqual(selectedDates);
+      expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    }
+  });
+
   it("reports full missing-display totals while capping missing-date samples at ten dates", async () => {
     const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
     getLatestCachedPastDatasetByScenario.mockResolvedValue({
