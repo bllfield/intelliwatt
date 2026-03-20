@@ -927,7 +927,6 @@ export async function buildGapfillCompareSimShared(args: {
   async function rebuildSharedArtifactDataset(): Promise<{
     ok: true;
     dataset: any;
-    cached: CachedPastDataset;
   } | {
     ok: false;
     status: number;
@@ -1016,7 +1015,6 @@ export async function buildGapfillCompareSimShared(args: {
     }
     return {
       ok: true,
-      cached: persistedExactArtifact,
       dataset: restoreCachedArtifactDataset({
         cached: persistedExactArtifact,
         useSelectedDaysLightweightArtifactRead,
@@ -1135,7 +1133,6 @@ export async function buildGapfillCompareSimShared(args: {
     }
     const rebuilt = await rebuildSharedArtifactDataset();
     if (!rebuilt.ok) return rebuilt;
-    cached = rebuilt.cached;
     dataset = rebuilt.dataset;
     artifactAutoRebuilt = true;
     artifactSourceMode =
@@ -1191,7 +1188,6 @@ export async function buildGapfillCompareSimShared(args: {
     if (shouldAutoRebuildNow) {
       const rebuilt = await rebuildSharedArtifactDataset();
       if (!rebuilt.ok) return rebuilt;
-      cached = rebuilt.cached;
       dataset = rebuilt.dataset;
       artifactAutoRebuilt = true;
       artifactSourceMode =
@@ -3573,6 +3569,16 @@ export async function getSimulatedUsageForHouseScenario(args: {
             (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
             (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
             (dataset.meta as any).buildPathKind = "cache_restore";
+            (dataset.meta as any).artifactReadMode = "allow_rebuild";
+            (dataset.meta as any).artifactSource = "past_cache";
+            (dataset.meta as any).artifactInputHash = inputHash;
+            (dataset.meta as any).artifactInputHashUsed = inputHash;
+            (dataset.meta as any).requestedInputHash = inputHash;
+            (dataset.meta as any).artifactHashMatch = true;
+            (dataset.meta as any).artifactScenarioId = scenarioIdForCache;
+            (dataset.meta as any).artifactSourceMode = "exact_hash_match";
+            (dataset.meta as any).artifactSourceNote = "Artifact source: exact identity match on Past input hash.";
+            (dataset.meta as any).artifactRecomputed = false;
             if ((dataset.meta as any).weatherSourceSummary == null || (dataset.meta as any).weatherSourceSummary === "") {
               (dataset.meta as any).weatherSourceSummary = "unknown";
             }

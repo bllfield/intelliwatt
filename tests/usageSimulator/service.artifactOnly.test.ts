@@ -472,6 +472,55 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       inputHash: "hash-rebuilt-exact",
     });
   });
+
+  it("returns the exact cached artifact identity when allow_rebuild reuses an exact cache hit", async () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-rebuilt-exact",
+      updatedAt: new Date("2026-03-18T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: canonicalCoverage.startDate,
+          end: canonicalCoverage.endDate,
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          coverageStart: canonicalCoverage.startDate,
+          coverageEnd: canonicalCoverage.endDate,
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-01": 0.5,
+            "2026-01-02": 0.25,
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.5, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {},
+        canonicalArtifactSimulatedDayTotalsByDate: {
+          "2026-01-01": 0.5,
+          "2026-01-02": 0.25,
+        },
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await rebuildGapfillSharedPastArtifact({
+      userId: "u1",
+      houseId: "h1",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.requestedInputHash).toBe("hash-rebuilt-exact");
+      expect(out.artifactInputHashUsed).toBe("hash-rebuilt-exact");
+      expect(out.artifactHashMatch).toBe(true);
+      expect(out.artifactSourceMode).toBe("exact_hash_match");
+    }
+    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
 });
 
 describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
