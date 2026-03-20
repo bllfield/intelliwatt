@@ -1189,6 +1189,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       maxTempF: 61,
       hdd65: 14,
       cdd65: 0,
+      weatherSourceUsed: "OPEN_METEO",
     });
     expect(body.missAttributionSummary?.source).toBe("scored_day_truth_rows");
     expect(body.accuracyTuningBreakdowns?.source).toBe("scored_day_truth_rows");
@@ -2166,6 +2167,18 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(routeSource).not.toContain("weatherBasisUsed: String((sharedSim as any).weatherBasisUsed ?? null)");
   });
 
+  it("binds compare-core weather truth directly in client source without heavy-only dependency", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain("Compare-Core Weather Truth");
+    expect(clientSource).toContain("extractCompareCoreScoredDayWeather(result)");
+    expect(clientSource).toContain("mergeScoredDayTruthRowsWithCompareCoreWeather(");
+    expect(clientSource).toContain("compareCoreScoredDayWeatherRows.length > 0");
+    expect(clientSource).toContain('row.weatherSourceUsed ?? "—"');
+  });
+
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
     getActualIntervalsForRange.mockReset();
     getCandidateDateCoverageForSelection.mockResolvedValue({
@@ -2281,6 +2294,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.usage365?.stitchedMonth?.yearMonth).toBe("2026-03");
   });
 });
+
 
 describe("GapFillLabClient catch normalization helpers", () => {
   const clientSource = readFileSync(

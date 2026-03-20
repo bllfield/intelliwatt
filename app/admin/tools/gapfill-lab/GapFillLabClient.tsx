@@ -28,6 +28,83 @@ type Usage365Payload = {
   } | null;
 };
 
+type ScoredDayWeatherRow = {
+  localDate: string;
+  avgTempF: number | null;
+  minTempF: number | null;
+  maxTempF: number | null;
+  hdd65: number | null;
+  cdd65: number | null;
+  weatherBasisUsed: string | null;
+  weatherKindUsed: string | null;
+  weatherSourceUsed: string | null;
+  weatherProviderName: string | null;
+  weatherFallbackReason: string | null;
+};
+
+type ScoredDayWeatherTruth = {
+  availability: string;
+  reasonCode: string;
+  explanation: string;
+  source: string;
+  scoredDateCount: number;
+  weatherRowCount: number;
+  missingDateCount: number;
+  missingDateSample: string[];
+};
+
+type TravelVacantParityRow = {
+  localDate: string;
+  artifactCanonicalSimDayKwh: number | null;
+  freshSharedDayCalcKwh: number | null;
+  parityMatch: boolean | null;
+  artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
+  freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
+  parityReasonCode: string;
+};
+
+type TravelVacantParityTruth = {
+  availability: string;
+  reasonCode: string;
+  explanation: string;
+  source: string;
+  comparisonBasis: string;
+  requestedDateCount: number;
+  validatedDateCount: number;
+  mismatchCount: number;
+  missingArtifactReferenceCount: number;
+  missingFreshCompareCount: number;
+  requestedDateSample: string[];
+  exactProofRequired: boolean;
+  exactProofSatisfied: boolean;
+};
+
+type ScoredDayTruthRow = {
+  localDate: string;
+  actualDayKwh: number;
+  freshCompareSimDayKwh: number;
+  displayedPastStyleSimDayKwh: number | null;
+  actualVsFreshErrorKwh: number;
+  displayVsFreshParityMatch: boolean | null;
+  parityAvailability?: string | null;
+  parityReasonCode?: string | null;
+  dayType: "weekday" | "weekend";
+  weatherBasis: string | null;
+  weatherSourceUsed?: string | null;
+  weatherFallbackReason?: string | null;
+  avgTempF: number | null;
+  minTempF: number | null;
+  maxTempF: number | null;
+  hdd65: number | null;
+  cdd65: number | null;
+  fallbackLevel: string | null;
+  selectedDayTotalSource: string | null;
+  selectedShapeVariant: string | null;
+  selectedReferenceMatchTier: string | null;
+  selectedMatchSampleCount: number | null;
+  reasonCode: string | null;
+};
+
 type ApiResponse =
   | {
       ok: true;
@@ -74,53 +151,10 @@ type ApiResponse =
       selectedFreshIntervalCount?: number;
       selectedActualIntervalCount?: number;
       artifactReferenceDayCount?: number;
-      scoredDayWeatherRows?: Array<{
-        localDate: string;
-        avgTempF: number | null;
-        minTempF: number | null;
-        maxTempF: number | null;
-        hdd65: number | null;
-        cdd65: number | null;
-        weatherBasisUsed: string | null;
-        weatherKindUsed: string | null;
-        weatherSourceUsed: string | null;
-        weatherProviderName: string | null;
-        weatherFallbackReason: string | null;
-      }>;
-      scoredDayWeatherTruth?: {
-        availability: string;
-        reasonCode: string;
-        explanation: string;
-        source: string;
-        scoredDateCount: number;
-        weatherRowCount: number;
-        missingDateCount: number;
-        missingDateSample: string[];
-      };
-      travelVacantParityRows?: Array<{
-        localDate: string;
-        artifactCanonicalSimDayKwh: number | null;
-        freshSharedDayCalcKwh: number | null;
-        parityMatch: boolean | null;
-        artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
-        freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
-        parityReasonCode: string;
-      }>;
-      travelVacantParityTruth?: {
-        availability: string;
-        reasonCode: string;
-        explanation: string;
-        source: string;
-        comparisonBasis: string;
-        requestedDateCount: number;
-        validatedDateCount: number;
-        mismatchCount: number;
-        missingArtifactReferenceCount: number;
-        missingFreshCompareCount: number;
-        requestedDateSample: string[];
-        exactProofRequired: boolean;
-        exactProofSatisfied: boolean;
-      };
+      scoredDayWeatherRows?: ScoredDayWeatherRow[];
+      scoredDayWeatherTruth?: ScoredDayWeatherTruth;
+      travelVacantParityRows?: TravelVacantParityRow[];
+      travelVacantParityTruth?: TravelVacantParityTruth;
       heavyStartedAt?: string;
       heavyEndedAt?: string;
       heavyElapsedMs?: number;
@@ -151,31 +185,7 @@ type ApiResponse =
         monthly: Array<{ month: string; kwh: number }>;
         stitchedMonth?: Usage365Payload["stitchedMonth"];
       };
-      scoredDayTruthRows?: Array<{
-        localDate: string;
-        actualDayKwh: number;
-        freshCompareSimDayKwh: number;
-        displayedPastStyleSimDayKwh: number | null;
-        actualVsFreshErrorKwh: number;
-        displayVsFreshParityMatch: boolean | null;
-        parityAvailability?: string | null;
-        parityReasonCode?: string | null;
-        dayType: "weekday" | "weekend";
-        weatherBasis: string | null;
-        weatherSourceUsed?: string | null;
-        weatherFallbackReason?: string | null;
-        avgTempF: number | null;
-        minTempF: number | null;
-        maxTempF: number | null;
-        hdd65: number | null;
-        cdd65: number | null;
-        fallbackLevel: string | null;
-        selectedDayTotalSource: string | null;
-        selectedShapeVariant: string | null;
-        selectedReferenceMatchTier: string | null;
-        selectedMatchSampleCount: number | null;
-        reasonCode: string | null;
-      }>;
+      scoredDayTruthRows?: ScoredDayTruthRow[];
       missAttributionSummary?: any;
       accuracyTuningBreakdowns?: any;
     }
@@ -201,6 +211,53 @@ function badgeClass(kind: "ok" | "warn" | "error" | "neutral"): string {
   if (kind === "warn") return "px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800";
   if (kind === "error") return "px-2 py-0.5 rounded text-xs font-semibold bg-rose-100 text-rose-800";
   return "px-2 py-0.5 rounded text-xs font-semibold bg-brand-navy/10 text-brand-navy";
+}
+
+export function extractCompareCoreScoredDayWeather(result: ApiResponse | null): {
+  rows: ScoredDayWeatherRow[];
+  truth: ScoredDayWeatherTruth | null;
+} {
+  const truthEnvelope = result && result.ok ? ((result as any).truthEnvelope ?? null) : null;
+  const rows =
+    result && result.ok
+      ? (Array.isArray((result as any)?.scoredDayWeatherRows)
+          ? ((result as any).scoredDayWeatherRows as ScoredDayWeatherRow[])
+          : Array.isArray((truthEnvelope as any)?.scoredDayWeatherRows)
+            ? ((truthEnvelope as any).scoredDayWeatherRows as ScoredDayWeatherRow[])
+            : [])
+      : [];
+  const truth =
+    result && result.ok
+      ? (((result as any)?.scoredDayWeatherTruth ?? (truthEnvelope as any)?.scoredDayWeatherTruth ?? null) as ScoredDayWeatherTruth | null)
+      : null;
+  return { rows, truth };
+}
+
+export function mergeScoredDayTruthRowsWithCompareCoreWeather(
+  rows: ScoredDayTruthRow[],
+  weatherRows: ScoredDayWeatherRow[],
+  fallbackWeatherBasis: string | null
+): ScoredDayTruthRow[] {
+  const weatherByDate = new Map<string, ScoredDayWeatherRow>();
+  for (const row of weatherRows) {
+    const dk = String(row.localDate ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && !weatherByDate.has(dk)) weatherByDate.set(dk, row);
+  }
+  return rows.map((row) => {
+    const weather = weatherByDate.get(String(row.localDate ?? "").slice(0, 10));
+    if (!weather) return row;
+    return {
+      ...row,
+      weatherBasis: row.weatherBasis ?? weather.weatherBasisUsed ?? fallbackWeatherBasis ?? null,
+      weatherSourceUsed: row.weatherSourceUsed ?? weather.weatherSourceUsed ?? null,
+      weatherFallbackReason: row.weatherFallbackReason ?? weather.weatherFallbackReason ?? null,
+      avgTempF: row.avgTempF ?? weather.avgTempF ?? null,
+      minTempF: row.minTempF ?? weather.minTempF ?? null,
+      maxTempF: row.maxTempF ?? weather.maxTempF ?? null,
+      hdd65: row.hdd65 ?? weather.hdd65 ?? null,
+      cdd65: row.cdd65 ?? weather.cdd65 ?? null,
+    };
+  });
 }
 
 const VALID_RANDOM_TEST_MODES = ["fixed", "random", "winter", "summer", "shoulder", "extreme_weather"] as const;
@@ -685,8 +742,10 @@ export default function GapFillLabClient() {
   const artifactStatus = artifactFromEnvelope ?? artifactFromTopLevel;
   const scoredDayTruthRows =
     result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
-      ? ((result as any).scoredDayTruthRows as Array<any>)
+      ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
       : [];
+  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } =
+    extractCompareCoreScoredDayWeather(result);
   const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
   const usageShapeDiag =
     result && result.ok ? ((result as any)?.modelAssumptions?.usageShapeProfileDiag ?? null) : null;
@@ -697,29 +756,30 @@ export default function GapFillLabClient() {
     result && result.ok
       ? ((result as any).compareTruth ?? truthEnvelope?.compareTruth ?? null)
       : null;
-  const travelVacantParityRows: Array<{
-    localDate: string;
-    artifactCanonicalSimDayKwh: number | null;
-    freshSharedDayCalcKwh: number | null;
-    parityMatch: boolean | null;
-    artifactReferenceAvailability: "available" | "missing_canonical_artifact_day_total";
-    freshCompareAvailability: "available" | "missing_fresh_shared_compare_output";
-    parityReasonCode: string;
-  }> =
+  const travelVacantParityRows: TravelVacantParityRow[] =
     result && result.ok
       ? (Array.isArray((result as any)?.travelVacantParityRows)
-          ? (result as any).travelVacantParityRows
+          ? ((result as any).travelVacantParityRows as TravelVacantParityRow[])
           : Array.isArray((truthEnvelope as any)?.travelVacantParityRows)
-            ? (truthEnvelope as any).travelVacantParityRows
+            ? ((truthEnvelope as any).travelVacantParityRows as TravelVacantParityRow[])
             : [])
       : [];
-  const travelVacantParityTruth =
+  const travelVacantParityTruth: TravelVacantParityTruth | null =
     result && result.ok
-      ? ((result as any)?.travelVacantParityTruth ?? (truthEnvelope as any)?.travelVacantParityTruth ?? null)
+      ? (((result as any)?.travelVacantParityTruth ?? (truthEnvelope as any)?.travelVacantParityTruth ?? null) as TravelVacantParityTruth | null)
       : null;
+  const scoredDayTruthRowsForDisplay = useMemo(
+    () =>
+      mergeScoredDayTruthRowsWithCompareCoreWeather(
+        scoredDayTruthRows,
+        compareCoreScoredDayWeatherRows,
+        (compareTruth?.weatherBasisUsed ?? truthEnvelope?.weatherBasisUsed ?? null) as string | null
+      ),
+    [scoredDayTruthRows, compareCoreScoredDayWeatherRows, compareTruth?.weatherBasisUsed, truthEnvelope?.weatherBasisUsed]
+  );
   const noScoreableIntervals = result && result.ok && (result as any).hasScoreableIntervals === false;
-  const mismatchRowsCount = scoredDayTruthRows.filter((row) => row.displayVsFreshParityMatch === false).length;
-  const largeErrorRowsCount = scoredDayTruthRows.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) >= 5).length;
+  const mismatchRowsCount = scoredDayTruthRowsForDisplay.filter((row) => row.displayVsFreshParityMatch === false).length;
+  const largeErrorRowsCount = scoredDayTruthRowsForDisplay.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) >= 5).length;
   const missAttribution = result && result.ok ? ((result as any).missAttributionSummary ?? null) : null;
   const tuningBreakdowns = result && result.ok ? ((result as any).accuracyTuningBreakdowns ?? null) : null;
   const phaseStateByKey = new Map(orchestratorPhases.map((p) => [p.key, p.status] as const));
@@ -2394,6 +2454,64 @@ export default function GapFillLabClient() {
 
           <details className="border border-brand-blue/20 rounded" open>
             <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+              Compare-Core Weather Truth
+            </summary>
+            <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
+              {compareCoreScoredDayWeatherTruth && (
+                <div className="flex flex-wrap gap-2">
+                  <span className={badgeClass(compareCoreScoredDayWeatherTruth.availability === "available" ? "ok" : "warn")}>
+                    availability: {compareCoreScoredDayWeatherTruth.availability}
+                  </span>
+                  <span className={badgeClass("neutral")}>rows: {compareCoreScoredDayWeatherTruth.weatherRowCount}</span>
+                  <span className={badgeClass(compareCoreScoredDayWeatherTruth.missingDateCount > 0 ? "warn" : "ok")}>
+                    missing: {compareCoreScoredDayWeatherTruth.missingDateCount}
+                  </span>
+                </div>
+              )}
+              {compareCoreScoredDayWeatherRows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border border-brand-blue/20">
+                    <thead>
+                      <tr className="bg-brand-blue/10">
+                        <th className="text-left p-2">Date</th>
+                        <th className="text-right p-2">Avg/Min/Max F</th>
+                        <th className="text-right p-2">HDD/CDD</th>
+                        <th className="text-left p-2">Basis</th>
+                        <th className="text-left p-2">Source</th>
+                        <th className="text-left p-2">Fallback</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {compareCoreScoredDayWeatherRows.map((row) => (
+                        <tr key={row.localDate} className="border-t border-brand-blue/10">
+                          <td className="p-2 font-mono">{row.localDate}</td>
+                          <td className="p-2 text-right font-mono">
+                            {row.avgTempF ?? "—"} / {row.minTempF ?? "—"} / {row.maxTempF ?? "—"}
+                          </td>
+                          <td className="p-2 text-right font-mono">
+                            {row.hdd65 ?? "—"} / {row.cdd65 ?? "—"}
+                          </td>
+                          <td className="p-2">{row.weatherBasisUsed ?? "—"}</td>
+                          <td className="p-2">
+                            <div className="font-mono">{row.weatherSourceUsed ?? "—"}</div>
+                            <div className="text-brand-navy/60">{row.weatherProviderName ?? "—"}</div>
+                          </td>
+                          <td className="p-2">{row.weatherFallbackReason ?? "none"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-brand-navy/70">
+                  No compare-core scored-day weather rows were returned for this run.
+                </p>
+              )}
+            </div>
+          </details>
+
+          <details className="border border-brand-blue/20 rounded" open>
+            <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
               Travel / Vacant Parity Check
             </summary>
             <div className="p-4 border-t border-brand-blue/20 space-y-3 text-sm">
@@ -2524,9 +2642,9 @@ export default function GapFillLabClient() {
               Scored Day Truth Table
             </summary>
             <div className="p-4 border-t border-brand-blue/20 space-y-3">
-              {scoredDayTruthRows.length > 0 && (
+              {scoredDayTruthRowsForDisplay.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  <span className={badgeClass("neutral")}>rows: {scoredDayTruthRows.length}</span>
+                  <span className={badgeClass("neutral")}>rows: {scoredDayTruthRowsForDisplay.length}</span>
                   <span className={badgeClass(mismatchRowsCount > 0 ? "error" : "ok")}>
                     display-vs-fresh mismatches: {mismatchRowsCount}
                   </span>
@@ -2535,7 +2653,7 @@ export default function GapFillLabClient() {
                   </span>
                 </div>
               )}
-              {scoredDayTruthRows.length > 0 ? (
+              {scoredDayTruthRowsForDisplay.length > 0 ? (
                 <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
                   <table className="w-full text-xs border border-brand-blue/20">
                     <thead>
@@ -2550,6 +2668,7 @@ export default function GapFillLabClient() {
                         <th className="text-right p-2">Avg/Min/Max F</th>
                         <th className="text-right p-2">HDD/CDD</th>
                         <th className="text-left p-2">Weather basis</th>
+                        <th className="text-left p-2">Weather source</th>
                         <th className="text-left p-2">Fallback</th>
                         <th className="text-left p-2">Day total source</th>
                         <th className="text-left p-2">Shape</th>
@@ -2559,7 +2678,7 @@ export default function GapFillLabClient() {
                       </tr>
                     </thead>
                     <tbody>
-                      {scoredDayTruthRows.map((row: any) => {
+                      {scoredDayTruthRowsForDisplay.map((row) => {
                         const absErr = Math.abs(Number(row.actualVsFreshErrorKwh) || 0);
                         const mismatch = row.displayVsFreshParityMatch === false;
                         return (
@@ -2587,6 +2706,10 @@ export default function GapFillLabClient() {
                             {row.hdd65 ?? "—"} / {row.cdd65 ?? "—"}
                           </td>
                           <td className="p-2">{row.weatherBasis ?? "—"}</td>
+                          <td className="p-2">
+                            <div className="font-mono">{row.weatherSourceUsed ?? "—"}</div>
+                            <div className="text-brand-navy/60">{row.weatherFallbackReason ?? "—"}</div>
+                          </td>
                           <td className="p-2">
                             <span className={badgeClass(row.fallbackLevel ? "warn" : "neutral")}>
                               {row.fallbackLevel ?? "none"}
