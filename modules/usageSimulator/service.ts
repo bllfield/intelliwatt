@@ -756,7 +756,7 @@ export async function buildGapfillCompareSimShared(args: {
   // mode stays selected-days unless the caller explicitly asks for full_window.
   void includeFreshCompareCalc;
   const effectiveCompareFreshMode = compareFreshMode ?? "selected_days";
-  let useSelectedDaysLightweightArtifactRead =
+  const useSelectedDaysLightweightArtifactRead =
     selectedDaysLightweightArtifactRead === true &&
     effectiveCompareFreshMode === "selected_days" &&
     !rebuildArtifact &&
@@ -833,11 +833,6 @@ export async function buildGapfillCompareSimShared(args: {
   );
   const exactTravelParityRequiresIntervalBackedArtifactTruth =
     requireExactArtifactMatch && boundedTravelDateKeysLocal.size > 0;
-  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
-    // Exact travel/vacant parity must read the exact cached artifact intervals rather than relying
-    // on lightweight metadata-only day totals. Display rows can still remain compact later.
-    useSelectedDaysLightweightArtifactRead = false;
-  }
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -1809,11 +1804,29 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.gapfillDisplayMonthlySource = useDatasetMonthlyAsCanonical
     ? "dataset.monthly"
     : "interval_rebucket_fallback";
-  const artifactIntervalsAvailableForExactParity = Array.isArray((dataset as any)?.series?.intervals15)
-    && (dataset as any).series.intervals15.length > 0;
+  const exactParityArtifactIntervals =
+    exactTravelParityRequiresIntervalBackedArtifactTruth
+      ? Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
+        ? ((dataset as any).series.intervals15 as Array<{ timestamp: string; kwh: number }>)
+        : cached && cached.intervalsCodec === INTERVAL_CODEC_V1
+          ? decodeIntervalsV1(cached.intervalsCompressed)
+          : []
+      : [];
+  const artifactDatasetForExactParity =
+    exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
+      ? {
+          ...dataset,
+          series: {
+            ...(typeof (dataset as any)?.series === "object" && (dataset as any).series !== null
+              ? (dataset as any).series
+              : {}),
+            intervals15: exactParityArtifactIntervals,
+          },
+        }
+      : dataset;
   const canonicalArtifactSimulatedDayTotalsByDate =
-    exactTravelParityRequiresIntervalBackedArtifactTruth && artifactIntervalsAvailableForExactParity
-      ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset, timezone)
+    exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
+      ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(artifactDatasetForExactParity, timezone)
       : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
   if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
     if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};

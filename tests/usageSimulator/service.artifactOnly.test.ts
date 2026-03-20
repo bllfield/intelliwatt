@@ -2079,6 +2079,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     });
     const selectedDaysCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
     const fullWindowCallsBefore = simulatePastUsageDataset.mock.calls.length;
+    const intervalFingerprintCallsBefore = getIntervalDataFingerprint.mock.calls.length;
+    const weatherIdentityCallsBefore = computePastWeatherIdentity.mock.calls.length;
+    const usageShapeIdentityCallsBefore = getUsageShapeProfileIdentityForPast.mock.calls.length;
 
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
@@ -2102,6 +2105,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const fullWindowCalls = simulatePastUsageDataset.mock.calls.slice(fullWindowCallsBefore);
       expect(selectedDaysCalls).toHaveLength(1);
       expect(fullWindowCalls).toHaveLength(1);
+      expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
+      expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
+      expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
+      expect(decodeIntervalsV1).toHaveBeenCalled();
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[])
       ).toEqual(["2026-01-01"]);
