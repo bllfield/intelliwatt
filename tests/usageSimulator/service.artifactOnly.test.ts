@@ -587,6 +587,9 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     }
     expect(simulatePastFullWindowShared).toHaveBeenCalledTimes(1);
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    const saved = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
+    const savedMeta = ((saved as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
+    expect(savedMeta.excludedDays).toBe(2);
     expect(getCachedPastDataset).toHaveBeenCalledTimes(3);
   });
 });

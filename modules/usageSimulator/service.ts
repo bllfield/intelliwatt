@@ -495,7 +495,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         canonicalEndMonth: (buildInputs as any)?.canonicalEndMonth ?? null,
         notes: Array.isArray((buildInputs as any)?.notes) ? (buildInputs as any).notes : [],
         filledMonths: Array.isArray((buildInputs as any)?.filledMonths) ? (buildInputs as any).filledMonths : [],
-        excludedDays: Array.from(simulatedDateKeys).sort(),
+        excludedDays: simulatedDateKeys.size,
         renormalized: false,
         dayTotalSource: "usage_shape_profile",
         usageShapeProfileDiag: { reasonNotUsed: null },
@@ -578,7 +578,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
           ok: false,
           error: "past_rebuild_failed",
           message:
-            "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+            "Saved shared Past artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
           retryable: true,
         };
       }
