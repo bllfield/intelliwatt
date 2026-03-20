@@ -2294,7 +2294,6 @@ export async function POST(req: NextRequest) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
     if (!simulatedDiagByDate.has(dk)) simulatedDiagByDate.set(dk, d);
   }
-  const weatherApiRows = Array.isArray((ma as any)?.weatherApiData) ? ((ma as any).weatherApiData as Array<Record<string, unknown>>) : [];
   const compactScoredDayWeatherRows: Array<{
     localDate: string;
     avgTempF: number | null;
@@ -2321,19 +2320,7 @@ export async function POST(req: NextRequest) {
         weatherProviderName: string | null;
         weatherFallbackReason: string | null;
       }>)
-    : weatherApiRows.map((w) => ({
-        localDate: String((w as any)?.dateKey ?? "").slice(0, 10),
-        avgTempF: Number((w as any)?.tAvgF ?? NaN),
-        minTempF: Number((w as any)?.tMinF ?? NaN),
-        maxTempF: Number((w as any)?.tMaxF ?? NaN),
-        hdd65: Number((w as any)?.hdd65 ?? NaN),
-        cdd65: Number((w as any)?.cdd65 ?? NaN),
-        weatherBasisUsed: String((sharedSim as any).weatherBasisUsed ?? null),
-        weatherKindUsed: String((ma as any)?.weatherKindUsed ?? ""),
-        weatherSourceUsed: String((w as any)?.source ?? ""),
-        weatherProviderName: String((ma as any)?.weatherProviderName ?? ""),
-        weatherFallbackReason: String((ma as any)?.weatherFallbackReason ?? ""),
-      }));
+    : [];
   const weatherByDate = new Map<string, Record<string, unknown>>();
   for (const w of compactScoredDayWeatherRows) {
     const dk = String((w as any)?.localDate ?? "").slice(0, 10);

@@ -1925,6 +1925,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(routeSource).toContain("Compare core failed while building diagnostics report payload.");
   });
 
+  it("does not reconstruct scored-day weather rows in route source", () => {
+    const routeSource = readFileSync(
+      resolve(process.cwd(), "app/api/admin/tools/gapfill-lab/route.ts"),
+      "utf8"
+    );
+    expect(routeSource).toContain("Array.isArray((sharedSim as any)?.scoredDayWeatherRows)");
+    expect(routeSource).not.toContain("weatherApiRows.map((w) => ({");
+    expect(routeSource).not.toContain("weatherBasisUsed: String((sharedSim as any).weatherBasisUsed ?? null)");
+  });
+
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
     getActualIntervalsForRange.mockReset();
     getCandidateDateCoverageForSelection.mockResolvedValue({
