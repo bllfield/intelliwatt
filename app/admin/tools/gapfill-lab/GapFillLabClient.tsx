@@ -145,7 +145,10 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
-const GAPFILL_COMPARE_TIMEOUT_MS = 900_000;
+// Heavy compare can legitimately spend up to the route's shared-compare timeout
+// plus the report-builder timeout. Keep the client budget slightly above that
+// so route-side failure classification still reaches the UI, without waiting ~15 min.
+const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 195_000;
 // Keep client timeout above route compare-core timeouts so route step-level
 // timeout classification can return to UI before the browser aborts.
 const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
@@ -1289,7 +1292,7 @@ export default function GapFillLabClient() {
       let heavyRes: Response;
       let heavyData: ApiResponse;
       try {
-        const heavyResult = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_TIMEOUT_MS);
+        const heavyResult = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
         heavyRes = heavyResult.res;
         heavyData = heavyResult.data;
       } catch (heavyErr: unknown) {
@@ -1428,14 +1431,14 @@ export default function GapFillLabClient() {
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: "compare_heavy_retry_started",
-        timeoutMs: GAPFILL_COMPARE_TIMEOUT_MS,
+        timeoutMs: GAPFILL_COMPARE_HEAVY_TIMEOUT_MS,
         compareHeavyRetryBody: heavyRetryBody,
       }));
       const startedAtMs = Date.now();
       let res: Response;
       let data: ApiResponse;
       try {
-        const retryResult = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_TIMEOUT_MS);
+        const retryResult = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
         res = retryResult.res;
         data = retryResult.data;
       } catch (e: unknown) {
