@@ -1794,7 +1794,6 @@ export async function buildGapfillCompareSimShared(args: {
     exactProofSatisfied: travelVacantParityDateKeysLocal.length === 0,
   };
   let selectedTestDailyTotalsByDate: Map<string, number> | null = null;
-  let selectedTravelParityDailyTotalsByDate: Map<string, number> | null = null;
   let freshParityIntervals: IntervalPoint[] = [];
 
   const needsFreshCompareForParity =
@@ -1940,7 +1939,6 @@ export async function buildGapfillCompareSimShared(args: {
         };
       }
       freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
-      selectedTravelParityDailyTotalsByDate = selectedTravelParityResult.dailyTotalsByDate;
       scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
       comparePulledFromSharedArtifactOnly = false;
       compareSimSource = "shared_selected_days_calc";
@@ -2307,21 +2305,16 @@ export async function buildGapfillCompareSimShared(args: {
         : ("not_applicable_scored_actual_day" as const),
     comparisonBasis: parityComparisonBasis,
   };
-  const freshParityDailyByDate =
-    compareFreshModeUsed === "selected_days" && selectedTravelParityDailyTotalsByDate
-      ? new Map<string, number>(
-          Array.from(selectedTravelParityDailyTotalsByDate.entries())
-            .filter(([dk]) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-            .map(([dk, kwh]) => [dk, round2Local(Number(kwh) || 0)] as const)
-        )
-      : (() => {
-          const totals = new Map<string, number>();
-          for (const p of freshParityIntervals) {
-            const dk = dateKeyInTimezone(p.timestamp, timezone);
-            totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
-          }
-          return totals;
-        })();
+  // Keep travel/vacant proof on canonical interval-summed day totals so
+  // artifact-side and fresh-side parity compare the same aggregation basis.
+  const freshParityDailyByDate = (() => {
+    const totals = new Map<string, number>();
+    for (const p of freshParityIntervals) {
+      const dk = dateKeyInTimezone(p.timestamp, timezone);
+      totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
+    }
+    return totals;
+  })();
   travelVacantParityRows = travelVacantParityDateKeysLocal.map((dk) => {
     const artifactCanonicalSimDayKwh = canonicalArtifactDailyByDate.has(dk)
       ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
