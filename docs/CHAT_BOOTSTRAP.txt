@@ -87,6 +87,10 @@ Shared simulation architecture authority:
   - `compare_heavy_parity`
   - `compare_heavy_scored_days`
 - Current runtime note: canonical heavy follow-up is now snapshot-read-only over `compareRunId`; reader stages do not own sim/artifact/weather logic.
+- Current runtime note: admin stabilization polish is now in place for staged readers:
+  - stage-scoped snapshot-reader retry,
+  - compact per-stage snapshot-reader history in Last Attempt Debug,
+  - clearer snapshot-reader stage labeling in payload/debug views.
 - Current runtime note: legacy `compare_heavy` compatibility may still exist, but it should not be treated as the normal path.
 - Route-level or tool-level simulation math is not allowed when shared simulator output already exists.
 - Authoritative shared simulator call chain:
@@ -101,7 +105,8 @@ Simulation modeling authority:
 - Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
 - This bootstrap should stay short and operational; do not redefine modeling logic here.
 - Architecture cleanup is complete for shared-artifact alignment. Current focus is shared simulation-core accuracy.
-- Current runtime subtask: stabilization follow-up only (optional admin dedupe cleanup, optional legacy `compare_heavy` compatibility cleanup, optional observability/perf polish).
+- Current runtime subtask: maintenance-only follow-up (optional admin dedupe cleanup, optional legacy `compare_heavy` compatibility cleanup, optional observability/perf polish).
+- Do not reopen Gap-Fill architecture refactor unless a real, current active-path bug is confirmed.
 - Do not reopen artifact architecture cleanup unless a new active-path bug proves it is necessary.
 
 Modeling mode split (summary):

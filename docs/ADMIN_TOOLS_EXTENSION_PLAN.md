@@ -45,8 +45,9 @@ _Generated from audit; selectively implemented in runtime. Do not redesign exist
   - `compare_heavy_parity`
   - `compare_heavy_scored_days`
 - Canonical admin heavy flow now uses compareRunId reader stages and snapshot-reader retry behavior.
+- Admin stabilization pass is now complete for staged readers (compact multi-stage debug history + stage label clarity + stage-scoped retry).
 - Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
-- Remaining work is stabilization-only (optional admin dedupe cleanup, optional legacy compatibility cleanup/deprecation, optional observability/perf cleanup).
+- Remaining work is maintenance-only (optional admin dedupe cleanup, optional legacy compatibility cleanup/deprecation, optional observability/perf cleanup).
 - Gap-Fill Lab must not own simulation logic, artifact identity logic, or weather logic; it remains orchestration/reporting over shared modules.
 
 ---

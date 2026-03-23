@@ -34,6 +34,11 @@
   - `compare_heavy_parity`
   - `compare_heavy_scored_days`
 - Canonical heavy retry now retries snapshot readers instead of `compare_heavy` recompute.
+- Narrow admin stabilization pass is complete:
+  - compact snapshot-reader history/debug clarity is now preserved across reader stages,
+  - snapshot reader retry is now stage-scoped in canonical admin flow,
+  - UI/debug labels now clearly distinguish snapshot reader stages.
+- No architecture changes were made in this stabilization pass (no sim-core, shared weather ownership, or compare snapshot persistence architecture change).
 - Shared sim-core ownership, shared weather truth ownership, and exact artifact identity enforcement remain unchanged.
 
 ## Remaining problem statement

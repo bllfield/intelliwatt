@@ -136,3 +136,18 @@
   - optionally rename reader error classification labels for clarity,
   - optionally add narrow tests for overlap/no-double-fire and debug-stage retention.
 - No evidence in this audit requires reopening sim-core, artifact identity, weather ownership, or route compute architecture.
+
+## Post-audit implementation update
+
+Recommended narrow stabilization pass has now been completed.
+
+- Implemented (limited scope):
+  - compact per-stage snapshot-reader history retained in Last Attempt Debug (initial + retry entries),
+  - snapshot reader stage labels clarified in payload/debug views,
+  - snapshot reader retry made stage-scoped in canonical admin flow,
+  - focused client/test assertions tightened for overlap guards and staged retry/debug history presence.
+- Explicitly unchanged:
+  - no sim-core architecture changes,
+  - no shared weather ownership/provenance changes,
+  - no compare snapshot persistence architecture changes,
+  - no legacy `compare_heavy` removal (still compatibility-only, non-canonical).

@@ -154,6 +154,21 @@ Checklist for stabilization follow-up (narrow scope, only if still needed):
 - [ ] Optional legacy `compare_heavy` cleanup/deprecation if compatibility risk is low.
 - [ ] Optional observability/perf cleanup for staged reader timings and no-recompute diagnostics.
 
+### Plan Change (2026-03) — Gap-Fill Admin Stabilization Pass
+
+- Narrow admin/orchestration stabilization pass is complete.
+- Scope completed in this pass:
+  - compact Last Attempt Debug snapshot-reader history retained across reader stages (initial + retry),
+  - snapshot reader stage label clarity improved in payload/debug views,
+  - snapshot reader retry is stage-scoped (retry targets the intended failed reader stage),
+  - in-flight overlap guards remain the normal protection path (`compareInFlightRef`, `rebuildInFlightRef`).
+- Explicitly unchanged in this pass:
+  - no sim-core architecture changes,
+  - no shared weather ownership/provenance changes,
+  - no compare snapshot persistence architecture changes,
+  - no legacy `compare_heavy` removal.
+- Gap-Fill compare flow is now in stabilization/maintenance state; do not reopen architecture refactor unless a new active-path bug appears.
+
 ### Simulation Modeling Modes (authoritative summary)
 
 - **Observed-history reconstruction mode** (Past Sim + GapFill compare): prioritize actual intervals, weather, weekday/weekend, time-of-day, and similar-day empirical behavior.

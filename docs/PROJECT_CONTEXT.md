@@ -136,8 +136,10 @@
 - `compare_core` now returns compare-run state fields (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
 - Staged heavy snapshot readers now exist in runtime (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) and require `compareRunId`.
 - Canonical heavy follow-up path is now snapshot-read-only over persisted compare snapshot state (no recompute in canonical admin flow).
+- Gap-Fill admin stabilization pass is complete for current runtime flow (snapshot-reader history/debug clarity + stage-scoped retry + reader-stage label clarity).
 - Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
-- Remaining work is stabilization/cleanup only (optional dedupe polish, optional compatibility cleanup, optional observability/perf refinement).
+- Remaining work is maintenance-only (optional dedupe polish, optional compatibility cleanup, optional observability/perf refinement).
+- No current Gap-Fill architecture refactor is needed; return focus to broader shared simulation-core accuracy unless a new active-path Gap-Fill bug appears.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
