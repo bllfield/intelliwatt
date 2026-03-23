@@ -2075,8 +2075,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
       "utf8"
     );
+    expect(clientSource).toContain("const compareCoreIncludesHeavyPayload =");
+    expect(clientSource).toContain("togglesSnapshot.fullDiagnosticsOnCore && !togglesSnapshot.runHeavyDiagnosticsStep");
     expect(clientSource).toContain('responseMode: "heavy_only_compact"');
     expect(clientSource).toContain('if ((data as any).responseMode === "heavy_only_compact")');
+    expect(clientSource).toContain("if (compareCoreIncludesHeavyPayload || !togglesSnapshot.runHeavyDiagnosticsStep)");
     expect(clientSource).toContain("heavyStartedAt");
     expect(clientSource).toContain("heavyStepsMs");
     expect(clientSource).toContain("compareCoreMode: prev.compareCoreMode");

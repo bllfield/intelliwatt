@@ -66,6 +66,41 @@ function dateKeysFromCanonicalDayStarts(canonicalDayStartsMs: number[]): string[
   return out;
 }
 
+function summarizePastWindowWeatherProvenance(args: {
+  actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  weatherFallbackReason: WeatherFallbackReason;
+}): WeatherProvenance {
+  const wxEntries = Array.from(args.actualWxByDateKey.entries());
+  const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
+  let weatherStubRowCount = 0;
+  const sourcesSeen = new Set<string>();
+  for (const [, w] of wxEntries) {
+    const src = String(w?.source ?? "").trim();
+    if (src) sourcesSeen.add(src);
+    if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
+  }
+  const weatherRowsCount = wxEntries.length;
+  const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
+  const weatherKindUsed =
+    sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
+  let weatherSourceSummary: WeatherProvenance["weatherSourceSummary"] = "none";
+  if (weatherRowsCount > 0) {
+    if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
+    else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
+    else weatherSourceSummary = "mixed_actual_and_stub";
+  }
+  return {
+    weatherKindUsed,
+    weatherSourceSummary,
+    weatherFallbackReason: args.weatherFallbackReason,
+    weatherProviderName: weatherActualRowCount > 0 ? "OPEN_METEO" : "STUB",
+    weatherCoverageStart: dateKeysSorted[0] ?? null,
+    weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
+    weatherStubRowCount,
+    weatherActualRowCount,
+  };
+}
+
 /**
  * Single shared weather loader for Past window.
  * Produces actualWxByDateKey, normalWxByDateKey, and truthful provenance.
@@ -81,6 +116,26 @@ export async function loadWeatherForPastWindow(args: {
   provenance: WeatherProvenance;
 }> {
   const { houseId, startDate, endDate, canonicalDateKeys } = args;
+  const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+  ]);
+  const missingOrStubWxKeys = canonicalDateKeys.filter((dk) => {
+    const row = actualWxByDateKey.get(dk);
+    if (!row) return true;
+    return String(row?.source ?? "").trim() === WEATHER_STUB_SOURCE;
+  });
+  if (missingOrStubWxKeys.length === 0) {
+    return {
+      actualWxByDateKey,
+      normalWxByDateKey,
+      provenance: summarizePastWindowWeatherProvenance({
+        actualWxByDateKey,
+        weatherFallbackReason: null,
+      }),
+    };
+  }
+
   const house = await (prisma as any).houseAddress
     .findUnique({ where: { id: houseId }, select: { lat: true, lng: true } })
     .catch(() => null);
@@ -89,117 +144,44 @@ export async function loadWeatherForPastWindow(args: {
 
   if (lat != null && lon != null) {
     const backfillResult = await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
-    const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-    ]);
     const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
     if (missingWxKeys.length > 0) {
       await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
-      const [actualWx2, normalWx2] = await Promise.all([
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-      ]);
-      const wxEntries = Array.from(actualWx2.entries());
-      const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
-      let weatherStubRowCount = 0;
-      const sourcesSeen = new Set<string>();
-      for (const [, w] of wxEntries) {
-        const src = String(w?.source ?? "").trim();
-        if (src) sourcesSeen.add(src);
-        if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
-      }
-      const weatherRowsCount = wxEntries.length;
-      const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
-      const weatherKindUsed =
-        sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
-      let weatherSourceSummary: WeatherProvenance["weatherSourceSummary"] = "none";
-      if (weatherRowsCount > 0) {
-        if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
-        else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
-        else weatherSourceSummary = "mixed_actual_and_stub";
-      }
-      const weatherFallbackReason: WeatherFallbackReason =
-        backfillResult.skippedLatLng === true
-          ? "missing_lat_lng"
-          : backfillResult.fetched === 0 && (backfillResult.stubbed ?? 0) > 0
-            ? "api_failure_or_no_data"
-            : (backfillResult.stubbed ?? 0) > 0
-              ? "partial_coverage"
-              : null;
-      return {
-        actualWxByDateKey: actualWx2,
-        normalWxByDateKey: normalWx2,
-        provenance: {
-          weatherKindUsed,
-          weatherSourceSummary,
-          weatherFallbackReason,
-          weatherProviderName: weatherActualRowCount > 0 ? "OPEN_METEO" : "STUB",
-          weatherCoverageStart: dateKeysSorted[0] ?? null,
-          weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
-          weatherStubRowCount,
-          weatherActualRowCount,
-        },
-      };
     }
-    const wxEntries = Array.from(actualWxByDateKey.entries());
-    const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
-    let weatherStubRowCount = 0;
-    const sourcesSeen = new Set<string>();
-    for (const [, w] of wxEntries) {
-      const src = String(w?.source ?? "").trim();
-      if (src) sourcesSeen.add(src);
-      if (src === WEATHER_STUB_SOURCE) weatherStubRowCount += 1;
-    }
-    const weatherRowsCount = wxEntries.length;
-    const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
-    const weatherKindUsed =
-      sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
-    let weatherSourceSummary: WeatherProvenance["weatherSourceSummary"] = "none";
-    if (weatherRowsCount > 0) {
-      if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
-      else if (weatherActualRowCount === weatherRowsCount) weatherSourceSummary = "actual_only";
-      else weatherSourceSummary = "mixed_actual_and_stub";
-    }
+    const [actualWx2, normalWx2] = await Promise.all([
+      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+    ]);
     const weatherFallbackReason: WeatherFallbackReason =
-      (backfillResult.stubbed ?? 0) > 0 ? "partial_coverage" : null;
+      backfillResult.skippedLatLng === true
+        ? "missing_lat_lng"
+        : backfillResult.fetched === 0 && (backfillResult.stubbed ?? 0) > 0
+          ? "api_failure_or_no_data"
+          : (backfillResult.stubbed ?? 0) > 0
+            ? "partial_coverage"
+            : null;
     return {
-      actualWxByDateKey,
-      normalWxByDateKey,
-      provenance: {
-        weatherKindUsed,
-        weatherSourceSummary,
+      actualWxByDateKey: actualWx2,
+      normalWxByDateKey: normalWx2,
+      provenance: summarizePastWindowWeatherProvenance({
+        actualWxByDateKey: actualWx2,
         weatherFallbackReason,
-        weatherProviderName: weatherActualRowCount > 0 ? "OPEN_METEO" : "STUB",
-        weatherCoverageStart: dateKeysSorted[0] ?? null,
-        weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
-        weatherStubRowCount,
-        weatherActualRowCount,
-      },
+      }),
     };
   }
 
   await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-  const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+  const [actualWx3, normalWx3] = await Promise.all([
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
   ]);
-  const wxEntries = Array.from(actualWxByDateKey.entries());
-  const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
-  const weatherStubRowCount = wxEntries.length;
   return {
-    actualWxByDateKey,
-    normalWxByDateKey,
-    provenance: {
-      weatherKindUsed: WEATHER_STUB_SOURCE,
-      weatherSourceSummary: "stub_only",
+    actualWxByDateKey: actualWx3,
+    normalWxByDateKey: normalWx3,
+    provenance: summarizePastWindowWeatherProvenance({
+      actualWxByDateKey: actualWx3,
       weatherFallbackReason: "missing_lat_lng",
-      weatherProviderName: "STUB",
-      weatherCoverageStart: dateKeysSorted[0] ?? null,
-      weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
-      weatherStubRowCount,
-      weatherActualRowCount: 0,
-    },
+    }),
   };
 }
 
