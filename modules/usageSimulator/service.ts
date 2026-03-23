@@ -1924,10 +1924,13 @@ export async function buildGapfillCompareSimShared(args: {
           endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
           canonicalDateKeys: selectedWeatherRange,
         });
+        const selectedDaysWeatherBasisUsed =
+          String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed;
+        weatherBasisUsed = selectedDaysWeatherBasisUsed;
         const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
           scoredDateKeysLocal: boundedTestDateKeysLocal,
           weatherByDateKey: selectedDaysWeather.actualWxByDateKey,
-          weatherBasisUsed: String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed,
+          weatherBasisUsed: selectedDaysWeatherBasisUsed,
           weatherKindUsed: selectedDaysWeather.provenance.weatherKindUsed ?? null,
           weatherProviderName: selectedDaysWeather.provenance.weatherProviderName ?? null,
           weatherFallbackReason: selectedDaysWeather.provenance.weatherFallbackReason ?? null,

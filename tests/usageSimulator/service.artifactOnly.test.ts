@@ -1063,6 +1063,65 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases[phases.length - 1]).toBe("build_shared_compare_finalize_start");
   });
 
+  it("reports weather phase metadata with the final loaded weather basis in selected-days mode", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      simulatedDayResults: [],
+      pastDayCounts: {},
+      weatherSourceSummary: "stub_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+    loadWeatherForPastWindow.mockResolvedValue({
+      actualWxByDateKey: new Map([
+        ["2026-01-01", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
+      ]),
+      normalWxByDateKey: new Map(),
+      provenance: {
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+        weatherSourceSummary: "mixed_actual_and_stub",
+        weatherFallbackReason: "partial_coverage",
+        weatherProviderName: "OPEN_METEO",
+      },
+    });
+    const phaseUpdates: Array<{ phase: string; meta: Record<string, unknown> | null }> = [];
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      onPhaseUpdate: (phase, meta) => {
+        phaseUpdates.push({ phase: String(phase), meta: (meta as Record<string, unknown> | undefined) ?? null });
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      const weatherPhase = phaseUpdates.find((entry) => entry.phase === "build_shared_compare_weather_ready");
+      expect(weatherPhase?.meta?.weatherBasisUsed).toBe("mixed_actual_and_stub");
+      expect(out.weatherBasisUsed).toBe("mixed_actual_and_stub");
+      expect(out.scoredDayWeatherRows?.[0]?.weatherBasisUsed).toBe("mixed_actual_and_stub");
+    }
+  });
+
   it("skips identity fingerprint/hash work for explicit selected-days lightweight artifact read", async () => {
     const computePastInputHashCallsBefore = computePastInputHash.mock.calls.length;
     getCachedPastDataset.mockResolvedValue({
