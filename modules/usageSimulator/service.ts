@@ -745,7 +745,10 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_inputs_ready"
   | "build_shared_compare_weather_ready"
   | "build_shared_compare_sim_ready"
+  | "build_shared_compare_scored_rows_ready"
+  | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
+  | "build_shared_compare_response_ready"
   | "build_shared_compare_finalize_start";
 
 function round2Local(n: number) {
@@ -1787,6 +1790,8 @@ export async function buildGapfillCompareSimShared(args: {
     exactProofRequired: exactArtifactReadRequired,
     exactProofSatisfied: travelVacantParityDateKeysLocal.length === 0,
   };
+  let selectedTestDailyTotalsByDate: Map<string, number> | null = null;
+  let selectedTravelParityDailyTotalsByDate: Map<string, number> | null = null;
   let freshParityIntervals: IntervalPoint[] = [];
 
   const needsFreshCompareForParity =
@@ -1841,6 +1846,7 @@ export async function buildGapfillCompareSimShared(args: {
             ok: true as const,
             dataset: null,
             simulatedIntervals: [] as Array<{ timestamp: string; kwh: number }>,
+            dailyTotalsByDate: new Map<string, number>(),
             weatherSourceSummary: weatherBasisUsed,
           };
         }
@@ -1865,13 +1871,33 @@ export async function buildGapfillCompareSimShared(args: {
               "Selected-day fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
           };
         }
+        const simulatedIntervalsNormalized = selectedDaysResult.simulatedIntervals.map((p) => ({
+          timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+          kwh: Number(p?.kwh) || 0,
+        }));
+        const dailyTotalsByDate = new Map<string, number>();
+        for (const row of selectedDaysResult.simulatedDayResults ?? []) {
+          const dk = String((row as any)?.localDate ?? "").slice(0, 10);
+          if (!selectedDateKeysLocal.has(dk)) continue;
+          const dayKwh = Number((row as any)?.intervalSumKwh ?? (row as any)?.finalDayKwh);
+          if (!Number.isFinite(dayKwh)) continue;
+          dailyTotalsByDate.set(dk, round2Local(dayKwh));
+        }
+        if (dailyTotalsByDate.size < selectedDateKeysLocal.size) {
+          for (const p of simulatedIntervalsNormalized) {
+            const dk = dateKeyInTimezone(p.timestamp, timezone);
+            if (!selectedDateKeysLocal.has(dk)) continue;
+            dailyTotalsByDate.set(dk, (dailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
+          }
+          for (const [dk, kwh] of Array.from(dailyTotalsByDate.entries())) {
+            dailyTotalsByDate.set(dk, round2Local(kwh));
+          }
+        }
         return {
           ok: true as const,
           dataset: null,
-          simulatedIntervals: selectedDaysResult.simulatedIntervals.map((p) => ({
-            timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-            kwh: Number(p?.kwh) || 0,
-          })),
+          simulatedIntervals: simulatedIntervalsNormalized,
+          dailyTotalsByDate,
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
         };
       };
@@ -1890,6 +1916,7 @@ export async function buildGapfillCompareSimShared(args: {
         };
       }
       simulatedTestIntervals = selectedTestDaysResult.simulatedIntervals;
+      selectedTestDailyTotalsByDate = selectedTestDaysResult.dailyTotalsByDate;
       const selectedTravelParityResult = await runSelectedDaysFreshExecution(new Set<string>(travelVacantParityDateKeysLocal));
       if (!selectedTravelParityResult.ok) {
         return {
@@ -1905,6 +1932,7 @@ export async function buildGapfillCompareSimShared(args: {
         };
       }
       freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
+      selectedTravelParityDailyTotalsByDate = selectedTravelParityResult.dailyTotalsByDate;
       scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
       comparePulledFromSharedArtifactOnly = false;
       compareSimSource = "shared_selected_days_calc";
@@ -2009,11 +2037,16 @@ export async function buildGapfillCompareSimShared(args: {
       freshParityIntervalsCount: freshParityIntervals.length,
     });
   }
-  const availableTestDateKeysFromSimulated = new Set<string>(
-    simulatedTestIntervals
-      .map((p) => dateKeyInTimezone(p.timestamp, timezone))
-      .filter((dk) => boundedTestDateKeysLocal.has(dk))
-  );
+  const availableTestDateKeysFromSimulated =
+    compareFreshModeUsed === "selected_days" && selectedTestDailyTotalsByDate
+      ? new Set<string>(
+          Array.from(selectedTestDailyTotalsByDate.keys()).filter((dk) => boundedTestDateKeysLocal.has(dk))
+        )
+      : new Set<string>(
+          simulatedTestIntervals
+            .map((p) => dateKeyInTimezone(p.timestamp, timezone))
+            .filter((dk) => boundedTestDateKeysLocal.has(dk))
+        );
   const scoredTestDaysMissingSimulatedOwnershipCount = Array.from(boundedTestDateKeysLocal).filter(
     (dk) => !availableTestDateKeysFromSimulated.has(dk)
   ).length;
@@ -2152,13 +2185,30 @@ export async function buildGapfillCompareSimShared(args: {
     boundedTestDateKeysLocal.has(row.date)
   ).length;
   modelAssumptions.travelVacantParityDateCount = travelVacantParityDateKeysLocal.length;
+  await reportPhase("build_shared_compare_scored_rows_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    displayDateCount: displayDateKeysLocal.size,
+    simulatedChartDailyCount: simulatedChartDaily.length,
+    artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
+  });
 
-  const freshDailyTotalsByDate = new Map<string, number>();
-  for (const p of simulatedTestIntervals) {
-    const dk = dateKeyInTimezone(p.timestamp, timezone);
-    if (!boundedTestDateKeysLocal.has(dk)) continue;
-    freshDailyTotalsByDate.set(dk, (freshDailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
-  }
+  const freshDailyTotalsByDate =
+    compareFreshModeUsed === "selected_days" && selectedTestDailyTotalsByDate
+      ? new Map<string, number>(
+          Array.from(selectedTestDailyTotalsByDate.entries())
+            .filter(([dk]) => boundedTestDateKeysLocal.has(dk))
+            .map(([dk, kwh]) => [dk, round2Local(Number(kwh) || 0)] as const)
+        )
+      : (() => {
+          const totals = new Map<string, number>();
+          for (const p of simulatedTestIntervals) {
+            const dk = dateKeyInTimezone(p.timestamp, timezone);
+            if (!boundedTestDateKeysLocal.has(dk)) continue;
+            totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
+          }
+          return totals;
+        })();
   const canonicalArtifactDailyByDate = new Map<string, number>(
     Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
       .map(([date, simKwh]) => [String(date).slice(0, 10), round2Local(Number(simKwh) || 0)] as const)
@@ -2234,11 +2284,21 @@ export async function buildGapfillCompareSimShared(args: {
         : ("not_applicable_scored_actual_day" as const),
     comparisonBasis: parityComparisonBasis,
   };
-  const freshParityDailyByDate = new Map<string, number>();
-  for (const p of freshParityIntervals) {
-    const dk = dateKeyInTimezone(p.timestamp, timezone);
-    freshParityDailyByDate.set(dk, (freshParityDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
-  }
+  const freshParityDailyByDate =
+    compareFreshModeUsed === "selected_days" && selectedTravelParityDailyTotalsByDate
+      ? new Map<string, number>(
+          Array.from(selectedTravelParityDailyTotalsByDate.entries())
+            .filter(([dk]) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+            .map(([dk, kwh]) => [dk, round2Local(Number(kwh) || 0)] as const)
+        )
+      : (() => {
+          const totals = new Map<string, number>();
+          for (const p of freshParityIntervals) {
+            const dk = dateKeyInTimezone(p.timestamp, timezone);
+            totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
+          }
+          return totals;
+        })();
   travelVacantParityRows = travelVacantParityDateKeysLocal.map((dk) => {
     const artifactCanonicalSimDayKwh = canonicalArtifactDailyByDate.has(dk)
       ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
@@ -2361,6 +2421,15 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.travelVacantParityMismatchCount = travelVacantParityMismatchCount;
   modelAssumptions.travelVacantParityMissingArtifactReferenceCount = travelVacantParityMissingArtifactCount;
   modelAssumptions.travelVacantParityMissingFreshCompareCount = travelVacantParityMissingFreshCount;
+  await reportPhase("build_shared_compare_parity_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    travelVacantRequestedDateCount: travelVacantParityDateKeysLocal.length,
+    travelVacantValidatedDateCount: travelVacantParityValidatedCount,
+    travelVacantMismatchCount: travelVacantParityMismatchCount,
+    travelVacantMissingArtifactReferenceCount: travelVacantParityMissingArtifactCount,
+    travelVacantMissingFreshCompareCount: travelVacantParityMissingFreshCount,
+  });
   await reportPhase("build_shared_compare_metrics_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -2416,6 +2485,14 @@ export async function buildGapfillCompareSimShared(args: {
         })()
       : modelAssumptions;
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
+  await reportPhase("build_shared_compare_response_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    scoredDateCount: boundedTestDateKeysLocal.size,
+    scoredDayWeatherCount: scoredDayWeatherRows.length,
+    travelVacantParityRowCount: travelVacantParityRows.length,
+    modelAssumptionsKeyCount: Object.keys(responseModelAssumptions ?? {}).length,
+  });
   await reportPhase("build_shared_compare_finalize_start", {
     compareFreshModeUsed,
     compareCalculationScope,

@@ -2644,7 +2644,18 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         compareSimSource: "shared_selected_days_calc",
         simulatedTestIntervalsCount: 2,
       });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_rows_ready", {
+        simulatedChartDailyCount: 1,
+        artifactReferenceRowCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_parity_ready", {
+        travelVacantValidatedDateCount: 0,
+      });
       await args?.onPhaseUpdate?.("build_shared_compare_metrics_ready", { travelVacantValidatedDateCount: 0 });
+      await args?.onPhaseUpdate?.("build_shared_compare_response_ready", {
+        scoredDateCount: 1,
+        modelAssumptionsKeyCount: 3,
+      });
       await args?.onPhaseUpdate?.("build_shared_compare_finalize_start", { scoredDateCount: 1 });
       return withSharedWeatherDefaults({
         ok: true,
@@ -2752,7 +2763,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(runningPhases).toContain("build_shared_compare_inputs_ready");
     expect(runningPhases).toContain("build_shared_compare_weather_ready");
     expect(runningPhases).toContain("build_shared_compare_sim_ready");
+    expect(runningPhases).toContain("build_shared_compare_scored_rows_ready");
+    expect(runningPhases).toContain("build_shared_compare_parity_ready");
     expect(runningPhases).toContain("build_shared_compare_metrics_ready");
+    expect(runningPhases).toContain("build_shared_compare_response_ready");
     expect(runningPhases).toContain("build_shared_compare_finalize_start");
     expect(runningPhases).toContain("build_shared_compare_done");
     const simReadyCall = markGapfillCompareRunRunning.mock.calls.find(
