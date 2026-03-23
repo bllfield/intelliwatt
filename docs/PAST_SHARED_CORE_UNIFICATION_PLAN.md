@@ -56,8 +56,9 @@ Modeling guidance alignment:
 
 ## Current next runtime step (target-state, not implemented yet)
 
-- Next implementation step is compare snapshot persistence + `compareRunId` handoff from `compare_core`.
-- `compareRunId` and staged snapshot readers (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) are target-state architecture and are not yet present in runtime code.
+- Current runtime state now includes compare-run persistence from `compare_core`: compare-core creates a durable compare-run record keyed by `compareRunId` and finalizes a compact compare snapshot on successful completion.
+- `compareRunId` handoff is implemented in current runtime (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
+- Next implementation step is staged snapshot-read-only heavy readers (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`), which are not yet present in runtime code.
 - GapFill remains scoring/reporting-only and must continue using the shared simulation/artifact/weather path; snapshot work changes orchestration/persistence only, not modeling ownership.
 
 ## LEGACY / NON-AUTHORITATIVE

@@ -273,3 +273,27 @@ Do not apply in this step; apply in a follow-up doc update pass:
    - compareRunId contract
    - heavy endpoints/read-only behavior
    - no-recompute guarantee language.
+
+## Post-audit implementation update (Step A)
+
+Runtime implementation update completed after this audit:
+
+- Durable compare-run persistence now exists in usage-domain storage (`GapfillCompareRunSnapshot`).
+- `compare_core` now creates compare-run state at execution start and tracks compare-run lifecycle status (`started`, `running`, `succeeded`, `failed`).
+- `compareRunId` now exists and is handed off by `compare_core`.
+- `compare_core` response now includes:
+  - `compareRunId`
+  - `compareRunStatus`
+  - `compareRunSnapshotReady`
+- Successful `compare_core` now persists a compact compare snapshot onto that compare-run record.
+- If final compare snapshot persistence fails after core computation, route returns explicit failure instead of reporting success.
+- Shared sim-core ownership remains unchanged.
+- Shared weather truth ownership remains unchanged (`loadWeatherForPastWindow` persisted-weather-first behavior and provenance ownership unchanged).
+- Exact artifact identity enforcement remains unchanged.
+
+Still not implemented (remains target-state):
+
+- `compare_heavy_manifest`
+- `compare_heavy_parity`
+- `compare_heavy_scored_days`
+- true snapshot-read-only heavy reader architecture

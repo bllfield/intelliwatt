@@ -8,8 +8,20 @@
   - `compare_core` and `compare_heavy` hit the same route (`/api/admin/tools/gapfill-lab`).
   - `responseMode: "heavy_only_compact"` changes response shaping only.
   - heavy can still rerun expensive full-window shared compare work.
-- No durable compare snapshot exists yet in runtime code.
-- No `compareRunId` exists yet in runtime code.
+
+## Implemented current state (Step A)
+
+- A durable DB-backed compare-run model exists: `GapfillCompareRunSnapshot`.
+- `compare_core` now creates a compare-run record at execution start and marks compare-run lifecycle status (`started`, `running`, `succeeded`, `failed`).
+- `compareRunId` now exists and is handed off by `compare_core`.
+- `compare_core` response now includes:
+  - `compareRunId`
+  - `compareRunStatus`
+  - `compareRunSnapshotReady`
+- Successful `compare_core` now finalizes a compact compare snapshot on that compare-run record.
+- If final compare snapshot persistence fails after core compute, route returns explicit failure instead of claiming success.
+- Shared sim-core ownership, shared weather truth ownership, and exact artifact identity enforcement remain unchanged.
+- Heavy follow-up architecture is still current-state route behavior (not snapshot-read-only readers yet).
 
 ## Problem statement
 
@@ -90,8 +102,10 @@ Persist enough snapshot data so heavy readers never rediscover identity or rebui
 ## Execution order
 
 ### Step A: compare snapshot persistence + `compareRunId` handoff in `compare_core`
-- Add snapshot write at end of successful core compare build.
-- Return `compareRunId` in core responses.
+- Implemented:
+  - compare-run persistence created at `compare_core` start.
+  - final compact compare snapshot persisted on successful `compare_core`.
+  - `compareRunId`, `compareRunStatus`, and `compareRunSnapshotReady` surfaced in `compare_core` responses.
 
 ### Step B: staged heavy snapshot readers
 - Add `compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`.
@@ -109,8 +123,6 @@ Persist enough snapshot data so heavy readers never rediscover identity or rebui
 
 The following are target-state and are not present in runtime code today:
 
-- `compareRunId`
-- durable compare snapshot persistence
 - `compare_heavy_manifest`
 - `compare_heavy_parity`
 - `compare_heavy_scored_days`

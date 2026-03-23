@@ -136,15 +136,20 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 ### Plan Change (2026-03) — Gap-Fill Compare Snapshot + Staged Heavy Diagnostics
 
 - Broad focus remains shared simulation-core accuracy.
-- Current runtime subtask is **Gap-Fill Compare Snapshot + Staged Heavy Diagnostics**.
-- Current runtime reality: `heavy_only_compact` is response shaping on the same route and can still recompute compare work.
+- Step A is complete in runtime code:
+  - [x] Durable compare-run persistence exists (`GapfillCompareRunSnapshot`).
+  - [x] Early `compareRunId` creation/handoff exists in `compare_core`.
+  - [x] Final compare snapshot persistence exists on successful `compare_core`.
+  - [x] `compare_core` response now includes `compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`.
+- Current runtime reality: `heavy_only_compact` is still response shaping on the same route and can still recompute compare work.
+- Next runtime subtask is staged heavy snapshot-read-only readers.
 
-Checklist for this subtask:
-- [ ] Persist a compact compare snapshot from `compare_core`.
-- [ ] Add `compareRunId` handoff in `compare_core` responses.
-- [ ] Add staged heavy endpoints (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) as snapshot-read-only readers.
-- [ ] Add admin dedupe/retry-safe orchestration that uses snapshot readers for heavy follow-ups.
-- [ ] Prove heavy readers do not rerun `compare_core` once snapshot architecture lands.
+Checklist for the next subtask:
+- [ ] Add `compare_heavy_manifest` as snapshot-read-only over `compareRunId`.
+- [ ] Add `compare_heavy_parity` as snapshot-read-only over `compareRunId`.
+- [ ] Add `compare_heavy_scored_days` as snapshot-read-only over `compareRunId`.
+- [ ] Route heavy retry/read path over persisted compare snapshot keyed by `compareRunId`.
+- [ ] Add admin dedupe cleanup after reader split if still needed.
 
 ### Simulation Modeling Modes (authoritative summary)
 

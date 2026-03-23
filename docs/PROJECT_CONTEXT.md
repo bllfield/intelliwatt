@@ -130,9 +130,12 @@
 
 - Shared-artifact alignment is already true for Past Sim and Gap-Fill compare in current runtime code.
 - Shared weather reuse/provenance is already true in current runtime code (`loadWeatherForPastWindow` persisted-weather-first behavior).
+- Shared sim-core remains authoritative; Gap-Fill remains orchestration/reporting over shared modules.
 - Broad focus remains shared simulation-core accuracy.
-- Current runtime bottleneck is compare-heavy duplicate-work/timeout risk because heavy remains route-monolithic.
-- `compareRunId` and snapshot-read-only heavy readers are next-step target-state architecture, not current runtime behavior.
+- `compareRunId` plus durable compare-run persistence now exist in runtime (`GapfillCompareRunSnapshot`).
+- `compare_core` now returns compare-run state fields (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
+- Current remaining bottleneck is heavy follow-up architecture because heavy remains route-monolithic and not snapshot-read-only.
+- Next runtime step is staged heavy snapshot-read-only readers (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`).
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
