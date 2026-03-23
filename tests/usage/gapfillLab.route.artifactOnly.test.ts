@@ -2824,6 +2824,36 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).not.toContain('responseMode: "heavy_only_compact" as const');
   });
 
+  it("keeps in-flight guards that prevent overlapping compare/rebuild/retry starts", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain("const compareInFlightRef = useRef(false);");
+    expect(clientSource).toContain("const rebuildInFlightRef = useRef(false);");
+    expect(clientSource).toContain("if (compareInFlightRef.current || rebuildInFlightRef.current) {");
+    expect(clientSource).toContain("A Gap-Fill request is already running. Wait for it to finish.");
+    expect(clientSource).toContain("compareInFlightRef.current = true;");
+    expect(clientSource).toContain("compareInFlightRef.current = false;");
+  });
+
+  it("uses stage-scoped snapshot retry and preserves per-stage reader debug history", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain("type SnapshotReaderDebugEntry = {");
+    expect(clientSource).toContain("function appendSnapshotReaderHistory(");
+    expect(clientSource).toContain("snapshotReaderHistory");
+    expect(clientSource).toContain("retryFromAction");
+    expect(clientSource).toContain("if (retryFromAction === \"compare_heavy_manifest\")");
+    expect(clientSource).toContain("else if (retryFromAction === \"compare_heavy_parity\")");
+    expect(clientSource).toContain("Snapshot Reader History (Initial + Retry, read-only)");
+    expect(clientSource).toContain("snapshot_manifest_reader");
+    expect(clientSource).toContain("snapshot_parity_reader");
+    expect(clientSource).toContain("snapshot_scored_days_reader");
+  });
+
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {
     getActualIntervalsForRange.mockReset();
     getCandidateDateCoverageForSelection.mockResolvedValue({

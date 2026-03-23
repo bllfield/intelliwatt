@@ -300,6 +300,21 @@ type OrchestratorPhase = {
   errorCode: string | null;
   errorMessage: string | null;
 };
+type SnapshotReaderAction =
+  | "compare_heavy_manifest"
+  | "compare_heavy_parity"
+  | "compare_heavy_scored_days";
+type SnapshotReaderDebugEntry = {
+  seq: number;
+  at: string;
+  mode: "initial" | "retry";
+  action: SnapshotReaderAction;
+  status: "done" | "error";
+  requestSummary: Record<string, unknown>;
+  responseSummary: Record<string, unknown> | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
 
 export type NormalizedUiError = {
   name: string;
@@ -315,6 +330,65 @@ const ORCHESTRATOR_PHASE_BLUEPRINT: Array<{ key: OrchestratorPhaseKey; label: st
   { key: "compare_heavy_parity", label: "Compare Heavy Parity (Snapshot)" },
   { key: "compare_heavy_scored_days", label: "Compare Heavy Scored Days (Snapshot)" },
 ];
+
+function summarizeSnapshotReaderRequest(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    action: typeof body.action === "string" ? body.action : null,
+    compareRunId:
+      typeof body.compareRunId === "string" && String(body.compareRunId).trim()
+        ? String(body.compareRunId).trim()
+        : null,
+    houseId:
+      typeof body.houseId === "string" && String(body.houseId).trim()
+        ? String(body.houseId).trim()
+        : null,
+    email:
+      typeof body.email === "string" && String(body.email).trim()
+        ? String(body.email).trim()
+        : null,
+    retryFromAction:
+      typeof body.retryFromAction === "string" && String(body.retryFromAction).trim()
+        ? String(body.retryFromAction).trim()
+        : null,
+  };
+}
+
+function summarizeSnapshotReaderResponse(data: ApiResponse | null | undefined): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  return {
+    ok: data.ok === true,
+    action: typeof (data as any).action === "string" ? (data as any).action : null,
+    compareRunId:
+      typeof (data as any).compareRunId === "string" && String((data as any).compareRunId).trim()
+        ? String((data as any).compareRunId).trim()
+        : null,
+    compareRunStatus: (data as any).compareRunStatus ?? null,
+    compareRunSnapshotReady:
+      typeof (data as any).compareRunSnapshotReady === "boolean"
+        ? (data as any).compareRunSnapshotReady
+        : null,
+    snapshotSource: typeof (data as any).snapshotSource === "string" ? (data as any).snapshotSource : null,
+    noRecompute: (data as any).noRecompute === true,
+    error: data.ok ? null : (data as any).error ?? null,
+    reasonCode: data.ok ? null : (data as any).reasonCode ?? null,
+  };
+}
+
+function appendSnapshotReaderHistory(
+  prev: Record<string, unknown> | null | undefined,
+  entry: Omit<SnapshotReaderDebugEntry, "seq">
+): Record<string, unknown> {
+  const base = (prev ?? {}) as Record<string, unknown>;
+  const existing = Array.isArray((base as any).snapshotReaderHistory)
+    ? ((base as any).snapshotReaderHistory as SnapshotReaderDebugEntry[])
+    : [];
+  const nextSeq = existing.length > 0 ? Math.max(...existing.map((e) => Number(e.seq) || 0)) + 1 : 1;
+  const next = [...existing, { ...entry, seq: nextSeq }];
+  return {
+    ...base,
+    snapshotReaderHistory: next.slice(-18),
+  };
+}
 
 function normalizeDailyRowsToWindow<T extends { date: string }>(
   rows: T[],
@@ -610,7 +684,9 @@ export default function GapFillLabClient() {
       errorMessage: null,
     }))
   );
-  const [heavyRetryBody, setHeavyRetryBody] = useState<Record<string, unknown> | null>(null);
+  const [heavyRetryBody, setHeavyRetryBody] = useState<
+    (Record<string, unknown> & { retryFromAction?: SnapshotReaderAction }) | null
+  >(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
   const [compareRunStatus, setCompareRunStatus] = useState<"started" | "running" | "succeeded" | "failed" | null>(null);
@@ -837,6 +913,26 @@ export default function GapFillLabClient() {
   const largeErrorRowsCount = scoredDayTruthRowsForDisplay.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) >= 5).length;
   const missAttribution = result && result.ok ? ((result as any).missAttributionSummary ?? null) : null;
   const tuningBreakdowns = result && result.ok ? ((result as any).accuracyTuningBreakdowns ?? null) : null;
+  const snapshotReaderHistory = useMemo<SnapshotReaderDebugEntry[]>(
+    () =>
+      Array.isArray((lastAttemptDebug as any)?.snapshotReaderHistory)
+        ? ((lastAttemptDebug as any).snapshotReaderHistory as SnapshotReaderDebugEntry[])
+        : [],
+    [lastAttemptDebug]
+  );
+  const latestSnapshotReaderByAction = useMemo(() => {
+    const byAction: Partial<Record<SnapshotReaderAction, SnapshotReaderDebugEntry>> = {};
+    for (const entry of snapshotReaderHistory) {
+      if (
+        entry.action === "compare_heavy_manifest" ||
+        entry.action === "compare_heavy_parity" ||
+        entry.action === "compare_heavy_scored_days"
+      ) {
+        byAction[entry.action] = entry;
+      }
+    }
+    return byAction;
+  }, [snapshotReaderHistory]);
   const phaseStateByKey = new Map(orchestratorPhases.map((p) => [p.key, p.status] as const));
   const phaseHasError = (...keys: OrchestratorPhaseKey[]) =>
     keys.some((key) => phaseStateByKey.get(key) === "error");
@@ -1718,7 +1814,16 @@ export default function GapFillLabClient() {
             errorMessage: failure.message,
           });
           setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
+            ...appendSnapshotReaderHistory(prev, {
+              at: new Date().toISOString(),
+              mode: "initial",
+              action: actionName,
+              status: "error",
+              requestSummary: summarizeSnapshotReaderRequest(body),
+              responseSummary: null,
+              errorCode: failure.errorCode,
+              errorMessage: failure.message,
+            }),
             phase: `${actionName}_exception`,
             compareRunId: coreCompareRunId,
             snapshotReaderAction: actionName,
@@ -1727,7 +1832,11 @@ export default function GapFillLabClient() {
             snapshotReaderMessage: failure.message,
             snapshotReaderFailureKind: failure.failureKind,
           }));
-          throw new Error(`SNAPSHOT_READER_STAGE_FAILED:${actionName}:${failure.message}`);
+          throw {
+            code: "SNAPSHOT_READER_STAGE_FAILED",
+            actionName,
+            message: failure.message,
+          };
         }
         if (!res.ok || !data.ok) {
           const errMsg = formatApiError(data as any, res.status);
@@ -1736,7 +1845,16 @@ export default function GapFillLabClient() {
             errorMessage: errMsg,
           });
           setLastAttemptDebug((prev) => ({
-            ...(prev ?? {}),
+            ...appendSnapshotReaderHistory(prev, {
+              at: new Date().toISOString(),
+              mode: "initial",
+              action: actionName,
+              status: "error",
+              requestSummary: summarizeSnapshotReaderRequest(body),
+              responseSummary: summarizeSnapshotReaderResponse(data),
+              errorCode: String((data as any)?.error ?? `${actionName}_failed`),
+              errorMessage: errMsg,
+            }),
             phase: `${actionName}_error`,
             compareRunId: coreCompareRunId,
             snapshotReaderAction: actionName,
@@ -1746,12 +1864,25 @@ export default function GapFillLabClient() {
             snapshotReaderMessage: (data as any)?.message ?? null,
             snapshotReaderResponse: data,
           }));
-          throw new Error(`SNAPSHOT_READER_STAGE_FAILED:${actionName}:${errMsg}`);
+          throw {
+            code: "SNAPSHOT_READER_STAGE_FAILED",
+            actionName,
+            message: errMsg,
+          };
         }
         finishPhase(phaseKey, "done");
         mergeSuccessfulResult(data);
         setLastAttemptDebug((prev) => ({
-          ...(prev ?? {}),
+          ...appendSnapshotReaderHistory(prev, {
+            at: new Date().toISOString(),
+            mode: "initial",
+            action: actionName,
+            status: "done",
+            requestSummary: summarizeSnapshotReaderRequest(body),
+            responseSummary: summarizeSnapshotReaderResponse(data),
+            errorCode: null,
+            errorMessage: null,
+          }),
           phase: `${actionName}_done`,
           compareRunId: coreCompareRunId,
           snapshotReaderAction: actionName,
@@ -1778,10 +1909,22 @@ export default function GapFillLabClient() {
           "Reading heavy scored-day snapshot..."
         );
       } catch (stageError: unknown) {
-        setHeavyRetryBody(readerBaseBody);
+        const failedAction =
+          stageError &&
+          typeof stageError === "object" &&
+          ((stageError as any).actionName === "compare_heavy_manifest" ||
+            (stageError as any).actionName === "compare_heavy_parity" ||
+            (stageError as any).actionName === "compare_heavy_scored_days")
+            ? ((stageError as any).actionName as SnapshotReaderAction)
+            : undefined;
+        setHeavyRetryBody({ ...readerBaseBody, retryFromAction: failedAction });
         setError(
           `Core compare completed, but snapshot heavy readers failed.\n${
-            stageError instanceof Error ? stageError.message : String(stageError)
+            stageError instanceof Error
+              ? stageError.message
+              : typeof stageError === "object" && stageError != null && typeof (stageError as any).message === "string"
+                ? (stageError as any).message
+                : String(stageError)
           }`
         );
         setProgressStatus("Core compare complete. Snapshot heavy readers failed; retry snapshot readers only.");
@@ -1838,7 +1981,7 @@ export default function GapFillLabClient() {
       return;
     }
     if (!heavyRetryBody) {
-      setError("No heavy-report retry payload is available. Run Compare first.");
+      setError("No snapshot-reader retry payload is available. Run Compare first.");
       return;
     }
     compareInFlightRef.current = true;
@@ -1877,6 +2020,12 @@ export default function GapFillLabClient() {
         compareSnapshotRetryBody: heavyRetryBody,
       }));
       const baseBody = { ...heavyRetryBody };
+      const retryFromAction =
+        baseBody.retryFromAction === "compare_heavy_manifest" ||
+        baseBody.retryFromAction === "compare_heavy_parity" ||
+        baseBody.retryFromAction === "compare_heavy_scored_days"
+          ? (baseBody.retryFromAction as SnapshotReaderAction)
+          : "compare_heavy_manifest";
       const runRetryStage = async (
         phaseKey: OrchestratorPhaseKey,
         actionName: "compare_heavy_manifest" | "compare_heavy_parity" | "compare_heavy_scored_days",
@@ -1908,18 +2057,43 @@ export default function GapFillLabClient() {
             errorCode: failure.errorCode,
             errorMessage: failure.message,
           });
+          setLastAttemptDebug((prev) =>
+            appendSnapshotReaderHistory(prev, {
+              at: new Date().toISOString(),
+              mode: "retry",
+              action: actionName,
+              status: "error",
+              requestSummary: summarizeSnapshotReaderRequest(requestBody),
+              responseSummary: null,
+              errorCode: failure.errorCode,
+              errorMessage: failure.message,
+            })
+          );
           throw new Error(`${actionName}:${failure.message}`);
         }
         if (!res.ok || !data.ok) {
           const endedAtMs = Date.now();
+          const errMsg = formatApiError(data as any, res.status);
           updateOrchestratorPhase(phaseKey, {
             status: "error",
             endedAt: new Date(endedAtMs).toISOString(),
             elapsedMs: endedAtMs - startedAtMs,
             errorCode: String((data as any)?.error ?? `${actionName}_retry_failed`),
-            errorMessage: formatApiError(data as any, res.status),
+            errorMessage: errMsg,
           });
-          throw new Error(`${actionName}:${formatApiError(data as any, res.status)}`);
+          setLastAttemptDebug((prev) =>
+            appendSnapshotReaderHistory(prev, {
+              at: new Date().toISOString(),
+              mode: "retry",
+              action: actionName,
+              status: "error",
+              requestSummary: summarizeSnapshotReaderRequest(requestBody),
+              responseSummary: summarizeSnapshotReaderResponse(data),
+              errorCode: String((data as any)?.error ?? `${actionName}_retry_failed`),
+              errorMessage: errMsg,
+            })
+          );
+          throw new Error(`${actionName}:${errMsg}`);
         }
         const endedAtMs = Date.now();
         updateOrchestratorPhase(phaseKey, {
@@ -1930,22 +2104,56 @@ export default function GapFillLabClient() {
           errorMessage: null,
         });
         mergeSuccessfulResult(data);
+        setLastAttemptDebug((prev) =>
+          appendSnapshotReaderHistory(prev, {
+            at: new Date().toISOString(),
+            mode: "retry",
+            action: actionName,
+            status: "done",
+            requestSummary: summarizeSnapshotReaderRequest(requestBody),
+            responseSummary: summarizeSnapshotReaderResponse(data),
+            errorCode: null,
+            errorMessage: null,
+          })
+        );
       };
-      await runRetryStage(
-        "compare_heavy_manifest",
-        "compare_heavy_manifest",
-        "Retrying snapshot manifest reader..."
-      );
-      await runRetryStage(
-        "compare_heavy_parity",
-        "compare_heavy_parity",
-        "Retrying snapshot parity reader..."
-      );
-      await runRetryStage(
-        "compare_heavy_scored_days",
-        "compare_heavy_scored_days",
-        "Retrying snapshot scored-day reader..."
-      );
+      if (retryFromAction === "compare_heavy_manifest") {
+        await runRetryStage(
+          "compare_heavy_manifest",
+          "compare_heavy_manifest",
+          "Retrying snapshot manifest reader..."
+        );
+      } else if (retryFromAction === "compare_heavy_parity") {
+        updateOrchestratorPhase("compare_heavy_manifest", {
+          status: "done",
+          endedAt: new Date().toISOString(),
+          errorCode: null,
+          errorMessage: "Skipped on retry; scoped to parity reader.",
+        });
+        await runRetryStage(
+          "compare_heavy_parity",
+          "compare_heavy_parity",
+          "Retrying snapshot parity reader..."
+        );
+      } else {
+        updateOrchestratorPhase("compare_heavy_manifest", {
+          status: "done",
+          endedAt: new Date().toISOString(),
+          errorCode: null,
+          errorMessage: "Skipped on retry; scoped to scored-days reader.",
+        });
+        updateOrchestratorPhase("compare_heavy_parity", {
+          status: "done",
+          endedAt: new Date().toISOString(),
+          errorCode: null,
+          errorMessage: "Skipped on retry; scoped to scored-days reader.",
+        });
+        await runRetryStage(
+          "compare_heavy_scored_days",
+          "compare_heavy_scored_days",
+          "Retrying snapshot scored-day reader..."
+        );
+      }
       setHeavyRetryBody(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
@@ -2507,31 +2715,22 @@ export default function GapFillLabClient() {
               { key: "artifact_ensure", request: (lastAttemptDebug as any).ensureBody, response: (lastAttemptDebug as any).ensureResponse, status: (lastAttemptDebug as any).ensureStatus },
               { key: "compare_core", request: (lastAttemptDebug as any).compareCoreBody, response: (lastAttemptDebug as any).coreResponse, status: (lastAttemptDebug as any).coreStatus },
               {
-                key: "compare_heavy_manifest",
-                request: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_manifest" ? (lastAttemptDebug as any).snapshotReaderBody : null,
-                response: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_manifest" ? (lastAttemptDebug as any).snapshotReaderResponse : null,
-                status: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_manifest" ? (lastAttemptDebug as any).snapshotReaderStatus : null,
+                key: "snapshot_manifest_reader",
+                request: latestSnapshotReaderByAction.compare_heavy_manifest?.requestSummary ?? null,
+                response: latestSnapshotReaderByAction.compare_heavy_manifest?.responseSummary ?? null,
+                status: latestSnapshotReaderByAction.compare_heavy_manifest?.status ?? null,
               },
               {
-                key: "compare_heavy_parity",
-                request: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_parity" ? (lastAttemptDebug as any).snapshotReaderBody : null,
-                response: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_parity" ? (lastAttemptDebug as any).snapshotReaderResponse : null,
-                status: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_parity" ? (lastAttemptDebug as any).snapshotReaderStatus : null,
+                key: "snapshot_parity_reader",
+                request: latestSnapshotReaderByAction.compare_heavy_parity?.requestSummary ?? null,
+                response: latestSnapshotReaderByAction.compare_heavy_parity?.responseSummary ?? null,
+                status: latestSnapshotReaderByAction.compare_heavy_parity?.status ?? null,
               },
               {
-                key: "compare_heavy_scored_days",
-                request:
-                  (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_scored_days"
-                    ? (lastAttemptDebug as any).snapshotReaderBody
-                    : null,
-                response:
-                  (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_scored_days"
-                    ? (lastAttemptDebug as any).snapshotReaderResponse
-                    : null,
-                status:
-                  (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_scored_days"
-                    ? (lastAttemptDebug as any).snapshotReaderStatus
-                    : null,
+                key: "snapshot_scored_days_reader",
+                request: latestSnapshotReaderByAction.compare_heavy_scored_days?.requestSummary ?? null,
+                response: latestSnapshotReaderByAction.compare_heavy_scored_days?.responseSummary ?? null,
+                status: latestSnapshotReaderByAction.compare_heavy_scored_days?.status ?? null,
               },
             ]
               .filter((row) => row.request != null || row.response != null || row.status != null)
@@ -2546,6 +2745,35 @@ export default function GapFillLabClient() {
                   </pre>
                 </details>
               ))}
+          </div>
+        </details>
+      )}
+
+      {snapshotReaderHistory.length > 0 && (
+        <details className="mb-6 border border-brand-blue/20 rounded" open>
+          <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">
+            Snapshot Reader History (Initial + Retry, read-only)
+          </summary>
+          <div className="p-4 border-t border-brand-blue/20 space-y-2">
+            {snapshotReaderHistory.map((entry) => (
+              <details key={`${entry.seq}-${entry.action}-${entry.mode}`} className="border border-brand-blue/20 rounded">
+                <summary className="px-3 py-2 cursor-pointer text-sm font-medium text-brand-navy bg-brand-navy/5">
+                  #{entry.seq} {entry.action} · {entry.mode} · {entry.status} · {entry.at}
+                </summary>
+                <pre className="text-xs bg-brand-navy/5 p-3 rounded-b overflow-x-auto max-h-72 overflow-y-auto">
+                  {JSON.stringify(
+                    {
+                      request: entry.requestSummary,
+                      response: entry.responseSummary,
+                      errorCode: entry.errorCode,
+                      errorMessage: entry.errorMessage,
+                    },
+                    null,
+                    2
+                  )}
+                </pre>
+              </details>
+            ))}
           </div>
         </details>
       )}
