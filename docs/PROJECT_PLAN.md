@@ -122,6 +122,8 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - GapFill core compare defaults to selected-day fresh shared scoring (`compareFreshMode=selected_days`) while display rows remain shared artifact output.
 - GapFill heavy diagnostics may explicitly request full-window shared fresh scoring (`compareFreshMode=full_window`) as an optional proof path.
 - Artifact fingerprint ownership and usage-shape identity behavior remain unchanged by this step; deferred identity/profile changes stay out of scope.
+- Shared weather truth is owned by `loadWeatherForPastWindow`; it must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily rows when the requested canonical window is already covered, instead of re-pulling weather.
+- Shared weather backfill/stub repair is only for missing or `STUB_V1` dates, and the resulting provenance must truthfully report whether coverage is `actual_only`, `mixed_actual_and_stub`, or `stub_only`.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, rebuild simulated intervals locally, or perform simulation math in routes/tools outside the shared modules.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

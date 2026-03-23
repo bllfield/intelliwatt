@@ -116,6 +116,8 @@
 - No local database connection needed
 - Migration scripts have been applied
 - Gap-Fill Lab `compare_core` in selected-days mode is expected to stay lightweight: shared simulator math remains authoritative, but the core response should avoid full-window diagnostic/weather payloads and other heavy report-only structures.
+- Shared weather truth for both Past Sim and Gap-Fill compare is owned by `loadWeatherForPastWindow`: it must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily weather rows when the requested canonical window is already covered, and only backfill/repair missing or `STUB_V1` dates.
+- Shared weather provenance must remain truthful when that loader runs: `weatherSourceSummary` should reflect whether the window is `actual_only`, `mixed_actual_and_stub`, or `stub_only`, rather than implying a fresh pull when saved actual weather already exists.
 - Gap-Fill Lab DB travel/vacant ranges are not guardrails only: compare-core must execute the bounded DB travel dates through the same shared simulator family used by Past Sim so canonical artifact simulated-day totals can be validated against fresh shared compare day totals.
 - Gap-Fill Lab selected-days scored actual days should not be reported as missing artifact simulated-day parity defects when the artifact only stores canonical simulated-day totals for true simulated ownership days (for example travel/vacant patches); surface an explicit not-applicable parity state instead.
 - Gap-Fill Lab heavy diagnostics retries should return a compact merge-only payload with heavy timing fields, rather than re-sending the entire core compare response.
@@ -204,6 +206,8 @@ Mandatory enforcement rules:
 - GapFill core/default scoring mode is selected-day fresh shared execution (`compareFreshMode=selected_days`) while chart/table display stays artifact-backed.
 - GapFill full-window fresh shared scoring (`compareFreshMode=full_window`) is retained as an explicit heavy proof path only.
 - Artifact fingerprint ownership and usage-shape profile identity rules are unchanged here; deferred identity/profile contract changes remain out of scope.
+- Shared weather truth is owned by `loadWeatherForPastWindow`, which must read saved non-stub daily actual weather first and only backfill missing or `STUB_V1` dates.
+- Weather provenance from that shared loader is part of the contract for both Past Sim and GapFill; docs and callers must not imply a fresh weather pull when persisted actual weather already covers the requested window.
 - Route-level or tool-level simulation math is not acceptable when the shared simulator output already exists.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

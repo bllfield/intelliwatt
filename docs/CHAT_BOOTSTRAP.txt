@@ -78,6 +78,9 @@ Shared simulation architecture authority:
 - GapFill core/default compare scoring now uses selected-day fresh shared execution (`compareFreshMode=selected_days`) while display data remains artifact-backed.
 - GapFill heavy diagnostics can opt into full-window shared fresh scoring (`compareFreshMode=full_window`); this proof path is non-default.
 - Artifact fingerprint ownership and usage-shape profile identity behavior stay unchanged in this step; deferred identity/profile changes remain out of scope.
+- Shared weather truth is owned by `loadWeatherForPastWindow`.
+- `loadWeatherForPastWindow` must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily weather rows when the canonical date window is already covered; do not trigger redundant weather backfill/API work in that case.
+- Backfill/stub repair is only for missing or `STUB_V1` dates, and provenance must stay truthful (`actual_only`, `mixed_actual_and_stub`, or `stub_only`) because both Past Sim and GapFill read this same shared weather path.
 - Route-level or tool-level simulation math is not allowed when shared simulator output already exists.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
