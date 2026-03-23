@@ -2234,6 +2234,99 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("does not double-count selected-day totals when simulatedDayResults and intervals both exist", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
+      },
+    });
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-no-double-count",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 24 * 5,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-03,2026-01-04",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-03": 24,
+            "2026-01-04": 24,
+          },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "ACTUAL" },
+          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 120 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+      const selected = Array.from((selectedDateKeysLocal ?? []) as string[]).sort();
+      return {
+        simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+        simulatedDayResults: selected.map((date) => ({
+          localDate: date,
+          intervalSumKwh: 24,
+          finalDayKwh: 24,
+        })),
+        pastDayCounts: {},
+        weatherSourceSummary: "actual_only",
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+      };
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(out.travelVacantParityTruth).toMatchObject({
+        availability: "validated",
+        requestedDateCount: 2,
+        validatedDateCount: 2,
+        mismatchCount: 0,
+        missingFreshCompareCount: 0,
+      });
+      expect(out.travelVacantParityRows).toEqual([
+        expect.objectContaining({
+          localDate: "2026-01-03",
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+        expect.objectContaining({
+          localDate: "2026-01-04",
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+      ]);
+    }
+  });
+
   it("reuses one full-window fresh execution for exact travel parity and scored days after exact hash handoff", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {

@@ -1876,17 +1876,20 @@ export async function buildGapfillCompareSimShared(args: {
           kwh: Number(p?.kwh) || 0,
         }));
         const dailyTotalsByDate = new Map<string, number>();
+        const dailyTotalsFromSimulatedDayResults = new Set<string>();
         for (const row of selectedDaysResult.simulatedDayResults ?? []) {
           const dk = String((row as any)?.localDate ?? "").slice(0, 10);
           if (!selectedDateKeysLocal.has(dk)) continue;
           const dayKwh = Number((row as any)?.intervalSumKwh ?? (row as any)?.finalDayKwh);
           if (!Number.isFinite(dayKwh)) continue;
           dailyTotalsByDate.set(dk, round2Local(dayKwh));
+          dailyTotalsFromSimulatedDayResults.add(dk);
         }
         if (dailyTotalsByDate.size < selectedDateKeysLocal.size) {
           for (const p of simulatedIntervalsNormalized) {
             const dk = dateKeyInTimezone(p.timestamp, timezone);
             if (!selectedDateKeysLocal.has(dk)) continue;
+            if (dailyTotalsFromSimulatedDayResults.has(dk)) continue;
             dailyTotalsByDate.set(dk, (dailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
           }
           for (const [dk, kwh] of Array.from(dailyTotalsByDate.entries())) {
