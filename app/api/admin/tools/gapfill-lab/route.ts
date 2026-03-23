@@ -23,6 +23,7 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDayS
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import {
   buildGapfillCompareSimShared,
+  type GapfillCompareBuildPhase,
   getSharedPastCoverageWindowForHouse,
   rebuildGapfillSharedPastArtifact,
 } from "@/modules/usageSimulator/service";
@@ -228,6 +229,33 @@ async function withTimeout<T>(task: Promise<T>, timeoutMs: number, timeoutErrorC
     return await Promise.race([task, timeoutPromise]);
   } finally {
     if (timeoutId != null) clearTimeout(timeoutId);
+  }
+}
+
+async function withRequestAbort<T>(
+  task: Promise<T>,
+  signal: AbortSignal | undefined,
+  abortErrorCode: string
+): Promise<T> {
+  if (!signal) return task;
+  if (signal.aborted) {
+    const err = new Error(abortErrorCode);
+    (err as any).code = abortErrorCode;
+    throw err;
+  }
+  let abortHandler: (() => void) | null = null;
+  const abortPromise = new Promise<never>((_, reject) => {
+    abortHandler = () => {
+      const err = new Error(abortErrorCode);
+      (err as any).code = abortErrorCode;
+      reject(err);
+    };
+    signal.addEventListener("abort", abortHandler, { once: true });
+  });
+  try {
+    return await Promise.race([task, abortPromise]);
+  } finally {
+    if (abortHandler) signal.removeEventListener("abort", abortHandler);
   }
 }
 
@@ -1349,6 +1377,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
+  let compareRunId: string | null = null;
+  let compareRunStatus: "started" | "running" | "succeeded" | "failed" | null = null;
+  let compareRunSnapshotReady = false;
+  let compareRunTerminalState = false;
+  let compareRequestTruthForLifecycle: Record<string, unknown> | null = null;
+  let artifactRequestTruthForLifecycle: Record<string, unknown> | null = null;
+  let compareCoreTimingForLifecycle: ReturnType<typeof startCompareCoreTiming> | null = null;
+
   try {
   const email = normalizeEmailSafe(body?.email ?? "");
   if (!email) {
@@ -2116,9 +2152,9 @@ export async function POST(req: NextRequest) {
     requireExactArtifactMatch,
     artifactIdentitySource,
   };
-  let compareRunId: string | null = null;
-  let compareRunStatus: "started" | "running" | "succeeded" | "failed" | null = null;
-  let compareRunSnapshotReady = false;
+  compareRequestTruthForLifecycle = compareRequestTruth;
+  artifactRequestTruthForLifecycle = artifactRequestTruth;
+  compareCoreTimingForLifecycle = compareCoreTiming;
   const compareRunStart = await createGapfillCompareRunStart({
     userId: user.id,
     houseId: house.id,
@@ -2159,6 +2195,26 @@ export async function POST(req: NextRequest) {
   }
   compareRunId = compareRunStart.compareRunId;
   compareRunStatus = "started";
+  const logCompareRunLifecycle = (
+    level: "info" | "warn" | "error",
+    event: string,
+    extra?: Record<string, unknown>
+  ) => {
+    const payload = {
+      route: "admin_gapfill_lab",
+      event,
+      compareRunId,
+      compareRunStatus,
+      compareRunSnapshotReady,
+      elapsedMs: Math.max(0, Date.now() - compareCoreTiming.startedAtMs),
+      compareCoreStepTimings: compareCoreTiming.stepsMs,
+      ...(extra ?? {}),
+    };
+    if (level === "warn") console.warn("[gapfill-lab][compare-run]", payload);
+    else if (level === "error") console.error("[gapfill-lab][compare-run]", payload);
+    else console.info("[gapfill-lab][compare-run]", payload);
+  };
+  logCompareRunLifecycle("info", "compare_run_started");
   await markGapfillCompareRunRunning({
     compareRunId,
     phase: "build_shared_compare_start",
@@ -2172,6 +2228,33 @@ export async function POST(req: NextRequest) {
     },
   });
   compareRunStatus = "running";
+  logCompareRunLifecycle("info", "compare_run_running", {
+    phase: "build_shared_compare_start",
+  });
+  const reportSharedComparePhase = async (
+    phase: GapfillCompareBuildPhase,
+    phaseMeta?: Record<string, unknown>
+  ) => {
+    if (!compareRunId || compareRunTerminalState) return;
+    await markGapfillCompareRunRunning({
+      compareRunId,
+      phase,
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        compareRunId,
+        phase,
+        compareCoreStepTimings: compareCoreTiming.stepsMs,
+        compareRequestTruth,
+        artifactRequestTruth,
+        phaseMeta: phaseMeta ?? null,
+      },
+    });
+    compareRunStatus = "running";
+    logCompareRunLifecycle("info", "shared_compare_phase", {
+      phase,
+      phaseMeta: phaseMeta ?? null,
+    });
+  };
   const markCompareRunFailure = async (args: {
     phase: string;
     failureCode: string;
@@ -2202,6 +2285,14 @@ export async function POST(req: NextRequest) {
     });
     compareRunStatus = "failed";
     compareRunSnapshotReady = false;
+    compareRunTerminalState = true;
+    logCompareRunLifecycle("warn", "compare_run_failed", {
+      phase: args.phase,
+      failureCode: args.failureCode,
+      failureMessage: args.failureMessage,
+      statusCode: args.statusCode,
+      compareCoreFailedStep: args.compareCoreFailedStep ?? args.phase,
+    });
     return {
       compareRunId,
       compareRunStatus,
@@ -2211,25 +2302,30 @@ export async function POST(req: NextRequest) {
   let sharedSim: Awaited<ReturnType<typeof buildGapfillCompareSimShared>>;
   try {
     sharedSim = await withTimeout(
-      buildGapfillCompareSimShared({
-        userId: user.id,
-        houseId: house.id,
-        timezone,
-        canonicalWindow,
-        testDateKeysLocal,
-        rebuildArtifact,
-        autoEnsureArtifact: autoEnsureArtifactForCompare,
-        compareFreshMode,
-        includeFreshCompareCalc: compareFreshMode === "full_window",
-        selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
-        artifactExactScenarioId: requestedArtifactScenarioId,
-        artifactExactInputHash: requestedArtifactInputHash,
-        requireExactArtifactMatch,
-        artifactIdentitySource:
-          artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
-            ? artifactIdentitySource
-            : null,
-      }),
+      withRequestAbort(
+        buildGapfillCompareSimShared({
+          userId: user.id,
+          houseId: house.id,
+          timezone,
+          canonicalWindow,
+          testDateKeysLocal,
+          rebuildArtifact,
+          autoEnsureArtifact: autoEnsureArtifactForCompare,
+          compareFreshMode,
+          includeFreshCompareCalc: compareFreshMode === "full_window",
+          selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
+          artifactExactScenarioId: requestedArtifactScenarioId,
+          artifactExactInputHash: requestedArtifactInputHash,
+          requireExactArtifactMatch,
+          artifactIdentitySource:
+            artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
+              ? artifactIdentitySource
+              : null,
+          onPhaseUpdate: reportSharedComparePhase,
+        }),
+        req.signal,
+        "compare_core_request_aborted_build_shared_compare"
+      ),
       ROUTE_COMPARE_SHARED_TIMEOUT_MS,
       "compare_core_route_timeout_build_shared_compare"
     );
@@ -2239,26 +2335,39 @@ export async function POST(req: NextRequest) {
       "Compare core failed while building shared compare output."
     );
     const timedOut = normalizedError.code === "compare_core_route_timeout_build_shared_compare";
+    const aborted = normalizedError.code === "compare_core_request_aborted_build_shared_compare";
     const compareRunEnvelope = await markCompareRunFailure({
       phase: "build_shared_compare",
-      failureCode: timedOut
+      failureCode: aborted
+        ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_SHARED_COMPARE"
+        : timedOut
         ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
         : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
-      failureMessage: timedOut
+      failureMessage: aborted
+        ? "Compare core request was aborted while building shared compare output."
+        : timedOut
         ? "Compare core timed out while building shared compare output."
         : normalizedError.message,
-      statusCode: timedOut ? 504 : 500,
+      statusCode: aborted ? 499 : timedOut ? 504 : 500,
       compareCoreFailedStep: "build_shared_compare",
     });
     return NextResponse.json(
       {
         ok: false,
-        error: timedOut ? "compare_core_route_timeout" : "compare_core_route_exception",
-        message: timedOut
+        error: aborted
+          ? "compare_core_request_aborted"
+          : timedOut
+            ? "compare_core_route_timeout"
+            : "compare_core_route_exception",
+        message: aborted
+          ? "Compare core request was aborted while building shared compare output."
+          : timedOut
           ? "Compare core timed out while building shared compare output."
           : normalizedError.message,
-        missingData: timedOut ? ["buildGapfillCompareSimShared"] : undefined,
-        reasonCode: timedOut
+        missingData: timedOut || aborted ? ["buildGapfillCompareSimShared"] : undefined,
+        reasonCode: aborted
+          ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_SHARED_COMPARE"
+          : timedOut
           ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
           : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
         ...(heavyOnlyCompactResponse
@@ -2270,13 +2379,14 @@ export async function POST(req: NextRequest) {
         compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
           failedStep: "build_shared_compare",
           timeoutMs: timedOut ? ROUTE_COMPARE_SHARED_TIMEOUT_MS : undefined,
+          requestAborted: aborted || undefined,
           compareRequestTruth,
           selectedDaysCoreLightweight,
         }),
         artifactRequestTruth,
         ...(compareRunEnvelope ?? {}),
       },
-      { status: timedOut ? 504 : 500 }
+      { status: aborted ? 499 : timedOut ? 504 : 500 }
     );
   }
   markCompareCoreStep(compareCoreTiming, "load_artifact");
@@ -3233,8 +3343,9 @@ export async function POST(req: NextRequest) {
   if (includeFullReportText) {
     try {
       fullReport = await withTimeout(
-        Promise.resolve(
-          buildFullReport({
+        withRequestAbort(
+          Promise.resolve(
+            buildFullReport({
             reportVersion: REPORT_VERSION,
             generatedAt: new Date().toISOString(),
             env: process.env.NODE_ENV ?? "development",
@@ -3371,7 +3482,10 @@ export async function POST(req: NextRequest) {
             excludedFromTest_travelCount,
             scoredDayWeatherRows: compactScoredDayWeatherRows,
             scoredDayWeatherTruth: scoredDayWeatherTruth as any,
-          })
+            })
+          ),
+          req.signal,
+          "compare_core_request_aborted_build_full_report"
         ),
         ROUTE_COMPARE_REPORT_TIMEOUT_MS,
         "compare_core_route_timeout_build_full_report"
@@ -3394,25 +3508,38 @@ export async function POST(req: NextRequest) {
         "Compare core failed while building diagnostics report payload."
       );
       const timedOut = normalizedError.code === "compare_core_route_timeout_build_full_report";
+      const aborted = normalizedError.code === "compare_core_request_aborted_build_full_report";
       const compareRunEnvelope = await markCompareRunFailure({
         phase: "build_full_report",
-        failureCode: timedOut
+        failureCode: aborted
+          ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_DIAGNOSTICS"
+          : timedOut
           ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
           : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
-        failureMessage: timedOut
+        failureMessage: aborted
+          ? "Compare core request was aborted while building diagnostics report payload."
+          : timedOut
           ? "Compare core timed out while building diagnostics report payload."
           : "Compare core failed while building diagnostics report payload.",
-        statusCode: timedOut ? 504 : 500,
+        statusCode: aborted ? 499 : timedOut ? 504 : 500,
         compareCoreFailedStep: "build_diagnostics",
       });
       return NextResponse.json(
         {
           ok: false,
-          error: timedOut ? "compare_core_route_timeout" : "compare_core_route_exception",
-          message: timedOut
+          error: aborted
+            ? "compare_core_request_aborted"
+            : timedOut
+              ? "compare_core_route_timeout"
+              : "compare_core_route_exception",
+          message: aborted
+            ? "Compare core request was aborted while building diagnostics report payload."
+            : timedOut
             ? "Compare core timed out while building diagnostics report payload."
             : "Compare core failed while building diagnostics report payload.",
-          reasonCode: timedOut
+          reasonCode: aborted
+            ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_DIAGNOSTICS"
+            : timedOut
             ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
             : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
           ...(heavyOnlyCompactResponse
@@ -3424,12 +3551,13 @@ export async function POST(req: NextRequest) {
           compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
             failedStep: "build_diagnostics",
             timeoutMs: timedOut ? ROUTE_COMPARE_REPORT_TIMEOUT_MS : undefined,
+            requestAborted: aborted || undefined,
             compareRequestTruth,
             selectedDaysCoreLightweight,
           }),
           ...(compareRunEnvelope ?? {}),
         },
-        { status: timedOut ? 504 : 500 }
+        { status: aborted ? 499 : timedOut ? 504 : 500 }
       );
     }
   }
@@ -3560,6 +3688,11 @@ export async function POST(req: NextRequest) {
       });
       compareRunStatus = "failed";
       compareRunSnapshotReady = false;
+      compareRunTerminalState = true;
+      logCompareRunLifecycle("error", "compare_run_snapshot_persist_failed", {
+        phase: "snapshot_persist_failed",
+        failureCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -3579,6 +3712,11 @@ export async function POST(req: NextRequest) {
     }
     compareRunStatus = "succeeded";
     compareRunSnapshotReady = true;
+    compareRunTerminalState = true;
+    logCompareRunLifecycle("info", "compare_run_succeeded", {
+      phase: "compare_core_succeeded",
+      compareCoreTiming: compareCoreTimingEnvelope,
+    });
   }
   if (heavyOnlyCompactResponse) {
     return NextResponse.json({
@@ -3761,12 +3899,52 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[gapfill-lab]", message, err);
+    if (compareRunId && !compareRunTerminalState) {
+      await markGapfillCompareRunFailed({
+        compareRunId,
+        phase: "compare_core_uncaught_exception",
+        failureCode: "COMPARE_CORE_UNCAUGHT_EXCEPTION_AFTER_RUN_START",
+        failureMessage: message,
+        statusMeta: {
+          route: "admin_gapfill_lab",
+          compareRunId,
+          compareRunSnapshotReady: false,
+          compareRequestTruth: compareRequestTruthForLifecycle,
+          artifactRequestTruth: artifactRequestTruthForLifecycle,
+          compareCoreTiming:
+            compareCoreTimingForLifecycle != null
+              ? finalizeCompareCoreTiming(compareCoreTimingForLifecycle, {
+                  failedStep: "build_shared_compare",
+                  compareRequestTruth: compareRequestTruthForLifecycle ?? undefined,
+                })
+              : null,
+        },
+      });
+      compareRunStatus = "failed";
+      compareRunSnapshotReady = false;
+      compareRunTerminalState = true;
+      console.error("[gapfill-lab][compare-run]", {
+        route: "admin_gapfill_lab",
+        event: "compare_run_failed_uncaught",
+        compareRunId,
+        compareRunStatus,
+        compareRunSnapshotReady,
+        detail: message,
+      });
+    }
     return NextResponse.json(
       {
         ok: false,
         error: "server_error",
         message: "The request took too long or failed. Try a shorter date range or try again.",
         detail: process.env.NODE_ENV === "development" ? message : undefined,
+        ...(compareRunId
+          ? {
+              compareRunId,
+              compareRunStatus,
+              compareRunSnapshotReady,
+            }
+          : {}),
       },
       { status: 500 }
     );

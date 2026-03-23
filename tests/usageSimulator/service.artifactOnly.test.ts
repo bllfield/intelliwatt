@@ -589,7 +589,11 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
     const saved = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
     const savedMeta = ((saved as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
-    expect(savedMeta.excludedDays).toBe(2);
+    const excludedDaysRaw = (savedMeta as any).excludedDays;
+    const excludedDaysCount = Array.isArray(excludedDaysRaw)
+      ? excludedDaysRaw.length
+      : Number(excludedDaysRaw);
+    expect(excludedDaysCount).toBe(2);
     expect(getCachedPastDataset).toHaveBeenCalledTimes(3);
   });
 });
@@ -1019,6 +1023,44 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.compareSimSource).toBe("shared_selected_days_calc");
       expect(out.simulatedTestIntervals.every((p) => p.kwh === 24 / 96)).toBe(true);
     }
+  });
+
+  it("reports shared-compare phase progression via onPhaseUpdate", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    const phases: string[] = [];
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      includeFreshCompareCalc: false,
+      onPhaseUpdate: (phase) => {
+        phases.push(String(phase));
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(phases[0]).toBe("build_shared_compare_inputs_ready");
+    expect(phases).toContain("build_shared_compare_weather_ready");
+    expect(phases).toContain("build_shared_compare_sim_ready");
+    expect(phases).toContain("build_shared_compare_metrics_ready");
+    expect(phases[phases.length - 1]).toBe("build_shared_compare_finalize_start");
   });
 
   it("skips identity fingerprint/hash work for explicit selected-days lightweight artifact read", async () => {

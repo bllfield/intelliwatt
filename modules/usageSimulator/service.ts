@@ -495,7 +495,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         canonicalEndMonth: (buildInputs as any)?.canonicalEndMonth ?? null,
         notes: Array.isArray((buildInputs as any)?.notes) ? (buildInputs as any).notes : [],
         filledMonths: Array.isArray((buildInputs as any)?.filledMonths) ? (buildInputs as any).filledMonths : [],
-        excludedDays: simulatedDateKeys.size,
+        excludedDays: Array.from(simulatedDateKeys).sort(),
         renormalized: false,
         dayTotalSource: "usage_shape_profile",
         usageShapeProfileDiag: { reasonNotUsed: null },
@@ -578,7 +578,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
           ok: false,
           error: "past_rebuild_failed",
           message:
-            "Saved shared Past artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
+            "Past rebuild completed, but the saved artifact is unavailable or missing canonical coverage metadata for artifact-only reads. Retry rebuild after DB pool pressure clears.",
           retryable: true,
         };
       }
@@ -739,6 +739,14 @@ export type GapfillCompareSimSharedResult =
       status: number;
       body: Record<string, unknown>;
     };
+
+export type GapfillCompareBuildPhase =
+  | "build_shared_compare_start"
+  | "build_shared_compare_inputs_ready"
+  | "build_shared_compare_weather_ready"
+  | "build_shared_compare_sim_ready"
+  | "build_shared_compare_metrics_ready"
+  | "build_shared_compare_finalize_start";
 
 function round2Local(n: number) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -980,6 +988,10 @@ export async function buildGapfillCompareSimShared(args: {
   artifactExactInputHash?: string | null;
   requireExactArtifactMatch?: boolean;
   artifactIdentitySource?: "same_run_artifact_ensure" | "manual_request" | null;
+  onPhaseUpdate?: (
+    phase: GapfillCompareBuildPhase,
+    meta?: Record<string, unknown>
+  ) => void | Promise<void>;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
     userId,
@@ -996,7 +1008,19 @@ export async function buildGapfillCompareSimShared(args: {
     artifactExactInputHash = null,
     requireExactArtifactMatch = false,
     artifactIdentitySource = null,
+    onPhaseUpdate,
   } = args;
+  const reportPhase = async (
+    phase: GapfillCompareBuildPhase,
+    meta?: Record<string, unknown>
+  ) => {
+    if (!onPhaseUpdate) return;
+    try {
+      await onPhaseUpdate(phase, meta);
+    } catch {
+      // Phase reporting is best-effort observability and must not alter compare behavior.
+    }
+  };
   // Keep the request flag for backward-compatible payloads, but default compare scoring
   // mode stays selected-days unless the caller explicitly asks for full_window.
   void includeFreshCompareCalc;
@@ -1767,6 +1791,12 @@ export async function buildGapfillCompareSimShared(args: {
 
   const needsFreshCompareForParity =
     boundedTestDateKeysLocal.size > 0 || travelVacantParityDateKeysLocal.length > 0;
+  await reportPhase("build_shared_compare_inputs_ready", {
+    compareFreshMode: effectiveCompareFreshMode,
+    boundedTestDateKeysCount: boundedTestDateKeysLocal.size,
+    travelVacantParityDateKeysCount: travelVacantParityDateKeysLocal.length,
+    needsFreshCompareForParity,
+  });
   if (needsFreshCompareForParity) {
     const runFullWindowFreshExecution = async () => {
       const freshResult = await simulatePastFullWindowShared({
@@ -1884,6 +1914,18 @@ export async function buildGapfillCompareSimShared(args: {
         });
         scoredDayWeatherRows = scoredDayWeatherPayload.rows;
         scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
+        await reportPhase("build_shared_compare_weather_ready", {
+          compareFreshModeUsed,
+          weatherBasisUsed,
+          scoredDayWeatherCount: scoredDayWeatherRows.length,
+          weatherAvailability: scoredDayWeatherTruth.availability,
+        });
+        await reportPhase("build_shared_compare_sim_ready", {
+          compareFreshModeUsed,
+          compareSimSource,
+          simulatedTestIntervalsCount: simulatedTestIntervals.length,
+          freshParityIntervalsCount: freshParityIntervals.length,
+        });
       } else {
         const selectedTestDaysResult = await runSelectedDaysFreshExecution(boundedTestDateKeysLocal);
         if (!selectedTestDaysResult.ok) {
@@ -1945,6 +1987,18 @@ export async function buildGapfillCompareSimShared(args: {
           scoredDayWeatherRows = scoredDayWeatherPayload.rows;
           scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
         }
+        await reportPhase("build_shared_compare_weather_ready", {
+          compareFreshModeUsed,
+          weatherBasisUsed,
+          scoredDayWeatherCount: scoredDayWeatherRows.length,
+          weatherAvailability: scoredDayWeatherTruth.availability,
+        });
+        await reportPhase("build_shared_compare_sim_ready", {
+          compareFreshModeUsed,
+          compareSimSource,
+          simulatedTestIntervalsCount: simulatedTestIntervals.length,
+          freshParityIntervalsCount: freshParityIntervals.length,
+        });
       }
     } else {
       const freshResult = await runFullWindowFreshExecution();
@@ -1984,7 +2038,26 @@ export async function buildGapfillCompareSimShared(args: {
       });
       scoredDayWeatherRows = scoredDayWeatherPayload.rows;
       scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
+      await reportPhase("build_shared_compare_weather_ready", {
+        compareFreshModeUsed,
+        weatherBasisUsed,
+        scoredDayWeatherCount: scoredDayWeatherRows.length,
+        weatherAvailability: scoredDayWeatherTruth.availability,
+      });
+      await reportPhase("build_shared_compare_sim_ready", {
+        compareFreshModeUsed,
+        compareSimSource,
+        simulatedTestIntervalsCount: simulatedTestIntervals.length,
+        freshParityIntervalsCount: freshParityIntervals.length,
+      });
     }
+  } else {
+    await reportPhase("build_shared_compare_sim_ready", {
+      compareFreshModeUsed,
+      compareSimSource,
+      simulatedTestIntervalsCount: simulatedTestIntervals.length,
+      freshParityIntervalsCount: freshParityIntervals.length,
+    });
   }
   const availableTestDateKeysFromSimulated = new Set<string>(
     simulatedTestIntervals
@@ -2338,6 +2411,16 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.travelVacantParityMismatchCount = travelVacantParityMismatchCount;
   modelAssumptions.travelVacantParityMissingArtifactReferenceCount = travelVacantParityMissingArtifactCount;
   modelAssumptions.travelVacantParityMissingFreshCompareCount = travelVacantParityMissingFreshCount;
+  await reportPhase("build_shared_compare_metrics_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    scoredDateCount: boundedTestDateKeysLocal.size,
+    travelVacantRequestedDateCount: travelVacantParityDateKeysLocal.length,
+    travelVacantValidatedDateCount: travelVacantParityValidatedCount,
+    travelVacantMismatchCount: travelVacantParityMismatchCount,
+    travelVacantMissingArtifactReferenceCount: travelVacantParityMissingArtifactCount,
+    travelVacantMissingFreshCompareCount: travelVacantParityMissingFreshCount,
+  });
   if (exactArtifactReadRequired && travelVacantParityTruth.exactProofSatisfied !== true) {
     return {
       ok: false,
@@ -2383,6 +2466,13 @@ export async function buildGapfillCompareSimShared(args: {
         })()
       : modelAssumptions;
   const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
+  await reportPhase("build_shared_compare_finalize_start", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    scoredDateCount: boundedTestDateKeysLocal.size,
+    scoredDayWeatherCount: scoredDayWeatherRows.length,
+    travelVacantParityRowCount: travelVacantParityRows.length,
+  });
 
   return {
     ok: true,
