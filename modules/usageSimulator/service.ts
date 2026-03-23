@@ -745,6 +745,8 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_inputs_ready"
   | "build_shared_compare_weather_ready"
   | "build_shared_compare_sim_ready"
+  | "build_shared_compare_scored_actual_rows_ready"
+  | "build_shared_compare_scored_sim_rows_ready"
   | "build_shared_compare_scored_rows_ready"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
@@ -1734,8 +1736,9 @@ export async function buildGapfillCompareSimShared(args: {
   const travelVacantParityDateKeysLocal = Array.from(boundedTravelDateKeysLocal)
     .filter((dk) => chartDateKeysLocal.has(dk))
     .sort((a, b) => (a < b ? -1 : 1));
-  const useSelectedDaysLightweightDisplayRows = selectedDaysLightweightArtifactRead === true;
-  const displayDateKeysLocal = useSelectedDaysLightweightDisplayRows
+  // Keep selected-days scored-row construction bounded to scored test days only.
+  const useSelectedDaysScopedDisplayRows = effectiveCompareFreshMode === "selected_days";
+  const displayDateKeysLocal = useSelectedDaysScopedDisplayRows
     ? new Set<string>(Array.from(boundedTestDateKeysLocal))
     : chartDateKeysLocal;
   let simulatedTestIntervals = artifactSimulatedTestIntervals;
@@ -1889,6 +1892,8 @@ export async function buildGapfillCompareSimShared(args: {
           for (const p of simulatedIntervalsNormalized) {
             const dk = dateKeyInTimezone(p.timestamp, timezone);
             if (!selectedDateKeysLocal.has(dk)) continue;
+            // Keep simulator-owned daily totals authoritative when already provided.
+            // Interval fallback should only fill dates that were missing day totals.
             if (dailyTotalsFromSimulatedDayResults.has(dk)) continue;
             dailyTotalsByDate.set(dk, (dailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
           }
@@ -2073,6 +2078,13 @@ export async function buildGapfillCompareSimShared(args: {
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && displayDateKeysLocal.has(d.date))
         .sort((a, b) => (a.date < b.date ? -1 : 1));
   const useDatasetDailyAsCanonical = datasetDailyRows.length > 0;
+  await reportPhase("build_shared_compare_scored_actual_rows_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    displayDateCount: displayDateKeysLocal.size,
+    datasetDailyRowsCount: datasetDailyRows.length,
+    useDatasetDailyAsCanonical,
+  });
   let simulatedChartDaily = useDatasetDailyAsCanonical
     ? datasetDailyRows.map((d) => ({
         date: d.date,
@@ -2123,6 +2135,14 @@ export async function buildGapfillCompareSimShared(args: {
   let simulatedChartMonthly = useDatasetMonthlyAsCanonical
     ? datasetMonthlyRows
     : monthlyChartBuild?.monthly ?? [];
+  await reportPhase("build_shared_compare_scored_sim_rows_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    simulatedChartIntervalCount: simulatedChartIntervals.length,
+    simulatedChartDailyCount: simulatedChartDaily.length,
+    simulatedChartMonthlyCount: simulatedChartMonthly.length,
+    useDatasetMonthlyAsCanonical,
+  });
   const simulatedChartStitchedMonth =
     (((dataset as any)?.insights?.stitchedMonth ?? null) as {
       mode: "PRIOR_YEAR_TAIL";
@@ -2172,7 +2192,7 @@ export async function buildGapfillCompareSimShared(args: {
     .map(([date, simKwh]) => ({ date: String(date).slice(0, 10), simKwh: round2Local(Number(simKwh) || 0) }))
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && displayDateKeysLocal.has(row.date))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
-  if (useSelectedDaysLightweightDisplayRows) {
+  if (useSelectedDaysScopedDisplayRows) {
     simulatedChartDaily = simulatedChartDaily.filter((row) => displayDateKeysLocal.has(String(row.date ?? "").slice(0, 10)));
     simulatedChartMonthly = simulatedChartMonthly.filter((row) => chartMonthKeysLocal.has(String(row.month ?? "").slice(0, 7)));
     artifactSimulatedDayReferenceRows = artifactSimulatedDayReferenceRows.filter((row) =>

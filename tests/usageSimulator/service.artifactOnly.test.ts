@@ -1059,6 +1059,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases[0]).toBe("build_shared_compare_inputs_ready");
     expect(phases).toContain("build_shared_compare_weather_ready");
     expect(phases).toContain("build_shared_compare_sim_ready");
+    expect(phases).toContain("build_shared_compare_scored_actual_rows_ready");
+    expect(phases).toContain("build_shared_compare_scored_sim_rows_ready");
     expect(phases).toContain("build_shared_compare_scored_rows_ready");
     expect(phases).toContain("build_shared_compare_parity_ready");
     expect(phases).toContain("build_shared_compare_metrics_ready");
@@ -2443,6 +2445,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         }),
       ]);
       expect(out.simulatedTestIntervals).toHaveLength(96);
+      expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(["2026-01-01"]);
       expect(out.scoredDayWeatherRows).toEqual([
         expect.objectContaining({
           localDate: "2026-01-01",
