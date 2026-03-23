@@ -747,6 +747,9 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_sim_ready"
   | "build_shared_compare_scored_actual_rows_ready"
   | "build_shared_compare_scored_sim_rows_ready"
+  | "build_shared_compare_scored_row_keys_ready"
+  | "build_shared_compare_scored_row_alignment_ready"
+  | "build_shared_compare_scored_row_merge_ready"
   | "build_shared_compare_scored_rows_ready"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
@@ -2186,10 +2189,19 @@ export async function buildGapfillCompareSimShared(args: {
     (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
     (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
   }
-  let artifactSimulatedDayReferenceRows = Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
-    .map(([date, simKwh]) => ({ date: String(date).slice(0, 10), simKwh: round2Local(Number(simKwh) || 0) }))
-    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && displayDateKeysLocal.has(row.date))
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  let artifactSimulatedDayReferenceRows = useSelectedDaysScopedDisplayRows
+    ? Array.from(displayDateKeysLocal)
+        .sort((a, b) => (a < b ? -1 : 1))
+        .flatMap((dk) => {
+          const raw = (canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown>)[dk];
+          const simKwh = Number(raw);
+          if (!Number.isFinite(simKwh)) return [];
+          return [{ date: dk, simKwh: round2Local(simKwh) }];
+        })
+    : Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
+        .map(([date, simKwh]) => ({ date: String(date).slice(0, 10), simKwh: round2Local(Number(simKwh) || 0) }))
+        .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && displayDateKeysLocal.has(row.date))
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
   if (useSelectedDaysScopedDisplayRows) {
     simulatedChartDaily = simulatedChartDaily.filter((row) => displayDateKeysLocal.has(String(row.date ?? "").slice(0, 10)));
     simulatedChartMonthly = simulatedChartMonthly.filter((row) => chartMonthKeysLocal.has(String(row.month ?? "").slice(0, 7)));
@@ -2206,10 +2218,13 @@ export async function buildGapfillCompareSimShared(args: {
     boundedTestDateKeysLocal.has(row.date)
   ).length;
   modelAssumptions.travelVacantParityDateCount = travelVacantParityDateKeysLocal.length;
-  await reportPhase("build_shared_compare_scored_rows_ready", {
+  const simulatedChartDailySourceByDate = new Map<string, "ACTUAL" | "SIMULATED">(
+    simulatedChartDaily.map((row) => [String(row.date ?? "").slice(0, 10), row.source] as const)
+  );
+  await reportPhase("build_shared_compare_scored_row_keys_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
-    displayDateCount: displayDateKeysLocal.size,
+    selectedDateCount: boundedTestDateKeysLocal.size,
     simulatedChartDailyCount: simulatedChartDaily.length,
     artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
   });
@@ -2235,18 +2250,32 @@ export async function buildGapfillCompareSimShared(args: {
       .map(([date, simKwh]) => [String(date).slice(0, 10), round2Local(Number(simKwh) || 0)] as const)
       .filter(([dk]) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
   );
-  const parityDisplayDailyByDate = new Map<string, number>(
-    Array.from(canonicalArtifactDailyByDate.entries()).filter(([dk]) => boundedTestDateKeysLocal.has(dk))
-  );
-  const allMissingDisplaySimDates = Array.from(boundedTestDateKeysLocal).filter((dk) => !parityDisplayDailyByDate.has(dk));
-  const missingDisplaySimDatesBackedByActualArtifactRows = allMissingDisplaySimDates.filter(
-    (dk) => simulatedChartDaily.find((row) => String(row.date ?? "").slice(0, 10) === dk)?.source === "ACTUAL"
-  );
-  const allMismatchDates = Array.from(boundedTestDateKeysLocal).filter(
-    (dk) =>
-      parityDisplayDailyByDate.has(dk) &&
-      round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== round2Local(parityDisplayDailyByDate.get(dk) ?? 0)
-  );
+  const parityDisplayDailyByDate = new Map<string, number>();
+  const allMissingDisplaySimDates: string[] = [];
+  const missingDisplaySimDatesBackedByActualArtifactRows: string[] = [];
+  const allMismatchDates: string[] = [];
+  for (const dk of Array.from(boundedTestDateKeysLocal)) {
+    if (!canonicalArtifactDailyByDate.has(dk)) {
+      allMissingDisplaySimDates.push(dk);
+      if ((simulatedChartDailySourceByDate.get(dk) ?? null) === "ACTUAL") {
+        missingDisplaySimDatesBackedByActualArtifactRows.push(dk);
+      }
+      continue;
+    }
+    const parityDisplayValue = round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0));
+    parityDisplayDailyByDate.set(dk, parityDisplayValue);
+    if (round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== parityDisplayValue) {
+      allMismatchDates.push(dk);
+    }
+  }
+  await reportPhase("build_shared_compare_scored_row_alignment_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    selectedDateCount: boundedTestDateKeysLocal.size,
+    comparableDateCount: parityDisplayDailyByDate.size,
+    missingDisplaySimCount: allMissingDisplaySimDates.length,
+    mismatchCount: allMismatchDates.length,
+  });
   const comparableDateCount = Math.max(0, boundedTestDateKeysLocal.size - allMissingDisplaySimDates.length);
   const missingDisplaySimSampleDates = allMissingDisplaySimDates.slice(0, 10);
   const mismatchSampleDates = allMismatchDates.slice(0, 10);
@@ -2305,6 +2334,22 @@ export async function buildGapfillCompareSimShared(args: {
         : ("not_applicable_scored_actual_day" as const),
     comparisonBasis: parityComparisonBasis,
   };
+  await reportPhase("build_shared_compare_scored_row_merge_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    scoredDayParityAvailability,
+    comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+    mismatchCount: displayVsFreshParityForScoredDays.mismatchCount,
+    missingDisplaySimCount: displayVsFreshParityForScoredDays.missingDisplaySimCount,
+  });
+  await reportPhase("build_shared_compare_scored_rows_ready", {
+    compareFreshModeUsed,
+    compareCalculationScope,
+    displayDateCount: displayDateKeysLocal.size,
+    simulatedChartDailyCount: simulatedChartDaily.length,
+    artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
+    comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+  });
   // Keep travel/vacant proof on canonical interval-summed day totals so
   // artifact-side and fresh-side parity compare the same aggregation basis.
   const freshParityDailyByDate = (() => {

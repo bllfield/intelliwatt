@@ -2644,6 +2644,22 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         compareSimSource: "shared_selected_days_calc",
         simulatedTestIntervalsCount: 2,
       });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_actual_rows_ready", {
+        displayDateCount: 1,
+        datasetDailyRowsCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_sim_rows_ready", {
+        simulatedChartDailyCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_row_keys_ready", {
+        selectedDateCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_row_alignment_ready", {
+        comparableDateCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_row_merge_ready", {
+        scoredDayParityAvailability: "available",
+      });
       await args?.onPhaseUpdate?.("build_shared_compare_scored_rows_ready", {
         simulatedChartDailyCount: 1,
         artifactReferenceRowCount: 1,
@@ -2763,6 +2779,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(runningPhases).toContain("build_shared_compare_inputs_ready");
     expect(runningPhases).toContain("build_shared_compare_weather_ready");
     expect(runningPhases).toContain("build_shared_compare_sim_ready");
+    expect(runningPhases).toContain("build_shared_compare_scored_actual_rows_ready");
+    expect(runningPhases).toContain("build_shared_compare_scored_sim_rows_ready");
+    expect(runningPhases).toContain("build_shared_compare_scored_row_keys_ready");
+    expect(runningPhases).toContain("build_shared_compare_scored_row_alignment_ready");
+    expect(runningPhases).toContain("build_shared_compare_scored_row_merge_ready");
     expect(runningPhases).toContain("build_shared_compare_scored_rows_ready");
     expect(runningPhases).toContain("build_shared_compare_parity_ready");
     expect(runningPhases).toContain("build_shared_compare_metrics_ready");

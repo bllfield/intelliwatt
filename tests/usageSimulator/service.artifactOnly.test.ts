@@ -1061,6 +1061,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases).toContain("build_shared_compare_sim_ready");
     expect(phases).toContain("build_shared_compare_scored_actual_rows_ready");
     expect(phases).toContain("build_shared_compare_scored_sim_rows_ready");
+    expect(phases).toContain("build_shared_compare_scored_row_keys_ready");
+    expect(phases).toContain("build_shared_compare_scored_row_alignment_ready");
+    expect(phases).toContain("build_shared_compare_scored_row_merge_ready");
     expect(phases).toContain("build_shared_compare_scored_rows_ready");
     expect(phases).toContain("build_shared_compare_parity_ready");
     expect(phases).toContain("build_shared_compare_metrics_ready");
@@ -2228,8 +2231,88 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           parityMatch: true,
         }),
       ]);
+      expect(phases).toContain("build_shared_compare_scored_row_keys_ready");
+      expect(phases).toContain("build_shared_compare_scored_row_alignment_ready");
+      expect(phases).toContain("build_shared_compare_scored_row_merge_ready");
+      expect(phases).toContain("build_shared_compare_scored_rows_ready");
       expect(phases).toContain("build_shared_compare_metrics_ready");
       expect(phases).toContain("build_shared_compare_finalize_start");
+    }
+  });
+
+  it("handles selected-date vs available-daily mismatch without widening scored-row merge scope", async () => {
+    const selectedDates = Array.from({ length: 21 }, (_, idx) => {
+      const day = String(idx + 1).padStart(2, "0");
+      return `2026-01-${day}`;
+    });
+    const availableDailyDates = selectedDates.slice(0, 19);
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-21-with-19-daily",
+      updatedAt: new Date("2026-01-31T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 31,
+          totalKwh: 24 * 31,
+          start: "2026-01-01",
+          end: "2026-01-31",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: Object.fromEntries(
+            availableDailyDates.map((dk) => [dk, 24])
+          ),
+        },
+        daily: availableDailyDates.map((dk) => ({ date: dk, kwh: 24, source: "SIMULATED" })),
+        monthly: [{ month: "2026-01", kwh: 24 * 31 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => ({
+      simulatedIntervals: Array.from(selectedDateKeysLocal ?? []).flatMap((dk) =>
+        oneChicagoLocalDayIntervals96(String(dk), 24 / 96)
+      ),
+      simulatedDayResults: Array.from(selectedDateKeysLocal ?? []).map((dk) => ({
+        localDate: String(dk),
+        intervalSumKwh: 24,
+        finalDayKwh: 24,
+      })),
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    }));
+    const phases: string[] = [];
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: selectedDates[0]!, endDate: selectedDates[selectedDates.length - 1]! },
+      testDateKeysLocal: new Set<string>(selectedDates),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      onPhaseUpdate: (phase) => {
+        phases.push(String(phase));
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(availableDailyDates);
+      expect(out.displayVsFreshParityForScoredDays?.availability).toBe("missing_expected_reference");
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(2);
+      expect(phases).toContain("build_shared_compare_scored_row_keys_ready");
+      expect(phases).toContain("build_shared_compare_scored_row_alignment_ready");
+      expect(phases).toContain("build_shared_compare_scored_row_merge_ready");
+      expect(phases).toContain("build_shared_compare_scored_rows_ready");
     }
   });
 
