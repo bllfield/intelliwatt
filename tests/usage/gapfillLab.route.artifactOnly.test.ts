@@ -2639,7 +2639,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     buildGapfillCompareSimShared.mockImplementationOnce(async (args: any) => {
       await args?.onPhaseUpdate?.("build_shared_compare_inputs_ready", { boundedTestDateKeysCount: 1 });
       await args?.onPhaseUpdate?.("build_shared_compare_weather_ready", { scoredDayWeatherCount: 1 });
-      await args?.onPhaseUpdate?.("build_shared_compare_sim_ready", { simulatedTestIntervalsCount: 2 });
+      await args?.onPhaseUpdate?.("build_shared_compare_sim_ready", {
+        compareFreshModeUsed: "selected_days",
+        compareSimSource: "shared_selected_days_calc",
+        simulatedTestIntervalsCount: 2,
+      });
       await args?.onPhaseUpdate?.("build_shared_compare_metrics_ready", { travelVacantValidatedDateCount: 0 });
       await args?.onPhaseUpdate?.("build_shared_compare_finalize_start", { scoredDateCount: 1 });
       return withSharedWeatherDefaults({
@@ -2751,6 +2755,11 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(runningPhases).toContain("build_shared_compare_metrics_ready");
     expect(runningPhases).toContain("build_shared_compare_finalize_start");
     expect(runningPhases).toContain("build_shared_compare_done");
+    const simReadyCall = markGapfillCompareRunRunning.mock.calls.find(
+      (call) => call?.[0]?.phase === "build_shared_compare_sim_ready"
+    )?.[0];
+    expect(simReadyCall?.statusMeta?.phaseMeta?.compareFreshModeUsed).toBe("selected_days");
+    expect(simReadyCall?.statusMeta?.phaseMeta?.compareFreshModeUsed).not.toBe("full_window");
     expect(finalizeGapfillCompareRunSnapshot).toHaveBeenCalledTimes(1);
   });
 

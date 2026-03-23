@@ -2117,24 +2117,15 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
       ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
     ]);
-    simulatePastFullWindowShared.mockResolvedValue({
-      simulatedIntervals: [
-        ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
-      ],
-      actualWxByDateKey: new Map([
-        ["2026-01-01", { tAvgF: 49, tMinF: 39, tMaxF: 59, hdd65: 16, cdd65: 0, source: "OPEN_METEO" }],
-        ["2026-01-03", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
-        ["2026-01-04", { tAvgF: 51, tMinF: 41, tMaxF: 61, hdd65: 14, cdd65: 0, source: "OPEN_METEO" }],
-      ]),
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => ({
+      simulatedIntervals: Array.from(selectedDateKeysLocal ?? []).flatMap((dk) =>
+        oneChicagoLocalDayIntervals96(String(dk), 24 / 96)
+      ),
+      simulatedDayResults: [],
+      pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
-      weatherProviderName: "OPEN_METEO",
-      weatherFallbackReason: null,
-    });
+    }));
     const selectedDaysCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
     const fullWindowCallsBefore = simulatePastFullWindowShared.mock.calls.length;
     const intervalFingerprintCallsBefore = getIntervalDataFingerprint.mock.calls.length;
@@ -2161,17 +2152,17 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
-      expect(selectedDaysCalls).toHaveLength(0);
-      expect(fullWindowCalls).toHaveLength(1);
+      expect(selectedDaysCalls).toHaveLength(2);
+      expect(fullWindowCalls).toHaveLength(0);
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
       expect(decodeIntervalsV1).toHaveBeenCalled();
-      expect(out.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
-      expect(out.compareFreshModeUsed).toBe("full_window");
-      expect(out.compareSharedCalcPath).toContain("simulatePastFullWindowShared");
-      expect(out.compareSimSource).toBe("shared_fresh_calc");
-      expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");
+      expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
+      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(out.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
+      expect(out.compareSimSource).toBe("shared_selected_days_calc");
+      expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -2199,10 +2190,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.scoredDayWeatherRows).toEqual([
         expect.objectContaining({
           localDate: "2026-01-01",
-          avgTempF: 49,
-          minTempF: 39,
-          maxTempF: 59,
-          hdd65: 16,
+          avgTempF: 50,
+          minTempF: 40,
+          maxTempF: 60,
+          hdd65: 15,
           cdd65: 0,
         }),
       ]);
@@ -2262,20 +2253,15 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
     });
-    simulatePastFullWindowShared.mockResolvedValue({
-      simulatedIntervals: [
-        ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
-        ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
-      ],
-      actualWxByDateKey: new Map([
-        ["2026-01-03", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
-        ["2026-01-04", { tAvgF: 51, tMinF: 41, tMaxF: 61, hdd65: 14, cdd65: 0, source: "OPEN_METEO" }],
-      ]),
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => ({
+      simulatedIntervals: Array.from(selectedDateKeysLocal ?? []).flatMap((dk) =>
+        oneChicagoLocalDayIntervals96(String(dk), 24 / 96)
+      ),
+      simulatedDayResults: [],
+      pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
-      weatherProviderName: "OPEN_METEO",
-      weatherFallbackReason: null,
-    });
+    }));
 
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
@@ -2296,6 +2282,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(decodeIntervalsV1).toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         mismatchCount: 0,
