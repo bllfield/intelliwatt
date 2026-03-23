@@ -2075,6 +2075,13 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
       "utf8"
     );
+    expect(clientSource).toContain("const EMPTY_SCORED_DAY_WEATHER_ROWS: ScoredDayWeatherRow[] = [];");
+    expect(clientSource).toContain("const EMPTY_SCORED_DAY_TRUTH_ROWS: ScoredDayTruthRow[] = [];");
+    expect(clientSource).toContain("const GAPFILL_REBUILD_TIMEOUT_MS = 270_000;");
+    expect(clientSource).toContain("Explicit rebuilds can still run full-year canonical artifact work before compare.");
+    expect(clientSource).toContain("const scoredDayTruthRows = useMemo(");
+    expect(clientSource).toContain("extractCompareCoreScoredDayWeather(result);");
+    expect(clientSource).toContain("rows: extracted.rows.length > 0 ? extracted.rows : EMPTY_SCORED_DAY_WEATHER_ROWS");
     expect(clientSource).toContain("const compareCoreIncludesHeavyPayload =");
     expect(clientSource).toContain("togglesSnapshot.fullDiagnosticsOnCore && !togglesSnapshot.runHeavyDiagnosticsStep");
     expect(clientSource).toContain('responseMode: "heavy_only_compact"');

@@ -105,6 +105,9 @@ type ScoredDayTruthRow = {
   reasonCode: string | null;
 };
 
+const EMPTY_SCORED_DAY_WEATHER_ROWS: ScoredDayWeatherRow[] = [];
+const EMPTY_SCORED_DAY_TRUTH_ROWS: ScoredDayTruthRow[] = [];
+
 type ApiResponse =
   | {
       ok: true;
@@ -272,7 +275,9 @@ const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 195_000;
 // Keep client timeout above route compare-core timeouts so route step-level
 // timeout classification can return to UI before the browser aborts.
 const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
-const GAPFILL_REBUILD_TIMEOUT_MS = 150_000;
+// Explicit rebuilds can still run full-year canonical artifact work before compare.
+// Keep this above the route rebuild timeout so structured route failures reach the UI.
+const GAPFILL_REBUILD_TIMEOUT_MS = 270_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;
 type OrchestratorPhaseKey =
@@ -782,12 +787,20 @@ export default function GapFillLabClient() {
         }
       : null;
   const artifactStatus = artifactFromEnvelope ?? artifactFromTopLevel;
-  const scoredDayTruthRows =
-    result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
-      ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
-      : [];
-  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } =
-    extractCompareCoreScoredDayWeather(result);
+  const scoredDayTruthRows = useMemo(
+    () =>
+      result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
+        ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
+        : EMPTY_SCORED_DAY_TRUTH_ROWS,
+    [result]
+  );
+  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } = useMemo(() => {
+    const extracted = extractCompareCoreScoredDayWeather(result);
+    return {
+      rows: extracted.rows.length > 0 ? extracted.rows : EMPTY_SCORED_DAY_WEATHER_ROWS,
+      truth: extracted.truth,
+    };
+  }, [result]);
   const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
   const usageShapeDiag =
     result && result.ok ? ((result as any)?.modelAssumptions?.usageShapeProfileDiag ?? null) : null;
