@@ -319,6 +319,11 @@ We then extend the bucket builder to read from a canonical “interval usage” 
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
 
+Alignment note (current runtime state):
+- Observed-history reconstruction remains the authoritative Past/GapFill mode.
+- Shared weather remains owned by `loadWeatherForPastWindow`, with persisted-weather-first behavior and short-circuit reuse when canonical dates are fully covered by non-stub `ACTUAL_LAST_YEAR` rows.
+- Compare snapshot work is runtime orchestration/persistence architecture and does not change simulation modeling authority.
+
 ### Stage Boundary Rule
 
 - Usage actual intervals = saved source artifact.

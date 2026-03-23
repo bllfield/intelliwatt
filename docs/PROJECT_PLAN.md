@@ -133,6 +133,19 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
   - `buildCurveFromPatchedIntervals`
   - `buildSimulatedUsageDatasetFromCurve`
 
+### Plan Change (2026-03) — Gap-Fill Compare Snapshot + Staged Heavy Diagnostics
+
+- Broad focus remains shared simulation-core accuracy.
+- Current runtime subtask is **Gap-Fill Compare Snapshot + Staged Heavy Diagnostics**.
+- Current runtime reality: `heavy_only_compact` is response shaping on the same route and can still recompute compare work.
+
+Checklist for this subtask:
+- [ ] Persist a compact compare snapshot from `compare_core`.
+- [ ] Add `compareRunId` handoff in `compare_core` responses.
+- [ ] Add staged heavy endpoints (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) as snapshot-read-only readers.
+- [ ] Add admin dedupe/retry-safe orchestration that uses snapshot readers for heavy follow-ups.
+- [ ] Prove heavy readers do not rerun `compare_core` once snapshot architecture lands.
+
 ### Simulation Modeling Modes (authoritative summary)
 
 - **Observed-history reconstruction mode** (Past Sim + GapFill compare): prioritize actual intervals, weather, weekday/weekend, time-of-day, and similar-day empirical behavior.

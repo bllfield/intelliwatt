@@ -126,6 +126,14 @@
 - Gap-Fill Lab exact compare requests that inherit identity from `same_run_artifact_ensure` must prove exact hash ownership before compare proceeds: `artifactSourceMode` must be exact, `requestedInputHash` must equal `artifactInputHashUsed`, and fallback identity handoff must fail early with `artifact_exact_identity_unresolved` / `ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED`.
 - Gap-Fill Lab travel/vacant parity must read canonical artifact references from the exact artifact row's persisted `canonicalArtifactSimulatedDayTotalsByDate`; if exact identity is unresolved, do not continue into travel/vacant parity validation.
 
+### Active Focus (Runtime)
+
+- Shared-artifact alignment is already true for Past Sim and Gap-Fill compare in current runtime code.
+- Shared weather reuse/provenance is already true in current runtime code (`loadWeatherForPastWindow` persisted-weather-first behavior).
+- Broad focus remains shared simulation-core accuracy.
+- Current runtime bottleneck is compare-heavy duplicate-work/timeout risk because heavy remains route-monolithic.
+- `compareRunId` and snapshot-read-only heavy readers are next-step target-state architecture, not current runtime behavior.
+
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
 - **Preview/Dev:** If `ADMIN_TOKEN` is set, it is required; if it is **not** set, access is allowed to prevent lockout.

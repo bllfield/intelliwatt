@@ -8,7 +8,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 
 - **Shared module** `modules/simulatedUsage/simulatePastUsageDataset.ts`
   - `simulatePastUsageDataset(args)`: single entrypoint; accepts houseId, userId, esiid, startDate, endDate, timezone, travelRanges, buildInputs, buildPathKind (`cold_build` | `recalc` | `lab_validation`), optional preloaded actualIntervals.
-  - `loadWeatherForPastWindow(args)`: single weather loader; uses house lat/lng to call `ensureHouseWeatherBackfill` + `getHouseWeatherDays` or `ensureHouseWeatherStubbed` + `getHouseWeatherDays`; returns actualWxByDateKey, normalWxByDateKey, and provenance (weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount).
+  - `loadWeatherForPastWindow(args)`: single weather loader; reads persisted daily weather first and short-circuits when canonical dates are fully covered by non-stub `ACTUAL_LAST_YEAR` rows, otherwise backfills/repairs only missing or `STUB_V1` dates before returning actualWxByDateKey, normalWxByDateKey, and provenance (weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount).
   - Weather fallback reasons: `missing_lat_lng`, `api_failure_or_no_data`, `partial_coverage`, `unknown` (or null when full actual).
 - **service.ts**
   - `getPastSimulatedDatasetForHouse`: delegates to `simulatePastUsageDataset(..., buildPathKind: 'cold_build' | 'lab_validation')`; preserves overlay and dailyWeather; optional `buildPathKind` parameter.
@@ -53,6 +53,12 @@ Modeling guidance alignment:
 - Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
 - For observed-history reconstruction in this shared Past core, empirical interval history + weather/day-time response is primary.
 - Home/appliance/occupancy details remain required and normalized, but are supportive priors/fallback in observed-history mode; they are primary in overlay and synthetic/sparse-data modes.
+
+## Current next runtime step (target-state, not implemented yet)
+
+- Next implementation step is compare snapshot persistence + `compareRunId` handoff from `compare_core`.
+- `compareRunId` and staged snapshot readers (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) are target-state architecture and are not yet present in runtime code.
+- GapFill remains scoring/reporting-only and must continue using the shared simulation/artifact/weather path; snapshot work changes orchestration/persistence only, not modeling ownership.
 
 ## LEGACY / NON-AUTHORITATIVE
 

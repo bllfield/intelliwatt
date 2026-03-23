@@ -105,9 +105,6 @@ type ScoredDayTruthRow = {
   reasonCode: string | null;
 };
 
-const EMPTY_SCORED_DAY_WEATHER_ROWS: ScoredDayWeatherRow[] = [];
-const EMPTY_SCORED_DAY_TRUTH_ROWS: ScoredDayTruthRow[] = [];
-
 type ApiResponse =
   | {
       ok: true;
@@ -151,6 +148,9 @@ type ApiResponse =
       hasScoreableIntervals?: boolean;
       compareCoreMode?: string;
       compareCoreStepTimings?: Record<string, number>;
+      compareRunId?: string | null;
+      compareRunStatus?: "started" | "running" | "succeeded" | "failed" | null;
+      compareRunSnapshotReady?: boolean;
       selectedFreshIntervalCount?: number;
       selectedActualIntervalCount?: number;
       artifactReferenceDayCount?: number;
@@ -201,6 +201,9 @@ type ApiResponse =
       reasonCode?: string;
       overlapCount?: number;
       overlapSample?: string[];
+      compareRunId?: string | null;
+      compareRunStatus?: "started" | "running" | "succeeded" | "failed" | null;
+      compareRunSnapshotReady?: boolean;
     };
 
 const DEFAULT_RANGE: RangeRow = { startDate: "", endDate: "" };
@@ -275,9 +278,7 @@ const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 195_000;
 // Keep client timeout above route compare-core timeouts so route step-level
 // timeout classification can return to UI before the browser aborts.
 const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
-// Explicit rebuilds can still run full-year canonical artifact work before compare.
-// Keep this above the route rebuild timeout so structured route failures reach the UI.
-const GAPFILL_REBUILD_TIMEOUT_MS = 270_000;
+const GAPFILL_REBUILD_TIMEOUT_MS = 150_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;
 type OrchestratorPhaseKey =
@@ -607,6 +608,9 @@ export default function GapFillLabClient() {
   );
   const [heavyRetryBody, setHeavyRetryBody] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
+  const [compareRunId, setCompareRunId] = useState<string | null>(null);
+  const [compareRunStatus, setCompareRunStatus] = useState<"started" | "running" | "succeeded" | "failed" | null>(null);
+  const [compareRunSnapshotReady, setCompareRunSnapshotReady] = useState<boolean | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
@@ -787,20 +791,12 @@ export default function GapFillLabClient() {
         }
       : null;
   const artifactStatus = artifactFromEnvelope ?? artifactFromTopLevel;
-  const scoredDayTruthRows = useMemo(
-    () =>
-      result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
-        ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
-        : EMPTY_SCORED_DAY_TRUTH_ROWS,
-    [result]
-  );
-  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } = useMemo(() => {
-    const extracted = extractCompareCoreScoredDayWeather(result);
-    return {
-      rows: extracted.rows.length > 0 ? extracted.rows : EMPTY_SCORED_DAY_WEATHER_ROWS,
-      truth: extracted.truth,
-    };
-  }, [result]);
+  const scoredDayTruthRows =
+    result && result.ok && Array.isArray((result as any).scoredDayTruthRows)
+      ? ((result as any).scoredDayTruthRows as ScoredDayTruthRow[])
+      : [];
+  const { rows: compareCoreScoredDayWeatherRows, truth: compareCoreScoredDayWeatherTruth } =
+    extractCompareCoreScoredDayWeather(result);
   const usageShapeDependencyStatus = truthEnvelope?.usageShapeDependencyStatus;
   const usageShapeDiag =
     result && result.ok ? ((result as any)?.modelAssumptions?.usageShapeProfileDiag ?? null) : null;
@@ -927,6 +923,9 @@ export default function GapFillLabClient() {
       setTestRanges([{ ...DEFAULT_RANGE }]);
       // House selection changes request identity; clear prior run state to avoid stale carry-over.
       setResult(null);
+      setCompareRunId(null);
+      setCompareRunStatus(null);
+      setCompareRunSnapshotReady(null);
       setError(null);
       setArtifactMissing(false);
       setLastCompareBody(null);
@@ -989,7 +988,29 @@ export default function GapFillLabClient() {
     }
   }
 
+  function syncCompareRunState(data: ApiResponse | null | undefined) {
+    if (!data || typeof data !== "object") return;
+    const runIdRaw = (data as any)?.compareRunId;
+    const runStatusRaw = (data as any)?.compareRunStatus;
+    const snapshotReadyRaw = (data as any)?.compareRunSnapshotReady;
+    if (typeof runIdRaw === "string" && runIdRaw.trim()) {
+      setCompareRunId(runIdRaw.trim());
+    }
+    if (
+      runStatusRaw === "started" ||
+      runStatusRaw === "running" ||
+      runStatusRaw === "succeeded" ||
+      runStatusRaw === "failed"
+    ) {
+      setCompareRunStatus(runStatusRaw);
+    }
+    if (typeof snapshotReadyRaw === "boolean") {
+      setCompareRunSnapshotReady(snapshotReadyRaw);
+    }
+  }
+
   function mergeSuccessfulResult(data: ApiResponse) {
+    syncCompareRunState(data);
     setResult((prev) => {
       if (data.ok && prev?.ok) {
         if ((data as any).responseMode === "heavy_only_compact") {
@@ -1079,6 +1100,9 @@ export default function GapFillLabClient() {
       return;
     }
     setResult(null);
+    setCompareRunId(null);
+    setCompareRunStatus(null);
+    setCompareRunSnapshotReady(null);
     setLookupLoading(true);
     try {
       const res = await fetch("/api/admin/tools/gapfill-lab", {
@@ -1170,6 +1194,9 @@ export default function GapFillLabClient() {
       return;
     }
     setResult(null);
+    setCompareRunId(null);
+    setCompareRunStatus(null);
+    setCompareRunSnapshotReady(null);
     compareInFlightRef.current = true;
     setLoading(true);
     setHeavyRetryBody(null);
@@ -1420,6 +1447,7 @@ export default function GapFillLabClient() {
         const coreResult = await postGapfill(compareBodyBase, GAPFILL_COMPARE_CORE_TIMEOUT_MS);
         coreRes = coreResult.res;
         coreData = coreResult.data;
+        syncCompareRunState(coreData);
       } catch (coreErr: unknown) {
         const normalizedCoreError = normalizeUnknownUiError(
           coreErr,
@@ -1463,6 +1491,12 @@ export default function GapFillLabClient() {
         setLastAttemptDebug((prev) => ({
           ...(prev ?? {}),
           phase: "compare_core_error",
+          compareRunId: (coreData as any)?.compareRunId ?? compareRunId ?? null,
+          compareRunStatus: (coreData as any)?.compareRunStatus ?? compareRunStatus ?? null,
+          compareRunSnapshotReady:
+            typeof (coreData as any)?.compareRunSnapshotReady === "boolean"
+              ? (coreData as any).compareRunSnapshotReady
+              : compareRunSnapshotReady,
           coreStatus: coreRes.status,
           coreError: (coreData as any)?.error ?? null,
           coreMessage: (coreData as any)?.message ?? null,
@@ -1483,6 +1517,12 @@ export default function GapFillLabClient() {
       mergeSuccessfulResult(coreData);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
+        compareRunId: (coreData as any)?.compareRunId ?? compareRunId ?? null,
+        compareRunStatus: (coreData as any)?.compareRunStatus ?? compareRunStatus ?? null,
+        compareRunSnapshotReady:
+          typeof (coreData as any)?.compareRunSnapshotReady === "boolean"
+            ? (coreData as any).compareRunSnapshotReady
+            : compareRunSnapshotReady,
         coreStatus: coreRes.status,
         compareCoreFetchSettledAt,
         compareCoreBody: compareBodyBase,
@@ -1524,6 +1564,7 @@ export default function GapFillLabClient() {
         includeDiagnostics: true,
         includeFullReportText: true,
         responseMode: "heavy_only_compact" as const,
+        compareRunId: (coreData as any)?.compareRunId ?? compareRunId ?? undefined,
       };
       const compareHeavyFreshModeRequested = resolveCompareFreshModeRequested({
         includeDiagnostics: true,
@@ -1536,6 +1577,7 @@ export default function GapFillLabClient() {
         const heavyResult = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
         heavyRes = heavyResult.res;
         heavyData = heavyResult.data;
+        syncCompareRunState(heavyData);
       } catch (heavyErr: unknown) {
         const failure = classifyHeavyDiagnosticsUiFailure(heavyErr);
         finishPhase("compare_heavy", "error", {
@@ -1605,6 +1647,18 @@ export default function GapFillLabClient() {
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: "orchestrator_success",
+        compareRunId: (heavyData as any)?.compareRunId ?? (coreData as any)?.compareRunId ?? compareRunId ?? null,
+        compareRunStatus:
+          (heavyData as any)?.compareRunStatus ??
+          (coreData as any)?.compareRunStatus ??
+          compareRunStatus ??
+          null,
+        compareRunSnapshotReady:
+          typeof (heavyData as any)?.compareRunSnapshotReady === "boolean"
+            ? (heavyData as any).compareRunSnapshotReady
+            : typeof (coreData as any)?.compareRunSnapshotReady === "boolean"
+              ? (coreData as any).compareRunSnapshotReady
+              : compareRunSnapshotReady,
         heavyStatus: heavyRes.status,
         compareHeavyBody: compareBodyHeavy,
         compareHeavyRequestTruth: {
@@ -1682,6 +1736,7 @@ export default function GapFillLabClient() {
         const retryResult = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
         res = retryResult.res;
         data = retryResult.data;
+        syncCompareRunState(data);
       } catch (e: unknown) {
         const failure = classifyHeavyDiagnosticsUiFailure(e);
         updateOrchestratorPhase("compare_heavy", {
@@ -1743,6 +1798,12 @@ export default function GapFillLabClient() {
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: "compare_heavy_retry_success",
+        compareRunId: (data as any)?.compareRunId ?? compareRunId ?? null,
+        compareRunStatus: (data as any)?.compareRunStatus ?? compareRunStatus ?? null,
+        compareRunSnapshotReady:
+          typeof (data as any)?.compareRunSnapshotReady === "boolean"
+            ? (data as any).compareRunSnapshotReady
+            : compareRunSnapshotReady,
         heavyRetryStatus: res.status,
       }));
       setProgressStatus(null);
@@ -1782,6 +1843,9 @@ export default function GapFillLabClient() {
       return;
     }
     setResult(null);
+    setCompareRunId(null);
+    setCompareRunStatus(null);
+    setCompareRunSnapshotReady(null);
     setRebuildLoading(true);
     setError(null);
     setProgressStatus(null);

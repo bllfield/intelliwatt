@@ -252,3 +252,35 @@ model PastSimulatedDatasetCache {
   @@unique([houseId, scenarioId, inputHash])
   @@index([houseId, scenarioId])
 }
+
+/// Durable compare-core run lifecycle + compact snapshot handoff for staged heavy readers.
+model GapfillCompareRunSnapshot {
+  id                        String    @id @default(cuid()) // compareRunId
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  startedAt                 DateTime  @default(now())
+  finishedAt                DateTime?
+  status                    String    // started | running | succeeded | failed
+  phase                     String?
+
+  houseId                   String?
+  userId                    String?
+  compareFreshMode          String
+
+  requestedInputHash        String?
+  artifactScenarioId        String?
+  requireExactArtifactMatch Boolean   @default(false)
+  artifactIdentitySource    String?
+
+  failureCode               String?
+  failureMessage            String?
+  snapshotReady             Boolean   @default(false)
+  snapshotVersion           String?
+  snapshotPersistedAt       DateTime?
+  snapshotJson              Json?
+  statusMetaJson            Json?
+
+  @@index([houseId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+}

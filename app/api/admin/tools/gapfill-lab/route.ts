@@ -26,6 +26,12 @@ import {
   getSharedPastCoverageWindowForHouse,
   rebuildGapfillSharedPastArtifact,
 } from "@/modules/usageSimulator/service";
+import {
+  createGapfillCompareRunStart,
+  finalizeGapfillCompareRunSnapshot,
+  markGapfillCompareRunFailed,
+  markGapfillCompareRunRunning,
+} from "@/modules/usageSimulator/compareRunSnapshot";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   classifySimulationFailure,
@@ -38,7 +44,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
 // Keep route compare-core timeout below client timeout so route-side
 // classification (failedStep/reasonCode) reaches UI before browser abort.
-const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 240_000;
+const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
 const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 120_000;
 const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
 
@@ -1271,6 +1277,7 @@ export async function POST(req: NextRequest) {
     artifactScenarioId?: unknown;
     requireExactArtifactMatch?: unknown;
     artifactIdentitySource?: unknown;
+    compareRunId?: unknown;
   };
   try {
     body = await req.json();
@@ -1308,6 +1315,10 @@ export async function POST(req: NextRequest) {
   const artifactIdentitySource =
     typeof body?.artifactIdentitySource === "string" && body.artifactIdentitySource.trim()
       ? body.artifactIdentitySource.trim()
+      : null;
+  const requestedCompareRunId =
+    typeof body?.compareRunId === "string" && body.compareRunId.trim()
+      ? body.compareRunId.trim()
       : null;
   const testDaysRequested = body?.testDays != null && Number(body.testDays) >= 1 ? Math.min(365, Math.floor(Number(body.testDays))) : null;
   const seed = String(body?.seed ?? "").trim() || null;
@@ -1843,6 +1854,98 @@ export async function POST(req: NextRequest) {
     requireExactArtifactMatch,
     artifactIdentitySource,
   };
+  let compareRunId: string | null = null;
+  let compareRunStatus: "started" | "running" | "succeeded" | "failed" | null = null;
+  let compareRunSnapshotReady = false;
+  const compareRunStart = await createGapfillCompareRunStart({
+    userId: user.id,
+    houseId: house.id,
+    compareFreshMode,
+    requestedInputHash: requestedArtifactInputHash,
+    artifactScenarioId: requestedArtifactScenarioId,
+    requireExactArtifactMatch,
+    artifactIdentitySource,
+    statusMeta: {
+      route: "admin_gapfill_lab",
+      phase: "compare_core_start",
+      compareCoreStartedAt: compareCoreTiming.startedAt,
+      compareCoreStartedAtMs: compareCoreTiming.startedAtMs,
+      compareRequestTruth,
+      artifactRequestTruth,
+      requestedCompareRunId,
+      responseMode: heavyOnlyCompactResponse ? "heavy_only_compact" : "default",
+    },
+  });
+  if (!compareRunStart.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: compareRunStart.error,
+        message: "Compare core could not start because compare-run persistence failed.",
+        detail: compareRunStart.message,
+        reasonCode: "COMPARE_RUN_START_PERSIST_FAILED",
+        compareRequestTruth,
+        artifactRequestTruth,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: "build_shared_compare",
+          compareRequestTruth,
+          selectedDaysCoreLightweight,
+        }),
+      },
+      { status: 500 }
+    );
+  }
+  compareRunId = compareRunStart.compareRunId;
+  compareRunStatus = "started";
+  await markGapfillCompareRunRunning({
+    compareRunId,
+    phase: "build_shared_compare_start",
+    statusMeta: {
+      route: "admin_gapfill_lab",
+      compareRunId,
+      compareCoreStartedAt: compareCoreTiming.startedAt,
+      compareCoreStepTimings: compareCoreTiming.stepsMs,
+      compareRequestTruth,
+      artifactRequestTruth,
+    },
+  });
+  compareRunStatus = "running";
+  const markCompareRunFailure = async (args: {
+    phase: string;
+    failureCode: string;
+    failureMessage: string;
+    statusCode?: number;
+    compareCoreFailedStep?: CompareCoreStepKey;
+  }) => {
+    if (!compareRunId) return null;
+    await markGapfillCompareRunFailed({
+      compareRunId,
+      phase: args.phase,
+      failureCode: args.failureCode,
+      failureMessage: args.failureMessage,
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        compareRunId,
+        compareRunSnapshotReady: false,
+        compareCoreFailedStep: args.compareCoreFailedStep ?? args.phase,
+        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
+          failedStep: args.compareCoreFailedStep ?? "build_shared_compare",
+          compareRequestTruth,
+          selectedDaysCoreLightweight,
+          statusCode: args.statusCode,
+        }),
+        compareRequestTruth,
+        artifactRequestTruth,
+      },
+    });
+    compareRunStatus = "failed";
+    compareRunSnapshotReady = false;
+    return {
+      compareRunId,
+      compareRunStatus,
+      compareRunSnapshotReady,
+    };
+  };
   let sharedSim: Awaited<ReturnType<typeof buildGapfillCompareSimShared>>;
   try {
     sharedSim = await withTimeout(
@@ -1874,6 +1977,17 @@ export async function POST(req: NextRequest) {
       "Compare core failed while building shared compare output."
     );
     const timedOut = normalizedError.code === "compare_core_route_timeout_build_shared_compare";
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "build_shared_compare",
+      failureCode: timedOut
+        ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
+        : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
+      failureMessage: timedOut
+        ? "Compare core timed out while building shared compare output."
+        : normalizedError.message,
+      statusCode: timedOut ? 504 : 500,
+      compareCoreFailedStep: "build_shared_compare",
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -1898,12 +2012,24 @@ export async function POST(req: NextRequest) {
           selectedDaysCoreLightweight,
         }),
         artifactRequestTruth,
+        ...(compareRunEnvelope ?? {}),
       },
       { status: timedOut ? 504 : 500 }
     );
   }
   markCompareCoreStep(compareCoreTiming, "load_artifact");
   markCompareCoreStep(compareCoreTiming, "build_shared_compare");
+  if (compareRunId) {
+    await markGapfillCompareRunRunning({
+      compareRunId,
+      phase: "build_shared_compare_done",
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        compareRunId,
+        compareCoreStepTimings: compareCoreTiming.stepsMs,
+      },
+    });
+  }
   if (!sharedSim.ok) {
     const classification = classifySimulationFailure({
       code: String((sharedSim.body as any)?.error ?? ""),
@@ -1953,6 +2079,13 @@ export async function POST(req: NextRequest) {
         }),
       },
     });
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "build_shared_compare",
+      failureCode: String((mergedBody as any)?.reasonCode ?? "COMPARE_CORE_SHARED_COMPARE_FAILED"),
+      failureMessage: String((mergedBody as any)?.message ?? "Shared compare failed."),
+      statusCode: sharedSim.status,
+      compareCoreFailedStep: "build_shared_compare",
+    });
     return NextResponse.json(
       {
         ...mergedBody,
@@ -1960,6 +2093,7 @@ export async function POST(req: NextRequest) {
           failedStep: "build_shared_compare",
           compareRequestTruth,
         }),
+        ...(compareRunEnvelope ?? {}),
       },
       { status: sharedSim.status }
     );
@@ -2016,6 +2150,13 @@ export async function POST(req: NextRequest) {
         }),
       },
     });
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "load_actual_usage",
+      failureCode: "NO_ACTUAL_DATA_SCORING_WINDOW",
+      failureMessage: "No actual interval data found for Test dates in this shared scoring window.",
+      statusCode: 400,
+      compareCoreFailedStep: "load_actual_usage",
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -2026,6 +2167,7 @@ export async function POST(req: NextRequest) {
           failedStep: "load_actual_usage",
           compareRequestTruth,
         }),
+        ...(compareRunEnvelope ?? {}),
       },
       { status: 400 }
     );
@@ -2101,6 +2243,14 @@ export async function POST(req: NextRequest) {
         code: "artifact_compare_join_incomplete_rebuild_required",
         message: "Saved shared Past artifact did not produce all simulated timestamps required for compare join.",
       });
+      const compareRunEnvelope = await markCompareRunFailure({
+        phase: "join_actual_vs_sim",
+        failureCode: String(classification.reasonCode ?? "ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED"),
+        failureMessage:
+          "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
+        statusCode: 409,
+        compareCoreFailedStep: "join_actual_vs_sim",
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -2116,10 +2266,19 @@ export async function POST(req: NextRequest) {
             failedStep: "join_actual_vs_sim",
             compareRequestTruth,
           }),
+          ...(compareRunEnvelope ?? {}),
         },
         { status: 409 }
       );
     }
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "join_actual_vs_sim",
+      failureCode: "COMPARE_SCORING_JOIN_INCOMPLETE",
+      failureMessage:
+        "Fresh shared compare scoring output is missing timestamps required for actual-vs-sim join. Retry compare and inspect shared scoring diagnostics.",
+      statusCode: 409,
+      compareCoreFailedStep: "join_actual_vs_sim",
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -2134,6 +2293,7 @@ export async function POST(req: NextRequest) {
           failedStep: "join_actual_vs_sim",
           compareRequestTruth,
         }),
+        ...(compareRunEnvelope ?? {}),
       },
       { status: 409 }
     );
@@ -2158,6 +2318,17 @@ export async function POST(req: NextRequest) {
   });
   markCompareCoreStep(compareCoreTiming, "build_metrics");
   markCompareCoreStep(compareCoreTiming, "summarize_metrics");
+  if (compareRunId) {
+    await markGapfillCompareRunRunning({
+      compareRunId,
+      phase: "metrics_built",
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        compareRunId,
+        compareCoreStepTimings: compareCoreTiming.stepsMs,
+      },
+    });
+  }
   const requestedTestDaysCount = testDateKeysLocal.size;
   const scoringTestDaysCount = scoringTestDateKeysLocal.size;
   const scoredIntervalsCount = scoringActualTestIntervalsCanon.length;
@@ -2241,6 +2412,14 @@ export async function POST(req: NextRequest) {
     artifactInputHashUsed === requestedInputHash &&
     artifactExactIdentityResolved === true;
   if (sameRunExactHandoffRequired && !sameRunExactHandoffResolved) {
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "artifact_identity_validation",
+      failureCode: "ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED",
+      failureMessage:
+        "Compare required the exact shared Past artifact identity returned by same-run artifact ensure, but that handoff was not proven as an exact hash match.",
+      statusCode: 409,
+      compareCoreFailedStep: "build_shared_compare",
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -2268,6 +2447,7 @@ export async function POST(req: NextRequest) {
           compareRequestTruth,
           selectedDaysCoreLightweight,
         }),
+        ...(compareRunEnvelope ?? {}),
       },
       { status: 409 }
     );
@@ -2279,8 +2459,19 @@ export async function POST(req: NextRequest) {
       (typeof requestedInputHash === "string" &&
         requestedInputHash.length > 0 &&
         artifactInputHashUsed !== requestedInputHash) ||
-      (requireExactArtifactMatch && artifactExactIdentityResolved !== true));
+      (requireExactArtifactMatch && sameRunExactHashRequested && artifactExactIdentityResolved !== true));
   if (hasContradictoryExactArtifactTruth) {
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "artifact_truth_validation",
+      failureCode: requireExactArtifactMatch
+        ? "ARTIFACT_EXACT_IDENTITY_UNRESOLVED"
+        : "ARTIFACT_TRUTH_INVARIANT_FAILED",
+      failureMessage: requireExactArtifactMatch
+        ? "Compare required an exact shared Past artifact identity, but the returned artifact truth could not prove that exact match."
+        : "Compare returned contradictory artifact truth and cannot report success.",
+      statusCode: requireExactArtifactMatch ? 409 : 500,
+      compareCoreFailedStep: "build_shared_compare",
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -2311,6 +2502,7 @@ export async function POST(req: NextRequest) {
           compareRequestTruth,
           selectedDaysCoreLightweight,
         }),
+        ...(compareRunEnvelope ?? {}),
       },
       { status: requireExactArtifactMatch ? 409 : 500 }
     );
@@ -2427,6 +2619,13 @@ export async function POST(req: NextRequest) {
     scoringTestDateKeysLocal.size > 0 &&
     String(scoredDayWeatherTruth.availability ?? "") !== "available"
   ) {
+    const compareRunEnvelope = await markCompareRunFailure({
+      phase: "weather_truth_validation",
+      failureCode: "COMPARE_CORE_WEATHER_TRUTH_MISSING",
+      failureMessage: "Compare core completed without compact scored-day weather truth for one or more scored dates.",
+      statusCode: 500,
+      compareCoreFailedStep: "build_shared_compare",
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -2439,6 +2638,7 @@ export async function POST(req: NextRequest) {
           compareRequestTruth,
           selectedDaysCoreLightweight,
         }),
+        ...(compareRunEnvelope ?? {}),
       },
       { status: 500 }
     );
@@ -2915,12 +3115,34 @@ export async function POST(req: NextRequest) {
         "compare_core_route_timeout_build_full_report"
       );
       markCompareCoreStep(compareCoreTiming, "build_full_report");
+      if (compareRunId) {
+        await markGapfillCompareRunRunning({
+          compareRunId,
+          phase: "build_full_report_done",
+          statusMeta: {
+            route: "admin_gapfill_lab",
+            compareRunId,
+            compareCoreStepTimings: compareCoreTiming.stepsMs,
+          },
+        });
+      }
     } catch (err: unknown) {
       const normalizedError = normalizeRouteError(
         err,
         "Compare core failed while building diagnostics report payload."
       );
       const timedOut = normalizedError.code === "compare_core_route_timeout_build_full_report";
+      const compareRunEnvelope = await markCompareRunFailure({
+        phase: "build_full_report",
+        failureCode: timedOut
+          ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
+          : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
+        failureMessage: timedOut
+          ? "Compare core timed out while building diagnostics report payload."
+          : "Compare core failed while building diagnostics report payload.",
+        statusCode: timedOut ? 504 : 500,
+        compareCoreFailedStep: "build_diagnostics",
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -2943,6 +3165,7 @@ export async function POST(req: NextRequest) {
             compareRequestTruth,
             selectedDaysCoreLightweight,
           }),
+          ...(compareRunEnvelope ?? {}),
         },
         { status: timedOut ? 504 : 500 }
       );
@@ -2962,10 +3185,146 @@ export async function POST(req: NextRequest) {
     compareCorePhaseStep: "finalize_response",
     compareCorePhaseElapsedMsByStep: compareCoreTiming.stepsMs,
   });
+  const compareRunSnapshotPayload: Record<string, unknown> = {
+    compareRunId,
+    snapshotVersion: "gapfill_compare_snapshot_v1",
+    generatedAt: new Date().toISOString(),
+    userId: user.id,
+    houseId: house.id,
+    timezone,
+    timezoneUsedForScoring: scoringTimezone,
+    compareFreshMode,
+    compareFreshModeUsed,
+    compareCoreMode,
+    compareRequestTruth,
+    artifactRequestTruth,
+    identityTruth: {
+      requestedInputHash,
+      artifactInputHashUsed,
+      artifactHashMatch,
+      artifactScenarioId,
+      artifactIdentitySource: artifactIdentitySourceUsed,
+      requireExactArtifactMatch,
+      artifactSourceMode,
+      artifactSourceNote,
+      artifactCreatedAt,
+      artifactUpdatedAt,
+      artifactExactIdentityRequested,
+      artifactExactIdentityResolved,
+      artifactSameRunEnsureIdentity,
+      artifactFallbackOccurred,
+      artifactFallbackReason,
+      artifactExactIdentifierUsed,
+    },
+    selectedScoredDateKeys: Array.from(scoringTestDateKeysLocal).sort(),
+    scoredDayTruthRowsCompact: scoredDayTruthRows.map((row) => ({
+      localDate: row.localDate,
+      actualDayKwh: row.actualDayKwh,
+      freshCompareSimDayKwh: row.freshCompareSimDayKwh,
+      displayedPastStyleSimDayKwh: row.displayedPastStyleSimDayKwh,
+      actualVsFreshErrorKwh: row.actualVsFreshErrorKwh,
+      displayVsFreshParityMatch: row.displayVsFreshParityMatch,
+      parityAvailability: row.parityAvailability,
+      weatherBasis: row.weatherBasis,
+      weatherSourceUsed: row.weatherSourceUsed,
+      weatherFallbackReason: row.weatherFallbackReason,
+      avgTempF: row.avgTempF,
+      minTempF: row.minTempF,
+      maxTempF: row.maxTempF,
+      hdd65: row.hdd65,
+      cdd65: row.cdd65,
+      fallbackLevel: row.fallbackLevel,
+      selectedReferenceMatchTier: row.selectedReferenceMatchTier,
+      selectedMatchSampleCount: row.selectedMatchSampleCount,
+      reasonCode: row.reasonCode,
+    })),
+    scoredDayWeatherRows: compactScoredDayWeatherRows,
+    scoredDayWeatherTruth,
+    travelVacantParityRows,
+    travelVacantParityTruth,
+    missAttributionSummary,
+    accuracyTuningBreakdowns,
+    compareTruth,
+    truthEnvelope,
+    metricsSummary: {
+      mae: metrics.mae,
+      rmse: metrics.rmse,
+      mape: metrics.mape,
+      wape: metrics.wape,
+      maxAbs: metrics.maxAbs,
+      totalActualKwhMasked: metrics.totalActualKwhMasked,
+      totalSimKwhMasked: metrics.totalSimKwhMasked,
+      deltaKwhMasked: metrics.deltaKwhMasked,
+    },
+    compareCoreTiming: compareCoreTimingEnvelope,
+    counts: {
+      requestedTestDaysCount,
+      scoringTestDaysCount,
+      scoredIntervalsCount,
+      actualTestIntervalsCount,
+      simulatedTestIntervalsCount,
+      boundedTravelDateKeysCount: boundedTravelDateKeysLocal.size,
+    },
+    responseMode: heavyOnlyCompactResponse ? "heavy_only_compact" : "default",
+  };
+  if (compareRunId) {
+    const snapshotPersisted = await finalizeGapfillCompareRunSnapshot({
+      compareRunId,
+      phase: "compare_core_succeeded",
+      snapshot: compareRunSnapshotPayload,
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        compareRunId,
+        compareRequestTruth,
+        artifactRequestTruth,
+        compareCoreTiming: compareCoreTimingEnvelope,
+        responseMode: heavyOnlyCompactResponse ? "heavy_only_compact" : "default",
+      },
+    });
+    if (!snapshotPersisted) {
+      await markGapfillCompareRunFailed({
+        compareRunId,
+        phase: "snapshot_persist_failed",
+        failureCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
+        failureMessage:
+          "Compare core calculation completed, but final compare snapshot persistence failed.",
+        statusMeta: {
+          route: "admin_gapfill_lab",
+          compareRunId,
+          compareRequestTruth,
+          artifactRequestTruth,
+          compareCoreTiming: compareCoreTimingEnvelope,
+        },
+      });
+      compareRunStatus = "failed";
+      compareRunSnapshotReady = false;
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_run_snapshot_persist_failed",
+          message:
+            "Compare core completed, but the final compare snapshot could not be persisted.",
+          reasonCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
+          compareRunId,
+          compareRunStatus,
+          compareRunSnapshotReady,
+          compareCoreTiming: compareCoreTimingEnvelope,
+          compareRequestTruth,
+          artifactRequestTruth,
+        },
+        { status: 500 }
+      );
+    }
+    compareRunStatus = "succeeded";
+    compareRunSnapshotReady = true;
+  }
   if (heavyOnlyCompactResponse) {
     return NextResponse.json({
       ok: true,
       responseMode: "heavy_only_compact",
+      compareRunId,
+      compareRunStatus,
+      compareRunSnapshotReady,
       diagnostics: includeDiagnostics
         ? {
             dailyTotalsChartSim: sharedSim.simulatedChartDaily,
@@ -3007,6 +3366,9 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    compareRunId,
+    compareRunStatus,
+    compareRunSnapshotReady,
     email: user.email,
     userId: user.id,
     house: {

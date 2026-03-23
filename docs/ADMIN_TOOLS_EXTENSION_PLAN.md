@@ -36,6 +36,17 @@ _Generated from audit; implementation not started. Do not redesign existing admi
 
 **Simulation test tooling:** Gap-Fill Lab and Simulation Engines provide diagnostics and compare outputs; they do not expose a dedicated “run baseline build only” or “run overlay application check” step. Prime-past-cache is additive and used by gapfill-lab.
 
+**Gap-Fill compare-heavy baseline state (current runtime):**
+- Compare-heavy behavior is client-staged in the admin UI but still monolithic route execution in runtime.
+- `heavy_only_compact` currently changes response shaping only; it is not snapshot-backed and can still rerun shared compare work.
+
+**Gap-Fill compare-heavy target-state (next runtime step):**
+- Add compare snapshot persistence from `compare_core`.
+- Add `compareRunId` handoff.
+- Add staged heavy snapshot-read-only endpoints (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`).
+- Add admin dedupe / retry-safe orchestration that uses snapshot-read-only heavy calls after snapshot architecture exists.
+- Gap-Fill Lab must not own simulation logic, artifact identity logic, or weather logic; it remains orchestration/reporting over shared modules.
+
 ---
 
 ## Step B — Admin Tools Extension Plan (additive only)

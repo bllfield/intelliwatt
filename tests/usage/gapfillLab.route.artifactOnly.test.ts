@@ -22,6 +22,10 @@ const getCandidateDateCoverageForSelection = vi.fn();
 const mergeDateKeysToRanges = vi.fn();
 const pickRandomTestDateKeys = vi.fn();
 const computeGapFillMetrics = vi.fn();
+const createGapfillCompareRunStart = vi.fn();
+const markGapfillCompareRunRunning = vi.fn();
+const markGapfillCompareRunFailed = vi.fn();
+const finalizeGapfillCompareRunSnapshot = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -72,6 +76,13 @@ vi.mock("@/modules/usageSimulator/service", () => ({
   buildGapfillCompareSimShared: (...args: any[]) => buildGapfillCompareSimShared(...args),
   getSharedPastCoverageWindowForHouse: (...args: any[]) => getSharedPastCoverageWindowForHouse(...args),
   rebuildGapfillSharedPastArtifact: (...args: any[]) => rebuildGapfillSharedPastArtifact(...args),
+}));
+
+vi.mock("@/modules/usageSimulator/compareRunSnapshot", () => ({
+  createGapfillCompareRunStart: (...args: any[]) => createGapfillCompareRunStart(...args),
+  markGapfillCompareRunRunning: (...args: any[]) => markGapfillCompareRunRunning(...args),
+  markGapfillCompareRunFailed: (...args: any[]) => markGapfillCompareRunFailed(...args),
+  finalizeGapfillCompareRunSnapshot: (...args: any[]) => finalizeGapfillCompareRunSnapshot(...args),
 }));
 
 vi.mock("@/lib/admin/gapfillLab", () => ({
@@ -209,6 +220,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     mergeDateKeysToRanges.mockReset();
     pickRandomTestDateKeys.mockReset();
     computeGapFillMetrics.mockReset();
+    createGapfillCompareRunStart.mockReset();
+    markGapfillCompareRunRunning.mockReset();
+    markGapfillCompareRunFailed.mockReset();
+    finalizeGapfillCompareRunSnapshot.mockReset();
     vi.restoreAllMocks();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
@@ -258,6 +273,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     pickRandomTestDateKeys.mockReturnValue(["2026-01-01"]);
     mergeDateKeysToRanges.mockReturnValue([{ startDate: "2026-01-01", endDate: "2026-01-01" }]);
     computeGapFillMetrics.mockImplementation(() => zeroMetrics());
+    createGapfillCompareRunStart.mockResolvedValue({
+      ok: true,
+      compareRunId: "cmp-run-1",
+      createdAt: "2026-03-18T00:00:00.000Z",
+      updatedAt: "2026-03-18T00:00:00.000Z",
+      status: "started",
+    });
+    markGapfillCompareRunRunning.mockResolvedValue(true);
+    markGapfillCompareRunFailed.mockResolvedValue(true);
+    finalizeGapfillCompareRunSnapshot.mockResolvedValue(true);
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {
@@ -1088,6 +1113,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
 
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
+    expect(body.compareRunId).toBe("cmp-run-1");
+    expect(body.compareRunStatus).toBe("succeeded");
+    expect(body.compareRunSnapshotReady).toBe(true);
     expect(body.requestedTestDaysCount).toBe(1);
     expect(body.scoringTestDaysCount).toBe(1);
     expect(body.scoredIntervalsCount).toBe(2);
@@ -1200,6 +1228,44 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.modelAssumptions?.simulatedDayDiagnosticsSample).toBeUndefined();
     expect(body.modelAssumptions?.dayTotalDiagnostics).toBeUndefined();
     expect(body.fullReportText).toBeUndefined();
+    expect(createGapfillCompareRunStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        houseId: "h1",
+        userId: "u1",
+        compareFreshMode: "selected_days",
+        requestedInputHash: null,
+        artifactScenarioId: null,
+        requireExactArtifactMatch: false,
+      })
+    );
+    expect(finalizeGapfillCompareRunSnapshot).toHaveBeenCalledTimes(1);
+    expect(finalizeGapfillCompareRunSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compareRunId: "cmp-run-1",
+        phase: "compare_core_succeeded",
+        snapshot: expect.objectContaining({
+          compareRunId: "cmp-run-1",
+          compareFreshMode: "selected_days",
+          identityTruth: expect.objectContaining({
+            requestedInputHash: "hash-1",
+            artifactScenarioId: "past-s1",
+            requireExactArtifactMatch: false,
+            artifactIdentitySource: "same_run_artifact_ensure",
+          }),
+          scoredDayWeatherRows: expect.arrayContaining([
+            expect.objectContaining({
+              localDate: "2026-01-01",
+              avgTempF: 51,
+              hdd65: 14,
+            }),
+          ]),
+          travelVacantParityTruth: expect.objectContaining({
+            availability: "validated",
+            reasonCode: "TRAVEL_VACANT_PARITY_VALIDATED",
+          }),
+        }),
+      })
+    );
   });
 
   it("keeps selected-days compare mode when diagnostics flags are explicitly false", async () => {
@@ -2075,13 +2141,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
       "utf8"
     );
-    expect(clientSource).toContain("const EMPTY_SCORED_DAY_WEATHER_ROWS: ScoredDayWeatherRow[] = [];");
-    expect(clientSource).toContain("const EMPTY_SCORED_DAY_TRUTH_ROWS: ScoredDayTruthRow[] = [];");
-    expect(clientSource).toContain("const GAPFILL_REBUILD_TIMEOUT_MS = 270_000;");
-    expect(clientSource).toContain("Explicit rebuilds can still run full-year canonical artifact work before compare.");
-    expect(clientSource).toContain("const scoredDayTruthRows = useMemo(");
+    expect(clientSource).toContain("const GAPFILL_REBUILD_TIMEOUT_MS = 150_000;");
+    expect(clientSource).toContain("const scoredDayTruthRows =");
     expect(clientSource).toContain("extractCompareCoreScoredDayWeather(result);");
-    expect(clientSource).toContain("rows: extracted.rows.length > 0 ? extracted.rows : EMPTY_SCORED_DAY_WEATHER_ROWS");
     expect(clientSource).toContain("const compareCoreIncludesHeavyPayload =");
     expect(clientSource).toContain("togglesSnapshot.fullDiagnosticsOnCore && !togglesSnapshot.runHeavyDiagnosticsStep");
     expect(clientSource).toContain('responseMode: "heavy_only_compact"');
@@ -2092,6 +2154,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("compareCoreMode: prev.compareCoreMode");
     expect(clientSource).toContain("compareCoreTiming: (prev as any).compareCoreTiming");
     expect(clientSource).toContain("compareCoreStepTimings: prev.compareCoreStepTimings");
+    expect(clientSource).toContain("const [compareRunId, setCompareRunId] = useState<string | null>(null);");
+    expect(clientSource).toContain("const [compareRunStatus, setCompareRunStatus] = useState<\"started\" | \"running\" | \"succeeded\" | \"failed\" | null>(null);");
+    expect(clientSource).toContain("function syncCompareRunState(data: ApiResponse | null | undefined)");
+    expect(clientSource).toContain("compareRunId: (coreData as any)?.compareRunId ?? compareRunId ?? undefined");
     expect(clientSource).toContain("...prev,");
   });
 
@@ -2279,8 +2345,133 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(504);
     expect(body.error).toBe("compare_core_route_timeout");
     expect(body.reasonCode).toBe("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE");
+    expect(body.compareRunId).toBe("cmp-run-1");
+    expect(body.compareRunStatus).toBe("failed");
+    expect(body.compareRunSnapshotReady).toBe(false);
     expect(body.compareCoreTiming?.failedStep).toBe("build_shared_compare");
     expect(body.compareCoreTiming?.compareRequestTruth?.compareFreshModeRequested).toBe("selected_days");
+    expect(markGapfillCompareRunFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compareRunId: "cmp-run-1",
+        phase: "build_shared_compare",
+        failureCode: "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE",
+      })
+    );
+    expect(finalizeGapfillCompareRunSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("fails explicitly when compare snapshot persistence fails after successful core calculation", async () => {
+    finalizeGapfillCompareRunSnapshot.mockResolvedValueOnce(false);
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
+      artifactBuildExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
+      artifactUsesTestDaysInIdentity: false,
+      artifactUsesTravelDaysInIdentity: true,
+      sharedArtifactScenarioId: "past-s1",
+      sharedArtifactInputHash: "hash-1",
+      comparePulledFromSharedArtifactOnly: false,
+      scoredTestDaysMissingSimulatedOwnershipCount: 0,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      compareSimSource: "shared_selected_days_calc",
+      displaySimSource: "dataset.daily",
+      weatherBasisUsed: "actual_only",
+      scoredDayWeatherRows: [
+        {
+          localDate: "2026-01-01",
+          avgTempF: 51,
+          minTempF: 41,
+          maxTempF: 61,
+          hdd65: 14,
+          cdd65: 0,
+          weatherBasisUsed: "actual_only",
+          weatherKindUsed: "ACTUAL_LAST_YEAR",
+          weatherSourceUsed: "OPEN_METEO",
+          weatherProviderName: "Open-Meteo",
+          weatherFallbackReason: null,
+        },
+      ],
+      scoredDayWeatherTruth: {
+        availability: "available",
+        reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+        source: "shared_compare_scored_day_weather",
+        scoredDateCount: 1,
+        weatherRowCount: 1,
+        missingDateCount: 0,
+        missingDateSample: [],
+      },
+      travelVacantParityRows: [],
+      travelVacantParityTruth: {
+        availability: "not_requested",
+        reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+      },
+      displayVsFreshParityForScoredDays: {
+        availability: "available",
+        matches: true,
+        mismatchCount: 0,
+        missingDisplaySimCount: 0,
+        parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+      },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      modelAssumptions: {
+        artifactSourceMode: "exact_hash_match",
+        requestedInputHash: "hash-1",
+        artifactInputHashUsed: "hash-1",
+        artifactHashMatch: true,
+        artifactScenarioId: "past-s1",
+        artifactRequestedScenarioId: "past-s1",
+        artifactExactIdentityRequested: true,
+        artifactExactIdentityResolved: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        artifactSameRunEnsureIdentity: true,
+        artifactFallbackOccurred: false,
+        artifactFallbackReason: null,
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("compare_run_snapshot_persist_failed");
+    expect(body.reasonCode).toBe("COMPARE_RUN_SNAPSHOT_PERSIST_FAILED");
+    expect(body.compareRunId).toBe("cmp-run-1");
+    expect(body.compareRunStatus).toBe("failed");
+    expect(body.compareRunSnapshotReady).toBe(false);
+    expect(markGapfillCompareRunFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compareRunId: "cmp-run-1",
+        phase: "snapshot_persist_failed",
+        failureCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
+      })
+    );
   });
 
   it("returns route timeout classification when rebuild-only artifact ensure stalls", async () => {
@@ -2302,7 +2493,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(504);
     expect(body.error).toBe("artifact_ensure_route_timeout");
     expect(body.reasonCode).toBe("ARTIFACT_ENSURE_ROUTE_TIMEOUT");
-    expect(body.timeoutMs).toBe(240000);
+    expect(body.timeoutMs).toBe(120000);
     expect(body.missingData).toEqual(["rebuildGapfillSharedPastArtifact"]);
   });
 
