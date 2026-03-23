@@ -82,7 +82,12 @@ Shared simulation architecture authority:
 - `loadWeatherForPastWindow` must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily weather rows when the canonical date window is already covered; do not trigger redundant weather backfill/API work in that case.
 - Backfill/stub repair is only for missing or `STUB_V1` dates, and provenance must stay truthful (`actual_only`, `mixed_actual_and_stub`, or `stub_only`) because both Past Sim and GapFill read this same shared weather path.
 - Current runtime note: compare-run persistence is now live (`GapfillCompareRunSnapshot`) and `compare_core` now returns `compareRunId`, `compareRunStatus`, and `compareRunSnapshotReady`.
-- Current runtime note: `heavy_only_compact` is still route-monolithic response shaping; heavy follow-ups are not yet split into snapshot-read-only reader endpoints.
+- Current runtime note: staged heavy snapshot readers now exist:
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Current runtime note: canonical heavy follow-up is now snapshot-read-only over `compareRunId`; reader stages do not own sim/artifact/weather logic.
+- Current runtime note: legacy `compare_heavy` compatibility may still exist, but it should not be treated as the normal path.
 - Route-level or tool-level simulation math is not allowed when shared simulator output already exists.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
@@ -96,7 +101,7 @@ Simulation modeling authority:
 - Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`.
 - This bootstrap should stay short and operational; do not redefine modeling logic here.
 - Architecture cleanup is complete for shared-artifact alignment. Current focus is shared simulation-core accuracy.
-- Current runtime subtask: staged heavy snapshot-read-only reader split (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) over persisted compare-run snapshot state.
+- Current runtime subtask: stabilization follow-up only (optional admin dedupe cleanup, optional legacy `compare_heavy` compatibility cleanup, optional observability/perf polish).
 - Do not reopen artifact architecture cleanup unless a new active-path bug proves it is necessary.
 
 Modeling mode split (summary):

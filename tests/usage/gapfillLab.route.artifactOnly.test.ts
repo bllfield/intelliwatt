@@ -26,6 +26,7 @@ const createGapfillCompareRunStart = vi.fn();
 const markGapfillCompareRunRunning = vi.fn();
 const markGapfillCompareRunFailed = vi.fn();
 const finalizeGapfillCompareRunSnapshot = vi.fn();
+const getGapfillCompareRunSnapshotById = vi.fn();
 
 const prismaUserFindFirst = vi.fn();
 const prismaHouseFindMany = vi.fn();
@@ -83,6 +84,7 @@ vi.mock("@/modules/usageSimulator/compareRunSnapshot", () => ({
   markGapfillCompareRunRunning: (...args: any[]) => markGapfillCompareRunRunning(...args),
   markGapfillCompareRunFailed: (...args: any[]) => markGapfillCompareRunFailed(...args),
   finalizeGapfillCompareRunSnapshot: (...args: any[]) => finalizeGapfillCompareRunSnapshot(...args),
+  getGapfillCompareRunSnapshotById: (...args: any[]) => getGapfillCompareRunSnapshotById(...args),
 }));
 
 vi.mock("@/lib/admin/gapfillLab", () => ({
@@ -224,6 +226,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     markGapfillCompareRunRunning.mockReset();
     markGapfillCompareRunFailed.mockReset();
     finalizeGapfillCompareRunSnapshot.mockReset();
+    getGapfillCompareRunSnapshotById.mockReset();
     vi.restoreAllMocks();
     prismaUserFindFirst.mockReset();
     prismaHouseFindMany.mockReset();
@@ -283,6 +286,85 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     markGapfillCompareRunRunning.mockResolvedValue(true);
     markGapfillCompareRunFailed.mockResolvedValue(true);
     finalizeGapfillCompareRunSnapshot.mockResolvedValue(true);
+    getGapfillCompareRunSnapshotById.mockResolvedValue({
+      ok: true,
+      row: {
+        id: "cmp-run-1",
+        createdAt: "2026-03-18T00:00:00.000Z",
+        updatedAt: "2026-03-18T00:01:00.000Z",
+        startedAt: "2026-03-18T00:00:00.000Z",
+        finishedAt: "2026-03-18T00:01:00.000Z",
+        status: "succeeded",
+        phase: "snapshot_persisted",
+        houseId: "h1",
+        userId: "u1",
+        compareFreshMode: "selected_days",
+        requestedInputHash: "hash-1",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        failureCode: null,
+        failureMessage: null,
+        snapshotReady: true,
+        snapshotVersion: "gapfill_compare_snapshot_v1",
+        snapshotPersistedAt: "2026-03-18T00:01:00.000Z",
+        snapshotJson: {
+          selectedScoredDateKeys: ["2026-01-01"],
+          scoredDayTruthRowsCompact: [
+            {
+              localDate: "2026-01-01",
+              actualDayKwh: 10,
+              freshCompareSimDayKwh: 10,
+            },
+          ],
+          scoredDayWeatherRows: [
+            {
+              localDate: "2026-01-01",
+              avgTempF: 50,
+              minTempF: 40,
+              maxTempF: 60,
+              hdd65: 15,
+              cdd65: 0,
+              weatherBasisUsed: "actual_only",
+              weatherKindUsed: "ACTUAL_LAST_YEAR",
+              weatherSourceUsed: "OPEN_METEO",
+              weatherProviderName: "Open-Meteo",
+              weatherFallbackReason: null,
+            },
+          ],
+          scoredDayWeatherTruth: {
+            availability: "available",
+            reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+          },
+          travelVacantParityRows: [
+            {
+              localDate: "2025-12-25",
+              artifactCanonicalSimDayKwh: 12.34,
+              freshSharedDayCalcKwh: 12.34,
+              parityMatch: true,
+            },
+          ],
+          travelVacantParityTruth: {
+            availability: "validated",
+            reasonCode: "TRAVEL_VACANT_PARITY_VALIDATED",
+          },
+          compareTruth: {
+            compareFreshModeUsed: "selected_days",
+            travelVacantParityAvailability: "validated",
+          },
+          identityTruth: {
+            artifactSourceMode: "exact_hash_match",
+            artifactHashMatch: true,
+          },
+          counts: {
+            selectedScoredDateCount: 1,
+            scoredDayWeatherCount: 1,
+            travelVacantParityCount: 1,
+          },
+        },
+        statusMetaJson: null,
+      },
+    });
   });
 
   it("returns rebuild-required when artifact is missing and does not rebuild implicitly", async () => {
@@ -2118,9 +2200,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("compare_heavy_client_exception");
     expect(clientSource).toContain("compare_heavy_timeout");
     expect(clientSource).toContain("compare_heavy_fetch_failure");
-    expect(clientSource).toContain("heavyFailureKind");
-    expect(clientSource).toContain("\"route_timeout\"");
-    expect(clientSource).toContain("\"route_exception\"");
+    expect(clientSource).toContain("snapshotReaderFailureKind");
+    expect(clientSource).toContain("SNAPSHOT_READER_STAGE_FAILED");
   });
 
   it("classifies artifact ensure client timeout, fetch failure, and exception explicitly in client source", () => {
@@ -2136,7 +2217,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("classifyArtifactEnsureUiFailure");
   });
 
-  it("requests and merges compact heavy-only responses in client source", () => {
+  it("requests and merges staged snapshot heavy readers in client source", () => {
     const clientSource = readFileSync(
       resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
       "utf8"
@@ -2146,18 +2227,17 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("extractCompareCoreScoredDayWeather(result);");
     expect(clientSource).toContain("const compareCoreIncludesHeavyPayload =");
     expect(clientSource).toContain("togglesSnapshot.fullDiagnosticsOnCore && !togglesSnapshot.runHeavyDiagnosticsStep");
-    expect(clientSource).toContain('responseMode: "heavy_only_compact"');
+    expect(clientSource).toContain("compare_heavy_manifest");
+    expect(clientSource).toContain("compare_heavy_parity");
+    expect(clientSource).toContain("compare_heavy_scored_days");
+    expect(clientSource).toContain("action: actionName");
     expect(clientSource).toContain('if ((data as any).responseMode === "heavy_only_compact")');
-    expect(clientSource).toContain("if (compareCoreIncludesHeavyPayload || !togglesSnapshot.runHeavyDiagnosticsStep)");
-    expect(clientSource).toContain("heavyStartedAt");
-    expect(clientSource).toContain("heavyStepsMs");
-    expect(clientSource).toContain("compareCoreMode: prev.compareCoreMode");
-    expect(clientSource).toContain("compareCoreTiming: (prev as any).compareCoreTiming");
-    expect(clientSource).toContain("compareCoreStepTimings: prev.compareCoreStepTimings");
+    expect(clientSource).toContain("snapshotReaderAction === \"compare_heavy_manifest\"");
+    expect(clientSource).toContain("snapshotReaderAction");
+    expect(clientSource).toContain("scoredDayTruthRowsCompact");
     expect(clientSource).toContain("const [compareRunId, setCompareRunId] = useState<string | null>(null);");
     expect(clientSource).toContain("const [compareRunStatus, setCompareRunStatus] = useState<\"started\" | \"running\" | \"succeeded\" | \"failed\" | null>(null);");
     expect(clientSource).toContain("function syncCompareRunState(data: ApiResponse | null | undefined)");
-    expect(clientSource).toContain("compareRunId: (coreData as any)?.compareRunId ?? compareRunId ?? undefined");
     expect(clientSource).toContain("...prev,");
   });
 
@@ -2326,6 +2406,201 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.byDayType).toBeUndefined();
     expect(body.worstDays).toBeUndefined();
     expect(body.modelAssumptions).toBeUndefined();
+  });
+
+  it("serves compare_heavy_manifest from persisted snapshot only", async () => {
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_manifest",
+        compareRunId: "cmp-run-1",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("compare_heavy_manifest");
+    expect(body.compareRunId).toBe("cmp-run-1");
+    expect(body.compareRunStatus).toBe("succeeded");
+    expect(body.compareRunSnapshotReady).toBe(true);
+    expect(body.snapshotSource).toBe("compare_run_snapshot");
+    expect(body.availableSections?.parity).toBe(true);
+    expect(body.availableSections?.scoredDays).toBe(true);
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+    expect(rebuildGapfillSharedPastArtifact).not.toHaveBeenCalled();
+  });
+
+  it("serves compare_heavy_parity from persisted snapshot only", async () => {
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_parity",
+        compareRunId: "cmp-run-1",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("compare_heavy_parity");
+    expect(body.travelVacantParityRows?.[0]?.localDate).toBe("2025-12-25");
+    expect(body.travelVacantParityTruth?.reasonCode).toBe("TRAVEL_VACANT_PARITY_VALIDATED");
+    expect(body.parity?.travelVacantParityRows?.[0]?.localDate).toBe("2025-12-25");
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+    expect(rebuildGapfillSharedPastArtifact).not.toHaveBeenCalled();
+  });
+
+  it("serves compare_heavy_scored_days from persisted snapshot only", async () => {
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_scored_days",
+        compareRunId: "cmp-run-1",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("compare_heavy_scored_days");
+    expect(body.scoredDayTruthRows?.[0]?.localDate).toBe("2026-01-01");
+    expect(body.scoredDayWeatherRows?.[0]?.localDate).toBe("2026-01-01");
+    expect(body.scoredDayWeatherTruth?.availability).toBe("available");
+    expect(body.scoredDays?.selectedScoredDateKeys).toEqual(["2026-01-01"]);
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+    expect(rebuildGapfillSharedPastArtifact).not.toHaveBeenCalled();
+  });
+
+  it("returns explicit error when compareRunId is missing for snapshot reader action", async () => {
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_manifest",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("compare_run_id_required");
+    expect(body.reasonCode).toBe("COMPARE_RUN_ID_REQUIRED");
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+  });
+
+  it("returns explicit error when compareRunId is unknown for snapshot readers", async () => {
+    getGapfillCompareRunSnapshotById.mockResolvedValueOnce({
+      ok: false,
+      error: "compare_run_not_found",
+      message: "No compare-run snapshot record exists for the provided compareRunId.",
+    });
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_manifest",
+        compareRunId: "cmp-run-missing",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(404);
+    expect(body.error).toBe("compare_run_not_found");
+    expect(body.reasonCode).toBe("COMPARE_RUN_NOT_FOUND");
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+  });
+
+  it("returns explicit snapshot-not-ready error for staged readers", async () => {
+    getGapfillCompareRunSnapshotById.mockResolvedValueOnce({
+      ok: true,
+      row: {
+        id: "cmp-run-1",
+        createdAt: "2026-03-18T00:00:00.000Z",
+        updatedAt: "2026-03-18T00:01:00.000Z",
+        startedAt: "2026-03-18T00:00:00.000Z",
+        finishedAt: null,
+        phase: "build_shared_compare",
+        houseId: "h1",
+        userId: "u1",
+        compareFreshMode: "selected_days",
+        requestedInputHash: "hash-1",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        failureCode: null,
+        failureMessage: null,
+        snapshotVersion: null,
+        snapshotPersistedAt: null,
+        statusMetaJson: null,
+        snapshotReady: false,
+        snapshotJson: null,
+        status: "running",
+      },
+    });
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_parity",
+        compareRunId: "cmp-run-1",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("compare_snapshot_not_ready");
+    expect(body.reasonCode).toBe("COMPARE_SNAPSHOT_NOT_READY");
+    expect(body.compareRunStatus).toBe("running");
+    expect(body.compareRunSnapshotReady).toBe(false);
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
+  });
+
+  it("returns explicit failed-run read-state error for staged readers", async () => {
+    getGapfillCompareRunSnapshotById.mockResolvedValueOnce({
+      ok: true,
+      row: {
+        id: "cmp-run-1",
+        createdAt: "2026-03-18T00:00:00.000Z",
+        updatedAt: "2026-03-18T00:01:00.000Z",
+        startedAt: "2026-03-18T00:00:00.000Z",
+        finishedAt: "2026-03-18T00:01:00.000Z",
+        status: "failed",
+        phase: "build_shared_compare",
+        houseId: "h1",
+        userId: "u1",
+        compareFreshMode: "selected_days",
+        requestedInputHash: "hash-1",
+        artifactScenarioId: "past-s1",
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
+        failureCode: "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE",
+        failureMessage: "Compare core timed out while building shared compare payload.",
+        snapshotReady: false,
+        snapshotVersion: null,
+        snapshotPersistedAt: null,
+        snapshotJson: null,
+        statusMetaJson: null,
+      },
+    });
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        action: "compare_heavy_scored_days",
+        compareRunId: "cmp-run-1",
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("compare_run_failed");
+    expect(body.reasonCode).toBe("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE");
+    expect(body.compareRunStatus).toBe("failed");
+    expect(body.compareRunSnapshotReady).toBe(false);
+    expect(buildGapfillCompareSimShared).not.toHaveBeenCalled();
   });
 
   it("returns route timeout classification with timing envelope when shared compare build stalls", async () => {
@@ -2534,6 +2809,19 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("mergeScoredDayTruthRowsWithCompareCoreWeather(");
     expect(clientSource).toContain("compareCoreScoredDayWeatherTruth");
     expect(clientSource).toContain('row.weatherSourceUsed ?? "—"');
+  });
+
+  it("uses staged snapshot reader actions instead of compare_heavy recompute in canonical flow", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain(
+      "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy_manifest -> compare_heavy_parity -> compare_heavy_scored_days"
+    );
+    expect(clientSource).toContain("const runReaderStage = async (");
+    expect(clientSource).toContain("action: actionName");
+    expect(clientSource).not.toContain('responseMode: "heavy_only_compact" as const');
   });
 
   it("reuses cached candidate intervals for random-day compare without refetching actuals", async () => {

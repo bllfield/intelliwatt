@@ -5,6 +5,7 @@ export const GAPFILL_COMPARE_SNAPSHOT_VERSION = "gapfill_compare_snapshot_v1";
 type GapfillCompareRunModel = {
   create: (args: any) => Promise<any>;
   update: (args: any) => Promise<any>;
+  findUnique: (args: any) => Promise<any>;
 };
 
 function getCompareRunModel(): GapfillCompareRunModel | null {
@@ -12,7 +13,8 @@ function getCompareRunModel(): GapfillCompareRunModel | null {
     const model = (usagePrisma as any).gapfillCompareRunSnapshot;
     return model &&
       typeof model.create === "function" &&
-      typeof model.update === "function"
+      typeof model.update === "function" &&
+      typeof model.findUnique === "function"
       ? model
       : null;
   } catch {
@@ -165,5 +167,113 @@ export async function finalizeGapfillCompareRunSnapshot(args: {
     return true;
   } catch {
     return false;
+  }
+}
+
+export async function getGapfillCompareRunSnapshotById(args: { compareRunId: string }): Promise<{
+  ok: true;
+  row: {
+    id: string;
+    createdAt: string;
+    updatedAt: string;
+    startedAt: string;
+    finishedAt: string | null;
+    status: string;
+    phase: string | null;
+    houseId: string | null;
+    userId: string | null;
+    compareFreshMode: string;
+    requestedInputHash: string | null;
+    artifactScenarioId: string | null;
+    requireExactArtifactMatch: boolean;
+    artifactIdentitySource: string | null;
+    failureCode: string | null;
+    failureMessage: string | null;
+    snapshotReady: boolean;
+    snapshotVersion: string | null;
+    snapshotPersistedAt: string | null;
+    snapshotJson: Record<string, unknown> | null;
+    statusMetaJson: Record<string, unknown> | null;
+  };
+} | {
+  ok: false;
+  error: string;
+  message: string;
+}> {
+  const model = getCompareRunModel();
+  if (!model) {
+    return {
+      ok: false,
+      error: "compare_run_persistence_unavailable",
+      message: "Gapfill compare-run persistence model is unavailable.",
+    };
+  }
+  try {
+    const row = await model.findUnique({
+      where: { id: args.compareRunId },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        startedAt: true,
+        finishedAt: true,
+        status: true,
+        phase: true,
+        houseId: true,
+        userId: true,
+        compareFreshMode: true,
+        requestedInputHash: true,
+        artifactScenarioId: true,
+        requireExactArtifactMatch: true,
+        artifactIdentitySource: true,
+        failureCode: true,
+        failureMessage: true,
+        snapshotReady: true,
+        snapshotVersion: true,
+        snapshotPersistedAt: true,
+        snapshotJson: true,
+        statusMetaJson: true,
+      },
+    });
+    if (!row) {
+      return {
+        ok: false,
+        error: "compare_run_not_found",
+        message: "No compare-run snapshot record exists for the provided compareRunId.",
+      };
+    }
+    return {
+      ok: true,
+      row: {
+        id: String(row.id),
+        createdAt: new Date(row.createdAt).toISOString(),
+        updatedAt: new Date(row.updatedAt).toISOString(),
+        startedAt: new Date(row.startedAt).toISOString(),
+        finishedAt: row.finishedAt ? new Date(row.finishedAt).toISOString() : null,
+        status: String(row.status ?? ""),
+        phase: row.phase != null ? String(row.phase) : null,
+        houseId: row.houseId != null ? String(row.houseId) : null,
+        userId: row.userId != null ? String(row.userId) : null,
+        compareFreshMode: String(row.compareFreshMode ?? ""),
+        requestedInputHash: row.requestedInputHash != null ? String(row.requestedInputHash) : null,
+        artifactScenarioId: row.artifactScenarioId != null ? String(row.artifactScenarioId) : null,
+        requireExactArtifactMatch: row.requireExactArtifactMatch === true,
+        artifactIdentitySource: row.artifactIdentitySource != null ? String(row.artifactIdentitySource) : null,
+        failureCode: row.failureCode != null ? String(row.failureCode) : null,
+        failureMessage: row.failureMessage != null ? String(row.failureMessage) : null,
+        snapshotReady: row.snapshotReady === true,
+        snapshotVersion: row.snapshotVersion != null ? String(row.snapshotVersion) : null,
+        snapshotPersistedAt: row.snapshotPersistedAt ? new Date(row.snapshotPersistedAt).toISOString() : null,
+        snapshotJson: row.snapshotJson && typeof row.snapshotJson === "object" ? (row.snapshotJson as Record<string, unknown>) : null,
+        statusMetaJson: row.statusMetaJson && typeof row.statusMetaJson === "object" ? (row.statusMetaJson as Record<string, unknown>) : null,
+      },
+    };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "compare run snapshot read failed";
+    return {
+      ok: false,
+      error: "compare_run_read_failed",
+      message: msg,
+    };
   }
 }

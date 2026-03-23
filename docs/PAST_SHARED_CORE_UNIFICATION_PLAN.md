@@ -54,11 +54,17 @@ Modeling guidance alignment:
 - For observed-history reconstruction in this shared Past core, empirical interval history + weather/day-time response is primary.
 - Home/appliance/occupancy details remain required and normalized, but are supportive priors/fallback in observed-history mode; they are primary in overlay and synthetic/sparse-data modes.
 
-## Current next runtime step (target-state, not implemented yet)
+## Current runtime state + next stabilization follow-up
 
 - Current runtime state now includes compare-run persistence from `compare_core`: compare-core creates a durable compare-run record keyed by `compareRunId` and finalizes a compact compare snapshot on successful completion.
 - `compareRunId` handoff is implemented in current runtime (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
-- Next implementation step is staged snapshot-read-only heavy readers (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`), which are not yet present in runtime code.
+- Staged snapshot-read-only heavy readers are now implemented in current runtime:
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Canonical admin heavy follow-up now reads staged snapshot projections via `compareRunId` readers.
+- Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
+- Next work is stabilization-only (optional admin dedupe polish, optional legacy compatibility cleanup, optional observability/perf cleanup).
 - GapFill remains scoring/reporting-only and must continue using the shared simulation/artifact/weather path; snapshot work changes orchestration/persistence only, not modeling ownership.
 
 ## LEGACY / NON-AUTHORITATIVE

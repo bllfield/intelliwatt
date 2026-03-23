@@ -29,6 +29,7 @@ import {
 import {
   createGapfillCompareRunStart,
   finalizeGapfillCompareRunSnapshot,
+  getGapfillCompareRunSnapshotById,
   markGapfillCompareRunFailed,
   markGapfillCompareRunRunning,
 } from "@/modules/usageSimulator/compareRunSnapshot";
@@ -243,6 +244,67 @@ function normalizeRouteError(value: unknown, fallbackMessage: string): { code: s
   const message = messageRaw || primitiveMessage || fallbackMessage;
   const code = codeRaw || messageRaw || fallbackMessage;
   return { code, message };
+}
+
+type GapfillSnapshotReaderAction =
+  | "compare_heavy_manifest"
+  | "compare_heavy_parity"
+  | "compare_heavy_scored_days";
+
+function toSnapshotReaderAction(value: unknown): GapfillSnapshotReaderAction | null {
+  const v = typeof value === "string" ? value.trim() : "";
+  if (
+    v === "compare_heavy_manifest" ||
+    v === "compare_heavy_parity" ||
+    v === "compare_heavy_scored_days"
+  ) {
+    return v;
+  }
+  return null;
+}
+
+function buildSnapshotReaderBase(args: {
+  compareRunId: string;
+  row: {
+    status: string;
+    phase: string | null;
+    compareFreshMode: string;
+    requestedInputHash: string | null;
+    artifactScenarioId: string | null;
+    requireExactArtifactMatch: boolean;
+    artifactIdentitySource: string | null;
+    failureCode: string | null;
+    failureMessage: string | null;
+    snapshotReady: boolean;
+    snapshotVersion: string | null;
+    snapshotPersistedAt: string | null;
+    snapshotJson: Record<string, unknown> | null;
+    statusMetaJson: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+    startedAt: string;
+    finishedAt: string | null;
+  };
+}) {
+  return {
+    compareRunId: args.compareRunId,
+    compareRunStatus: args.row.status,
+    compareRunSnapshotReady: args.row.snapshotReady,
+    compareFreshMode: args.row.compareFreshMode,
+    compareRunTiming: {
+      createdAt: args.row.createdAt,
+      updatedAt: args.row.updatedAt,
+      startedAt: args.row.startedAt,
+      finishedAt: args.row.finishedAt,
+      phase: args.row.phase,
+    },
+    artifactRequestTruth: {
+      requestedInputHash: args.row.requestedInputHash,
+      requestedArtifactScenarioId: args.row.artifactScenarioId,
+      requireExactArtifactMatch: args.row.requireExactArtifactMatch,
+      artifactIdentitySource: args.row.artifactIdentitySource,
+    },
+  };
 }
 
 function safeRatio(numerator: number, denominator: number): number | null {
@@ -1272,6 +1334,8 @@ export async function POST(req: NextRequest) {
     includeFullReportText?: boolean;
     /** Request compact heavy-only response shaping for merge onto an existing core result. */
     responseMode?: "heavy_only_compact";
+    /** Optional staged reader action over persisted compare-run snapshot. */
+    action?: unknown;
     /** Optional exact artifact identity forwarded from same-run artifact ensure. */
     requestedInputHash?: unknown;
     artifactScenarioId?: unknown;
@@ -1301,6 +1365,7 @@ export async function POST(req: NextRequest) {
   const includeUsage365 = body?.includeUsage365 === true;
   const includeDiagnostics = body?.includeDiagnostics === true;
   const includeFullReportText = body?.includeFullReportText === true;
+  const action = toSnapshotReaderAction(body?.action);
   const heavyOnlyCompactResponse =
     body?.responseMode === "heavy_only_compact" && includeDiagnostics && includeFullReportText;
   const requestedArtifactInputHash =
@@ -1371,6 +1436,203 @@ export async function POST(req: NextRequest) {
     : houses[0];
   if (!house) {
     return NextResponse.json({ ok: false, error: "house_not_found", message: "House not found or not owned by user." }, { status: 404 });
+  }
+
+  if (action) {
+    if (!requestedCompareRunId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_run_id_required",
+          message: "Snapshot reader action requires compareRunId.",
+          reasonCode: "COMPARE_RUN_ID_REQUIRED",
+          action,
+        },
+        { status: 400 }
+      );
+    }
+    const compareRunRead = await getGapfillCompareRunSnapshotById({
+      compareRunId: requestedCompareRunId,
+    });
+    if (!compareRunRead.ok) {
+      const notFound = compareRunRead.error === "compare_run_not_found";
+      return NextResponse.json(
+        {
+          ok: false,
+          error: notFound ? "compare_run_not_found" : "compare_run_read_failed",
+          message: compareRunRead.message,
+          reasonCode: notFound ? "COMPARE_RUN_NOT_FOUND" : "COMPARE_RUN_READ_FAILED",
+          action,
+          compareRunId: requestedCompareRunId,
+        },
+        { status: notFound ? 404 : 500 }
+      );
+    }
+    const runRow = compareRunRead.row;
+    if (runRow.userId && runRow.userId !== user.id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_run_not_found",
+          message: "No compare-run snapshot record exists for the provided compareRunId.",
+          reasonCode: "COMPARE_RUN_NOT_FOUND",
+          action,
+          compareRunId: requestedCompareRunId,
+        },
+        { status: 404 }
+      );
+    }
+    if (runRow.houseId && runRow.houseId !== house.id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_run_not_found",
+          message: "No compare-run snapshot record exists for the provided compareRunId.",
+          reasonCode: "COMPARE_RUN_NOT_FOUND",
+          action,
+          compareRunId: requestedCompareRunId,
+        },
+        { status: 404 }
+      );
+    }
+    if (runRow.status === "failed") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_run_failed",
+          message: runRow.failureMessage ?? "Compare run failed before snapshot readers could serve data.",
+          reasonCode: runRow.failureCode ?? "COMPARE_RUN_FAILED",
+          action,
+          ...buildSnapshotReaderBase({
+            compareRunId: requestedCompareRunId,
+            row: runRow,
+          }),
+        },
+        { status: 409 }
+      );
+    }
+    if (!runRow.snapshotReady || !runRow.snapshotJson) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_snapshot_not_ready",
+          message: "Compare snapshot is not ready for staged heavy readers yet.",
+          reasonCode: "COMPARE_SNAPSHOT_NOT_READY",
+          action,
+          ...buildSnapshotReaderBase({
+            compareRunId: requestedCompareRunId,
+            row: runRow,
+          }),
+        },
+        { status: 409 }
+      );
+    }
+
+    const snapshot = runRow.snapshotJson;
+    const base = buildSnapshotReaderBase({
+      compareRunId: requestedCompareRunId,
+      row: runRow,
+    });
+    console.info("[gapfill-lab][snapshot-reader]", {
+      route: "admin_gapfill_lab",
+      action,
+      compareRunId: requestedCompareRunId,
+      compareRunStatus: runRow.status,
+      compareRunSnapshotReady: runRow.snapshotReady,
+      snapshotSource: "GapfillCompareRunSnapshot.snapshotJson",
+      noRecompute: true,
+    });
+    if (action === "compare_heavy_manifest") {
+      const selectedScoredDateKeys = Array.isArray((snapshot as any)?.selectedScoredDateKeys)
+        ? (snapshot as any).selectedScoredDateKeys
+        : [];
+      const scoredDayWeatherRows = Array.isArray((snapshot as any)?.scoredDayWeatherRows)
+        ? (snapshot as any).scoredDayWeatherRows
+        : [];
+      const travelVacantParityRows = Array.isArray((snapshot as any)?.travelVacantParityRows)
+        ? (snapshot as any).travelVacantParityRows
+        : [];
+      return NextResponse.json({
+        ok: true,
+        action,
+        ...base,
+        snapshotSource: "compare_run_snapshot",
+        snapshotVersion: runRow.snapshotVersion,
+        snapshotPersistedAt: runRow.snapshotPersistedAt,
+        availableSections: {
+          parity: travelVacantParityRows.length > 0 || (snapshot as any)?.travelVacantParityTruth != null,
+          scoredDays:
+            selectedScoredDateKeys.length > 0 ||
+            Array.isArray((snapshot as any)?.scoredDayTruthRowsCompact),
+          scoredDayWeather:
+            scoredDayWeatherRows.length > 0 || (snapshot as any)?.scoredDayWeatherTruth != null,
+          compactDiagnostics:
+            (snapshot as any)?.missAttributionSummary != null ||
+            (snapshot as any)?.accuracyTuningBreakdowns != null,
+        },
+        counts: (snapshot as any)?.counts ?? null,
+        compareRequestTruth: (snapshot as any)?.compareRequestTruth ?? null,
+        identityTruth: (snapshot as any)?.identityTruth ?? null,
+        compareCoreTiming: (snapshot as any)?.compareCoreTiming ?? null,
+        noRecompute: true,
+      });
+    }
+    if (action === "compare_heavy_parity") {
+      const travelVacantParityRows = Array.isArray((snapshot as any)?.travelVacantParityRows)
+        ? (snapshot as any).travelVacantParityRows
+        : [];
+      const travelVacantParityTruth = (snapshot as any)?.travelVacantParityTruth ?? null;
+      const compareTruth = (snapshot as any)?.compareTruth ?? null;
+      const missAttributionSummary = (snapshot as any)?.missAttributionSummary ?? null;
+      return NextResponse.json({
+        ok: true,
+        action,
+        ...base,
+        snapshotSource: "compare_run_snapshot",
+        travelVacantParityRows,
+        travelVacantParityTruth,
+        compareTruth,
+        missAttributionSummary,
+        parity: {
+          travelVacantParityRows,
+          travelVacantParityTruth,
+          compareTruth,
+          identityTruth: (snapshot as any)?.identityTruth ?? null,
+          compareCoreTiming: (snapshot as any)?.compareCoreTiming ?? null,
+          counts: (snapshot as any)?.counts ?? null,
+          missAttributionSummary,
+        },
+        noRecompute: true,
+      });
+    }
+    const scoredDayTruthRowsCompact = Array.isArray((snapshot as any)?.scoredDayTruthRowsCompact)
+      ? (snapshot as any).scoredDayTruthRowsCompact
+      : [];
+    const scoredDayWeatherRows = Array.isArray((snapshot as any)?.scoredDayWeatherRows)
+      ? (snapshot as any).scoredDayWeatherRows
+      : [];
+    const scoredDayWeatherTruth = (snapshot as any)?.scoredDayWeatherTruth ?? null;
+    return NextResponse.json({
+      ok: true,
+      action,
+      ...base,
+      snapshotSource: "compare_run_snapshot",
+      scoredDayTruthRows: scoredDayTruthRowsCompact,
+      scoredDayWeatherRows,
+      scoredDayWeatherTruth,
+      scoredDays: {
+        selectedScoredDateKeys: Array.isArray((snapshot as any)?.selectedScoredDateKeys)
+          ? (snapshot as any).selectedScoredDateKeys
+          : [],
+        scoredDayTruthRowsCompact,
+        scoredDayWeatherRows,
+        scoredDayWeatherTruth,
+        metricsSummary: (snapshot as any)?.metricsSummary ?? null,
+        compareCoreTiming: (snapshot as any)?.compareCoreTiming ?? null,
+        counts: (snapshot as any)?.counts ?? null,
+      },
+      noRecompute: true,
+    });
   }
 
   const { homeProfile, applianceProfile } = await loadDisplayProfilesForHouse({

@@ -4,12 +4,14 @@
 
 - `artifact_ensure` succeeds as an explicit rebuild-only step in the current orchestrator flow.
 - `compare_core` succeeds and returns the primary compare truth/report payload.
-- `compare_heavy` is currently client-staged but still route-monolithic:
-  - `compare_core` and `compare_heavy` hit the same route (`/api/admin/tools/gapfill-lab`).
-  - `responseMode: "heavy_only_compact"` changes response shaping only.
-  - heavy can still rerun expensive full-window shared compare work.
+- Staged heavy snapshot readers now exist in the same route:
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Canonical admin heavy follow-up is now snapshot-read-only over `compareRunId`.
+- Legacy `compare_heavy` compatibility can still exist in runtime, but it is no longer the canonical admin heavy path.
 
-## Implemented current state (Step A)
+## Implemented current state (Step A + Step B)
 
 - A durable DB-backed compare-run model exists: `GapfillCompareRunSnapshot`.
 - `compare_core` now creates a compare-run record at execution start and marks compare-run lifecycle status (`started`, `running`, `succeeded`, `failed`).
@@ -20,12 +22,23 @@
   - `compareRunSnapshotReady`
 - Successful `compare_core` now finalizes a compact compare snapshot on that compare-run record.
 - If final compare snapshot persistence fails after core compute, route returns explicit failure instead of claiming success.
+- `compare_heavy_manifest`, `compare_heavy_parity`, and `compare_heavy_scored_days` now exist.
+- These reader actions require `compareRunId` and read only from persisted compare snapshot state.
+- Reader actions do not invoke fresh shared compare compute, artifact ensure, or weather loading/backfill.
+- GapFillLabClient canonical admin flow now runs:
+  - `lookup_inputs`
+  - `usage365_load`
+  - `artifact_ensure`
+  - `compare_core`
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Canonical heavy retry now retries snapshot readers instead of `compare_heavy` recompute.
 - Shared sim-core ownership, shared weather truth ownership, and exact artifact identity enforcement remain unchanged.
-- Heavy follow-up architecture is still current-state route behavior (not snapshot-read-only readers yet).
 
-## Problem statement
+## Remaining problem statement
 
-Compare-heavy timeout/duplicate-work risk remains because heavy follow-ups are not snapshot-backed. Even with compact heavy response shaping, the heavy step can recompute shared compare work instead of reading already-produced core truth.
+Major architecture replacement is complete through Step B. Remaining work is stabilization/cleanup (for example, optional admin dedupe polish, optional legacy `compare_heavy` deprecation when safe, and optional observability/perf cleanup).
 
 ## Non-negotiable rules
 
@@ -94,9 +107,11 @@ Persist enough snapshot data so heavy readers never rediscover identity or rebui
   - usage load
   - artifact ensure
   - compare core
-  - heavy follow-ups
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
 - UI must avoid duplicate fetches from rerender/useEffect/state churn.
-- Heavy retry buttons must call snapshot-read-only endpoints only after snapshot architecture exists.
+- Heavy retry buttons must call snapshot-read-only endpoints (not `compare_heavy` recompute).
 - UI dedupe must prevent double-submit duplicate work while preserving explicit retry behavior.
 
 ## Execution order
@@ -108,22 +123,24 @@ Persist enough snapshot data so heavy readers never rediscover identity or rebui
   - `compareRunId`, `compareRunStatus`, and `compareRunSnapshotReady` surfaced in `compare_core` responses.
 
 ### Step B: staged heavy snapshot readers
-- Add `compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`.
-- Ensure handlers are read-only over persisted snapshot data.
+- Implemented:
+  - `compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days` added.
+  - handlers are read-only over persisted compare snapshot data keyed by `compareRunId`.
+  - canonical admin heavy flow now uses reader stages and retries reader stages.
+  - canonical heavy follow-up is no longer recompute-based.
 
-### Step C: admin dedupe/retry-safe orchestration
-- Wire heavy follow-up buttons/steps to snapshot readers.
-- Keep one canonical path and explicit retry semantics.
+### Step C: stabilization follow-up (only if still needed)
+- Admin dedupe/cleanup polish if duplicate calls remain under rerender/user-repeat pressure.
+- Optional legacy `compare_heavy` deprecation/removal when compatibility risk is low and coverage is sufficient.
 
-### Step D: narrow tests for snapshot-read-only and no-recompute guarantees
-- Add focused tests that prove heavy readers do not rerun `compare_core` logic.
-- Add tests for compareRunId handoff and missing/invalid snapshot handling.
+### Step D: narrow incremental cleanup (only if still needed)
+- Add any missing focused tests for no-recompute guarantees and edge read-state handling.
+- Add optional observability/perf cleanup around staged reader timings and diagnostics.
 
-## Explicit not implemented yet
+## Explicit remaining stabilization items
 
-The following are target-state and are not present in runtime code today:
+The following are remaining optional cleanup items, not architecture gaps:
 
-- `compare_heavy_manifest`
-- `compare_heavy_parity`
-- `compare_heavy_scored_days`
-- snapshot-read-only heavy endpoints
+- additional admin dedupe polish if needed
+- optional legacy `compare_heavy` compatibility cleanup/deprecation if safe
+- optional observability/perf cleanup

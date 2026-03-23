@@ -141,15 +141,18 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
   - [x] Early `compareRunId` creation/handoff exists in `compare_core`.
   - [x] Final compare snapshot persistence exists on successful `compare_core`.
   - [x] `compare_core` response now includes `compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`.
-- Current runtime reality: `heavy_only_compact` is still response shaping on the same route and can still recompute compare work.
-- Next runtime subtask is staged heavy snapshot-read-only readers.
+- Step B is complete in runtime code:
+  - [x] `compare_heavy_manifest` exists as snapshot-read-only over `compareRunId`.
+  - [x] `compare_heavy_parity` exists as snapshot-read-only over `compareRunId`.
+  - [x] `compare_heavy_scored_days` exists as snapshot-read-only over `compareRunId`.
+  - [x] Canonical GapFill admin heavy flow now uses compareRunId reader stages.
+  - [x] Canonical heavy retry now retries snapshot readers instead of recompute.
+- Runtime note: legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
 
-Checklist for the next subtask:
-- [ ] Add `compare_heavy_manifest` as snapshot-read-only over `compareRunId`.
-- [ ] Add `compare_heavy_parity` as snapshot-read-only over `compareRunId`.
-- [ ] Add `compare_heavy_scored_days` as snapshot-read-only over `compareRunId`.
-- [ ] Route heavy retry/read path over persisted compare snapshot keyed by `compareRunId`.
-- [ ] Add admin dedupe cleanup after reader split if still needed.
+Checklist for stabilization follow-up (narrow scope, only if still needed):
+- [ ] Admin dedupe/cleanup polish for any residual duplicate heavy-reader calls.
+- [ ] Optional legacy `compare_heavy` cleanup/deprecation if compatibility risk is low.
+- [ ] Optional observability/perf cleanup for staged reader timings and no-recompute diagnostics.
 
 ### Simulation Modeling Modes (authoritative summary)
 

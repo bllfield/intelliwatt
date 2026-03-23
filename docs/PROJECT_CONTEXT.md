@@ -134,8 +134,10 @@
 - Broad focus remains shared simulation-core accuracy.
 - `compareRunId` plus durable compare-run persistence now exist in runtime (`GapfillCompareRunSnapshot`).
 - `compare_core` now returns compare-run state fields (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
-- Current remaining bottleneck is heavy follow-up architecture because heavy remains route-monolithic and not snapshot-read-only.
-- Next runtime step is staged heavy snapshot-read-only readers (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`).
+- Staged heavy snapshot readers now exist in runtime (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`) and require `compareRunId`.
+- Canonical heavy follow-up path is now snapshot-read-only over persisted compare snapshot state (no recompute in canonical admin flow).
+- Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
+- Remaining work is stabilization/cleanup only (optional dedupe polish, optional compatibility cleanup, optional observability/perf refinement).
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.

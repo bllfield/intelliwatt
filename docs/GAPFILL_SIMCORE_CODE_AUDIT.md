@@ -297,3 +297,27 @@ Still not implemented (remains target-state):
 - `compare_heavy_parity`
 - `compare_heavy_scored_days`
 - true snapshot-read-only heavy reader architecture
+
+## Post-audit implementation update (Step B)
+
+Runtime implementation update completed after Step A:
+
+Note: this Step B addendum supersedes the Step A "still not implemented" list for heavy reader architecture.
+
+- Staged heavy snapshot readers now exist in runtime code:
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Reader actions require `compareRunId` and read only from persisted compare-run snapshot state.
+- Reader actions do not invoke fresh shared compare compute, artifact ensure, or weather loading/backfill.
+- Canonical GapFill admin heavy flow now uses compareRunId reader stages:
+  - `lookup_inputs`
+  - `usage365_load`
+  - `artifact_ensure`
+  - `compare_core`
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Canonical heavy retry now retries snapshot readers, not `compare_heavy` recompute.
+- Legacy `compare_heavy` compatibility may still exist, but it is no longer the canonical admin heavy path.
+- Shared sim-core ownership, shared weather truth ownership (`loadWeatherForPastWindow`), and exact artifact identity enforcement remain unchanged.

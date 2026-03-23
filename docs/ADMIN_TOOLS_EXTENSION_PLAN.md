@@ -1,6 +1,6 @@
 # Admin Tools Extension Plan (additive only)
 
-_Generated from audit; implementation not started. Do not redesign existing admin IA; add sections/buttons/forms only where capabilities are missing._
+_Generated from audit; selectively implemented in runtime. Do not redesign existing admin IA; add sections/buttons/forms only where capabilities are missing._
 
 ---
 
@@ -37,15 +37,16 @@ _Generated from audit; implementation not started. Do not redesign existing admi
 **Simulation test tooling:** Gap-Fill Lab and Simulation Engines provide diagnostics and compare outputs; they do not expose a dedicated “run baseline build only” or “run overlay application check” step. Prime-past-cache is additive and used by gapfill-lab.
 
 **Gap-Fill compare-heavy baseline state (current runtime):**
-- Compare-heavy behavior is client-staged in the admin UI but still monolithic route execution in runtime.
 - Compare-run persistence is now implemented (`GapfillCompareRunSnapshot`) and `compare_core` now creates/updates compare-run lifecycle status.
 - `compareRunId` handoff is now implemented in `compare_core` responses (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
 - Successful `compare_core` now persists a compact compare snapshot on the compare-run record.
-- `heavy_only_compact` still changes response shaping only; heavy follow-ups are not yet split into snapshot-read-only readers and can still rerun shared compare work.
-
-**Gap-Fill compare-heavy target-state (next runtime step):**
-- Add staged heavy snapshot-read-only endpoints (`compare_heavy_manifest`, `compare_heavy_parity`, `compare_heavy_scored_days`).
-- Add admin dedupe / retry-safe orchestration that uses snapshot-read-only heavy calls after snapshot architecture exists.
+- Staged heavy snapshot-read-only readers are now implemented:
+  - `compare_heavy_manifest`
+  - `compare_heavy_parity`
+  - `compare_heavy_scored_days`
+- Canonical admin heavy flow now uses compareRunId reader stages and snapshot-reader retry behavior.
+- Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
+- Remaining work is stabilization-only (optional admin dedupe cleanup, optional legacy compatibility cleanup/deprecation, optional observability/perf cleanup).
 - Gap-Fill Lab must not own simulation logic, artifact identity logic, or weather logic; it remains orchestration/reporting over shared modules.
 
 ---

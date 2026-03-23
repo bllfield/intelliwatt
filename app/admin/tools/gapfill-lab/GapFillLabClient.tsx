@@ -274,7 +274,7 @@ type ChartMode = "usage365" | "gapfill";
 // Heavy compare can legitimately spend up to the route's shared-compare timeout
 // plus the report-builder timeout. Keep the client budget slightly above that
 // so route-side failure classification still reaches the UI, without waiting ~15 min.
-const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 195_000;
+const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 120_000;
 // Keep client timeout above route compare-core timeouts so route step-level
 // timeout classification can return to UI before the browser aborts.
 const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
@@ -286,7 +286,9 @@ type OrchestratorPhaseKey =
   | "usage365_load"
   | "artifact_ensure"
   | "compare_core"
-  | "compare_heavy";
+  | "compare_heavy_manifest"
+  | "compare_heavy_parity"
+  | "compare_heavy_scored_days";
 type OrchestratorPhaseStatus = "pending" | "active" | "done" | "error" | "skipped";
 type OrchestratorPhase = {
   key: OrchestratorPhaseKey;
@@ -309,7 +311,9 @@ const ORCHESTRATOR_PHASE_BLUEPRINT: Array<{ key: OrchestratorPhaseKey; label: st
   { key: "usage365_load", label: "Usage 365 Load" },
   { key: "artifact_ensure", label: "Artifact Ensure" },
   { key: "compare_core", label: "Compare Core" },
-  { key: "compare_heavy", label: "Compare Heavy Report" },
+  { key: "compare_heavy_manifest", label: "Compare Heavy Manifest (Snapshot)" },
+  { key: "compare_heavy_parity", label: "Compare Heavy Parity (Snapshot)" },
+  { key: "compare_heavy_scored_days", label: "Compare Heavy Scored Days (Snapshot)" },
 ];
 
 function normalizeDailyRowsToWindow<T extends { date: string }>(
@@ -889,15 +893,29 @@ export default function GapFillLabClient() {
     {
       key: "compare",
       label: "Compare",
-      failed: phaseHasError("compare_core", "compare_heavy"),
+      failed: phaseHasError(
+        "compare_core",
+        "compare_heavy_manifest",
+        "compare_heavy_parity",
+        "compare_heavy_scored_days"
+      ),
       state:
-        phaseHasError("compare_core", "compare_heavy")
+        phaseHasError(
+          "compare_core",
+          "compare_heavy_manifest",
+          "compare_heavy_parity",
+          "compare_heavy_scored_days"
+        )
           ? "pending"
-          : phaseStateByKey.get("compare_heavy") === "done" ||
+          : phaseStateByKey.get("compare_heavy_scored_days") === "done" ||
+        phaseStateByKey.get("compare_heavy_parity") === "done" ||
+        phaseStateByKey.get("compare_heavy_manifest") === "done" ||
         phaseStateByKey.get("compare_core") === "done" ||
         (result && result.ok && result.metrics)
           ? "done"
-          : phaseStateByKey.get("compare_heavy") === "active" ||
+          : phaseStateByKey.get("compare_heavy_scored_days") === "active" ||
+            phaseStateByKey.get("compare_heavy_parity") === "active" ||
+            phaseStateByKey.get("compare_heavy_manifest") === "active" ||
             phaseStateByKey.get("compare_core") === "active" ||
             loading
             ? "active"
@@ -1013,6 +1031,63 @@ export default function GapFillLabClient() {
     syncCompareRunState(data);
     setResult((prev) => {
       if (data.ok && prev?.ok) {
+        const snapshotReaderAction =
+          typeof (data as any).action === "string" ? String((data as any).action) : null;
+        if (
+          snapshotReaderAction === "compare_heavy_manifest" ||
+          snapshotReaderAction === "compare_heavy_parity" ||
+          snapshotReaderAction === "compare_heavy_scored_days"
+        ) {
+          const parityPayload = (data as any).parity ?? null;
+          const scoredDaysPayload = (data as any).scoredDays ?? null;
+          return {
+            ...prev,
+            ...data,
+            compareRunId: (data as any).compareRunId ?? prev.compareRunId ?? null,
+            compareRunStatus: (data as any).compareRunStatus ?? prev.compareRunStatus ?? null,
+            compareRunSnapshotReady:
+              typeof (data as any).compareRunSnapshotReady === "boolean"
+                ? (data as any).compareRunSnapshotReady
+                : prev.compareRunSnapshotReady,
+            compareTruth:
+              (data as any).compareTruth ??
+              parityPayload?.compareTruth ??
+              prev.compareTruth ??
+              null,
+            travelVacantParityRows:
+              (data as any).travelVacantParityRows ??
+              parityPayload?.travelVacantParityRows ??
+              prev.travelVacantParityRows ??
+              [],
+            travelVacantParityTruth:
+              (data as any).travelVacantParityTruth ??
+              parityPayload?.travelVacantParityTruth ??
+              prev.travelVacantParityTruth ??
+              undefined,
+            scoredDayWeatherRows:
+              (data as any).scoredDayWeatherRows ??
+              scoredDaysPayload?.scoredDayWeatherRows ??
+              prev.scoredDayWeatherRows ??
+              [],
+            scoredDayWeatherTruth:
+              (data as any).scoredDayWeatherTruth ??
+              scoredDaysPayload?.scoredDayWeatherTruth ??
+              prev.scoredDayWeatherTruth ??
+              undefined,
+            scoredDayTruthRows:
+              (data as any).scoredDayTruthRows ??
+              scoredDaysPayload?.scoredDayTruthRowsCompact ??
+              prev.scoredDayTruthRows ??
+              [],
+            missAttributionSummary:
+              (data as any).missAttributionSummary ??
+              parityPayload?.missAttributionSummary ??
+              prev.missAttributionSummary,
+            accuracyTuningBreakdowns:
+              (data as any).accuracyTuningBreakdowns ??
+              prev.accuracyTuningBreakdowns,
+          } as ApiResponse;
+        }
         if ((data as any).responseMode === "heavy_only_compact") {
           return {
             ...prev,
@@ -1222,7 +1297,8 @@ export default function GapFillLabClient() {
       setLastAttemptDebug({
         startedAt: runStartedAt,
         phase: "orchestrator_started",
-        orchestration: "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy",
+        orchestration:
+          "lookup_inputs -> usage365_load -> artifact_ensure -> compare_core -> compare_heavy_manifest -> compare_heavy_parity -> compare_heavy_scored_days",
         requestBody: baseCompareBody,
         requestTruth: {
           includeDiagnostics: compareCoreIncludesHeavyPayload,
@@ -1539,7 +1615,23 @@ export default function GapFillLabClient() {
         const skipReason = !togglesSnapshot.runHeavyDiagnosticsStep
           ? "Heavy diagnostics step disabled by toggle."
           : "Heavy step skipped because core already included full diagnostics/report.";
-        updateOrchestratorPhase("compare_heavy", {
+        updateOrchestratorPhase("compare_heavy_manifest", {
+          status: "skipped",
+          startedAt: nowIso,
+          endedAt: nowIso,
+          elapsedMs: 0,
+          errorCode: null,
+          errorMessage: skipReason,
+        });
+        updateOrchestratorPhase("compare_heavy_parity", {
+          status: "skipped",
+          startedAt: nowIso,
+          endedAt: nowIso,
+          elapsedMs: 0,
+          errorCode: null,
+          errorMessage: skipReason,
+        });
+        updateOrchestratorPhase("compare_heavy_scored_days", {
           status: "skipped",
           startedAt: nowIso,
           endedAt: nowIso,
@@ -1558,116 +1650,155 @@ export default function GapFillLabClient() {
         return;
       }
 
-      // 5) Compare heavy report (full diagnostics/text)
-      const compareBodyHeavy = {
-        ...compareBodyBase,
-        includeDiagnostics: true,
-        includeFullReportText: true,
-        responseMode: "heavy_only_compact" as const,
-        compareRunId: (coreData as any)?.compareRunId ?? compareRunId ?? undefined,
+      // 5-7) Snapshot-read-only heavy reader stages
+      const coreCompareRunId =
+        typeof (coreData as any)?.compareRunId === "string" && String((coreData as any).compareRunId).trim()
+          ? String((coreData as any).compareRunId).trim()
+          : compareRunId ?? null;
+      if (!coreCompareRunId) {
+        const msg = "Compare core completed without compareRunId; cannot run snapshot heavy readers.";
+        updateOrchestratorPhase("compare_heavy_manifest", {
+          status: "error",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          errorCode: "compare_run_id_missing_after_core",
+          errorMessage: msg,
+        });
+        updateOrchestratorPhase("compare_heavy_parity", {
+          status: "skipped",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          errorCode: null,
+          errorMessage: "Skipped because manifest stage failed.",
+        });
+        updateOrchestratorPhase("compare_heavy_scored_days", {
+          status: "skipped",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          errorCode: null,
+          errorMessage: "Skipped because manifest stage failed.",
+        });
+        setHeavyRetryBody({
+          email: trimmed,
+          timezone,
+          houseId: houseId || undefined,
+          compareRunId: coreCompareRunId,
+        });
+        setError(msg);
+        setProgressStatus("Core compare complete. Snapshot heavy readers need compareRunId.");
+        return;
+      }
+      const readerBaseBody = {
+        email: trimmed,
+        timezone,
+        houseId: houseId || undefined,
+        compareRunId: coreCompareRunId,
       };
-      const compareHeavyFreshModeRequested = resolveCompareFreshModeRequested({
-        includeDiagnostics: true,
-        includeFullReportText: true,
-      });
-      startPhase("compare_heavy", "Building heavy diagnostics report...");
-      let heavyRes: Response;
-      let heavyData: ApiResponse;
+      const runReaderStage = async (
+        phaseKey: OrchestratorPhaseKey,
+        actionName: "compare_heavy_manifest" | "compare_heavy_parity" | "compare_heavy_scored_days",
+        statusLabel: string
+      ): Promise<{ res: Response; data: ApiResponse }> => {
+        const body = { ...readerBaseBody, action: actionName };
+        startPhase(phaseKey, statusLabel);
+        let res: Response;
+        let data: ApiResponse;
+        try {
+          const result = await postGapfill(body, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
+          res = result.res;
+          data = result.data;
+          syncCompareRunState(data);
+        } catch (e: unknown) {
+          const failure = classifyHeavyDiagnosticsUiFailure(e);
+          finishPhase(phaseKey, "error", {
+            errorCode: failure.errorCode,
+            errorMessage: failure.message,
+          });
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: `${actionName}_exception`,
+            compareRunId: coreCompareRunId,
+            snapshotReaderAction: actionName,
+            snapshotReaderBody: body,
+            snapshotReaderError: failure.errorCode,
+            snapshotReaderMessage: failure.message,
+            snapshotReaderFailureKind: failure.failureKind,
+          }));
+          throw new Error(`SNAPSHOT_READER_STAGE_FAILED:${actionName}:${failure.message}`);
+        }
+        if (!res.ok || !data.ok) {
+          const errMsg = formatApiError(data as any, res.status);
+          finishPhase(phaseKey, "error", {
+            errorCode: String((data as any)?.error ?? `${actionName}_failed`),
+            errorMessage: errMsg,
+          });
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            phase: `${actionName}_error`,
+            compareRunId: coreCompareRunId,
+            snapshotReaderAction: actionName,
+            snapshotReaderBody: body,
+            snapshotReaderStatus: res.status,
+            snapshotReaderError: (data as any)?.error ?? null,
+            snapshotReaderMessage: (data as any)?.message ?? null,
+            snapshotReaderResponse: data,
+          }));
+          throw new Error(`SNAPSHOT_READER_STAGE_FAILED:${actionName}:${errMsg}`);
+        }
+        finishPhase(phaseKey, "done");
+        mergeSuccessfulResult(data);
+        setLastAttemptDebug((prev) => ({
+          ...(prev ?? {}),
+          phase: `${actionName}_done`,
+          compareRunId: coreCompareRunId,
+          snapshotReaderAction: actionName,
+          snapshotReaderBody: body,
+          snapshotReaderStatus: res.status,
+          snapshotReaderResponse: data,
+        }));
+        return { res, data };
+      };
       try {
-        const heavyResult = await postGapfill(compareBodyHeavy, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
-        heavyRes = heavyResult.res;
-        heavyData = heavyResult.data;
-        syncCompareRunState(heavyData);
-      } catch (heavyErr: unknown) {
-        const failure = classifyHeavyDiagnosticsUiFailure(heavyErr);
-        finishPhase("compare_heavy", "error", {
-          errorCode: failure.errorCode,
-          errorMessage: failure.message,
-        });
-        setHeavyRetryBody(compareBodyHeavy);
-        setError(`Core compare completed, but heavy diagnostics/report failed.\n${failure.message}`);
-        setLastAttemptDebug((prev) => ({
-          ...(prev ?? {}),
-          phase: failure.phase,
-          heavyStatus: null,
-          heavyError: failure.errorCode,
-          heavyMessage: failure.message,
-          heavyFailureKind: failure.failureKind,
-          compareHeavyBody: compareBodyHeavy,
-          compareHeavyRequestTruth: {
-            includeDiagnostics: true,
-            includeFullReportText: true,
-            compareFreshModeRequested: compareHeavyFreshModeRequested,
-            runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
-          },
-          heavyResponse: null,
-        }));
-        setProgressStatus("Core compare complete. Heavy diagnostics failed; retry heavy report.");
-        return;
-      }
-      if (!heavyRes.ok || !heavyData.ok) {
-        finishPhase("compare_heavy", "error", {
-          errorCode: String((heavyData as any)?.error ?? "compare_heavy_failed"),
-          errorMessage: formatApiError(heavyData as any, heavyRes.status),
-        });
-        setHeavyRetryBody(compareBodyHeavy);
-        setError(
-          `Core compare completed, but heavy diagnostics/report failed.\n${formatApiError(
-            heavyData as any,
-            heavyRes.status
-          )}`
+        await runReaderStage(
+          "compare_heavy_manifest",
+          "compare_heavy_manifest",
+          "Reading heavy manifest snapshot..."
         );
-        setLastAttemptDebug((prev) => ({
-          ...(prev ?? {}),
-          phase: "compare_heavy_error",
-          heavyStatus: heavyRes.status,
-          heavyError: (heavyData as any)?.error ?? null,
-          heavyMessage: (heavyData as any)?.message ?? null,
-          heavyFailureKind:
-            heavyRes.status === 504 || String((heavyData as any)?.error ?? "") === "compare_core_route_timeout"
-              ? "route_timeout"
-              : String((heavyData as any)?.error ?? "") === "compare_core_route_exception"
-                ? "route_exception"
-                : "route_error_response",
-          compareHeavyBody: compareBodyHeavy,
-          compareHeavyRequestTruth: {
-            includeDiagnostics: true,
-            includeFullReportText: true,
-            compareFreshModeRequested: compareHeavyFreshModeRequested,
-            runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
-          },
-          heavyResponse: heavyData,
-        }));
-        setProgressStatus("Core compare complete. Heavy diagnostics failed; retry heavy report.");
+        await runReaderStage(
+          "compare_heavy_parity",
+          "compare_heavy_parity",
+          "Reading heavy parity snapshot..."
+        );
+        await runReaderStage(
+          "compare_heavy_scored_days",
+          "compare_heavy_scored_days",
+          "Reading heavy scored-day snapshot..."
+        );
+      } catch (stageError: unknown) {
+        setHeavyRetryBody(readerBaseBody);
+        setError(
+          `Core compare completed, but snapshot heavy readers failed.\n${
+            stageError instanceof Error ? stageError.message : String(stageError)
+          }`
+        );
+        setProgressStatus("Core compare complete. Snapshot heavy readers failed; retry snapshot readers only.");
         return;
       }
-      finishPhase("compare_heavy", "done");
-      mergeSuccessfulResult(heavyData);
       setHeavyRetryBody(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
         phase: "orchestrator_success",
-        compareRunId: (heavyData as any)?.compareRunId ?? (coreData as any)?.compareRunId ?? compareRunId ?? null,
-        compareRunStatus:
-          (heavyData as any)?.compareRunStatus ??
-          (coreData as any)?.compareRunStatus ??
-          compareRunStatus ??
-          null,
+        compareRunId: coreCompareRunId,
+        compareRunStatus: compareRunStatus ?? (coreData as any)?.compareRunStatus ?? null,
         compareRunSnapshotReady:
-          typeof (heavyData as any)?.compareRunSnapshotReady === "boolean"
-            ? (heavyData as any).compareRunSnapshotReady
+          typeof compareRunSnapshotReady === "boolean"
+            ? compareRunSnapshotReady
             : typeof (coreData as any)?.compareRunSnapshotReady === "boolean"
               ? (coreData as any).compareRunSnapshotReady
-              : compareRunSnapshotReady,
-        heavyStatus: heavyRes.status,
-        compareHeavyBody: compareBodyHeavy,
-        compareHeavyRequestTruth: {
-          includeDiagnostics: true,
-          includeFullReportText: true,
-          compareFreshModeRequested: compareHeavyFreshModeRequested,
-          runHeavyDiagnosticsStep: togglesSnapshot.runHeavyDiagnosticsStep,
-        },
-        heavyResponse: heavyData,
+              : null,
         finishedAt: new Date().toISOString(),
       }));
       setProgressStatus(null);
@@ -1713,7 +1844,7 @@ export default function GapFillLabClient() {
     compareInFlightRef.current = true;
     setLoading(true);
     setError(null);
-    updateOrchestratorPhase("compare_heavy", {
+    updateOrchestratorPhase("compare_heavy_manifest", {
       status: "active",
       startedAt: new Date().toISOString(),
       endedAt: null,
@@ -1721,107 +1852,136 @@ export default function GapFillLabClient() {
       errorCode: null,
       errorMessage: null,
     });
-    setProgressStatus("Retrying heavy diagnostics report...");
+    updateOrchestratorPhase("compare_heavy_parity", {
+      status: "pending",
+      startedAt: null,
+      endedAt: null,
+      elapsedMs: null,
+      errorCode: null,
+      errorMessage: null,
+    });
+    updateOrchestratorPhase("compare_heavy_scored_days", {
+      status: "pending",
+      startedAt: null,
+      endedAt: null,
+      elapsedMs: null,
+      errorCode: null,
+      errorMessage: null,
+    });
+    setProgressStatus("Retrying snapshot heavy readers...");
     try {
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
-        phase: "compare_heavy_retry_started",
+        phase: "compare_snapshot_readers_retry_started",
         timeoutMs: GAPFILL_COMPARE_HEAVY_TIMEOUT_MS,
-        compareHeavyRetryBody: heavyRetryBody,
+        compareSnapshotRetryBody: heavyRetryBody,
       }));
-      const startedAtMs = Date.now();
-      let res: Response;
-      let data: ApiResponse;
-      try {
-        const retryResult = await postGapfill(heavyRetryBody, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
-        res = retryResult.res;
-        data = retryResult.data;
-        syncCompareRunState(data);
-      } catch (e: unknown) {
-        const failure = classifyHeavyDiagnosticsUiFailure(e);
-        updateOrchestratorPhase("compare_heavy", {
-          status: "error",
-          endedAt: new Date().toISOString(),
-          errorCode: failure.errorCode,
-          errorMessage: failure.message,
+      const baseBody = { ...heavyRetryBody };
+      const runRetryStage = async (
+        phaseKey: OrchestratorPhaseKey,
+        actionName: "compare_heavy_manifest" | "compare_heavy_parity" | "compare_heavy_scored_days",
+        statusLabel: string
+      ): Promise<void> => {
+        const startedAtMs = Date.now();
+        updateOrchestratorPhase(phaseKey, {
+          status: "active",
+          startedAt: new Date(startedAtMs).toISOString(),
+          endedAt: null,
+          elapsedMs: null,
+          errorCode: null,
+          errorMessage: null,
         });
-        setError(failure.message);
-        setLastAttemptDebug((prev) => ({
-          ...(prev ?? {}),
-          phase:
-            failure.failureKind === "client_timeout"
-              ? "compare_heavy_retry_timeout"
-              : failure.failureKind === "fetch_failure"
-                ? "compare_heavy_retry_fetch_failure"
-                : "compare_heavy_retry_exception",
-          heavyRetryError: failure.errorCode,
-          heavyRetryMessage: failure.message,
-          heavyRetryFailureKind: failure.failureKind,
-        }));
-        return;
-      }
-      if (!res.ok || !data.ok) {
+        setProgressStatus(statusLabel);
+        const requestBody = { ...baseBody, action: actionName };
+        let res: Response;
+        let data: ApiResponse;
+        try {
+          const retryResult = await postGapfill(requestBody, GAPFILL_COMPARE_HEAVY_TIMEOUT_MS);
+          res = retryResult.res;
+          data = retryResult.data;
+          syncCompareRunState(data);
+        } catch (e: unknown) {
+          const failure = classifyHeavyDiagnosticsUiFailure(e);
+          updateOrchestratorPhase(phaseKey, {
+            status: "error",
+            endedAt: new Date().toISOString(),
+            errorCode: failure.errorCode,
+            errorMessage: failure.message,
+          });
+          throw new Error(`${actionName}:${failure.message}`);
+        }
+        if (!res.ok || !data.ok) {
+          const endedAtMs = Date.now();
+          updateOrchestratorPhase(phaseKey, {
+            status: "error",
+            endedAt: new Date(endedAtMs).toISOString(),
+            elapsedMs: endedAtMs - startedAtMs,
+            errorCode: String((data as any)?.error ?? `${actionName}_retry_failed`),
+            errorMessage: formatApiError(data as any, res.status),
+          });
+          throw new Error(`${actionName}:${formatApiError(data as any, res.status)}`);
+        }
         const endedAtMs = Date.now();
-        updateOrchestratorPhase("compare_heavy", {
-          status: "error",
+        updateOrchestratorPhase(phaseKey, {
+          status: "done",
           endedAt: new Date(endedAtMs).toISOString(),
           elapsedMs: endedAtMs - startedAtMs,
-          errorCode: String((data as any)?.error ?? "compare_heavy_retry_failed"),
-          errorMessage: formatApiError(data as any, res.status),
+          errorCode: null,
+          errorMessage: null,
         });
-        setError(formatApiError(data as any, res.status));
-        setLastAttemptDebug((prev) => ({
-          ...(prev ?? {}),
-          phase: "compare_heavy_retry_error",
-          heavyRetryStatus: res.status,
-          heavyRetryError: (data as any)?.error ?? null,
-          heavyRetryMessage: (data as any)?.message ?? null,
-          heavyRetryFailureKind:
-            res.status === 504 || String((data as any)?.error ?? "") === "compare_core_route_timeout"
-              ? "route_timeout"
-              : String((data as any)?.error ?? "") === "compare_core_route_exception"
-                ? "route_exception"
-                : "route_error_response",
-        }));
-        return;
-      }
-      const endedAtMs = Date.now();
-      updateOrchestratorPhase("compare_heavy", {
-        status: "done",
-        endedAt: new Date(endedAtMs).toISOString(),
-        elapsedMs: endedAtMs - startedAtMs,
-        errorCode: null,
-        errorMessage: null,
-      });
-      mergeSuccessfulResult(data);
+        mergeSuccessfulResult(data);
+      };
+      await runRetryStage(
+        "compare_heavy_manifest",
+        "compare_heavy_manifest",
+        "Retrying snapshot manifest reader..."
+      );
+      await runRetryStage(
+        "compare_heavy_parity",
+        "compare_heavy_parity",
+        "Retrying snapshot parity reader..."
+      );
+      await runRetryStage(
+        "compare_heavy_scored_days",
+        "compare_heavy_scored_days",
+        "Retrying snapshot scored-day reader..."
+      );
       setHeavyRetryBody(null);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
-        phase: "compare_heavy_retry_success",
-        compareRunId: (data as any)?.compareRunId ?? compareRunId ?? null,
-        compareRunStatus: (data as any)?.compareRunStatus ?? compareRunStatus ?? null,
-        compareRunSnapshotReady:
-          typeof (data as any)?.compareRunSnapshotReady === "boolean"
-            ? (data as any).compareRunSnapshotReady
-            : compareRunSnapshotReady,
-        heavyRetryStatus: res.status,
+        phase: "compare_snapshot_readers_retry_success",
+        compareRunId: compareRunId ?? null,
+        compareRunStatus: compareRunStatus ?? null,
+        compareRunSnapshotReady: compareRunSnapshotReady,
       }));
       setProgressStatus(null);
     } catch (e: any) {
       const normalized = normalizeUnknownUiError(
         e,
-        "Heavy diagnostics retry failed after the request started."
+        "Snapshot heavy reader retry failed after the request started."
       );
-      updateOrchestratorPhase("compare_heavy", {
+      updateOrchestratorPhase("compare_heavy_manifest", {
         status: "error",
         endedAt: new Date().toISOString(),
-        errorCode: normalized.name ?? "compare_heavy_retry_exception",
+        errorCode: normalized.name ?? "compare_snapshot_retry_exception",
+        errorMessage: normalized.message,
+      });
+      updateOrchestratorPhase("compare_heavy_parity", {
+        status: "error",
+        endedAt: new Date().toISOString(),
+        errorCode: normalized.name ?? "compare_snapshot_retry_exception",
+        errorMessage: normalized.message,
+      });
+      updateOrchestratorPhase("compare_heavy_scored_days", {
+        status: "error",
+        endedAt: new Date().toISOString(),
+        errorCode: normalized.name ?? "compare_snapshot_retry_exception",
         errorMessage: normalized.message,
       });
       setError(normalized.message);
       setLastAttemptDebug((prev) => ({
         ...(prev ?? {}),
-        phase: "compare_heavy_retry_exception",
+        phase: "compare_snapshot_readers_retry_exception",
         errorName: normalized.name ?? null,
         errorMessage: normalized.message,
       }));
@@ -2236,7 +2396,7 @@ export default function GapFillLabClient() {
               disabled={loading || rebuildLoading}
               className="mt-3 px-3 py-1.5 bg-brand-navy text-white rounded hover:bg-brand-blue disabled:opacity-50 text-sm"
             >
-              Retry heavy diagnostics only
+              Retry snapshot heavy readers only
             </button>
           )}
         </div>
@@ -2252,17 +2412,19 @@ export default function GapFillLabClient() {
                 <span className="ml-2 text-brand-navy/80">
                   {phaseStateByKey.get("compare_core") === "error"
                     ? "Compare core failed; see Orchestrator Timeline for exact reason."
-                    : phaseStateByKey.get("compare_heavy") === "error"
-                      ? "Heavy diagnostics failed; core compare may still be valid."
+                    : phaseStateByKey.get("compare_heavy_manifest") === "error" ||
+                        phaseStateByKey.get("compare_heavy_parity") === "error" ||
+                        phaseStateByKey.get("compare_heavy_scored_days") === "error"
+                      ? "Snapshot heavy readers failed; core compare may still be valid."
                       : "Request failed before completion."}
                 </span>
               </div>
             )}
             {heavyRetryBody && (
               <div>
-                <span className={badgeClass("warn")}>heavy diagnostics retry available</span>
+                <span className={badgeClass("warn")}>snapshot reader retry available</span>
                 <span className="ml-2 text-brand-navy/80">
-                  Core compare has run, but heavy report payload needs retry.
+                  Core compare has run, but snapshot heavy readers need retry.
                 </span>
               </div>
             )}
@@ -2344,7 +2506,33 @@ export default function GapFillLabClient() {
               { key: "usage365_load", request: (lastAttemptDebug as any).usageBody, response: (lastAttemptDebug as any).usageResponse, status: (lastAttemptDebug as any).usageStatus },
               { key: "artifact_ensure", request: (lastAttemptDebug as any).ensureBody, response: (lastAttemptDebug as any).ensureResponse, status: (lastAttemptDebug as any).ensureStatus },
               { key: "compare_core", request: (lastAttemptDebug as any).compareCoreBody, response: (lastAttemptDebug as any).coreResponse, status: (lastAttemptDebug as any).coreStatus },
-              { key: "compare_heavy", request: (lastAttemptDebug as any).compareHeavyBody, response: (lastAttemptDebug as any).heavyResponse, status: (lastAttemptDebug as any).heavyStatus },
+              {
+                key: "compare_heavy_manifest",
+                request: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_manifest" ? (lastAttemptDebug as any).snapshotReaderBody : null,
+                response: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_manifest" ? (lastAttemptDebug as any).snapshotReaderResponse : null,
+                status: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_manifest" ? (lastAttemptDebug as any).snapshotReaderStatus : null,
+              },
+              {
+                key: "compare_heavy_parity",
+                request: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_parity" ? (lastAttemptDebug as any).snapshotReaderBody : null,
+                response: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_parity" ? (lastAttemptDebug as any).snapshotReaderResponse : null,
+                status: (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_parity" ? (lastAttemptDebug as any).snapshotReaderStatus : null,
+              },
+              {
+                key: "compare_heavy_scored_days",
+                request:
+                  (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_scored_days"
+                    ? (lastAttemptDebug as any).snapshotReaderBody
+                    : null,
+                response:
+                  (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_scored_days"
+                    ? (lastAttemptDebug as any).snapshotReaderResponse
+                    : null,
+                status:
+                  (lastAttemptDebug as any).snapshotReaderAction === "compare_heavy_scored_days"
+                    ? (lastAttemptDebug as any).snapshotReaderStatus
+                    : null,
+              },
             ]
               .filter((row) => row.request != null || row.response != null || row.status != null)
               .map((row) => (
