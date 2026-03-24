@@ -51,6 +51,7 @@ vi.mock("@/modules/weather/identity", () => ({
 vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
   encodeIntervalsV1: vi.fn(),
   decodeIntervalsV1: vi.fn(() => [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.5 }]),
+  quantizeIntervalKwhForCodec: (kwh: number) => Math.round(Math.max(0, Number(kwh) || 0) * 1000) / 1000,
   INTERVAL_CODEC_V1: "v1_delta_varint",
 }));
 

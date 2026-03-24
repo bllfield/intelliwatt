@@ -51,6 +51,10 @@ vi.mock("@/modules/usageSimulator/pastCache", () => ({
 vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
   encodeIntervalsV1: (...args: any[]) => encodeIntervalsV1(...args),
   decodeIntervalsV1: (...args: any[]) => decodeIntervalsV1(...args),
+  quantizeIntervalKwhForCodec: (kwh: number) => {
+    const raw = Math.max(0, Number(kwh) || 0);
+    return Math.round(raw * 1000) / 1000;
+  },
   INTERVAL_CODEC_V1: "v1_delta_varint",
 }));
 
@@ -3228,7 +3232,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("keeps exact travel parity validated from shared interval day totals even when selected-day day results drift", async () => {
+  it("keeps exact travel parity validated when fresh travel intervals only differ below codec precision", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -3277,14 +3281,18 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     const phases: string[] = [];
     simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
       const selected = Array.from(selectedDateKeysLocal ?? []).map(String).sort();
-      const intervals = selected.flatMap((dk) => oneChicagoLocalDayIntervals96(dk, 24 / 96));
       if (selected.includes("2026-01-03") || selected.includes("2026-01-04")) {
+        const driftedDay3 = oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96).map((row, idx) => ({
+          ...row,
+          kwh: idx < 26 ? row.kwh - 0.0004 : row.kwh,
+        }));
+        const stableDay4 = oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96);
         return {
-          simulatedIntervals: intervals,
+          simulatedIntervals: [...driftedDay3, ...stableDay4],
           simulatedDayResults: selected.map((dk) => ({
             localDate: dk,
-            intervalSumKwh: dk === "2026-01-03" ? 23.98 : 24.02,
-            finalDayKwh: dk === "2026-01-03" ? 23.98 : 24.02,
+            intervalSumKwh: dk === "2026-01-03" ? 23.99 : 24,
+            finalDayKwh: dk === "2026-01-03" ? 23.99 : 24,
           })),
           pastDayCounts: {},
           weatherSourceSummary: "actual_only",
@@ -3292,7 +3300,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         };
       }
       return {
-        simulatedIntervals: intervals,
+        simulatedIntervals: selected.flatMap((dk) => oneChicagoLocalDayIntervals96(dk, 24 / 96)),
         simulatedDayResults: selected.map((dk) => ({
           localDate: dk,
           intervalSumKwh: 24,
@@ -3320,7 +3328,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       artifactExactInputHash: "hash-selected-exact-interval-authority",
       requireExactArtifactMatch: true,
       artifactIdentitySource: "same_run_artifact_ensure",
-      onPhaseUpdate: (phase) => phases.push(String(phase)),
+      onPhaseUpdate: (phase) => {
+        phases.push(String(phase));
+      },
     });
 
     expect(out.ok).toBe(true);
@@ -3349,7 +3359,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("reports raw parity mismatch diagnostics with interval edge timestamps for exact travel parity mismatches", async () => {
+  it("reports raw parity mismatch diagnostics when fresh interval drift survives codec normalization", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -3398,11 +3408,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
       const selected = Array.from(selectedDateKeysLocal ?? []).map(String).sort();
       if (selected.includes("2026-01-03") || selected.includes("2026-01-04")) {
+        const mismatchDay3 = oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96).map((row, idx) => ({
+          ...row,
+          kwh: idx === 0 ? row.kwh + 0.012 : row.kwh,
+        }));
         return {
-          simulatedIntervals: [
-            ...oneChicagoLocalDayIntervals96("2026-01-03", 23.98 / 96),
-            ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
-          ],
+          simulatedIntervals: [...mismatchDay3, ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96)],
           simulatedDayResults: [],
           pastDayCounts: {},
           weatherSourceSummary: "actual_only",
@@ -3450,7 +3461,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           expect.objectContaining({
             localDate: "2026-01-03",
             artifactCanonicalSimDayKwh: 24,
-            freshSharedDayCalcKwh: 23.98,
+            freshSharedDayCalcKwh: 24.01,
             parityMatch: false,
           }),
         ])
@@ -3459,7 +3470,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         expect.objectContaining({
           localDate: "2026-01-03",
           normalizedArtifactDaySum: 24,
-          normalizedFreshDaySum: 23.98,
+          normalizedFreshDaySum: 24.01,
           intervalCountArtifact: 96,
           intervalCountFresh: 96,
         }),

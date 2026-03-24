@@ -35,7 +35,12 @@ import {
   type CachedPastDataset,
   type CanonicalArtifactSimulatedDayTotalsByDate,
 } from "@/modules/usageSimulator/pastCache";
-import { encodeIntervalsV1, decodeIntervalsV1, INTERVAL_CODEC_V1 } from "@/modules/usageSimulator/intervalCodec";
+import {
+  encodeIntervalsV1,
+  decodeIntervalsV1,
+  INTERVAL_CODEC_V1,
+  quantizeIntervalKwhForCodec,
+} from "@/modules/usageSimulator/intervalCodec";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
@@ -923,6 +928,22 @@ function buildCanonicalIntervalDayTotalsByLocalDate(
       },
     ])
   );
+}
+
+/** Match persisted artifact codec precision before exact parity aggregates compare day totals. */
+function normalizeIntervalsForExactParityCodec(
+  intervals: Array<{ timestamp: string; kwh: number }>
+): Array<{ timestamp: string; kwh: number }> {
+  const out: Array<{ timestamp: string; kwh: number }> = [];
+  for (const row of intervals) {
+    const timestamp = canonicalIntervalKey(String(row?.timestamp ?? "").trim());
+    if (!timestamp) continue;
+    out.push({
+      timestamp,
+      kwh: quantizeIntervalKwhForCodec(Number(row?.kwh) || 0),
+    });
+  }
+  return out;
 }
 
 const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
@@ -2921,9 +2942,15 @@ export async function buildGapfillCompareSimShared(args: {
   throwIfGapfillCompareAborted(abortSignal);
   // Keep travel/vacant proof on canonical interval-summed day totals so
   // artifact-side and fresh-side parity compare the same aggregation basis.
-  const freshParityDayTotalsByDate = buildCanonicalIntervalDayTotalsByLocalDate(freshParityIntervals, timezone);
   const useIntervalBackedTravelVacantParityTotals =
     exactParityArtifactIntervals.length > 0 && freshParityIntervals.length > 0;
+  const freshParityIntervalsForExactParity = useIntervalBackedTravelVacantParityTotals
+    ? normalizeIntervalsForExactParityCodec(freshParityIntervals)
+    : freshParityIntervals;
+  const freshParityDayTotalsByDate = buildCanonicalIntervalDayTotalsByLocalDate(
+    freshParityIntervalsForExactParity,
+    timezone
+  );
   throwIfGapfillCompareAborted(abortSignal);
   const artifactExactParityDayTotalsByDate = useIntervalBackedTravelVacantParityTotals
     ? buildCanonicalIntervalDayTotalsByLocalDate(exactParityArtifactIntervals, timezone)
