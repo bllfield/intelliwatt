@@ -3228,6 +3228,263 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("keeps exact travel parity validated from shared interval day totals even when selected-day day results drift", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
+      },
+    });
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-exact-interval-authority",
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 24 * 5,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-03,2026-01-04",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-03": 24,
+            "2026-01-04": 24,
+          },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "ACTUAL" },
+          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 120 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue([
+      ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
+    ]);
+    const phases: string[] = [];
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+      const selected = Array.from(selectedDateKeysLocal ?? []).map(String).sort();
+      const intervals = selected.flatMap((dk) => oneChicagoLocalDayIntervals96(dk, 24 / 96));
+      if (selected.includes("2026-01-03") || selected.includes("2026-01-04")) {
+        return {
+          simulatedIntervals: intervals,
+          simulatedDayResults: selected.map((dk) => ({
+            localDate: dk,
+            intervalSumKwh: dk === "2026-01-03" ? 23.98 : 24.02,
+            finalDayKwh: dk === "2026-01-03" ? 23.98 : 24.02,
+          })),
+          pastDayCounts: {},
+          weatherSourceSummary: "actual_only",
+          weatherKindUsed: "ACTUAL_LAST_YEAR",
+        };
+      }
+      return {
+        simulatedIntervals: intervals,
+        simulatedDayResults: selected.map((dk) => ({
+          localDate: dk,
+          intervalSumKwh: 24,
+          finalDayKwh: 24,
+        })),
+        pastDayCounts: {},
+        weatherSourceSummary: "actual_only",
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+      };
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      artifactExactScenarioId: "gapfill_lab",
+      artifactExactInputHash: "hash-selected-exact-interval-authority",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+      onPhaseUpdate: (phase) => phases.push(String(phase)),
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+      expect(out.travelVacantParityTruth).toMatchObject({
+        availability: "validated",
+        mismatchCount: 0,
+        exactProofSatisfied: true,
+      });
+      expect(out.travelVacantParityTruth?.mismatchDiagnosticsSample).toBeUndefined();
+      expect(out.travelVacantParityRows).toEqual([
+        expect.objectContaining({
+          localDate: "2026-01-03",
+          artifactCanonicalSimDayKwh: 24,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+        expect.objectContaining({
+          localDate: "2026-01-04",
+          artifactCanonicalSimDayKwh: 24,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
+        }),
+      ]);
+    }
+  });
+
+  it("reports raw parity mismatch diagnostics with interval edge timestamps for exact travel parity mismatches", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
+      },
+    });
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-exact-mismatch-diag",
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 24 * 5,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-03,2026-01-04",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-03": 24,
+            "2026-01-04": 24,
+          },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "ACTUAL" },
+          { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-04", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 120 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue([
+      ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-05", 24 / 96),
+    ]);
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+      const selected = Array.from(selectedDateKeysLocal ?? []).map(String).sort();
+      if (selected.includes("2026-01-03") || selected.includes("2026-01-04")) {
+        return {
+          simulatedIntervals: [
+            ...oneChicagoLocalDayIntervals96("2026-01-03", 23.98 / 96),
+            ...oneChicagoLocalDayIntervals96("2026-01-04", 24 / 96),
+          ],
+          simulatedDayResults: [],
+          pastDayCounts: {},
+          weatherSourceSummary: "actual_only",
+          weatherKindUsed: "ACTUAL_LAST_YEAR",
+        };
+      }
+      return {
+        simulatedIntervals: selected.flatMap((dk) => oneChicagoLocalDayIntervals96(dk, 24 / 96)),
+        simulatedDayResults: [],
+        pastDayCounts: {},
+        weatherSourceSummary: "actual_only",
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+      };
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      artifactExactScenarioId: "gapfill_lab",
+      artifactExactInputHash: "hash-selected-exact-mismatch-diag",
+      requireExactArtifactMatch: true,
+      artifactIdentitySource: "same_run_artifact_ensure",
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.reasonCode).toBe("TRAVEL_VACANT_PARITY_MISMATCH");
+      expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
+        availability: "mismatch_detected",
+        mismatchCount: 1,
+        exactProofSatisfied: false,
+      });
+      expect((out.body as any)?.travelVacantParityRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            localDate: "2026-01-03",
+            artifactCanonicalSimDayKwh: 24,
+            freshSharedDayCalcKwh: 23.98,
+            parityMatch: false,
+          }),
+        ])
+      );
+      expect((out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample).toEqual([
+        expect.objectContaining({
+          localDate: "2026-01-03",
+          normalizedArtifactDaySum: 24,
+          normalizedFreshDaySum: 23.98,
+          intervalCountArtifact: 96,
+          intervalCountFresh: 96,
+        }),
+      ]);
+      expect(typeof (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.rawArtifactDaySum).toBe(
+        "number"
+      );
+      expect(typeof (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.rawFreshDaySum).toBe(
+        "number"
+      );
+      expect(
+        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.artifactFirstLocalTimestamp
+      ).toMatch(/^2026-01-03T/);
+      expect(
+        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.artifactLastLocalTimestamp
+      ).toMatch(/^2026-01-03T/);
+      expect(
+        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.freshFirstLocalTimestamp
+      ).toMatch(/^2026-01-03T/);
+      expect(
+        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.freshLastLocalTimestamp
+      ).toMatch(/^2026-01-03T/);
+    }
+  });
+
   it("reports full missing-reference totals when simulated artifact days are missing canonical references", async () => {
     const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
     getLatestCachedPastDatasetByScenario.mockResolvedValue({

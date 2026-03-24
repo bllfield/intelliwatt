@@ -1564,6 +1564,21 @@ describe("gapfill-lab route artifact-only hard lock", () => {
           requestedDateSample: ["2025-12-25"],
           exactProofRequired: true,
           exactProofSatisfied: false,
+          mismatchDiagnosticsSample: [
+            {
+              localDate: "2025-12-25",
+              rawArtifactDaySum: 12.3456,
+              rawFreshDaySum: 12.3256,
+              normalizedArtifactDaySum: 12.35,
+              normalizedFreshDaySum: 12.33,
+              artifactFirstLocalTimestamp: "2025-12-25T00:00:00",
+              artifactLastLocalTimestamp: "2025-12-25T23:45:00",
+              freshFirstLocalTimestamp: "2025-12-25T00:00:00",
+              freshLastLocalTimestamp: "2025-12-25T23:45:00",
+              intervalCountArtifact: 96,
+              intervalCountFresh: 96,
+            },
+          ],
         },
       },
     });
@@ -1589,6 +1604,15 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       exactProofRequired: true,
       exactProofSatisfied: false,
     });
+    expect(body.travelVacantParityTruth?.mismatchDiagnosticsSample).toEqual([
+      expect.objectContaining({
+        localDate: "2025-12-25",
+        normalizedArtifactDaySum: 12.35,
+        normalizedFreshDaySum: 12.33,
+        intervalCountArtifact: 96,
+        intervalCountFresh: 96,
+      }),
+    ]);
   });
 
   it("keeps compare auto-ensure enabled for full-window diagnostics mode", async () => {
