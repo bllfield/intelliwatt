@@ -1122,12 +1122,6 @@ export async function buildGapfillCompareSimShared(args: {
     // allowing selected-days lightweight reads to change how the artifact is selected.
     useSelectedDaysLightweightArtifactRead = false;
   }
-  /** Selected-days Gap-Fill compare_core only: omit heavy chart/monthly/display materialization when diagnostics and full report are off (Vercel OOM mitigation). */
-  const compareCoreMemoryReducedPath =
-    effectiveCompareFreshMode === "selected_days" &&
-    useSelectedDaysLightweightArtifactRead === true &&
-    includeDiagnostics !== true &&
-    includeFullReportText !== true;
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -1174,6 +1168,20 @@ export async function buildGapfillCompareSimShared(args: {
       : "";
   const exactArtifactIdentityRequested = requestedArtifactInputHash.length > 0;
   const exactArtifactReadRequired = exactArtifactIdentityRequested && requireExactArtifactMatch === true;
+  /**
+   * Selected-days Gap-Fill compare_core: omit heavy chart/monthly/display materialization when the
+   * client requested selected-days lightweight compare (diagnostics/full report off, no rebuild).
+   * Intentionally does NOT require `useSelectedDaysLightweightArtifactRead` — that flag is cleared
+   * when exact interval-backed travel/vacant parity forces non-lightweight artifact *selection*,
+   * but we still skip broad display/monthly materialization in that case (Vercel OOM mitigation).
+   */
+  const compareCoreMemoryReducedPath =
+    selectedDaysLightweightArtifactRead === true &&
+    effectiveCompareFreshMode === "selected_days" &&
+    !rebuildArtifact &&
+    !autoEnsureArtifact &&
+    includeDiagnostics !== true &&
+    includeFullReportText !== true;
   let sharedInputHash = exactArtifactIdentityRequested ? requestedArtifactInputHash : "";
   if (!useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested) {
     const intervalDataFingerprint = await getIntervalDataFingerprint({
@@ -1857,6 +1865,16 @@ export async function buildGapfillCompareSimShared(args: {
     boundedTestDateKeysCount: boundedTestDateKeysLocal.size,
     travelVacantParityDateKeysCount: travelVacantParityDateKeysLocal.length,
     needsFreshCompareForParity,
+    compactPathEligible: compareCoreMemoryReducedPath,
+    compactPathGates: {
+      effectiveCompareFreshMode,
+      includeDiagnostics,
+      includeFullReportText,
+      selectedDaysLightweightArtifactRead: selectedDaysLightweightArtifactRead === true,
+      useSelectedDaysLightweightArtifactRead,
+      exactArtifactReadRequired,
+      exactTravelParityRequiresIntervalBackedArtifactTruth,
+    },
   });
   if (needsFreshCompareForParity) {
     const runFullWindowFreshExecution = async () => {
@@ -2211,6 +2229,9 @@ export async function buildGapfillCompareSimShared(args: {
       artifactIntervalsMaterializedCount: artifactIntervals.length,
       skippedFullDatasetMonthlyScan: true,
       skippedIntervalMonthlyRebucket: true,
+      exactTravelParityRequiresIntervalBackedArtifactTruth,
+      lightweightArtifactReadOverriddenForExactTravelParity:
+        exactTravelParityRequiresIntervalBackedArtifactTruth && selectedDaysLightweightArtifactRead === true,
     });
   }
   await reportPhase("build_shared_compare_scored_sim_rows_ready", {

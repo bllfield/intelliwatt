@@ -75,6 +75,7 @@ import {
   buildGapfillCompareSimShared,
   getSimulatedUsageForHouseScenario,
   rebuildGapfillSharedPastArtifact,
+  type GapfillCompareBuildPhase,
 } from "@/modules/usageSimulator/service";
 
 describe("getSimulatedUsageForHouseScenario artifact_only", () => {
@@ -1117,6 +1118,72 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
       expect(out.travelVacantParityTruth?.availability).toBeDefined();
       expect(Array.isArray(out.scoredDayWeatherRows)).toBe(true);
+    }
+  });
+
+  it("activates compact compare_core when exact travel parity disables lightweight artifact read (requireExactArtifactMatch)", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
+    const artifact = {
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-01",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 9999 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getCachedPastDataset.mockResolvedValue(artifact);
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+
+    const phases: string[] = [];
+    const inputsReadyMeta = { value: null as Record<string, unknown> | null };
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      requireExactArtifactMatch: true,
+      onPhaseUpdate: (phase: GapfillCompareBuildPhase, meta?: Record<string, unknown>) => {
+        phases.push(String(phase));
+        if (phase === "build_shared_compare_inputs_ready") {
+          inputsReadyMeta.value = meta ?? null;
+        }
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+    const inputsMeta = inputsReadyMeta.value;
+    const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
+    expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);
+    expect(gates?.useSelectedDaysLightweightArtifactRead).toBe(false);
+    expect(inputsMeta?.compactPathEligible).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedChartMonthly.length).toBe(0);
+      expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
+      expect(out.boundedTravelDateKeysLocal.has("2026-01-01")).toBe(true);
+      expect(out.travelVacantParityTruth?.availability).toBeDefined();
     }
   });
 
