@@ -443,6 +443,10 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       inputHash: "hash-rebuilt-exact",
     });
     expect(simulatePastFullWindowShared).toHaveBeenCalledTimes(1);
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    const savedAfterRebuild = saveCachedPastDataset.mock.calls[0]?.[0] ?? {};
+    const savedMetaAfterRebuild = ((savedAfterRebuild as any).datasetJson?.meta ?? {}) as Record<string, unknown>;
+    expect(savedMetaAfterRebuild.curveShapingVersion).toBe("shared_curve_v2");
   });
 
   it("uses the exact cached artifact for artifact ensure when the persisted identity is already valid", async () => {
@@ -595,6 +599,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       ? excludedDaysRaw.length
       : Number(excludedDaysRaw);
     expect(excludedDaysCount).toBe(2);
+    expect(savedMeta.curveShapingVersion).toBe("shared_curve_v2");
     expect(getCachedPastDataset).toHaveBeenCalledTimes(3);
   });
 });
@@ -698,6 +703,68 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (!out.ok) {
       expect(out.status).toBe(409);
       expect((out.body as any)?.error).toBe("artifact_missing_rebuild_required");
+    }
+  });
+
+  it("treats cached artifact missing curveShapingVersion as stale (curve-shaping guard)", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-exact-curve",
+      updatedAt: new Date(),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: { excludedDateKeysFingerprint: "" },
+        daily: [],
+        monthly: [],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    computePastInputHash.mockReturnValue("hash-exact-curve");
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-exact-curve",
+      updatedAt: new Date(),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96,
+          totalKwh: 24,
+          start: "2026-01-01",
+          end: "2026-01-01",
+        },
+        meta: {
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      autoEnsureArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: false,
+      artifactExactInputHash: "hash-exact-curve",
+      artifactExactScenarioId: "gapfill_lab",
+      requireExactArtifactMatch: true,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_stale_rebuild_required");
+      expect(String((out.body as any)?.message ?? "")).toContain("curve-shaping");
     }
   });
 

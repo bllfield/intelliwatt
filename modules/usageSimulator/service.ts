@@ -510,6 +510,8 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         intervalCount: recomputed.intervalCount,
         coverageStart: canonicalCoverage.startDate,
         coverageEnd: canonicalCoverage.endDate,
+        // Must match shared Past simulator + compare_core stale guard (`needsRebuildForOldCurveVersion`).
+        curveShapingVersion: "shared_curve_v2",
       },
       usageBucketsByMonth: recomputed.usageBucketsByMonth,
     };
