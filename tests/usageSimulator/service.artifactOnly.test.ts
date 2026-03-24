@@ -1184,6 +1184,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
       expect(out.boundedTravelDateKeysLocal.has("2026-01-01")).toBe(true);
       expect(out.travelVacantParityTruth?.availability).toBeDefined();
+      expect(out.travelVacantParityRows?.length).toBeGreaterThan(0);
+      expect(out.travelVacantParityRows?.every((r) => r.parityMatch === true)).toBe(true);
+      expect(out.travelVacantParityTruth?.reasonCode).toBe("TRAVEL_VACANT_PARITY_VALIDATED");
     }
   });
 

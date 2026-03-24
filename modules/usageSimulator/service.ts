@@ -761,6 +761,27 @@ function round2Local(n: number) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/**
+ * Sum 15m interval kWh for one local calendar date, then round to 2 dp — same finalization as
+ * buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset (interval branch). Used for travel/vacant
+ * parity so artifact and fresh sides share one aggregation path and avoid 0.01-ish float drift from
+ * mixing meta/daily-rounded totals with raw float sums.
+ */
+function canonicalDayKwhFromIntervals15ForLocalDateKey(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  timezone: string,
+  dateKey: string
+): number {
+  let sum = 0;
+  for (const row of intervals) {
+    const timestamp = String(row?.timestamp ?? "").trim();
+    if (!timestamp) continue;
+    if (dateKeyInTimezone(timestamp, timezone) !== dateKey) continue;
+    sum += Number(row.kwh) || 0;
+  }
+  return round2Local(sum);
+}
+
 const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
 
 function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
@@ -2315,6 +2336,9 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.selectedDaysRequestedCount = boundedTestDateKeysLocal.size;
   modelAssumptions.selectedDaysScoredCount = availableTestDateKeysFromSimulated.size;
   modelAssumptions.freshSimIntervalCountSelectedDays = simulatedTestIntervals.length;
+  // TODO(scored-day parity UX): when selected-days scoped rows diverge from merge expectations,
+  // artifactReferenceRowCount / comparableDateCount can still read 0 in diagnostics — separate from
+  // travel/vacant interval parity below.
   modelAssumptions.artifactReferenceDayCountUsed = artifactSimulatedDayReferenceRows.filter((row) =>
     boundedTestDateKeysLocal.has(row.date)
   ).length;
@@ -2461,13 +2485,19 @@ export async function buildGapfillCompareSimShared(args: {
     }
     return totals;
   })();
+  const useIntervalBackedTravelVacantParityTotals =
+    exactParityArtifactIntervals.length > 0 && freshParityIntervals.length > 0;
   travelVacantParityRows = travelVacantParityDateKeysLocal.map((dk) => {
-    const artifactCanonicalSimDayKwh = canonicalArtifactDailyByDate.has(dk)
-      ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
-      : null;
-    const freshSharedDayCalcKwh = freshParityDailyByDate.has(dk)
-      ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
-      : null;
+    const artifactCanonicalSimDayKwh = useIntervalBackedTravelVacantParityTotals
+      ? canonicalDayKwhFromIntervals15ForLocalDateKey(exactParityArtifactIntervals, timezone, dk)
+      : canonicalArtifactDailyByDate.has(dk)
+        ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
+        : null;
+    const freshSharedDayCalcKwh = useIntervalBackedTravelVacantParityTotals
+      ? canonicalDayKwhFromIntervals15ForLocalDateKey(freshParityIntervals, timezone, dk)
+      : freshParityDailyByDate.has(dk)
+        ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
+        : null;
     const parityMatch =
       artifactCanonicalSimDayKwh == null || freshSharedDayCalcKwh == null
         ? null
