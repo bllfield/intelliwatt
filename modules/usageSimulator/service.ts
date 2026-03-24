@@ -751,7 +751,17 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_scored_row_alignment_ready"
   | "build_shared_compare_scored_row_merge_ready"
   | "build_shared_compare_scored_rows_ready"
+  | "compact_pre_bounded_exact_parity_decode_start"
+  | "compact_pre_bounded_exact_parity_decode_done"
+  | "compact_pre_bounded_meta_read_start"
+  | "compact_pre_bounded_meta_read_done"
+  | "compact_pre_bounded_canonical_build_start"
+  | "compact_pre_bounded_canonical_build_done"
+  | "compact_pre_bounded_merge_backfill_start"
+  | "compact_pre_bounded_merge_backfill_done"
   | "build_shared_compare_compact_bounded_canonical_ready"
+  | "compact_pre_bounded_meta_write_start"
+  | "compact_pre_bounded_meta_write_done"
   | "build_shared_compare_compact_post_scored_sim_ready"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
@@ -2393,6 +2403,14 @@ export async function buildGapfillCompareSimShared(args: {
     ...Array.from(boundedTestDateKeysLocal),
     ...Array.from(travelVacantParityDateKeysLocal),
   ]);
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_exact_parity_decode_start", {
+      exactTravelParityRequiresIntervalBackedArtifactTruth,
+      hadSeriesIntervals15InDataset: Boolean(
+        Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
+      ),
+    });
+  }
   const exactParityArtifactIntervalsDecodeBufferOwned =
     exactTravelParityRequiresIntervalBackedArtifactTruth &&
     !(
@@ -2418,16 +2436,20 @@ export async function buildGapfillCompareSimShared(args: {
       compactCanonicalDateKeys
     );
   }
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_exact_parity_decode_done", {
+      exactParityIntervalCount: exactParityArtifactIntervals.length,
+      decodeBufferOwned: exactParityArtifactIntervalsDecodeBufferOwned,
+    });
+  }
   const artifactDatasetForExactParity =
     exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
       ? compareCoreMemoryReducedPath
         ? {
             meta: (dataset as any).meta,
             daily: (dataset as any).daily,
+            // Compact path: only intervals15 is read by bounded canonical — avoid copying full series (codec refs, etc.).
             series: {
-              ...(typeof (dataset as any)?.series === "object" && (dataset as any).series !== null
-                ? (dataset as any).series
-                : {}),
               intervals15: exactParityArtifactIntervals,
             },
           }
@@ -2441,9 +2463,24 @@ export async function buildGapfillCompareSimShared(args: {
             },
           }
       : dataset;
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_meta_read_start", {
+      boundedTestDateKeyCount: boundedTestDateKeysLocal.size,
+    });
+  }
   const preservedMetaCanonicalTotals = compareCoreMemoryReducedPath
     ? readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(dataset, boundedTestDateKeysLocal)
     : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_meta_read_done", {
+      preservedMetaCanonicalKeyCount: Object.keys(preservedMetaCanonicalTotals).length,
+    });
+  }
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_canonical_build_start", {
+      usesIntervalBackedDataset: exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0,
+    });
+  }
   let canonicalArtifactSimulatedDayTotalsByDate: CanonicalArtifactSimulatedDayTotalsByDate;
   if (compareCoreMemoryReducedPath) {
     if (exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0) {
@@ -2464,13 +2501,32 @@ export async function buildGapfillCompareSimShared(args: {
         ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(artifactDatasetForExactParity, timezone)
         : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
   }
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_canonical_build_done", {
+      canonicalArtifactKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
+    });
+  }
   // Selected-days scored alignment: buildCanonical… ownership filters can omit non-travel test dates.
-  // Backfill each bounded test date from full interval truth (exact parity blob or raw artifact series)
+  // Backfill each bounded test date from interval truth (exact parity blob or compact-filtered raw series)
   // so reference rows / parityDisplayDailyByDate match fresh selected-day totals on the same keys.
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_merge_backfill_start", {
+      mergeBackfillWillRun: useSelectedDaysScopedDisplayRows && boundedTestDateKeysLocal.size > 0,
+    });
+  }
   if (useSelectedDaysScopedDisplayRows && boundedTestDateKeysLocal.size > 0) {
     const merged: Record<string, number> = { ...(canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>) };
-    const intervalSourceForBackfill =
-      exactParityArtifactIntervals.length > 0 ? exactParityArtifactIntervals : artifactIntervalsRaw;
+    const intervalSourceForBackfill = (() => {
+      if (exactParityArtifactIntervals.length > 0) return exactParityArtifactIntervals;
+      if (compareCoreMemoryReducedPath && artifactIntervalsRaw.length > 0) {
+        return filterExactParityArtifactIntervalsToCompactDateKeys(
+          artifactIntervalsRaw,
+          timezone,
+          compactCanonicalDateKeys
+        );
+      }
+      return artifactIntervalsRaw;
+    })();
     for (const dk of Array.from(boundedTestDateKeysLocal)) {
       const cur = merged[dk];
       if (cur !== undefined && Number.isFinite(Number(cur))) continue;
@@ -2491,6 +2547,11 @@ export async function buildGapfillCompareSimShared(args: {
     canonicalArtifactSimulatedDayTotalsByDate = merged as CanonicalArtifactSimulatedDayTotalsByDate;
   }
   if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_pre_bounded_merge_backfill_done", {
+      canonicalArtifactKeyCountAfterMerge: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
+    });
+  }
+  if (compareCoreMemoryReducedPath) {
     await reportPhase("build_shared_compare_compact_bounded_canonical_ready", {
       boundedCanonicalDateCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
       selectedDateKeyCount: boundedTestDateKeysLocal.size,
@@ -2499,10 +2560,20 @@ export async function buildGapfillCompareSimShared(args: {
         exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0,
     });
   }
+  if (compareCoreMemoryReducedPath && exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    await reportPhase("compact_pre_bounded_meta_write_start", {
+      canonicalArtifactKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
+    });
+  }
   if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
     if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
     (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
     (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
+  }
+  if (compareCoreMemoryReducedPath && exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    await reportPhase("compact_pre_bounded_meta_write_done", {
+      wroteCanonicalIntoDatasetMeta: true,
+    });
   }
   let artifactSimulatedDayReferenceRows = useSelectedDaysScopedDisplayRows
     ? Array.from(displayDateKeysLocal)

@@ -2800,6 +2800,175 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(finalizeGapfillCompareRunSnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it("records compact pre-bounded compare_core phases when shared compare reports them", async () => {
+    buildGapfillCompareSimShared.mockImplementationOnce(async (args: any) => {
+      await args?.onPhaseUpdate?.("build_shared_compare_inputs_ready", { boundedTestDateKeysCount: 1 });
+      await args?.onPhaseUpdate?.("build_shared_compare_weather_ready", { scoredDayWeatherCount: 1 });
+      await args?.onPhaseUpdate?.("build_shared_compare_sim_ready", {
+        compareFreshModeUsed: "selected_days",
+        compareSimSource: "shared_selected_days_calc",
+        simulatedTestIntervalsCount: 2,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_actual_rows_ready", {
+        displayDateCount: 1,
+        datasetDailyRowsCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_sim_rows_ready", {
+        simulatedChartDailyCount: 1,
+      });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_exact_parity_decode_start", {
+        exactTravelParityRequiresIntervalBackedArtifactTruth: false,
+      });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_exact_parity_decode_done", { exactParityIntervalCount: 0 });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_meta_read_start", { boundedTestDateKeyCount: 1 });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_meta_read_done", { preservedMetaCanonicalKeyCount: 0 });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_canonical_build_start", { usesIntervalBackedDataset: false });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_canonical_build_done", { canonicalArtifactKeyCount: 1 });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_merge_backfill_start", { mergeBackfillWillRun: true });
+      await args?.onPhaseUpdate?.("compact_pre_bounded_merge_backfill_done", { canonicalArtifactKeyCountAfterMerge: 1 });
+      await args?.onPhaseUpdate?.("build_shared_compare_compact_bounded_canonical_ready", {
+        boundedCanonicalDateCount: 1,
+        selectedDateKeyCount: 1,
+        parityDateKeyCount: 0,
+        usedIntervalBackedExactParityTruth: false,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_row_keys_ready", {
+        selectedDateCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_row_alignment_ready", {
+        comparableDateCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_row_merge_ready", {
+        scoredDayParityAvailability: "available",
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_scored_rows_ready", {
+        simulatedChartDailyCount: 1,
+        artifactReferenceRowCount: 1,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_parity_ready", {
+        travelVacantValidatedDateCount: 0,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_metrics_ready", { travelVacantValidatedDateCount: 0 });
+      await args?.onPhaseUpdate?.("build_shared_compare_response_ready", {
+        scoredDateCount: 1,
+        modelAssumptionsKeyCount: 3,
+      });
+      await args?.onPhaseUpdate?.("build_shared_compare_finalize_start", { scoredDateCount: 1 });
+      return withSharedWeatherDefaults({
+        ok: true,
+        artifactAutoRebuilt: false,
+        scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+        scoringExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
+        artifactBuildExcludedSource: "shared_past_travel_vacant_excludedDateKeysFingerprint",
+        artifactUsesTestDaysInIdentity: false,
+        artifactUsesTravelDaysInIdentity: true,
+        sharedArtifactScenarioId: "past-s1",
+        sharedArtifactInputHash: "hash-1",
+        comparePulledFromSharedArtifactOnly: false,
+        scoredTestDaysMissingSimulatedOwnershipCount: 0,
+        compareSharedCalcPath:
+          "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+        compareFreshModeUsed: "selected_days",
+        compareCalculationScope: "selected_days_shared_path_only",
+        compareSimSource: "shared_selected_days_calc",
+        displaySimSource: "dataset.daily",
+        weatherBasisUsed: "actual_only",
+        scoredDayWeatherRows: [
+          {
+            localDate: "2026-01-01",
+            avgTempF: 51,
+            minTempF: 41,
+            maxTempF: 61,
+            hdd65: 14,
+            cdd65: 0,
+            weatherBasisUsed: "actual_only",
+            weatherKindUsed: "ACTUAL_LAST_YEAR",
+            weatherSourceUsed: "OPEN_METEO",
+            weatherProviderName: "Open-Meteo",
+            weatherFallbackReason: null,
+          },
+        ],
+        scoredDayWeatherTruth: {
+          availability: "available",
+          reasonCode: "SCORED_DAY_WEATHER_AVAILABLE",
+          source: "shared_compare_scored_day_weather",
+          scoredDateCount: 1,
+          weatherRowCount: 1,
+          missingDateCount: 0,
+          missingDateSample: [],
+        },
+        travelVacantParityRows: [],
+        travelVacantParityTruth: {
+          availability: "not_requested",
+          reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+        },
+        displayVsFreshParityForScoredDays: {
+          availability: "available",
+          matches: true,
+          mismatchCount: 0,
+          missingDisplaySimCount: 0,
+          parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+        },
+        sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+        boundedTravelDateKeysLocal: new Set<string>(),
+        simulatedTestIntervals: [
+          { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+          { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+        ],
+        simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+        simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+        simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+        simulatedChartStitchedMonth: null,
+        artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+        artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+        scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+        timezoneUsedForScoring: "America/Chicago",
+        windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+        modelAssumptions: {
+          artifactSourceMode: "exact_hash_match",
+          requestedInputHash: "hash-1",
+          artifactInputHashUsed: "hash-1",
+          artifactHashMatch: true,
+          artifactScenarioId: "past-s1",
+          artifactRequestedScenarioId: "past-s1",
+          artifactExactIdentityRequested: true,
+          artifactExactIdentityResolved: true,
+          artifactIdentitySource: "same_run_artifact_ensure",
+          artifactSameRunEnsureIdentity: true,
+          artifactFallbackOccurred: false,
+          artifactFallbackReason: null,
+        },
+        homeProfileFromModel: null,
+        applianceProfileFromModel: null,
+      });
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    const runningPhases = markGapfillCompareRunRunning.mock.calls.map((call) => call?.[0]?.phase);
+    expect(runningPhases).toContain("compact_pre_bounded_merge_backfill_done");
+    expect(runningPhases).toContain("build_shared_compare_compact_bounded_canonical_ready");
+    const idxMergeDone = runningPhases.indexOf("compact_pre_bounded_merge_backfill_done");
+    const idxBounded = runningPhases.indexOf("build_shared_compare_compact_bounded_canonical_ready");
+    const idxRowKeys = runningPhases.indexOf("build_shared_compare_scored_row_keys_ready");
+    expect(idxMergeDone).toBeGreaterThan(-1);
+    expect(idxBounded).toBeGreaterThan(-1);
+    expect(idxRowKeys).toBeGreaterThan(-1);
+    expect(idxMergeDone).toBeLessThan(idxBounded);
+    expect(idxBounded).toBeLessThan(idxRowKeys);
+    expect(finalizeGapfillCompareRunSnapshot).toHaveBeenCalledTimes(1);
+  });
+
   it("marks compare-run failed on shared-compare exception after compareRunId creation", async () => {
     buildGapfillCompareSimShared.mockRejectedValueOnce(new Error("shared compare exploded"));
 

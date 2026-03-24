@@ -1121,6 +1121,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
     expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
+    expect(phases).toContain("compact_pre_bounded_exact_parity_decode_done");
+    expect(phases.indexOf("build_shared_compare_scored_sim_rows_ready")).toBeLessThan(
+      phases.indexOf("compact_pre_bounded_exact_parity_decode_start")
+    );
+    expect(phases.indexOf("compact_pre_bounded_merge_backfill_done")).toBeLessThan(
+      phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")
+    );
     expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
       phases.indexOf("build_shared_compare_scored_row_keys_ready")
     );
@@ -1246,6 +1253,16 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
     expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
+    expect(phases).toContain("compact_pre_bounded_meta_write_done");
+    expect(phases.indexOf("compact_pre_bounded_merge_backfill_done")).toBeLessThan(
+      phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")
+    );
+    expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
+      phases.indexOf("compact_pre_bounded_meta_write_start")
+    );
+    expect(phases.indexOf("compact_pre_bounded_meta_write_done")).toBeLessThan(
+      phases.indexOf("build_shared_compare_scored_row_keys_ready")
+    );
     expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
       phases.indexOf("build_shared_compare_scored_row_keys_ready")
     );
