@@ -766,19 +766,25 @@ function round2Local(n: number) {
  * buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset (interval branch). Used for travel/vacant
  * parity so artifact and fresh sides share one aggregation path and avoid 0.01-ish float drift from
  * mixing meta/daily-rounded totals with raw float sums.
+ *
+ * Returns `null` when no interval row falls on `dateKey` in `timezone` (missing coverage), so callers
+ * can distinguish that from a real zero-kWh day (intervals present that sum to 0).
  */
 function canonicalDayKwhFromIntervals15ForLocalDateKey(
   intervals: Array<{ timestamp: string; kwh: number }>,
   timezone: string,
   dateKey: string
-): number {
+): number | null {
   let sum = 0;
+  let sawMatchingInterval = false;
   for (const row of intervals) {
     const timestamp = String(row?.timestamp ?? "").trim();
     if (!timestamp) continue;
     if (dateKeyInTimezone(timestamp, timezone) !== dateKey) continue;
+    sawMatchingInterval = true;
     sum += Number(row.kwh) || 0;
   }
+  if (!sawMatchingInterval) return null;
   return round2Local(sum);
 }
 
@@ -2302,10 +2308,37 @@ export async function buildGapfillCompareSimShared(args: {
           },
         }
       : dataset;
-  const canonicalArtifactSimulatedDayTotalsByDate =
+  const preservedMetaCanonicalTotals = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  let canonicalArtifactSimulatedDayTotalsByDate: CanonicalArtifactSimulatedDayTotalsByDate =
     exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
       ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(artifactDatasetForExactParity, timezone)
       : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  // Selected-days scored alignment: buildCanonical… ownership filters can omit non-travel test dates.
+  // Backfill each bounded test date from full interval truth (exact parity blob or raw artifact series)
+  // so reference rows / parityDisplayDailyByDate match fresh selected-day totals on the same keys.
+  if (useSelectedDaysScopedDisplayRows && boundedTestDateKeysLocal.size > 0) {
+    const merged: Record<string, number> = { ...(canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>) };
+    const intervalSourceForBackfill =
+      exactParityArtifactIntervals.length > 0 ? exactParityArtifactIntervals : artifactIntervalsRaw;
+    for (const dk of Array.from(boundedTestDateKeysLocal)) {
+      const cur = merged[dk];
+      if (cur !== undefined && Number.isFinite(Number(cur))) continue;
+      // Do not synthesize simulated-day totals from intervals when the artifact daily row for this
+      // scored date is ACTUAL — parity stays "not applicable" for those days (see scored-day tests).
+      if (daySourceFromDataset.get(dk) === "ACTUAL") continue;
+      if (intervalSourceForBackfill.length > 0) {
+        const fromIntervals = canonicalDayKwhFromIntervals15ForLocalDateKey(intervalSourceForBackfill, timezone, dk);
+        if (fromIntervals !== null) {
+          merged[dk] = fromIntervals;
+        } else if (preservedMetaCanonicalTotals[dk] !== undefined && Number.isFinite(Number(preservedMetaCanonicalTotals[dk]))) {
+          merged[dk] = round2Local(Number(preservedMetaCanonicalTotals[dk]));
+        }
+      } else if (preservedMetaCanonicalTotals[dk] !== undefined && Number.isFinite(Number(preservedMetaCanonicalTotals[dk]))) {
+        merged[dk] = round2Local(Number(preservedMetaCanonicalTotals[dk]));
+      }
+    }
+    canonicalArtifactSimulatedDayTotalsByDate = merged as CanonicalArtifactSimulatedDayTotalsByDate;
+  }
   if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
     if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
     (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
@@ -2336,9 +2369,6 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.selectedDaysRequestedCount = boundedTestDateKeysLocal.size;
   modelAssumptions.selectedDaysScoredCount = availableTestDateKeysFromSimulated.size;
   modelAssumptions.freshSimIntervalCountSelectedDays = simulatedTestIntervals.length;
-  // TODO(scored-day parity UX): when selected-days scoped rows diverge from merge expectations,
-  // artifactReferenceRowCount / comparableDateCount can still read 0 in diagnostics — separate from
-  // travel/vacant interval parity below.
   modelAssumptions.artifactReferenceDayCountUsed = artifactSimulatedDayReferenceRows.filter((row) =>
     boundedTestDateKeysLocal.has(row.date)
   ).length;
@@ -2396,7 +2426,9 @@ export async function buildGapfillCompareSimShared(args: {
   await reportPhase("build_shared_compare_scored_row_alignment_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
+    selectedDateKeyCount: boundedTestDateKeysLocal.size,
     selectedDateCount: boundedTestDateKeysLocal.size,
+    artifactSimulatedDayReferenceRowCount: artifactSimulatedDayReferenceRows.length,
     comparableDateCount: parityDisplayDailyByDate.size,
     missingDisplaySimCount: allMissingDisplaySimDates.length,
     mismatchCount: allMismatchDates.length,

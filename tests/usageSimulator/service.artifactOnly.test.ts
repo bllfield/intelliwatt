@@ -1023,6 +1023,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
       expect(out.compareSimSource).toBe("shared_selected_days_calc");
       expect(out.simulatedTestIntervals.every((p) => p.kwh === 24 / 96)).toBe(true);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
     }
   });
 
@@ -1187,6 +1189,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.travelVacantParityRows?.length).toBeGreaterThan(0);
       expect(out.travelVacantParityRows?.every((r) => r.parityMatch === true)).toBe(true);
       expect(out.travelVacantParityTruth?.reasonCode).toBe("TRAVEL_VACANT_PARITY_VALIDATED");
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
     }
   });
 
