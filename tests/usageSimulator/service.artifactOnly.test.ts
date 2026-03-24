@@ -1114,7 +1114,11 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+    expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
+    expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
+      phases.indexOf("build_shared_compare_scored_row_keys_ready")
+    );
     if (out.ok) {
       expect(out.simulatedChartMonthly.length).toBe(0);
       expect(out.simulatedChartStitchedMonth).toBeNull();
@@ -1125,6 +1129,57 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         out.scoringTestDateKeysLocal.size + out.boundedTravelDateKeysLocal.size
       );
     }
+  });
+
+  it("compact bounded canonical phase reports small boundedCanonicalDateCount when meta contains many day keys", async () => {
+    const bloatedMetaTotals: Record<string, number> = {};
+    for (let i = 0; i < 365; i++) {
+      const t = new Date(2026, 0, 1 + i);
+      bloatedMetaTotals[t.toISOString().slice(0, 10)] = 1;
+    }
+    bloatedMetaTotals["2026-01-01"] = 24;
+    const compactArtifact = {
+      inputHash: "hash-bloated-meta",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          canonicalArtifactSimulatedDayTotalsByDate: bloatedMetaTotals,
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 9999 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getLatestCachedPastDatasetByScenario.mockResolvedValue(compactArtifact);
+    getCachedPastDataset.mockResolvedValue(compactArtifact);
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+
+    let boundedMeta: Record<string, unknown> | null = null;
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      onPhaseUpdate: (phase, meta) => {
+        if (phase === "build_shared_compare_compact_bounded_canonical_ready") boundedMeta = meta ?? null;
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(boundedMeta).not.toBeNull();
+    expect(Number((boundedMeta as any)?.boundedCanonicalDateCount)).toBeLessThanOrEqual(2);
+    expect(Number((boundedMeta as any)?.selectedDateKeyCount)).toBe(1);
   });
 
   it("activates compact compare_core when exact travel parity disables lightweight artifact read (requireExactArtifactMatch)", async () => {
@@ -1180,7 +1235,11 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+    expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
+    expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
+      phases.indexOf("build_shared_compare_scored_row_keys_ready")
+    );
     const inputsMeta = inputsReadyMeta.value;
     const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
     expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);

@@ -751,6 +751,7 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_scored_row_alignment_ready"
   | "build_shared_compare_scored_row_merge_ready"
   | "build_shared_compare_scored_rows_ready"
+  | "build_shared_compare_compact_bounded_canonical_ready"
   | "build_shared_compare_compact_post_scored_sim_ready"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
@@ -801,6 +802,88 @@ function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalA
     const dk = String(date ?? "").slice(0, 10);
     const kwh = Number(value);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !Number.isFinite(kwh)) continue;
+    out[dk] = round2Local(kwh);
+  }
+  return out;
+}
+
+/** Meta read scoped to explicit date keys only (compact compare_core: avoid materializing full-year maps). */
+function readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
+  dataset: any,
+  dateKeys: Set<string>
+): CanonicalArtifactSimulatedDayTotalsByDate {
+  const raw =
+    (dataset as any)?.meta?.[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] ??
+    (dataset as any)?.[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
+  for (const dk of Array.from(dateKeys)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    const value = (raw as Record<string, unknown>)[dk];
+    if (value === undefined) continue;
+    const kwh = Number(value);
+    if (!Number.isFinite(kwh)) continue;
+    out[dk] = round2Local(kwh);
+  }
+  return out;
+}
+
+/**
+ * Same rules as buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset but only materializes totals
+ * for `dateKeys` (bounded compare_core — avoids full-year output object + full Map in the interval pass).
+ */
+function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
+  dataset: any,
+  timezone: string | null | undefined,
+  dateKeys: Set<string>
+): CanonicalArtifactSimulatedDayTotalsByDate {
+  const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
+  const dailyRows = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
+  const simulatedOwnershipDates = new Set<string>(
+    String((dataset as any)?.meta?.excludedDateKeysFingerprint ?? "")
+      .split(",")
+      .map((dk) => String(dk ?? "").trim())
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  for (const row of dailyRows) {
+    const dk = String((row as any)?.date ?? "").slice(0, 10);
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && source === "SIMULATED") simulatedOwnershipDates.add(dk);
+  }
+  const timezoneResolved = typeof timezone === "string" && timezone.trim().length > 0 ? timezone.trim() : null;
+  const intervals15 = Array.isArray((dataset as any)?.series?.intervals15)
+    ? ((dataset as any).series.intervals15 as Array<Record<string, unknown>>)
+    : [];
+  if (timezoneResolved && simulatedOwnershipDates.size > 0 && intervals15.length > 0) {
+    const intervalSumsByLocalDate = new Map<string, number>();
+    for (const row of intervals15) {
+      const timestamp = String((row as any)?.timestamp ?? "").trim();
+      if (!timestamp) continue;
+      const dk = dateKeyInTimezone(timestamp, timezoneResolved);
+      if (!dateKeys.has(dk) || !simulatedOwnershipDates.has(dk)) continue;
+      intervalSumsByLocalDate.set(dk, (intervalSumsByLocalDate.get(dk) ?? 0) + (Number((row as any)?.kwh) || 0));
+    }
+    if (intervalSumsByLocalDate.size > 0) {
+      for (const [dk, kwh] of Array.from(intervalSumsByLocalDate.entries())) out[dk] = round2Local(kwh);
+      for (const row of dailyRows) {
+        const dk = String((row as any)?.date ?? "").slice(0, 10);
+        if (!dateKeys.has(dk)) continue;
+        const source = String((row as any)?.source ?? "").toUpperCase();
+        const kwh = Number((row as any)?.kwh);
+        const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh) || dk in out) continue;
+        out[dk] = round2Local(kwh);
+      }
+      return out;
+    }
+  }
+  for (const row of dailyRows) {
+    const dk = String((row as any)?.date ?? "").slice(0, 10);
+    if (!dateKeys.has(dk)) continue;
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    const kwh = Number((row as any)?.kwh);
+    const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh)) continue;
     out[dk] = round2Local(kwh);
   }
   return out;
@@ -2315,11 +2398,33 @@ export async function buildGapfillCompareSimShared(args: {
           },
         }
       : dataset;
-  const preservedMetaCanonicalTotals = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
-  let canonicalArtifactSimulatedDayTotalsByDate: CanonicalArtifactSimulatedDayTotalsByDate =
-    exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
-      ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(artifactDatasetForExactParity, timezone)
-      : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  const compactCanonicalDateKeys = new Set<string>([
+    ...Array.from(boundedTestDateKeysLocal),
+    ...Array.from(travelVacantParityDateKeysLocal),
+  ]);
+  const preservedMetaCanonicalTotals = compareCoreMemoryReducedPath
+    ? readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(dataset, boundedTestDateKeysLocal)
+    : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  let canonicalArtifactSimulatedDayTotalsByDate: CanonicalArtifactSimulatedDayTotalsByDate;
+  if (compareCoreMemoryReducedPath) {
+    if (exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0) {
+      canonicalArtifactSimulatedDayTotalsByDate = buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
+        artifactDatasetForExactParity,
+        timezone,
+        compactCanonicalDateKeys
+      );
+    } else {
+      canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
+        dataset,
+        compactCanonicalDateKeys
+      );
+    }
+  } else {
+    canonicalArtifactSimulatedDayTotalsByDate =
+      exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
+        ? buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(artifactDatasetForExactParity, timezone)
+        : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  }
   // Selected-days scored alignment: buildCanonical… ownership filters can omit non-travel test dates.
   // Backfill each bounded test date from full interval truth (exact parity blob or raw artifact series)
   // so reference rows / parityDisplayDailyByDate match fresh selected-day totals on the same keys.
@@ -2351,26 +2456,12 @@ export async function buildGapfillCompareSimShared(args: {
     (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
     (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
   }
-  // Compact selected-days compare: drop full-window canonical day maps after merge + meta write.
-  // Only bounded scored dates + travel/vacant parity dates are needed for alignment, parity proof,
-  // and snapshot consumers; retaining the full-year canonical map was a major post-scored-sim heap
-  // source on Vercel.
   if (compareCoreMemoryReducedPath) {
-    const slimKeys = new Set<string>([
-      ...Array.from(boundedTestDateKeysLocal),
-      ...Array.from(travelVacantParityDateKeysLocal),
-    ]);
-    const slim: CanonicalArtifactSimulatedDayTotalsByDate = {};
-    for (const dk of Array.from(slimKeys)) {
-      const v = (canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>)[dk];
-      if (v !== undefined && Number.isFinite(Number(v))) slim[dk] = round2Local(Number(v));
-    }
-    canonicalArtifactSimulatedDayTotalsByDate = slim;
-    if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
-      if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
-      (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = slim;
-      (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = slim;
-    }
+    await reportPhase("build_shared_compare_compact_bounded_canonical_ready", {
+      boundedCanonicalDateCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
+      selectedDateKeyCount: boundedTestDateKeysLocal.size,
+      parityDateKeyCount: travelVacantParityDateKeysLocal.length,
+    });
   }
   let artifactSimulatedDayReferenceRows = useSelectedDaysScopedDisplayRows
     ? Array.from(displayDateKeysLocal)
@@ -2677,6 +2768,7 @@ export async function buildGapfillCompareSimShared(args: {
       compactScoredRowCount: boundedTestDateKeysLocal.size,
       compactParityRowCount: travelVacantParityRows.length,
       compactWeatherRowCount: scoredDayWeatherRows.length,
+      artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
       comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
       missingDisplaySimCount: displayVsFreshParityForScoredDays.missingDisplaySimCount,
     });
