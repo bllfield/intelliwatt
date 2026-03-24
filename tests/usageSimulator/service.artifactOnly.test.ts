@@ -1095,6 +1095,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
 
     const phases: string[] = [];
+    let boundedCanonicalMetaLight: Record<string, unknown> | null = null;
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
       houseId: "h1",
@@ -1107,12 +1108,16 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       selectedDaysLightweightArtifactRead: true,
       includeDiagnostics: false,
       includeFullReportText: false,
-      onPhaseUpdate: (phase) => {
+      onPhaseUpdate: (phase, meta) => {
         phases.push(String(phase));
+        if (String(phase) === "build_shared_compare_compact_bounded_canonical_ready") {
+          boundedCanonicalMetaLight = meta ?? null;
+        }
       },
     });
 
     expect(out.ok).toBe(true);
+    expect(boundedCanonicalMetaLight?.["usedIntervalBackedExactParityTruth"]).toBe(false);
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
     expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
@@ -1212,6 +1217,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     const phases: string[] = [];
     const inputsReadyMeta = { value: null as Record<string, unknown> | null };
+    let boundedCanonicalMeta: Record<string, unknown> | null = null;
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
       houseId: "h1",
@@ -1230,6 +1236,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         if (phase === "build_shared_compare_inputs_ready") {
           inputsReadyMeta.value = meta ?? null;
         }
+        if (String(phase) === "build_shared_compare_compact_bounded_canonical_ready") {
+          boundedCanonicalMeta = meta ?? null;
+        }
       },
     });
 
@@ -1240,6 +1249,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
       phases.indexOf("build_shared_compare_scored_row_keys_ready")
     );
+    expect(boundedCanonicalMeta?.["usedIntervalBackedExactParityTruth"]).toBe(true);
     const inputsMeta = inputsReadyMeta.value;
     const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
     expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);

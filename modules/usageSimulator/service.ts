@@ -889,6 +889,23 @@ function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
   return out;
 }
 
+/** Compact compare_core: keep only interval points for local dates needed for bounded canonical + parity (drops full-year decode peak). */
+function filterExactParityArtifactIntervalsToCompactDateKeys(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  timezone: string,
+  dateKeys: Set<string>
+): Array<{ timestamp: string; kwh: number }> {
+  const out: Array<{ timestamp: string; kwh: number }> = [];
+  for (const p of intervals) {
+    const ts = canonicalIntervalKey(String(p?.timestamp ?? "").trim());
+    if (!ts) continue;
+    const dk = dateKeyInTimezone(ts, timezone);
+    if (!dateKeys.has(dk)) continue;
+    out.push({ timestamp: ts, kwh: Number(p?.kwh) || 0 });
+  }
+  return out;
+}
+
 function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(
   dataset: any,
   timezone?: string | null
@@ -2372,6 +2389,10 @@ export async function buildGapfillCompareSimShared(args: {
     : useDatasetMonthlyAsCanonical
       ? "dataset.monthly"
       : "interval_rebucket_fallback";
+  const compactCanonicalDateKeys = new Set<string>([
+    ...Array.from(boundedTestDateKeysLocal),
+    ...Array.from(travelVacantParityDateKeysLocal),
+  ]);
   const exactParityArtifactIntervalsDecodeBufferOwned =
     exactTravelParityRequiresIntervalBackedArtifactTruth &&
     !(
@@ -2386,22 +2407,40 @@ export async function buildGapfillCompareSimShared(args: {
           ? decodeIntervalsV1(cached.intervalsCompressed)
           : []
       : [];
+  if (
+    compareCoreMemoryReducedPath &&
+    exactTravelParityRequiresIntervalBackedArtifactTruth &&
+    exactParityArtifactIntervals.length > 0
+  ) {
+    exactParityArtifactIntervals = filterExactParityArtifactIntervalsToCompactDateKeys(
+      exactParityArtifactIntervals,
+      timezone,
+      compactCanonicalDateKeys
+    );
+  }
   const artifactDatasetForExactParity =
     exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
-      ? {
-          ...dataset,
-          series: {
-            ...(typeof (dataset as any)?.series === "object" && (dataset as any).series !== null
-              ? (dataset as any).series
-              : {}),
-            intervals15: exactParityArtifactIntervals,
-          },
-        }
+      ? compareCoreMemoryReducedPath
+        ? {
+            meta: (dataset as any).meta,
+            daily: (dataset as any).daily,
+            series: {
+              ...(typeof (dataset as any)?.series === "object" && (dataset as any).series !== null
+                ? (dataset as any).series
+                : {}),
+              intervals15: exactParityArtifactIntervals,
+            },
+          }
+        : {
+            ...dataset,
+            series: {
+              ...(typeof (dataset as any)?.series === "object" && (dataset as any).series !== null
+                ? (dataset as any).series
+                : {}),
+              intervals15: exactParityArtifactIntervals,
+            },
+          }
       : dataset;
-  const compactCanonicalDateKeys = new Set<string>([
-    ...Array.from(boundedTestDateKeysLocal),
-    ...Array.from(travelVacantParityDateKeysLocal),
-  ]);
   const preservedMetaCanonicalTotals = compareCoreMemoryReducedPath
     ? readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(dataset, boundedTestDateKeysLocal)
     : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
@@ -2451,17 +2490,19 @@ export async function buildGapfillCompareSimShared(args: {
     }
     canonicalArtifactSimulatedDayTotalsByDate = merged as CanonicalArtifactSimulatedDayTotalsByDate;
   }
-  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
-    if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
-    (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
-    (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
-  }
   if (compareCoreMemoryReducedPath) {
     await reportPhase("build_shared_compare_compact_bounded_canonical_ready", {
       boundedCanonicalDateCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
       selectedDateKeyCount: boundedTestDateKeysLocal.size,
       parityDateKeyCount: travelVacantParityDateKeysLocal.length,
+      usedIntervalBackedExactParityTruth:
+        exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0,
     });
+  }
+  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
+    (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
+    (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
   }
   let artifactSimulatedDayReferenceRows = useSelectedDaysScopedDisplayRows
     ? Array.from(displayDateKeysLocal)
