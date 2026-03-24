@@ -1279,10 +1279,33 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     expect(boundedCanonicalMetaLight?.["usedIntervalBackedExactParityTruth"]).toBe(false);
+    expect(Number(boundedCanonicalMetaLight?.["compactCanonicalUnionKeyCount"])).toBe(1);
+    expect(Number(boundedCanonicalMetaLight?.["selectedDateKeyCount"])).toBe(1);
+    expect(Number(boundedCanonicalMetaLight?.["parityDateKeyCount"])).toBe(0);
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
     expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
     expect(phases).toContain("compact_pre_bounded_exact_parity_decode_done");
+    expect(phases).toContain("compact_post_scored_rows_parity_start");
+    expect(phases).toContain("compact_post_scored_rows_parity_done");
+    expect(phases).toContain("compact_post_scored_rows_metrics_start");
+    expect(phases).toContain("compact_post_scored_rows_metrics_done");
+    expect(phases).toContain("compact_post_scored_rows_response_start");
+    expect(phases.indexOf("compact_post_scored_rows_parity_start")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_done")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_parity_done")).toBeLessThan(
+      phases.indexOf("build_shared_compare_compact_post_scored_sim_ready")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_metrics_start")).toBeLessThan(
+      phases.indexOf("build_shared_compare_parity_ready")
+    );
+    expect(phases.indexOf("build_shared_compare_metrics_ready")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_metrics_done")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_metrics_done")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_response_start")
+    );
     expect(phases.indexOf("build_shared_compare_scored_sim_rows_ready")).toBeLessThan(
       phases.indexOf("compact_pre_bounded_exact_parity_decode_start")
     );
@@ -1428,6 +1451,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       phases.indexOf("build_shared_compare_scored_row_keys_ready")
     );
     expect(boundedCanonicalMeta?.["usedIntervalBackedExactParityTruth"]).toBe(true);
+    expect(Number(boundedCanonicalMeta?.["compactCanonicalUnionKeyCount"])).toBe(1);
+    expect(Number(boundedCanonicalMeta?.["selectedDateKeyCount"])).toBe(1);
+    expect(Number(boundedCanonicalMeta?.["parityDateKeyCount"])).toBe(1);
+    expect(phases).toContain("compact_post_scored_rows_parity_start");
+    expect(phases.indexOf("build_shared_compare_scored_rows_ready")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_start")
+    );
     const inputsMeta = inputsReadyMeta.value;
     const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
     expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);

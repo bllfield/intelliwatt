@@ -782,6 +782,11 @@ export type GapfillCompareBuildPhase =
   | "compact_pre_bounded_meta_write_start"
   | "compact_pre_bounded_meta_write_done"
   | "build_shared_compare_compact_post_scored_sim_ready"
+  | "compact_post_scored_rows_parity_start"
+  | "compact_post_scored_rows_parity_done"
+  | "compact_post_scored_rows_metrics_start"
+  | "compact_post_scored_rows_metrics_done"
+  | "compact_post_scored_rows_response_start"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
   | "build_shared_compare_compact_compare_core_memory_reduced"
@@ -860,11 +865,16 @@ function readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
 /**
  * Same rules as buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset but only materializes totals
  * for `dateKeys` (bounded compare_core — avoids full-year output object + full Map in the interval pass).
+ *
+ * `forcedScoredDateKeys`: Gap-Fill selected scored dates must contribute interval/daily totals even when
+ * fingerprint-based ownership omits them (otherwise compact canonical has parity/travel keys but zero
+ * artifact reference rows for scored dates).
  */
 function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
   dataset: any,
   timezone: string | null | undefined,
-  dateKeys: Set<string>
+  dateKeys: Set<string>,
+  forcedScoredDateKeys?: Set<string>
 ): CanonicalArtifactSimulatedDayTotalsByDate {
   const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
   const dailyRows = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
@@ -879,17 +889,25 @@ function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
     const source = String((row as any)?.source ?? "").toUpperCase();
     if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && source === "SIMULATED") simulatedOwnershipDates.add(dk);
   }
+  const treatAsIntervalOwned = (dk: string) =>
+    simulatedOwnershipDates.has(dk) || Boolean(forcedScoredDateKeys?.has(dk));
+  const treatAsDailyOwned = (source: string, dk: string) =>
+    source === "SIMULATED" || simulatedOwnershipDates.has(dk) || Boolean(forcedScoredDateKeys?.has(dk));
   const timezoneResolved = typeof timezone === "string" && timezone.trim().length > 0 ? timezone.trim() : null;
   const intervals15 = Array.isArray((dataset as any)?.series?.intervals15)
     ? ((dataset as any).series.intervals15 as Array<Record<string, unknown>>)
     : [];
-  if (timezoneResolved && simulatedOwnershipDates.size > 0 && intervals15.length > 0) {
+  const canAttemptIntervalPass =
+    Boolean(timezoneResolved) &&
+    intervals15.length > 0 &&
+    (simulatedOwnershipDates.size > 0 || (forcedScoredDateKeys?.size ?? 0) > 0);
+  if (canAttemptIntervalPass) {
     const intervalSumsByLocalDate = new Map<string, number>();
     for (const row of intervals15) {
       const timestamp = String((row as any)?.timestamp ?? "").trim();
       if (!timestamp) continue;
-      const dk = dateKeyInTimezone(timestamp, timezoneResolved);
-      if (!dateKeys.has(dk) || !simulatedOwnershipDates.has(dk)) continue;
+      const dk = dateKeyInTimezone(timestamp, timezoneResolved!);
+      if (!dateKeys.has(dk) || !treatAsIntervalOwned(dk)) continue;
       intervalSumsByLocalDate.set(dk, (intervalSumsByLocalDate.get(dk) ?? 0) + (Number((row as any)?.kwh) || 0));
     }
     if (intervalSumsByLocalDate.size > 0) {
@@ -899,7 +917,7 @@ function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
         if (!dateKeys.has(dk)) continue;
         const source = String((row as any)?.source ?? "").toUpperCase();
         const kwh = Number((row as any)?.kwh);
-        const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
+        const isSimulatorOwnedDay = treatAsDailyOwned(source, dk);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh) || dk in out) continue;
         out[dk] = round2Local(kwh);
       }
@@ -911,7 +929,7 @@ function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
     if (!dateKeys.has(dk)) continue;
     const source = String((row as any)?.source ?? "").toUpperCase();
     const kwh = Number((row as any)?.kwh);
-    const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
+    const isSimulatorOwnedDay = treatAsDailyOwned(source, dk);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh)) continue;
     out[dk] = round2Local(kwh);
   }
@@ -1138,6 +1156,13 @@ function dateKeysToRanges(dateKeys: Set<string>): DateRange[] {
   return out;
 }
 
+function throwIfGapfillCompareAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const err = new Error("compare_core_build_aborted");
+  (err as any).code = "compare_core_build_aborted";
+  throw err;
+}
+
 export async function buildGapfillCompareSimShared(args: {
   userId: string;
   houseId: string;
@@ -1162,6 +1187,8 @@ export async function buildGapfillCompareSimShared(args: {
     phase: GapfillCompareBuildPhase,
     meta?: Record<string, unknown>
   ) => void | Promise<void>;
+  /** When aborted (client disconnect or route deadline), stop work so the serverless invocation can end with the HTTP response. */
+  abortSignal?: AbortSignal;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
     userId,
@@ -1181,11 +1208,13 @@ export async function buildGapfillCompareSimShared(args: {
     includeDiagnostics = true,
     includeFullReportText = true,
     onPhaseUpdate,
+    abortSignal,
   } = args;
   const reportPhase = async (
     phase: GapfillCompareBuildPhase,
     meta?: Record<string, unknown>
   ) => {
+    throwIfGapfillCompareAborted(abortSignal);
     if (!onPhaseUpdate) return;
     try {
       await onPhaseUpdate(phase, meta);
@@ -2135,6 +2164,7 @@ export async function buildGapfillCompareSimShared(args: {
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
         };
       };
+      throwIfGapfillCompareAborted(abortSignal);
       const selectedTestDaysResult = await runSelectedDaysFreshExecution(boundedTestDateKeysLocal);
       if (!selectedTestDaysResult.ok) {
         return {
@@ -2151,6 +2181,7 @@ export async function buildGapfillCompareSimShared(args: {
       }
       simulatedTestIntervals = selectedTestDaysResult.simulatedIntervals;
       selectedTestDailyTotalsByDate = selectedTestDaysResult.dailyTotalsByDate;
+      throwIfGapfillCompareAborted(abortSignal);
       const selectedTravelParityResult = await runSelectedDaysFreshExecution(new Set<string>(travelVacantParityDateKeysLocal));
       if (!selectedTravelParityResult.ok) {
         return {
@@ -2179,6 +2210,7 @@ export async function buildGapfillCompareSimShared(args: {
           : selectedTravelParityResult.weatherSourceSummary;
       const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
       if (selectedWeatherRange.length > 0) {
+        throwIfGapfillCompareAborted(abortSignal);
         const selectedDaysWeather = await loadWeatherForPastWindow({
           houseId,
           startDate: selectedWeatherRange[0]!,
@@ -2212,6 +2244,7 @@ export async function buildGapfillCompareSimShared(args: {
         freshParityIntervalsCount: freshParityIntervals.length,
       });
     } else {
+      throwIfGapfillCompareAborted(abortSignal);
       const freshResult = await runFullWindowFreshExecution();
       if (!freshResult.ok) {
         return {
@@ -2416,10 +2449,10 @@ export async function buildGapfillCompareSimShared(args: {
     : useDatasetMonthlyAsCanonical
       ? "dataset.monthly"
       : "interval_rebucket_fallback";
-  const compactCanonicalDateKeys = new Set<string>([
-    ...Array.from(boundedTestDateKeysLocal),
-    ...Array.from(travelVacantParityDateKeysLocal),
-  ]);
+  // Bounded compare_core: canonical totals must cover scored test days ∪ DB travel/vacant parity days.
+  const compactCanonicalDateKeys = new Set<string>();
+  for (const dk of Array.from(boundedTestDateKeysLocal)) compactCanonicalDateKeys.add(dk);
+  for (const dk of travelVacantParityDateKeysLocal) compactCanonicalDateKeys.add(dk);
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_exact_parity_decode_start", {
       exactTravelParityRequiresIntervalBackedArtifactTruth,
@@ -2504,7 +2537,8 @@ export async function buildGapfillCompareSimShared(args: {
       canonicalArtifactSimulatedDayTotalsByDate = buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
         artifactDatasetForExactParity,
         timezone,
-        compactCanonicalDateKeys
+        compactCanonicalDateKeys,
+        boundedTestDateKeysLocal
       );
     } else {
       canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
@@ -2571,6 +2605,7 @@ export async function buildGapfillCompareSimShared(args: {
   if (compareCoreMemoryReducedPath) {
     await reportPhase("build_shared_compare_compact_bounded_canonical_ready", {
       boundedCanonicalDateCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
+      compactCanonicalUnionKeyCount: compactCanonicalDateKeys.size,
       selectedDateKeyCount: boundedTestDateKeysLocal.size,
       parityDateKeyCount: travelVacantParityDateKeysLocal.length,
       usedIntervalBackedExactParityTruth:
@@ -2755,6 +2790,15 @@ export async function buildGapfillCompareSimShared(args: {
     artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
     comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
   });
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_parity_start", {
+      parityRowCount: travelVacantParityDateKeysLocal.length,
+      scoredRowCount: boundedTestDateKeysLocal.size,
+      comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+      mismatchCount: displayVsFreshParityForScoredDays.mismatchCount,
+      responseAssemblyStarted: false,
+    });
+  }
   // Keep travel/vacant proof on canonical interval-summed day totals so
   // artifact-side and fresh-side parity compare the same aggregation basis.
   const freshParityDailyByDate = (() => {
@@ -2890,6 +2934,16 @@ export async function buildGapfillCompareSimShared(args: {
                 exactProofSatisfied: true,
               };
   if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_parity_done", {
+      parityRowCount: travelVacantParityRows.length,
+      scoredRowCount: boundedTestDateKeysLocal.size,
+      comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+      mismatchCount: travelVacantParityMismatchCount,
+      travelVacantTruthAvailability: travelVacantParityTruth.availability,
+      responseAssemblyStarted: false,
+    });
+  }
+  if (compareCoreMemoryReducedPath) {
     if (exactParityArtifactIntervalsDecodeBufferOwned && exactParityArtifactIntervals.length > 0) {
       exactParityArtifactIntervals.length = 0;
     }
@@ -2906,6 +2960,15 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.travelVacantParityMismatchCount = travelVacantParityMismatchCount;
   modelAssumptions.travelVacantParityMissingArtifactReferenceCount = travelVacantParityMissingArtifactCount;
   modelAssumptions.travelVacantParityMissingFreshCompareCount = travelVacantParityMissingFreshCount;
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_metrics_start", {
+      parityRowCount: travelVacantParityRows.length,
+      scoredRowCount: boundedTestDateKeysLocal.size,
+      comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+      mismatchCount: travelVacantParityMismatchCount,
+      responseAssemblyStarted: false,
+    });
+  }
   await reportPhase("build_shared_compare_parity_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -2925,6 +2988,15 @@ export async function buildGapfillCompareSimShared(args: {
     travelVacantMissingArtifactReferenceCount: travelVacantParityMissingArtifactCount,
     travelVacantMissingFreshCompareCount: travelVacantParityMissingFreshCount,
   });
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_metrics_done", {
+      parityRowCount: travelVacantParityRows.length,
+      scoredRowCount: boundedTestDateKeysLocal.size,
+      comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+      mismatchCount: travelVacantParityMismatchCount,
+      responseAssemblyStarted: false,
+    });
+  }
   if (exactArtifactReadRequired && travelVacantParityTruth.exactProofSatisfied !== true) {
     return {
       ok: false,
@@ -2941,6 +3013,16 @@ export async function buildGapfillCompareSimShared(args: {
         travelVacantParityRows: travelVacantParityRows.slice(0, 25),
       },
     };
+  }
+
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_response_start", {
+      parityRowCount: travelVacantParityRows.length,
+      scoredRowCount: boundedTestDateKeysLocal.size,
+      comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+      mismatchCount: travelVacantParityMismatchCount,
+      responseAssemblyStarted: true,
+    });
   }
 
   const responseModelAssumptions =

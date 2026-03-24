@@ -259,6 +259,24 @@ async function withRequestAbort<T>(
   }
 }
 
+/** Forward multiple abort sources into one controller so compare_core can stop work cooperatively (Vercel duration ≈ response time). */
+function attachAbortForwarders(target: AbortController, ...sources: Array<AbortSignal | undefined>): () => void {
+  const disposers: Array<() => void> = [];
+  for (const s of sources) {
+    if (s == null) continue;
+    if (s.aborted) {
+      target.abort();
+      return () => {};
+    }
+    const onAbort = () => target.abort();
+    s.addEventListener("abort", onAbort, { once: true });
+    disposers.push(() => s.removeEventListener("abort", onAbort));
+  }
+  return () => {
+    for (const d of disposers) d();
+  };
+}
+
 function normalizeRouteError(value: unknown, fallbackMessage: string): { code: string; message: string } {
   const fromObject = value != null && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const codeRaw = fromObject && typeof fromObject.code === "string" ? fromObject.code.trim() : "";
@@ -2300,56 +2318,60 @@ export async function POST(req: NextRequest) {
     };
   };
   let sharedSim: Awaited<ReturnType<typeof buildGapfillCompareSimShared>>;
+  const compareCoreAbort = new AbortController();
+  const unlinkCompareCoreAbort = attachAbortForwarders(compareCoreAbort, req.signal);
+  const compareCoreDeadlineTimer = setTimeout(() => {
+    compareCoreAbort.abort();
+  }, ROUTE_COMPARE_SHARED_TIMEOUT_MS);
   try {
-    sharedSim = await withTimeout(
-      withRequestAbort(
-        buildGapfillCompareSimShared({
-          userId: user.id,
-          houseId: house.id,
-          timezone,
-          canonicalWindow,
-          testDateKeysLocal,
-          rebuildArtifact,
-          autoEnsureArtifact: autoEnsureArtifactForCompare,
-          compareFreshMode,
-          includeFreshCompareCalc: compareFreshMode === "full_window",
-          selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
-          includeDiagnostics,
-          includeFullReportText,
-          artifactExactScenarioId: requestedArtifactScenarioId,
-          artifactExactInputHash: requestedArtifactInputHash,
-          requireExactArtifactMatch,
-          artifactIdentitySource:
-            artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
-              ? artifactIdentitySource
-              : null,
-          onPhaseUpdate: reportSharedComparePhase,
-        }),
-        req.signal,
-        "compare_core_request_aborted_build_shared_compare"
-      ),
-      ROUTE_COMPARE_SHARED_TIMEOUT_MS,
-      "compare_core_route_timeout_build_shared_compare"
-    );
+    sharedSim = await buildGapfillCompareSimShared({
+      userId: user.id,
+      houseId: house.id,
+      timezone,
+      canonicalWindow,
+      testDateKeysLocal,
+      rebuildArtifact,
+      autoEnsureArtifact: autoEnsureArtifactForCompare,
+      compareFreshMode,
+      includeFreshCompareCalc: compareFreshMode === "full_window",
+      selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
+      includeDiagnostics,
+      includeFullReportText,
+      artifactExactScenarioId: requestedArtifactScenarioId,
+      artifactExactInputHash: requestedArtifactInputHash,
+      requireExactArtifactMatch,
+      artifactIdentitySource:
+        artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
+          ? artifactIdentitySource
+          : null,
+      onPhaseUpdate: reportSharedComparePhase,
+      abortSignal: compareCoreAbort.signal,
+    });
   } catch (err: unknown) {
     const normalizedError = normalizeRouteError(
       err,
       "Compare core failed while building shared compare output."
     );
-    const timedOut = normalizedError.code === "compare_core_route_timeout_build_shared_compare";
-    const aborted = normalizedError.code === "compare_core_request_aborted_build_shared_compare";
+    const buildAborted = normalizedError.code === "compare_core_build_aborted";
+    // Client disconnect vs route deadline: cooperative abort stops work so Vercel duration tracks the response.
+    const aborted =
+      (buildAborted && req.signal.aborted) ||
+      normalizedError.code === "compare_core_request_aborted_build_shared_compare";
+    const timedOut =
+      (buildAborted && !req.signal.aborted) ||
+      normalizedError.code === "compare_core_route_timeout_build_shared_compare";
     const compareRunEnvelope = await markCompareRunFailure({
       phase: "build_shared_compare",
       failureCode: aborted
         ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_SHARED_COMPARE"
         : timedOut
-        ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
-        : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
+          ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
+          : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
       failureMessage: aborted
         ? "Compare core request was aborted while building shared compare output."
         : timedOut
-        ? "Compare core timed out while building shared compare output."
-        : normalizedError.message,
+          ? "Compare core timed out while building shared compare output."
+          : normalizedError.message,
       statusCode: aborted ? 499 : timedOut ? 504 : 500,
       compareCoreFailedStep: "build_shared_compare",
     });
@@ -2364,14 +2386,14 @@ export async function POST(req: NextRequest) {
         message: aborted
           ? "Compare core request was aborted while building shared compare output."
           : timedOut
-          ? "Compare core timed out while building shared compare output."
-          : normalizedError.message,
+            ? "Compare core timed out while building shared compare output."
+            : normalizedError.message,
         missingData: timedOut || aborted ? ["buildGapfillCompareSimShared"] : undefined,
         reasonCode: aborted
           ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_SHARED_COMPARE"
           : timedOut
-          ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
-          : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
+            ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
+            : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
         ...(heavyOnlyCompactResponse
           ? buildHeavyTiming(compareCoreTiming, {
               heavyFailedStep: "build_shared_compare",
@@ -2390,6 +2412,9 @@ export async function POST(req: NextRequest) {
       },
       { status: aborted ? 499 : timedOut ? 504 : 500 }
     );
+  } finally {
+    clearTimeout(compareCoreDeadlineTimer);
+    unlinkCompareCoreAbort();
   }
   markCompareCoreStep(compareCoreTiming, "load_artifact");
   markCompareCoreStep(compareCoreTiming, "build_shared_compare");
