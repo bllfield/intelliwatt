@@ -54,6 +54,7 @@ import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
+  ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
   simulatePastUsageDataset,
   simulatePastSelectedDaysShared,
@@ -388,6 +389,20 @@ export async function rebuildGapfillSharedPastArtifact(args: {
   const identityWindowResolved = identityWindow;
   const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
   const buildTravelRanges = travelRangesFromBuildInputs(buildInputs);
+  const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
+    userId: args.userId,
+    houseId: args.houseId,
+    timezone,
+    canonicalMonths: ((buildInputs as any).canonicalMonths ?? []) as string[],
+  });
+  if (ensuredUsageShape.error) {
+    return {
+      ok: false,
+      error: "usage_shape_profile_required",
+      message:
+        "Shared Past artifact ensure could not establish a valid usage-shape profile before exact identity resolution.",
+    };
+  }
   const intervalDataFingerprint = await getIntervalDataFingerprint({
     houseId: args.houseId,
     esiid: houseResolved.esiid ?? null,
@@ -525,8 +540,9 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         excludedDays: Array.from(simulatedDateKeys).sort(),
         renormalized: false,
         dayTotalSource: "usage_shape_profile",
-        usageShapeProfileDiag: pastResult.usageShapeProfileDiag ?? { found: true, reasonNotUsed: null },
-        profileAutoBuilt: pastResult.profileAutoBuilt === true,
+        usageShapeProfileDiag: pastResult.usageShapeProfileDiag ?? ensuredUsageShape.usageShapeProfileDiag,
+        profileAutoBuilt:
+          pastResult.profileAutoBuilt === true || ensuredUsageShape.profileAutoBuilt === true,
         weatherSourceSummary: String(pastResult.weatherSourceSummary ?? "unknown"),
         weatherKindUsed: pastResult.weatherKindUsed ?? null,
         weatherProviderName: pastResult.weatherProviderName ?? null,
@@ -2874,6 +2890,12 @@ export async function buildGapfillCompareSimShared(args: {
       allMismatchDates.push(dk);
     }
   }
+  const missingDisplaySimDatesBackedByActualArtifactRowSet = new Set<string>(
+    missingDisplaySimDatesBackedByActualArtifactRows
+  );
+  const expectedMissingDisplaySimDates = allMissingDisplaySimDates.filter(
+    (dk) => !missingDisplaySimDatesBackedByActualArtifactRowSet.has(dk)
+  );
   await reportPhase("build_shared_compare_scored_row_alignment_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -2881,11 +2903,11 @@ export async function buildGapfillCompareSimShared(args: {
     selectedDateCount: boundedTestDateKeysLocal.size,
     artifactSimulatedDayReferenceRowCount: artifactSimulatedDayReferenceRows.length,
     comparableDateCount: parityDisplayDailyByDate.size,
-    missingDisplaySimCount: allMissingDisplaySimDates.length,
+    missingDisplaySimCount: expectedMissingDisplaySimDates.length,
     mismatchCount: allMismatchDates.length,
   });
   const comparableDateCount = Math.max(0, boundedTestDateKeysLocal.size - allMissingDisplaySimDates.length);
-  const missingDisplaySimSampleDates = allMissingDisplaySimDates.slice(0, 10);
+  const missingDisplaySimSampleDates = expectedMissingDisplaySimDates.slice(0, 10);
   const mismatchSampleDates = allMismatchDates.slice(0, 10);
   const parityComparisonBasis:
     | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
@@ -2898,14 +2920,15 @@ export async function buildGapfillCompareSimShared(args: {
         ? "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
         : "display_shared_artifact_vs_compare_artifact_filter_only";
   const scoredDayParityAvailability =
-    allMissingDisplaySimDates.length === 0
-      ? ("available" as const)
-      : compareCalculationScope === "selected_days_shared_path_only" &&
-          missingDisplaySimDatesBackedByActualArtifactRows.length === allMissingDisplaySimDates.length
-        ? ("not_applicable_scored_actual_days" as const)
-        : parityDisplayDailyByDate.size > 0
-          ? ("available" as const)
-          : ("missing_expected_reference" as const);
+    expectedMissingDisplaySimDates.length === 0
+      ? parityDisplayDailyByDate.size > 0
+        ? ("available" as const)
+        : allMissingDisplaySimDates.length > 0
+          ? ("not_applicable_scored_actual_days" as const)
+          : ("available" as const)
+      : parityDisplayDailyByDate.size > 0
+        ? ("available" as const)
+        : ("missing_expected_reference" as const);
   const parityComparableDatesAligned = parityDisplayDailyByDate.size;
   const displayVsFreshParityForScoredDays = {
     matches:
@@ -2917,20 +2940,20 @@ export async function buildGapfillCompareSimShared(args: {
     mismatchSampleDates: scoredDayParityAvailability === "available" ? mismatchSampleDates : [],
     missingDisplaySimCount:
       scoredDayParityAvailability === "missing_expected_reference"
-        ? allMissingDisplaySimDates.length
-        : scoredDayParityAvailability === "available" && allMissingDisplaySimDates.length > 0
-          ? allMissingDisplaySimDates.length
+        ? expectedMissingDisplaySimDates.length
+        : scoredDayParityAvailability === "available" && expectedMissingDisplaySimDates.length > 0
+          ? expectedMissingDisplaySimDates.length
           : 0,
     missingDisplaySimSampleDates:
       scoredDayParityAvailability === "missing_expected_reference"
         ? missingDisplaySimSampleDates
-        : scoredDayParityAvailability === "available" && allMissingDisplaySimDates.length > 0
+        : scoredDayParityAvailability === "available" && expectedMissingDisplaySimDates.length > 0
           ? missingDisplaySimSampleDates
           : [],
     comparableDateCount,
     complete:
       scoredDayParityAvailability === "available"
-        ? allMismatchDates.length === 0 && allMissingDisplaySimDates.length === 0
+        ? allMismatchDates.length === 0 && expectedMissingDisplaySimDates.length === 0
         : null,
     availability: scoredDayParityAvailability,
     reasonCode:
@@ -2941,9 +2964,11 @@ export async function buildGapfillCompareSimShared(args: {
           : ("ARTIFACT_SIMULATED_REFERENCE_MISSING" as const),
     explanation:
       scoredDayParityAvailability === "available"
-        ? allMissingDisplaySimDates.length > 0
+        ? expectedMissingDisplaySimDates.length > 0
           ? "Artifact-side canonical simulated-day totals are available for scored-day parity for comparable dates; some scored dates still lack a simulated-day reference row."
-          : "Artifact-side canonical simulated-day totals are available for scored-day parity."
+          : allMissingDisplaySimDates.length > 0
+            ? "Artifact-side canonical simulated-day totals are available for all parity-applicable scored dates; scored actual artifact rows remain non-comparable by design."
+            : "Artifact-side canonical simulated-day totals are available for scored-day parity."
         : scoredDayParityAvailability === "not_applicable_scored_actual_days"
           ? "Selected scored days are actual artifact rows, so artifact simulated-day parity is not applicable for those dates."
           : "Expected artifact simulated-day references were not available for some scored dates.",

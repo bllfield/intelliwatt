@@ -21,6 +21,7 @@ const decodeIntervalsV1 = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const computePastWeatherIdentity = vi.fn();
 const getUsageShapeProfileIdentityForPast = vi.fn();
+const ensureUsageShapeProfileForSharedSimulation = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -62,6 +63,8 @@ vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
   simulatePastFullWindowShared: (...args: any[]) => simulatePastFullWindowShared(...args),
   simulatePastUsageDataset: (...args: any[]) => simulatePastUsageDataset(...args),
   simulatePastSelectedDaysShared: (...args: any[]) => simulatePastSelectedDaysShared(...args),
+  ensureUsageShapeProfileForSharedSimulation: (...args: any[]) =>
+    ensureUsageShapeProfileForSharedSimulation(...args),
   getUsageShapeProfileIdentityForPast: (...args: any[]) => getUsageShapeProfileIdentityForPast(...args),
   loadWeatherForPastWindow: (...args: any[]) => loadWeatherForPastWindow(...args),
 }));
@@ -100,6 +103,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     getIntervalDataFingerprint.mockReset();
     computePastWeatherIdentity.mockReset();
     getUsageShapeProfileIdentityForPast.mockReset();
+    ensureUsageShapeProfileForSharedSimulation.mockReset();
 
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
     scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
@@ -119,6 +123,36 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       usageShapeProfileVersion: "1",
       usageShapeProfileDerivedAt: "2026-01-01T00:00:00.000Z",
       usageShapeProfileSimHash: "shape-hash-1",
+    });
+    ensureUsageShapeProfileForSharedSimulation.mockResolvedValue({
+      usageShapeProfileSnap: {
+        weekdayAvgByMonthKey: { "2026-01": 1 },
+        weekendAvgByMonthKey: { "2026-01": 1 },
+      },
+      usageShapeProfileDiag: {
+        found: true,
+        id: "shape-1",
+        version: "1",
+        derivedAt: "2026-01-01T00:00:00.000Z",
+        windowStartUtc: "2026-01-01",
+        windowEndUtc: "2026-01-31",
+        profileMonthKeys: ["2026-01"],
+        weekdayAvgLen: 1,
+        weekendAvgLen: 1,
+        canonicalMonths: ["2026-01"],
+        canonicalMonthsLen: 1,
+        inlineDerivedFromActual: false,
+        reasonNotUsed: null,
+        ensuredInFlow: false,
+        ensureAttempted: false,
+        ensuredReason: null,
+        ensureFailedReason: null,
+        ensuredProfileId: "shape-1",
+        canonicalCoverageStartDate: "2025-03-23",
+        canonicalCoverageEndDate: "2026-03-22",
+      },
+      profileAutoBuilt: false,
+      error: null,
     });
     encodeIntervalsV1.mockReturnValue({ bytes: Buffer.from("00", "hex") });
     decodeIntervalsV1.mockReturnValue([
@@ -353,6 +387,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     getIntervalDataFingerprint.mockReset();
     computePastWeatherIdentity.mockReset();
     getUsageShapeProfileIdentityForPast.mockReset();
+    ensureUsageShapeProfileForSharedSimulation.mockReset();
 
     scenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
@@ -373,11 +408,88 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       usageShapeProfileDerivedAt: "2026-01-01T00:00:00.000Z",
       usageShapeProfileSimHash: "shape-hash-1",
     });
+    ensureUsageShapeProfileForSharedSimulation.mockResolvedValue({
+      usageShapeProfileSnap: {
+        weekdayAvgByMonthKey: { "2026-01": 1 },
+        weekendAvgByMonthKey: { "2026-01": 1 },
+      },
+      usageShapeProfileDiag: {
+        found: true,
+        id: "shape-1",
+        version: "1",
+        derivedAt: "2026-01-01T00:00:00.000Z",
+        windowStartUtc: "2026-01-01",
+        windowEndUtc: "2026-01-31",
+        profileMonthKeys: ["2026-01"],
+        weekdayAvgLen: 1,
+        weekendAvgLen: 1,
+        canonicalMonths: ["2026-01"],
+        canonicalMonthsLen: 1,
+        inlineDerivedFromActual: false,
+        reasonNotUsed: null,
+        ensuredInFlow: false,
+        ensureAttempted: false,
+        ensuredReason: null,
+        ensureFailedReason: null,
+        ensuredProfileId: "shape-1",
+        canonicalCoverageStartDate: "2025-03-23",
+        canonicalCoverageEndDate: "2026-03-22",
+      },
+      profileAutoBuilt: false,
+      error: null,
+    });
     encodeIntervalsV1.mockReturnValue({ bytes: Buffer.from("00", "hex") });
     decodeIntervalsV1.mockReturnValue([
       { timestamp: "2026-03-14T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-03-14T00:15:00.000Z", kwh: 0.5 },
     ]);
+  });
+
+  it("ensures usage shape before resolving the exact artifact identity hash", async () => {
+    const exactCached = {
+      inputHash: "hash-rebuilt-exact",
+      updatedAt: new Date("2026-03-18T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: "2025-03-23",
+          end: "2026-03-22",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          coverageStart: "2025-03-23",
+          coverageEnd: "2026-03-22",
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.5, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getCachedPastDataset.mockResolvedValueOnce(exactCached);
+
+    await rebuildGapfillSharedPastArtifact({
+      userId: "u1",
+      houseId: "h1",
+    });
+
+    expect(ensureUsageShapeProfileForSharedSimulation).toHaveBeenCalledWith({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalMonths: ["2026-01"],
+    });
+    expect(
+      ensureUsageShapeProfileForSharedSimulation.mock.invocationCallOrder[0]
+    ).toBeLessThan(getUsageShapeProfileIdentityForPast.mock.invocationCallOrder[0]);
+    expect(getCachedPastDataset).toHaveBeenCalledWith({
+      houseId: "h1",
+      scenarioId: "past-s1",
+      inputHash: "hash-rebuilt-exact",
+    });
   });
 
   it("returns the exact rebuilt artifact identity instead of latest fallback identity", async () => {
