@@ -2735,19 +2735,31 @@ export async function buildGapfillCompareSimShared(args: {
       : compareCalculationScope === "selected_days_shared_path_only" &&
           missingDisplaySimDatesBackedByActualArtifactRows.length === allMissingDisplaySimDates.length
         ? ("not_applicable_scored_actual_days" as const)
-        : ("missing_expected_reference" as const);
+        : parityDisplayDailyByDate.size > 0
+          ? ("available" as const)
+          : ("missing_expected_reference" as const);
+  const parityComparableDatesAligned = parityDisplayDailyByDate.size;
   const displayVsFreshParityForScoredDays = {
     matches:
       scoredDayParityAvailability === "available"
         ? allMismatchDates.length === 0
         : null,
-    mismatchCount: scoredDayParityAvailability === "available" ? allMismatchDates.length : 0,
+    mismatchCount:
+      scoredDayParityAvailability === "available" ? allMismatchDates.length : 0,
     mismatchSampleDates: scoredDayParityAvailability === "available" ? mismatchSampleDates : [],
     missingDisplaySimCount:
-      scoredDayParityAvailability === "missing_expected_reference" ? allMissingDisplaySimDates.length : 0,
+      scoredDayParityAvailability === "missing_expected_reference"
+        ? allMissingDisplaySimDates.length
+        : scoredDayParityAvailability === "available" && allMissingDisplaySimDates.length > 0
+          ? allMissingDisplaySimDates.length
+          : 0,
     missingDisplaySimSampleDates:
-      scoredDayParityAvailability === "missing_expected_reference" ? missingDisplaySimSampleDates : [],
-    comparableDateCount: scoredDayParityAvailability === "available" ? comparableDateCount : 0,
+      scoredDayParityAvailability === "missing_expected_reference"
+        ? missingDisplaySimSampleDates
+        : scoredDayParityAvailability === "available" && allMissingDisplaySimDates.length > 0
+          ? missingDisplaySimSampleDates
+          : [],
+    comparableDateCount,
     complete:
       scoredDayParityAvailability === "available"
         ? allMismatchDates.length === 0 && allMissingDisplaySimDates.length === 0
@@ -2761,7 +2773,9 @@ export async function buildGapfillCompareSimShared(args: {
           : ("ARTIFACT_SIMULATED_REFERENCE_MISSING" as const),
     explanation:
       scoredDayParityAvailability === "available"
-        ? "Artifact-side canonical simulated-day totals are available for scored-day parity."
+        ? allMissingDisplaySimDates.length > 0
+          ? "Artifact-side canonical simulated-day totals are available for scored-day parity for comparable dates; some scored dates still lack a simulated-day reference row."
+          : "Artifact-side canonical simulated-day totals are available for scored-day parity."
         : scoredDayParityAvailability === "not_applicable_scored_actual_days"
           ? "Selected scored days are actual artifact rows, so artifact simulated-day parity is not applicable for those dates."
           : "Expected artifact simulated-day references were not available for some scored dates.",
@@ -2778,6 +2792,9 @@ export async function buildGapfillCompareSimShared(args: {
     compareFreshModeUsed,
     compareCalculationScope,
     scoredDayParityAvailability,
+    alignedComparableDateCount: parityComparableDatesAligned,
+    mergedComparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+    preservedComparableHandoff: parityComparableDatesAligned === displayVsFreshParityForScoredDays.comparableDateCount,
     comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
     mismatchCount: displayVsFreshParityForScoredDays.mismatchCount,
     missingDisplaySimCount: displayVsFreshParityForScoredDays.missingDisplaySimCount,
@@ -2794,6 +2811,7 @@ export async function buildGapfillCompareSimShared(args: {
     await reportPhase("compact_post_scored_rows_parity_start", {
       parityRowCount: travelVacantParityDateKeysLocal.length,
       scoredRowCount: boundedTestDateKeysLocal.size,
+      alignedComparableDateCount: parityComparableDatesAligned,
       comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
       mismatchCount: displayVsFreshParityForScoredDays.mismatchCount,
       responseAssemblyStarted: false,
@@ -2845,6 +2863,14 @@ export async function buildGapfillCompareSimShared(args: {
               : "TRAVEL_VACANT_PARITY_MISMATCH",
     };
   });
+  if (compareCoreMemoryReducedPath) {
+    // Interval arrays are only inputs to the travel/vacant parity row map above; release them early on
+    // the compact path so later phases (truth objects, DB status writes) do not retain peak heap.
+    freshParityIntervals.length = 0;
+    if (exactParityArtifactIntervalsDecodeBufferOwned && exactParityArtifactIntervals.length > 0) {
+      exactParityArtifactIntervals.length = 0;
+    }
+  }
   const travelVacantParityMissingArtifactCount = travelVacantParityRows.filter(
     (row) => row.artifactReferenceAvailability !== "available"
   ).length;
@@ -2944,9 +2970,6 @@ export async function buildGapfillCompareSimShared(args: {
     });
   }
   if (compareCoreMemoryReducedPath) {
-    if (exactParityArtifactIntervalsDecodeBufferOwned && exactParityArtifactIntervals.length > 0) {
-      exactParityArtifactIntervals.length = 0;
-    }
     await reportPhase("build_shared_compare_compact_post_scored_sim_ready", {
       compactScoredRowCount: boundedTestDateKeysLocal.size,
       compactParityRowCount: travelVacantParityRows.length,

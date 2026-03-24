@@ -2691,6 +2691,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       weatherKindUsed: "ACTUAL_LAST_YEAR",
     }));
     const phases: string[] = [];
+    let mergeReadyMeta: Record<string, unknown> | null = null;
 
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
@@ -2702,8 +2703,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       compareFreshMode: "selected_days",
       includeFreshCompareCalc: false,
       selectedDaysLightweightArtifactRead: true,
-      onPhaseUpdate: (phase) => {
+      onPhaseUpdate: (phase, meta) => {
         phases.push(String(phase));
+        if (String(phase) === "build_shared_compare_scored_row_merge_ready") mergeReadyMeta = meta ?? null;
       },
     });
 
@@ -2712,8 +2714,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.compareFreshModeUsed).toBe("selected_days");
       expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
       expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(availableDailyDates);
-      expect(out.displayVsFreshParityForScoredDays?.availability).toBe("missing_expected_reference");
+      expect(out.displayVsFreshParityForScoredDays?.availability).toBe("available");
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(19);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(2);
+      expect(out.displayVsFreshParityForScoredDays?.reasonCode).toBe("ARTIFACT_SIMULATED_REFERENCE_AVAILABLE");
+      expect(Number(mergeReadyMeta?.["alignedComparableDateCount"])).toBe(19);
+      expect(Number(mergeReadyMeta?.["mergedComparableDateCount"])).toBe(19);
+      expect(mergeReadyMeta?.["preservedComparableHandoff"]).toBe(true);
       expect(phases).toContain("build_shared_compare_scored_row_keys_ready");
       expect(phases).toContain("build_shared_compare_scored_row_alignment_ready");
       expect(phases).toContain("build_shared_compare_scored_row_merge_ready");
