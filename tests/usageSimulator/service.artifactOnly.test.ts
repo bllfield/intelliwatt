@@ -1287,11 +1287,19 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
     expect(phases).toContain("compact_pre_bounded_exact_parity_decode_done");
     expect(phases).toContain("compact_post_scored_rows_parity_start");
+    expect(phases).toContain("compact_post_scored_rows_parity_rows_ready");
+    expect(phases).toContain("compact_post_scored_rows_parity_truth_ready");
     expect(phases).toContain("compact_post_scored_rows_parity_done");
     expect(phases).toContain("compact_post_scored_rows_metrics_start");
     expect(phases).toContain("compact_post_scored_rows_metrics_done");
     expect(phases).toContain("compact_post_scored_rows_response_start");
     expect(phases.indexOf("compact_post_scored_rows_parity_start")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_rows_ready")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_parity_rows_ready")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_truth_ready")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_parity_truth_ready")).toBeLessThan(
       phases.indexOf("compact_post_scored_rows_parity_done")
     );
     expect(phases.indexOf("compact_post_scored_rows_parity_done")).toBeLessThan(
@@ -1455,6 +1463,18 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(Number(boundedCanonicalMeta?.["selectedDateKeyCount"])).toBe(1);
     expect(Number(boundedCanonicalMeta?.["parityDateKeyCount"])).toBe(1);
     expect(phases).toContain("compact_post_scored_rows_parity_start");
+    expect(phases).toContain("compact_post_scored_rows_parity_rows_ready");
+    expect(phases).toContain("compact_post_scored_rows_parity_truth_ready");
+    expect(phases).toContain("compact_post_scored_rows_parity_done");
+    expect(phases.indexOf("compact_post_scored_rows_parity_start")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_rows_ready")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_parity_rows_ready")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_truth_ready")
+    );
+    expect(phases.indexOf("compact_post_scored_rows_parity_truth_ready")).toBeLessThan(
+      phases.indexOf("compact_post_scored_rows_parity_done")
+    );
     expect(phases.indexOf("build_shared_compare_scored_rows_ready")).toBeLessThan(
       phases.indexOf("compact_post_scored_rows_parity_start")
     );
@@ -1474,6 +1494,62 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
     }
+  });
+
+  it("abortSignal stops work after compact_post_scored_rows_parity_start (compare_core_build_aborted)", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      },
+    });
+    const artifact = {
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-01",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 9999 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getCachedPastDataset.mockResolvedValue(artifact);
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+
+    const ac = new AbortController();
+    let sawParityStart = false;
+    await expect(
+      buildGapfillCompareSimShared({
+        userId: "u1",
+        houseId: "h1",
+        timezone: "America/Chicago",
+        canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+        testDateKeysLocal: new Set<string>(["2026-01-01"]),
+        rebuildArtifact: false,
+        compareFreshMode: "selected_days",
+        includeFreshCompareCalc: false,
+        selectedDaysLightweightArtifactRead: true,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        requireExactArtifactMatch: true,
+        abortSignal: ac.signal,
+        onPhaseUpdate: (phase) => {
+          if (phase === "compact_post_scored_rows_parity_start") {
+            sawParityStart = true;
+            ac.abort();
+          }
+        },
+      })
+    ).rejects.toMatchObject({ code: "compare_core_build_aborted" });
+    expect(sawParityStart).toBe(true);
   });
 
   it("reports weather phase metadata with the final loaded weather basis in selected-days mode", async () => {

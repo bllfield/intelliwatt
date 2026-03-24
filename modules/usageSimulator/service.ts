@@ -783,6 +783,8 @@ export type GapfillCompareBuildPhase =
   | "compact_pre_bounded_meta_write_done"
   | "build_shared_compare_compact_post_scored_sim_ready"
   | "compact_post_scored_rows_parity_start"
+  | "compact_post_scored_rows_parity_rows_ready"
+  | "compact_post_scored_rows_parity_truth_ready"
   | "compact_post_scored_rows_parity_done"
   | "compact_post_scored_rows_metrics_start"
   | "compact_post_scored_rows_metrics_done"
@@ -822,6 +824,26 @@ function canonicalDayKwhFromIntervals15ForLocalDateKey(
   }
   if (!sawMatchingInterval) return null;
   return round2Local(sum);
+}
+
+/**
+ * One pass over 15m intervals → raw kWh sum per local calendar day (not rounded per row).
+ * Used for travel/vacant parity when interval-backed proof is required so we do not scan the full
+ * interval vector once per parity date (O(parityDates × intervalRows)).
+ */
+function buildDayRawKwhTotalsByDateFromIntervals15(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  timezone: string
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const row of intervals) {
+    const timestamp = String(row?.timestamp ?? "").trim();
+    if (!timestamp) continue;
+    const dk = dateKeyInTimezone(timestamp, timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    totals.set(dk, (totals.get(dk) ?? 0) + (Number(row.kwh) || 0));
+  }
+  return totals;
 }
 
 const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
@@ -2817,6 +2839,7 @@ export async function buildGapfillCompareSimShared(args: {
       responseAssemblyStarted: false,
     });
   }
+  throwIfGapfillCompareAborted(abortSignal);
   // Keep travel/vacant proof on canonical interval-summed day totals so
   // artifact-side and fresh-side parity compare the same aggregation basis.
   const freshParityDailyByDate = (() => {
@@ -2829,22 +2852,32 @@ export async function buildGapfillCompareSimShared(args: {
   })();
   const useIntervalBackedTravelVacantParityTotals =
     exactParityArtifactIntervals.length > 0 && freshParityIntervals.length > 0;
-  travelVacantParityRows = travelVacantParityDateKeysLocal.map((dk) => {
+  throwIfGapfillCompareAborted(abortSignal);
+  const artifactExactParityDayRawByDate: Map<string, number> | null = useIntervalBackedTravelVacantParityTotals
+    ? buildDayRawKwhTotalsByDateFromIntervals15(exactParityArtifactIntervals, timezone)
+    : null;
+  throwIfGapfillCompareAborted(abortSignal);
+  const parityDateKeysOrdered = travelVacantParityDateKeysLocal;
+  const PARITY_ROW_ABORT_STRIDE = 24;
+  travelVacantParityRows = [];
+  for (let i = 0; i < parityDateKeysOrdered.length; i++) {
+    if (i % PARITY_ROW_ABORT_STRIDE === 0) throwIfGapfillCompareAborted(abortSignal);
+    const dk = parityDateKeysOrdered[i]!;
     const artifactCanonicalSimDayKwh = useIntervalBackedTravelVacantParityTotals
-      ? canonicalDayKwhFromIntervals15ForLocalDateKey(exactParityArtifactIntervals, timezone, dk)
+      ? artifactExactParityDayRawByDate !== null && artifactExactParityDayRawByDate.has(dk)
+        ? round2Local(artifactExactParityDayRawByDate.get(dk) ?? 0)
+        : null
       : canonicalArtifactDailyByDate.has(dk)
         ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
         : null;
-    const freshSharedDayCalcKwh = useIntervalBackedTravelVacantParityTotals
-      ? canonicalDayKwhFromIntervals15ForLocalDateKey(freshParityIntervals, timezone, dk)
-      : freshParityDailyByDate.has(dk)
-        ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
-        : null;
+    const freshSharedDayCalcKwh = freshParityDailyByDate.has(dk)
+      ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
+      : null;
     const parityMatch =
       artifactCanonicalSimDayKwh == null || freshSharedDayCalcKwh == null
         ? null
         : round2Local(artifactCanonicalSimDayKwh) === round2Local(freshSharedDayCalcKwh);
-    return {
+    travelVacantParityRows.push({
       localDate: dk,
       artifactCanonicalSimDayKwh,
       freshSharedDayCalcKwh,
@@ -2861,14 +2894,30 @@ export async function buildGapfillCompareSimShared(args: {
             : parityMatch
               ? "TRAVEL_VACANT_PARITY_MATCH"
               : "TRAVEL_VACANT_PARITY_MISMATCH",
-    };
-  });
+    });
+  }
+  throwIfGapfillCompareAborted(abortSignal);
+  let releasedFreshParityIntervals = false;
+  let releasedExactParityArtifactIntervals = false;
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_parity_rows_ready", {
+      parityRowCount: travelVacantParityRows.length,
+      truthDateCount: travelVacantParityDateKeysLocal.length,
+      usedIndexedIntervalDayTotals: useIntervalBackedTravelVacantParityTotals,
+      usedCompactParityTruth: useIntervalBackedTravelVacantParityTotals,
+      mismatchCount: displayVsFreshParityForScoredDays.mismatchCount,
+      releasedFreshParityIntervals: false,
+      releasedExactParityArtifactIntervals: false,
+    });
+  }
   if (compareCoreMemoryReducedPath) {
     // Interval arrays are only inputs to the travel/vacant parity row map above; release them early on
     // the compact path so later phases (truth objects, DB status writes) do not retain peak heap.
     freshParityIntervals.length = 0;
+    releasedFreshParityIntervals = true;
     if (exactParityArtifactIntervalsDecodeBufferOwned && exactParityArtifactIntervals.length > 0) {
       exactParityArtifactIntervals.length = 0;
+      releasedExactParityArtifactIntervals = true;
     }
   }
   const travelVacantParityMissingArtifactCount = travelVacantParityRows.filter(
@@ -2879,6 +2928,7 @@ export async function buildGapfillCompareSimShared(args: {
   ).length;
   const travelVacantParityMismatchCount = travelVacantParityRows.filter((row) => row.parityMatch === false).length;
   const travelVacantParityValidatedCount = travelVacantParityRows.filter((row) => row.parityMatch === true).length;
+  throwIfGapfillCompareAborted(abortSignal);
   travelVacantParityTruth =
     travelVacantParityDateKeysLocal.length === 0
       ? {
@@ -2959,6 +3009,18 @@ export async function buildGapfillCompareSimShared(args: {
                 exactProofRequired: exactArtifactReadRequired,
                 exactProofSatisfied: true,
               };
+  throwIfGapfillCompareAborted(abortSignal);
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("compact_post_scored_rows_parity_truth_ready", {
+      parityRowCount: travelVacantParityRows.length,
+      parityTruthRowCount: travelVacantParityDateKeysLocal.length,
+      truthAvailability: travelVacantParityTruth.availability,
+      usedCompactParityTruth: true,
+      releasedFreshParityIntervals,
+      releasedExactParityArtifactIntervals,
+      mismatchCount: travelVacantParityMismatchCount,
+    });
+  }
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_post_scored_rows_parity_done", {
       parityRowCount: travelVacantParityRows.length,

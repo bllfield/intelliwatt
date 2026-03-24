@@ -1407,6 +1407,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         selectedDaysLightweightArtifactRead: true,
         includeDiagnostics: false,
         includeFullReportText: false,
+        abortSignal: expect.any(AbortSignal),
       })
     );
   });
