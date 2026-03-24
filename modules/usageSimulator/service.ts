@@ -266,6 +266,14 @@ export async function getSharedPastCoverageWindowForHouse(args: {
   return resolveCanonicalUsage365CoverageWindow();
 }
 
+/** Same rule as compare_core `needsRebuildForOldCurveVersion` (artifact_ensure must not skip rebuild when this fails). */
+function sharedPastArtifactMetaFailsCurveShapingStaleGuard(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  const v = String(meta?.curveShapingVersion ?? "");
+  return v.length === 0 || v !== "shared_curve_v2";
+}
+
 function applyCanonicalCoverageMetadataForNonBaseline(
   dataset: any,
   scenarioKey: string,
@@ -585,6 +593,15 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         };
       }
       const verificationMeta = (((verification.dataset as any)?.meta ?? {}) as Record<string, unknown>) ?? {};
+      if (sharedPastArtifactMetaFailsCurveShapingStaleGuard(verificationMeta)) {
+        return {
+          ok: false,
+          error: "artifact_stale_rebuild_required",
+          message:
+            "Saved shared Past artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before compare.",
+          retryable: true,
+        };
+      }
       return {
         ok: true,
         rebuilt: false,
@@ -1649,7 +1666,6 @@ export async function buildGapfillCompareSimShared(args: {
       useSelectedDaysLightweightArtifactRead ? { buildInputs } : undefined
     );
     restoredMetaNormalized = { ...(((dataset as any)?.meta ?? {}) as Record<string, unknown>) };
-    const artifactCurveShapingVersion = String(restoredMetaNormalized?.curveShapingVersion ?? "");
     const artifactIntervalsRaw = dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
     // Lightweight selected-days compare reads score from fresh selected-day simulation.
     // Full-window artifact interval completeness is not required for this mode.
@@ -1660,8 +1676,7 @@ export async function buildGapfillCompareSimShared(args: {
       artifactIntervalsRaw.length > 0 &&
       artifactIntervalsRaw.length < expectedChartIntervalCount;
     const needsRebuildForOldCurveVersion =
-      !rebuildArtifact &&
-      (artifactCurveShapingVersion.length === 0 || artifactCurveShapingVersion !== "shared_curve_v2");
+      !rebuildArtifact && sharedPastArtifactMetaFailsCurveShapingStaleGuard(restoredMetaNormalized);
     const excludedFingerprintFromMeta = String(restoredMetaNormalized?.excludedDateKeysFingerprint ?? "")
       .split(",")
       .map((dk) => String(dk).trim())
