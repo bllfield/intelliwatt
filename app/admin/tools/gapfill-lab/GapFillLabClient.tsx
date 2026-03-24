@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 type HouseOption = { id: string; label: string };
 type RangeRow = { startDate: string; endDate: string };
@@ -731,6 +732,7 @@ export default function GapFillLabClient() {
 
   const gapfillChartData = useMemo(() => {
     if (!result || !result.ok) return null;
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const dailyChartRows = Array.isArray((result as any)?.displaySimulated?.daily)
       ? ((result as any).displaySimulated.daily as Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>)
       : Array.isArray((result as any).diagnostics?.dailyTotalsChartSim)
@@ -748,18 +750,36 @@ export default function GapFillLabClient() {
       }))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
+    // Label + filter window: shared canonical coverage only (parity/displaySimulated/usage365),
+    // never raw daily min/max or scoring-only window — matches Usage dashboard + metadataWindow lock.
     const coverageStart =
-      (result as any)?.displaySimulated?.coverageStart ??
-      (result as any)?.truthEnvelope?.windowUsedForScoring?.startDate ??
-      (result as any)?.parity?.windowStartUtc ??
-      rawDaily[0]?.date ??
-      null;
+      (typeof (result as any)?.displaySimulated?.coverageStart === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test((result as any).displaySimulated.coverageStart)
+        ? (result as any).displaySimulated.coverageStart
+        : null) ??
+      (typeof (result as any)?.parity?.windowStartUtc === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test((result as any).parity.windowStartUtc)
+        ? (result as any).parity.windowStartUtc
+        : null) ??
+      (typeof (result as any)?.usage365?.coverageStart === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test((result as any).usage365.coverageStart)
+        ? (result as any).usage365.coverageStart
+        : null) ??
+      canonicalWindow.startDate;
     const coverageEnd =
-      (result as any)?.displaySimulated?.coverageEnd ??
-      (result as any)?.truthEnvelope?.windowUsedForScoring?.endDate ??
-      (result as any)?.parity?.windowEndUtc ??
-      rawDaily[rawDaily.length - 1]?.date ??
-      null;
+      (typeof (result as any)?.displaySimulated?.coverageEnd === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test((result as any).displaySimulated.coverageEnd)
+        ? (result as any).displaySimulated.coverageEnd
+        : null) ??
+      (typeof (result as any)?.parity?.windowEndUtc === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test((result as any).parity.windowEndUtc)
+        ? (result as any).parity.windowEndUtc
+        : null) ??
+      (typeof (result as any)?.usage365?.coverageEnd === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test((result as any).usage365.coverageEnd)
+        ? (result as any).usage365.coverageEnd
+        : null) ??
+      canonicalWindow.endDate;
     const daily = normalizeDailyRowsToWindow(rawDaily, coverageStart, coverageEnd, 365);
 
     if (!daily.length) return null;
@@ -823,6 +843,7 @@ export default function GapFillLabClient() {
   }, [result, timezone]);
   const usage365ChartData = useMemo(() => {
     if (!result || !result.ok || !result.usage365?.daily?.length) return null;
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const normalizedDaily = normalizeDailyRowsToWindow(
       result.usage365.daily,
       result.usage365.coverageStart ?? null,
@@ -830,12 +851,20 @@ export default function GapFillLabClient() {
       365
     );
     if (!normalizedDaily.length) return null;
-    const normalizedCoverageStart = normalizedDaily[0]?.date ?? result.usage365.coverageStart ?? null;
-    const normalizedCoverageEnd = normalizedDaily[normalizedDaily.length - 1]?.date ?? result.usage365.coverageEnd ?? null;
+    // Do not derive displayed coverage from sparse first/last daily rows — that desyncs from Usage dashboard
+    // (resolveCanonicalUsage365CoverageWindow) when actual data ends before the canonical end date.
+    const labelCoverageStart =
+      typeof result.usage365.coverageStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(result.usage365.coverageStart)
+        ? result.usage365.coverageStart
+        : canonicalWindow.startDate;
+    const labelCoverageEnd =
+      typeof result.usage365.coverageEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(result.usage365.coverageEnd)
+        ? result.usage365.coverageEnd
+        : canonicalWindow.endDate;
     return {
       ...result.usage365,
-      coverageStart: normalizedCoverageStart,
-      coverageEnd: normalizedCoverageEnd,
+      coverageStart: labelCoverageStart,
+      coverageEnd: labelCoverageEnd,
       daily: normalizedDaily,
     };
   }, [result]);
