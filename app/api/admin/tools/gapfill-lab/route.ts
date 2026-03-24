@@ -1110,7 +1110,7 @@ function buildFullReport(args: {
       kv("joinJoinedCount", j.joinJoinedCount ?? "—");
       kv("joinMissingCount", j.joinMissingCount ?? "—");
       kv("joinPct", j.joinPct != null ? round2((j.joinPct as number) * 100) + "%" : "—");
-      lines.push("No Past cache; sim from UsageShapeProfile or auto-built lite (or uniform fallback).");
+      lines.push("No Past cache; sim runs through the shared flow with an ensured UsageShapeProfile dependency (or fails if unavailable).");
     } else {
       kv("userCacheTried", (fullReportJson.engine as any).userCacheTried ?? false);
       kv("userCacheHit", (fullReportJson.engine as any).userCacheHit ?? false);
@@ -2943,7 +2943,7 @@ export async function POST(req: NextRequest) {
     parityDisplayDailyByDate.has(dk)
   ).length;
   const actualDailyByDate = new Map<string, number>();
-  for (const p of scoringActualTestIntervalsCanon) {
+  for (const p of actualScoringIntervalsCanon) {
     const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
     actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
   }
@@ -3061,9 +3061,6 @@ export async function POST(req: NextRequest) {
       exactProofRequired: false,
       exactProofSatisfied: true,
     };
-  const scoredDayParityEnvelope =
-    ((sharedSim as any)?.displayVsFreshParityForScoredDays as Record<string, unknown> | undefined) ?? null;
-  const scoredDayParityAvailability = String(scoredDayParityEnvelope?.availability ?? "available");
   const scoredDayTruthRows = Array.from(scoringTestDateKeysLocal)
     .sort()
     .map((date) => {
@@ -3071,10 +3068,7 @@ export async function POST(req: NextRequest) {
       const freshCompareSimDayKwh = round2(freshDailyByDate.get(date) ?? 0);
       const displayDay = displayDailyByDate.get(date);
       const parityDisplayDay = parityDisplayDailyByDate.get(date);
-      const parityNotApplicableForScoredActualDay =
-        !parityDisplayDay &&
-        scoredDayParityAvailability === "not_applicable_scored_actual_days" &&
-        displayDay?.source === "ACTUAL";
+      const parityNotApplicableForScoredActualDay = !parityDisplayDay && displayDay?.source === "ACTUAL";
       const displayedPastStyleSimDayKwh =
         parityDisplayDay && parityDisplayDay.source === "SIMULATED"
           ? round2(parityDisplayDay.simKwh)
@@ -3264,6 +3258,21 @@ export async function POST(req: NextRequest) {
   const compareSimSource = (sharedSim as any).compareSimSource ?? null;
   const displaySimSource = (sharedSim as any).displaySimSource ?? null;
   const weatherBasisUsed = (sharedSim as any).weatherBasisUsed ?? null;
+  const compareModelAssumptions = ((sharedSim as any).modelAssumptions ?? null) as Record<string, unknown> | null;
+  const usageShapeDayTotalSource = String((compareModelAssumptions as any)?.dayTotalSource ?? "").trim() || null;
+  const usageShapeDiag =
+    compareModelAssumptions && typeof compareModelAssumptions === "object"
+      ? (((compareModelAssumptions as any).usageShapeProfileDiag ?? null) as
+          | { found?: unknown; reasonNotUsed?: unknown }
+          | null)
+      : null;
+  const usageShapeProfileUsed =
+    usageShapeDayTotalSource === "usage_shape_profile" ||
+    usageShapeDayTotalSource === "usageShapeProfile_avgKwhPerDayByMonth";
+  const usageShapeReasonNotUsed =
+    usageShapeDiag && String(usageShapeDiag.reasonNotUsed ?? "").trim()
+      ? String(usageShapeDiag.reasonNotUsed ?? "").trim()
+      : null;
   const compareTruth = {
     compareFreshModeUsed,
     compareFreshModeLabel:
@@ -3294,7 +3303,7 @@ export async function POST(req: NextRequest) {
     weatherBasisUsed,
     architectureNote:
       compareCalculationScope === "selected_days_shared_path_only"
-        ? "Selected-days mode still runs through shared past-day simulator core, including DB travel/vacant parity-validation dates. It is not an isolated route-level per-day simulator."
+        ? "Selected-days mode still runs through the shared past-day simulator core for scored dates. Exact DB travel/vacant parity may additionally reuse a full-window shared execution when exact proof is required."
         : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
           ? "Full-window mode runs shared simulator over the full window before filtering to scored days and validating DB travel/vacant parity."
           : "Artifact-only mode reads shared artifact output and filters scored days.",
@@ -3321,12 +3330,30 @@ export async function POST(req: NextRequest) {
     travelVacantExclusionCount: boundedTravelDateKeysLocal.size,
     artifactDisplayReferenceWarning,
     usageShapeDependencyStatus: (() => {
-      const usageShapeDiag = (sharedSim.modelAssumptions as any)?.usageShapeProfileDiag;
-      if (!usageShapeDiag) return { status: "unknown", reason: null };
-      if (usageShapeDiag.found) return { status: "available", reason: null };
+      if (usageShapeReasonNotUsed) {
+        return {
+          status: "missing_or_not_used",
+          reason: usageShapeReasonNotUsed,
+          dayTotalSource: usageShapeDayTotalSource,
+        };
+      }
+      if (usageShapeProfileUsed || usageShapeDiag?.found === true) {
+        return {
+          status: "available",
+          reason: null,
+          dayTotalSource: usageShapeDayTotalSource,
+        };
+      }
+      if (!usageShapeDiag) {
+        return { status: "unknown", reason: null, dayTotalSource: usageShapeDayTotalSource };
+      }
+      if (usageShapeDiag.found === false) {
+        return { status: "unknown", reason: null, dayTotalSource: usageShapeDayTotalSource };
+      }
       return {
-        status: "missing_or_not_used",
-        reason: String(usageShapeDiag.reasonNotUsed ?? "unknown"),
+        status: "unknown",
+        reason: null,
+        dayTotalSource: usageShapeDayTotalSource,
       };
     })(),
     artifact: {

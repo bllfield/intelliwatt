@@ -567,7 +567,15 @@ export type SimulatedUsageDatasetMeta = {
     canonicalMonthsLen: number;
     inlineDerivedFromActual?: boolean;
     reasonNotUsed: string | null;
+    ensuredInFlow?: boolean;
+    ensureAttempted?: boolean;
+    ensuredReason?: string | null;
+    ensureFailedReason?: string | null;
+    ensuredProfileId?: string | null;
+    canonicalCoverageStartDate?: string;
+    canonicalCoverageEndDate?: string;
   };
+  profileAutoBuilt?: boolean;
   scenarioId?: string | null;
   /** Past: cold_build | recalc | lab_validation | cache_restore. */
   buildPathKind?: "cold_build" | "recalc" | "lab_validation" | "cache_restore";

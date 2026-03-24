@@ -24,9 +24,11 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDayS
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
-import { buildMonthKeyedDailyAverages, deriveUsageShapeProfile } from "@/modules/usageShapeProfile/derive";
+import { buildMonthKeyedDailyAverages } from "@/modules/usageShapeProfile/derive";
 import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
+import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 
@@ -224,6 +226,8 @@ export type SimulatePastSelectedDaysResult = {
   pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
   weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
   weatherKindUsed: string | undefined;
+  usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
+  profileAutoBuilt?: boolean;
 };
 
 export type SimulatePastFullWindowSharedResult = {
@@ -235,6 +239,8 @@ export type SimulatePastFullWindowSharedResult = {
   weatherKindUsed: string | undefined;
   weatherProviderName: string | null;
   weatherFallbackReason: string | null;
+  usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
+  profileAutoBuilt?: boolean;
 };
 
 export type UsageShapeProfileIdentity = {
@@ -242,6 +248,34 @@ export type UsageShapeProfileIdentity = {
   usageShapeProfileVersion: string | null;
   usageShapeProfileDerivedAt: string | null;
   usageShapeProfileSimHash: string | null;
+};
+
+type UsageShapeProfileSnapForSimulation = {
+  weekdayAvgByMonthKey: Record<string, number>;
+  weekendAvgByMonthKey: Record<string, number>;
+};
+
+export type SharedSimUsageShapeProfileDiag = {
+  found: boolean;
+  id: string | null;
+  version: string | null;
+  derivedAt: string | null;
+  windowStartUtc: string | null;
+  windowEndUtc: string | null;
+  profileMonthKeys: string[];
+  weekdayAvgLen: number | null;
+  weekendAvgLen: number | null;
+  canonicalMonths: string[];
+  canonicalMonthsLen: number;
+  inlineDerivedFromActual: boolean;
+  reasonNotUsed: string | null;
+  ensuredInFlow: boolean;
+  ensureAttempted: boolean;
+  ensuredReason: string | null;
+  ensureFailedReason: string | null;
+  ensuredProfileId: string | null;
+  canonicalCoverageStartDate: string;
+  canonicalCoverageEndDate: string;
 };
 
 /**
@@ -272,6 +306,139 @@ export async function getUsageShapeProfileIdentityForPast(houseId: string): Prom
           }
         : null
     ),
+  };
+}
+
+function usageShapeProfileWindowDateKey(value: unknown): string | null {
+  const s = String(value ?? "").trim();
+  if (!s) return null;
+  const dateKey = s.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : null;
+}
+
+function usageShapeProfileContractFailure(args: {
+  row: any;
+  timezone: string | null;
+  canonicalCoverage: { startDate: string; endDate: string };
+}): string | null {
+  const { row, timezone, canonicalCoverage } = args;
+  if (!row) return "profile_not_found";
+  if (!timezone) return "missing_timezone";
+  const version = String(row?.version ?? "").trim();
+  if (version && version !== "v1") return "version_mismatch";
+  if (!row?.shapeByMonth96) return "no_shapeByMonth96";
+  if (row?.avgKwhPerDayWeekdayByMonth == null || row?.avgKwhPerDayWeekendByMonth == null) return "missing_arrays";
+  const windowStartDate = usageShapeProfileWindowDateKey(row?.windowStartUtc);
+  const windowEndDate = usageShapeProfileWindowDateKey(row?.windowEndUtc);
+  if (windowStartDate !== canonicalCoverage.startDate || windowEndDate !== canonicalCoverage.endDate) {
+    return "coverage_window_mismatch";
+  }
+  const profileMonthKeys = parseMonthKeysFromShapeByMonth(row.shapeByMonth96);
+  const snap = buildUsageShapeProfileSnapFromMonthContract({
+    monthKeys: profileMonthKeys,
+    weekdayVals: row.avgKwhPerDayWeekdayByMonth,
+    weekendVals: row.avgKwhPerDayWeekendByMonth,
+  });
+  if (!snap) return "no_positive_values";
+  return null;
+}
+
+function usageShapeProfileSnapFromRow(row: any): UsageShapeProfileSnapForSimulation | null {
+  if (!row?.shapeByMonth96) return null;
+  const profileMonthKeys = parseMonthKeysFromShapeByMonth(row.shapeByMonth96);
+  return buildUsageShapeProfileSnapFromMonthContract({
+    monthKeys: profileMonthKeys,
+    weekdayVals: row.avgKwhPerDayWeekdayByMonth,
+    weekendVals: row.avgKwhPerDayWeekendByMonth,
+  });
+}
+
+export async function ensureUsageShapeProfileForSharedSimulation(args: {
+  userId: string;
+  houseId: string;
+  timezone: string | undefined;
+  canonicalMonths?: string[] | null;
+}): Promise<{
+  usageShapeProfileSnap: UsageShapeProfileSnapForSimulation | null;
+  usageShapeProfileDiag: SharedSimUsageShapeProfileDiag;
+  profileAutoBuilt: boolean;
+  error: string | null;
+}> {
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const timezoneResolved = String(args.timezone ?? "").trim() || null;
+  let shapeProfileRow = await getLatestUsageShapeProfile(args.houseId).catch(() => null);
+  let usageShapeProfileSnap = usageShapeProfileSnapFromRow(shapeProfileRow);
+  let contractFailure = usageShapeProfileContractFailure({
+    row: shapeProfileRow,
+    timezone: timezoneResolved,
+    canonicalCoverage,
+  });
+  let profileAutoBuilt = false;
+  let ensureAttempted = false;
+  let ensuredReason: string | null = null;
+  let ensureFailedReason: string | null = null;
+  let ensuredProfileId: string | null = null;
+
+  if (contractFailure && timezoneResolved) {
+    ensureAttempted = true;
+    ensuredReason = contractFailure;
+    const ensured = await ensureUsageShapeProfileForUserHouse({
+      userId: args.userId,
+      houseId: args.houseId,
+      timezone: timezoneResolved,
+    });
+    if (ensured.ok) {
+      profileAutoBuilt = true;
+      ensuredProfileId = String(ensured.profileId ?? "");
+      shapeProfileRow = await getLatestUsageShapeProfile(args.houseId).catch(() => null);
+      usageShapeProfileSnap = usageShapeProfileSnapFromRow(shapeProfileRow);
+      contractFailure = usageShapeProfileContractFailure({
+        row: shapeProfileRow,
+        timezone: timezoneResolved,
+        canonicalCoverage,
+      });
+      if (contractFailure) ensureFailedReason = contractFailure;
+    } else {
+      ensureFailedReason = ensured.reason;
+      usageShapeProfileSnap = null;
+    }
+  }
+
+  const reasonNotUsed = usageShapeProfileSnap ? null : ensureFailedReason ?? contractFailure ?? "missing";
+  return {
+    usageShapeProfileSnap,
+    usageShapeProfileDiag: {
+      found: !!shapeProfileRow,
+      id: shapeProfileRow?.id != null ? String(shapeProfileRow.id) : null,
+      version: shapeProfileRow?.version != null ? String(shapeProfileRow.version) : null,
+      derivedAt: shapeProfileRow?.derivedAt != null ? String(shapeProfileRow.derivedAt) : null,
+      windowStartUtc: shapeProfileRow?.windowStartUtc != null ? String(shapeProfileRow.windowStartUtc) : null,
+      windowEndUtc: shapeProfileRow?.windowEndUtc != null ? String(shapeProfileRow.windowEndUtc) : null,
+      profileMonthKeys: shapeProfileRow?.shapeByMonth96
+        ? Object.keys((shapeProfileRow.shapeByMonth96 as Record<string, unknown>) ?? {})
+            .filter((k) => /^\d{4}-\d{2}$/.test(k))
+            .sort()
+        : [],
+      weekdayAvgLen: Array.isArray(shapeProfileRow?.avgKwhPerDayWeekdayByMonth)
+        ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length
+        : null,
+      weekendAvgLen: Array.isArray(shapeProfileRow?.avgKwhPerDayWeekendByMonth)
+        ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length
+        : null,
+      canonicalMonths: Array.isArray(args.canonicalMonths) ? args.canonicalMonths.map((m) => String(m)) : [],
+      canonicalMonthsLen: Array.isArray(args.canonicalMonths) ? args.canonicalMonths.length : 0,
+      inlineDerivedFromActual: false,
+      reasonNotUsed,
+      ensuredInFlow: profileAutoBuilt,
+      ensureAttempted,
+      ensuredReason: profileAutoBuilt ? ensuredReason : null,
+      ensureFailedReason,
+      ensuredProfileId,
+      canonicalCoverageStartDate: canonicalCoverage.startDate,
+      canonicalCoverageEndDate: canonicalCoverage.endDate,
+    },
+    profileAutoBuilt,
+    error: reasonNotUsed ? `usage_shape_profile_required:${reasonNotUsed}` : null,
   };
 }
 
@@ -375,10 +542,9 @@ export async function simulatePastUsageDataset(
       };
     }
 
-    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
+    const [homeRecForPast, applianceRecForPast] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-      getLatestUsageShapeProfile(houseId).catch(() => null),
     ]);
     const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
     const applianceProfileForPast =
@@ -387,102 +553,20 @@ export async function simulatePastUsageDataset(
         : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
 
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
-    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
-    let inlineDerivedShapeProfile:
-      | ReturnType<typeof deriveUsageShapeProfile>
-      | null = null;
-    let reasonNotUsed: string | null = null;
-    if (!shapeProfileRow) {
-      reasonNotUsed = "profile_not_found";
-    } else if (!timezone) {
-      reasonNotUsed = "missing_timezone";
-    } else if (!shapeProfileRow.shapeByMonth96) {
-      reasonNotUsed = "no_shapeByMonth96";
-    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
-      reasonNotUsed = "missing_arrays";
-    }
-    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
-      const profileMonthKeys = parseMonthKeysFromShapeByMonth(shapeProfileRow.shapeByMonth96);
-      const snap = buildUsageShapeProfileSnapFromMonthContract({
-        monthKeys: profileMonthKeys,
-        weekdayVals: shapeProfileRow.avgKwhPerDayWeekdayByMonth,
-        weekendVals: shapeProfileRow.avgKwhPerDayWeekendByMonth,
-      });
-      if (snap) {
-        usageShapeProfileSnap = snap;
-        reasonNotUsed = null;
-      } else {
-        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
-      }
-    }
-    if (!usageShapeProfileSnap && timezone && actualIntervals.length > 0) {
-      try {
-        inlineDerivedShapeProfile = deriveUsageShapeProfile(
-          actualIntervals.map((r) => ({
-            tsUtc: String(r.timestamp ?? ""),
-            kwh: Number(r.kwh) || 0,
-          })),
-          timezone,
-          `${startDate}T00:00:00.000Z`,
-          `${endDate}T23:59:59.999Z`
-        );
-        const inlineMonthKeys = parseMonthKeysFromShapeByMonth(inlineDerivedShapeProfile.shapeByMonth96);
-        const inlineSnap = buildUsageShapeProfileSnapFromMonthContract({
-          monthKeys: inlineMonthKeys,
-          weekdayVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonth,
-          weekendVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonth,
-          weekdayByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonthKey,
-          weekendByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonthKey,
-        });
-        if (inlineSnap) {
-          usageShapeProfileSnap = inlineSnap;
-          reasonNotUsed = null;
-        } else {
-          reasonNotUsed = reasonNotUsed ?? "inline_profile_no_positive_values";
-        }
-      } catch {
-        reasonNotUsed = reasonNotUsed ?? "inline_profile_derive_failed";
-      }
-    }
+    const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
+      userId,
+      houseId,
+      timezone,
+      canonicalMonths,
+    });
+    const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     if (!usageShapeProfileSnap) {
       return {
         dataset: null,
-        error: `usage_shape_profile_required:${reasonNotUsed ?? "missing"}`,
+        error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
       };
     }
-    const usageShapeProfileDiag = {
-      found: !!shapeProfileRow || !!inlineDerivedShapeProfile,
-      id: shapeProfileRow?.id ?? null,
-      version: shapeProfileRow?.version ?? (inlineDerivedShapeProfile ? "inline_derived_v1" : null),
-      derivedAt: shapeProfileRow?.derivedAt != null ? String(shapeProfileRow.derivedAt) : null,
-      windowStartUtc:
-        shapeProfileRow?.windowStartUtc != null
-          ? String(shapeProfileRow.windowStartUtc)
-          : (inlineDerivedShapeProfile?.windowStartUtc ?? null),
-      windowEndUtc:
-        shapeProfileRow?.windowEndUtc != null
-          ? String(shapeProfileRow.windowEndUtc)
-          : (inlineDerivedShapeProfile?.windowEndUtc ?? null),
-      profileMonthKeys: shapeProfileRow?.shapeByMonth96
-        ? Object.keys((shapeProfileRow.shapeByMonth96 as Record<string, unknown>) ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort()
-        : Object.keys(inlineDerivedShapeProfile?.shapeByMonth96 ?? {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort(),
-      weekdayAvgLen:
-        shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null
-          ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekdayByMonth) ? shapeProfileRow.avgKwhPerDayWeekdayByMonth.length : null)
-          : Array.isArray(inlineDerivedShapeProfile?.avgKwhPerDayWeekdayByMonth)
-            ? inlineDerivedShapeProfile!.avgKwhPerDayWeekdayByMonth.length
-            : null,
-      weekendAvgLen:
-        shapeProfileRow?.avgKwhPerDayWeekendByMonth != null
-          ? (Array.isArray(shapeProfileRow.avgKwhPerDayWeekendByMonth) ? shapeProfileRow.avgKwhPerDayWeekendByMonth.length : null)
-          : Array.isArray(inlineDerivedShapeProfile?.avgKwhPerDayWeekendByMonth)
-            ? inlineDerivedShapeProfile!.avgKwhPerDayWeekendByMonth.length
-            : null,
-      canonicalMonths,
-      canonicalMonthsLen: canonicalMonths.length,
-      inlineDerivedFromActual: !!inlineDerivedShapeProfile,
-      reasonNotUsed,
-    };
+    const usageShapeProfileDiag = ensuredUsageShape.usageShapeProfileDiag;
 
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
     // memory pressure for large windows. Only collect when explicitly requested.
@@ -558,6 +642,7 @@ export async function simulatePastUsageDataset(
         dayTotalShapingPath: "shared_daytype_neighbor_weather_shaping",
         curveShapingVersion: "shared_curve_v2",
         usageShapeProfileDiag,
+        profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
         dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
         intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
         coverageStart: dataset?.summary?.start ?? startDate,
@@ -650,10 +735,9 @@ export async function simulatePastFullWindowShared(
       };
     }
 
-    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
+    const [homeRecForPast, applianceRecForPast] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-      getLatestUsageShapeProfile(houseId).catch(() => null),
     ]);
     const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
     const applianceProfileForPast =
@@ -661,67 +745,17 @@ export async function simulatePastFullWindowShared(
         ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
         : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
 
-    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
-    let inlineDerivedShapeProfile:
-      | ReturnType<typeof deriveUsageShapeProfile>
-      | null = null;
-    let reasonNotUsed: string | null = null;
-    if (!shapeProfileRow) {
-      reasonNotUsed = "profile_not_found";
-    } else if (!timezone) {
-      reasonNotUsed = "missing_timezone";
-    } else if (!shapeProfileRow.shapeByMonth96) {
-      reasonNotUsed = "no_shapeByMonth96";
-    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
-      reasonNotUsed = "missing_arrays";
-    }
-    if (timezone && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
-      const profileMonthKeys = parseMonthKeysFromShapeByMonth(shapeProfileRow.shapeByMonth96);
-      const snap = buildUsageShapeProfileSnapFromMonthContract({
-        monthKeys: profileMonthKeys,
-        weekdayVals: shapeProfileRow.avgKwhPerDayWeekdayByMonth,
-        weekendVals: shapeProfileRow.avgKwhPerDayWeekendByMonth,
-      });
-      if (snap) {
-        usageShapeProfileSnap = snap;
-        reasonNotUsed = null;
-      } else {
-        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
-      }
-    }
-    if (!usageShapeProfileSnap && timezone && actualIntervals.length > 0) {
-      try {
-        inlineDerivedShapeProfile = deriveUsageShapeProfile(
-          actualIntervals.map((r) => ({
-            tsUtc: String(r.timestamp ?? ""),
-            kwh: Number(r.kwh) || 0,
-          })),
-          timezone,
-          `${startDate}T00:00:00.000Z`,
-          `${endDate}T23:59:59.999Z`
-        );
-        const inlineMonthKeys = parseMonthKeysFromShapeByMonth(inlineDerivedShapeProfile.shapeByMonth96);
-        const inlineSnap = buildUsageShapeProfileSnapFromMonthContract({
-          monthKeys: inlineMonthKeys,
-          weekdayVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonth,
-          weekendVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonth,
-          weekdayByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonthKey,
-          weekendByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonthKey,
-        });
-        if (inlineSnap) {
-          usageShapeProfileSnap = inlineSnap;
-          reasonNotUsed = null;
-        } else {
-          reasonNotUsed = reasonNotUsed ?? "inline_profile_no_positive_values";
-        }
-      } catch {
-        reasonNotUsed = reasonNotUsed ?? "inline_profile_derive_failed";
-      }
-    }
+    const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
+      userId,
+      houseId,
+      timezone,
+      canonicalMonths: ((buildInputs as any).canonicalMonths ?? []) as string[],
+    });
+    const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     if (!usageShapeProfileSnap) {
       return {
         simulatedIntervals: null,
-        error: `usage_shape_profile_required:${reasonNotUsed ?? "missing"}`,
+        error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
       };
     }
 
@@ -751,6 +785,8 @@ export async function simulatePastFullWindowShared(
       weatherKindUsed: provenance.weatherKindUsed,
       weatherProviderName: provenance.weatherProviderName,
       weatherFallbackReason: provenance.weatherFallbackReason,
+      usageShapeProfileDiag: ensuredUsageShape.usageShapeProfileDiag,
+      profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
@@ -825,78 +861,26 @@ export async function simulatePastSelectedDaysShared(
         error: `actual_weather_required:${provenance.weatherSourceSummary}`,
       };
     }
-    const [homeRecForPast, applianceRecForPast, shapeProfileRow] = await Promise.all([
+    const [homeRecForPast, applianceRecForPast] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-      getLatestUsageShapeProfile(houseId).catch(() => null),
     ]);
     const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
     const applianceProfileForPast =
       normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
         ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
         : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
-    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
-    let usageShapeProfileSnap: { weekdayAvgByMonthKey: Record<string, number>; weekendAvgByMonthKey: Record<string, number> } | null = null;
-    let inlineDerivedShapeProfile:
-      | ReturnType<typeof deriveUsageShapeProfile>
-      | null = null;
-    let reasonNotUsed: string | null = null;
-    if (!shapeProfileRow) {
-      reasonNotUsed = "profile_not_found";
-    } else if (!timezoneResolved) {
-      reasonNotUsed = "missing_timezone";
-    } else if (!shapeProfileRow.shapeByMonth96) {
-      reasonNotUsed = "no_shapeByMonth96";
-    } else if (shapeProfileRow.avgKwhPerDayWeekdayByMonth == null || shapeProfileRow.avgKwhPerDayWeekendByMonth == null) {
-      reasonNotUsed = "missing_arrays";
-    }
-    if (timezoneResolved && shapeProfileRow?.shapeByMonth96 && shapeProfileRow?.avgKwhPerDayWeekdayByMonth != null && shapeProfileRow?.avgKwhPerDayWeekendByMonth != null) {
-      const profileMonthKeys = parseMonthKeysFromShapeByMonth(shapeProfileRow.shapeByMonth96);
-      const snap = buildUsageShapeProfileSnapFromMonthContract({
-        monthKeys: profileMonthKeys,
-        weekdayVals: shapeProfileRow.avgKwhPerDayWeekdayByMonth,
-        weekendVals: shapeProfileRow.avgKwhPerDayWeekendByMonth,
-      });
-      if (snap) {
-        usageShapeProfileSnap = snap;
-        reasonNotUsed = null;
-      } else {
-        reasonNotUsed = reasonNotUsed ?? "no_positive_values";
-      }
-    }
-    if (!usageShapeProfileSnap && timezoneResolved && actualIntervals.length > 0) {
-      try {
-        inlineDerivedShapeProfile = deriveUsageShapeProfile(
-          actualIntervals.map((r) => ({
-            tsUtc: String(r.timestamp ?? ""),
-            kwh: Number(r.kwh) || 0,
-          })),
-          timezoneResolved,
-          `${startDate}T00:00:00.000Z`,
-          `${endDate}T23:59:59.999Z`
-        );
-        const inlineMonthKeys = parseMonthKeysFromShapeByMonth(inlineDerivedShapeProfile.shapeByMonth96);
-        const inlineSnap = buildUsageShapeProfileSnapFromMonthContract({
-          monthKeys: inlineMonthKeys,
-          weekdayVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonth,
-          weekendVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonth,
-          weekdayByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekdayByMonthKey,
-          weekendByMonthKeyVals: inlineDerivedShapeProfile.avgKwhPerDayWeekendByMonthKey,
-        });
-        if (inlineSnap) {
-          usageShapeProfileSnap = inlineSnap;
-          reasonNotUsed = null;
-        } else {
-          reasonNotUsed = reasonNotUsed ?? "inline_profile_no_positive_values";
-        }
-      } catch {
-        reasonNotUsed = reasonNotUsed ?? "inline_profile_derive_failed";
-      }
-    }
+    const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
+      userId,
+      houseId,
+      timezone: timezoneResolved,
+      canonicalMonths: ((buildInputs as any).canonicalMonths ?? []) as string[],
+    });
+    const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     if (!usageShapeProfileSnap) {
       return {
         simulatedIntervals: null,
-        error: `usage_shape_profile_required:${reasonNotUsed ?? "missing"}`,
+        error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
       };
     }
     // Selected local test dates can span two UTC dates. Force simulation for every
@@ -944,6 +928,8 @@ export async function simulatePastSelectedDaysShared(
       pastDayCounts,
       weatherSourceSummary: provenance.weatherSourceSummary,
       weatherKindUsed: provenance.weatherKindUsed,
+      usageShapeProfileDiag: ensuredUsageShape.usageShapeProfileDiag,
+      profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
