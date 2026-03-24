@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { chicagoDateKey } from "@/lib/time/chicago";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 type HouseOption = { id: string; label: string };
@@ -647,7 +648,26 @@ function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
   );
 }
 
+/** Re-compute when Chicago calendar day rolls so `resolveCanonicalUsage365CoverageWindow()` label fallbacks stay in sync. */
+function useChicagoCalendarDayKey(): string {
+  const [key, setKey] = useState(() => chicagoDateKey());
+  useEffect(() => {
+    const tick = () => setKey(chicagoDateKey());
+    const id = window.setInterval(tick, 60_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+  return key;
+}
+
 export default function GapFillLabClient() {
+  const chicagoCalendarDayKey = useChicagoCalendarDayKey();
   const [email, setEmail] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
   const [weatherKind, setWeatherKind] = useState<WeatherKindOption>("ACTUAL_LAST_YEAR");
@@ -840,7 +860,7 @@ export default function GapFillLabClient() {
       fifteenCurve,
       stitchedMonth: (result as any)?.displaySimulated?.stitchedMonth ?? (result as any)?.diagnostics?.stitchedMonthChartSim ?? null,
     };
-  }, [result, timezone]);
+  }, [result, timezone, chicagoCalendarDayKey]);
   const usage365ChartData = useMemo(() => {
     if (!result || !result.ok || !result.usage365?.daily?.length) return null;
     const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
@@ -867,7 +887,7 @@ export default function GapFillLabClient() {
       coverageEnd: labelCoverageEnd,
       daily: normalizedDaily,
     };
-  }, [result]);
+  }, [result, chicagoCalendarDayKey]);
   const hasUsage365ChartData = Boolean(usage365ChartData?.daily?.length);
   const hasGapfillChartData = Boolean(gapfillChartData?.daily?.length);
   const effectiveChartMode: ChartMode =

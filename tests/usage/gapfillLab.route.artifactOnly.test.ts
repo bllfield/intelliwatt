@@ -3371,5 +3371,14 @@ describe("GapFillLabClient catch normalization helpers", () => {
     expect(clientSource).toContain("status: \"error\",");
     expect(clientSource).toContain("errorMessage: args.errorMessage,");
   });
+
+  it("keeps Usage 365 / Gap-Fill chart coverage labels on route or canonical window (not sparse daily min/max) and refreshes canonical labels after Chicago day change", () => {
+    expect(clientSource).not.toMatch(/normalizedDaily\[0\]/);
+    expect(clientSource).not.toMatch(/normalizedDaily\[normalizedDaily\.length\s*-\s*1\]/);
+    expect(clientSource).toContain("labelCoverageStart");
+    expect(clientSource).toContain("labelCoverageEnd");
+    expect(clientSource).toContain("useChicagoCalendarDayKey");
+    expect(clientSource).toContain("chicagoCalendarDayKey");
+  });
 });
 
