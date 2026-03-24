@@ -1599,6 +1599,10 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(409);
     expect(body.error).toBe("travel_vacant_parity_proof_failed");
     expect(body.reasonCode).toBe("TRAVEL_VACANT_ARTIFACT_REFERENCE_MISSING");
+    expect(body.explanation).toBe(
+      "Exact travel/vacant parity validation failed. Saved artifact totals and fresh shared simulation totals did not match exactly for one or more validated dates."
+    );
+    expect(body.explanation).not.toContain("Simulation failed unexpectedly");
     expect(body.travelVacantParityTruth).toMatchObject({
       availability: "missing_artifact_reference",
       exactProofRequired: true,

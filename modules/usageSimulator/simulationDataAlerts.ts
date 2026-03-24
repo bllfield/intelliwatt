@@ -123,6 +123,21 @@ export function classifySimulationFailure(args: {
     };
   }
 
+  if (
+    haystack.includes("travel_vacant_parity_proof_failed") ||
+    haystack.includes("travel_vacant_parity_mismatch")
+  ) {
+    return {
+      reasonCode: "TRAVEL_VACANT_PARITY_VALIDATION_FAILED",
+      reasonMessage:
+        "Exact travel/vacant parity validation failed because saved artifact totals and fresh shared simulation totals did not match exactly.",
+      missingData: [],
+      userFacingExplanation:
+        "Exact travel/vacant parity validation failed. Saved artifact totals and fresh shared simulation totals did not match exactly for one or more validated dates.",
+      shouldAlert: false,
+    };
+  }
+
   return {
     reasonCode: "SIMULATION_RUNTIME_ERROR",
     reasonMessage: message || "Simulation failed for an unknown reason.",

@@ -946,6 +946,25 @@ function normalizeIntervalsForExactParityCodec(
   return out;
 }
 
+function filterIntervalsToLocalDateKeys(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  timezone: string,
+  localDateKeys: ReadonlySet<string>
+): Array<{ timestamp: string; kwh: number }> {
+  if (localDateKeys.size === 0 || intervals.length === 0) return [];
+  const out: Array<{ timestamp: string; kwh: number }> = [];
+  for (const row of intervals) {
+    const timestamp = canonicalIntervalKey(String(row?.timestamp ?? "").trim());
+    if (!timestamp) continue;
+    if (!localDateKeys.has(dateKeyInTimezone(timestamp, timezone))) continue;
+    out.push({
+      timestamp,
+      kwh: Number(row?.kwh) || 0,
+    });
+  }
+  return out;
+}
+
 const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
 
 function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
@@ -2220,6 +2239,8 @@ export async function buildGapfillCompareSimShared(args: {
       };
     };
     if (effectiveCompareFreshMode === "selected_days") {
+      const travelVacantParityDateKeySet = new Set<string>(travelVacantParityDateKeysLocal);
+      let freshParityWeatherSourceSummary = weatherBasisUsed;
       const runSelectedDaysFreshExecution = async (selectedDateKeysLocal: Set<string>) => {
         if (selectedDateKeysLocal.size === 0) {
           return {
@@ -2304,21 +2325,45 @@ export async function buildGapfillCompareSimShared(args: {
       simulatedTestIntervals = selectedTestDaysResult.simulatedIntervals;
       selectedTestDailyTotalsByDate = selectedTestDaysResult.dailyTotalsByDate;
       throwIfGapfillCompareAborted(abortSignal);
-      const selectedTravelParityResult = await runSelectedDaysFreshExecution(new Set<string>(travelVacantParityDateKeysLocal));
-      if (!selectedTravelParityResult.ok) {
-        return {
-          ok: false,
-          status: 500,
-          body: {
+      if (exactArtifactReadRequired && travelVacantParityDateKeySet.size > 0) {
+        const exactTravelParityFreshResult = await runFullWindowFreshExecution();
+        if (!exactTravelParityFreshResult.ok) {
+          return {
             ok: false,
-            error: "fresh_compare_simulation_failed",
-            message: selectedTravelParityResult.error,
-            mode: "artifact_only",
-            scenarioId: sharedScenarioCacheId,
-          },
-        };
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_simulation_failed",
+              message: exactTravelParityFreshResult.error,
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+            },
+          };
+        }
+        freshParityIntervals = filterIntervalsToLocalDateKeys(
+          exactTravelParityFreshResult.simulatedIntervals,
+          timezone,
+          travelVacantParityDateKeySet
+        );
+        freshParityWeatherSourceSummary = exactTravelParityFreshResult.weatherSourceSummary;
+      } else {
+        const selectedTravelParityResult = await runSelectedDaysFreshExecution(travelVacantParityDateKeySet);
+        if (!selectedTravelParityResult.ok) {
+          return {
+            ok: false,
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_simulation_failed",
+              message: selectedTravelParityResult.error,
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+            },
+          };
+        }
+        freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
+        freshParityWeatherSourceSummary = selectedTravelParityResult.weatherSourceSummary;
       }
-      freshParityIntervals = selectedTravelParityResult.simulatedIntervals;
       scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
       comparePulledFromSharedArtifactOnly = false;
       compareSimSource = "shared_selected_days_calc";
@@ -2329,7 +2374,7 @@ export async function buildGapfillCompareSimShared(args: {
       weatherBasisUsed =
         boundedTestDateKeysLocal.size > 0
           ? selectedTestDaysResult.weatherSourceSummary
-          : selectedTravelParityResult.weatherSourceSummary;
+          : freshParityWeatherSourceSummary;
       const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
       if (selectedWeatherRange.length > 0) {
         throwIfGapfillCompareAborted(abortSignal);
