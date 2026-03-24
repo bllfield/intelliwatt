@@ -1405,6 +1405,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         autoEnsureArtifact: false,
         includeFreshCompareCalc: false,
         selectedDaysLightweightArtifactRead: true,
+        includeDiagnostics: false,
+        includeFullReportText: false,
       })
     );
   });

@@ -753,6 +753,7 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_scored_rows_ready"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
+  | "build_shared_compare_compact_compare_core_memory_reduced"
   | "build_shared_compare_response_ready"
   | "build_shared_compare_finalize_start";
 
@@ -996,6 +997,10 @@ export async function buildGapfillCompareSimShared(args: {
   artifactExactInputHash?: string | null;
   requireExactArtifactMatch?: boolean;
   artifactIdentitySource?: "same_run_artifact_ensure" | "manual_request" | null;
+  /** When false with selected-days lightweight compare, skip heavy chart/monthly display materialization (Gap-Fill compare_core memory). Default true preserves legacy test/caller behavior. */
+  includeDiagnostics?: boolean;
+  /** When false with selected-days lightweight compare, skip heavy chart/monthly display materialization. Default true preserves legacy test/caller behavior. */
+  includeFullReportText?: boolean;
   onPhaseUpdate?: (
     phase: GapfillCompareBuildPhase,
     meta?: Record<string, unknown>
@@ -1016,6 +1021,8 @@ export async function buildGapfillCompareSimShared(args: {
     artifactExactInputHash = null,
     requireExactArtifactMatch = false,
     artifactIdentitySource = null,
+    includeDiagnostics = true,
+    includeFullReportText = true,
     onPhaseUpdate,
   } = args;
   const reportPhase = async (
@@ -1115,9 +1122,18 @@ export async function buildGapfillCompareSimShared(args: {
     // allowing selected-days lightweight reads to change how the artifact is selected.
     useSelectedDaysLightweightArtifactRead = false;
   }
+  /** Selected-days Gap-Fill compare_core only: omit heavy chart/monthly/display materialization when diagnostics and full report are off (Vercel OOM mitigation). */
+  const compareCoreMemoryReducedPath =
+    effectiveCompareFreshMode === "selected_days" &&
+    useSelectedDaysLightweightArtifactRead === true &&
+    includeDiagnostics !== true &&
+    includeFullReportText !== true;
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
+  const travelVacantParityDateKeysLocal = Array.from(boundedTravelDateKeysLocal)
+    .filter((dk) => chartDateKeysLocal.has(dk))
+    .sort((a, b) => (a < b ? -1 : 1));
   const expectedChartIntervalCount = chartDateKeysLocal.size * 96;
 
   // Cheap pre-read: if scenario has no artifact rows at all, short-circuit before identity/fingerprint work.
@@ -1722,23 +1738,58 @@ export async function buildGapfillCompareSimShared(args: {
   modelAssumptions.excludedDateKeysFingerprint = travelFingerprint;
   modelAssumptions.excludedDateKeysCount = boundedTravelDateKeysLocal.size;
 
-  const artifactIntervals = ((dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>) ?? []).map((p) => ({
-    timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-    kwh: Number(p?.kwh) || 0,
-  }));
-  const daySourceFromDataset = new Map<string, "ACTUAL" | "SIMULATED">(
-    (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
-      .map((d: any) => [String(d?.date ?? "").slice(0, 10), String(d?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL"])
-      .filter((entry: [string, "ACTUAL" | "SIMULATED"]) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]))
-  );
+  const artifactIntervalsRaw = (dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>) ?? [];
+  const artifactIntervals = (() => {
+    if (!compareCoreMemoryReducedPath) {
+      return artifactIntervalsRaw.map((p) => ({
+        timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
+        kwh: Number(p?.kwh) || 0,
+      }));
+    }
+    // Compare join + scored-day paths only need interval points for local dates in the bounded
+    // scoring window (full-year interval arrays are a major compare_core memory source on Vercel).
+    // Travel/vacant parity uses canonical artifact day totals + fresh parity intervals, not raw
+    // artifact interval rows for non-scored travel dates.
+    const neededDayKeys = new Set<string>(Array.from(boundedTestDateKeysLocal));
+    const out: Array<{ timestamp: string; kwh: number }> = [];
+    for (const p of artifactIntervalsRaw) {
+      const ts = canonicalIntervalKey(String(p?.timestamp ?? "").trim());
+      const dk = dateKeyInTimezone(ts, timezone);
+      if (!neededDayKeys.has(dk)) continue;
+      out.push({ timestamp: ts, kwh: Number(p?.kwh) || 0 });
+    }
+    return out;
+  })();
+  const daySourceFromDataset = (() => {
+    const dailyArr = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
+    if (!compareCoreMemoryReducedPath) {
+      const entries = dailyArr
+        .map((d: any) =>
+          [
+            String(d?.date ?? "").slice(0, 10),
+            String(d?.source ?? "").toUpperCase() === "SIMULATED" ? ("SIMULATED" as const) : ("ACTUAL" as const),
+          ] as const
+        )
+        .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry[0]));
+      return new Map<string, "ACTUAL" | "SIMULATED">(entries);
+    }
+    const keysNeeded = new Set<string>([
+      ...Array.from(boundedTestDateKeysLocal),
+      ...Array.from(boundedTravelDateKeysLocal),
+    ]);
+    const m = new Map<string, "ACTUAL" | "SIMULATED">();
+    for (const d of dailyArr) {
+      const dk = String((d as any)?.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !keysNeeded.has(dk)) continue;
+      m.set(dk, String((d as any)?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL");
+    }
+    return m;
+  })();
   const scoringExcludedSource = "shared_past_travel_vacant_excludedDateKeysFingerprint";
   const artifactSimulatedTestIntervals = artifactIntervals.filter((p) => {
     const dk = dateKeyInTimezone(p.timestamp, timezone);
     return boundedTestDateKeysLocal.has(dk);
   });
-  const travelVacantParityDateKeysLocal = Array.from(boundedTravelDateKeysLocal)
-    .filter((dk) => chartDateKeysLocal.has(dk))
-    .sort((a, b) => (a < b ? -1 : 1));
   // Keep selected-days scored-row construction bounded to scored test days only.
   const useSelectedDaysScopedDisplayRows = effectiveCompareFreshMode === "selected_days";
   const displayDateKeysLocal = useSelectedDaysScopedDisplayRows
@@ -2071,13 +2122,25 @@ export async function buildGapfillCompareSimShared(args: {
   const canonicalDailyInputRows = restoredCanonicalDailyRows ?? (Array.isArray((dataset as any)?.daily)
     ? ((dataset as any).daily as Array<{ date?: string; kwh?: number; source?: string }>)
     : []);
-  const datasetDailyRows = canonicalDailyInputRows
-        .map((d) => ({
-          date: String(d?.date ?? "").slice(0, 10),
-          simKwh: round2Local(Number(d?.kwh) || 0),
-        }))
-        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && displayDateKeysLocal.has(d.date))
-        .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const datasetDailyRows = (() => {
+    if (compareCoreMemoryReducedPath) {
+      const out: Array<{ date: string; simKwh: number }> = [];
+      for (const d of canonicalDailyInputRows) {
+        const date = String(d?.date ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !displayDateKeysLocal.has(date)) continue;
+        out.push({ date, simKwh: round2Local(Number(d?.kwh) || 0) });
+      }
+      out.sort((a, b) => (a.date < b.date ? -1 : 1));
+      return out;
+    }
+    return canonicalDailyInputRows
+      .map((d) => ({
+        date: String(d?.date ?? "").slice(0, 10),
+        simKwh: round2Local(Number(d?.kwh) || 0),
+      }))
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && displayDateKeysLocal.has(d.date))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+  })();
   const useDatasetDailyAsCanonical = datasetDailyRows.length > 0;
   await reportPhase("build_shared_compare_scored_actual_rows_ready", {
     compareFreshModeUsed,
@@ -2116,26 +2179,40 @@ export async function buildGapfillCompareSimShared(args: {
   const canonicalMonthlyInputRows = restoredCanonicalMonthlyRows ?? (Array.isArray((dataset as any)?.monthly)
     ? ((dataset as any).monthly as Array<{ month?: string; kwh?: number }>)
     : []);
-  const datasetMonthlyRows = canonicalMonthlyInputRows
+  const datasetMonthlyRows = compareCoreMemoryReducedPath
+    ? []
+    : canonicalMonthlyInputRows
         .map((m) => ({
           month: String(m?.month ?? "").slice(0, 7),
           kwh: round2Local(Number(m?.kwh) || 0),
         }))
         .filter((m) => /^\d{4}-\d{2}$/.test(m.month) && chartMonthKeysLocal.has(m.month))
         .sort((a, b) => (a.month < b.month ? -1 : 1));
-  const useDatasetMonthlyAsCanonical = datasetMonthlyRows.length > 0;
-  const monthlyChartBuild = !useDatasetMonthlyAsCanonical
-    ? buildDisplayMonthlyFromIntervalsUtc(
-        simulatedChartIntervals.map((p) => ({
-          timestamp: String(p.timestamp ?? ""),
-          consumption_kwh: Number(p.kwh) || 0,
-        })),
-        canonicalWindow.endDate
-      )
-    : null;
-  let simulatedChartMonthly = useDatasetMonthlyAsCanonical
-    ? datasetMonthlyRows
-    : monthlyChartBuild?.monthly ?? [];
+  const useDatasetMonthlyAsCanonical = !compareCoreMemoryReducedPath && datasetMonthlyRows.length > 0;
+  const monthlyChartBuild =
+    compareCoreMemoryReducedPath || useDatasetMonthlyAsCanonical
+      ? null
+      : buildDisplayMonthlyFromIntervalsUtc(
+          simulatedChartIntervals.map((p) => ({
+            timestamp: String(p.timestamp ?? ""),
+            consumption_kwh: Number(p.kwh) || 0,
+          })),
+          canonicalWindow.endDate
+        );
+  let simulatedChartMonthly = compareCoreMemoryReducedPath
+    ? []
+    : useDatasetMonthlyAsCanonical
+      ? datasetMonthlyRows
+      : monthlyChartBuild?.monthly ?? [];
+  if (compareCoreMemoryReducedPath) {
+    await reportPhase("build_shared_compare_compact_compare_core_memory_reduced", {
+      compareFreshModeUsed,
+      compareCalculationScope,
+      artifactIntervalsMaterializedCount: artifactIntervals.length,
+      skippedFullDatasetMonthlyScan: true,
+      skippedIntervalMonthlyRebucket: true,
+    });
+  }
   await reportPhase("build_shared_compare_scored_sim_rows_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -2144,22 +2221,25 @@ export async function buildGapfillCompareSimShared(args: {
     simulatedChartMonthlyCount: simulatedChartMonthly.length,
     useDatasetMonthlyAsCanonical,
   });
-  const simulatedChartStitchedMonth =
-    (((dataset as any)?.insights?.stitchedMonth ?? null) as {
-      mode: "PRIOR_YEAR_TAIL";
-      yearMonth: string;
-      haveDaysThrough: number;
-      missingDaysFrom: number;
-      missingDaysTo: number;
-      borrowedFromYearMonth: string;
-      completenessRule: string;
-    } | null) ?? monthlyChartBuild?.stitchedMonth ?? null;
+  const simulatedChartStitchedMonth = compareCoreMemoryReducedPath
+    ? null
+    : ((((dataset as any)?.insights?.stitchedMonth ?? null) as {
+        mode: "PRIOR_YEAR_TAIL";
+        yearMonth: string;
+        haveDaysThrough: number;
+        missingDaysFrom: number;
+        missingDaysTo: number;
+        borrowedFromYearMonth: string;
+        completenessRule: string;
+      } | null) ?? monthlyChartBuild?.stitchedMonth ?? null);
   modelAssumptions.gapfillDisplayDailySource = useDatasetDailyAsCanonical
     ? "dataset.daily"
     : "interval_rebucket_fallback";
-  modelAssumptions.gapfillDisplayMonthlySource = useDatasetMonthlyAsCanonical
-    ? "dataset.monthly"
-    : "interval_rebucket_fallback";
+  modelAssumptions.gapfillDisplayMonthlySource = compareCoreMemoryReducedPath
+    ? "compact_compare_core_skipped"
+    : useDatasetMonthlyAsCanonical
+      ? "dataset.monthly"
+      : "interval_rebucket_fallback";
   const exactParityArtifactIntervals =
     exactTravelParityRequiresIntervalBackedArtifactTruth
       ? Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0

@@ -1071,6 +1071,55 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(phases[phases.length - 1]).toBe("build_shared_compare_finalize_start");
   });
 
+  it("emits compact compare_core memory-reduced phase and skips monthly/chart materialization when diagnostics and full report are off", async () => {
+    const compactArtifact = {
+      inputHash: "hash-compact-core",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 9999 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    };
+    getLatestCachedPastDatasetByScenario.mockResolvedValue(compactArtifact);
+    getCachedPastDataset.mockResolvedValue(compactArtifact);
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+
+    const phases: string[] = [];
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      onPhaseUpdate: (phase) => {
+        phases.push(String(phase));
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+    if (out.ok) {
+      expect(out.simulatedChartMonthly.length).toBe(0);
+      expect(out.simulatedChartStitchedMonth).toBeNull();
+      expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
+      expect(out.travelVacantParityTruth?.availability).toBeDefined();
+      expect(Array.isArray(out.scoredDayWeatherRows)).toBe(true);
+    }
+  });
+
   it("reports weather phase metadata with the final loaded weather basis in selected-days mode", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",

@@ -2314,6 +2314,8 @@ export async function POST(req: NextRequest) {
           compareFreshMode,
           includeFreshCompareCalc: compareFreshMode === "full_window",
           selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
+          includeDiagnostics,
+          includeFullReportText,
           artifactExactScenarioId: requestedArtifactScenarioId,
           artifactExactInputHash: requestedArtifactInputHash,
           requireExactArtifactMatch,
