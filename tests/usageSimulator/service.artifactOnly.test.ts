@@ -1114,12 +1114,16 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+    expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
     if (out.ok) {
       expect(out.simulatedChartMonthly.length).toBe(0);
       expect(out.simulatedChartStitchedMonth).toBeNull();
       expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
       expect(out.travelVacantParityTruth?.availability).toBeDefined();
       expect(Array.isArray(out.scoredDayWeatherRows)).toBe(true);
+      expect((out.modelAssumptions as any)?.artifactSimulatedDayReferenceCount).toBeLessThanOrEqual(
+        out.scoringTestDateKeysLocal.size + out.boundedTravelDateKeysLocal.size
+      );
     }
   });
 
@@ -1176,6 +1180,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+    expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
     const inputsMeta = inputsReadyMeta.value;
     const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
     expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);

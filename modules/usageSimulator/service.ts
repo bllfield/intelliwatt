@@ -751,6 +751,7 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_scored_row_alignment_ready"
   | "build_shared_compare_scored_row_merge_ready"
   | "build_shared_compare_scored_rows_ready"
+  | "build_shared_compare_compact_post_scored_sim_ready"
   | "build_shared_compare_parity_ready"
   | "build_shared_compare_metrics_ready"
   | "build_shared_compare_compact_compare_core_memory_reduced"
@@ -2288,7 +2289,13 @@ export async function buildGapfillCompareSimShared(args: {
     : useDatasetMonthlyAsCanonical
       ? "dataset.monthly"
       : "interval_rebucket_fallback";
-  const exactParityArtifactIntervals =
+  const exactParityArtifactIntervalsDecodeBufferOwned =
+    exactTravelParityRequiresIntervalBackedArtifactTruth &&
+    !(
+      Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
+    ) &&
+    Boolean(cached?.intervalsCodec === INTERVAL_CODEC_V1);
+  let exactParityArtifactIntervals: Array<{ timestamp: string; kwh: number }> =
     exactTravelParityRequiresIntervalBackedArtifactTruth
       ? Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
         ? ((dataset as any).series.intervals15 as Array<{ timestamp: string; kwh: number }>)
@@ -2343,6 +2350,27 @@ export async function buildGapfillCompareSimShared(args: {
     if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
     (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
     (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = canonicalArtifactSimulatedDayTotalsByDate;
+  }
+  // Compact selected-days compare: drop full-window canonical day maps after merge + meta write.
+  // Only bounded scored dates + travel/vacant parity dates are needed for alignment, parity proof,
+  // and snapshot consumers; retaining the full-year canonical map was a major post-scored-sim heap
+  // source on Vercel.
+  if (compareCoreMemoryReducedPath) {
+    const slimKeys = new Set<string>([
+      ...Array.from(boundedTestDateKeysLocal),
+      ...Array.from(travelVacantParityDateKeysLocal),
+    ]);
+    const slim: CanonicalArtifactSimulatedDayTotalsByDate = {};
+    for (const dk of Array.from(slimKeys)) {
+      const v = (canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>)[dk];
+      if (v !== undefined && Number.isFinite(Number(v))) slim[dk] = round2Local(Number(v));
+    }
+    canonicalArtifactSimulatedDayTotalsByDate = slim;
+    if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
+      if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
+      (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = slim;
+      (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = slim;
+    }
   }
   let artifactSimulatedDayReferenceRows = useSelectedDaysScopedDisplayRows
     ? Array.from(displayDateKeysLocal)
@@ -2641,6 +2669,18 @@ export async function buildGapfillCompareSimShared(args: {
                 exactProofRequired: exactArtifactReadRequired,
                 exactProofSatisfied: true,
               };
+  if (compareCoreMemoryReducedPath) {
+    if (exactParityArtifactIntervalsDecodeBufferOwned && exactParityArtifactIntervals.length > 0) {
+      exactParityArtifactIntervals.length = 0;
+    }
+    await reportPhase("build_shared_compare_compact_post_scored_sim_ready", {
+      compactScoredRowCount: boundedTestDateKeysLocal.size,
+      compactParityRowCount: travelVacantParityRows.length,
+      compactWeatherRowCount: scoredDayWeatherRows.length,
+      comparableDateCount: displayVsFreshParityForScoredDays.comparableDateCount,
+      missingDisplaySimCount: displayVsFreshParityForScoredDays.missingDisplaySimCount,
+    });
+  }
   modelAssumptions.travelVacantParityValidatedCount = travelVacantParityValidatedCount;
   modelAssumptions.travelVacantParityMismatchCount = travelVacantParityMismatchCount;
   modelAssumptions.travelVacantParityMissingArtifactReferenceCount = travelVacantParityMissingArtifactCount;
