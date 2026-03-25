@@ -973,7 +973,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
-      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareSharedCalcPath:
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       compareSimSource: "shared_selected_days_calc",
@@ -1028,7 +1029,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       ok: true,
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
-      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareSharedCalcPath:
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       compareSimSource: "shared_selected_days_calc",
@@ -1079,7 +1081,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       scoringUsedSharedArtifact: false,
-      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareSharedCalcPath:
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       displaySimSource: "dataset.daily",
@@ -1212,6 +1215,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoringTestDaysCount).toBe(1);
     expect(body.scoredIntervalsCount).toBe(2);
     expect(body.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
+    expect(body.compareSharedCalcPath).toContain("simulatePastUsageDataset");
+    expect(body.compareSharedCalcPath).toContain("buildSimulatedUsageDatasetFromCurve");
     expect(body.compareFreshModeUsed).toBe("selected_days");
     expect(body.compareCoreMode).toBe("selected_days_core_lightweight");
     expect(body.compareCoreStepTimings).toEqual(body.compareCoreTiming?.stepsMs);
@@ -1249,7 +1254,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
     expect(body.compareTruth?.compareFreshModeLabel).toContain("Selected-days");
     expect(body.compareTruth?.compareCalculationScope).toBe("selected_days_shared_path_only");
-    expect(body.compareTruth?.compareCalculationScopeLabel).toContain("Selected-day-only");
+    expect(body.compareTruth?.compareCalculationScopeLabel).toContain("Canonical shared Past dataset path");
+    expect(body.compareTruth?.architectureNote).toContain("canonical shared Past simulation/output path");
     expect(body.compareTruth?.architectureNote).toContain("Exact DB travel/vacant parity may additionally reuse a full-window shared execution");
     expect(body.compareTruth?.architectureNote).not.toContain("including DB travel/vacant parity-validation dates");
     expect(body.compareTruth?.artifactParityReferenceSource).toBe("canonical_artifact_simulated_day_totals");
@@ -2193,6 +2199,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
+    expect(body.compareTruth?.architectureNote).toContain("canonical shared Past simulation/output path");
     expect(body.compareTruth?.architectureNote).toContain("Exact DB travel/vacant parity may additionally reuse a full-window shared execution");
     expect(body.compareTruth?.architectureNote).not.toContain("including DB travel/vacant parity-validation dates");
     expect(body.truthEnvelope?.usageShapeDependencyStatus).toEqual({

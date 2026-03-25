@@ -235,12 +235,76 @@ describe("shared sim usage-shape ensure path", () => {
         weekdayAvgByMonthKey: { "2026-01": 24 },
         weekendAvgByMonthKey: { "2026-01": 20 },
       });
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBeUndefined();
+      expect(Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys ?? [])).toEqual([
+        "2026-01-01",
+      ]);
       expect(out.profileAutoBuilt).toBe(true);
       expect(out.usageShapeProfileDiag).toMatchObject({
         reasonNotUsed: null,
         ensuredInFlow: true,
         ensuredReason: "coverage_window_mismatch",
       });
+    }
+  });
+
+  it("slices selected-day outputs only after the shared full-path dataset is built", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+    buildPastSimulatedBaselineV1.mockImplementationOnce(() => ({
+      intervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.2 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.3 },
+        { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 },
+        { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.6 },
+      ],
+      dayResults: [
+        {
+          localDate: "2026-01-01",
+          displayDayKwh: 0.5,
+          intervals: [
+            { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.2 },
+            { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.3 },
+          ],
+          intervalSumKwh: 0.5,
+          finalDayKwh: 0.5,
+        },
+        {
+          localDate: "2026-01-02",
+          displayDayKwh: 1,
+          intervals: [
+            { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 },
+            { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.6 },
+          ],
+          intervalSumKwh: 1,
+          finalDayKwh: 1,
+        },
+      ],
+    }));
+
+    const out = await simulatePastSelectedDaysShared({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-02",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        snapshots: {},
+      } as any,
+      buildPathKind: "lab_validation",
+      selectedDateKeysLocal: new Set(["2026-01-02"]),
+    });
+
+    expect(out.simulatedIntervals).not.toBeNull();
+    if (out.simulatedIntervals !== null) {
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBeUndefined();
+      expect(out.simulatedIntervals).toEqual([
+        { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 },
+        { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.6 },
+      ]);
+      expect(out.simulatedDayResults.map((row) => row.localDate)).toEqual(["2026-01-02"]);
     }
   });
 });

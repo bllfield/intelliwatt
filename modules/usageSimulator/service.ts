@@ -2387,7 +2387,7 @@ export async function buildGapfillCompareSimShared(args: {
       compareCalculationScope = "selected_days_shared_path_only";
       compareFreshModeUsed = "selected_days";
       compareSharedCalcPath =
-        "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared";
       weatherBasisUsed =
         boundedTestDateKeysLocal.size > 0
           ? selectedTestDaysResult.weatherSourceSummary

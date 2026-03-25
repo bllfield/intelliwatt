@@ -201,6 +201,8 @@ export type SimulatePastUsageDatasetArgs = {
   includeSimulatedDayResults?: boolean;
   /** When provided, skip fetching actual intervals (caller already has them). */
   actualIntervals?: Array<{ timestamp: string; kwh: number }>;
+  /** Optional local dates that should be simulated by the shared path before downstream slicing. */
+  forceSimulateDateKeysLocal?: Set<string>;
 };
 
 export type SimulatePastUsageDatasetResult = {
@@ -505,6 +507,7 @@ export async function simulatePastUsageDataset(
     buildPathKind,
     includeSimulatedDayResults = true,
     actualIntervals: preloadedIntervals,
+    forceSimulateDateKeysLocal,
   } = args;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -521,6 +524,11 @@ export async function simulatePastUsageDataset(
 
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+    const forcedSimulateDateKeysLocal = new Set<string>(
+      Array.from(forceSimulateDateKeysLocal ?? [])
+        .map((dk) => String(dk ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    );
     // Keep exclusion metadata and downstream simulated-day labeling aligned to the
     // active usage coverage window only (older travel ranges naturally fall off).
     const excludedDateKeys = boundDateKeysToCoverageWindow(
@@ -567,6 +575,20 @@ export async function simulatePastUsageDataset(
       };
     }
     const usageShapeProfileDiag = ensuredUsageShape.usageShapeProfileDiag;
+    const timezoneResolved = String(timezone ?? "").trim();
+    const forcedUtcDateKeys = new Set<string>();
+    if (forcedSimulateDateKeysLocal.size > 0 && timezoneResolved) {
+      for (const dayStartMs of canonicalDayStartsMs) {
+        const gridTs = getDayGridTimestamps(dayStartMs);
+        if (!gridTs.length) continue;
+        const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
+        const intersectsForcedLocalDay = gridTs.some((ts) =>
+          forcedSimulateDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
+        );
+        if (intersectsForcedLocalDay) forcedUtcDateKeys.add(utcDateKey);
+      }
+    }
 
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
     // memory pressure for large windows. Only collect when explicitly requested.
@@ -585,6 +607,7 @@ export async function simulatePastUsageDataset(
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
+      forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
       debug: { out: pastDayCounts as any },
     });
 
@@ -814,6 +837,7 @@ export async function simulatePastSelectedDaysShared(
     buildInputs,
     actualIntervals: preloadedIntervals,
     selectedDateKeysLocal,
+    buildPathKind,
   } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { simulatedIntervals: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
@@ -837,82 +861,33 @@ export async function simulatePastSelectedDaysShared(
     return { simulatedIntervals: null, error: "missing_timezone" };
   }
   try {
-    const actualIntervals =
-      preloadedIntervals ??
-      (await getActualIntervalsForRange({ houseId, esiid, startDate, endDate })).map((p) => ({
-        timestamp: p.timestamp,
-        kwh: p.kwh,
-      }));
-    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
-    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-    const excludedDateKeys = boundDateKeysToCoverageWindow(
-      travelRangesToExcludeDateKeys(travelRanges),
-      { startDate, endDate }
-    );
-    const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
-      houseId,
-      startDate,
-      endDate,
-      canonicalDateKeys,
-    });
-    if (provenance.weatherSourceSummary !== "actual_only") {
-      return {
-        simulatedIntervals: null,
-        error: `actual_weather_required:${provenance.weatherSourceSummary}`,
-      };
-    }
-    const [homeRecForPast, applianceRecForPast] = await Promise.all([
-      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
-      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-    ]);
-    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
-    const applianceProfileForPast =
-      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
-        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
-        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
-    const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
+    const sharedResult = await simulatePastUsageDataset({
       userId,
       houseId,
+      esiid,
+      startDate,
+      endDate,
       timezone: timezoneResolved,
-      canonicalMonths: ((buildInputs as any).canonicalMonths ?? []) as string[],
+      travelRanges,
+      buildInputs,
+      buildPathKind,
+      includeSimulatedDayResults: true,
+      actualIntervals: preloadedIntervals,
+      forceSimulateDateKeysLocal: selectedValid,
     });
-    const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
-    if (!usageShapeProfileSnap) {
+    if (sharedResult.dataset === null) {
       return {
         simulatedIntervals: null,
-        error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
+        error: sharedResult.error ?? "simulatePastUsageDataset failed",
       };
     }
-    // Selected local test dates can span two UTC dates. Force simulation for every
-    // UTC day whose 96-slot grid intersects the selected local date keys so join
-    // scoring can materialize a complete local-day interval set.
-    const forcedUtcDateKeys = new Set<string>();
-    for (const dayStartMs of canonicalDayStartsMs) {
-      const gridTs = getDayGridTimestamps(dayStartMs);
-      if (!gridTs.length) continue;
-      const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-      const intersectsSelectedLocalDay = gridTs.some((ts) => selectedValid.has(dateKeyInTimezone(ts, timezoneResolved)));
-      if (intersectsSelectedLocalDay) forcedUtcDateKeys.add(utcDateKey);
-    }
-    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
-    const { intervals: simulatedIntervalsRaw, dayResults } = buildPastSimulatedBaselineV1({
-      actualIntervals,
-      canonicalDayStartsMs,
-      excludedDateKeys,
-      dateKeyFromTimestamp,
-      getDayGridTimestamps,
-      homeProfile: homeProfileForPast,
-      applianceProfile: applianceProfileForPast,
-      usageShapeProfile: usageShapeProfileSnap ?? undefined,
-      timezoneForProfile: timezoneResolved,
-      actualWxByDateKey,
-      _normalWxByDateKey: normalWxByDateKey,
-      collectSimulatedDayResults: true,
-      forceSimulateDateKeys: forcedUtcDateKeys,
-      emitAllIntervals: false,
-      debug: { out: pastDayCounts as any },
-    });
+    const simulatedIntervalsRaw = Array.isArray((sharedResult.dataset as any)?.series?.intervals15)
+      ? (((sharedResult.dataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>).map((row) => ({
+          timestamp: String(row?.timestamp ?? ""),
+          kwh: Number(row?.kwh) || 0,
+        })))
+      : [];
+    const dayResults = sharedResult.simulatedDayResults ?? [];
     const selectedResults = dayResults.filter((r) =>
       Array.isArray((r as any)?.intervals) &&
       (r as any).intervals.some((iv: { timestamp?: string }) =>
@@ -925,11 +900,11 @@ export async function simulatePastSelectedDaysShared(
     return {
       simulatedIntervals: selectedIntervals,
       simulatedDayResults: selectedResults,
-      pastDayCounts,
-      weatherSourceSummary: provenance.weatherSourceSummary,
-      weatherKindUsed: provenance.weatherKindUsed,
-      usageShapeProfileDiag: ensuredUsageShape.usageShapeProfileDiag,
-      profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
+      pastDayCounts: sharedResult.pastDayCounts,
+      weatherSourceSummary: String((sharedResult.meta as any)?.weatherSourceSummary ?? "unknown") as WeatherProvenance["weatherSourceSummary"],
+      weatherKindUsed: (sharedResult.meta as any)?.weatherKindUsed as string | undefined,
+      usageShapeProfileDiag: (sharedResult.meta as any)?.usageShapeProfileDiag as SharedSimUsageShapeProfileDiag | undefined,
+      profileAutoBuilt: (sharedResult.meta as any)?.profileAutoBuilt === true,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));

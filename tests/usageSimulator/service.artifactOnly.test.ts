@@ -3221,6 +3221,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
       expect(out.compareFreshModeUsed).toBe("selected_days");
       expect(out.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
+      expect(out.compareSharedCalcPath).toContain("simulatePastUsageDataset");
+      expect(out.compareSharedCalcPath).toContain("buildSimulatedUsageDatasetFromCurve");
       expect(out.compareSimSource).toBe("shared_selected_days_calc");
       expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
       expect(out.travelVacantParityTruth).toMatchObject({

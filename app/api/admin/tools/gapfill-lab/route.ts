@@ -3288,7 +3288,7 @@ export async function POST(req: NextRequest) {
     compareCalculationScope,
     compareCalculationScopeLabel:
       compareCalculationScope === "selected_days_shared_path_only"
-        ? "Selected-day-only fresh shared calculation"
+        ? "Canonical shared Past dataset path, then selected-day slice"
         : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
           ? "Full-window fresh shared calculation, then scored-day filter"
           : compareCalculationScope === "artifact_read_then_scored_day_filter"
@@ -3305,7 +3305,7 @@ export async function POST(req: NextRequest) {
     weatherBasisUsed,
     architectureNote:
       compareCalculationScope === "selected_days_shared_path_only"
-        ? "Selected-days mode still runs through the shared past-day simulator core for scored dates. Exact DB travel/vacant parity may additionally reuse a full-window shared execution when exact proof is required."
+        ? "Selected-days mode now reuses the canonical shared Past simulation/output path, then slices the scored local dates from that shared output. Exact DB travel/vacant parity may additionally reuse a full-window shared execution when exact proof is required."
         : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
           ? "Full-window mode runs shared simulator over the full window before filtering to scored days and validating DB travel/vacant parity."
           : "Artifact-only mode reads shared artifact output and filters scored days.",
