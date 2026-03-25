@@ -677,7 +677,17 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.diagnostics?.dailyTotalsChartSim).toEqual(sharedPastDaily);
     expect(body.diagnostics?.dailyTotalsChartSim?.[0]?.simKwh).toBe(56.74);
     expect(body.diagnostics?.dailyTotalsChartSim?.[0]?.source).toBe("SIMULATED");
-    expect(body.displaySimulated?.daily).toEqual(sharedPastDaily);
+    expect(body.displaySimulated?.daily).toEqual([
+      ...sharedPastDaily,
+      {
+        date: "2026-01-01",
+        simKwh: 0,
+        source: "MISSING_REFERENCE",
+        selectedTestDate: true,
+        status: "missing_expected_reference",
+        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+      },
+    ]);
     expect(body.displaySimulated?.daily?.[0]?.simKwh).toBe(56.74);
   });
 
@@ -2040,6 +2050,89 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     });
   });
 
+  it("keeps every selected scored date in displaySimulated daily output even when a display reference row is missing", async () => {
+    getActualIntervalsForRange.mockResolvedValue([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.25 },
+    ]);
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      comparePulledFromSharedArtifactOnly: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: {
+        availability: "available",
+        matches: true,
+        mismatchCount: 0,
+        missingDisplaySimCount: 1,
+        missingDisplaySimSampleDates: ["2026-01-02"],
+        comparableDateCount: 1,
+        parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+      },
+      travelVacantParityRows: [],
+      travelVacantParityTruth: {
+        availability: "not_requested",
+        reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+      },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.25 },
+      ],
+      artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 1 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01", "2026-01-02"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-02" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+    const missingRow = body.displaySimulated?.daily?.find((row: any) => row.date === "2026-01-02");
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.displaySimulated?.daily?.map((row: any) => row.date)).toEqual(["2026-01-01", "2026-01-02"]);
+    expect(missingRow).toMatchObject({
+      date: "2026-01-02",
+      simKwh: 0,
+      source: "MISSING_REFERENCE",
+      selectedTestDate: true,
+      status: "missing_expected_reference",
+      reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+    });
+    expect(body.scoredDayTruthRows?.find((row: any) => row.localDate === "2026-01-02")).toMatchObject({
+      parityAvailability: "missing_expected_reference",
+      parityReasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+    });
+  });
+
   it("reports usage-shape dependency as available when day-total source is usage shape profile", async () => {
     mockCompareResultOnce({
       ok: true,
@@ -2107,6 +2200,143 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       reason: null,
       dayTotalSource: "usage_shape_profile",
     });
+  });
+
+  it("returns a truthful gapfill load-curve message when usage-shape shaping was used but no 15-minute curve is rendered", async () => {
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      comparePulledFromSharedArtifactOnly: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: {
+        availability: "available",
+        matches: true,
+        mismatchCount: 0,
+        missingDisplaySimCount: 0,
+        parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+      },
+      travelVacantParityRows: [],
+      travelVacantParityTruth: {
+        availability: "not_requested",
+        reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+      },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      modelAssumptions: {
+        dayTotalSource: "usage_shape_profile",
+        usageShapeProfileDiag: { found: true, reasonNotUsed: null },
+      },
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.displaySimulated?.loadCurveMessage).toContain("shared sim still used the ensured usage-shape dependency");
+  });
+
+  it("allows compare to succeed when no DB travel or vacation dates exist", async () => {
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      comparePulledFromSharedArtifactOnly: false,
+      compareSharedCalcPath: "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: {
+        availability: "available",
+        matches: true,
+        mismatchCount: 0,
+        missingDisplaySimCount: 0,
+        parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+      },
+      travelVacantParityRows: [],
+      travelVacantParityTruth: {
+        availability: "not_requested",
+        reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+        requestedDateCount: 0,
+        validatedDateCount: 0,
+        mismatchCount: 0,
+        missingArtifactReferenceCount: 0,
+        missingFreshCompareCount: 0,
+        requestedDateSample: [],
+        exactProofRequired: true,
+        exactProofSatisfied: true,
+      },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.travelVacantParityTruth).toMatchObject({
+      availability: "not_requested",
+      reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+      requestedDateCount: 0,
+      exactProofSatisfied: true,
+    });
+    expect(body.compareTruth?.travelVacantParityAvailability).toBe("not_requested");
   });
 
   it("passes exact artifact identity request fields into shared compare build", async () => {
@@ -2438,6 +2668,18 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("const [compareRunStatus, setCompareRunStatus] = useState<\"started\" | \"running\" | \"succeeded\" | \"failed\" | null>(null);");
     expect(clientSource).toContain("function syncCompareRunState(data: ApiResponse | null | undefined)");
     expect(clientSource).toContain("...prev,");
+  });
+
+  it("wires truthful missing-reference and load-curve UI handling in client source", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "app/admin/tools/gapfill-lab/GapFillLabClient.tsx"),
+      "utf8"
+    );
+    expect(clientSource).toContain('source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE"');
+    expect(clientSource).toContain("displaySimulated?.loadCurveMessage");
+    expect(clientSource).toContain("emptyFifteenCurveMessage={gapfillLoadCurveEmptyMessage}");
+    expect(clientSource).toContain("row.displayVsFreshParityMatch === true");
+    expect(clientSource).toContain('row.parityAvailability ?? "n/a"');
   });
 
   it("returns a compact heavy-only response with heavy timing fields for merge-on-top-of-core", async () => {

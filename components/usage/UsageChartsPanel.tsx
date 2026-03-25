@@ -17,7 +17,7 @@ import { formatDateShort, formatDateShortWithYear, formatMonthLabel, formatTimeL
 import { pct, sumKwh } from "@/components/usage/usageMath";
 
 type MonthlyRow = { month: string; kwh: number };
-type DailyRow = { date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" };
+type DailyRow = { date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE" };
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
 type StitchedMonth =
   | {
@@ -47,6 +47,7 @@ export function UsageChartsPanel(props: {
   /** When set and daily table shows weather, display this truthful basis (e.g. stub/test vs actual cached). */
   weatherBasisLabel?: string | null;
   fifteenCurve: FifteenMinuteAverage[];
+  emptyFifteenCurveMessage?: string | null;
   /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
   coverageStart?: string | null;
   coverageEnd?: string | null;
@@ -65,6 +66,7 @@ export function UsageChartsPanel(props: {
     dailyWeather,
     weatherBasisLabel,
     fifteenCurve,
+    emptyFifteenCurveMessage,
     coverageStart,
     coverageEnd,
   } = props;
@@ -380,7 +382,9 @@ export function UsageChartsPanel(props: {
               </ResponsiveContainer>
             </div>
           ) : (
-            <p className="text-xs text-neutral-500">Not enough interval data yet to build a load curve.</p>
+            <p className="text-xs text-neutral-500">
+              {emptyFifteenCurveMessage ?? "Not enough interval data yet to build a load curve."}
+            </p>
           )}
         </div>
       </div>

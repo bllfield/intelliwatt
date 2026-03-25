@@ -14,7 +14,7 @@ type Usage365Payload = {
   coverageStart: string | null;
   coverageEnd: string | null;
   intervalCount: number;
-  daily: Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" }>;
+  daily: Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE" }>;
   monthly: Array<{ month: string; kwh: number }>;
   weekdayKwh: number;
   weekendKwh: number;
@@ -186,7 +186,15 @@ type ApiResponse =
         source: string | null;
         coverageStart: string | null;
         coverageEnd: string | null;
-        daily: Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>;
+        daily: Array<{
+          date: string;
+          simKwh: number;
+          source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
+          selectedTestDate?: boolean;
+          status?: string | null;
+          reasonCode?: string | null;
+        }>;
+        loadCurveMessage?: string | null;
         monthly: Array<{ month: string; kwh: number }>;
         stitchedMonth?: Usage365Payload["stitchedMonth"];
       };
@@ -754,9 +762,17 @@ export default function GapFillLabClient() {
     if (!result || !result.ok) return null;
     const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const dailyChartRows = Array.isArray((result as any)?.displaySimulated?.daily)
-      ? ((result as any).displaySimulated.daily as Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>)
+      ? ((result as any).displaySimulated.daily as Array<{
+          date: string;
+          simKwh: number;
+          source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
+        }>)
       : Array.isArray((result as any).diagnostics?.dailyTotalsChartSim)
-      ? ((result as any).diagnostics.dailyTotalsChartSim as Array<{ date: string; simKwh: number; source?: "ACTUAL" | "SIMULATED" }>)
+      ? ((result as any).diagnostics.dailyTotalsChartSim as Array<{
+          date: string;
+          simKwh: number;
+          source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
+        }>)
       : Array.isArray((result as any).diagnostics?.dailyTotalsMasked)
         ? ((result as any).diagnostics.dailyTotalsMasked as Array<{ date: string; simKwh?: number; kwh?: number }>)
       : [];
@@ -766,7 +782,11 @@ export default function GapFillLabClient() {
       .map((d) => ({
         date: String(d.date ?? ""),
         kwh: Number((d as any).simKwh ?? (d as any).kwh ?? 0) || 0,
-        ...(String((d as any)?.source ?? "").toUpperCase() === "SIMULATED" ? { source: "SIMULATED" as const } : {}),
+        ...(String((d as any)?.source ?? "").toUpperCase() === "SIMULATED"
+          ? { source: "SIMULATED" as const }
+          : String((d as any)?.source ?? "").toUpperCase() === "MISSING_REFERENCE"
+            ? { source: "MISSING_REFERENCE" as const }
+            : {}),
       }))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -860,7 +880,7 @@ export default function GapFillLabClient() {
       fifteenCurve,
       stitchedMonth: (result as any)?.displaySimulated?.stitchedMonth ?? (result as any)?.diagnostics?.stitchedMonthChartSim ?? null,
     };
-  }, [result, timezone, chicagoCalendarDayKey]);
+  }, [result, timezone]);
   const usage365ChartData = useMemo(() => {
     if (!result || !result.ok || !result.usage365?.daily?.length) return null;
     const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
@@ -935,6 +955,13 @@ export default function GapFillLabClient() {
   const compareTruth =
     result && result.ok
       ? ((result as any).compareTruth ?? truthEnvelope?.compareTruth ?? null)
+      : null;
+  const gapfillLoadCurveEmptyMessage =
+    result && result.ok && !gapfillChartData?.fifteenCurve?.length
+      ? (typeof (result as any)?.displaySimulated?.loadCurveMessage === "string" &&
+        String((result as any).displaySimulated.loadCurveMessage).trim()
+          ? String((result as any).displaySimulated.loadCurveMessage).trim()
+          : null)
       : null;
   const travelVacantParityRows: TravelVacantParityRow[] =
     result && result.ok
@@ -2889,6 +2916,7 @@ export default function GapFillLabClient() {
                       onDailyViewChange={setUsageDailyView}
                       daily={gapfillChartData.daily}
                       fifteenCurve={gapfillChartData.fifteenCurve}
+                      emptyFifteenCurveMessage={gapfillLoadCurveEmptyMessage}
                       coverageStart={gapfillChartData.coverageStart}
                       coverageEnd={gapfillChartData.coverageEnd}
                     />
@@ -3310,10 +3338,12 @@ export default function GapFillLabClient() {
                           <td className="p-2 text-right font-mono">{row.displayedPastStyleSimDayKwh}</td>
                           <td className="p-2 text-right font-mono">{row.actualVsFreshErrorKwh}</td>
                           <td className="p-2">
-                            {row.displayVsFreshParityMatch ? (
+                            {row.displayVsFreshParityMatch === true ? (
                               <span className={badgeClass("ok")}>match</span>
-                            ) : (
+                            ) : row.displayVsFreshParityMatch === false ? (
                               <span className={badgeClass("error")}>mismatch</span>
+                            ) : (
+                              <span className={badgeClass("neutral")}>{row.parityAvailability ?? "n/a"}</span>
                             )}
                           </td>
                           <td className="p-2">{row.dayType}</td>

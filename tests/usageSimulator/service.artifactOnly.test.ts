@@ -446,6 +446,7 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
   });
 
   it("ensures usage shape before resolving the exact artifact identity hash", async () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
     const exactCached = {
       inputHash: "hash-rebuilt-exact",
       updatedAt: new Date("2026-03-18T00:00:00.000Z"),
@@ -454,13 +455,13 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
           source: "SIMULATED",
           intervalsCount: 2,
           totalKwh: 0.75,
-          start: "2025-03-23",
-          end: "2026-03-22",
+          start: canonicalCoverage.startDate,
+          end: canonicalCoverage.endDate,
         },
         meta: {
           curveShapingVersion: "shared_curve_v2",
-          coverageStart: "2025-03-23",
-          coverageEnd: "2026-03-22",
+          coverageStart: canonicalCoverage.startDate,
+          coverageEnd: canonicalCoverage.endDate,
         },
         daily: [{ date: "2026-01-01", kwh: 0.5, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 0.75 }],

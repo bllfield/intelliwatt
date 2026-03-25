@@ -2916,7 +2916,9 @@ export async function POST(req: NextRequest) {
   const chartIntervalCount = Array.isArray(sharedSim.simulatedChartIntervals)
     ? sharedSim.simulatedChartIntervals.length
     : Number(ma.intervalCount ?? 0) || 0;
-  const displayDailyRows = Array.isArray(sharedSim.simulatedChartDaily)
+  const displayDailyRowsBase: Array<{ date: string; simKwh: number; source: "ACTUAL" | "SIMULATED" }> = Array.isArray(
+    sharedSim.simulatedChartDaily
+  )
     ? sharedSim.simulatedChartDaily.map((row) => ({
         date: String((row as any)?.date ?? "").slice(0, 10),
         simKwh: round2(Number((row as any)?.simKwh ?? 0)),
@@ -2924,7 +2926,7 @@ export async function POST(req: NextRequest) {
       }))
     : [];
   const displayDailyByDate = new Map<string, { simKwh: number; source: "ACTUAL" | "SIMULATED" }>(
-    displayDailyRows
+    displayDailyRowsBase
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
       .map((r) => [r.date, { simKwh: r.simKwh, source: r.source as "ACTUAL" | "SIMULATED" }] as const)
   );
@@ -3309,6 +3311,58 @@ export async function POST(req: NextRequest) {
           : "Artifact-only mode reads shared artifact output and filters scored days.",
     compareRequestTruth,
   };
+  const displayDailyRows = (() => {
+    const byDate = new Map<
+      string,
+      {
+        date: string;
+        simKwh: number;
+        source: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
+        selectedTestDate?: boolean;
+        status?: string | null;
+        reasonCode?: string | null;
+      }
+    >();
+    for (const row of displayDailyRowsBase) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(row.date ?? ""))) continue;
+      byDate.set(row.date, row);
+    }
+    for (const row of scoredDayTruthRows) {
+      const localDate = String(row.localDate ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) continue;
+      const existing = byDate.get(localDate);
+      if (existing) {
+        byDate.set(localDate, {
+          ...existing,
+          selectedTestDate: true,
+          status: row.parityAvailability ?? null,
+          reasonCode: row.parityReasonCode ?? null,
+        });
+        continue;
+      }
+      byDate.set(localDate, {
+        date: localDate,
+        simKwh:
+          row.scoredDayDisplaySource === "ACTUAL"
+            ? round2(Number(row.actualDayKwh) || 0)
+            : 0,
+        source: row.scoredDayDisplaySource === "ACTUAL" ? "ACTUAL" : "MISSING_REFERENCE",
+        selectedTestDate: true,
+        status: row.parityAvailability ?? "missing_expected_reference",
+        reasonCode: row.parityReasonCode ?? "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+      });
+    }
+    return Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+  })();
+  const hasGapfillLoadCurveData =
+    Array.isArray((metrics as any)?.diagnostics?.hourlyProfileMasked) &&
+    ((metrics as any).diagnostics.hourlyProfileMasked as Array<unknown>).length > 0;
+  const displaySimulatedLoadCurveMessage =
+    !hasGapfillLoadCurveData && (usageShapeProfileUsed || usageShapeDiag?.found === true)
+      ? includeDiagnostics
+        ? "No 15-minute load-curve visualization was returned for this Gap-Fill view, but the shared sim still used the ensured usage-shape dependency for day shaping."
+        : "Compact Gap-Fill view does not include a 15-minute load-curve visualization, but the shared sim still used the ensured usage-shape dependency for day shaping."
+      : null;
   const truthEnvelope = {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -3900,6 +3954,7 @@ export async function POST(req: NextRequest) {
       coverageStart: sharedCoverageWindow.startDate,
       coverageEnd: sharedCoverageWindow.endDate,
       daily: displayDailyRows,
+      loadCurveMessage: displaySimulatedLoadCurveMessage,
       monthly: sharedSim.simulatedChartMonthly,
       stitchedMonth: sharedSim.simulatedChartStitchedMonth,
     },
