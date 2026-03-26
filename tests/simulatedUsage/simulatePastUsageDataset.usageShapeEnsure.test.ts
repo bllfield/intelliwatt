@@ -236,10 +236,8 @@ describe("shared sim usage-shape ensure path", () => {
         weekdayAvgByMonthKey: { "2026-01": 24 },
         weekendAvgByMonthKey: { "2026-01": 20 },
       });
-      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(false);
-      expect(Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys ?? [])).toEqual([
-        "2026-01-01",
-      ]);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(true);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys).toBeUndefined();
       expect(out.profileAutoBuilt).toBe(true);
       expect(out.usageShapeProfileDiag).toMatchObject({
         reasonNotUsed: null,
@@ -300,7 +298,8 @@ describe("shared sim usage-shape ensure path", () => {
 
     expect(out.simulatedIntervals).not.toBeNull();
     if (out.simulatedIntervals !== null) {
-      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(false);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(true);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys).toBeUndefined();
       expect(out.simulatedIntervals).toEqual([
         { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 },
         { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.6 },
@@ -397,18 +396,14 @@ describe("shared sim usage-shape ensure path", () => {
 
     expect(out.simulatedIntervals).not.toBeNull();
     if (out.simulatedIntervals !== null) {
-      expect(Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys ?? []).sort()).toEqual([
-        "2026-01-01",
-        "2026-01-02",
-      ]);
-      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(false);
-      expect(
-        Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys ?? []).sort()
-      ).toEqual(["2026-01-02"]);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys).toBeUndefined();
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(true);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys).toBeUndefined();
       expect(out.simulatedIntervals.map((row) => row.timestamp)).toEqual([
         "2026-01-01T00:00:00.000Z",
         "2026-01-02T00:00:00.000Z",
       ]);
+      expect(out.simulatedDayResults.map((row) => row.localDate)).toEqual(["2026-01-02"]);
     }
   });
 

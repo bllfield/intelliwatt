@@ -458,7 +458,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     | { ok: true; artifactSourceNote: string | null }
     | { ok: false; error: string; message: string }
   > {
-    const pastResult = await simulatePastFullWindowShared({
+    const pastResult = await simulatePastUsageDataset({
       userId: args.userId,
       houseId: args.houseId,
       esiid: houseResolved.esiid ?? null,
@@ -470,19 +470,46 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       buildPathKind: "lab_validation",
       includeSimulatedDayResults: false,
     });
-    if (pastResult.simulatedIntervals === null) {
+    if (pastResult.dataset === null) {
       return {
         ok: false,
         error: "past_rebuild_failed",
         message: pastResult.error ?? "Failed to build shared Past artifact.",
       };
     }
-    const intervals15 = (pastResult.simulatedIntervals ?? [])
-      .map((row) => ({
+    const rebuiltDataset: any = {
+      ...pastResult.dataset,
+      summary: typeof (pastResult.dataset as any)?.summary === "object" && (pastResult.dataset as any).summary !== null
+        ? { ...(pastResult.dataset as any).summary }
+        : {},
+      series: typeof (pastResult.dataset as any)?.series === "object" && (pastResult.dataset as any).series !== null
+        ? { ...(pastResult.dataset as any).series }
+        : {},
+      daily: Array.isArray((pastResult.dataset as any)?.daily) ? [...(pastResult.dataset as any).daily] : [],
+      monthly: Array.isArray((pastResult.dataset as any)?.monthly) ? [...(pastResult.dataset as any).monthly] : [],
+      totals: typeof (pastResult.dataset as any)?.totals === "object" && (pastResult.dataset as any).totals !== null
+        ? { ...(pastResult.dataset as any).totals }
+        : {},
+      insights: typeof (pastResult.dataset as any)?.insights === "object" && (pastResult.dataset as any).insights !== null
+        ? { ...(pastResult.dataset as any).insights }
+        : {},
+      meta: typeof (pastResult.dataset as any)?.meta === "object" && (pastResult.dataset as any).meta !== null
+        ? { ...(pastResult.dataset as any).meta }
+        : {},
+      usageBucketsByMonth:
+        (pastResult.dataset as any)?.usageBucketsByMonth &&
+        typeof (pastResult.dataset as any).usageBucketsByMonth === "object"
+          ? { ...(pastResult.dataset as any).usageBucketsByMonth }
+          : {},
+    };
+    const intervals15 = (
+      Array.isArray((rebuiltDataset as any)?.series?.intervals15) ? rebuiltDataset.series.intervals15 : []
+    )
+      .map((row: { timestamp?: string; kwh?: number }) => ({
         timestamp: String(row?.timestamp ?? ""),
         kwh: Number(row?.kwh) || 0,
       }))
-      .filter((row) => row.timestamp.length > 0);
+      .filter((row: { timestamp: string; kwh: number }) => row.timestamp.length > 0);
     if (intervals15.length === 0) {
       return {
         ok: false,
@@ -490,74 +517,20 @@ export async function rebuildGapfillSharedPastArtifact(args: {
         message: "Shared Past artifact build completed, but intervals15 are missing.",
       };
     }
-    const simulatedDateKeys = boundDateKeysToCoverageWindow(
-      new Set<string>(travelRangesToExcludeDateKeys(buildTravelRanges)),
-      canonicalCoverage
-    );
-    const recomputed = recomputePastAggregatesFromIntervals({
-      intervals: intervals15,
-      curveEndDate: canonicalCoverage.endDate,
-      simulatedDateKeys,
-    });
-    const rebuiltDataset: any = {
-      summary: {
-        source: "SIMULATED",
-        intervalsCount: recomputed.intervalCount,
-        totalKwh: recomputed.intervalSumKwh,
-        start: canonicalCoverage.startDate,
-        end: canonicalCoverage.endDate,
-        latest: `${canonicalCoverage.endDate}T23:59:59.999Z`,
-      },
-      series: {
-        intervals15,
-        hourly: [],
-        daily: recomputed.daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: Number(d.kwh) || 0 })),
-        monthly: recomputed.monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: Number(m.kwh) || 0 })),
-        annual: [
-          {
-            timestamp: `${canonicalCoverage.endDate.slice(0, 4)}-01-01T00:00:00.000Z`,
-            kwh: recomputed.monthlySumKwh,
-          },
-        ],
-      },
-      daily: recomputed.daily,
-      monthly: recomputed.monthly,
-      totals: {
-        importKwh: recomputed.intervalSumKwh,
-        exportKwh: 0,
-        netKwh: recomputed.intervalSumKwh,
-      },
-      insights: {
-        stitchedMonth: recomputed.stitchedMonth,
-      },
-      meta: {
-        datasetKind: "SIMULATED",
-        baseKind: (buildInputs as any)?.baseKind ?? null,
-        mode: (buildInputs as any)?.mode ?? null,
-        canonicalEndMonth: (buildInputs as any)?.canonicalEndMonth ?? null,
-        notes: Array.isArray((buildInputs as any)?.notes) ? (buildInputs as any).notes : [],
-        filledMonths: Array.isArray((buildInputs as any)?.filledMonths) ? (buildInputs as any).filledMonths : [],
-        excludedDays: Array.from(simulatedDateKeys).sort(),
-        renormalized: false,
-        dayTotalSource: "usage_shape_profile",
-        usageShapeProfileDiag: pastResult.usageShapeProfileDiag ?? ensuredUsageShape.usageShapeProfileDiag,
-        profileAutoBuilt:
-          pastResult.profileAutoBuilt === true || ensuredUsageShape.profileAutoBuilt === true,
-        weatherSourceSummary: String(pastResult.weatherSourceSummary ?? "unknown"),
-        weatherKindUsed: pastResult.weatherKindUsed ?? null,
-        weatherProviderName: pastResult.weatherProviderName ?? null,
-        weatherFallbackReason: pastResult.weatherFallbackReason ?? null,
-        sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-        buildPathKind: "lab_validation",
-        pastBuildIntervalsFetchCount: 1,
-        dailyRowCount: recomputed.daily.length,
-        intervalCount: recomputed.intervalCount,
-        coverageStart: canonicalCoverage.startDate,
-        coverageEnd: canonicalCoverage.endDate,
-        // Must match shared Past simulator + compare_core stale guard (`needsRebuildForOldCurveVersion`).
-        curveShapingVersion: "shared_curve_v2",
-      },
-      usageBucketsByMonth: recomputed.usageBucketsByMonth,
+    rebuiltDataset.series = {
+      ...(rebuiltDataset.series ?? {}),
+      intervals15,
+    };
+    rebuiltDataset.meta = {
+      ...(rebuiltDataset.meta ?? {}),
+      usageShapeProfileDiag:
+        (rebuiltDataset.meta as any)?.usageShapeProfileDiag ?? ensuredUsageShape.usageShapeProfileDiag,
+      profileAutoBuilt:
+        (rebuiltDataset.meta as any)?.profileAutoBuilt === true || ensuredUsageShape.profileAutoBuilt === true,
+      buildPathKind: "lab_validation",
+      pastBuildIntervalsFetchCount: 1,
+      // Must match shared Past simulator + compare_core stale guard (`needsRebuildForOldCurveVersion`).
+      curveShapingVersion: "shared_curve_v2",
     };
     applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
     const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(
@@ -1332,20 +1305,59 @@ function reconcileRestoredDatasetFromDecodedIntervals(args: {
     curveEndDate: curveEnd,
     simulatedDateKeys: simDateKeys,
   });
-  (dataset as any).daily = recomputed.daily;
-  if (recomputed.monthly.length > 0) {
+  const hasCanonicalDaily = Array.isArray((dataset as any).daily) && (dataset as any).daily.length > 0;
+  const hasCanonicalMonthly = Array.isArray((dataset as any).monthly) && (dataset as any).monthly.length > 0;
+  const hasCanonicalUsageBuckets =
+    (dataset as any).usageBucketsByMonth &&
+    typeof (dataset as any).usageBucketsByMonth === "object" &&
+    Object.keys((dataset as any).usageBucketsByMonth).length > 0;
+  if (!hasCanonicalDaily) {
+    (dataset as any).daily = recomputed.daily;
+  }
+  if (!hasCanonicalMonthly && recomputed.monthly.length > 0) {
     (dataset as any).monthly = recomputed.monthly;
+  }
+  if (!hasCanonicalUsageBuckets && recomputed.monthly.length > 0) {
     (dataset as any).usageBucketsByMonth = recomputed.usageBucketsByMonth;
+  }
+  if (!Array.isArray((dataset as any)?.series?.daily) || (dataset as any).series.daily.length === 0) {
+    (dataset as any).series.daily = recomputed.daily.map((d) => ({
+      timestamp: `${d.date}T00:00:00.000Z`,
+      kwh: Number(d.kwh) || 0,
+    }));
+  }
+  if (!Array.isArray((dataset as any)?.series?.monthly) || (dataset as any).series.monthly.length === 0) {
+    (dataset as any).series.monthly = recomputed.monthly.map((m) => ({
+      timestamp: `${m.month}-01T00:00:00.000Z`,
+      kwh: Number(m.kwh) || 0,
+    }));
+  }
+  if (!Array.isArray((dataset as any)?.series?.annual) || (dataset as any).series.annual.length === 0) {
+    (dataset as any).series.annual = [
+      {
+        timestamp: `${curveEnd.slice(0, 4)}-01-01T00:00:00.000Z`,
+        kwh: recomputed.monthlySumKwh,
+      },
+    ];
   }
 
   if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
-  (dataset.summary as any).totalKwh = recomputed.intervalSumKwh;
+  if ((dataset.summary as any).totalKwh == null) {
+    (dataset.summary as any).totalKwh = recomputed.intervalSumKwh;
+  }
   if ((dataset.summary as any).intervalsCount == null) {
     (dataset.summary as any).intervalsCount = recomputed.intervalCount;
   }
   if (!dataset.totals || typeof dataset.totals !== "object") (dataset as any).totals = {};
-  (dataset.totals as any).importKwh = recomputed.intervalSumKwh;
-  (dataset.totals as any).netKwh = recomputed.intervalSumKwh;
+  if ((dataset.totals as any).importKwh == null) {
+    (dataset.totals as any).importKwh = recomputed.intervalSumKwh;
+  }
+  if ((dataset.totals as any).netKwh == null) {
+    (dataset.totals as any).netKwh = recomputed.intervalSumKwh;
+  }
+  if ((dataset.totals as any).exportKwh == null) {
+    (dataset.totals as any).exportKwh = 0;
+  }
 }
 
 function enumerateDateKeysInclusive(startDate: string, endDate: string): Set<string> {
@@ -2383,33 +2395,34 @@ export async function buildGapfillCompareSimShared(args: {
           timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
           kwh: Number(p?.kwh) || 0,
         }));
+        const simulatedDayResultDateKeys = new Set<string>();
         const dailyTotalsByDate = new Map<string, number>();
-        const dailyTotalsFromSimulatedDayResults = new Set<string>();
         for (const row of selectedDaysResult.simulatedDayResults ?? []) {
-          const dk = String((row as any)?.localDate ?? "").slice(0, 10);
-          if (!selectedDateKeysLocal.has(dk)) continue;
+          const intervalDateKeys = new Set<string>(
+            Array.isArray((row as any)?.intervals)
+              ? ((row as any).intervals as Array<{ timestamp?: string }>)
+                  .map((interval) => dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone))
+                  .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+              : []
+          );
+          const fallbackDateKey = String((row as any)?.localDate ?? "").slice(0, 10);
+          const rowDateKeys = intervalDateKeys.size > 0 ? Array.from(intervalDateKeys) : [fallbackDateKey];
+          const matchingDateKeys = rowDateKeys.filter((dk) => selectedDateKeysLocal.has(dk));
+          if (matchingDateKeys.length === 0) continue;
           const dayKwh = Number((row as any)?.intervalSumKwh ?? (row as any)?.finalDayKwh);
           if (!Number.isFinite(dayKwh)) continue;
-          dailyTotalsByDate.set(dk, round2Local(dayKwh));
-          dailyTotalsFromSimulatedDayResults.add(dk);
-        }
-        if (dailyTotalsByDate.size < selectedDateKeysLocal.size) {
-          for (const p of simulatedIntervalsNormalized) {
-            const dk = dateKeyInTimezone(p.timestamp, timezone);
-            if (!selectedDateKeysLocal.has(dk)) continue;
-            // Keep simulator-owned daily totals authoritative when already provided.
-            // Interval fallback should only fill dates that were missing day totals.
-            if (dailyTotalsFromSimulatedDayResults.has(dk)) continue;
-            dailyTotalsByDate.set(dk, (dailyTotalsByDate.get(dk) ?? 0) + (Number(p.kwh) || 0));
-          }
-          for (const [dk, kwh] of Array.from(dailyTotalsByDate.entries())) {
-            dailyTotalsByDate.set(dk, round2Local(kwh));
+          for (const dk of matchingDateKeys) {
+            simulatedDayResultDateKeys.add(dk);
+            dailyTotalsByDate.set(dk, round2Local(dayKwh));
           }
         }
+        const simulatorOwnedIntervals = simulatedIntervalsNormalized.filter((p) =>
+          simulatedDayResultDateKeys.has(dateKeyInTimezone(p.timestamp, timezone))
+        );
         return {
           ok: true as const,
           dataset: null,
-          simulatedIntervals: simulatedIntervalsNormalized,
+          simulatedIntervals: simulatorOwnedIntervals,
           dailyTotalsByDate,
           actualWxByDateKey: selectedDaysResult.actualWxByDateKey ?? null,
           weatherKindUsed: String(selectedDaysResult.weatherKindUsed ?? "") || null,

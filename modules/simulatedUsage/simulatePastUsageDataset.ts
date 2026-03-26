@@ -75,11 +75,7 @@ function simulatedDayResultIntersectsLocalDateKeys(
 ): boolean {
   if (dateKeysLocal.size === 0) return false;
   const intervals = Array.isArray(result?.intervals) ? result.intervals : [];
-  if (intervals.length > 0) {
-    return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
-  }
-  const fallbackDateKey = dateKeyInTimezone(`${String(result?.localDate ?? "").slice(0, 10)}T12:00:00.000Z`, timezone);
-  return dateKeysLocal.has(fallbackDateKey);
+  return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
 }
 
 function summarizePastWindowWeatherProvenance(args: {
@@ -843,6 +839,11 @@ export async function simulatePastSelectedDaysShared(
       .map((dk) => String(dk ?? "").slice(0, 10))
       .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
   );
+  const retainedValid = new Set<string>(
+    Array.from(retainSimulatedDayResultDateKeysLocal ?? [])
+      .map((dk) => String(dk ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
   if (selectedValid.size === 0) {
     return {
       simulatedIntervals: [],
@@ -869,14 +870,6 @@ export async function simulatePastSelectedDaysShared(
       buildPathKind,
       actualIntervals: preloadedIntervals,
       includeSimulatedDayResults: true,
-      forceSimulateDateKeysLocal: selectedValid,
-      // Selected-days callers only consume simulator-owned intervals after slicing.
-      // Dropping passthrough actual intervals avoids building a near-full-window payload.
-      emitAllIntervals: false,
-      retainSimulatedDayResultDateKeysLocal:
-        retainSimulatedDayResultDateKeysLocal && retainSimulatedDayResultDateKeysLocal.size > 0
-          ? retainSimulatedDayResultDateKeysLocal
-          : selectedValid,
     });
     if (sharedResult.simulatedIntervals === null) {
       return {
@@ -884,15 +877,19 @@ export async function simulatePastSelectedDaysShared(
         error: sharedResult.error ?? "simulatePastFullWindowShared failed",
       };
     }
-    const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
-      simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
-    );
     const selectedIntervals = sharedResult.simulatedIntervals.filter((row) =>
       selectedValid.has(dateKeyInTimezone(String(row.timestamp ?? ""), timezoneResolved))
     );
+    const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
+      simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
+    );
+    const retainedSelectedResults =
+      retainedValid.size > 0
+        ? selectedResults.filter((r) => simulatedDayResultIntersectsLocalDateKeys(r, retainedValid, timezoneResolved))
+        : selectedResults;
     return {
       simulatedIntervals: selectedIntervals,
-      simulatedDayResults: selectedResults,
+      simulatedDayResults: retainedSelectedResults,
       pastDayCounts: sharedResult.pastDayCounts,
       actualWxByDateKey: sharedResult.actualWxByDateKey,
       weatherSourceSummary: sharedResult.weatherSourceSummary,
