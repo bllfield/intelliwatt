@@ -1518,7 +1518,6 @@ export function buildPastSimulatedBaselineV1(args: {
           : result;
       const retainDayResult =
         !collectSimulatedDayResultsDateKeys ||
-        collectSimulatedDayResultsDateKeys.size === 0 ||
         collectSimulatedDayResultsDateKeys.has(dateKey);
       if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
         dayResults.push(blendedResult);

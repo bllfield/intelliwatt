@@ -70,6 +70,7 @@ vi.mock("@/lib/admin/gapfillLab", async (importOriginal) => {
 });
 
 import {
+  simulatePastUsageDataset,
   simulatePastFullWindowShared,
   simulatePastSelectedDaysShared,
 } from "@/modules/simulatedUsage/simulatePastUsageDataset";
@@ -364,5 +365,30 @@ describe("shared sim usage-shape ensure path", () => {
         "2026-01-02T00:00:00.000Z",
       ]);
     }
+  });
+
+  it("forwards an explicit empty retain-set when retention keys are supplied without timezone", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+
+    const out = await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: undefined,
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        snapshots: {},
+      } as any,
+      buildPathKind: "lab_validation",
+      includeSimulatedDayResults: true,
+      retainSimulatedDayResultDateKeysLocal: new Set(["2026-01-01"]),
+    });
+
+    expect(out.dataset).not.toBeNull();
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys).toBeInstanceOf(Set);
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys?.size).toBe(0);
   });
 });
