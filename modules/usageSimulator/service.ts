@@ -2688,6 +2688,21 @@ export async function buildGapfillCompareSimShared(args: {
       decodeBufferOwned: exactParityArtifactIntervalsDecodeBufferOwned,
     });
   }
+  let artifactExactParityIntervalDayTotalsByDate:
+    | ReturnType<typeof buildCanonicalIntervalDayTotalsByLocalDate>
+    | null = null;
+  if (
+    compareCoreMemoryReducedPath &&
+    exactTravelParityRequiresIntervalBackedArtifactTruth &&
+    exactParityArtifactIntervals.length > 0
+  ) {
+    throwIfGapfillCompareAborted(abortSignal);
+    artifactExactParityIntervalDayTotalsByDate = buildCanonicalIntervalDayTotalsByLocalDate(
+      exactParityArtifactIntervals,
+      timezone
+    );
+    throwIfGapfillCompareAborted(abortSignal);
+  }
   const artifactDatasetForExactParity =
     exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
       ? compareCoreMemoryReducedPath
@@ -2727,15 +2742,24 @@ export async function buildGapfillCompareSimShared(args: {
       usesIntervalBackedDataset: exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0,
     });
   }
+  throwIfGapfillCompareAborted(abortSignal);
   let canonicalArtifactSimulatedDayTotalsByDate: CanonicalArtifactSimulatedDayTotalsByDate;
   if (compareCoreMemoryReducedPath) {
     if (exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0) {
-      canonicalArtifactSimulatedDayTotalsByDate = buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
-        artifactDatasetForExactParity,
-        timezone,
-        compactCanonicalDateKeys,
-        boundedTestDateKeysLocal
-      );
+      if (artifactExactParityIntervalDayTotalsByDate) {
+        canonicalArtifactSimulatedDayTotalsByDate = {};
+        for (const [dk, totals] of Array.from(artifactExactParityIntervalDayTotalsByDate.entries())) {
+          if (!compactCanonicalDateKeys.has(dk)) continue;
+          canonicalArtifactSimulatedDayTotalsByDate[dk] = totals.normalizedDaySum;
+        }
+      } else {
+        canonicalArtifactSimulatedDayTotalsByDate = buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
+          artifactDatasetForExactParity,
+          timezone,
+          compactCanonicalDateKeys,
+          boundedTestDateKeysLocal
+        );
+      }
     } else {
       canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
         dataset,
@@ -2753,6 +2777,7 @@ export async function buildGapfillCompareSimShared(args: {
       canonicalArtifactKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
     });
   }
+  throwIfGapfillCompareAborted(abortSignal);
   // Selected-days scored alignment: buildCanonical… ownership filters can omit non-travel test dates.
   // Backfill each bounded test date from interval truth (exact parity blob or compact-filtered raw series)
   // so reference rows / parityDisplayDailyByDate match fresh selected-day totals on the same keys.
@@ -3036,7 +3061,8 @@ export async function buildGapfillCompareSimShared(args: {
   );
   throwIfGapfillCompareAborted(abortSignal);
   const artifactExactParityDayTotalsByDate = useIntervalBackedTravelVacantParityTotals
-    ? buildCanonicalIntervalDayTotalsByLocalDate(exactParityArtifactIntervals, timezone)
+    ? artifactExactParityIntervalDayTotalsByDate ??
+      buildCanonicalIntervalDayTotalsByLocalDate(exactParityArtifactIntervals, timezone)
     : null;
   throwIfGapfillCompareAborted(abortSignal);
   const parityDateKeysOrdered = travelVacantParityDateKeysLocal;
