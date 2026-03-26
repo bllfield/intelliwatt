@@ -613,13 +613,15 @@ export async function simulatePastUsageDataset(
         );
         if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
       }
+    } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && !timezoneResolved) {
+      for (const dateKey of retainedSimulatedDayResultDateKeysLocal) {
+        retainedResultUtcDateKeys.add(dateKey);
+      }
     }
 
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
     // memory pressure for large windows. Only collect when explicitly requested.
     const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
-    const collectSimulatedDayResultsDateKeys =
-      retainedSimulatedDayResultDateKeysLocal.size > 0 ? retainedResultUtcDateKeys : undefined;
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
@@ -634,7 +636,8 @@ export async function simulatePastUsageDataset(
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
-      collectSimulatedDayResultsDateKeys,
+      collectSimulatedDayResultsDateKeys:
+        retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined,
       forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
       debug: { out: pastDayCounts as any },
     });

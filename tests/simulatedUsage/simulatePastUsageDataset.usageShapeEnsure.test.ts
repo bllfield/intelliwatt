@@ -367,7 +367,7 @@ describe("shared sim usage-shape ensure path", () => {
     }
   });
 
-  it("forwards an explicit empty retain-set when retention keys are supplied without timezone", async () => {
+  it("treats retain keys as UTC day keys when timezone is missing", async () => {
     getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
 
     const out = await simulatePastUsageDataset({
@@ -389,6 +389,8 @@ describe("shared sim usage-shape ensure path", () => {
 
     expect(out.dataset).not.toBeNull();
     expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys).toBeInstanceOf(Set);
-    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys?.size).toBe(0);
+    expect(
+      Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys ?? []).sort()
+    ).toEqual(["2026-01-01"]);
   });
 });
