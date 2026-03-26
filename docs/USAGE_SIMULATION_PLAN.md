@@ -311,6 +311,9 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - Heavy proof mode may explicitly run shared full-window fresh calculation (`compareFreshMode=full_window`) for deeper diagnostics; it is non-default.
 - Artifact identity/fingerprint ownership and usage-shape profile contracts remain unchanged in this step; any further identity changes are deferred.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
+- Current branch note: `simulatePastSelectedDaysShared()` is now post-output slicing only, so the older wrapper-level `forceSimulateDateKeysLocal` / `emitAllIntervals` divergence is no longer current runtime behavior.
+- Current branch note: strict finalized-output alignment is still not fully complete because `modules/usageSimulator/service.ts` continues to reconstruct/backfill canonical simulated-day totals and exact-parity day totals outside `buildSimulatedUsageDatasetFromCurve()`.
+- Current branch note: shared window/date ownership remains locked; compare identity comes from `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage comes from `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not mutate artifact fingerprint or travel/vacant exclusion ownership.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
   - `simulatePastUsageDataset`

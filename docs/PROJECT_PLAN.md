@@ -108,7 +108,7 @@ Mandatory enforcement rules:
 
 LEGACY / NON-AUTHORITATIVE historical drift notes:
 - Older notes referenced unresolved shared identity wiring work in simulation engines diagnostics.
-- Treat these as historical context only; active architecture alignment work is complete unless a new active-path bug is confirmed.
+- Treat these as historical context only; fresh producer-chain alignment is in place on the current branch, but strict finalized-output alignment still has remaining service-level caveats.
 - Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`; other docs should align to it and stay shorter unless file-specific detail is required.
 
 ### GapFill Shared-Artifact Rule
@@ -122,6 +122,8 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - GapFill core compare defaults to selected-day fresh shared scoring (`compareFreshMode=selected_days`) while display rows remain shared artifact output.
 - GapFill heavy diagnostics may explicitly request full-window shared fresh scoring (`compareFreshMode=full_window`) as an optional proof path.
 - Artifact fingerprint ownership and usage-shape identity behavior remain unchanged by this step; deferred identity/profile changes stay out of scope.
+- Current branch caveat: `simulatePastSelectedDaysShared()` is now a pure post-output slicer, but strict finalized-output alignment is still not complete because `modules/usageSimulator/service.ts` continues to reconstruct/backfill canonical simulated-day totals outside `buildSimulatedUsageDatasetFromCurve()`.
+- Shared window/date ownership remains locked: compare identity comes from `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage comes from `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership.
 - Shared weather truth is owned by `loadWeatherForPastWindow`; it must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily rows when the requested canonical window is already covered, instead of re-pulling weather.
 - Shared weather backfill/stub repair is only for missing or `STUB_V1` dates, and the resulting provenance must truthfully report whether coverage is `actual_only`, `mixed_actual_and_stub`, or `stub_only`.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, rebuild simulated intervals locally, or perform simulation math in routes/tools outside the shared modules.
@@ -167,7 +169,7 @@ Checklist for stabilization follow-up (narrow scope, only if still needed):
   - no shared weather ownership/provenance changes,
   - no compare snapshot persistence architecture changes,
   - no legacy `compare_heavy` removal.
-- Gap-Fill compare flow is now in stabilization/maintenance state; do not reopen architecture refactor unless a new active-path bug appears.
+- Gap-Fill compare flow remains mostly in stabilization/maintenance state, but one narrow alignment follow-up is still live on the current branch: retire the remaining service-level post-sim simulated-day total ownership helpers and the downstream `localDate` fallback without changing shared-window ownership.
 
 ### Simulation Modeling Modes (authoritative summary)
 

@@ -128,9 +128,10 @@
 
 ### Active Focus (Runtime)
 
-- Shared-artifact alignment is already true for Past Sim and Gap-Fill compare in current runtime code.
+- Fresh shared producer-chain alignment is now true for Past Sim and Gap-Fill compare (`simulatePastUsageDataset` -> `buildPastSimulatedBaselineV1` -> `buildCurveFromPatchedIntervals` -> `buildSimulatedUsageDatasetFromCurve`).
 - Shared weather reuse/provenance is already true in current runtime code (`loadWeatherForPastWindow` persisted-weather-first behavior).
-- Shared sim-core remains authoritative; Gap-Fill remains orchestration/reporting over shared modules.
+- Shared sim-core remains authoritative, but strict finalized-output alignment is **not** fully complete on the current branch: `modules/usageSimulator/service.ts` still reconstructs/backfills canonical simulated-day totals in `buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys()`, `buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset()`, and `attachCanonicalArtifactSimulatedDayTotalsByDate()`.
+- Shared window/date ownership is still locked correctly on the current branch: compare identity uses `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage uses `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not mutate artifact input hash or travel/vacant exclusion ownership.
 - Broad focus remains shared simulation-core accuracy.
 - `compareRunId` plus durable compare-run persistence now exist in runtime (`GapfillCompareRunSnapshot`).
 - `compare_core` now returns compare-run state fields (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
@@ -138,8 +139,7 @@
 - Canonical heavy follow-up path is now snapshot-read-only over persisted compare snapshot state (no recompute in canonical admin flow).
 - Gap-Fill admin stabilization pass is complete for current runtime flow (snapshot-reader history/debug clarity + stage-scoped retry + reader-stage label clarity).
 - Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
-- Remaining work is maintenance-only (optional dedupe polish, optional compatibility cleanup, optional observability/perf refinement).
-- No current Gap-Fill architecture refactor is needed; return focus to broader shared simulation-core accuracy unless a new active-path Gap-Fill bug appears.
+- Remaining follow-up is narrow: retire the remaining service-level post-sim simulated-day total ownership helpers and the downstream `runSelectedDaysFreshExecution()` `localDate` fallback without changing shared-window ownership.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
@@ -234,7 +234,7 @@ Mandatory enforcement rules:
 
 LEGACY / NON-AUTHORITATIVE historical drift notes:
 - Older notes referenced unresolved shared identity wiring work in simulation engines diagnostics.
-- Treat these as historical context only; active architecture alignment work is complete unless a new active-path bug is confirmed.
+- Treat these as historical context only; fresh producer-chain alignment is now in place, but strict finalized-output alignment still has remaining service-level caveats on the current branch.
 - Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`; this context doc should stay shorter and aligned to that source.
 
 ### Simulation Modeling Modes (authoritative summary)

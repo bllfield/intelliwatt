@@ -41,6 +41,8 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - When `artifactIdentitySource=same_run_artifact_ensure` and exact compare is requested, the handoff must stay on the exact rebuilt artifact identity: no latest-scenario fallback is allowed, and route/service must fail early with an artifact identity error before travel/vacant parity proof runs.
 - Rebuilt shared artifacts must persist `canonicalArtifactSimulatedDayTotalsByDate` on the exact saved row, and exact compare/parity reads must source DB travel/vacant artifact references from that canonical field rather than display rows.
 - Artifact fingerprint ownership and usage-shape identity contracts are unchanged by this step; deferred profile/hash contract work remains separate.
+- Current branch caveat: `simulatePastSelectedDaysShared()` is now a pure post-output slicer, but strict finalized-output alignment is still not complete because `modules/usageSimulator/service.ts` still reconstructs/backfills canonical simulated-day totals and exact-parity day totals outside `buildSimulatedUsageDatasetFromCurve()`.
+- Current branch caveat: shared window/date ownership is still correct and must stay locked. Compare identity uses `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage uses `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership or artifact identity.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
   - `simulatePastUsageDataset`
@@ -64,7 +66,7 @@ Modeling guidance alignment:
   - `compare_heavy_scored_days`
 - Canonical admin heavy follow-up now reads staged snapshot projections via `compareRunId` readers.
 - Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
-- Next work is stabilization-only (optional admin dedupe polish, optional legacy compatibility cleanup, optional observability/perf cleanup).
+- Next work is still narrow: optional admin polish remains, but strict shared-sim follow-up on the current branch is now focused on retiring service-level post-sim simulated-day total ownership helpers and the downstream `runSelectedDaysFreshExecution()` `localDate` fallback without changing shared-window ownership.
 - GapFill remains scoring/reporting-only and must continue using the shared simulation/artifact/weather path; snapshot work changes orchestration/persistence only, not modeling ownership.
 
 ## LEGACY / NON-AUTHORITATIVE
