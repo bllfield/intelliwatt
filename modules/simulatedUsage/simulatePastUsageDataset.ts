@@ -75,6 +75,9 @@ function simulatedDayResultIntersectsLocalDateKeys(
 ): boolean {
   if (dateKeysLocal.size === 0) return false;
   const intervals = Array.isArray(result?.intervals) ? result.intervals : [];
+  // Shared selected-day membership is defined by interval timestamps.
+  // localDate is metadata and must not override missing or conflicting interval ownership.
+  if (intervals.length === 0) return false;
   return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
 }
 
@@ -880,6 +883,7 @@ export async function simulatePastSelectedDaysShared(
     const selectedIntervals = sharedResult.simulatedIntervals.filter((row) =>
       selectedValid.has(dateKeyInTimezone(String(row.timestamp ?? ""), timezoneResolved))
     );
+    // Keep result slicing on the same timestamp-derived local-date rule as interval slicing.
     const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
       simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
     );
