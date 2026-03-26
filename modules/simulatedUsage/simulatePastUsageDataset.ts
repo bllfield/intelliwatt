@@ -226,6 +226,7 @@ export type SimulatePastSelectedDaysResult = {
   simulatedIntervals: Array<{ timestamp: string; kwh: number }>;
   simulatedDayResults: SimulatedDayResult[];
   pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
+  actualWxByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
   weatherKindUsed: string | undefined;
   usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
@@ -901,6 +902,7 @@ export async function simulatePastSelectedDaysShared(
       simulatedIntervals: selectedIntervals,
       simulatedDayResults: selectedResults,
       pastDayCounts: sharedResult.pastDayCounts,
+      actualWxByDateKey: sharedResult.actualWxByDateKey,
       weatherSourceSummary: String((sharedResult.meta as any)?.weatherSourceSummary ?? "unknown") as WeatherProvenance["weatherSourceSummary"],
       weatherKindUsed: (sharedResult.meta as any)?.weatherKindUsed as string | undefined,
       usageShapeProfileDiag: (sharedResult.meta as any)?.usageShapeProfileDiag as SharedSimUsageShapeProfileDiag | undefined,

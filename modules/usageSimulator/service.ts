@@ -2269,6 +2269,11 @@ export async function buildGapfillCompareSimShared(args: {
             dataset: null,
             simulatedIntervals: [] as Array<{ timestamp: string; kwh: number }>,
             dailyTotalsByDate: new Map<string, number>(),
+          actualWxByDateKey: null as Map<
+            string,
+            { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
+          > | null,
+          weatherKindUsed: null as string | null,
             weatherSourceSummary: weatherBasisUsed,
           };
         }
@@ -2325,6 +2330,8 @@ export async function buildGapfillCompareSimShared(args: {
           dataset: null,
           simulatedIntervals: simulatedIntervalsNormalized,
           dailyTotalsByDate,
+          actualWxByDateKey: selectedDaysResult.actualWxByDateKey ?? null,
+          weatherKindUsed: String(selectedDaysResult.weatherKindUsed ?? "") || null,
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
         };
       };
@@ -2372,23 +2379,38 @@ export async function buildGapfillCompareSimShared(args: {
           : freshParityWeatherSourceSummary;
       const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
       if (selectedWeatherRange.length > 0) {
-        throwIfGapfillCompareAborted(abortSignal);
-        const selectedDaysWeather = await loadWeatherForPastWindow({
-          houseId,
-          startDate: selectedWeatherRange[0]!,
-          endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
-          canonicalDateKeys: selectedWeatherRange,
-        });
-        const selectedDaysWeatherBasisUsed =
-          String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed;
-        weatherBasisUsed = selectedDaysWeatherBasisUsed;
+        const sharedSelectedDaysWeatherByDate = sharedSelectedDaysResult.actualWxByDateKey ?? null;
+        const sharedSelectedDaysWeatherComplete =
+          sharedSelectedDaysWeatherByDate != null &&
+          selectedWeatherRange.every((dk) => sharedSelectedDaysWeatherByDate.has(dk));
+        let selectedDaysWeatherBasisUsed = weatherBasisUsed;
+        let selectedDaysWeatherByDate = sharedSelectedDaysWeatherByDate;
+        let selectedDaysWeatherKindUsed = sharedSelectedDaysResult.weatherKindUsed;
+        let selectedDaysWeatherProviderName: string | null = null;
+        let selectedDaysWeatherFallbackReason: string | null = null;
+        if (!sharedSelectedDaysWeatherComplete) {
+          throwIfGapfillCompareAborted(abortSignal);
+          const selectedDaysWeather = await loadWeatherForPastWindow({
+            houseId,
+            startDate: selectedWeatherRange[0]!,
+            endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
+            canonicalDateKeys: selectedWeatherRange,
+          });
+          selectedDaysWeatherByDate = selectedDaysWeather.actualWxByDateKey;
+          selectedDaysWeatherBasisUsed =
+            String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed;
+          weatherBasisUsed = selectedDaysWeatherBasisUsed;
+          selectedDaysWeatherKindUsed = selectedDaysWeather.provenance.weatherKindUsed ?? null;
+          selectedDaysWeatherProviderName = selectedDaysWeather.provenance.weatherProviderName ?? null;
+          selectedDaysWeatherFallbackReason = selectedDaysWeather.provenance.weatherFallbackReason ?? null;
+        }
         const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
           scoredDateKeysLocal: boundedTestDateKeysLocal,
-          weatherByDateKey: selectedDaysWeather.actualWxByDateKey,
+          weatherByDateKey: selectedDaysWeatherByDate ?? new Map(),
           weatherBasisUsed: selectedDaysWeatherBasisUsed,
-          weatherKindUsed: selectedDaysWeather.provenance.weatherKindUsed ?? null,
-          weatherProviderName: selectedDaysWeather.provenance.weatherProviderName ?? null,
-          weatherFallbackReason: selectedDaysWeather.provenance.weatherFallbackReason ?? null,
+          weatherKindUsed: selectedDaysWeatherKindUsed,
+          weatherProviderName: selectedDaysWeatherProviderName,
+          weatherFallbackReason: selectedDaysWeatherFallbackReason,
         });
         scoredDayWeatherRows = scoredDayWeatherPayload.rows;
         scoredDayWeatherTruth = scoredDayWeatherPayload.truth;

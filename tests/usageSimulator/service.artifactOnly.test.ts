@@ -3158,6 +3158,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       ),
       simulatedDayResults: [],
       pastDayCounts: {},
+      actualWxByDateKey: new Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }>([
+        ["2026-01-01", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
+      ]),
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
     }));
@@ -3243,6 +3246,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       ]);
       expect(out.simulatedTestIntervals).toHaveLength(96);
       expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(["2026-01-01"]);
+      expect(loadWeatherForPastWindow).not.toHaveBeenCalled();
       expect(out.scoredDayWeatherRows).toEqual([
         expect.objectContaining({
           localDate: "2026-01-01",
