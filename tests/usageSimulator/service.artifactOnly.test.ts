@@ -3213,6 +3213,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
       ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
+      expect(
+        Array.from(
+          (((selectedDaysCalls[0] ?? [])[0] as any)?.retainSimulatedDayResultDateKeysLocal ?? []) as Iterable<string>
+        )
+          .sort()
+      ).toEqual(["2026-01-01"]);
       expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
       expect(out.compareFreshModeUsed).toBe("selected_days");
       expect(out.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");

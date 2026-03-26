@@ -892,6 +892,11 @@ export function buildPastSimulatedBaselineV1(args: {
    */
   collectSimulatedDayResultsLimit?: number;
   /**
+   * Optional local-day keys to retain in `dayResults` when collection is enabled.
+   * Simulation still runs for all required days; this only narrows the retained payload.
+   */
+  collectSimulatedDayResultsDateKeys?: Set<string>;
+  /**
    * Optional: force simulation for specific local date keys (YYYY-MM-DD).
    * Forced-simulated days are excluded from reference-day selection.
    */
@@ -1444,6 +1449,7 @@ export function buildPastSimulatedBaselineV1(args: {
     Number.isFinite(collectSimulatedDayResultsLimitRaw) && collectSimulatedDayResultsLimitRaw >= 0
       ? Math.floor(collectSimulatedDayResultsLimitRaw)
       : Number.POSITIVE_INFINITY;
+  const collectSimulatedDayResultsDateKeys = args.collectSimulatedDayResultsDateKeys;
   const dayResults: SimulatedDayResult[] = [];
   let totalDays = 0;
   let excludedDays = 0;
@@ -1510,7 +1516,11 @@ export function buildPastSimulatedBaselineV1(args: {
               };
             })()
           : result;
-      if (collectSimulatedDayResults && dayResults.length < collectSimulatedDayResultsLimit) {
+      const retainDayResult =
+        !collectSimulatedDayResultsDateKeys ||
+        collectSimulatedDayResultsDateKeys.size === 0 ||
+        collectSimulatedDayResultsDateKeys.has(dateKey);
+      if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
         dayResults.push(blendedResult);
       }
       for (const iv of blendedResult.intervals) out.push(iv);

@@ -203,6 +203,8 @@ export type SimulatePastUsageDatasetArgs = {
   actualIntervals?: Array<{ timestamp: string; kwh: number }>;
   /** Optional local dates that should be simulated by the shared path before downstream slicing. */
   forceSimulateDateKeysLocal?: Set<string>;
+  /** Optional local dates whose simulated-day payloads should be retained for downstream consumers. */
+  retainSimulatedDayResultDateKeysLocal?: Set<string>;
 };
 
 export type SimulatePastUsageDatasetResult = {
@@ -509,6 +511,7 @@ export async function simulatePastUsageDataset(
     includeSimulatedDayResults = true,
     actualIntervals: preloadedIntervals,
     forceSimulateDateKeysLocal,
+    retainSimulatedDayResultDateKeysLocal,
   } = args;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -527,6 +530,11 @@ export async function simulatePastUsageDataset(
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
     const forcedSimulateDateKeysLocal = new Set<string>(
       Array.from(forceSimulateDateKeysLocal ?? [])
+        .map((dk) => String(dk ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    );
+    const retainedSimulatedDayResultDateKeysLocal = new Set<string>(
+      Array.from(retainSimulatedDayResultDateKeysLocal ?? [])
         .map((dk) => String(dk ?? "").slice(0, 10))
         .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
     );
@@ -578,6 +586,7 @@ export async function simulatePastUsageDataset(
     const usageShapeProfileDiag = ensuredUsageShape.usageShapeProfileDiag;
     const timezoneResolved = String(timezone ?? "").trim();
     const forcedUtcDateKeys = new Set<string>();
+    const retainedResultUtcDateKeys = new Set<string>();
     if (forcedSimulateDateKeysLocal.size > 0 && timezoneResolved) {
       for (const dayStartMs of canonicalDayStartsMs) {
         const gridTs = getDayGridTimestamps(dayStartMs);
@@ -588,6 +597,21 @@ export async function simulatePastUsageDataset(
           forcedSimulateDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
         );
         if (intersectsForcedLocalDay) forcedUtcDateKeys.add(utcDateKey);
+        const intersectsRetainedLocalDay = gridTs.some((ts) =>
+          retainedSimulatedDayResultDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
+        );
+        if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
+      }
+    } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && timezoneResolved) {
+      for (const dayStartMs of canonicalDayStartsMs) {
+        const gridTs = getDayGridTimestamps(dayStartMs);
+        if (!gridTs.length) continue;
+        const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
+        const intersectsRetainedLocalDay = gridTs.some((ts) =>
+          retainedSimulatedDayResultDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
+        );
+        if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
       }
     }
 
@@ -608,6 +632,8 @@ export async function simulatePastUsageDataset(
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
+      collectSimulatedDayResultsDateKeys:
+        retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined,
       forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
       debug: { out: pastDayCounts as any },
     });
@@ -838,6 +864,7 @@ export async function simulatePastSelectedDaysShared(
     buildInputs,
     actualIntervals: preloadedIntervals,
     selectedDateKeysLocal,
+    retainSimulatedDayResultDateKeysLocal,
     buildPathKind,
   } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -875,6 +902,10 @@ export async function simulatePastSelectedDaysShared(
       includeSimulatedDayResults: true,
       actualIntervals: preloadedIntervals,
       forceSimulateDateKeysLocal: selectedValid,
+      retainSimulatedDayResultDateKeysLocal:
+        retainSimulatedDayResultDateKeysLocal && retainSimulatedDayResultDateKeysLocal.size > 0
+          ? retainSimulatedDayResultDateKeysLocal
+          : selectedValid,
     });
     if (sharedResult.dataset === null) {
       return {

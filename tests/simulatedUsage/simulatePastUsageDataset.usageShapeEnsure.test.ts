@@ -307,4 +307,62 @@ describe("shared sim usage-shape ensure path", () => {
       expect(out.simulatedDayResults.map((row) => row.localDate)).toEqual(["2026-01-02"]);
     }
   });
+
+  it("retains only requested selected-day result payloads while still simulating all selected days", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+    buildPastSimulatedBaselineV1.mockImplementationOnce(() => ({
+      intervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.2 },
+        { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 },
+      ],
+      dayResults: [
+        {
+          localDate: "2026-01-01",
+          displayDayKwh: 0.2,
+          intervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.2 }],
+          intervalSumKwh: 0.2,
+          finalDayKwh: 0.2,
+        },
+        {
+          localDate: "2026-01-02",
+          displayDayKwh: 0.4,
+          intervals: [{ timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 }],
+          intervalSumKwh: 0.4,
+          finalDayKwh: 0.4,
+        },
+      ],
+    }));
+
+    const out = await simulatePastSelectedDaysShared({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-02",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        snapshots: {},
+      } as any,
+      buildPathKind: "lab_validation",
+      selectedDateKeysLocal: new Set(["2026-01-01", "2026-01-02"]),
+      retainSimulatedDayResultDateKeysLocal: new Set(["2026-01-02"]),
+    });
+
+    expect(out.simulatedIntervals).not.toBeNull();
+    if (out.simulatedIntervals !== null) {
+      expect(Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys ?? []).sort()).toEqual([
+        "2026-01-01",
+        "2026-01-02",
+      ]);
+      expect(
+        Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys ?? []).sort()
+      ).toEqual(["2026-01-02"]);
+      expect(out.simulatedIntervals.map((row) => row.timestamp)).toEqual([
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z",
+      ]);
+    }
+  });
 });

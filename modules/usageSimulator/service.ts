@@ -2289,6 +2289,7 @@ export async function buildGapfillCompareSimShared(args: {
           timezone,
           buildPathKind: "lab_validation",
           selectedDateKeysLocal,
+          retainSimulatedDayResultDateKeysLocal: boundedTestDateKeysLocal,
         });
         if (selectedDaysResult.simulatedIntervals === null) {
           return {
