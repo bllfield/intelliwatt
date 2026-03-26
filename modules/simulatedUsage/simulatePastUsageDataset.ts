@@ -756,110 +756,53 @@ export async function simulatePastFullWindowShared(
   args: SimulatePastUsageDatasetArgs
 ): Promise<SimulatePastFullWindowSharedResult | { simulatedIntervals: null; error: string }> {
   const {
-    houseId,
-    userId,
-    esiid,
     startDate,
     endDate,
-    timezone,
-    travelRanges,
-    buildInputs,
-    actualIntervals: preloadedIntervals,
     includeSimulatedDayResults = false,
   } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { simulatedIntervals: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
   }
   try {
-    const actualIntervals =
-      preloadedIntervals ??
-      (await getActualIntervalsForRange({ houseId, esiid, startDate, endDate })).map((p) => ({
-        timestamp: p.timestamp,
-        kwh: p.kwh,
-      }));
-    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
-    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
-    const excludedDateKeys = boundDateKeysToCoverageWindow(
-      travelRangesToExcludeDateKeys(travelRanges),
-      { startDate, endDate }
-    );
-    const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
-      houseId,
-      startDate,
-      endDate,
-      canonicalDateKeys,
+    const sharedResult = await simulatePastUsageDataset({
+      ...args,
+      includeSimulatedDayResults,
     });
-    if (provenance.weatherSourceSummary !== "actual_only") {
+    if (sharedResult.dataset === null) {
       return {
         simulatedIntervals: null,
-        error: `actual_weather_required:${provenance.weatherSourceSummary}`,
+        error: sharedResult.error ?? "simulatePastUsageDataset failed",
       };
     }
-
-    const [homeRecForPast, applianceRecForPast] = await Promise.all([
-      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
-      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-    ]);
-    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
-    const applianceProfileForPast =
-      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
-        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
-        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
-
-    const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
-      userId,
-      houseId,
-      timezone,
-      canonicalMonths: ((buildInputs as any).canonicalMonths ?? []) as string[],
-    });
-    const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
-    if (!usageShapeProfileSnap) {
-      return {
-        simulatedIntervals: null,
-        error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
-      };
-    }
-
-    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
-    const { intervals: simulatedIntervals, dayResults } = buildPastSimulatedBaselineV1({
-      actualIntervals,
-      canonicalDayStartsMs,
-      excludedDateKeys,
-      dateKeyFromTimestamp,
-      getDayGridTimestamps,
-      homeProfile: homeProfileForPast,
-      applianceProfile: applianceProfileForPast,
-      usageShapeProfile: usageShapeProfileSnap ?? undefined,
-      timezoneForProfile: timezone ?? undefined,
-      actualWxByDateKey,
-      _normalWxByDateKey: normalWxByDateKey,
-      collectSimulatedDayResults: includeSimulatedDayResults,
-      debug: { out: pastDayCounts as any },
-    });
-
+    const simulatedIntervals = Array.isArray((sharedResult.dataset as any)?.series?.intervals15)
+      ? (((sharedResult.dataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>).map((row) => ({
+          timestamp: String(row?.timestamp ?? ""),
+          kwh: Number(row?.kwh) || 0,
+        })))
+      : [];
     return {
       simulatedIntervals,
-      simulatedDayResults: includeSimulatedDayResults ? dayResults : undefined,
-      pastDayCounts,
-      actualWxByDateKey,
-      weatherSourceSummary: provenance.weatherSourceSummary,
-      weatherKindUsed: provenance.weatherKindUsed,
-      weatherProviderName: provenance.weatherProviderName,
-      weatherFallbackReason: provenance.weatherFallbackReason,
-      usageShapeProfileDiag: ensuredUsageShape.usageShapeProfileDiag,
-      profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
+      simulatedDayResults: sharedResult.simulatedDayResults,
+      pastDayCounts: sharedResult.pastDayCounts,
+      actualWxByDateKey: sharedResult.actualWxByDateKey ?? new Map(),
+      weatherSourceSummary: String((sharedResult.meta as any)?.weatherSourceSummary ?? "unknown") as WeatherProvenance["weatherSourceSummary"],
+      weatherKindUsed: (sharedResult.meta as any)?.weatherKindUsed as string | undefined,
+      weatherProviderName: String((sharedResult.meta as any)?.weatherProviderName ?? "") || null,
+      weatherFallbackReason: String((sharedResult.meta as any)?.weatherFallbackReason ?? "") || null,
+      usageShapeProfileDiag: (sharedResult.meta as any)?.usageShapeProfileDiag as SharedSimUsageShapeProfileDiag | undefined,
+      profileAutoBuilt: (sharedResult.meta as any)?.profileAutoBuilt === true,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
-    console.warn("[simulatePastFullWindowShared] failed", { houseId, err: e });
+    console.warn("[simulatePastFullWindowShared] failed", { houseId: args.houseId, err: e });
     return { simulatedIntervals: null, error: err.message };
   }
 }
 
 /**
  * Shared selected-day fresh execution path.
- * Uses the exact same shared weather/profile/context preparation as full-window past simulation,
- * but emits simulated outputs only for the selected local days.
+ * Uses the exact same shared full-output wrapper as full-window past simulation,
+ * then slices selected local days from the canonical shared output.
  */
 export async function simulatePastSelectedDaysShared(
   args: SimulatePastSelectedDaysArgs
@@ -900,7 +843,7 @@ export async function simulatePastSelectedDaysShared(
     return { simulatedIntervals: null, error: "missing_timezone" };
   }
   try {
-    const sharedResult = await simulatePastUsageDataset({
+    const sharedResult = await simulatePastFullWindowShared({
       userId,
       houseId,
       esiid,
@@ -910,8 +853,8 @@ export async function simulatePastSelectedDaysShared(
       travelRanges,
       buildInputs,
       buildPathKind,
-      includeSimulatedDayResults: true,
       actualIntervals: preloadedIntervals,
+      includeSimulatedDayResults: true,
       forceSimulateDateKeysLocal: selectedValid,
       // Selected-days callers only consume simulator-owned intervals after slicing.
       // Dropping passthrough actual intervals avoids building a near-full-window payload.
@@ -921,26 +864,16 @@ export async function simulatePastSelectedDaysShared(
           ? retainSimulatedDayResultDateKeysLocal
           : selectedValid,
     });
-    if (sharedResult.dataset === null) {
+    if (sharedResult.simulatedIntervals === null) {
       return {
         simulatedIntervals: null,
-        error: sharedResult.error ?? "simulatePastUsageDataset failed",
+        error: sharedResult.error ?? "simulatePastFullWindowShared failed",
       };
     }
-    const simulatedIntervalsRaw = Array.isArray((sharedResult.dataset as any)?.series?.intervals15)
-      ? (((sharedResult.dataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>).map((row) => ({
-          timestamp: String(row?.timestamp ?? ""),
-          kwh: Number(row?.kwh) || 0,
-        })))
-      : [];
-    const dayResults = sharedResult.simulatedDayResults ?? [];
-    const selectedResults = dayResults.filter((r) =>
-      Array.isArray((r as any)?.intervals) &&
-      (r as any).intervals.some((iv: { timestamp?: string }) =>
-        selectedValid.has(dateKeyInTimezone(String(iv?.timestamp ?? ""), timezoneResolved))
-      )
+    const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
+      selectedValid.has(String((r as any)?.localDate ?? "").slice(0, 10))
     );
-    const selectedIntervals = simulatedIntervalsRaw.filter((row) =>
+    const selectedIntervals = sharedResult.simulatedIntervals.filter((row) =>
       selectedValid.has(dateKeyInTimezone(String(row.timestamp ?? ""), timezoneResolved))
     );
     return {
@@ -948,10 +881,10 @@ export async function simulatePastSelectedDaysShared(
       simulatedDayResults: selectedResults,
       pastDayCounts: sharedResult.pastDayCounts,
       actualWxByDateKey: sharedResult.actualWxByDateKey,
-      weatherSourceSummary: String((sharedResult.meta as any)?.weatherSourceSummary ?? "unknown") as WeatherProvenance["weatherSourceSummary"],
-      weatherKindUsed: (sharedResult.meta as any)?.weatherKindUsed as string | undefined,
-      usageShapeProfileDiag: (sharedResult.meta as any)?.usageShapeProfileDiag as SharedSimUsageShapeProfileDiag | undefined,
-      profileAutoBuilt: (sharedResult.meta as any)?.profileAutoBuilt === true,
+      weatherSourceSummary: sharedResult.weatherSourceSummary,
+      weatherKindUsed: sharedResult.weatherKindUsed,
+      usageShapeProfileDiag: sharedResult.usageShapeProfileDiag,
+      profileAutoBuilt: sharedResult.profileAutoBuilt,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));

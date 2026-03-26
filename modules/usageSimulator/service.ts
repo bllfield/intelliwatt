@@ -2472,7 +2472,7 @@ export async function buildGapfillCompareSimShared(args: {
       compareCalculationScope = "selected_days_shared_path_only";
       compareFreshModeUsed = "selected_days";
       compareSharedCalcPath =
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared";
+        "simulatePastSelectedDaysShared(simulatePastFullWindowShared->simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared";
       weatherBasisUsed =
         boundedTestDateKeysLocal.size > 0
           ? sharedSelectedDaysResult.weatherSourceSummary
@@ -2558,7 +2558,7 @@ export async function buildGapfillCompareSimShared(args: {
       compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
       compareFreshModeUsed = "full_window";
       compareSharedCalcPath =
-        "simulatePastFullWindowShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared";
+        "simulatePastFullWindowShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->buildGapfillCompareSimShared";
       weatherBasisUsed = freshResult.weatherSourceSummary;
       const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
         scoredDateKeysLocal: boundedTestDateKeysLocal,
