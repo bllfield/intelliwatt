@@ -2155,6 +2155,13 @@ export async function POST(req: NextRequest) {
     : compareFreshMode === "full_window"
       ? "full_window_compare_core"
       : "selected_days_compare_core";
+  // In the exact same-run lightweight path, per-phase compare-run persistence is observability only
+  // and can add significant latency without changing compare behavior or the returned payload.
+  const useInlineSharedComparePhasePersistence = !(
+    selectedDaysCoreLightweight &&
+    requireExactArtifactMatch === true &&
+    artifactIdentitySource === "same_run_artifact_ensure"
+  );
   // Orchestrator already runs explicit artifact_ensure before compare_core.
   // Skip redundant auto-ensure in lightweight selected-days compare.
   const autoEnsureArtifactForCompare =
@@ -2344,7 +2351,7 @@ export async function POST(req: NextRequest) {
         artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
           ? artifactIdentitySource
           : null,
-      onPhaseUpdate: reportSharedComparePhase,
+      onPhaseUpdate: useInlineSharedComparePhasePersistence ? reportSharedComparePhase : undefined,
       abortSignal: compareCoreAbort.signal,
     });
   } catch (err: unknown) {

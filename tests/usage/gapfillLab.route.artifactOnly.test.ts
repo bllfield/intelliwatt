@@ -2404,6 +2404,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         artifactExactScenarioId: "past-s1",
         requireExactArtifactMatch: true,
         artifactIdentitySource: "same_run_artifact_ensure",
+        onPhaseUpdate: undefined,
       })
     );
     expect(body.artifactRequestTruth).toEqual({
