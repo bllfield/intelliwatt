@@ -614,8 +614,10 @@ export async function simulatePastUsageDataset(
         if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
       }
     } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && !timezoneResolved) {
-      for (const dateKey of Array.from(retainedSimulatedDayResultDateKeysLocal)) {
-        retainedResultUtcDateKeys.add(dateKey);
+      for (const utcDateKey of canonicalDateKeys) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
+        if (!retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) continue;
+        retainedResultUtcDateKeys.add(utcDateKey);
       }
     }
 

@@ -367,7 +367,7 @@ describe("shared sim usage-shape ensure path", () => {
     }
   });
 
-  it("treats retain keys as UTC day keys when timezone is missing", async () => {
+  it("keeps only canonical in-window UTC retain keys when timezone is missing", async () => {
     getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
 
     const out = await simulatePastUsageDataset({
@@ -384,7 +384,7 @@ describe("shared sim usage-shape ensure path", () => {
       } as any,
       buildPathKind: "lab_validation",
       includeSimulatedDayResults: true,
-      retainSimulatedDayResultDateKeysLocal: new Set(["2026-01-01"]),
+      retainSimulatedDayResultDateKeysLocal: new Set(["2026-01-01", "2026-02-01"]),
     });
 
     expect(out.dataset).not.toBeNull();
