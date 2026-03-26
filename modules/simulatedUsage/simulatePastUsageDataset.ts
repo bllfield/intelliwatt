@@ -628,7 +628,7 @@ export async function simulatePastUsageDataset(
     // memory pressure for large windows. Only collect when explicitly requested.
     const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
     const collectSimulatedDayResultsDateKeys =
-      retainedSimulatedDayResultDateKeysLocal.size > 0 ? retainedResultUtcDateKeys : undefined;
+      retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined;
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,

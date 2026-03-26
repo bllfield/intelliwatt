@@ -394,4 +394,28 @@ describe("shared sim usage-shape ensure path", () => {
       Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys ?? []).sort()
     ).toEqual(["2026-01-01"]);
   });
+
+  it("forwards undefined retain keys when local retained keys do not intersect UTC dates", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+
+    const out = await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: undefined,
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        snapshots: {},
+      } as any,
+      buildPathKind: "lab_validation",
+      includeSimulatedDayResults: true,
+      retainSimulatedDayResultDateKeysLocal: new Set(["2026-02-01"]),
+    });
+
+    expect(out.dataset).not.toBeNull();
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys).toBeUndefined();
+  });
 });
