@@ -2698,16 +2698,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(-2);
-      expect(selectedDaysCalls).toHaveLength(2);
-      const scoringCallDateKeys = Array.from(
+      const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(-1);
+      expect(selectedDaysCalls).toHaveLength(1);
+      const sharedCallDateKeys = Array.from(
         (((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
       ).sort();
-      const parityCallDateKeys = Array.from(
-        (((selectedDaysCalls[1] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
-      ).sort();
-      expect(scoringCallDateKeys).toEqual(["2026-01-01"]);
-      expect(parityCallDateKeys).toEqual(["2026-01-03", "2026-01-04"]);
+      expect(sharedCallDateKeys).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3206,23 +3202,20 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(selectedDaysCalls).toHaveLength(1);
-      expect(fullWindowCalls).toHaveLength(1);
+      expect(fullWindowCalls).toHaveLength(0);
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
       expect(decodeIntervalsV1).toHaveBeenCalled();
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
-      ).toEqual(["2026-01-01"]);
-      expect((fullWindowCalls[0] ?? [])[0]).toMatchObject({
-        startDate: "2026-01-01",
-        buildPathKind: "lab_validation",
-      });
+      ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
       expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
       expect(out.compareFreshModeUsed).toBe("selected_days");
       expect(out.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
       expect(out.compareSharedCalcPath).toContain("simulatePastUsageDataset");
       expect(out.compareSharedCalcPath).toContain("buildSimulatedUsageDatasetFromCurve");
+      expect(out.compareSharedCalcPath).toContain("slice_selected_and_parity_days");
       expect(out.compareSimSource).toBe("shared_selected_days_calc");
       expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
       expect(out.travelVacantParityTruth).toMatchObject({
@@ -3359,7 +3352,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(decodeIntervalsV1).toHaveBeenCalled();
-      expect(simulatePastFullWindowShared).toHaveBeenCalledTimes(1);
+      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         mismatchCount: 0,
@@ -3382,7 +3375,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("keeps exact travel parity validated when selected-days travel drift differs from the full shared proof source", async () => {
+  it("uses the reused selected-days shared output for exact travel parity proof", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -3499,28 +3492,29 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       },
     });
 
-    expect(out.ok).toBe(true);
-    if (out.ok) {
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
       expect(selectedDaysCalls).toHaveLength(1);
-      expect(fullWindowCalls).toHaveLength(1);
+      expect(fullWindowCalls).toHaveLength(0);
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
-      ).toEqual(["2026-01-01"]);
-      expect(out.travelVacantParityTruth).toMatchObject({
-        availability: "validated",
-        mismatchCount: 0,
-        exactProofSatisfied: true,
+      ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.reasonCode).toBe("TRAVEL_VACANT_PARITY_MISMATCH");
+      expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
+        availability: "mismatch_detected",
+        mismatchCount: 1,
+        exactProofSatisfied: false,
       });
-      expect(out.travelVacantParityTruth?.mismatchDiagnosticsSample).toBeUndefined();
-      expect(out.travelVacantParityRows).toEqual([
+      expect((out.body as any)?.travelVacantParityRows).toEqual([
         expect.objectContaining({
           localDate: "2026-01-03",
           artifactCanonicalSimDayKwh: 24,
-          freshSharedDayCalcKwh: 24,
-          parityMatch: true,
+          freshSharedDayCalcKwh: 24.01,
+          parityMatch: false,
         }),
         expect.objectContaining({
           localDate: "2026-01-04",
@@ -3532,7 +3526,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("reports raw parity mismatch diagnostics when full shared proof intervals drift after codec normalization", async () => {
+  it("does not consult a second full-window proof path in selected-days exact proof mode", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -3623,52 +3617,24 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       artifactIdentitySource: "same_run_artifact_ensure",
     });
 
-    expect(out.ok).toBe(false);
-    if (!out.ok) {
-      expect(out.status).toBe(409);
-      expect((out.body as any)?.reasonCode).toBe("TRAVEL_VACANT_PARITY_MISMATCH");
-      expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
-        availability: "mismatch_detected",
-        mismatchCount: 1,
-        exactProofSatisfied: false,
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(out.travelVacantParityTruth).toMatchObject({
+        availability: "validated",
+        mismatchCount: 0,
+        exactProofSatisfied: true,
       });
-      expect((out.body as any)?.travelVacantParityRows).toEqual(
+      expect(out.travelVacantParityRows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             localDate: "2026-01-03",
             artifactCanonicalSimDayKwh: 24,
-            freshSharedDayCalcKwh: 24.01,
-            parityMatch: false,
+            freshSharedDayCalcKwh: 24,
+            parityMatch: true,
           }),
         ])
       );
-      expect((out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample).toEqual([
-        expect.objectContaining({
-          localDate: "2026-01-03",
-          normalizedArtifactDaySum: 24,
-          normalizedFreshDaySum: 24.01,
-          intervalCountArtifact: 96,
-          intervalCountFresh: 96,
-        }),
-      ]);
-      expect(typeof (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.rawArtifactDaySum).toBe(
-        "number"
-      );
-      expect(typeof (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.rawFreshDaySum).toBe(
-        "number"
-      );
-      expect(
-        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.artifactFirstLocalTimestamp
-      ).toMatch(/^2026-01-03T/);
-      expect(
-        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.artifactLastLocalTimestamp
-      ).toMatch(/^2026-01-03T/);
-      expect(
-        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.freshFirstLocalTimestamp
-      ).toMatch(/^2026-01-03T/);
-      expect(
-        (out.body as any)?.travelVacantParityTruth?.mismatchDiagnosticsSample?.[0]?.freshLastLocalTimestamp
-      ).toMatch(/^2026-01-03T/);
     }
   });
 

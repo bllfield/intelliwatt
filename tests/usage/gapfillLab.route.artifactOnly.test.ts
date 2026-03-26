@@ -974,7 +974,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       compareSharedCalcPath:
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared",
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       compareSimSource: "shared_selected_days_calc",
@@ -1030,7 +1030,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       compareSharedCalcPath:
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared",
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       compareSimSource: "shared_selected_days_calc",
@@ -1082,7 +1082,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       scoringUsedSharedArtifact: false,
       compareSharedCalcPath:
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_days->buildGapfillCompareSimShared",
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       displaySimSource: "dataset.daily",
@@ -1256,7 +1256,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.compareTruth?.compareCalculationScope).toBe("selected_days_shared_path_only");
     expect(body.compareTruth?.compareCalculationScopeLabel).toContain("Canonical shared Past dataset path");
     expect(body.compareTruth?.architectureNote).toContain("canonical shared Past simulation/output path");
-    expect(body.compareTruth?.architectureNote).toContain("Exact DB travel/vacant parity may additionally reuse a full-window shared execution");
+    expect(body.compareTruth?.architectureNote).toContain(
+      "slices scored local dates and exact parity dates from that shared output"
+    );
     expect(body.compareTruth?.architectureNote).not.toContain("including DB travel/vacant parity-validation dates");
     expect(body.compareTruth?.artifactParityReferenceSource).toBe("canonical_artifact_simulated_day_totals");
     expect(body.travelVacantParityRows?.[0]).toMatchObject({
@@ -2200,7 +2202,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
 
     expect(res.status).toBe(200);
     expect(body.compareTruth?.architectureNote).toContain("canonical shared Past simulation/output path");
-    expect(body.compareTruth?.architectureNote).toContain("Exact DB travel/vacant parity may additionally reuse a full-window shared execution");
+    expect(body.compareTruth?.architectureNote).toContain(
+      "slices scored local dates and exact parity dates from that shared output"
+    );
     expect(body.compareTruth?.architectureNote).not.toContain("including DB travel/vacant parity-validation dates");
     expect(body.truthEnvelope?.usageShapeDependencyStatus).toEqual({
       status: "available",
