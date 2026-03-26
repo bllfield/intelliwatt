@@ -2280,6 +2280,16 @@ export async function POST(req: NextRequest) {
       phaseMeta: phaseMeta ?? null,
     });
   };
+  const reportSharedComparePhaseLogOnly = async (
+    phase: GapfillCompareBuildPhase,
+    phaseMeta?: Record<string, unknown>
+  ) => {
+    logCompareRunLifecycle("info", "shared_compare_phase", {
+      phase,
+      phaseMeta: phaseMeta ?? null,
+      persistenceMode: "log_only",
+    });
+  };
   const markCompareRunFailure = async (args: {
     phase: string;
     failureCode: string;
@@ -2351,7 +2361,9 @@ export async function POST(req: NextRequest) {
         artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
           ? artifactIdentitySource
           : null,
-      onPhaseUpdate: useInlineSharedComparePhasePersistence ? reportSharedComparePhase : undefined,
+      onPhaseUpdate: useInlineSharedComparePhasePersistence
+        ? reportSharedComparePhase
+        : reportSharedComparePhaseLogOnly,
       abortSignal: compareCoreAbort.signal,
     });
   } catch (err: unknown) {
