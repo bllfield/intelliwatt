@@ -834,6 +834,21 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
     return out;
   }
+  function localDateRangeIntervals96(
+    startDate: string,
+    endDate: string,
+    kwh = 24 / 96
+  ): Array<{ timestamp: string; kwh: number }> {
+    const out: Array<{ timestamp: string; kwh: number }> = [];
+    let cursor = new Date(`${startDate}T00:00:00.000Z`).getTime();
+    const end = new Date(`${endDate}T00:00:00.000Z`).getTime();
+    while (cursor <= end) {
+      const localDate = new Date(cursor).toISOString().slice(0, 10);
+      out.push(...oneChicagoLocalDayIntervals96(localDate, kwh));
+      cursor += 24 * 60 * 60 * 1000;
+    }
+    return out;
+  }
 
   beforeEach(() => {
     scenarioFindFirst.mockReset();
@@ -880,6 +895,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
     });
+    simulatePastFullWindowShared.mockImplementation(async ({ startDate, endDate }: any) => ({
+      simulatedIntervals: localDateRangeIntervals96(String(startDate), String(endDate)),
+      actualWxByDateKey: new Map<string, unknown>(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
+    }));
     loadWeatherForPastWindow.mockImplementation(async ({ canonicalDateKeys }: any) => ({
       actualWxByDateKey: new Map(
         (canonicalDateKeys ?? []).map((dateKey: string) => [
@@ -2710,6 +2733,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(-1);
       expect(selectedDaysCalls).toHaveLength(1);
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       const sharedCallDateKeys = Array.from(
         (((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
       ).sort();
@@ -2816,7 +2840,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -2997,7 +3021,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3215,7 +3239,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(selectedDaysCalls).toHaveLength(1);
-      expect(fullWindowCalls).toHaveLength(0);
+      expect(fullWindowCalls).toHaveLength(1);
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
@@ -3372,7 +3396,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(decodeIntervalsV1).toHaveBeenCalled();
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         mismatchCount: 0,
@@ -3395,7 +3419,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("uses the reused selected-days shared output for exact travel parity proof", async () => {
+  it("uses full-window proof output for exact travel parity even when selected-days scoring drifts", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -3512,29 +3536,27 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       },
     });
 
-    expect(out.ok).toBe(false);
-    if (!out.ok) {
+    expect(out.ok).toBe(true);
+    if (out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
       expect(selectedDaysCalls).toHaveLength(1);
-      expect(fullWindowCalls).toHaveLength(0);
+      expect(fullWindowCalls).toHaveLength(1);
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
       ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
-      expect(out.status).toBe(409);
-      expect((out.body as any)?.reasonCode).toBe("TRAVEL_VACANT_PARITY_MISMATCH");
-      expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
-        availability: "mismatch_detected",
-        mismatchCount: 1,
-        exactProofSatisfied: false,
+      expect(out.travelVacantParityTruth).toMatchObject({
+        availability: "validated",
+        mismatchCount: 0,
+        exactProofSatisfied: true,
       });
-      expect((out.body as any)?.travelVacantParityRows).toEqual([
+      expect(out.travelVacantParityRows).toEqual([
         expect.objectContaining({
           localDate: "2026-01-03",
           artifactCanonicalSimDayKwh: 24,
-          freshSharedDayCalcKwh: 24.01,
-          parityMatch: false,
+          freshSharedDayCalcKwh: 24,
+          parityMatch: true,
         }),
         expect.objectContaining({
           localDate: "2026-01-04",
@@ -3546,7 +3568,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("does not consult a second full-window proof path in selected-days exact proof mode", async () => {
+  it("uses a second full-window proof path in selected-days exact proof mode", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -3637,21 +3659,21 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       artifactIdentitySource: "same_run_artifact_ensure",
     });
 
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
-      expect(out.travelVacantParityTruth).toMatchObject({
-        availability: "validated",
-        mismatchCount: 0,
-        exactProofSatisfied: true,
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
+      expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
+        availability: "mismatch_detected",
+        mismatchCount: 1,
+        exactProofSatisfied: false,
       });
-      expect(out.travelVacantParityRows).toEqual(
+      expect((out.body as any)?.travelVacantParityRows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             localDate: "2026-01-03",
             artifactCanonicalSimDayKwh: 24,
-            freshSharedDayCalcKwh: 24,
-            parityMatch: true,
+            freshSharedDayCalcKwh: 24.01,
+            parityMatch: false,
           }),
         ])
       );

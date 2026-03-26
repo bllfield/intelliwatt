@@ -2441,12 +2441,31 @@ export async function buildGapfillCompareSimShared(args: {
           boundedTestDateKeysLocal.has(dk)
         )
       );
-      freshParityIntervals = filterIntervalsToLocalDateKeys(
-        sharedSelectedDaysResult.simulatedIntervals,
-        timezone,
-        travelVacantParityDateKeySet
-      );
       freshParityWeatherSourceSummary = sharedSelectedDaysResult.weatherSourceSummary;
+      if (travelVacantParityDateKeySet.size > 0) {
+        throwIfGapfillCompareAborted(abortSignal);
+        const parityFullWindowResult = await runFullWindowFreshExecution();
+        if (!parityFullWindowResult.ok) {
+          return {
+            ok: false,
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_simulation_failed",
+              message: parityFullWindowResult.error,
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+            },
+          };
+        }
+        freshParityIntervals = filterIntervalsToLocalDateKeys(
+          parityFullWindowResult.simulatedIntervals,
+          timezone,
+          travelVacantParityDateKeySet
+        );
+      } else {
+        freshParityIntervals = [];
+      }
       scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
       comparePulledFromSharedArtifactOnly = false;
       compareSimSource = "shared_selected_days_calc";
@@ -2505,10 +2524,12 @@ export async function buildGapfillCompareSimShared(args: {
       await reportPhase("build_shared_compare_sim_ready", {
         compareFreshModeUsed,
         compareSimSource,
-        reusedSingleSelectedDaysExecution: true,
+        reusedSingleSelectedDaysExecution: false,
         selectedAndParityDateKeysCount: selectedAndParityDateKeySet.size,
         simulatedTestIntervalsCount: simulatedTestIntervals.length,
         freshParityIntervalsCount: freshParityIntervals.length,
+        parityFreshSource:
+          travelVacantParityDateKeySet.size > 0 ? "shared_full_window_calc" : "none_requested",
       });
     } else {
       throwIfGapfillCompareAborted(abortSignal);
