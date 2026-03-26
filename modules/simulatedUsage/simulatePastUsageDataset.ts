@@ -68,6 +68,20 @@ function dateKeysFromCanonicalDayStarts(canonicalDayStartsMs: number[]): string[
   return out;
 }
 
+function simulatedDayResultIntersectsLocalDateKeys(
+  result: SimulatedDayResult,
+  dateKeysLocal: Set<string>,
+  timezone: string
+): boolean {
+  if (dateKeysLocal.size === 0) return false;
+  const intervals = Array.isArray(result?.intervals) ? result.intervals : [];
+  if (intervals.length > 0) {
+    return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
+  }
+  const fallbackDateKey = dateKeyInTimezone(`${String(result?.localDate ?? "").slice(0, 10)}T12:00:00.000Z`, timezone);
+  return dateKeysLocal.has(fallbackDateKey);
+}
+
 function summarizePastWindowWeatherProvenance(args: {
   actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherFallbackReason: WeatherFallbackReason;
@@ -871,7 +885,7 @@ export async function simulatePastSelectedDaysShared(
       };
     }
     const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
-      selectedValid.has(String((r as any)?.localDate ?? "").slice(0, 10))
+      simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
     );
     const selectedIntervals = sharedResult.simulatedIntervals.filter((row) =>
       selectedValid.has(dateKeyInTimezone(String(row.timestamp ?? ""), timezoneResolved))
