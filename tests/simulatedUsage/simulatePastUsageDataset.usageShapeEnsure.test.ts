@@ -236,7 +236,7 @@ describe("shared sim usage-shape ensure path", () => {
         weekdayAvgByMonthKey: { "2026-01": 24 },
         weekendAvgByMonthKey: { "2026-01": 20 },
       });
-      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBeUndefined();
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(false);
       expect(Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceSimulateDateKeys ?? [])).toEqual([
         "2026-01-01",
       ]);
@@ -300,7 +300,7 @@ describe("shared sim usage-shape ensure path", () => {
 
     expect(out.simulatedIntervals).not.toBeNull();
     if (out.simulatedIntervals !== null) {
-      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBeUndefined();
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(false);
       expect(out.simulatedIntervals).toEqual([
         { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.4 },
         { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.6 },
@@ -357,6 +357,7 @@ describe("shared sim usage-shape ensure path", () => {
         "2026-01-01",
         "2026-01-02",
       ]);
+      expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.emitAllIntervals).toBe(false);
       expect(
         Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys ?? []).sort()
       ).toEqual(["2026-01-02"]);

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import * as usageDatasetModule from "@/modules/usageSimulator/dataset";
 
 vi.mock("server-only", () => ({}));
 
@@ -1530,86 +1531,95 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     };
     getCachedPastDataset.mockResolvedValue(artifact);
     decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+    const recomputeSpy = vi.spyOn(usageDatasetModule, "recomputePastAggregatesFromIntervals");
+    recomputeSpy.mockImplementation(() => {
+      throw new Error("compact selected-days restore should not recompute artifact aggregates");
+    });
 
     const phases: string[] = [];
     const inputsReadyMeta = { value: null as Record<string, unknown> | null };
     let boundedCanonicalMeta: Record<string, unknown> | null = null;
-    const out = await buildGapfillCompareSimShared({
-      userId: "u1",
-      houseId: "h1",
-      timezone: "America/Chicago",
-      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
-      testDateKeysLocal: new Set<string>(["2026-01-01"]),
-      rebuildArtifact: false,
-      compareFreshMode: "selected_days",
-      includeFreshCompareCalc: false,
-      selectedDaysLightweightArtifactRead: true,
-      includeDiagnostics: false,
-      includeFullReportText: false,
-      requireExactArtifactMatch: true,
-      onPhaseUpdate: (phase: GapfillCompareBuildPhase, meta?: Record<string, unknown>) => {
-        phases.push(String(phase));
-        if (phase === "build_shared_compare_inputs_ready") {
-          inputsReadyMeta.value = meta ?? null;
-        }
-        if (String(phase) === "build_shared_compare_compact_bounded_canonical_ready") {
-          boundedCanonicalMeta = meta ?? null;
-        }
-      },
-    });
+    try {
+      const out = await buildGapfillCompareSimShared({
+        userId: "u1",
+        houseId: "h1",
+        timezone: "America/Chicago",
+        canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+        testDateKeysLocal: new Set<string>(["2026-01-01"]),
+        rebuildArtifact: false,
+        compareFreshMode: "selected_days",
+        includeFreshCompareCalc: false,
+        selectedDaysLightweightArtifactRead: true,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        requireExactArtifactMatch: true,
+        onPhaseUpdate: (phase: GapfillCompareBuildPhase, meta?: Record<string, unknown>) => {
+          phases.push(String(phase));
+          if (phase === "build_shared_compare_inputs_ready") {
+            inputsReadyMeta.value = meta ?? null;
+          }
+          if (String(phase) === "build_shared_compare_compact_bounded_canonical_ready") {
+            boundedCanonicalMeta = meta ?? null;
+          }
+        },
+      });
 
-    expect(out.ok).toBe(true);
-    expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
-    expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
-    expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
-    expect(phases).toContain("compact_pre_bounded_meta_write_done");
-    expect(phases.indexOf("compact_pre_bounded_merge_backfill_done")).toBeLessThan(
-      phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")
-    );
-    expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
-      phases.indexOf("compact_pre_bounded_meta_write_start")
-    );
-    expect(phases.indexOf("compact_pre_bounded_meta_write_done")).toBeLessThan(
-      phases.indexOf("build_shared_compare_scored_row_keys_ready")
-    );
-    expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
-      phases.indexOf("build_shared_compare_scored_row_keys_ready")
-    );
-    expect(boundedCanonicalMeta?.["usedIntervalBackedExactParityTruth"]).toBe(true);
-    expect(Number(boundedCanonicalMeta?.["compactCanonicalUnionKeyCount"])).toBe(1);
-    expect(Number(boundedCanonicalMeta?.["selectedDateKeyCount"])).toBe(1);
-    expect(Number(boundedCanonicalMeta?.["parityDateKeyCount"])).toBe(1);
-    expect(phases).toContain("compact_post_scored_rows_parity_start");
-    expect(phases).toContain("compact_post_scored_rows_parity_rows_ready");
-    expect(phases).toContain("compact_post_scored_rows_parity_truth_ready");
-    expect(phases).toContain("compact_post_scored_rows_parity_done");
-    expect(phases.indexOf("compact_post_scored_rows_parity_start")).toBeLessThan(
-      phases.indexOf("compact_post_scored_rows_parity_rows_ready")
-    );
-    expect(phases.indexOf("compact_post_scored_rows_parity_rows_ready")).toBeLessThan(
-      phases.indexOf("compact_post_scored_rows_parity_truth_ready")
-    );
-    expect(phases.indexOf("compact_post_scored_rows_parity_truth_ready")).toBeLessThan(
-      phases.indexOf("compact_post_scored_rows_parity_done")
-    );
-    expect(phases.indexOf("build_shared_compare_scored_rows_ready")).toBeLessThan(
-      phases.indexOf("compact_post_scored_rows_parity_start")
-    );
-    const inputsMeta = inputsReadyMeta.value;
-    const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
-    expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);
-    expect(gates?.useSelectedDaysLightweightArtifactRead).toBe(false);
-    expect(inputsMeta?.compactPathEligible).toBe(true);
-    if (out.ok) {
-      expect(out.simulatedChartMonthly.length).toBe(0);
-      expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
-      expect(out.boundedTravelDateKeysLocal.has("2026-01-01")).toBe(true);
-      expect(out.travelVacantParityTruth?.availability).toBeDefined();
-      expect(out.travelVacantParityRows?.length).toBeGreaterThan(0);
-      expect(out.travelVacantParityRows?.every((r) => r.parityMatch === true)).toBe(true);
-      expect(out.travelVacantParityTruth?.reasonCode).toBe("TRAVEL_VACANT_PARITY_VALIDATED");
-      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
-      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
+      expect(recomputeSpy).not.toHaveBeenCalled();
+      expect(out.ok).toBe(true);
+      expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
+      expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
+      expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
+      expect(phases).toContain("compact_pre_bounded_meta_write_done");
+      expect(phases.indexOf("compact_pre_bounded_merge_backfill_done")).toBeLessThan(
+        phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")
+      );
+      expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
+        phases.indexOf("compact_pre_bounded_meta_write_start")
+      );
+      expect(phases.indexOf("compact_pre_bounded_meta_write_done")).toBeLessThan(
+        phases.indexOf("build_shared_compare_scored_row_keys_ready")
+      );
+      expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
+        phases.indexOf("build_shared_compare_scored_row_keys_ready")
+      );
+      expect(boundedCanonicalMeta?.["usedIntervalBackedExactParityTruth"]).toBe(true);
+      expect(Number(boundedCanonicalMeta?.["compactCanonicalUnionKeyCount"])).toBe(1);
+      expect(Number(boundedCanonicalMeta?.["selectedDateKeyCount"])).toBe(1);
+      expect(Number(boundedCanonicalMeta?.["parityDateKeyCount"])).toBe(1);
+      expect(phases).toContain("compact_post_scored_rows_parity_start");
+      expect(phases).toContain("compact_post_scored_rows_parity_rows_ready");
+      expect(phases).toContain("compact_post_scored_rows_parity_truth_ready");
+      expect(phases).toContain("compact_post_scored_rows_parity_done");
+      expect(phases.indexOf("compact_post_scored_rows_parity_start")).toBeLessThan(
+        phases.indexOf("compact_post_scored_rows_parity_rows_ready")
+      );
+      expect(phases.indexOf("compact_post_scored_rows_parity_rows_ready")).toBeLessThan(
+        phases.indexOf("compact_post_scored_rows_parity_truth_ready")
+      );
+      expect(phases.indexOf("compact_post_scored_rows_parity_truth_ready")).toBeLessThan(
+        phases.indexOf("compact_post_scored_rows_parity_done")
+      );
+      expect(phases.indexOf("build_shared_compare_scored_rows_ready")).toBeLessThan(
+        phases.indexOf("compact_post_scored_rows_parity_start")
+      );
+      const inputsMeta = inputsReadyMeta.value;
+      const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
+      expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);
+      expect(gates?.useSelectedDaysLightweightArtifactRead).toBe(false);
+      expect(inputsMeta?.compactPathEligible).toBe(true);
+      if (out.ok) {
+        expect(out.simulatedChartMonthly.length).toBe(0);
+        expect((out.modelAssumptions as any)?.gapfillDisplayMonthlySource).toBe("compact_compare_core_skipped");
+        expect(out.boundedTravelDateKeysLocal.has("2026-01-01")).toBe(true);
+        expect(out.travelVacantParityTruth?.availability).toBeDefined();
+        expect(out.travelVacantParityRows?.length).toBeGreaterThan(0);
+        expect(out.travelVacantParityRows?.every((r) => r.parityMatch === true)).toBe(true);
+        expect(out.travelVacantParityTruth?.reasonCode).toBe("TRAVEL_VACANT_PARITY_VALIDATED");
+        expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+        expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
+      }
+    } finally {
+      recomputeSpy.mockRestore();
     }
   });
 

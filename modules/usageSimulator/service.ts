@@ -1187,12 +1187,18 @@ function restoreCachedArtifactDataset(args: {
   cached: CachedPastDataset;
   useSelectedDaysLightweightArtifactRead: boolean;
   fallbackEndDate: string;
+  skipAggregateRecompute?: boolean;
 }): {
   dataset: any;
   restoredCanonicalDailyRows: Array<{ date?: string; kwh?: number; source?: string }> | null;
   restoredCanonicalMonthlyRows: Array<{ month?: string; kwh?: number }> | null;
 } {
-  const { cached, useSelectedDaysLightweightArtifactRead, fallbackEndDate } = args;
+  const {
+    cached,
+    useSelectedDaysLightweightArtifactRead,
+    fallbackEndDate,
+    skipAggregateRecompute = false,
+  } = args;
   const restoredCanonicalDailyRows = Array.isArray((cached.datasetJson as any)?.daily)
     ? (((cached.datasetJson as any).daily as Array<{ date?: string; kwh?: number; source?: string }>).map((d) => ({
         date: d?.date,
@@ -1216,7 +1222,7 @@ function restoreCachedArtifactDataset(args: {
       intervals15: useSelectedDaysLightweightArtifactRead ? [] : decodeIntervalsV1(cached.intervalsCompressed),
     },
   };
-  if (!useSelectedDaysLightweightArtifactRead) {
+  if (!useSelectedDaysLightweightArtifactRead && !skipAggregateRecompute) {
     reconcileRestoredDatasetFromDecodedIntervals({
       dataset,
       decodedIntervals: dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>,
@@ -1802,6 +1808,9 @@ export async function buildGapfillCompareSimShared(args: {
       cached,
       useSelectedDaysLightweightArtifactRead,
       fallbackEndDate: identityWindow.endDate,
+      // Compact selected-days compare already reads canonical daily/monthly truth from stored
+      // artifact rows, so exact-parity interval decode does not need to rebuild aggregates first.
+      skipAggregateRecompute: compareCoreMemoryReducedPath,
     });
     restoredCanonicalDailyRows = restored.restoredCanonicalDailyRows;
     restoredCanonicalMonthlyRows = restored.restoredCanonicalMonthlyRows;

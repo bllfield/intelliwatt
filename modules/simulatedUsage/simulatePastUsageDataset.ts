@@ -203,6 +203,8 @@ export type SimulatePastUsageDatasetArgs = {
   actualIntervals?: Array<{ timestamp: string; kwh: number }>;
   /** Optional local dates that should be simulated by the shared path before downstream slicing. */
   forceSimulateDateKeysLocal?: Set<string>;
+  /** When false, omit passthrough actual intervals for non-simulated days. */
+  emitAllIntervals?: boolean;
   /** Optional local dates whose simulated-day payloads should be retained for downstream consumers. */
   retainSimulatedDayResultDateKeysLocal?: Set<string>;
 };
@@ -511,6 +513,7 @@ export async function simulatePastUsageDataset(
     includeSimulatedDayResults = true,
     actualIntervals: preloadedIntervals,
     forceSimulateDateKeysLocal,
+    emitAllIntervals = true,
     retainSimulatedDayResultDateKeysLocal,
   } = args;
 
@@ -624,6 +627,8 @@ export async function simulatePastUsageDataset(
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
     // memory pressure for large windows. Only collect when explicitly requested.
     const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
+    const collectSimulatedDayResultsDateKeys =
+      retainedSimulatedDayResultDateKeysLocal.size > 0 ? retainedResultUtcDateKeys : undefined;
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
@@ -638,9 +643,9 @@ export async function simulatePastUsageDataset(
       actualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
-      collectSimulatedDayResultsDateKeys:
-        retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined,
+      collectSimulatedDayResultsDateKeys,
       forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
+      emitAllIntervals,
       debug: { out: pastDayCounts as any },
     });
 
@@ -908,6 +913,9 @@ export async function simulatePastSelectedDaysShared(
       includeSimulatedDayResults: true,
       actualIntervals: preloadedIntervals,
       forceSimulateDateKeysLocal: selectedValid,
+      // Selected-days callers only consume simulator-owned intervals after slicing.
+      // Dropping passthrough actual intervals avoids building a near-full-window payload.
+      emitAllIntervals: false,
       retainSimulatedDayResultDateKeysLocal:
         retainSimulatedDayResultDateKeysLocal && retainSimulatedDayResultDateKeysLocal.size > 0
           ? retainSimulatedDayResultDateKeysLocal
