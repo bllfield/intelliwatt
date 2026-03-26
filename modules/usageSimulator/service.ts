@@ -808,6 +808,8 @@ export type GapfillCompareBuildPhase =
   | "build_shared_compare_scored_rows_ready"
   | "compact_pre_bounded_exact_parity_decode_start"
   | "compact_pre_bounded_exact_parity_decode_done"
+  | "compact_pre_bounded_exact_parity_day_totals_start"
+  | "compact_pre_bounded_exact_parity_day_totals_done"
   | "compact_pre_bounded_meta_read_start"
   | "compact_pre_bounded_meta_read_done"
   | "compact_pre_bounded_canonical_build_start"
@@ -927,6 +929,75 @@ function buildCanonicalIntervalDayTotalsByLocalDate(
     } else {
       totals.set(dk, {
         rawDaySum: Number(row.kwh) || 0,
+        firstUtcTimestamp: timestamp,
+        lastUtcTimestamp: timestamp,
+        intervalCount: 1,
+      });
+    }
+  }
+  return new Map(
+    Array.from(totals.entries()).map(([dk, entry]) => [
+      dk,
+      {
+        rawDaySum: entry.rawDaySum,
+        normalizedDaySum: round2Local(entry.rawDaySum),
+        firstLocalTimestamp: formatCanonicalLocalTimestampForTimezone(entry.firstUtcTimestamp, timezone),
+        lastLocalTimestamp: formatCanonicalLocalTimestampForTimezone(entry.lastUtcTimestamp, timezone),
+        intervalCount: entry.intervalCount,
+      },
+    ])
+  );
+}
+
+async function buildCanonicalIntervalDayTotalsByLocalDateAbortable(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  timezone: string,
+  abortSignal?: AbortSignal,
+  yieldEvery = 512
+): Promise<
+  Map<
+    string,
+    {
+      rawDaySum: number;
+      normalizedDaySum: number;
+      firstLocalTimestamp: string | null;
+      lastLocalTimestamp: string | null;
+      intervalCount: number;
+    }
+  >
+> {
+  const totals = new Map<
+    string,
+    {
+      rawDaySum: number;
+      firstUtcTimestamp: string;
+      lastUtcTimestamp: string;
+      intervalCount: number;
+    }
+  >();
+  for (let i = 0; i < intervals.length; i++) {
+    if (abortSignal?.aborted) {
+      const err = new Error("compare_core_build_aborted");
+      (err as any).code = "compare_core_build_aborted";
+      throw err;
+    }
+    if (i > 0 && i % yieldEvery === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const row = intervals[i];
+    const timestamp = canonicalIntervalKey(String(row?.timestamp ?? "").trim());
+    if (!timestamp) continue;
+    const dk = dateKeyInTimezone(timestamp, timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    const existing = totals.get(dk);
+    if (existing) {
+      existing.rawDaySum += Number(row?.kwh) || 0;
+      existing.intervalCount += 1;
+      if (timestamp < existing.firstUtcTimestamp) existing.firstUtcTimestamp = timestamp;
+      if (timestamp > existing.lastUtcTimestamp) existing.lastUtcTimestamp = timestamp;
+    } else {
+      totals.set(dk, {
+        rawDaySum: Number(row?.kwh) || 0,
         firstUtcTimestamp: timestamp,
         lastUtcTimestamp: timestamp,
         intervalCount: 1,
@@ -2696,12 +2767,21 @@ export async function buildGapfillCompareSimShared(args: {
     exactTravelParityRequiresIntervalBackedArtifactTruth &&
     exactParityArtifactIntervals.length > 0
   ) {
+    await reportPhase("compact_pre_bounded_exact_parity_day_totals_start", {
+      exactParityIntervalCount: exactParityArtifactIntervals.length,
+      yieldEvery: 512,
+    });
     throwIfGapfillCompareAborted(abortSignal);
-    artifactExactParityIntervalDayTotalsByDate = buildCanonicalIntervalDayTotalsByLocalDate(
+    artifactExactParityIntervalDayTotalsByDate = await buildCanonicalIntervalDayTotalsByLocalDateAbortable(
       exactParityArtifactIntervals,
-      timezone
+      timezone,
+      abortSignal,
+      512
     );
     throwIfGapfillCompareAborted(abortSignal);
+    await reportPhase("compact_pre_bounded_exact_parity_day_totals_done", {
+      exactParityDayTotalCount: artifactExactParityIntervalDayTotalsByDate.size,
+    });
   }
   const artifactDatasetForExactParity =
     exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
