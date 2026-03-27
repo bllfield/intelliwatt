@@ -45,6 +45,37 @@ import {
 import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
+/** Built in POST; parity fields align with GapfillScoredDayParity* in usageSimulator/service. */
+type GapfillLabScoredDayTruthRow = {
+  localDate: string;
+  actualDayKwh: number;
+  freshCompareSimDayKwh: number | null;
+  displayedPastStyleSimDayKwh: number | null;
+  actualVsFreshErrorKwh: number | null;
+  displayVsFreshParityMatch: boolean | null;
+  parityAvailability: GapfillScoredDayParityAvailability;
+  parityDisplaySourceUsed: string;
+  artifactSimulatedDayReferenceSource: string;
+  parityDisplayValueKind: GapfillScoredDayParityDisplayValueKind;
+  parityReasonCode: GapfillScoredDayParityReasonCode;
+  scoredDayDisplaySource: "SIMULATED" | "MISSING_REFERENCE";
+  dayType: "weekend" | "weekday";
+  weatherBasis: string | null;
+  weatherSourceUsed: string | null;
+  weatherFallbackReason: string | null;
+  avgTempF: number | null;
+  minTempF: number | null;
+  maxTempF: number | null;
+  hdd65: number | null;
+  cdd65: number | null;
+  fallbackLevel: string | null;
+  selectedDayTotalSource: string | null;
+  selectedShapeVariant: string | null;
+  selectedReferenceMatchTier: string | null;
+  selectedMatchSampleCount: number | null;
+  reasonCode: string | null;
+};
+
 export const dynamic = "force-dynamic";
 // Keep the platform deadline aligned with the route's own compare/rebuild guards so
 // Vercel terminates stuck requests before the admin UI's client timeout fires first.
@@ -3089,7 +3120,7 @@ export async function POST(req: NextRequest) {
     };
   const scoredDayTruthRows = Array.from(scoringTestDateKeysLocal)
     .sort()
-    .map((date) => {
+    .map((date): GapfillLabScoredDayTruthRow => {
       const actualDayKwh = round2(actualDailyByDate.get(date) ?? 0);
       const hasFreshCompareSim = freshDailyByDate.has(date);
       const freshCompareSimDayKwh = hasFreshCompareSim ? round2(freshDailyByDate.get(date) ?? 0) : null;
@@ -3120,19 +3151,19 @@ export async function POST(req: NextRequest) {
       const maxTempF = Number((weather as any)?.maxTempF);
       const hdd65 = Number((weather as any)?.hdd65);
       const cdd65 = Number((weather as any)?.cdd65);
-      const parityAvailability =
+      const parityAvailability: GapfillScoredDayParityAvailability =
         displayedPastStyleSimDayKwh == null
           ? "missing_expected_reference"
           : !hasFreshCompareSim
             ? "missing_fresh_compare_sim"
             : "available";
-      const parityReasonCode =
+      const parityReasonCode: GapfillScoredDayParityReasonCode =
         displayedPastStyleSimDayKwh == null
           ? "ARTIFACT_SIMULATED_REFERENCE_MISSING"
           : !hasFreshCompareSim
             ? "SCORED_DAY_FRESH_COMPARE_SIM_MISSING"
             : "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE";
-      const parityDisplayValueKind =
+      const parityDisplayValueKind: GapfillScoredDayParityDisplayValueKind =
         displayedPastStyleSimDayKwh == null
           ? "missing_display_sim_reference"
           : !hasFreshCompareSim
