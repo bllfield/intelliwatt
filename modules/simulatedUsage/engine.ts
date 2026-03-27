@@ -1316,6 +1316,11 @@ export function buildPastSimulatedBaselineV1(args: {
     addShapeToAcc(weekdayWeekendAcc[dayType], dayShape);
     addShapeToAcc(weekdayWeekendWeatherAcc[dayType][weatherRegime], dayShape);
   }
+  // Raw 15‑minute kWh vectors are only needed for shape aggregation above. Clearing them before
+  // pastContext + the per-day simulation loop reduces peak heap on full-year windows (serverless OOM).
+  for (const d of referenceDays) {
+    d.slotKwh.length = 0;
+  }
   const normalizedFromAcc = (acc: ShapeAcc): number[] | null =>
     acc.count > 0 ? normalizeShape96OrNull(acc.sum.map((v) => v / acc.count)) : null;
   for (const ym of monthKeysRef) {
@@ -1657,6 +1662,7 @@ export function buildPastSimulatedBaselineV1(args: {
     );
   }
 
+  actualByTs.clear();
   out.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   return { intervals: out, dayResults };
 }
