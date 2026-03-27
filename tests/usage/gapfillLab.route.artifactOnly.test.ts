@@ -1152,6 +1152,41 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         exactProofRequired: false,
         exactProofSatisfied: true,
       },
+      gapfillScoringDiagnostics: {
+        run: {
+          scoringMode: "modeled_scored_days",
+          referencePoolRuleSummary:
+            "Reference pool excludes only travel/vacant; test-day actuals remain in the pool; compare uses shared modeled totals (keep-ref) for scored dates.",
+          testDaysInReferencePoolCount: 1,
+          travelVacantExcludedCount: 0,
+          scoredDaysModeledCount: 1,
+          scoredDaysMissingModeledCount: 0,
+          parityDaysValidatedCount: 1,
+          compareSharedCalcPath:
+            "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared",
+          compareFreshModeUsed: "selected_days",
+          oneUnionRunUsed: true,
+          sameSharedRunAsParity: true,
+          actualAsSimGuardWouldTrigger: false,
+          sharedRunFingerprint: "selected_days:selected_days_shared_path_only:2026-01-01|2025-12-25",
+          gapfillForceModeledKeepRefLocalDateKeys: ["2026-01-01"],
+          gapfillForceModeledKeepRefUtcKeyCount: 1,
+        },
+        scoredDays: [
+          {
+            selectedDateKey: "2026-01-01",
+            inReferencePool: true,
+            excludedFromReferencePoolReason: null,
+            compareOutputSource: "MODELED_SIM",
+            compareOutputOwnership: "simulator_owned",
+            compareOutputAuthority: "freshCompareScoredDaySimTotalsByDate",
+            actualSource: "actual_usage",
+            wasMeterPassthroughPrevented: true,
+            dayModelingMode: "forced_modeled_scored_day",
+            sameSharedRunAsParity: true,
+          },
+        ],
+      },
       sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
       boundedTravelDateKeysLocal: new Set<string>(),
       simulatedTestIntervals: [
@@ -1283,6 +1318,9 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       compareFreshModeRequested: "selected_days",
     });
     expect(body.truthEnvelope?.compareCalculationScope).toBe("selected_days_shared_path_only");
+    expect(body.truthEnvelope?.gapfillScoringDiagnostics?.run?.scoringMode).toBe("modeled_scored_days");
+    expect(body.truthEnvelope?.gapfillScoringDiagnostics?.run?.oneUnionRunUsed).toBe(true);
+    expect(body.truthEnvelope?.gapfillScoringDiagnostics?.scoredDays?.[0]?.compareOutputSource).toBe("MODELED_SIM");
     expect(body.truthEnvelope?.requestedTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoringTestDaysCount).toBe(1);
     expect(body.truthEnvelope?.scoredIntervalsCount).toBe(2);

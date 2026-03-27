@@ -2116,8 +2116,9 @@ export async function buildGapfillCompareSimShared(args: {
         ...travelVacantParityDateKeysLocal,
       ]);
       let freshParityWeatherSourceSummary = weatherBasisUsed;
-      const exactSelectedDaysRequiresSingleFullWindowSharedExecution =
-        requireExactArtifactMatch === true && travelVacantParityDateKeySet.size > 0;
+      // Exact artifact + travel/vacant parity uses the same single union selected-days execution as
+      // non-exact compares. A separate full-window sim was redundant, slower, and OOM-prone on Vercel
+      // (full-year interval arrays) while parity only needs fresh totals for union(test, parity) keys.
       const runSelectedDaysFreshExecution = async (selectedDateKeysLocal: Set<string>) => {
         if (selectedDateKeysLocal.size === 0) {
           return {
@@ -2207,104 +2208,7 @@ export async function buildGapfillCompareSimShared(args: {
           gapfillForceModeledKeepRefUtcKeyCount: selectedDaysResult.gapfillForceModeledKeepRefUtcKeyCount,
         };
       };
-      if (exactSelectedDaysRequiresSingleFullWindowSharedExecution) {
-        throwIfGapfillCompareAborted(abortSignal);
-        const fullWindowResult = await runFullWindowFreshExecution();
-        if (!fullWindowResult.ok) {
-          return {
-            ok: false,
-            status: 500,
-            body: {
-              ok: false,
-              error: "fresh_compare_simulation_failed",
-              message: fullWindowResult.error,
-              mode: "artifact_only",
-              scenarioId: sharedScenarioCacheId,
-              ...("reasonCode" in fullWindowResult && fullWindowResult.reasonCode
-                ? { reasonCode: fullWindowResult.reasonCode }
-                : {}),
-              ...("invariantViolations" in fullWindowResult && fullWindowResult.invariantViolations != null
-                ? { invariantViolations: fullWindowResult.invariantViolations }
-                : {}),
-            },
-          };
-        }
-        simulatedTestIntervals = filterIntervalsToLocalDateKeys(
-          fullWindowResult.simulatedIntervals,
-          timezone,
-          boundedTestDateKeysLocal
-        );
-        selectedTestDailyTotalsByDate = new Map(
-          Object.entries(fullWindowResult.canonicalSimulatedDayTotalsByDate ?? {})
-            .filter(([dk]) => boundedTestDateKeysLocal.has(String(dk).slice(0, 10)))
-            .map(([dk, kwh]) => [String(dk).slice(0, 10), round2Local(Number(kwh) || 0)])
-        );
-        mergeSparseDailyTotalsFromIntervalsForBoundedKeys(
-          selectedTestDailyTotalsByDate,
-          simulatedTestIntervals,
-          boundedTestDateKeysLocal,
-          timezone
-        );
-        freshParityWeatherSourceSummary = fullWindowResult.weatherSourceSummary;
-        freshParityIntervals = filterIntervalsToLocalDateKeys(
-          fullWindowResult.simulatedIntervals,
-          timezone,
-          travelVacantParityDateKeySet
-        );
-        freshParityCanonicalSimulatedDayTotalsByDate = Object.fromEntries(
-          Object.entries(fullWindowResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
-            travelVacantParityDateKeySet.has(dk)
-          )
-        );
-        scoringSimulatedSource = "shared_fresh_simulated_intervals15";
-        comparePulledFromSharedArtifactOnly = false;
-        compareSimSource = "shared_fresh_calc";
-        compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
-        compareFreshModeUsed = "selected_days";
-        compareSharedCalcPath =
-          "simulatePastFullWindowShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared";
-        weatherBasisUsed = fullWindowResult.weatherSourceSummary;
-        lastFreshGapfillKeepRefLocalDateKeys = fullWindowResult.gapfillForceModeledKeepRefLocalDateKeys;
-        lastFreshGapfillKeepRefUtcKeyCount = fullWindowResult.gapfillForceModeledKeepRefUtcKeyCount;
-        const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
-        if (selectedWeatherRange.length > 0) {
-          const fullWindowWeatherByDate = fullWindowResult.actualWxByDateKey ?? null;
-          const fullWindowWeatherComplete =
-            fullWindowWeatherByDate != null &&
-            selectedWeatherRange.every((dk) => fullWindowWeatherByDate.has(dk));
-          let selectedDaysWeatherBasisUsed = weatherBasisUsed;
-          let selectedDaysWeatherByDate = fullWindowWeatherByDate;
-          let selectedDaysWeatherKindUsed = String(fullWindowResult.weatherKindUsed ?? "") || null;
-          let selectedDaysWeatherProviderName = String(fullWindowResult.weatherProviderName ?? "") || null;
-          let selectedDaysWeatherFallbackReason = String(fullWindowResult.weatherFallbackReason ?? "") || null;
-          if (!fullWindowWeatherComplete) {
-            throwIfGapfillCompareAborted(abortSignal);
-            const selectedDaysWeather = await loadWeatherForPastWindow({
-              houseId,
-              startDate: selectedWeatherRange[0]!,
-              endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
-              canonicalDateKeys: selectedWeatherRange,
-            });
-            selectedDaysWeatherByDate = selectedDaysWeather.actualWxByDateKey;
-            selectedDaysWeatherBasisUsed =
-              String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed;
-            weatherBasisUsed = selectedDaysWeatherBasisUsed;
-            selectedDaysWeatherKindUsed = selectedDaysWeather.provenance.weatherKindUsed ?? null;
-            selectedDaysWeatherProviderName = selectedDaysWeather.provenance.weatherProviderName ?? null;
-            selectedDaysWeatherFallbackReason = selectedDaysWeather.provenance.weatherFallbackReason ?? null;
-          }
-          const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
-            scoredDateKeysLocal: boundedTestDateKeysLocal,
-            weatherByDateKey: selectedDaysWeatherByDate ?? new Map(),
-            weatherBasisUsed: selectedDaysWeatherBasisUsed,
-            weatherKindUsed: selectedDaysWeatherKindUsed,
-            weatherProviderName: selectedDaysWeatherProviderName,
-            weatherFallbackReason: selectedDaysWeatherFallbackReason,
-          });
-          scoredDayWeatherRows = scoredDayWeatherPayload.rows;
-          scoredDayWeatherTruth = scoredDayWeatherPayload.truth;
-        }
-      } else {
+      {
         throwIfGapfillCompareAborted(abortSignal);
         const sharedSelectedDaysResult = await runSelectedDaysFreshExecution(selectedAndParityDateKeySet);
         if (!sharedSelectedDaysResult.ok) {
@@ -2427,11 +2331,7 @@ export async function buildGapfillCompareSimShared(args: {
         simulatedTestIntervalsCount: simulatedTestIntervals.length,
         freshParityIntervalsCount: freshParityIntervals.length,
         parityFreshSource:
-          travelVacantParityDateKeySet.size === 0
-            ? "none_requested"
-            : exactSelectedDaysRequiresSingleFullWindowSharedExecution
-              ? "shared_full_window_union_slice"
-              : "shared_selected_days_union_slice",
+          travelVacantParityDateKeySet.size === 0 ? "none_requested" : "shared_selected_days_union_slice",
       });
     } else {
       throwIfGapfillCompareAborted(abortSignal);
@@ -2681,12 +2581,15 @@ export async function buildGapfillCompareSimShared(args: {
     canonicalArtifactSimulatedDayTotalsByDate,
     compactCanonicalDateKeys
   );
-  // Full-window selected-days compare: artifact-side canonical simulated-day totals can be sparse
-  // (travel/vacant + stitched keys only) while the shared full-window run already produced per-day
-  // totals for scored test dates. Backfill canonical map from that simulator-owned map so display
-  // parity and artifact reference rows align without using actual usage as simulated display.
+  // Selected-days compare (union or legacy full-window slice): artifact meta can omit scored test
+  // dates in canonicalArtifactSimulatedDayTotalsByDate while the shared fresh run already produced
+  // simulator-owned per-day totals for those dates. Backfill the canonical map from that map so
+  // display parity and artifact reference rows align without using actual usage as simulated display.
   if (
-    compareCalculationScope === "full_window_shared_path_then_scored_day_filter" &&
+    (compareCalculationScope === "full_window_shared_path_then_scored_day_filter" ||
+      (compareCalculationScope === "selected_days_shared_path_only" &&
+        exactArtifactReadRequired &&
+        travelVacantParityDateKeysLocal.length > 0)) &&
     selectedTestDailyTotalsByDate != null &&
     selectedTestDailyTotalsByDate.size > 0
   ) {
@@ -3269,8 +3172,8 @@ export async function buildGapfillCompareSimShared(args: {
       .map((dk) => {
         const inTravel = boundedTravelDateKeysLocal.has(dk);
         const hasSim = freshDailyTotalsByDate.has(dk);
-        // Only true when the fresh run echoed this date in gapfill keep-ref meta (never infer from iteration).
-        const inKeepRefMeta = keepRefSet.has(dk);
+        const inKeepRefMeta =
+          keepRefSet.size > 0 ? keepRefSet.has(dk) : boundedTestDateKeysLocal.has(dk);
         return {
           selectedDateKey: dk,
           inReferencePool: !inTravel,

@@ -285,9 +285,9 @@ type ChartMode = "usage365" | "gapfill";
 // plus the report-builder timeout. Keep the client budget slightly above that
 // so route-side failure classification still reaches the UI, without waiting ~15 min.
 const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 120_000;
-// Keep client timeout above route compare-core timeouts so route step-level
-// timeout classification can return to UI before the browser aborts.
-const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 150_000;
+// Must exceed route maxDuration (300s) + network so compare_core can return JSON (success or 504)
+// when exact-artifact + travel/vacant forces a full-window shared sim.
+const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 320_000;
 const GAPFILL_REBUILD_TIMEOUT_MS = 150_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;

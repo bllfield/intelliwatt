@@ -77,13 +77,13 @@ type GapfillLabScoredDayTruthRow = {
 };
 
 export const dynamic = "force-dynamic";
-// Keep the platform deadline aligned with the route's own compare/rebuild guards so
-// Vercel terminates stuck requests before the admin UI's client timeout fires first.
-export const maxDuration = 120;
-// Keep route compare-core timeout below client timeout so route-side
-// classification (failedStep/reasonCode) reaches UI before browser abort.
+// Vercel serverless ceiling (seconds). Must fit shared compare + optional full-report build
+// (see ROUTE_*_TIMEOUT_MS) so exact-artifact + travel/vacant full-window compare can finish.
+export const maxDuration = 300;
+// Cooperative abort for rebuild/compare; keep sum(shared + report) under maxDuration with margin.
 const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
-const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 120_000;
+// Full-window shared sim (exact artifact + parity) can exceed 2 minutes; 210s leaves room for report phase.
+const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 210_000;
 const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
