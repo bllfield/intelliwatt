@@ -3570,29 +3570,20 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
-      expect(selectedDaysCalls).toHaveLength(1);
+      expect(selectedDaysCalls).toHaveLength(0);
       expect(fullWindowCalls).toHaveLength(1);
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
       expect(decodeIntervalsV1).not.toHaveBeenCalled();
-      expect(
-        Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
-      ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
-      expect(
-        Array.from(
-          (((selectedDaysCalls[0] ?? [])[0] as any)?.retainSimulatedDayResultDateKeysLocal ?? []) as Iterable<string>
-        )
-          .sort()
-      ).toEqual(["2026-01-01"]);
-      expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
+      expect(out.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(out.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
+      expect(out.compareSharedCalcPath).toContain("simulatePastFullWindowShared");
       expect(out.compareSharedCalcPath).toContain("simulatePastUsageDataset");
       expect(out.compareSharedCalcPath).toContain("buildSimulatedUsageDatasetFromCurve");
       expect(out.compareSharedCalcPath).toContain("slice_selected_and_parity_days");
-      expect(out.compareSimSource).toBe("shared_selected_days_calc");
-      expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
+      expect(out.compareSimSource).toBe("shared_fresh_calc");
+      expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3618,7 +3609,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       ]);
       expect(out.simulatedTestIntervals).toHaveLength(96);
       expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(["2026-01-01"]);
-      expect(loadWeatherForPastWindow).not.toHaveBeenCalled();
+      expect(loadWeatherForPastWindow).toHaveBeenCalled();
       expect(out.scoredDayWeatherRows).toEqual([
         expect.objectContaining({
           localDate: "2026-01-01",
@@ -3889,11 +3880,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
-      expect(selectedDaysCalls).toHaveLength(1);
+      expect(selectedDaysCalls).toHaveLength(0);
       expect(fullWindowCalls).toHaveLength(1);
-      expect(
-        Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
-      ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         mismatchCount: 0,
