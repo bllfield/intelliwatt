@@ -281,13 +281,9 @@ type RandomTestMode = (typeof VALID_RANDOM_TEST_MODES)[number];
 
 type WeatherKindOption = "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
 type ChartMode = "usage365" | "gapfill";
-// Heavy compare can legitimately spend up to the route's shared-compare timeout
-// plus the report-builder timeout. Keep the client budget slightly above that
-// so route-side failure classification still reaches the UI, without waiting ~15 min.
-const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 120_000;
-// Must exceed route maxDuration (300s) + network so compare_core can return JSON (success or 504)
-// when exact-artifact + travel/vacant forces a full-window shared sim.
-const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 320_000;
+// Align with route `maxDuration` (~120s) + small network margin so the browser aborts shortly after the server cap.
+const GAPFILL_COMPARE_HEAVY_TIMEOUT_MS = 125_000;
+const GAPFILL_COMPARE_CORE_TIMEOUT_MS = 125_000;
 const GAPFILL_REBUILD_TIMEOUT_MS = 150_000;
 const GAPFILL_LOOKUP_TIMEOUT_MS = 120_000;
 const GAPFILL_USAGE365_TIMEOUT_MS = 180_000;
@@ -1132,7 +1128,7 @@ export default function GapFillLabClient() {
     }
   }
 
-  async function postGapfill(body: Record<string, unknown>, timeoutMs = 320_000): Promise<{ res: Response; data: ApiResponse }> {
+  async function postGapfill(body: Record<string, unknown>, timeoutMs = 125_000): Promise<{ res: Response; data: ApiResponse }> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {

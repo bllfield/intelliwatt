@@ -843,6 +843,11 @@ export function buildSimulatedUsageDatasetFromCurve(
     useUtcMonth?: boolean;
     /** Canonical simulated-day artifacts used for simulated-date daily display parity. */
     simulatedDayResults?: SimulatedDayResult[];
+    /**
+     * Gap-Fill lab_validation + sparse stitched curves: skip fifteen-minute profiles, time-of-day buckets,
+     * and normal-life baseload math (heavy on CPU/allocations; not used for compare_core scoring).
+     */
+    skipHeavyInsights?: boolean;
   }
 ): SimulatedUsageDataset {
   const dailyMap = new Map<string, number>();
@@ -895,8 +900,9 @@ export function buildSimulatedUsageDatasetFromCurve(
   // Summary must reflect the exact post-patch intervals returned to clients.
   const totalFromIntervals = round2(seriesIntervals15.reduce((s, r) => s + (Number(r.kwh) || 0), 0));
 
-  const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
-  const timeOfDayBuckets = computeTimeOfDayBuckets(curve.intervals);
+  const skipHeavyInsights = options?.skipHeavyInsights === true;
+  const fifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
+  const timeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
 
   let weekdaySum = 0;
   let weekendSum = 0;
@@ -908,17 +914,19 @@ export function buildSimulatedUsageDatasetFromCurve(
 
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
-  const baseloadComputed = computeNormalLifeBaseloadKw(
-    curve.intervals.map((i) => ({ tsIso: String(i.timestamp ?? ""), kwh: Number(i.consumption_kwh) || 0 })),
-    { excludedDateKeys: options?.excludedDateKeys }
-  );
+  const baseloadComputed = skipHeavyInsights
+    ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
+    : computeNormalLifeBaseloadKw(
+        curve.intervals.map((i) => ({ tsIso: String(i.timestamp ?? ""), kwh: Number(i.consumption_kwh) || 0 })),
+        { excludedDateKeys: options?.excludedDateKeys }
+      );
   const baseload = baseloadComputed.baseloadKw;
   const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = baseloadComputed
     .fallbackUsed
     ? "FALLBACK_V1"
     : "FILTERED_NORMAL_LIFE_V1";
-  const baseloadDaily = low10Average(daily.map((d) => Number(d.kwh) || 0));
-  const baseloadMonthly = low10Average(monthly.map((m) => Number(m.kwh) || 0));
+  const baseloadDaily = skipHeavyInsights ? 0 : low10Average(daily.map((d) => Number(d.kwh) || 0));
+  const baseloadMonthly = skipHeavyInsights ? 0 : low10Average(monthly.map((m) => Number(m.kwh) || 0));
 
   const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
 

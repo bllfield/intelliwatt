@@ -815,6 +815,8 @@ export async function simulatePastUsageDataset(
       intervals: patchedIntervals,
     });
 
+    const skipHeavyDatasetInsights = emitAllIntervals === false && buildPathKind === "lab_validation";
+
     const dataset = buildSimulatedUsageDatasetFromCurve(
       stitchedCurve,
       {
@@ -828,6 +830,7 @@ export async function simulatePastUsageDataset(
         timezone: timezone ?? undefined,
         useUtcMonth: true,
         simulatedDayResults: dayResults,
+        skipHeavyInsights: skipHeavyDatasetInsights,
       }
     );
 

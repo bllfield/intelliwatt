@@ -3719,7 +3719,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(res.status).toBe(504);
     expect(body.error).toBe("artifact_ensure_route_timeout");
     expect(body.reasonCode).toBe("ARTIFACT_ENSURE_ROUTE_TIMEOUT");
-    expect(body.timeoutMs).toBe(120000);
+    expect(body.timeoutMs).toBe(75000);
     expect(body.missingData).toEqual(["rebuildGapfillSharedPastArtifact"]);
   });
 

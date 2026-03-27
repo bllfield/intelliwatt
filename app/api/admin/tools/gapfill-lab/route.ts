@@ -77,14 +77,15 @@ type GapfillLabScoredDayTruthRow = {
 };
 
 export const dynamic = "force-dynamic";
-// Vercel serverless ceiling (seconds). Must fit shared compare + optional full-report build
-// (see ROUTE_*_TIMEOUT_MS) so exact-artifact + travel/vacant full-window compare can finish.
-export const maxDuration = 300;
+// Vercel serverless ceiling (seconds). Keep tight: OOM/thrash can otherwise run many minutes before the
+// platform kills the instance; shorter wall-clock returns a 504/classified timeout sooner on bad runs.
+// Sum(shared compare + report) must stay under this with margin.
+export const maxDuration = 120;
 // Cooperative abort for rebuild/compare; keep sum(shared + report) under maxDuration with margin.
-const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
-// Full-window shared sim (exact artifact + parity) can exceed 2 minutes; 210s leaves room for report phase.
-const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 210_000;
-const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 60_000;
+const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 75_000;
+// Selected-days compare is usually fast; lower bound fails fast when work hangs or memory pressure stalls the isolate.
+const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 90_000;
+const ROUTE_COMPARE_REPORT_TIMEOUT_MS = 35_000;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 
