@@ -1184,13 +1184,9 @@ export async function buildGapfillCompareSimShared(args: {
     new Set<string>(travelRangesToExcludeDateKeys(buildTravelRanges)),
     sharedCoverageWindow
   );
-  const exactTravelParityRequiresIntervalBackedArtifactTruth =
-    requireExactArtifactMatch && boundedTravelDateKeysLocal.size > 0;
-  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
-    // Exact travel/vacant parity must preserve full-year artifact identity ownership rather than
-    // allowing selected-days lightweight reads to change how the artifact is selected.
-    useSelectedDaysLightweightArtifactRead = false;
-  }
+  // Exact travel/vacant parity now compares saved canonical artifact totals against fresh canonical
+  // full-window totals, so artifact interval decoding is no longer required as a second truth path.
+  const exactTravelParityRequiresIntervalBackedArtifactTruth = false;
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -1240,9 +1236,9 @@ export async function buildGapfillCompareSimShared(args: {
   /**
    * Selected-days Gap-Fill compare_core: omit heavy chart/monthly/display materialization when the
    * client requested selected-days lightweight compare (diagnostics/full report off, no rebuild).
-   * Intentionally does NOT require `useSelectedDaysLightweightArtifactRead` — that flag is cleared
-   * when exact interval-backed travel/vacant parity forces non-lightweight artifact *selection*,
-   * but we still skip broad display/monthly materialization in that case (Vercel OOM mitigation).
+   * Intentionally does NOT require `useSelectedDaysLightweightArtifactRead` so exact-identity
+   * selected-days compares can keep the lightweight artifact read while still running canonical
+   * fresh parity against the shared full-window path.
    */
   const compareCoreMemoryReducedPath =
     selectedDaysLightweightArtifactRead === true &&
@@ -2001,11 +1997,11 @@ export async function buildGapfillCompareSimShared(args: {
             simulatedIntervals: [] as Array<{ timestamp: string; kwh: number }>,
             dailyTotalsByDate: new Map<string, number>(),
             canonicalSimulatedDayTotalsByDate: {} as Record<string, number>,
-            actualWxByDateKey: null as Map<
-              string,
-              { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
-            > | null,
-            weatherKindUsed: null as string | null,
+          actualWxByDateKey: null as Map<
+            string,
+            { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
+          > | null,
+          weatherKindUsed: null as string | null,
             weatherSourceSummary: weatherBasisUsed,
           };
         }

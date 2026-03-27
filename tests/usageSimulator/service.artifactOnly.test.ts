@@ -1640,7 +1640,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(Number((boundedMeta as any)?.selectedDateKeyCount)).toBe(1);
   });
 
-  it("activates compact compare_core when exact travel parity disables lightweight artifact read (requireExactArtifactMatch)", async () => {
+  it("activates compact compare_core while exact travel parity keeps lightweight artifact read (requireExactArtifactMatch)", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -1688,7 +1688,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         selectedDaysLightweightArtifactRead: true,
         includeDiagnostics: false,
         includeFullReportText: false,
+        artifactExactScenarioId: "gapfill_lab",
+        artifactExactInputHash: "hash-selected-default",
         requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
         onPhaseUpdate: (phase: GapfillCompareBuildPhase, meta?: Record<string, unknown>) => {
           phases.push(String(phase));
           if (phase === "build_shared_compare_inputs_ready") {
@@ -1705,15 +1708,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
       expect(phases).toContain("build_shared_compare_compact_bounded_canonical_ready");
       expect(phases).toContain("build_shared_compare_compact_post_scored_sim_ready");
-      expect(phases).toContain("compact_pre_bounded_meta_write_done");
       expect(phases.indexOf("compact_pre_bounded_merge_backfill_done")).toBeLessThan(
         phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")
-      );
-      expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
-        phases.indexOf("compact_pre_bounded_meta_write_start")
-      );
-      expect(phases.indexOf("compact_pre_bounded_meta_write_done")).toBeLessThan(
-        phases.indexOf("build_shared_compare_scored_row_keys_ready")
       );
       expect(phases.indexOf("build_shared_compare_compact_bounded_canonical_ready")).toBeLessThan(
         phases.indexOf("build_shared_compare_scored_row_keys_ready")
@@ -1740,8 +1736,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       );
       const inputsMeta = inputsReadyMeta.value;
       const gates = inputsMeta?.compactPathGates as Record<string, unknown> | undefined;
-      expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(true);
-      expect(gates?.useSelectedDaysLightweightArtifactRead).toBe(false);
+      expect(gates?.exactTravelParityRequiresIntervalBackedArtifactTruth).toBe(false);
+      expect(gates?.useSelectedDaysLightweightArtifactRead).toBe(true);
       expect(inputsMeta?.compactPathEligible).toBe(true);
       if (out.ok) {
         expect(out.simulatedChartMonthly.length).toBe(0);
@@ -1802,7 +1798,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         selectedDaysLightweightArtifactRead: true,
         includeDiagnostics: false,
         includeFullReportText: false,
+        artifactExactScenarioId: "gapfill_lab",
+        artifactExactInputHash: "hash-selected-default",
         requireExactArtifactMatch: true,
+        artifactIdentitySource: "same_run_artifact_ensure",
         abortSignal: ac.signal,
         onPhaseUpdate: (phase) => {
           if (phase === "compact_post_scored_rows_parity_start") {
@@ -3576,7 +3575,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
-      expect(decodeIntervalsV1).toHaveBeenCalled();
+      expect(decodeIntervalsV1).not.toHaveBeenCalled();
       expect(
         Array.from((((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]).sort()
       ).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
@@ -3739,7 +3738,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(false);
     if (!out.ok) {
-      expect(decodeIntervalsV1).toHaveBeenCalled();
+      expect(decodeIntervalsV1).not.toHaveBeenCalled();
       expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
         availability: "mismatch_detected",
