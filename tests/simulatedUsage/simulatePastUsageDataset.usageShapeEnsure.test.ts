@@ -190,6 +190,7 @@ describe("shared sim usage-shape ensure path", () => {
         ensuredInFlow: true,
         ensuredReason: "profile_not_found",
       });
+      expect(out.canonicalSimulatedDayTotalsByDate).toEqual({ "2026-01-01": 0.5 });
     }
   });
 
@@ -466,6 +467,9 @@ describe("shared sim usage-shape ensure path", () => {
     });
 
     expect(out.dataset).not.toBeNull();
+    expect((out.dataset?.meta as any)?.canonicalArtifactSimulatedDayTotalsByDate).toEqual({
+      "2026-01-01": 0.5,
+    });
     expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys).toBeInstanceOf(Set);
     expect(
       Array.from(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys ?? []).sort()

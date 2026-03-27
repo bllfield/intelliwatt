@@ -625,6 +625,8 @@ export type SimulatedUsageDatasetMeta = {
     intervalSumKwh: number;
     fallbackLevel: string | null;
   }>;
+  /** Canonical shared-sim daily totals keyed by simulated local date. */
+  canonicalArtifactSimulatedDayTotalsByDate?: Record<string, number>;
 };
 
 export type SimulatedUsageDataset = {
@@ -853,7 +855,10 @@ export function buildSimulatedUsageDatasetFromCurve(
   for (const row of options?.simulatedDayResults ?? []) {
     const dk = String(row?.localDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    simulatedDisplayByDate.set(dk, Number(row.displayDayKwh) || 0);
+    simulatedDisplayByDate.set(
+      dk,
+      Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0
+    );
     simulatedSourceByDate.add(dk);
   }
   // Daily display values for simulated days come from shared core SimulatedDayResult.
@@ -864,6 +869,11 @@ export function buildSimulatedUsageDatasetFromCurve(
       source: simulatedSourceByDate.has(date) ? ("SIMULATED" as const) : ("ACTUAL" as const),
     }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const canonicalArtifactSimulatedDayTotalsByDate = Object.fromEntries(
+    daily
+      .filter((row) => simulatedSourceByDate.has(row.date))
+      .map((row) => [row.date, round2(Number(row.kwh) || 0)] as const)
+  );
 
   const monthlyBuild = buildDisplayMonthlyFromIntervals({
     intervals: curve.intervals,
@@ -926,7 +936,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     });
   }
 
-  return {
+  const dataset: SimulatedUsageDataset = {
     summary: {
       source: "SIMULATED" as const,
       intervalsCount: seriesIntervals15.length,
@@ -972,9 +982,13 @@ export function buildSimulatedUsageDatasetFromCurve(
       filledMonths: meta.filledMonths ?? [],
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
+      canonicalArtifactSimulatedDayTotalsByDate,
     },
     usageBucketsByMonth,
   };
+  (dataset as SimulatedUsageDataset & { canonicalArtifactSimulatedDayTotalsByDate: Record<string, number> })
+    .canonicalArtifactSimulatedDayTotalsByDate = canonicalArtifactSimulatedDayTotalsByDate;
+  return dataset;
 }
 
 /** Build usage buckets by month (same shape as buildUsageBucketsForEstimate) from simulated monthly totals. Used for Past/Future so plan costing can use simulated usage. */

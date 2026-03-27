@@ -39,7 +39,6 @@ import {
   encodeIntervalsV1,
   decodeIntervalsV1,
   INTERVAL_CODEC_V1,
-  quantizeIntervalKwhForCodec,
 } from "@/modules/usageSimulator/intervalCodec";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
@@ -533,10 +532,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       curveShapingVersion: "shared_curve_v2",
     };
     applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
-    const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(
-      rebuiltDataset,
-      timezone
-    );
+    const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset);
     const { bytes } = encodeIntervalsV1(intervals15);
     const datasetJsonForStorage = {
       ...rebuiltDataset,
@@ -810,203 +806,6 @@ function round2Local(n: number) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
-/**
- * Sum 15m interval kWh for one local calendar date, then round to 2 dp — same finalization as
- * buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset (interval branch). Used for travel/vacant
- * parity so artifact and fresh sides share one aggregation path and avoid 0.01-ish float drift from
- * mixing meta/daily-rounded totals with raw float sums.
- *
- * Returns `null` when no interval row falls on `dateKey` in `timezone` (missing coverage), so callers
- * can distinguish that from a real zero-kWh day (intervals present that sum to 0).
- */
-function canonicalDayKwhFromIntervals15ForLocalDateKey(
-  intervals: Array<{ timestamp: string; kwh: number }>,
-  timezone: string,
-  dateKey: string
-): number | null {
-  let sum = 0;
-  let sawMatchingInterval = false;
-  for (const row of intervals) {
-    const timestamp = String(row?.timestamp ?? "").trim();
-    if (!timestamp) continue;
-    if (dateKeyInTimezone(timestamp, timezone) !== dateKey) continue;
-    sawMatchingInterval = true;
-    sum += Number(row.kwh) || 0;
-  }
-  if (!sawMatchingInterval) return null;
-  return round2Local(sum);
-}
-
-/**
- * One pass over 15m intervals → raw kWh sum per local calendar day (not rounded per row).
- * Used for travel/vacant parity when interval-backed proof is required so we do not scan the full
- * interval vector once per parity date (O(parityDates × intervalRows)).
- */
-function formatCanonicalLocalTimestampForTimezone(timestamp: string, timezone: string): string | null {
-  const dt = new Date(timestamp);
-  if (!Number.isFinite(dt.getTime())) return null;
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(dt);
-  const lookup = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  const year = lookup("year");
-  const month = lookup("month");
-  const day = lookup("day");
-  const hour = lookup("hour");
-  const minute = lookup("minute");
-  const second = lookup("second");
-  if (!year || !month || !day || !hour || !minute || !second) return null;
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
-}
-
-function buildCanonicalIntervalDayTotalsByLocalDate(
-  intervals: Array<{ timestamp: string; kwh: number }>,
-  timezone: string
-): Map<
-  string,
-  {
-    rawDaySum: number;
-    normalizedDaySum: number;
-    firstLocalTimestamp: string | null;
-    lastLocalTimestamp: string | null;
-    intervalCount: number;
-  }
-> {
-  const totals = new Map<
-    string,
-    {
-      rawDaySum: number;
-      firstUtcTimestamp: string;
-      lastUtcTimestamp: string;
-      intervalCount: number;
-    }
-  >();
-  for (const row of intervals) {
-    const timestamp = canonicalIntervalKey(String(row?.timestamp ?? "").trim());
-    if (!timestamp) continue;
-    const dk = dateKeyInTimezone(timestamp, timezone);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    const existing = totals.get(dk);
-    if (existing) {
-      existing.rawDaySum += Number(row.kwh) || 0;
-      existing.intervalCount += 1;
-      if (timestamp < existing.firstUtcTimestamp) existing.firstUtcTimestamp = timestamp;
-      if (timestamp > existing.lastUtcTimestamp) existing.lastUtcTimestamp = timestamp;
-    } else {
-      totals.set(dk, {
-        rawDaySum: Number(row.kwh) || 0,
-        firstUtcTimestamp: timestamp,
-        lastUtcTimestamp: timestamp,
-        intervalCount: 1,
-      });
-    }
-  }
-  return new Map(
-    Array.from(totals.entries()).map(([dk, entry]) => [
-      dk,
-      {
-        rawDaySum: entry.rawDaySum,
-        normalizedDaySum: round2Local(entry.rawDaySum),
-        firstLocalTimestamp: formatCanonicalLocalTimestampForTimezone(entry.firstUtcTimestamp, timezone),
-        lastLocalTimestamp: formatCanonicalLocalTimestampForTimezone(entry.lastUtcTimestamp, timezone),
-        intervalCount: entry.intervalCount,
-      },
-    ])
-  );
-}
-
-async function buildCanonicalIntervalDayTotalsByLocalDateAbortable(
-  intervals: Array<{ timestamp: string; kwh: number }>,
-  timezone: string,
-  abortSignal?: AbortSignal,
-  yieldEvery = 512
-): Promise<
-  Map<
-    string,
-    {
-      rawDaySum: number;
-      normalizedDaySum: number;
-      firstLocalTimestamp: string | null;
-      lastLocalTimestamp: string | null;
-      intervalCount: number;
-    }
-  >
-> {
-  const totals = new Map<
-    string,
-    {
-      rawDaySum: number;
-      firstUtcTimestamp: string;
-      lastUtcTimestamp: string;
-      intervalCount: number;
-    }
-  >();
-  for (let i = 0; i < intervals.length; i++) {
-    if (abortSignal?.aborted) {
-      const err = new Error("compare_core_build_aborted");
-      (err as any).code = "compare_core_build_aborted";
-      throw err;
-    }
-    if (i > 0 && i % yieldEvery === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    const row = intervals[i];
-    const timestamp = canonicalIntervalKey(String(row?.timestamp ?? "").trim());
-    if (!timestamp) continue;
-    const dk = dateKeyInTimezone(timestamp, timezone);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    const existing = totals.get(dk);
-    if (existing) {
-      existing.rawDaySum += Number(row?.kwh) || 0;
-      existing.intervalCount += 1;
-      if (timestamp < existing.firstUtcTimestamp) existing.firstUtcTimestamp = timestamp;
-      if (timestamp > existing.lastUtcTimestamp) existing.lastUtcTimestamp = timestamp;
-    } else {
-      totals.set(dk, {
-        rawDaySum: Number(row?.kwh) || 0,
-        firstUtcTimestamp: timestamp,
-        lastUtcTimestamp: timestamp,
-        intervalCount: 1,
-      });
-    }
-  }
-  return new Map(
-    Array.from(totals.entries()).map(([dk, entry]) => [
-      dk,
-      {
-        rawDaySum: entry.rawDaySum,
-        normalizedDaySum: round2Local(entry.rawDaySum),
-        firstLocalTimestamp: formatCanonicalLocalTimestampForTimezone(entry.firstUtcTimestamp, timezone),
-        lastLocalTimestamp: formatCanonicalLocalTimestampForTimezone(entry.lastUtcTimestamp, timezone),
-        intervalCount: entry.intervalCount,
-      },
-    ])
-  );
-}
-
-/** Match persisted artifact codec precision before exact parity aggregates compare day totals. */
-function normalizeIntervalsForExactParityCodec(
-  intervals: Array<{ timestamp: string; kwh: number }>
-): Array<{ timestamp: string; kwh: number }> {
-  const out: Array<{ timestamp: string; kwh: number }> = [];
-  for (const row of intervals) {
-    const timestamp = canonicalIntervalKey(String(row?.timestamp ?? "").trim());
-    if (!timestamp) continue;
-    out.push({
-      timestamp,
-      kwh: quantizeIntervalKwhForCodec(Number(row?.kwh) || 0),
-    });
-  }
-  return out;
-}
-
 function filterIntervalsToLocalDateKeys(
   intervals: Array<{ timestamp: string; kwh: number }>,
   timezone: string,
@@ -1062,169 +861,6 @@ function readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
     out[dk] = round2Local(kwh);
   }
   return out;
-}
-
-/**
- * Same rules as buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset but only materializes totals
- * for `dateKeys` (bounded compare_core — avoids full-year output object + full Map in the interval pass).
- *
- * `forcedScoredDateKeys`: Gap-Fill selected scored dates must contribute interval/daily totals even when
- * fingerprint-based ownership omits them (otherwise compact canonical has parity/travel keys but zero
- * artifact reference rows for scored dates).
- */
-function buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys(
-  dataset: any,
-  timezone: string | null | undefined,
-  dateKeys: Set<string>,
-  forcedScoredDateKeys?: Set<string>
-): CanonicalArtifactSimulatedDayTotalsByDate {
-  const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
-  const dailyRows = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
-  const simulatedOwnershipDates = new Set<string>(
-    String((dataset as any)?.meta?.excludedDateKeysFingerprint ?? "")
-      .split(",")
-      .map((dk) => String(dk ?? "").trim())
-      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-  );
-  for (const row of dailyRows) {
-    const dk = String((row as any)?.date ?? "").slice(0, 10);
-    const source = String((row as any)?.source ?? "").toUpperCase();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && source === "SIMULATED") simulatedOwnershipDates.add(dk);
-  }
-  const treatAsIntervalOwned = (dk: string) =>
-    simulatedOwnershipDates.has(dk) || Boolean(forcedScoredDateKeys?.has(dk));
-  const treatAsDailyOwned = (source: string, dk: string) =>
-    source === "SIMULATED" || simulatedOwnershipDates.has(dk) || Boolean(forcedScoredDateKeys?.has(dk));
-  const timezoneResolved = typeof timezone === "string" && timezone.trim().length > 0 ? timezone.trim() : null;
-  const intervals15 = Array.isArray((dataset as any)?.series?.intervals15)
-    ? ((dataset as any).series.intervals15 as Array<Record<string, unknown>>)
-    : [];
-  const canAttemptIntervalPass =
-    Boolean(timezoneResolved) &&
-    intervals15.length > 0 &&
-    (simulatedOwnershipDates.size > 0 || (forcedScoredDateKeys?.size ?? 0) > 0);
-  if (canAttemptIntervalPass) {
-    const intervalSumsByLocalDate = new Map<string, number>();
-    for (const row of intervals15) {
-      const timestamp = String((row as any)?.timestamp ?? "").trim();
-      if (!timestamp) continue;
-      const dk = dateKeyInTimezone(timestamp, timezoneResolved!);
-      if (!dateKeys.has(dk) || !treatAsIntervalOwned(dk)) continue;
-      intervalSumsByLocalDate.set(dk, (intervalSumsByLocalDate.get(dk) ?? 0) + (Number((row as any)?.kwh) || 0));
-    }
-    if (intervalSumsByLocalDate.size > 0) {
-      for (const [dk, kwh] of Array.from(intervalSumsByLocalDate.entries())) out[dk] = round2Local(kwh);
-      for (const row of dailyRows) {
-        const dk = String((row as any)?.date ?? "").slice(0, 10);
-        if (!dateKeys.has(dk)) continue;
-        const source = String((row as any)?.source ?? "").toUpperCase();
-        const kwh = Number((row as any)?.kwh);
-        const isSimulatorOwnedDay = treatAsDailyOwned(source, dk);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh) || dk in out) continue;
-        out[dk] = round2Local(kwh);
-      }
-      return out;
-    }
-  }
-  for (const row of dailyRows) {
-    const dk = String((row as any)?.date ?? "").slice(0, 10);
-    if (!dateKeys.has(dk)) continue;
-    const source = String((row as any)?.source ?? "").toUpperCase();
-    const kwh = Number((row as any)?.kwh);
-    const isSimulatorOwnedDay = treatAsDailyOwned(source, dk);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh)) continue;
-    out[dk] = round2Local(kwh);
-  }
-  return out;
-}
-
-/** Compact compare_core: keep only interval points for local dates needed for bounded canonical + parity (drops full-year decode peak). */
-function filterExactParityArtifactIntervalsToCompactDateKeys(
-  intervals: Array<{ timestamp: string; kwh: number }>,
-  timezone: string,
-  dateKeys: Set<string>
-): Array<{ timestamp: string; kwh: number }> {
-  const out: Array<{ timestamp: string; kwh: number }> = [];
-  for (const p of intervals) {
-    const ts = canonicalIntervalKey(String(p?.timestamp ?? "").trim());
-    if (!ts) continue;
-    const dk = dateKeyInTimezone(ts, timezone);
-    if (!dateKeys.has(dk)) continue;
-    out.push({ timestamp: ts, kwh: Number(p?.kwh) || 0 });
-  }
-  return out;
-}
-
-function buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(
-  dataset: any,
-  timezone?: string | null
-): CanonicalArtifactSimulatedDayTotalsByDate {
-  const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
-  const dailyRows = Array.isArray((dataset as any)?.daily) ? ((dataset as any).daily as Array<Record<string, unknown>>) : [];
-  const simulatedOwnershipDates = new Set<string>(
-    String((dataset as any)?.meta?.excludedDateKeysFingerprint ?? "")
-      .split(",")
-      .map((dk) => String(dk ?? "").trim())
-      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-  );
-  for (const row of dailyRows) {
-    const dk = String((row as any)?.date ?? "").slice(0, 10);
-    const source = String((row as any)?.source ?? "").toUpperCase();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && source === "SIMULATED") simulatedOwnershipDates.add(dk);
-  }
-  const timezoneResolved = typeof timezone === "string" && timezone.trim().length > 0 ? timezone.trim() : null;
-  const intervals15 = Array.isArray((dataset as any)?.series?.intervals15)
-    ? ((dataset as any).series.intervals15 as Array<Record<string, unknown>>)
-    : [];
-  if (timezoneResolved && simulatedOwnershipDates.size > 0 && intervals15.length > 0) {
-    const intervalSumsByLocalDate = new Map<string, number>();
-    for (const row of intervals15) {
-      const timestamp = String((row as any)?.timestamp ?? "").trim();
-      if (!timestamp) continue;
-      const dk = dateKeyInTimezone(timestamp, timezoneResolved);
-      if (!simulatedOwnershipDates.has(dk)) continue;
-      intervalSumsByLocalDate.set(dk, (intervalSumsByLocalDate.get(dk) ?? 0) + (Number((row as any)?.kwh) || 0));
-    }
-    if (intervalSumsByLocalDate.size > 0) {
-      for (const [dk, kwh] of Array.from(intervalSumsByLocalDate.entries())) out[dk] = round2Local(kwh);
-      for (const row of dailyRows) {
-        const dk = String((row as any)?.date ?? "").slice(0, 10);
-        const source = String((row as any)?.source ?? "").toUpperCase();
-        const kwh = Number((row as any)?.kwh);
-        const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh) || dk in out) continue;
-        out[dk] = round2Local(kwh);
-      }
-      return out;
-    }
-  }
-  for (const row of dailyRows) {
-    const dk = String((row as any)?.date ?? "").slice(0, 10);
-    const source = String((row as any)?.source ?? "").toUpperCase();
-    const kwh = Number((row as any)?.kwh);
-    const isSimulatorOwnedDay = source === "SIMULATED" || simulatedOwnershipDates.has(dk);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !isSimulatorOwnedDay || !Number.isFinite(kwh)) continue;
-    out[dk] = round2Local(kwh);
-  }
-  return out;
-}
-
-function attachCanonicalArtifactSimulatedDayTotalsByDate(
-  dataset: any,
-  timezone?: string | null
-): CanonicalArtifactSimulatedDayTotalsByDate {
-  if (!dataset || typeof dataset !== "object") return {};
-  if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
-  const existing = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
-  if (Object.keys(existing).length > 0 || CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY in ((dataset as any).meta ?? {})) {
-    (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = existing;
-    (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = existing;
-    return existing;
-  }
-  const built = buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset(dataset, timezone);
-  (dataset as any).meta[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
-  (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = built;
-  return built;
 }
 
 function restoreCachedArtifactDataset(args: {
@@ -1755,7 +1391,7 @@ export async function buildGapfillCompareSimShared(args: {
     // Persist canonical shared-window ownership metadata with rebuilt artifacts so compare
     // fallback compatibility checks and scope diagnostics use the same bounded fingerprint.
     applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
-    const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset, timezone);
+    const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset);
     const { bytes } = encodeIntervalsV1(intervals15);
     const datasetJsonForStorage = {
       ...rebuiltDataset,
@@ -2290,6 +1926,7 @@ export async function buildGapfillCompareSimShared(args: {
     exactProofSatisfied: travelVacantParityDateKeysLocal.length === 0,
   };
   let selectedTestDailyTotalsByDate: Map<string, number> | null = null;
+  let freshParityCanonicalSimulatedDayTotalsByDate: Record<string, number> = {};
   let freshParityIntervals: IntervalPoint[] = [];
 
   const needsFreshCompareForParity =
@@ -2344,6 +1981,8 @@ export async function buildGapfillCompareSimShared(args: {
         weatherFallbackReason: freshResult.weatherFallbackReason,
         actualWxByDateKey: freshResult.actualWxByDateKey ?? null,
         simulatedIntervals: freshIntervals,
+        canonicalSimulatedDayTotalsByDate:
+          freshResult.canonicalSimulatedDayTotalsByDate ?? {},
         weatherSourceSummary: String(freshResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
       };
     };
@@ -2475,7 +2114,13 @@ export async function buildGapfillCompareSimShared(args: {
           timezone,
           travelVacantParityDateKeySet
         );
+        freshParityCanonicalSimulatedDayTotalsByDate = Object.fromEntries(
+          Object.entries(parityFullWindowResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
+            travelVacantParityDateKeySet.has(dk)
+          )
+        );
       } else {
+        freshParityCanonicalSimulatedDayTotalsByDate = {};
         freshParityIntervals = [];
       }
       scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
@@ -2561,6 +2206,7 @@ export async function buildGapfillCompareSimShared(args: {
         };
       }
       freshParityIntervals = freshResult.simulatedIntervals;
+      freshParityCanonicalSimulatedDayTotalsByDate = freshResult.canonicalSimulatedDayTotalsByDate ?? {};
       simulatedTestIntervals = freshResult.simulatedIntervals.filter((p) =>
         boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
       );
@@ -2756,87 +2402,20 @@ export async function buildGapfillCompareSimShared(args: {
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_exact_parity_decode_start", {
       exactTravelParityRequiresIntervalBackedArtifactTruth,
-      hadSeriesIntervals15InDataset: Boolean(
-        Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
-      ),
+      hadSeriesIntervals15InDataset: false,
     });
-  }
-  const exactParityArtifactIntervalsDecodeBufferOwned =
-    exactTravelParityRequiresIntervalBackedArtifactTruth &&
-    !(
-      Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
-    ) &&
-    Boolean(cached?.intervalsCodec === INTERVAL_CODEC_V1);
-  let exactParityArtifactIntervals: Array<{ timestamp: string; kwh: number }> =
-    exactTravelParityRequiresIntervalBackedArtifactTruth
-      ? Array.isArray((dataset as any)?.series?.intervals15) && (dataset as any).series.intervals15.length > 0
-        ? ((dataset as any).series.intervals15 as Array<{ timestamp: string; kwh: number }>)
-        : cached && cached.intervalsCodec === INTERVAL_CODEC_V1
-          ? decodeIntervalsV1(cached.intervalsCompressed)
-          : []
-      : [];
-  if (
-    compareCoreMemoryReducedPath &&
-    exactTravelParityRequiresIntervalBackedArtifactTruth &&
-    exactParityArtifactIntervals.length > 0
-  ) {
-    exactParityArtifactIntervals = filterExactParityArtifactIntervalsToCompactDateKeys(
-      exactParityArtifactIntervals,
-      timezone,
-      compactCanonicalDateKeys
-    );
-  }
-  if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_exact_parity_decode_done", {
-      exactParityIntervalCount: exactParityArtifactIntervals.length,
-      decodeBufferOwned: exactParityArtifactIntervalsDecodeBufferOwned,
+      exactParityIntervalCount: 0,
+      decodeBufferOwned: false,
     });
-  }
-  let artifactExactParityIntervalDayTotalsByDate:
-    | ReturnType<typeof buildCanonicalIntervalDayTotalsByLocalDate>
-    | null = null;
-  if (
-    compareCoreMemoryReducedPath &&
-    exactTravelParityRequiresIntervalBackedArtifactTruth &&
-    exactParityArtifactIntervals.length > 0
-  ) {
     await reportPhase("compact_pre_bounded_exact_parity_day_totals_start", {
-      exactParityIntervalCount: exactParityArtifactIntervals.length,
-      yieldEvery: 512,
+      exactParityIntervalCount: 0,
+      yieldEvery: 0,
     });
-    throwIfGapfillCompareAborted(abortSignal);
-    artifactExactParityIntervalDayTotalsByDate = await buildCanonicalIntervalDayTotalsByLocalDateAbortable(
-      exactParityArtifactIntervals,
-      timezone,
-      abortSignal,
-      512
-    );
-    throwIfGapfillCompareAborted(abortSignal);
     await reportPhase("compact_pre_bounded_exact_parity_day_totals_done", {
-      exactParityDayTotalCount: artifactExactParityIntervalDayTotalsByDate.size,
+      exactParityDayTotalCount: 0,
     });
   }
-  const artifactDatasetForExactParity =
-    exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0
-      ? compareCoreMemoryReducedPath
-        ? {
-            meta: (dataset as any).meta,
-            daily: (dataset as any).daily,
-            // Compact path: only intervals15 is read by bounded canonical — avoid copying full series (codec refs, etc.).
-            series: {
-              intervals15: exactParityArtifactIntervals,
-            },
-          }
-        : {
-            ...dataset,
-            series: {
-              ...(typeof (dataset as any)?.series === "object" && (dataset as any).series !== null
-                ? (dataset as any).series
-                : {}),
-              intervals15: exactParityArtifactIntervals,
-            },
-          }
-      : dataset;
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_meta_read_start", {
       boundedTestDateKeyCount: boundedTestDateKeysLocal.size,
@@ -2850,7 +2429,7 @@ export async function buildGapfillCompareSimShared(args: {
       preservedMetaCanonicalKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
     });
     await reportPhase("compact_pre_bounded_canonical_build_start", {
-      usesIntervalBackedDataset: exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0,
+      usesIntervalBackedDataset: false,
     });
   }
   throwIfGapfillCompareAborted(abortSignal);
@@ -2873,8 +2452,7 @@ export async function buildGapfillCompareSimShared(args: {
       compactCanonicalUnionKeyCount: compactCanonicalDateKeys.size,
       selectedDateKeyCount: boundedTestDateKeysLocal.size,
       parityDateKeyCount: travelVacantParityDateKeysLocal.length,
-      usedIntervalBackedExactParityTruth:
-        exactTravelParityRequiresIntervalBackedArtifactTruth && exactParityArtifactIntervals.length > 0,
+      usedIntervalBackedExactParityTruth: false,
     });
   }
   if (compareCoreMemoryReducedPath && exactTravelParityRequiresIntervalBackedArtifactTruth) {
@@ -3085,22 +2663,12 @@ export async function buildGapfillCompareSimShared(args: {
     });
   }
   throwIfGapfillCompareAborted(abortSignal);
-  // Keep travel/vacant proof on canonical interval-summed day totals so
-  // artifact-side and fresh-side parity compare the same aggregation basis.
-  const useIntervalBackedTravelVacantParityTotals =
-    exactParityArtifactIntervals.length > 0 && freshParityIntervals.length > 0;
-  const freshParityIntervalsForExactParity = useIntervalBackedTravelVacantParityTotals
-    ? normalizeIntervalsForExactParityCodec(freshParityIntervals)
-    : freshParityIntervals;
-  const freshParityDayTotalsByDate = buildCanonicalIntervalDayTotalsByLocalDate(
-    freshParityIntervalsForExactParity,
-    timezone
+  const freshParityDailyByDate = new Map<string, number>(
+    Object.entries(freshParityCanonicalSimulatedDayTotalsByDate).map(([date, simKwh]) => [
+      String(date).slice(0, 10),
+      round2Local(Number(simKwh) || 0),
+    ])
   );
-  throwIfGapfillCompareAborted(abortSignal);
-  const artifactExactParityDayTotalsByDate = useIntervalBackedTravelVacantParityTotals
-    ? artifactExactParityIntervalDayTotalsByDate ??
-      buildCanonicalIntervalDayTotalsByLocalDate(exactParityArtifactIntervals, timezone)
-    : null;
   throwIfGapfillCompareAborted(abortSignal);
   const parityDateKeysOrdered = travelVacantParityDateKeysLocal;
   const PARITY_ROW_ABORT_STRIDE = 24;
@@ -3109,45 +2677,16 @@ export async function buildGapfillCompareSimShared(args: {
   for (let i = 0; i < parityDateKeysOrdered.length; i++) {
     if (i % PARITY_ROW_ABORT_STRIDE === 0) throwIfGapfillCompareAborted(abortSignal);
     const dk = parityDateKeysOrdered[i]!;
-    const artifactParityDayTotal = useIntervalBackedTravelVacantParityTotals
-      ? artifactExactParityDayTotalsByDate?.get(dk) ?? null
+    const artifactCanonicalSimDayKwh = canonicalArtifactDailyByDate.has(dk)
+      ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
       : null;
-    const freshParityDayTotal = freshParityDayTotalsByDate.get(dk) ?? null;
-    const artifactCanonicalSimDayKwh = useIntervalBackedTravelVacantParityTotals
-      ? artifactParityDayTotal !== null
-        ? artifactParityDayTotal.normalizedDaySum
-        : null
-      : canonicalArtifactDailyByDate.has(dk)
-        ? round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0))
-        : null;
-    const freshSharedDayCalcKwh = freshParityDayTotal
-      ? freshParityDayTotal.normalizedDaySum
+    const freshSharedDayCalcKwh = freshParityDailyByDate.has(dk)
+      ? round2Local(Number(freshParityDailyByDate.get(dk) ?? 0))
       : null;
     const parityMatch =
       artifactCanonicalSimDayKwh == null || freshSharedDayCalcKwh == null
         ? null
         : round2Local(artifactCanonicalSimDayKwh) === round2Local(freshSharedDayCalcKwh);
-    if (
-      useIntervalBackedTravelVacantParityTotals &&
-      parityMatch === false &&
-      artifactParityDayTotal !== null &&
-      freshParityDayTotal !== null &&
-      travelVacantParityMismatchDiagnosticsSample.length < 10
-    ) {
-      travelVacantParityMismatchDiagnosticsSample.push({
-        localDate: dk,
-        rawArtifactDaySum: artifactParityDayTotal.rawDaySum,
-        rawFreshDaySum: freshParityDayTotal.rawDaySum,
-        normalizedArtifactDaySum: artifactParityDayTotal.normalizedDaySum,
-        normalizedFreshDaySum: freshParityDayTotal.normalizedDaySum,
-        artifactFirstLocalTimestamp: artifactParityDayTotal.firstLocalTimestamp,
-        artifactLastLocalTimestamp: artifactParityDayTotal.lastLocalTimestamp,
-        freshFirstLocalTimestamp: freshParityDayTotal.firstLocalTimestamp,
-        freshLastLocalTimestamp: freshParityDayTotal.lastLocalTimestamp,
-        intervalCountArtifact: artifactParityDayTotal.intervalCount,
-        intervalCountFresh: freshParityDayTotal.intervalCount,
-      });
-    }
     travelVacantParityRows.push({
       localDate: dk,
       artifactCanonicalSimDayKwh,
@@ -3169,13 +2708,13 @@ export async function buildGapfillCompareSimShared(args: {
   }
   throwIfGapfillCompareAborted(abortSignal);
   let releasedFreshParityIntervals = false;
-  let releasedExactParityArtifactIntervals = false;
+  const releasedExactParityArtifactIntervals = false;
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_post_scored_rows_parity_rows_ready", {
       parityRowCount: travelVacantParityRows.length,
       truthDateCount: travelVacantParityDateKeysLocal.length,
-      usedIndexedIntervalDayTotals: useIntervalBackedTravelVacantParityTotals,
-      usedCompactParityTruth: useIntervalBackedTravelVacantParityTotals,
+      usedIndexedIntervalDayTotals: false,
+      usedCompactParityTruth: false,
       mismatchCount: displayVsFreshParityForScoredDays.mismatchCount,
       releasedFreshParityIntervals: false,
       releasedExactParityArtifactIntervals: false,
@@ -3186,10 +2725,6 @@ export async function buildGapfillCompareSimShared(args: {
     // the compact path so later phases (truth objects, DB status writes) do not retain peak heap.
     freshParityIntervals.length = 0;
     releasedFreshParityIntervals = true;
-    if (exactParityArtifactIntervalsDecodeBufferOwned && exactParityArtifactIntervals.length > 0) {
-      exactParityArtifactIntervals.length = 0;
-      releasedExactParityArtifactIntervals = true;
-    }
   }
   const travelVacantParityMissingArtifactCount = travelVacantParityRows.filter(
     (row) => row.artifactReferenceAvailability !== "available"
@@ -3290,7 +2825,7 @@ export async function buildGapfillCompareSimShared(args: {
       parityRowCount: travelVacantParityRows.length,
       parityTruthRowCount: travelVacantParityDateKeysLocal.length,
       truthAvailability: travelVacantParityTruth.availability,
-      usedCompactParityTruth: true,
+      usedCompactParityTruth: false,
       releasedFreshParityIntervals,
       releasedExactParityArtifactIntervals,
       mismatchCount: travelVacantParityMismatchCount,
@@ -5080,7 +4615,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
               if (scenarioKey !== "BASELINE") {
                 applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
               }
-              attachCanonicalArtifactSimulatedDayTotalsByDate(dataset, timezone);
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
@@ -5092,7 +4626,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);
-            const canonicalArtifactSimulatedDayTotalsByDate = attachCanonicalArtifactSimulatedDayTotalsByDate(dataset, timezone);
+            const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
             const datasetJsonForStorage = {
               ...dataset,
               canonicalArtifactSimulatedDayTotalsByDate,

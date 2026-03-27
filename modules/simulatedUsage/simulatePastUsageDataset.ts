@@ -75,9 +75,6 @@ function simulatedDayResultIntersectsLocalDateKeys(
 ): boolean {
   if (dateKeysLocal.size === 0) return false;
   const intervals = Array.isArray(result?.intervals) ? result.intervals : [];
-  // Shared selected-day membership is defined by interval timestamps.
-  // localDate is metadata and must not override missing or conflicting interval ownership.
-  if (intervals.length === 0) return false;
   return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
 }
 
@@ -253,6 +250,7 @@ export type SimulatePastSelectedDaysResult = {
 export type SimulatePastFullWindowSharedResult = {
   simulatedIntervals: Array<{ timestamp: string; kwh: number }>;
   simulatedDayResults?: SimulatedDayResult[];
+  canonicalSimulatedDayTotalsByDate?: Record<string, number>;
   pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
   actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
@@ -686,7 +684,7 @@ export async function simulatePastUsageDataset(
       {
         timezone: timezone ?? undefined,
         useUtcMonth: true,
-        simulatedDayResults: collectSimulatedDayResultsForDiagnostics ? dayResults : undefined,
+        simulatedDayResults: dayResults,
       }
     );
 
@@ -796,6 +794,13 @@ export async function simulatePastFullWindowShared(
     return {
       simulatedIntervals,
       simulatedDayResults: sharedResult.simulatedDayResults,
+      canonicalSimulatedDayTotalsByDate:
+        ((sharedResult.dataset as any)?.meta?.canonicalArtifactSimulatedDayTotalsByDate as
+          | Record<string, number>
+          | undefined) ??
+        ((sharedResult.dataset as any)?.canonicalArtifactSimulatedDayTotalsByDate as
+          | Record<string, number>
+          | undefined),
       pastDayCounts: sharedResult.pastDayCounts,
       actualWxByDateKey: sharedResult.actualWxByDateKey ?? new Map(),
       weatherSourceSummary: String((sharedResult.meta as any)?.weatherSourceSummary ?? "unknown") as WeatherProvenance["weatherSourceSummary"],
@@ -883,7 +888,6 @@ export async function simulatePastSelectedDaysShared(
     const selectedIntervals = sharedResult.simulatedIntervals.filter((row) =>
       selectedValid.has(dateKeyInTimezone(String(row.timestamp ?? ""), timezoneResolved))
     );
-    // Keep result slicing on the same timestamp-derived local-date rule as interval slicing.
     const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
       simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
     );
