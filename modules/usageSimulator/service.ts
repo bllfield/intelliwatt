@@ -676,6 +676,22 @@ export async function rebuildGapfillSharedPastArtifact(args: {
   };
 }
 
+/** Shared contract for scored-day display vs fresh parity (aggregate + per-row truth in GapFill route). */
+export type GapfillScoredDayParityAvailability =
+  | "available"
+  | "missing_expected_reference"
+  | "missing_fresh_compare_sim";
+
+export type GapfillScoredDayParityReasonCode =
+  | "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE"
+  | "ARTIFACT_SIMULATED_REFERENCE_MISSING"
+  | "SCORED_DAY_FRESH_COMPARE_SIM_MISSING";
+
+export type GapfillScoredDayParityDisplayValueKind =
+  | "artifact_simulated_day_total"
+  | "missing_display_sim_reference"
+  | "missing_fresh_compare_sim_day_total";
+
 export type GapfillCompareSimSharedResult =
   | {
       ok: true;
@@ -716,15 +732,15 @@ export type GapfillCompareSimSharedResult =
         missingDisplaySimSampleDates?: string[];
         comparableDateCount?: number;
         complete?: boolean | null;
-        availability?: "available" | "missing_expected_reference";
-        reasonCode?: "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE" | "ARTIFACT_SIMULATED_REFERENCE_MISSING";
+        availability?: GapfillScoredDayParityAvailability;
+        reasonCode?: GapfillScoredDayParityReasonCode;
         missingFreshCompareSimCount?: number;
         missingFreshCompareSimSampleDates?: string[];
         explanation?: string;
         scope: "scored_test_days_local";
         granularity: "daily_kwh_rounded_2dp";
         parityDisplaySourceUsed?: "canonical_artifact_simulated_day_totals";
-        parityDisplayValueKind?: "artifact_simulated_day_total" | "missing_display_sim_reference";
+        parityDisplayValueKind?: GapfillScoredDayParityDisplayValueKind;
         comparisonBasis:
           | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
           | "display_shared_artifact_vs_compare_artifact_filter_only"
@@ -2692,16 +2708,18 @@ export async function buildGapfillCompareSimShared(args: {
       : compareCalculationScope === "selected_days_shared_path_only"
         ? "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
         : "display_shared_artifact_vs_compare_artifact_filter_only";
-  const scoredDayParityAvailability =
+  const scoredDayParityAvailability: GapfillScoredDayParityAvailability =
     expectedMissingDisplaySimDates.length === 0
       ? parityDisplayDailyByDate.size > 0
-        ? ("available" as const)
+        ? allMissingFreshScoredDates.length > 0
+          ? "missing_fresh_compare_sim"
+          : "available"
         : boundedTestDateKeysLocal.size > 0
-          ? ("missing_expected_reference" as const)
-          : ("available" as const)
+          ? "missing_expected_reference"
+          : "available"
       : parityDisplayDailyByDate.size > 0
-        ? ("available" as const)
-        : ("missing_expected_reference" as const);
+        ? "available"
+        : "missing_expected_reference";
   const parityComparableDatesAligned = parityDisplayDailyByDate.size;
   const displayVsFreshParityForScoredDays = {
     matches:
@@ -2734,22 +2752,26 @@ export async function buildGapfillCompareSimShared(args: {
     reasonCode:
       scoredDayParityAvailability === "available"
         ? ("ARTIFACT_SIMULATED_REFERENCE_AVAILABLE" as const)
-        : ("ARTIFACT_SIMULATED_REFERENCE_MISSING" as const),
+        : scoredDayParityAvailability === "missing_fresh_compare_sim"
+          ? ("SCORED_DAY_FRESH_COMPARE_SIM_MISSING" as const)
+          : ("ARTIFACT_SIMULATED_REFERENCE_MISSING" as const),
     explanation:
       scoredDayParityAvailability === "available"
         ? expectedMissingDisplaySimDates.length > 0
           ? "Artifact-side canonical simulated-day totals are available for scored-day parity for comparable dates; some scored dates still lack a simulated-day reference row."
-          : allMissingFreshScoredDates.length > 0
-            ? "Artifact-side canonical simulated-day totals match the shared compare path for comparable dates; one or more scored dates lack fresh shared simulated totals for display parity."
-            : "Artifact-side canonical simulated-day totals are available for scored-day parity."
-        : "Expected artifact simulated-day references were not available for some scored dates.",
+          : "Artifact-side canonical simulated-day totals are available for scored-day parity."
+        : scoredDayParityAvailability === "missing_fresh_compare_sim"
+          ? "Artifact-side canonical simulated-day totals match the shared compare path for comparable dates; one or more scored dates lack fresh shared simulated totals for display parity."
+          : "Expected artifact simulated-day references were not available for some scored dates.",
     scope: "scored_test_days_local" as const,
     granularity: "daily_kwh_rounded_2dp" as const,
     parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals" as const,
     parityDisplayValueKind:
       scoredDayParityAvailability === "available"
         ? ("artifact_simulated_day_total" as const)
-        : ("missing_display_sim_reference" as const),
+        : scoredDayParityAvailability === "missing_fresh_compare_sim"
+          ? ("missing_fresh_compare_sim_day_total" as const)
+          : ("missing_display_sim_reference" as const),
     missingFreshCompareSimCount: allMissingFreshScoredDates.length,
     missingFreshCompareSimSampleDates: allMissingFreshScoredDates.slice(0, 10),
     comparisonBasis: parityComparisonBasis,

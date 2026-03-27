@@ -1962,6 +1962,83 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).not.toBe("ACTUAL");
   });
 
+  it("passes through shared compare missing_fresh_compare_sim parity state on the JSON response", async () => {
+    getActualIntervalsForRange.mockResolvedValueOnce([
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+    mockCompareResultOnce({
+      ok: true,
+      artifactAutoRebuilt: false,
+      scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
+      scoringUsedSharedArtifact: false,
+      comparePulledFromSharedArtifactOnly: false,
+      compareSharedCalcPath:
+        "simulatePastSelectedDaysShared(buildPastSimulatedBaselineV1->simulatePastDay)->buildGapfillCompareSimShared",
+      compareFreshModeUsed: "selected_days",
+      compareCalculationScope: "selected_days_shared_path_only",
+      displaySimSource: "dataset.daily",
+      compareSimSource: "shared_selected_days_calc",
+      weatherBasisUsed: "actual_only",
+      displayVsFreshParityForScoredDays: {
+        matches: null,
+        mismatchCount: 0,
+        mismatchSampleDates: [],
+        missingDisplaySimCount: 0,
+        comparableDateCount: 1,
+        complete: null,
+        availability: "missing_fresh_compare_sim",
+        reasonCode: "SCORED_DAY_FRESH_COMPARE_SIM_MISSING",
+        parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
+        parityDisplayValueKind: "missing_fresh_compare_sim_day_total",
+        missingFreshCompareSimCount: 1,
+        missingFreshCompareSimSampleDates: ["2026-01-01"],
+        scope: "scored_test_days_local",
+        granularity: "daily_kwh_rounded_2dp",
+        comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
+      },
+      travelVacantParityRows: [],
+      travelVacantParityTruth: {
+        availability: "not_requested",
+        reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
+      },
+      sharedCoverageWindow: { startDate: "2025-03-14", endDate: "2026-03-14" },
+      boundedTravelDateKeysLocal: new Set<string>(),
+      simulatedTestIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+      artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
+      artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
+      simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
+      simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
+      simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],
+      simulatedChartStitchedMonth: null,
+      modelAssumptions: null,
+      homeProfileFromModel: null,
+      applianceProfileFromModel: null,
+      scoringTestDateKeysLocal: new Set<string>(["2026-01-01"]),
+      timezoneUsedForScoring: "America/Chicago",
+      windowUsedForScoring: { startDate: "2025-03-14", endDate: "2026-03-14" },
+    });
+
+    const req = {
+      cookies: { get: () => undefined },
+      json: async () => ({
+        email: "user@example.com",
+        testRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+      }),
+    } as any;
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.displayVsFreshParityForScoredDays?.availability).toBe("missing_fresh_compare_sim");
+    expect(body.displayVsFreshParityForScoredDays?.reasonCode).toBe("SCORED_DAY_FRESH_COMPARE_SIM_MISSING");
+    expect(body.displayVsFreshParityForScoredDays?.parityDisplayValueKind).toBe("missing_fresh_compare_sim_day_total");
+    expect(body.truthEnvelope?.displayVsFreshParityForScoredDays?.availability).toBe("missing_fresh_compare_sim");
+  });
+
   it("keeps mixed ACTUAL scored rows truthful when only other scored dates have simulated parity references", async () => {
     getActualIntervalsForRange.mockResolvedValueOnce([
       { timestamp: "2026-03-16T00:00:00.000Z", kwh: 6 },

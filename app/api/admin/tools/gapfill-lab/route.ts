@@ -24,6 +24,9 @@ import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDis
 import {
   buildGapfillCompareSimShared,
   type GapfillCompareBuildPhase,
+  type GapfillScoredDayParityAvailability,
+  type GapfillScoredDayParityDisplayValueKind,
+  type GapfillScoredDayParityReasonCode,
   getSharedPastCoverageWindowForHouse,
   rebuildGapfillSharedPastArtifact,
 } from "@/modules/usageSimulator/service";
@@ -3349,8 +3352,8 @@ export async function POST(req: NextRequest) {
         simKwh: number;
         source: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
         selectedTestDate?: boolean;
-        status?: string | null;
-        reasonCode?: string | null;
+        status?: GapfillScoredDayParityAvailability | null;
+        reasonCode?: GapfillScoredDayParityReasonCode | null;
       }
     >();
     for (const row of displayDailyRowsBase) {

@@ -3347,7 +3347,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
-        availability: "available",
+        availability: "missing_fresh_compare_sim",
+        reasonCode: "SCORED_DAY_FRESH_COMPARE_SIM_MISSING",
+        parityDisplayValueKind: "missing_fresh_compare_sim_day_total",
         mismatchCount: 0,
         missingFreshCompareSimCount: 1,
         comparableDateCount: 1,
@@ -3409,7 +3411,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
-        availability: "available",
+        availability: "missing_fresh_compare_sim",
+        reasonCode: "SCORED_DAY_FRESH_COMPARE_SIM_MISSING",
+        parityDisplayValueKind: "missing_fresh_compare_sim_day_total",
         mismatchCount: 0,
         missingFreshCompareSimCount: 1,
         comparableDateCount: 1,
