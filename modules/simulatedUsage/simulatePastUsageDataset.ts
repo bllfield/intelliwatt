@@ -758,18 +758,11 @@ export async function simulatePastUsageDataset(
         );
         if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
       }
-    } else if (
-      !timezoneResolved &&
-      (forcedSimulateDateKeysLocal.size > 0 ||
-        retainedSimulatedDayResultDateKeysLocal.size > 0 ||
-        forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0)
-    ) {
-      // No IANA timezone: local date keys are treated as canonical UTC calendar keys (same as retained fallback).
+    } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && !timezoneResolved) {
       for (const utcDateKey of canonicalDateKeys) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-        if (forcedSimulateDateKeysLocal.has(utcDateKey)) forcedUtcDateKeys.add(utcDateKey);
-        if (retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) retainedResultUtcDateKeys.add(utcDateKey);
-        if (forceModeledOutputKeepReferencePoolDateKeysLocalSet.has(utcDateKey)) keepRefUtcDateKeys.add(utcDateKey);
+        if (!retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) continue;
+        retainedResultUtcDateKeys.add(utcDateKey);
       }
     }
     for (const utcKey of Array.from(keepRefUtcDateKeys)) {
@@ -1043,6 +1036,10 @@ export async function simulatePastSelectedDaysShared(
     return { simulatedIntervals: null, error: "missing_timezone" };
   }
   try {
+    // Gap-Fill union runs only need stitched intervals for **simulated** days (travel/excluded,
+    // incomplete, keep-ref scored days, etc.). Omitting passthrough actual intervals for the rest
+    // of the identity window cuts patched interval array size by an order of magnitude and is the
+    // main lever against Vercel OOM on compare_core.
     const sharedResult = await simulatePastFullWindowShared({
       userId,
       houseId,
@@ -1056,6 +1053,7 @@ export async function simulatePastSelectedDaysShared(
       actualIntervals: preloadedIntervals,
       includeSimulatedDayResults: true,
       forceModeledOutputKeepReferencePoolDateKeysLocal,
+      emitAllIntervals: false,
     });
     if (sharedResult.simulatedIntervals === null) {
       return {
