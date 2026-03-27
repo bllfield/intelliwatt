@@ -758,11 +758,18 @@ export async function simulatePastUsageDataset(
         );
         if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
       }
-    } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && !timezoneResolved) {
+    } else if (
+      !timezoneResolved &&
+      (forcedSimulateDateKeysLocal.size > 0 ||
+        retainedSimulatedDayResultDateKeysLocal.size > 0 ||
+        forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0)
+    ) {
+      // No IANA timezone: local date keys are treated as canonical UTC calendar keys (same as retained fallback).
       for (const utcDateKey of canonicalDateKeys) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-        if (!retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) continue;
-        retainedResultUtcDateKeys.add(utcDateKey);
+        if (forcedSimulateDateKeysLocal.has(utcDateKey)) forcedUtcDateKeys.add(utcDateKey);
+        if (retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) retainedResultUtcDateKeys.add(utcDateKey);
+        if (forceModeledOutputKeepReferencePoolDateKeysLocalSet.has(utcDateKey)) keepRefUtcDateKeys.add(utcDateKey);
       }
     }
     for (const utcKey of Array.from(keepRefUtcDateKeys)) {

@@ -3269,8 +3269,8 @@ export async function buildGapfillCompareSimShared(args: {
       .map((dk) => {
         const inTravel = boundedTravelDateKeysLocal.has(dk);
         const hasSim = freshDailyTotalsByDate.has(dk);
-        const inKeepRefMeta =
-          keepRefSet.size > 0 ? keepRefSet.has(dk) : boundedTestDateKeysLocal.has(dk);
+        // Only true when the fresh run echoed this date in gapfill keep-ref meta (never infer from iteration).
+        const inKeepRefMeta = keepRefSet.has(dk);
         return {
           selectedDateKey: dk,
           inReferencePool: !inTravel,

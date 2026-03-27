@@ -2876,8 +2876,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     });
-    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+    simulatePastSelectedDaysShared.mockImplementation(async ({
+      selectedDateKeysLocal,
+      forceModeledOutputKeepReferencePoolDateKeysLocal,
+    }: any) => {
       const selected = Array.from((selectedDateKeysLocal ?? []) as string[]).sort();
+      const keepRefLocals = forceModeledOutputKeepReferencePoolDateKeysLocal
+        ? Array.from(forceModeledOutputKeepReferencePoolDateKeysLocal as Set<string>).sort()
+        : [];
       return {
         simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
         simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
@@ -2885,6 +2891,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
+        gapfillForceModeledKeepRefLocalDateKeys: keepRefLocals.length > 0 ? keepRefLocals : undefined,
+        gapfillForceModeledKeepRefUtcKeyCount: keepRefLocals.length > 0 ? keepRefLocals.length : undefined,
       };
     });
 
