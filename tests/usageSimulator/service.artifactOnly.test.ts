@@ -4277,7 +4277,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("does not widen scored references from exact-proof artifact intervals when canonical totals are missing", async () => {
+  it("backfills sparse canonical scored-day totals from full-window shared simulator when exact-match travel parity runs", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -4367,13 +4367,21 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
+      expect((out.modelAssumptions as any)?.canonicalArtifactSimulatedDayTotalsFullWindowBackfillCount).toBe(1);
+      expect((out.modelAssumptions as any)?.canonicalArtifactSimulatedDayTotalsFullWindowBackfillSource).toBe(
+        "selected_shared_full_window_simulated_day_totals"
+      );
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
-        availability: "missing_expected_reference",
-        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
-        missingDisplaySimCount: 1,
-        comparableDateCount: 0,
+        availability: "available",
+        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE",
+        matches: true,
+        mismatchCount: 0,
+        missingDisplaySimCount: 0,
+        comparableDateCount: 1,
+        complete: true,
       });
-      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual(["2026-01-01"]);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual([]);
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         exactProofSatisfied: true,

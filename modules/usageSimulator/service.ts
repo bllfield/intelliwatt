@@ -2581,6 +2581,33 @@ export async function buildGapfillCompareSimShared(args: {
     canonicalArtifactSimulatedDayTotalsByDate,
     compactCanonicalDateKeys
   );
+  // Full-window selected-days compare: artifact-side canonical simulated-day totals can be sparse
+  // (travel/vacant + stitched keys only) while the shared full-window run already produced per-day
+  // totals for scored test dates. Backfill canonical map from that simulator-owned map so display
+  // parity and artifact reference rows align without using actual usage as simulated display.
+  if (
+    compareCalculationScope === "full_window_shared_path_then_scored_day_filter" &&
+    selectedTestDailyTotalsByDate != null &&
+    selectedTestDailyTotalsByDate.size > 0
+  ) {
+    let fullWindowSharedCanonicalBackfillCount = 0;
+    for (const dk of Array.from(boundedTestDateKeysLocal)) {
+      const raw = (canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown>)[dk];
+      if (Number.isFinite(Number(raw))) continue;
+      const fromFresh = selectedTestDailyTotalsByDate.get(dk);
+      if (!Number.isFinite(Number(fromFresh))) continue;
+      (canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>)[dk] = round2Local(
+        Number(fromFresh) || 0
+      );
+      fullWindowSharedCanonicalBackfillCount++;
+    }
+    if (fullWindowSharedCanonicalBackfillCount > 0) {
+      (modelAssumptions as any).canonicalArtifactSimulatedDayTotalsFullWindowBackfillCount =
+        fullWindowSharedCanonicalBackfillCount;
+      (modelAssumptions as any).canonicalArtifactSimulatedDayTotalsFullWindowBackfillSource =
+        "selected_shared_full_window_simulated_day_totals";
+    }
+  }
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_meta_read_done", {
       preservedMetaCanonicalKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
