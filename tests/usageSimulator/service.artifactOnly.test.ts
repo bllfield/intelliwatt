@@ -3128,6 +3128,136 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("resolves compact scoped artifact canonical totals when meta keys are ISO-normalized", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+      },
+    });
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-iso-meta-keys",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 24 * 5,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-01T00:00:00.000Z": 24,
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 120 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+      const selected = Array.from((selectedDateKeysLocal ?? []) as string[]).sort();
+      return {
+        simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+        simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
+        pastDayCounts: {},
+        weatherSourceSummary: "actual_only",
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+      };
+    });
+    const selectedCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(simulatePastSelectedDaysShared.mock.calls.slice(selectedCallsBefore)).toHaveLength(1);
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect((out.modelAssumptions as any)?.artifactReferenceDayCountUsed).toBe(1);
+    }
+  });
+
+  it("fills scored-day artifact canonical from daily SIMULATED when meta omits bounded date keys", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+      },
+    });
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-daily-augment-canonical",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96 * 5,
+          totalKwh: 24 * 5,
+          start: "2026-01-01",
+          end: "2026-01-05",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {},
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 120 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockImplementation(async ({ selectedDateKeysLocal }: any) => {
+      const selected = Array.from((selectedDateKeysLocal ?? []) as string[]).sort();
+      return {
+        simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
+        simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
+        pastDayCounts: {},
+        weatherSourceSummary: "actual_only",
+        weatherKindUsed: "ACTUAL_LAST_YEAR",
+      };
+    });
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-05" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
+      expect((out.modelAssumptions as any)?.artifactReferenceDayCountUsed).toBe(1);
+    }
+  });
+
   it("does not double-count selected-day totals when simulatedDayResults and intervals both exist", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
@@ -4105,7 +4235,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 96 * testDates.length, totalKwh: 24 * testDates.length, start: testDates[0], end: testDates[testDates.length - 1] },
         meta: { curveShapingVersion: "shared_curve_v2", excludedDateKeysFingerprint: "", weatherSourceSummary: "actual_only" },
-        daily: testDates.map((date) => ({ date, kwh: 24, source: "SIMULATED" })),
+        daily: testDates.map((date) => ({ date, kwh: 24, source: "ACTUAL" })),
         monthly: [{ month: "2026-01", kwh: 24 * testDates.length }],
         series: {},
       },
@@ -4175,7 +4305,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           },
         },
         daily: [
-          { date: "2026-01-01", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-01", kwh: 24, source: "ACTUAL" },
           { date: "2026-01-02", kwh: 24, source: "ACTUAL" },
           { date: "2026-01-03", kwh: 24, source: "SIMULATED" },
         ],

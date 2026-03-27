@@ -856,7 +856,7 @@ function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalA
   return out;
 }
 
-/** Meta read scoped to explicit date keys only (compact compare_core: avoid materializing full-year maps). */
+/** Meta read scoped to explicit date keys only (compact compare_core: avoid building a full-year output map). */
 function readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
   dataset: any,
   dateKeys: Set<string>
@@ -866,11 +866,38 @@ function readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
     (dataset as any)?.[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: CanonicalArtifactSimulatedDayTotalsByDate = {};
-  for (const dk of Array.from(dateKeys)) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    const value = (raw as Record<string, unknown>)[dk];
-    if (value === undefined) continue;
+  for (const [date, value] of Object.entries(raw as Record<string, unknown>)) {
+    const dk = String(date ?? "").slice(0, 10);
     const kwh = Number(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !Number.isFinite(kwh)) continue;
+    if (!dateKeys.has(dk)) continue;
+    out[dk] = round2Local(kwh);
+  }
+  return out;
+}
+
+/**
+ * When meta omits a bounded date key but the persisted artifact `daily` row is simulator-owned
+ * (`source: SIMULATED`), use that row's kWh as the same artifact-side reference authority for
+ * scored-day / parity display (no ACTUAL / passthrough rows).
+ */
+function augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(
+  dataset: any,
+  base: CanonicalArtifactSimulatedDayTotalsByDate,
+  limitDateKeys: Set<string>
+): CanonicalArtifactSimulatedDayTotalsByDate {
+  if (limitDateKeys.size === 0) return base;
+  const out: CanonicalArtifactSimulatedDayTotalsByDate = { ...base };
+  const daily = Array.isArray((dataset as any)?.daily)
+    ? ((dataset as any).daily as Array<{ date?: string; kwh?: number; source?: string }>)
+    : [];
+  for (const row of daily) {
+    const dk = String(row?.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !limitDateKeys.has(dk)) continue;
+    if (out[dk] !== undefined && Number.isFinite(Number(out[dk]))) continue;
+    const src = String(row?.source ?? "").trim().toUpperCase();
+    if (src !== "SIMULATED") continue;
+    const kwh = Number(row?.kwh);
     if (!Number.isFinite(kwh)) continue;
     out[dk] = round2Local(kwh);
   }
@@ -2546,9 +2573,14 @@ export async function buildGapfillCompareSimShared(args: {
       boundedTestDateKeyCount: boundedTestDateKeysLocal.size,
     });
   }
-  const canonicalArtifactSimulatedDayTotalsByDate = compareCoreMemoryReducedPath
+  let canonicalArtifactSimulatedDayTotalsByDate = compareCoreMemoryReducedPath
     ? readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(dataset, compactCanonicalDateKeys)
     : readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  canonicalArtifactSimulatedDayTotalsByDate = augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(
+    dataset,
+    canonicalArtifactSimulatedDayTotalsByDate,
+    compactCanonicalDateKeys
+  );
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_meta_read_done", {
       preservedMetaCanonicalKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
