@@ -839,6 +839,33 @@ function filterIntervalsToLocalDateKeys(
   return out;
 }
 
+/**
+ * When canonical per-day totals are sparse but interval rows exist for bounded keys, fill missing or
+ * non-finite map entries from interval sums (simulator-owned truth for those days).
+ */
+function mergeSparseDailyTotalsFromIntervalsForBoundedKeys(
+  totalsByDate: Map<string, number>,
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  boundedDateKeysLocal: ReadonlySet<string>,
+  timezone: string
+): void {
+  if (intervals.length === 0) return;
+  const fromIntervals = new Map<string, number>();
+  for (const p of intervals) {
+    const dk = dateKeyInTimezone(p.timestamp, timezone);
+    if (!boundedDateKeysLocal.has(dk)) continue;
+    fromIntervals.set(dk, (fromIntervals.get(dk) ?? 0) + (Number(p.kwh) || 0));
+  }
+  for (const dk of Array.from(boundedDateKeysLocal)) {
+    const iv = fromIntervals.get(dk);
+    if (iv === undefined || !Number.isFinite(iv)) continue;
+    const existing = totalsByDate.get(dk);
+    if (!Number.isFinite(Number(existing))) {
+      totalsByDate.set(dk, round2Local(iv));
+    }
+  }
+}
+
 const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
 
 function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalArtifactSimulatedDayTotalsByDate {
@@ -2159,6 +2186,12 @@ export async function buildGapfillCompareSimShared(args: {
             .filter(([dk]) => boundedTestDateKeysLocal.has(String(dk).slice(0, 10)))
             .map(([dk, kwh]) => [String(dk).slice(0, 10), round2Local(Number(kwh) || 0)])
         );
+        mergeSparseDailyTotalsFromIntervalsForBoundedKeys(
+          selectedTestDailyTotalsByDate,
+          simulatedTestIntervals,
+          boundedTestDateKeysLocal,
+          timezone
+        );
         freshParityWeatherSourceSummary = fullWindowResult.weatherSourceSummary;
         freshParityIntervals = filterIntervalsToLocalDateKeys(
           fullWindowResult.simulatedIntervals,
@@ -2248,6 +2281,12 @@ export async function buildGapfillCompareSimShared(args: {
           Array.from(sharedSelectedDaysResult.dailyTotalsByDate.entries()).filter(([dk]) =>
             boundedTestDateKeysLocal.has(dk)
           )
+        );
+        mergeSparseDailyTotalsFromIntervalsForBoundedKeys(
+          selectedTestDailyTotalsByDate,
+          simulatedTestIntervals,
+          boundedTestDateKeysLocal,
+          timezone
         );
         freshParityWeatherSourceSummary = sharedSelectedDaysResult.weatherSourceSummary;
         if (travelVacantParityDateKeySet.size > 0) {
@@ -2402,7 +2441,9 @@ export async function buildGapfillCompareSimShared(args: {
     });
   }
   const availableTestDateKeysFromSimulated =
-    compareFreshModeUsed === "selected_days" && selectedTestDailyTotalsByDate
+    compareFreshModeUsed === "selected_days" &&
+    selectedTestDailyTotalsByDate &&
+    selectedTestDailyTotalsByDate.size > 0
       ? new Set<string>(
           Array.from(selectedTestDailyTotalsByDate.keys()).filter((dk) => boundedTestDateKeysLocal.has(dk))
         )
@@ -2688,7 +2729,9 @@ export async function buildGapfillCompareSimShared(args: {
   });
 
   const freshDailyTotalsByDate =
-    compareFreshModeUsed === "selected_days" && selectedTestDailyTotalsByDate
+    compareFreshModeUsed === "selected_days" &&
+    selectedTestDailyTotalsByDate &&
+    selectedTestDailyTotalsByDate.size > 0
       ? new Map<string, number>(
           Array.from(selectedTestDailyTotalsByDate.entries())
             .filter(([dk]) => boundedTestDateKeysLocal.has(dk))
