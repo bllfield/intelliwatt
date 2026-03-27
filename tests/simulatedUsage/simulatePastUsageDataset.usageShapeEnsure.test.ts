@@ -544,4 +544,20 @@ describe("collectSimulatedDayLocalDateIntervalConflicts", () => {
       { localDate: "2026-01-01", intervalDerivedDateKeys: ["2026-01-02"] },
     ]);
   });
+
+  it("allows localDate when it is one of multiple interval-derived local calendar days (midnight span)", () => {
+    const conflicts = collectSimulatedDayLocalDateIntervalConflicts(
+      [
+        {
+          localDate: "2026-01-01",
+          intervals: [
+            { timestamp: "2026-01-01T12:00:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-01-02T12:00:00.000Z", kwh: 0.5 },
+          ],
+        } as any,
+      ],
+      tz
+    );
+    expect(conflicts).toEqual([]);
+  });
 });

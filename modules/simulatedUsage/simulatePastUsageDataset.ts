@@ -80,8 +80,10 @@ function simulatedDayResultIntersectsLocalDateKeys(
 
 /**
  * Interval timestamps → local date keys are authoritative for membership.
- * If `localDate` disagrees with interval-derived keys (or intervals have no valid keys), that is an
- * invariant violation — callers must not silently prefer `localDate` over intervals.
+ * A single simulated day may span two local calendar days (e.g. 15‑minute grid around local midnight);
+ * interval-derived keys may then be a set of size 2. That is valid as long as `localDate` is one of
+ * those keys. Violation: `localDate` is missing from interval-derived keys, invalid, or intervals
+ * produce no valid keys.
  */
 export type SimulatedDayLocalDateIntervalViolation = {
   localDate: string;
@@ -112,7 +114,7 @@ export function collectSimulatedDayLocalDateIntervalConflicts(
       out.push({ localDate: ld, intervalDerivedDateKeys: [] });
       continue;
     }
-    if (keys.size !== 1 || !keys.has(ld)) {
+    if (!keys.has(ld)) {
       out.push({ localDate: ld, intervalDerivedDateKeys: Array.from(keys).sort() });
     }
   }
