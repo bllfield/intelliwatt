@@ -2259,6 +2259,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     });
 
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({ includeSimulatedDayResults: true })
+    );
     expect(out.ok).toBe(false);
     if (!out.ok) {
       expect(out.status).toBe(500);
@@ -3572,6 +3575,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       const fullWindowCalls = simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBefore);
       expect(selectedDaysCalls).toHaveLength(0);
       expect(fullWindowCalls).toHaveLength(1);
+      expect(fullWindowCalls[0]?.[0]).toEqual(expect.objectContaining({ includeSimulatedDayResults: true }));
       expect(getIntervalDataFingerprint.mock.calls.length).toBe(intervalFingerprintCallsBefore);
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
@@ -3882,6 +3886,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(phases).toContain("build_shared_compare_compact_compare_core_memory_reduced");
       expect(selectedDaysCalls).toHaveLength(0);
       expect(fullWindowCalls).toHaveLength(1);
+      expect(fullWindowCalls[0]?.[0]).toEqual(expect.objectContaining({ includeSimulatedDayResults: true }));
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         mismatchCount: 0,

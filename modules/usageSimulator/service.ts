@@ -467,7 +467,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       endDate: identityWindowResolved.endDate,
       timezone,
       buildPathKind: "lab_validation",
-      includeSimulatedDayResults: false,
+      includeSimulatedDayResults: true,
     });
     if (pastResult.dataset === null) {
       return {
@@ -1353,8 +1353,8 @@ export async function buildGapfillCompareSimShared(args: {
       endDate: identityWindowResolved.endDate,
       timezone,
       buildPathKind: "lab_validation",
-      // Keep inline ensure/rebuild memory-light so compare can finish in one request.
-      includeSimulatedDayResults: false,
+      // Exact artifact parity depends on canonical simulated-day totals from the shared build.
+      includeSimulatedDayResults: true,
     });
     if (pastResult.dataset === null) {
       return {
@@ -1956,7 +1956,7 @@ export async function buildGapfillCompareSimShared(args: {
         endDate: identityWindowResolved.endDate,
         timezone,
         buildPathKind: "lab_validation",
-        includeSimulatedDayResults: false,
+        includeSimulatedDayResults: true,
       });
       if (freshResult.simulatedIntervals === null) {
         return {

@@ -360,7 +360,7 @@ export async function buildAndSavePastForGapfillLab(args: {
     endDate,
     timezone,
     buildPathKind: "lab_validation",
-    includeSimulatedDayResults: false,
+    includeSimulatedDayResults: true,
   });
 
   if (!pastResult.dataset) {
