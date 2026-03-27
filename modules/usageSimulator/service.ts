@@ -1184,9 +1184,13 @@ export async function buildGapfillCompareSimShared(args: {
     new Set<string>(travelRangesToExcludeDateKeys(buildTravelRanges)),
     sharedCoverageWindow
   );
-  // Exact travel/vacant parity now compares saved canonical artifact totals against fresh canonical
-  // full-window totals, so artifact interval decoding is no longer required as a second truth path.
-  const exactTravelParityRequiresIntervalBackedArtifactTruth = false;
+  const exactTravelParityRequiresIntervalBackedArtifactTruth =
+    requireExactArtifactMatch && boundedTravelDateKeysLocal.size > 0;
+  if (exactTravelParityRequiresIntervalBackedArtifactTruth) {
+    // Exact travel/vacant parity must preserve full-year artifact identity ownership rather than
+    // allowing selected-days lightweight reads to change how the artifact is selected.
+    useSelectedDaysLightweightArtifactRead = false;
+  }
   const boundedTestDateKeysLocal = boundDateKeysToCoverageWindow(testDateKeysLocal, sharedCoverageWindow);
   const travelFingerprint = Array.from(boundedTravelDateKeysLocal).sort().join(",");
   const chartDateKeysLocal = enumerateDateKeysInclusive(canonicalWindow.startDate, canonicalWindow.endDate);
@@ -1236,9 +1240,9 @@ export async function buildGapfillCompareSimShared(args: {
   /**
    * Selected-days Gap-Fill compare_core: omit heavy chart/monthly/display materialization when the
    * client requested selected-days lightweight compare (diagnostics/full report off, no rebuild).
-   * Intentionally does NOT require `useSelectedDaysLightweightArtifactRead` so exact-identity
-   * selected-days compares can keep the lightweight artifact read while still running canonical
-   * fresh parity against the shared full-window path.
+   * Intentionally does NOT require `useSelectedDaysLightweightArtifactRead` — that flag is cleared
+   * when exact interval-backed travel/vacant parity forces non-lightweight artifact *selection*,
+   * but we still skip broad display/monthly materialization in that case (Vercel OOM mitigation).
    */
   const compareCoreMemoryReducedPath =
     selectedDaysLightweightArtifactRead === true &&
@@ -1997,11 +2001,11 @@ export async function buildGapfillCompareSimShared(args: {
             simulatedIntervals: [] as Array<{ timestamp: string; kwh: number }>,
             dailyTotalsByDate: new Map<string, number>(),
             canonicalSimulatedDayTotalsByDate: {} as Record<string, number>,
-          actualWxByDateKey: null as Map<
-            string,
-            { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
-          > | null,
-          weatherKindUsed: null as string | null,
+            actualWxByDateKey: null as Map<
+              string,
+              { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
+            > | null,
+            weatherKindUsed: null as string | null,
             weatherSourceSummary: weatherBasisUsed,
           };
         }
@@ -2087,29 +2091,10 @@ export async function buildGapfillCompareSimShared(args: {
       );
       freshParityWeatherSourceSummary = sharedSelectedDaysResult.weatherSourceSummary;
       if (travelVacantParityDateKeySet.size > 0) {
-        throwIfGapfillCompareAborted(abortSignal);
-        const parityFullWindowResult = await runFullWindowFreshExecution();
-        if (!parityFullWindowResult.ok) {
-          return {
-            ok: false,
-            status: 500,
-            body: {
-              ok: false,
-              error: "fresh_compare_simulation_failed",
-              message: parityFullWindowResult.error,
-              mode: "artifact_only",
-              scenarioId: sharedScenarioCacheId,
-            },
-          };
-        }
-        freshParityIntervals = filterIntervalsToLocalDateKeys(
-          parityFullWindowResult.simulatedIntervals,
-          timezone,
-          travelVacantParityDateKeySet
-        );
+        freshParityIntervals = [];
         freshParityCanonicalSimulatedDayTotalsByDate = Object.fromEntries(
-          Object.entries(parityFullWindowResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
-            travelVacantParityDateKeySet.has(dk)
+          Object.entries(sharedSelectedDaysResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
+            travelVacantParityDateKeySet.has(String(dk).slice(0, 10))
           )
         );
       } else {
@@ -2174,12 +2159,12 @@ export async function buildGapfillCompareSimShared(args: {
       await reportPhase("build_shared_compare_sim_ready", {
         compareFreshModeUsed,
         compareSimSource,
-        reusedSingleSelectedDaysExecution: false,
+        reusedSingleSelectedDaysExecution: travelVacantParityDateKeySet.size > 0,
         selectedAndParityDateKeysCount: selectedAndParityDateKeySet.size,
         simulatedTestIntervalsCount: simulatedTestIntervals.length,
         freshParityIntervalsCount: freshParityIntervals.length,
         parityFreshSource:
-          travelVacantParityDateKeySet.size > 0 ? "shared_full_window_calc" : "none_requested",
+          travelVacantParityDateKeySet.size > 0 ? "shared_selected_days_calc" : "none_requested",
       });
     } else {
       throwIfGapfillCompareAborted(abortSignal);
