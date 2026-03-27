@@ -2410,6 +2410,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       includeFreshCompareCalc: true,
     });
 
+    expect(simulatePastFullWindowShared).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buildPathKind: "lab_validation",
+        emitAllIntervals: false,
+      })
+    );
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");

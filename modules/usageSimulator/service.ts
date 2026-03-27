@@ -2079,6 +2079,11 @@ export async function buildGapfillCompareSimShared(args: {
         timezone,
         buildPathKind: "lab_validation",
         includeSimulatedDayResults: true,
+        // Same as simulatePastSelectedDaysShared: do not emit passthrough actual intervals for
+        // non-simulated days. Full-window compare only filters/scores simulated days; materializing
+        // ~365×96 interval rows here was a major compare_core OOM source on Vercel when
+        // compareFreshMode === "full_window".
+        emitAllIntervals: false,
         forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
         ...(actualIntervalsForSharedPastSim != null ? { actualIntervals: actualIntervalsForSharedPastSim } : {}),
