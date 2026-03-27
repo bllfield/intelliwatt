@@ -51,6 +51,8 @@
 
 - Avoid `&&` in command examples; keep one command per line.
 
+**Compare / simulation integrity:** GapFill and shared Past compare must not use hidden fallbacks. Missing simulated data stays missing (explicit nulls/reason codes). Actual usage must never populate simulated-side fields for parity or scoring. Simulated-day rows must not silently prefer `localDate` over interval-derived local dates—invariant violations fail the shared compare path with an explicit error/reason code.
+
 **Authoritative docs:**
 
 - Workflow overview: `docs/QUICK_START.md` (Development & Deploy Workflow)

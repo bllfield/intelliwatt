@@ -70,6 +70,7 @@ vi.mock("@/lib/admin/gapfillLab", async (importOriginal) => {
 });
 
 import {
+  collectSimulatedDayLocalDateIntervalConflicts,
   simulatePastUsageDataset,
   simulatePastFullWindowShared,
   simulatePastSelectedDaysShared,
@@ -311,7 +312,7 @@ describe("shared sim usage-shape ensure path", () => {
     }
   });
 
-  it("filters selected-day results by interval timestamps even when localDate conflicts", async () => {
+  it("fails selected-day shared path when localDate conflicts with interval-derived local date keys", async () => {
     getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
     buildPastSimulatedBaselineV1.mockImplementationOnce(() => ({
       intervals: [
@@ -348,11 +349,13 @@ describe("shared sim usage-shape ensure path", () => {
       selectedDateKeysLocal: new Set(["2026-01-01"]),
     });
 
-    expect(out.simulatedIntervals).not.toBeNull();
-    if (out.simulatedIntervals !== null) {
-      expect(out.simulatedIntervals).toHaveLength(2);
-      expect(out.simulatedDayResults.map((row) => row.localDate)).toEqual(["2026-01-02"]);
-    }
+    expect(out.simulatedIntervals).toBeNull();
+    expect("error" in out ? out.error : null).toBe("simulated_day_local_date_interval_invariant_violation");
+    const failed = out as { invariantViolations?: { localDate: string; intervalDerivedDateKeys: string[] }[] };
+    expect(Array.isArray(failed.invariantViolations)).toBe(true);
+    expect(failed.invariantViolations).toEqual([
+      { localDate: "2026-01-02", intervalDerivedDateKeys: ["2026-01-01"] },
+    ]);
   });
 
   it("does not admit empty-interval selected-day results through localDate metadata", async () => {
@@ -500,5 +503,45 @@ describe("shared sim usage-shape ensure path", () => {
 
     expect(out.dataset).not.toBeNull();
     expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.collectSimulatedDayResultsDateKeys).toBeUndefined();
+  });
+});
+
+describe("collectSimulatedDayLocalDateIntervalConflicts", () => {
+  const tz = "America/Chicago";
+
+  it("returns empty when intervals are empty (no interval-backed membership to check)", () => {
+    const conflicts = collectSimulatedDayLocalDateIntervalConflicts(
+      [{ localDate: "2026-01-01", intervals: [] } as any],
+      tz
+    );
+    expect(conflicts).toEqual([]);
+  });
+
+  it("returns empty when localDate matches the single interval-derived local date key", () => {
+    const conflicts = collectSimulatedDayLocalDateIntervalConflicts(
+      [
+        {
+          localDate: "2026-01-01",
+          intervals: [{ timestamp: "2026-01-01T12:00:00.000Z", kwh: 1 }],
+        } as any,
+      ],
+      tz
+    );
+    expect(conflicts).toEqual([]);
+  });
+
+  it("flags when localDate disagrees with interval-derived keys", () => {
+    const conflicts = collectSimulatedDayLocalDateIntervalConflicts(
+      [
+        {
+          localDate: "2026-01-01",
+          intervals: [{ timestamp: "2026-01-02T12:00:00.000Z", kwh: 1 }],
+        } as any,
+      ],
+      tz
+    );
+    expect(conflicts).toEqual([
+      { localDate: "2026-01-01", intervalDerivedDateKeys: ["2026-01-02"] },
+    ]);
   });
 });

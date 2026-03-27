@@ -43,10 +43,9 @@ import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
-// Keep the platform deadline above the route's own 120s compare/rebuild guards so
-// timeout responses have headroom to serialize, while still finishing before the
-// admin UI's 150s client timeout.
-export const maxDuration = 135;
+// Keep the platform deadline aligned with the route's own compare/rebuild guards so
+// Vercel terminates stuck requests before the admin UI's client timeout fires first.
+export const maxDuration = 120;
 // Keep route compare-core timeout below client timeout so route-side
 // classification (failedStep/reasonCode) reaches UI before browser abort.
 const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
@@ -3089,16 +3088,15 @@ export async function POST(req: NextRequest) {
     .sort()
     .map((date) => {
       const actualDayKwh = round2(actualDailyByDate.get(date) ?? 0);
-      const freshCompareSimDayKwh = round2(freshDailyByDate.get(date) ?? 0);
-      const displayDay = displayDailyByDate.get(date);
+      const hasFreshCompareSim = freshDailyByDate.has(date);
+      const freshCompareSimDayKwh = hasFreshCompareSim ? round2(freshDailyByDate.get(date) ?? 0) : null;
       const parityDisplayDay = parityDisplayDailyByDate.get(date);
-      const parityNotApplicableForScoredActualDay = !parityDisplayDay && displayDay?.source === "ACTUAL";
       const displayedPastStyleSimDayKwh =
         parityDisplayDay && parityDisplayDay.source === "SIMULATED"
           ? round2(parityDisplayDay.simKwh)
           : null;
       const parityMatch =
-        parityNotApplicableForScoredActualDay || displayedPastStyleSimDayKwh == null
+        displayedPastStyleSimDayKwh == null || freshCompareSimDayKwh == null
           ? null
           : round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
       const dow = getLocalDayOfWeekFromDateKey(date, scoringTimezone);
@@ -3119,37 +3117,44 @@ export async function POST(req: NextRequest) {
       const maxTempF = Number((weather as any)?.maxTempF);
       const hdd65 = Number((weather as any)?.hdd65);
       const cdd65 = Number((weather as any)?.cdd65);
+      const parityAvailability =
+        displayedPastStyleSimDayKwh == null
+          ? "missing_expected_reference"
+          : !hasFreshCompareSim
+            ? "missing_fresh_compare_sim"
+            : "available";
+      const parityReasonCode =
+        displayedPastStyleSimDayKwh == null
+          ? "ARTIFACT_SIMULATED_REFERENCE_MISSING"
+          : !hasFreshCompareSim
+            ? "SCORED_DAY_FRESH_COMPARE_SIM_MISSING"
+            : "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE";
+      const parityDisplayValueKind =
+        displayedPastStyleSimDayKwh == null
+          ? "missing_display_sim_reference"
+          : !hasFreshCompareSim
+            ? "missing_fresh_compare_sim_day_total"
+            : "artifact_simulated_day_total";
       return {
         localDate: date,
         actualDayKwh,
         freshCompareSimDayKwh,
         displayedPastStyleSimDayKwh,
-        actualVsFreshErrorKwh: round2(actualDayKwh - freshCompareSimDayKwh),
+        actualVsFreshErrorKwh:
+          hasFreshCompareSim && freshCompareSimDayKwh != null
+            ? round2(actualDayKwh - freshCompareSimDayKwh)
+            : null,
         displayVsFreshParityMatch: parityMatch,
-        parityAvailability: parityNotApplicableForScoredActualDay
-          ? "not_applicable_scored_actual_days"
-          : displayedPastStyleSimDayKwh == null
-            ? "missing_expected_reference"
-            : "available",
+        parityAvailability,
         parityDisplaySourceUsed:
           ((sharedSim as any)?.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed as string | undefined) ??
           "canonical_artifact_simulated_day_totals",
         artifactSimulatedDayReferenceSource:
           ((sharedSim as any)?.artifactSimulatedDayReferenceSource as string | undefined) ??
           "canonical_artifact_simulated_day_totals",
-        parityDisplayValueKind:
-          parityNotApplicableForScoredActualDay
-            ? "not_applicable_scored_actual_day"
-            : displayedPastStyleSimDayKwh == null
-              ? "missing_display_sim_reference"
-              : "artifact_simulated_day_total",
-        parityReasonCode:
-          parityNotApplicableForScoredActualDay
-            ? "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS"
-            : displayedPastStyleSimDayKwh == null
-              ? "ARTIFACT_SIMULATED_REFERENCE_MISSING"
-              : "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE",
-        scoredDayDisplaySource: displayDay?.source ?? null,
+        parityDisplayValueKind,
+        parityReasonCode,
+        scoredDayDisplaySource: hasFreshCompareSim ? ("SIMULATED" as const) : ("MISSING_REFERENCE" as const),
         dayType: weekend ? "weekend" : "weekday",
         weatherBasis:
           String((weather as any)?.weatherBasisUsed ?? (sharedSim as any).weatherBasisUsed ?? "") || null,
@@ -3185,11 +3190,14 @@ export async function POST(req: NextRequest) {
   const scoredRowsWithMiss = scoredDayTruthRows.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) > 0.01);
   const worstErrorDates = scoredRowsWithMiss
     .slice()
-    .sort((a, b) => Math.abs(b.actualVsFreshErrorKwh) - Math.abs(a.actualVsFreshErrorKwh))
+    .sort(
+      (a, b) =>
+        Math.abs(Number(b.actualVsFreshErrorKwh) || 0) - Math.abs(Number(a.actualVsFreshErrorKwh) || 0)
+    )
     .slice(0, 10)
     .map((row) => ({
       localDate: row.localDate,
-      absErrorKwh: round2(Math.abs(row.actualVsFreshErrorKwh)),
+      absErrorKwh: round2(Math.abs(Number(row.actualVsFreshErrorKwh) || 0)),
       summary: row.reasonCode ?? row.fallbackLevel ?? row.selectedReferenceMatchTier ?? "no_reason_code",
     }));
   const countIf = (pred: (row: (typeof scoredDayTruthRows)[number]) => boolean): number =>
@@ -3353,9 +3361,18 @@ export async function POST(req: NextRequest) {
       const localDate = String(row.localDate ?? "").slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) continue;
       const existing = byDate.get(localDate);
+      const scoredSimKwh =
+        row.freshCompareSimDayKwh == null ? 0 : round2(Number(row.freshCompareSimDayKwh));
+      const scoredSimSource: "SIMULATED" | "MISSING_REFERENCE" =
+        row.freshCompareSimDayKwh == null ? "MISSING_REFERENCE" : "SIMULATED";
       if (existing) {
+        const overlay =
+          scoredSimSource === "SIMULATED"
+            ? { simKwh: scoredSimKwh, source: "SIMULATED" as const }
+            : { simKwh: 0, source: "MISSING_REFERENCE" as const };
         byDate.set(localDate, {
           ...existing,
+          ...overlay,
           selectedTestDate: true,
           status: row.parityAvailability ?? null,
           reasonCode: row.parityReasonCode ?? null,
@@ -3364,11 +3381,8 @@ export async function POST(req: NextRequest) {
       }
       byDate.set(localDate, {
         date: localDate,
-        simKwh:
-          row.scoredDayDisplaySource === "ACTUAL"
-            ? round2(Number(row.actualDayKwh) || 0)
-            : 0,
-        source: row.scoredDayDisplaySource === "ACTUAL" ? "ACTUAL" : "MISSING_REFERENCE",
+        simKwh: scoredSimKwh,
+        source: scoredSimSource,
         selectedTestDate: true,
         status: row.parityAvailability ?? "missing_expected_reference",
         reasonCode: row.parityReasonCode ?? "ARTIFACT_SIMULATED_REFERENCE_MISSING",

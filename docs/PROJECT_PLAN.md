@@ -2,6 +2,13 @@
 
 ## Project-wide engineering rule
 
+### Compare / simulation integrity (non-negotiable)
+
+- **No hidden fallbacks** in GapFill compare or shared Past fresh execution: if canonical simulated output is absent, responses expose explicit missing/invariant state—never “safe” numeric substitutes.
+- **Actual never stands in for simulated** on the simulated side of scored-day or parity comparisons.
+- **Single authority**: shared outputs come from `simulatePastUsageDataset` / `simulatePastFullWindowShared` / `simulatePastSelectedDaysShared` plus artifact canonical fields—not a second recomputed simulated total when the canonical path fails.
+- **localDate vs intervals**: interval timestamps determine local-date membership; if `SimulatedDayResult.localDate` disagrees, the shared path fails loudly (`simulated_day_local_date_interval_invariant_violation`).
+
 - No duplicate functional logic is allowed across files.
 - Shared behavior must be implemented once in a canonical module and imported everywhere else.
 - Do not create a second derivation path for the same output or artifact.

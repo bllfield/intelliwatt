@@ -78,6 +78,47 @@ function simulatedDayResultIntersectsLocalDateKeys(
   return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
 }
 
+/**
+ * Interval timestamps → local date keys are authoritative for membership.
+ * If `localDate` disagrees with interval-derived keys (or intervals have no valid keys), that is an
+ * invariant violation — callers must not silently prefer `localDate` over intervals.
+ */
+export type SimulatedDayLocalDateIntervalViolation = {
+  localDate: string;
+  intervalDerivedDateKeys: string[];
+};
+
+export function collectSimulatedDayLocalDateIntervalConflicts(
+  results: SimulatedDayResult[] | undefined,
+  timezone: string
+): SimulatedDayLocalDateIntervalViolation[] {
+  const out: SimulatedDayLocalDateIntervalViolation[] = [];
+  const tz = String(timezone ?? "").trim();
+  if (!tz) return out;
+  for (const r of results ?? []) {
+    const ivs = Array.isArray(r?.intervals) ? r.intervals : [];
+    if (ivs.length === 0) continue;
+    const keys = new Set<string>();
+    for (const iv of ivs) {
+      const dk = dateKeyInTimezone(String(iv?.timestamp ?? ""), tz);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) keys.add(dk);
+    }
+    const ld = String(r?.localDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ld)) {
+      out.push({ localDate: ld || "(invalid)", intervalDerivedDateKeys: Array.from(keys).sort() });
+      continue;
+    }
+    if (keys.size === 0) {
+      out.push({ localDate: ld, intervalDerivedDateKeys: [] });
+      continue;
+    }
+    if (keys.size !== 1 || !keys.has(ld)) {
+      out.push({ localDate: ld, intervalDerivedDateKeys: Array.from(keys).sort() });
+    }
+  }
+  return out;
+}
+
 function summarizePastWindowWeatherProvenance(args: {
   actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherFallbackReason: WeatherFallbackReason;
@@ -248,6 +289,13 @@ export type SimulatePastSelectedDaysResult = {
   profileAutoBuilt?: boolean;
 };
 
+/** Hard failure from simulatePastSelectedDaysShared (no silent recovery). */
+export type SimulatePastSelectedDaysSharedFailure = {
+  simulatedIntervals: null;
+  error: string;
+  invariantViolations?: SimulatedDayLocalDateIntervalViolation[];
+};
+
 export type SimulatePastFullWindowSharedResult = {
   simulatedIntervals: Array<{ timestamp: string; kwh: number }>;
   simulatedDayResults?: SimulatedDayResult[];
@@ -260,6 +308,13 @@ export type SimulatePastFullWindowSharedResult = {
   weatherFallbackReason: string | null;
   usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
   profileAutoBuilt?: boolean;
+};
+
+/** Hard failure from simulatePastFullWindowShared (no silent recovery). */
+export type SimulatePastFullWindowSharedFailure = {
+  simulatedIntervals: null;
+  error: string;
+  invariantViolations?: SimulatedDayLocalDateIntervalViolation[];
 };
 
 export type UsageShapeProfileIdentity = {
@@ -766,7 +821,7 @@ export async function simulatePastUsageDataset(
 
 export async function simulatePastFullWindowShared(
   args: SimulatePastUsageDatasetArgs
-): Promise<SimulatePastFullWindowSharedResult | { simulatedIntervals: null; error: string }> {
+): Promise<SimulatePastFullWindowSharedResult | SimulatePastFullWindowSharedFailure> {
   const {
     startDate,
     endDate,
@@ -785,6 +840,25 @@ export async function simulatePastFullWindowShared(
         simulatedIntervals: null,
         error: sharedResult.error ?? "simulatePastUsageDataset failed",
       };
+    }
+    const timezoneResolved = String(args.timezone ?? "").trim();
+    if (
+      includeSimulatedDayResults &&
+      Array.isArray(sharedResult.simulatedDayResults) &&
+      sharedResult.simulatedDayResults.length > 0 &&
+      timezoneResolved
+    ) {
+      const localDateIntervalConflicts = collectSimulatedDayLocalDateIntervalConflicts(
+        sharedResult.simulatedDayResults,
+        timezoneResolved
+      );
+      if (localDateIntervalConflicts.length > 0) {
+        return {
+          simulatedIntervals: null,
+          error: "simulated_day_local_date_interval_invariant_violation",
+          invariantViolations: localDateIntervalConflicts,
+        };
+      }
     }
     const simulatedIntervals = Array.isArray((sharedResult.dataset as any)?.series?.intervals15)
       ? (((sharedResult.dataset as any).series.intervals15 as Array<{ timestamp?: string; kwh?: number }>).map((row) => ({
@@ -825,7 +899,7 @@ export async function simulatePastFullWindowShared(
  */
 export async function simulatePastSelectedDaysShared(
   args: SimulatePastSelectedDaysArgs
-): Promise<SimulatePastSelectedDaysResult | { simulatedIntervals: null; error: string }> {
+): Promise<SimulatePastSelectedDaysResult | SimulatePastSelectedDaysSharedFailure> {
   const {
     houseId,
     userId,
@@ -885,6 +959,12 @@ export async function simulatePastSelectedDaysShared(
       return {
         simulatedIntervals: null,
         error: sharedResult.error ?? "simulatePastFullWindowShared failed",
+        ...("invariantViolations" in sharedResult &&
+        Array.isArray((sharedResult as SimulatePastFullWindowSharedFailure).invariantViolations)
+          ? {
+              invariantViolations: (sharedResult as SimulatePastFullWindowSharedFailure).invariantViolations,
+            }
+          : {}),
       };
     }
     const selectedIntervals = sharedResult.simulatedIntervals.filter((row) =>

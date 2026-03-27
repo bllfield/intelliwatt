@@ -681,8 +681,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       ...sharedPastDaily,
       {
         date: "2026-01-01",
-        simKwh: 0,
-        source: "MISSING_REFERENCE",
+        simKwh: 0.5,
+        source: "SIMULATED",
         selectedTestDate: true,
         status: "missing_expected_reference",
         reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
@@ -1884,7 +1884,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displayVsFreshParityForScoredDays?.complete).toBe(false);
   });
 
-  it("marks scored actual days as not-applicable parity when no artifact simulated-day reference exists", async () => {
+  it("does not label scored-day compare sim as ACTUAL when chart daily rows are ACTUAL but fresh shared sim exists", async () => {
     mockCompareResultOnce({
       ok: true,
       artifactAutoRebuilt: false,
@@ -1900,14 +1900,14 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         matches: null,
         mismatchCount: 0,
         mismatchSampleDates: [],
-        missingDisplaySimCount: 0,
-        missingDisplaySimSampleDates: [],
+        missingDisplaySimCount: 1,
+        missingDisplaySimSampleDates: ["2026-01-01"],
         comparableDateCount: 0,
         complete: null,
-        availability: "not_applicable_scored_actual_days",
-        reasonCode: "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS",
+        availability: "missing_expected_reference",
+        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
         parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals",
-        parityDisplayValueKind: "not_applicable_scored_actual_day",
+        parityDisplayValueKind: "missing_display_sim_reference",
         scope: "scored_test_days_local",
         granularity: "daily_kwh_rounded_2dp",
         comparisonBasis: "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc",
@@ -1947,17 +1947,19 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
     expect(body.displayVsFreshParityForScoredDays?.matches).toBeNull();
     expect(body.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
-    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
-    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual([]);
-    expect(body.displayVsFreshParityForScoredDays?.availability).toBe("not_applicable_scored_actual_days");
-    expect(body.displayVsFreshParityForScoredDays?.reasonCode).toBe("SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS");
+    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(1);
+    expect(body.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual(["2026-01-01"]);
+    expect(body.displayVsFreshParityForScoredDays?.availability).toBe("missing_expected_reference");
+    expect(body.displayVsFreshParityForScoredDays?.reasonCode).toBe("ARTIFACT_SIMULATED_REFERENCE_MISSING");
     expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);
     expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBeNull();
-    expect(body.scoredDayTruthRows?.[0]?.parityAvailability).toBe("not_applicable_scored_actual_days");
-    expect(body.scoredDayTruthRows?.[0]?.parityReasonCode).toBe("SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS");
-    expect(body.scoredDayTruthRows?.[0]?.parityDisplayValueKind).toBe("not_applicable_scored_actual_day");
+    expect(body.scoredDayTruthRows?.[0]?.parityAvailability).toBe("missing_expected_reference");
+    expect(body.scoredDayTruthRows?.[0]?.parityReasonCode).toBe("ARTIFACT_SIMULATED_REFERENCE_MISSING");
+    expect(body.scoredDayTruthRows?.[0]?.parityDisplayValueKind).toBe("missing_display_sim_reference");
     expect(body.scoredDayTruthRows?.[0]?.artifactSimulatedDayReferenceSource).toBe("canonical_artifact_simulated_day_totals");
-    expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).toBe("ACTUAL");
+    expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).toBe("SIMULATED");
+    expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).not.toBe("ACTUAL");
   });
 
   it("keeps mixed ACTUAL scored rows truthful when only other scored dates have simulated parity references", async () => {
@@ -2045,16 +2047,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(row0316).toMatchObject({
       actualDayKwh: 12,
       displayedPastStyleSimDayKwh: null,
-      parityAvailability: "not_applicable_scored_actual_days",
-      parityReasonCode: "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS",
-      scoredDayDisplaySource: "ACTUAL",
+      parityAvailability: "missing_expected_reference",
+      parityReasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+      scoredDayDisplaySource: "MISSING_REFERENCE",
     });
     expect(row0321).toMatchObject({
       actualDayKwh: 12,
       displayedPastStyleSimDayKwh: null,
-      parityAvailability: "not_applicable_scored_actual_days",
-      parityReasonCode: "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS",
-      scoredDayDisplaySource: "ACTUAL",
+      parityAvailability: "missing_expected_reference",
+      parityReasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+      scoredDayDisplaySource: "MISSING_REFERENCE",
     });
   });
 
@@ -2129,8 +2131,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displaySimulated?.daily?.map((row: any) => row.date)).toEqual(["2026-01-01", "2026-01-02"]);
     expect(missingRow).toMatchObject({
       date: "2026-01-02",
-      simKwh: 0,
-      source: "MISSING_REFERENCE",
+      simKwh: 0.5,
+      source: "SIMULATED",
       selectedTestDate: true,
       status: "missing_expected_reference",
       reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",

@@ -716,19 +716,15 @@ export type GapfillCompareSimSharedResult =
         missingDisplaySimSampleDates?: string[];
         comparableDateCount?: number;
         complete?: boolean | null;
-        availability?:
-          | "available"
-          | "not_applicable_scored_actual_days"
-          | "missing_expected_reference";
-        reasonCode?:
-          | "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE"
-          | "SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS"
-          | "ARTIFACT_SIMULATED_REFERENCE_MISSING";
+        availability?: "available" | "missing_expected_reference";
+        reasonCode?: "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE" | "ARTIFACT_SIMULATED_REFERENCE_MISSING";
+        missingFreshCompareSimCount?: number;
+        missingFreshCompareSimSampleDates?: string[];
         explanation?: string;
         scope: "scored_test_days_local";
         granularity: "daily_kwh_rounded_2dp";
         parityDisplaySourceUsed?: "canonical_artifact_simulated_day_totals";
-        parityDisplayValueKind?: "artifact_simulated_day_total" | "not_applicable_scored_actual_day";
+        parityDisplayValueKind?: "artifact_simulated_day_total" | "missing_display_sim_reference";
         comparisonBasis:
           | "display_shared_artifact_vs_compare_shared_full_window_then_filter"
           | "display_shared_artifact_vs_compare_artifact_filter_only"
@@ -1959,11 +1955,23 @@ export async function buildGapfillCompareSimShared(args: {
         includeSimulatedDayResults: true,
       });
       if (freshResult.simulatedIntervals === null) {
+        const code = String(freshResult.error ?? "");
+        const inv =
+          "invariantViolations" in freshResult &&
+          Array.isArray((freshResult as { invariantViolations?: unknown }).invariantViolations)
+            ? (freshResult as { invariantViolations: unknown }).invariantViolations
+            : undefined;
+        const message =
+          code === "simulated_day_local_date_interval_invariant_violation"
+            ? "Simulated day localDate disagrees with interval-derived local date keys (invariant violation). Compare cannot proceed with a second authority."
+            : freshResult.error ??
+              "Fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.";
         return {
           ok: false as const,
-          error:
-            freshResult.error ??
-            "Fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
+          error: message,
+          ...(code === "simulated_day_local_date_interval_invariant_violation" && inv != null
+            ? { reasonCode: "SIMULATED_DAY_LOCAL_DATE_INTERVAL_INVARIANT_VIOLATION" as const, invariantViolations: inv }
+            : {}),
         };
       }
       const freshIntervals = freshResult.simulatedIntervals.map((p) => ({
@@ -2022,11 +2030,23 @@ export async function buildGapfillCompareSimShared(args: {
           retainSimulatedDayResultDateKeysLocal: boundedTestDateKeysLocal,
         });
         if (selectedDaysResult.simulatedIntervals === null) {
+          const code = String(selectedDaysResult.error ?? "");
+          const inv =
+            "invariantViolations" in selectedDaysResult &&
+            Array.isArray((selectedDaysResult as { invariantViolations?: unknown }).invariantViolations)
+              ? (selectedDaysResult as { invariantViolations: unknown }).invariantViolations
+              : undefined;
+          const message =
+            code === "simulated_day_local_date_interval_invariant_violation"
+              ? "Simulated day localDate disagrees with interval-derived local date keys (invariant violation). Compare cannot proceed with a second authority."
+              : selectedDaysResult.error ??
+                "Selected-day fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.";
           return {
             ok: false as const,
-            error:
-              selectedDaysResult.error ??
-              "Selected-day fresh shared compare simulation failed before scoring. Retry and rebuild artifact if needed.",
+            error: message,
+            ...(code === "simulated_day_local_date_interval_invariant_violation" && inv != null
+              ? { reasonCode: "SIMULATED_DAY_LOCAL_DATE_INTERVAL_INVARIANT_VIOLATION" as const, invariantViolations: inv }
+              : {}),
           };
         }
         const simulatedIntervalsNormalized = selectedDaysResult.simulatedIntervals.map((p) => ({
@@ -2075,6 +2095,12 @@ export async function buildGapfillCompareSimShared(args: {
               message: fullWindowResult.error,
               mode: "artifact_only",
               scenarioId: sharedScenarioCacheId,
+              ...("reasonCode" in fullWindowResult && fullWindowResult.reasonCode
+                ? { reasonCode: fullWindowResult.reasonCode }
+                : {}),
+              ...("invariantViolations" in fullWindowResult && fullWindowResult.invariantViolations != null
+                ? { invariantViolations: fullWindowResult.invariantViolations }
+                : {}),
             },
           };
         }
@@ -2158,6 +2184,13 @@ export async function buildGapfillCompareSimShared(args: {
               message: sharedSelectedDaysResult.error,
               mode: "artifact_only",
               scenarioId: sharedScenarioCacheId,
+              ...("reasonCode" in sharedSelectedDaysResult && sharedSelectedDaysResult.reasonCode
+                ? { reasonCode: sharedSelectedDaysResult.reasonCode }
+                : {}),
+              ...("invariantViolations" in sharedSelectedDaysResult &&
+              sharedSelectedDaysResult.invariantViolations != null
+                ? { invariantViolations: sharedSelectedDaysResult.invariantViolations }
+                : {}),
             },
           };
         }
@@ -2185,6 +2218,13 @@ export async function buildGapfillCompareSimShared(args: {
                 message: parityFullWindowResult.error,
                 mode: "artifact_only",
                 scenarioId: sharedScenarioCacheId,
+                ...("reasonCode" in parityFullWindowResult && parityFullWindowResult.reasonCode
+                  ? { reasonCode: parityFullWindowResult.reasonCode }
+                  : {}),
+                ...("invariantViolations" in parityFullWindowResult &&
+                parityFullWindowResult.invariantViolations != null
+                  ? { invariantViolations: parityFullWindowResult.invariantViolations }
+                  : {}),
               },
             };
           }
@@ -2279,10 +2319,13 @@ export async function buildGapfillCompareSimShared(args: {
           body: {
             ok: false,
             error: "fresh_compare_simulation_failed",
-            message:
-              freshResult.error,
+            message: freshResult.error,
             mode: "artifact_only",
             scenarioId: sharedScenarioCacheId,
+            ...("reasonCode" in freshResult && freshResult.reasonCode ? { reasonCode: freshResult.reasonCode } : {}),
+            ...("invariantViolations" in freshResult && freshResult.invariantViolations != null
+              ? { invariantViolations: freshResult.invariantViolations }
+              : {}),
           },
         };
       }
@@ -2607,28 +2650,24 @@ export async function buildGapfillCompareSimShared(args: {
   );
   const parityDisplayDailyByDate = new Map<string, number>();
   const allMissingDisplaySimDates: string[] = [];
-  const missingDisplaySimDatesBackedByActualArtifactRows: string[] = [];
+  const allMissingFreshScoredDates: string[] = [];
   const allMismatchDates: string[] = [];
   for (const dk of Array.from(boundedTestDateKeysLocal)) {
     if (!canonicalArtifactDailyByDate.has(dk)) {
       allMissingDisplaySimDates.push(dk);
-      if ((simulatedChartDailySourceByDate.get(dk) ?? null) === "ACTUAL") {
-        missingDisplaySimDatesBackedByActualArtifactRows.push(dk);
-      }
       continue;
     }
     const parityDisplayValue = round2Local(Number(canonicalArtifactDailyByDate.get(dk) ?? 0));
     parityDisplayDailyByDate.set(dk, parityDisplayValue);
+    if (!freshDailyTotalsByDate.has(dk)) {
+      allMissingFreshScoredDates.push(dk);
+      continue;
+    }
     if (round2Local(freshDailyTotalsByDate.get(dk) ?? 0) !== parityDisplayValue) {
       allMismatchDates.push(dk);
     }
   }
-  const missingDisplaySimDatesBackedByActualArtifactRowSet = new Set<string>(
-    missingDisplaySimDatesBackedByActualArtifactRows
-  );
-  const expectedMissingDisplaySimDates = allMissingDisplaySimDates.filter(
-    (dk) => !missingDisplaySimDatesBackedByActualArtifactRowSet.has(dk)
-  );
+  const expectedMissingDisplaySimDates = allMissingDisplaySimDates;
   await reportPhase("build_shared_compare_scored_row_alignment_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -2637,6 +2676,7 @@ export async function buildGapfillCompareSimShared(args: {
     artifactSimulatedDayReferenceRowCount: artifactSimulatedDayReferenceRows.length,
     comparableDateCount: parityDisplayDailyByDate.size,
     missingDisplaySimCount: expectedMissingDisplaySimDates.length,
+    missingFreshCompareSimCount: allMissingFreshScoredDates.length,
     mismatchCount: allMismatchDates.length,
   });
   const comparableDateCount = Math.max(0, boundedTestDateKeysLocal.size - allMissingDisplaySimDates.length);
@@ -2656,8 +2696,8 @@ export async function buildGapfillCompareSimShared(args: {
     expectedMissingDisplaySimDates.length === 0
       ? parityDisplayDailyByDate.size > 0
         ? ("available" as const)
-        : allMissingDisplaySimDates.length > 0
-          ? ("not_applicable_scored_actual_days" as const)
+        : boundedTestDateKeysLocal.size > 0
+          ? ("missing_expected_reference" as const)
           : ("available" as const)
       : parityDisplayDailyByDate.size > 0
         ? ("available" as const)
@@ -2686,32 +2726,32 @@ export async function buildGapfillCompareSimShared(args: {
     comparableDateCount,
     complete:
       scoredDayParityAvailability === "available"
-        ? allMismatchDates.length === 0 && expectedMissingDisplaySimDates.length === 0
+        ? allMismatchDates.length === 0 &&
+          expectedMissingDisplaySimDates.length === 0 &&
+          allMissingFreshScoredDates.length === 0
         : null,
     availability: scoredDayParityAvailability,
     reasonCode:
       scoredDayParityAvailability === "available"
         ? ("ARTIFACT_SIMULATED_REFERENCE_AVAILABLE" as const)
-        : scoredDayParityAvailability === "not_applicable_scored_actual_days"
-          ? ("SCORED_DAYS_USE_ACTUAL_ARTIFACT_ROWS" as const)
-          : ("ARTIFACT_SIMULATED_REFERENCE_MISSING" as const),
+        : ("ARTIFACT_SIMULATED_REFERENCE_MISSING" as const),
     explanation:
       scoredDayParityAvailability === "available"
         ? expectedMissingDisplaySimDates.length > 0
           ? "Artifact-side canonical simulated-day totals are available for scored-day parity for comparable dates; some scored dates still lack a simulated-day reference row."
-          : allMissingDisplaySimDates.length > 0
-            ? "Artifact-side canonical simulated-day totals are available for all parity-applicable scored dates; scored actual artifact rows remain non-comparable by design."
+          : allMissingFreshScoredDates.length > 0
+            ? "Artifact-side canonical simulated-day totals match the shared compare path for comparable dates; one or more scored dates lack fresh shared simulated totals for display parity."
             : "Artifact-side canonical simulated-day totals are available for scored-day parity."
-        : scoredDayParityAvailability === "not_applicable_scored_actual_days"
-          ? "Selected scored days are actual artifact rows, so artifact simulated-day parity is not applicable for those dates."
-          : "Expected artifact simulated-day references were not available for some scored dates.",
+        : "Expected artifact simulated-day references were not available for some scored dates.",
     scope: "scored_test_days_local" as const,
     granularity: "daily_kwh_rounded_2dp" as const,
     parityDisplaySourceUsed: "canonical_artifact_simulated_day_totals" as const,
     parityDisplayValueKind:
       scoredDayParityAvailability === "available"
         ? ("artifact_simulated_day_total" as const)
-        : ("not_applicable_scored_actual_day" as const),
+        : ("missing_display_sim_reference" as const),
+    missingFreshCompareSimCount: allMissingFreshScoredDates.length,
+    missingFreshCompareSimSampleDates: allMissingFreshScoredDates.slice(0, 10),
     comparisonBasis: parityComparisonBasis,
   };
   await reportPhase("build_shared_compare_scored_row_merge_ready", {
