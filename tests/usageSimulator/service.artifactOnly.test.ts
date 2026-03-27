@@ -2888,6 +2888,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       };
     });
 
+    const selectedDaysCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
+    const fullWindowCallsBeforeTravelParity = simulatePastFullWindowShared.mock.calls.length;
+
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
       houseId: "h1",
@@ -2902,13 +2905,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(-1);
+      const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore);
       expect(selectedDaysCalls).toHaveLength(1);
-      expect(simulatePastFullWindowShared).toHaveBeenCalled();
+      expect(simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBeforeTravelParity)).toHaveLength(0);
       const sharedCallDateKeys = Array.from(
         (((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
       ).sort();
       expect(sharedCallDateKeys).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
+      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -2989,6 +2993,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       };
     });
     const phases: string[] = [];
+    const selectedDaysCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
+    const fullWindowCallsBeforePhases = simulatePastFullWindowShared.mock.calls.length;
 
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
@@ -3008,7 +3014,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(simulatePastFullWindowShared).toHaveBeenCalled();
+      expect(simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBeforePhases)).toHaveLength(0);
+      expect(simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore)).toHaveLength(1);
+      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3172,6 +3180,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       };
     });
 
+    const selectedDaysCallsBefore = simulatePastSelectedDaysShared.mock.calls.length;
+    const fullWindowCallsBeforeDoubleCount = simulatePastFullWindowShared.mock.calls.length;
+
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
       houseId: "h1",
@@ -3187,7 +3198,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(simulatePastFullWindowShared).toHaveBeenCalled();
+      expect(simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBeforeDoubleCount)).toHaveLength(0);
+      expect(simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore)).toHaveLength(1);
+      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,

@@ -974,7 +974,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       compareSharedCalcPath:
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared",
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       compareSimSource: "shared_selected_days_calc",
@@ -1030,7 +1030,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       artifactAutoRebuilt: false,
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       compareSharedCalcPath:
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared",
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       compareSimSource: "shared_selected_days_calc",
@@ -1082,7 +1082,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
       scoringSimulatedSource: "shared_selected_days_simulated_intervals15",
       scoringUsedSharedArtifact: false,
       compareSharedCalcPath:
-        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared",
+        "simulatePastSelectedDaysShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared",
       compareFreshModeUsed: "selected_days",
       compareCalculationScope: "selected_days_shared_path_only",
       displaySimSource: "dataset.daily",

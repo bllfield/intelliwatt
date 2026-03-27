@@ -2224,37 +2224,16 @@ export async function buildGapfillCompareSimShared(args: {
         );
         freshParityWeatherSourceSummary = sharedSelectedDaysResult.weatherSourceSummary;
         if (travelVacantParityDateKeySet.size > 0) {
-          throwIfGapfillCompareAborted(abortSignal);
-          const parityFullWindowResult = await runFullWindowFreshExecution();
-          if (!parityFullWindowResult.ok) {
-            return {
-              ok: false,
-              status: 500,
-              body: {
-                ok: false,
-                error: "fresh_compare_simulation_failed",
-                message: parityFullWindowResult.error,
-                mode: "artifact_only",
-                scenarioId: sharedScenarioCacheId,
-                ...("reasonCode" in parityFullWindowResult && parityFullWindowResult.reasonCode
-                  ? { reasonCode: parityFullWindowResult.reasonCode }
-                  : {}),
-                ...("invariantViolations" in parityFullWindowResult &&
-                parityFullWindowResult.invariantViolations != null
-                  ? { invariantViolations: parityFullWindowResult.invariantViolations }
-                  : {}),
-              },
-            };
-          }
-          freshParityWeatherSourceSummary = parityFullWindowResult.weatherSourceSummary;
+          // Parity uses the same shared selected-days execution as compare (union of test + travel/vacant keys).
+          // Slice intervals and canonical day totals from that single run; do not run a second full-window sim here.
           freshParityIntervals = filterIntervalsToLocalDateKeys(
-            parityFullWindowResult.simulatedIntervals,
+            sharedSelectedDaysResult.simulatedIntervals,
             timezone,
             travelVacantParityDateKeySet
           );
           freshParityCanonicalSimulatedDayTotalsByDate = Object.fromEntries(
-            Object.entries(parityFullWindowResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
-              travelVacantParityDateKeySet.has(dk)
+            Object.entries(sharedSelectedDaysResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
+              travelVacantParityDateKeySet.has(String(dk).slice(0, 10))
             )
           );
         } else {
@@ -2267,7 +2246,7 @@ export async function buildGapfillCompareSimShared(args: {
         compareCalculationScope = "selected_days_shared_path_only";
         compareFreshModeUsed = "selected_days";
         compareSharedCalcPath =
-          "simulatePastSelectedDaysShared(simulatePastFullWindowShared->simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared";
+          "simulatePastSelectedDaysShared(simulatePastFullWindowShared->simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared";
         weatherBasisUsed =
           boundedTestDateKeysLocal.size > 0
             ? sharedSelectedDaysResult.weatherSourceSummary
@@ -2325,7 +2304,11 @@ export async function buildGapfillCompareSimShared(args: {
         simulatedTestIntervalsCount: simulatedTestIntervals.length,
         freshParityIntervalsCount: freshParityIntervals.length,
         parityFreshSource:
-          travelVacantParityDateKeySet.size > 0 ? "shared_full_window_calc" : "none_requested",
+          travelVacantParityDateKeySet.size === 0
+            ? "none_requested"
+            : exactSelectedDaysRequiresSingleFullWindowSharedExecution
+              ? "shared_full_window_union_slice"
+              : "shared_selected_days_union_slice",
       });
     } else {
       throwIfGapfillCompareAborted(abortSignal);
