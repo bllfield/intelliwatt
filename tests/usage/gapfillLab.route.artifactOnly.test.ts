@@ -489,7 +489,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
   });
 
-  it("expands manual-range actual fetch by one day on each side for timezone spillover safety", async () => {
+  it("loads canonical identity-window actual intervals (±1 day) once for compare scoring and shared sim preload", async () => {
     getActualIntervalsForRange.mockResolvedValueOnce([
       { timestamp: "2026-01-01T05:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T05:15:00.000Z", kwh: 0.25 },
@@ -529,8 +529,16 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.ok).toBe(true);
     expect(getActualIntervalsForRange).toHaveBeenCalledWith(
       expect.objectContaining({
-        startDate: "2025-12-31",
-        endDate: "2026-01-02",
+        startDate: "2025-03-13",
+        endDate: "2026-03-15",
+      })
+    );
+    expect(buildGapfillCompareSimShared).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preloadedIdentityActualIntervals: [
+          { timestamp: "2026-01-01T05:00:00.000Z", kwh: 0.25 },
+          { timestamp: "2026-01-01T05:15:00.000Z", kwh: 0.25 },
+        ],
       })
     );
   });

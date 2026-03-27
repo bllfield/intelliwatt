@@ -2106,51 +2106,25 @@ export async function POST(req: NextRequest) {
   const minTestKey = testDateKeysSorted[0] ?? "";
   const fetchStart = minTestKey;
   const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
-  const fetchStartExpanded = shiftIsoDateUtc(fetchStart, -1);
-  const fetchEndExpanded = shiftIsoDateUtc(fetchEnd, 1);
 
-  const actualIntervals = await (
-    candidateIntervalsForTesting != null
-      ? candidateIntervalsForTesting
-      : testSelectionMode === "manual_ranges"
-        ? (() => {
-            // Manual replay after rebuild can contain sparse one-day ranges across the year.
-            // Fetch per merged range to avoid materializing a full-window interval payload.
-            const mergedManualRanges = mergeDateKeysToRanges(testDateKeysSorted);
-            return Promise.all(
-              mergedManualRanges.map((r) =>
-                getActualIntervalsForRange({
-                  houseId: house.id,
-                  esiid,
-                  // Expand by one UTC day on both sides so local-day filtering can
-                  // include timezone spillover intervals at day boundaries.
-                  startDate: shiftIsoDateUtc(r.startDate, -1),
-                  endDate: shiftIsoDateUtc(r.endDate, 1),
-                })
-              )
-            ).then((chunks) => {
-              const byTs = new Map<string, { timestamp: string; kwh: number }>();
-              for (const chunk of chunks) {
-                for (const row of chunk ?? []) {
-                  const ts = String((row as any)?.timestamp ?? "").trim();
-                  if (!ts) continue;
-                  byTs.set(ts, { timestamp: ts, kwh: Number((row as any)?.kwh) || 0 });
-                }
-              }
-              return Array.from(byTs.values()).sort((a, b) =>
-                String(a.timestamp).localeCompare(String(b.timestamp))
-              );
-            });
-          })()
-        : getActualIntervalsForRange({
-            houseId: house.id,
-            esiid,
-            // Expand by one UTC day on both sides so local-day filtering can
-            // include timezone spillover intervals at day boundaries.
-            startDate: fetchStartExpanded,
-            endDate: fetchEndExpanded,
-          })
-  );
+  // Shared compare_core runs `simulatePastUsageDataset` on the full canonical (identity) window.
+  // Load actual intervals once for that window (or reuse random-selection's full-window fetch) and
+  // pass through to `buildGapfillCompareSimShared` so the fresh sim does not call
+  // `getActualIntervalsForRange` again — a major compare_core memory win on serverless.
+  const identityFetchStart = shiftIsoDateUtc(canonicalWindow.startDate, -1);
+  const identityFetchEnd = shiftIsoDateUtc(canonicalWindow.endDate, 1);
+
+  const actualIntervals = await (async () => {
+    if (candidateIntervalsForTesting != null && candidateIntervalsForTesting.length > 0) {
+      return candidateIntervalsForTesting;
+    }
+    return getActualIntervalsForRange({
+      houseId: house.id,
+      esiid,
+      startDate: identityFetchStart,
+      endDate: identityFetchEnd,
+    });
+  })();
   markCompareCoreStep(compareCoreTiming, "load_actual_usage");
 
   if (!actualIntervals?.length) {
@@ -2401,6 +2375,7 @@ export async function POST(req: NextRequest) {
         ? reportSharedComparePhase
         : reportSharedComparePhaseLogOnly,
       abortSignal: compareCoreAbort.signal,
+      preloadedIdentityActualIntervals: actualIntervals,
     });
   } catch (err: unknown) {
     const normalizedError = normalizeRouteError(

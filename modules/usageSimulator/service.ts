@@ -1181,6 +1181,12 @@ export async function buildGapfillCompareSimShared(args: {
   ) => void | Promise<void>;
   /** When aborted (client disconnect or route deadline), stop work so the serverless invocation can end with the HTTP response. */
   abortSignal?: AbortSignal;
+  /**
+   * When set, `simulatePastUsageDataset` skips its own `getActualIntervalsForRange` for the identity window.
+   * Gap-Fill compare_core should pass the same intervals already loaded in the route (canonical coverage window)
+   * to avoid holding two full-year interval arrays during selected-days / full-window fresh sim.
+   */
+  preloadedIdentityActualIntervals?: Array<{ timestamp: string; kwh: number }>;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
     userId,
@@ -1201,7 +1207,12 @@ export async function buildGapfillCompareSimShared(args: {
     includeFullReportText = true,
     onPhaseUpdate,
     abortSignal,
+    preloadedIdentityActualIntervals,
   } = args;
+  const actualIntervalsForSharedPastSim =
+    preloadedIdentityActualIntervals != null && preloadedIdentityActualIntervals.length > 0
+      ? preloadedIdentityActualIntervals
+      : undefined;
   const reportPhase = async (
     phase: GapfillCompareBuildPhase,
     meta?: Record<string, unknown>
@@ -2070,6 +2081,7 @@ export async function buildGapfillCompareSimShared(args: {
         includeSimulatedDayResults: true,
         forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
+        ...(actualIntervalsForSharedPastSim != null ? { actualIntervals: actualIntervalsForSharedPastSim } : {}),
       });
       if (freshResult.simulatedIntervals === null) {
         const code = String(freshResult.error ?? "");
@@ -2152,6 +2164,7 @@ export async function buildGapfillCompareSimShared(args: {
           retainSimulatedDayResultDateKeysLocal: boundedTestDateKeysLocal,
           forceModeledOutputKeepReferencePoolDateKeysLocal:
             boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
+          ...(actualIntervalsForSharedPastSim != null ? { actualIntervals: actualIntervalsForSharedPastSim } : {}),
         });
         if (selectedDaysResult.simulatedIntervals === null) {
           const code = String(selectedDaysResult.error ?? "");
