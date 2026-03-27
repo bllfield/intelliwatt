@@ -2115,7 +2115,7 @@ export async function POST(req: NextRequest) {
   const identityFetchStart = shiftIsoDateUtc(canonicalWindow.startDate, -1);
   const identityFetchEnd = shiftIsoDateUtc(canonicalWindow.endDate, 1);
 
-  const actualIntervals = await (async () => {
+  let actualIntervals = await (async () => {
     if (candidateIntervalsForTesting != null && candidateIntervalsForTesting.length > 0) {
       return candidateIntervalsForTesting;
     }
@@ -2553,6 +2553,10 @@ export async function POST(req: NextRequest) {
   const actualScoringIntervals = actualIntervals.filter((p) =>
     scoringTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))
   );
+  // Drop the route's reference to the full-window preload (join/scoring use `actualScoringIntervals` only).
+  // Reassign instead of mutating `.length` so the array passed to `buildGapfillCompareSimShared` stays intact
+  // for callers/tests that retain that reference.
+  actualIntervals = [];
   if (actualScoringIntervals.length === 0) {
     const classification = classifySimulationFailure({
       code: "no_actual_data",

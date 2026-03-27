@@ -814,6 +814,9 @@ export async function simulatePastUsageDataset(
       endDate,
       intervals: patchedIntervals,
     });
+    // `buildCurveFromPatchedIntervals` copies into `stitchedCurve.intervals`; release the engine
+    // output array before dataset construction to lower peak heap on full-window runs.
+    patchedIntervals.length = 0;
 
     const skipHeavyDatasetInsights = emitAllIntervals === false && buildPathKind === "lab_validation";
 
@@ -904,7 +907,9 @@ export async function simulatePastUsageDataset(
       pastDayCounts,
       shapeMonthsPresent,
       actualWxByDateKey: actualWxByDateKey,
-      stitchedCurve,
+      // lab_validation (Gap-Fill / shared compare): dataset already carries `series.intervals15`;
+      // omitting duplicate `SimulatedCurve` cuts peak heap. cold_build/recalc still return it.
+      stitchedCurve: buildPathKind === "lab_validation" ? undefined : stitchedCurve,
       simulatedDayResults: includeSimulatedDayResults ? dayResults : undefined,
     };
   } catch (e) {
