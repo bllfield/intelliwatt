@@ -4,6 +4,20 @@ Audited branch: `main`
 Audited commit: `c32726b5b57d6159f59638269dc34fd959376531`
 Working tree at audit start: `clean`
 
+## Superseded Status Note
+
+This document reflects an older branch state and is no longer the current source of truth after commit `67dfead393e3c3f9154e378b05d9f5e6d02ca794`.
+
+Retired findings in this older audit:
+
+- `modules/usageSimulator/service.ts` no longer owns `attachCanonicalArtifactSimulatedDayTotalsByDate()`, `buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset()`, or `buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys()`.
+- The downstream selected-day `localDate` fallback described here is no longer current; selected-day membership is interval-timestamp-backed only.
+- `forcedScoredDateKeys` ownership-widening and canonical merge/backfill are no longer live runtime behavior on the current branch.
+- The selected-day compare authority gap described here is no longer current on the working tree; `runSelectedDaysFreshExecution()` now consumes surfaced canonical selected-day totals from `simulatePastSelectedDaysShared()`.
+- Exact travel/vacant parity now intentionally treats persisted canonical artifact totals as the saved-artifact authority; decoded intervals remain a legacy restore/backfill input, not a second parity truth source.
+
+Use `docs/FINAL_EXACT_PARITY_AND_SHARED_AUTHORITY_AUDIT.md` for the latest current-branch verdict on parity authority and shared-output alignment.
+
 ## Scope
 
 This audit is for the currently checked-out branch/commit only. Older audit docs were not treated as source of truth. The code and docs were re-read directly on this branch.

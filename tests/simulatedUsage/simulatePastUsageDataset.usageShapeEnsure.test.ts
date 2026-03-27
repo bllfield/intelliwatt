@@ -245,6 +245,7 @@ describe("shared sim usage-shape ensure path", () => {
         ensuredInFlow: true,
         ensuredReason: "coverage_window_mismatch",
       });
+      expect(out.canonicalSimulatedDayTotalsByDate).toEqual({ "2026-01-01": 0.5 });
     }
   });
 
@@ -306,6 +307,7 @@ describe("shared sim usage-shape ensure path", () => {
         { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.6 },
       ]);
       expect(out.simulatedDayResults.map((row) => row.localDate)).toEqual(["2026-01-02"]);
+      expect(out.canonicalSimulatedDayTotalsByDate).toEqual({ "2026-01-02": 1 });
     }
   });
 

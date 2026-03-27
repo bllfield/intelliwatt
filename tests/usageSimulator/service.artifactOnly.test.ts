@@ -996,6 +996,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -1832,6 +1833,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "stub_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2544,6 +2546,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: testDates.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
       simulatedDayResults: testDates.map((date) => simulatedDayResultForLocalDay(date)),
+      canonicalSimulatedDayTotalsByDate: Object.fromEntries(testDates.map((date) => [date, 24])),
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2589,6 +2592,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2646,6 +2650,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2740,6 +2745,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: selectedDates.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
       simulatedDayResults: selectedDates.map((date) => simulatedDayResultForLocalDay(date)),
+      canonicalSimulatedDayTotalsByDate: Object.fromEntries(selectedDates.map((date) => [date, 24])),
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2826,6 +2832,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       return {
         simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
         simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2926,6 +2933,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       return {
         simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
         simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3018,6 +3026,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       simulatedDayResults: Array.from(selectedDateKeysLocal ?? []).map((dk) =>
         simulatedDayResultForLocalDay(String(dk))
       ),
+      canonicalSimulatedDayTotalsByDate: Object.fromEntries(
+        Array.from(selectedDateKeysLocal ?? []).map((dk) => [String(dk), 24])
+      ),
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3105,6 +3116,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       return {
         simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
         simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3194,6 +3206,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         ...oneChicagoLocalDayIntervals96("2026-01-03", 24 / 96),
       ],
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-03")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-03": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3293,6 +3306,67 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("does not derive selected-day compare totals from day results when canonical selected-day totals are absent", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash-selected-missing-canonical-selected-total",
+      updatedAt: new Date("2026-01-20T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96,
+          totalKwh: 24,
+          start: "2026-01-01",
+          end: "2026-01-01",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2026-01-01": 24,
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: true,
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.simulatedTestIntervals).toHaveLength(0);
+      expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
+      expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
+      expect(out.displayVsFreshParityForScoredDays).toMatchObject({
+        availability: "available",
+        mismatchCount: 1,
+        comparableDateCount: 1,
+        missingDisplaySimCount: 0,
+      });
+    }
+  });
+
   it("uses fresh interval-summed day totals for travel/vacant parity proof when day-result totals drift", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
@@ -3345,6 +3419,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           intervalSumKwh: isTravelParitySet ? 24.09 : 24,
           finalDayKwh: isTravelParitySet ? 24.09 : 24,
         })),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3441,6 +3516,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         oneChicagoLocalDayIntervals96(String(dk), 24 / 96)
       ),
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       actualWxByDateKey: new Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source: string }>([
         ["2026-01-01", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
@@ -3606,6 +3682,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3615,6 +3692,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         oneChicagoLocalDayIntervals96(String(dk), 24 / 96)
       ),
       simulatedDayResults: [],
+      canonicalSimulatedDayTotalsByDate: Object.fromEntries(
+        Array.from(selectedDateKeysLocal ?? []).map((dk) => [String(dk), 24])
+      ),
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3747,6 +3827,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
               ? simulatedDayResultFromIntervals(dk, driftedDay3)
               : simulatedDayResultFromIntervals(dk, stableDay4)
           ),
+          canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((dk) => [dk, 24])),
           pastDayCounts: {},
           weatherSourceSummary: "actual_only",
           weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3755,6 +3836,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       return {
         simulatedIntervals: selected.flatMap((dk) => oneChicagoLocalDayIntervals96(dk, 24 / 96)),
         simulatedDayResults: selected.map((dk) => simulatedDayResultForLocalDay(dk)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((dk) => [dk, 24])),
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -3972,6 +4054,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: testDates.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
       simulatedDayResults: [],
+      canonicalSimulatedDayTotalsByDate: Object.fromEntries(testDates.map((date) => [date, 24])),
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -4051,6 +4134,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       return {
         simulatedIntervals: selected.flatMap((date) => oneChicagoLocalDayIntervals96(date, 24 / 96)),
         simulatedDayResults: selected.map((date) => simulatedDayResultForLocalDay(date)),
+        canonicalSimulatedDayTotalsByDate: Object.fromEntries(selected.map((date) => [date, 24])),
         pastDayCounts: {},
         weatherSourceSummary: "actual_only",
         weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -4129,6 +4213,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     simulatePastSelectedDaysShared.mockResolvedValue({
       simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
       simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01")],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
       pastDayCounts: {},
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",

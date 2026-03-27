@@ -2000,11 +2000,12 @@ export async function buildGapfillCompareSimShared(args: {
             dataset: null,
             simulatedIntervals: [] as Array<{ timestamp: string; kwh: number }>,
             dailyTotalsByDate: new Map<string, number>(),
-          actualWxByDateKey: null as Map<
-            string,
-            { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
-          > | null,
-          weatherKindUsed: null as string | null,
+            canonicalSimulatedDayTotalsByDate: {} as Record<string, number>,
+            actualWxByDateKey: null as Map<
+              string,
+              { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
+            > | null,
+            weatherKindUsed: null as string | null,
             weatherSourceSummary: weatherBasisUsed,
           };
         }
@@ -2034,26 +2035,21 @@ export async function buildGapfillCompareSimShared(args: {
           timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
           kwh: Number(p?.kwh) || 0,
         }));
-        const simulatedDayResultDateKeys = new Set<string>();
-        const dailyTotalsByDate = new Map<string, number>();
-        for (const row of selectedDaysResult.simulatedDayResults ?? []) {
-          const intervalDateKeys = new Set<string>(
-            Array.isArray((row as any)?.intervals)
-              ? ((row as any).intervals as Array<{ timestamp?: string }>)
-                  .map((interval) => dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone))
-                  .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-              : []
-          );
-          if (intervalDateKeys.size === 0) continue;
-          const matchingDateKeys = Array.from(intervalDateKeys).filter((dk) => selectedDateKeysLocal.has(dk));
-          if (matchingDateKeys.length === 0) continue;
-          const dayKwh = Number((row as any)?.intervalSumKwh ?? (row as any)?.finalDayKwh);
-          if (!Number.isFinite(dayKwh)) continue;
-          for (const dk of matchingDateKeys) {
-            simulatedDayResultDateKeys.add(dk);
-            dailyTotalsByDate.set(dk, round2Local(dayKwh));
-          }
-        }
+        const canonicalSimulatedDayTotalsByDate = Object.fromEntries(
+          Object.entries(selectedDaysResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk, kwh]) => {
+            const dateKey = String(dk).slice(0, 10);
+            return selectedDateKeysLocal.has(dateKey) && Number.isFinite(Number(kwh));
+          })
+        );
+        const simulatedDayResultDateKeys = new Set<string>(
+          Object.keys(canonicalSimulatedDayTotalsByDate).map((dk) => String(dk).slice(0, 10))
+        );
+        const dailyTotalsByDate = new Map<string, number>(
+          Object.entries(canonicalSimulatedDayTotalsByDate).map(([dk, kwh]) => [
+            String(dk).slice(0, 10),
+            round2Local(Number(kwh) || 0),
+          ])
+        );
         const simulatorOwnedIntervals = simulatedIntervalsNormalized.filter((p) =>
           simulatedDayResultDateKeys.has(dateKeyInTimezone(p.timestamp, timezone))
         );
@@ -2062,6 +2058,7 @@ export async function buildGapfillCompareSimShared(args: {
           dataset: null,
           simulatedIntervals: simulatorOwnedIntervals,
           dailyTotalsByDate,
+          canonicalSimulatedDayTotalsByDate,
           actualWxByDateKey: selectedDaysResult.actualWxByDateKey ?? null,
           weatherKindUsed: String(selectedDaysResult.weatherKindUsed ?? "") || null,
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",

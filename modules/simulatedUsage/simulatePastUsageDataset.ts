@@ -239,6 +239,7 @@ export type SimulatePastSelectedDaysArgs = Omit<SimulatePastUsageDatasetArgs, "i
 export type SimulatePastSelectedDaysResult = {
   simulatedIntervals: Array<{ timestamp: string; kwh: number }>;
   simulatedDayResults: SimulatedDayResult[];
+  canonicalSimulatedDayTotalsByDate?: Record<string, number>;
   pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
   actualWxByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
@@ -856,6 +857,7 @@ export async function simulatePastSelectedDaysShared(
     return {
       simulatedIntervals: [],
       simulatedDayResults: [],
+      canonicalSimulatedDayTotalsByDate: {},
       pastDayCounts: {},
       weatherSourceSummary: "none",
       weatherKindUsed: undefined,
@@ -891,6 +893,11 @@ export async function simulatePastSelectedDaysShared(
     const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
       simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
     );
+    const canonicalSimulatedDayTotalsByDate = Object.fromEntries(
+      Object.entries(sharedResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
+        selectedValid.has(String(dk).slice(0, 10))
+      )
+    );
     const retainedSelectedResults =
       retainedValid.size > 0
         ? selectedResults.filter((r) => simulatedDayResultIntersectsLocalDateKeys(r, retainedValid, timezoneResolved))
@@ -898,6 +905,7 @@ export async function simulatePastSelectedDaysShared(
     return {
       simulatedIntervals: selectedIntervals,
       simulatedDayResults: retainedSelectedResults,
+      canonicalSimulatedDayTotalsByDate,
       pastDayCounts: sharedResult.pastDayCounts,
       actualWxByDateKey: sharedResult.actualWxByDateKey,
       weatherSourceSummary: sharedResult.weatherSourceSummary,

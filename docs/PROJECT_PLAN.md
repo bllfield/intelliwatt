@@ -108,7 +108,7 @@ Mandatory enforcement rules:
 
 LEGACY / NON-AUTHORITATIVE historical drift notes:
 - Older notes referenced unresolved shared identity wiring work in simulation engines diagnostics.
-- Treat these as historical context only; fresh producer-chain alignment is in place on the current branch, but strict finalized-output alignment still has remaining service-level caveats.
+- Treat these as historical context only; fresh producer-chain alignment is in place on the current branch, and service-owned canonical simulated-day total builders/attachers are no longer current runtime behavior.
 - Canonical simulation-logic reference is `docs/USAGE_SIMULATION_PLAN.md`; other docs should align to it and stay shorter unless file-specific detail is required.
 
 ### GapFill Shared-Artifact Rule
@@ -122,7 +122,7 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - GapFill core compare defaults to selected-day fresh shared scoring (`compareFreshMode=selected_days`) while display rows remain shared artifact output.
 - GapFill heavy diagnostics may explicitly request full-window shared fresh scoring (`compareFreshMode=full_window`) as an optional proof path.
 - Artifact fingerprint ownership and usage-shape identity behavior remain unchanged by this step; deferred identity/profile changes stay out of scope.
-- Current branch caveat: `simulatePastSelectedDaysShared()` is now a pure post-output slicer, but strict finalized-output alignment is still not complete because `modules/usageSimulator/service.ts` continues to reconstruct/backfill canonical simulated-day totals outside `buildSimulatedUsageDatasetFromCurve()`.
+- Current branch caveat: `simulatePastSelectedDaysShared()` is a pure post-output slicer, canonical simulated-day totals are owned by `buildSimulatedUsageDatasetFromCurve()`, and selected-day compare now consumes that surfaced canonical selected-day authority directly. The remaining narrow caveat is historical artifact provenance: exact parity intentionally trusts saved canonical totals rather than decoding intervals as a second truth source.
 - Shared window/date ownership remains locked: compare identity comes from `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage comes from `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership.
 - Shared weather truth is owned by `loadWeatherForPastWindow`; it must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily rows when the requested canonical window is already covered, instead of re-pulling weather.
 - Shared weather backfill/stub repair is only for missing or `STUB_V1` dates, and the resulting provenance must truthfully report whether coverage is `actual_only`, `mixed_actual_and_stub`, or `stub_only`.

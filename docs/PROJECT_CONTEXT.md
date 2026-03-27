@@ -130,8 +130,11 @@
 
 - Fresh shared producer-chain alignment is now true for Past Sim and Gap-Fill compare (`simulatePastUsageDataset` -> `buildPastSimulatedBaselineV1` -> `buildCurveFromPatchedIntervals` -> `buildSimulatedUsageDatasetFromCurve`).
 - Shared weather reuse/provenance is already true in current runtime code (`loadWeatherForPastWindow` persisted-weather-first behavior).
-- Shared sim-core remains authoritative, but strict finalized-output alignment is **not** fully complete on the current branch: `modules/usageSimulator/service.ts` still reconstructs/backfills canonical simulated-day totals in `buildBoundedCanonicalArtifactSimulatedDayTotalsFromDatasetForDateKeys()`, `buildCanonicalArtifactSimulatedDayTotalsByDateFromDataset()`, and `attachCanonicalArtifactSimulatedDayTotalsByDate()`.
+- Canonical simulated-day total authority now lives in `buildSimulatedUsageDatasetFromCurve()` via `canonicalArtifactSimulatedDayTotalsByDate`; `modules/usageSimulator/service.ts` reads that authority through `readCanonicalArtifactSimulatedDayTotalsByDate*()` and no longer owns service-side canonical total builders/attachers.
 - Shared window/date ownership is still locked correctly on the current branch: compare identity uses `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage uses `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not mutate artifact input hash or travel/vacant exclusion ownership.
+- Selected-day result slicing and selected-day compare ownership stay on one timestamp-derived local-date rule; the retired `localDate` fallback path is no longer current runtime behavior.
+- Travel/test scoring still does not change artifact hash ownership or `excludedDateKeysFingerprint`.
+- Strict shared-sim calculation alignment is now complete for the active compare/parity paths on the current working tree: selected-day compare consumes surfaced `canonicalSimulatedDayTotalsByDate` from `simulatePastSelectedDaysShared()`, and exact travel/vacant parity compares saved canonical artifact totals against fresh canonical full-window totals from the same shared finalized-output authority.
 - Broad focus remains shared simulation-core accuracy.
 - `compareRunId` plus durable compare-run persistence now exist in runtime (`GapfillCompareRunSnapshot`).
 - `compare_core` now returns compare-run state fields (`compareRunId`, `compareRunStatus`, `compareRunSnapshotReady`).
@@ -139,7 +142,7 @@
 - Canonical heavy follow-up path is now snapshot-read-only over persisted compare snapshot state (no recompute in canonical admin flow).
 - Gap-Fill admin stabilization pass is complete for current runtime flow (snapshot-reader history/debug clarity + stage-scoped retry + reader-stage label clarity).
 - Legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
-- Remaining follow-up is narrow: retire the remaining service-level post-sim simulated-day total ownership helpers and the downstream `runSelectedDaysFreshExecution()` `localDate` fallback without changing shared-window ownership.
+- Remaining caveat is narrow and historical-data-only: `reconcileRestoredDatasetFromDecodedIntervals()` still backfills missing legacy display aggregates, and exact parity intentionally trusts persisted canonical artifact totals rather than decoding intervals as a second truth source. Historical artifacts with wrong stored canonical totals therefore need rebuild, not parity-side recomputation.
 
 **Security note (Oct 2025):** Admin/Debug routes are now gated with `ADMIN_TOKEN`.
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
