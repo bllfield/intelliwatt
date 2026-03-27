@@ -2912,6 +2912,16 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         (((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
       ).sort();
       expect(sharedCallDateKeys).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
+      const firstSelectedArgs = (selectedDaysCalls[0] ?? [])[0] as {
+        forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+      };
+      expect(firstSelectedArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal).toEqual(
+        new Set<string>(["2026-01-01"])
+      );
+      expect(out.gapfillScoringDiagnostics?.run?.scoringMode).toBe("modeled_scored_days");
+      expect(out.gapfillScoringDiagnostics?.run?.oneUnionRunUsed).toBe(true);
+      expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.compareOutputSource).toBe("MODELED_SIM");
+      expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.wasMeterPassthroughPrevented).toBe(true);
       expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",

@@ -3459,6 +3459,7 @@ export async function POST(req: NextRequest) {
     compareTruth,
     compareRequestTruth,
     displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
+    gapfillScoringDiagnostics: (sharedSim as any)?.gapfillScoringDiagnostics ?? null,
     travelVacantParityRows,
     travelVacantParityTruth,
     timezoneUsedForScoring: scoringTimezone,

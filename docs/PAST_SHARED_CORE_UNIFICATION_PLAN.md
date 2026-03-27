@@ -23,6 +23,24 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - **UsageDashboard**
   - `getWeatherBasisLabel(meta)` surfaces weatherFallbackReason for stub/mixed (e.g. "no coordinates", "partial coverage", "API unavailable"); does not imply actual weather when summary is stub_only, mixed, or unknown.
 
+## Target: Gap-Fill data pool and holdout scoring (product intent)
+
+Authoritative expanded write-up: `docs/USAGE_SIMULATION_PLAN.md` → **Gap-Fill Lab: Target architecture (data pool, single run, scoring)**.
+
+Summary:
+
+- **Reference / good-data pool** for the shared Past sim includes **test compare** days’ **actual** intervals (they are trustworthy at-home usage). **Only** travel/vacant (and similar exclusions) are **withheld** from that pool as bad reference signal.
+- **Travel/vacant** days are **not** in the pool; they are **filled** by the same shared sim using the **rest** of the good window.
+- **One** shared execution: union of scored test dates and travel/vacant parity dates (selected-days mode) or full-window proof; then **slice** for parity vs scoring—not two engines.
+- **Target for test rows:** “Fresh sim” in Gap-Fill grading is **modeled** by that same day-level logic as travel fills via **`forceModeledOutputKeepReferencePoolDateKeys`** (see `USAGE_SIMULATION_PLAN.md` § Gap-Fill Lab target architecture §6).
+
+## What changed to match the target (engineering checklist)
+
+- **Gap-Fill compare path:** `buildGapfillCompareSimShared` passes bounded scored test dates as **`forceModeledOutputKeepReferencePoolDateKeysLocal`** into **`simulatePastSelectedDaysShared` / `simulatePastFullWindowShared`** → **`simulatePastUsageDataset`** → **`buildPastSimulatedBaselineV1`**. Test-day actuals **remain** in the reference pool; stitched **compare** output for those days is **modeled** (`GAPFILL_MODELED_KEEP_REF`), not meter-as-sim.
+- **Engine / flags:** Complements **`forceSimulateDateKeys`** (which **excludes** days from the reference pool). Keep-ref keys must stay **disjoint** from forced-sim keys for the same calendar day.
+- **UI / API truth:** Route payload includes **`gapfillScoringDiagnostics`**; Gap-Fill Lab shows a **scoring source diagnostics** panel. Truth tables still use **`freshCompareScoredDaySimTotalsByDate`** for scored-day simulated totals (simulator-owned).
+- **Docs/tests:** Service artifact tests assert keep-ref args and diagnostics; shared-window ownership rules unchanged.
+
 ## Active architecture authority
 
 - Past Sim and GapFill compare use the same shared artifact identity/fingerprint and the same shared simulator logic.

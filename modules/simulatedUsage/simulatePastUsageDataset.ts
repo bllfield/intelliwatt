@@ -313,6 +313,12 @@ export type SimulatePastUsageDatasetArgs = {
   actualIntervals?: Array<{ timestamp: string; kwh: number }>;
   /** Optional local dates that should be simulated by the shared path before downstream slicing. */
   forceSimulateDateKeysLocal?: Set<string>;
+  /**
+   * Gap-Fill scored test days: local dates whose **stitched compare output** must be modeled (not meter passthrough)
+   * while **actual** intervals for those days remain in the reference-day pool. UTC mapping matches `forceSimulateDateKeysLocal`.
+   * Must not overlap `forceSimulateDateKeysLocal` (forced days are excluded from the reference pool).
+   */
+  forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
   /** When false, omit passthrough actual intervals for non-simulated days. */
   emitAllIntervals?: boolean;
   /** Optional local dates whose simulated-day payloads should be retained for downstream consumers. */
@@ -346,6 +352,8 @@ export type SimulatePastSelectedDaysResult = {
   weatherKindUsed: string | undefined;
   usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
   profileAutoBuilt?: boolean;
+  gapfillForceModeledKeepRefLocalDateKeys?: string[];
+  gapfillForceModeledKeepRefUtcKeyCount?: number;
 };
 
 /** Hard failure from simulatePastSelectedDaysShared (no silent recovery). */
@@ -367,6 +375,9 @@ export type SimulatePastFullWindowSharedResult = {
   weatherFallbackReason: string | null;
   usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
   profileAutoBuilt?: boolean;
+  /** Echoed from shared dataset meta when Gap-Fill keep-ref modeled scoring was requested. */
+  gapfillForceModeledKeepRefLocalDateKeys?: string[];
+  gapfillForceModeledKeepRefUtcKeyCount?: number;
 };
 
 /** Hard failure from simulatePastFullWindowShared (no silent recovery). */
@@ -639,6 +650,7 @@ export async function simulatePastUsageDataset(
     includeSimulatedDayResults = true,
     actualIntervals: preloadedIntervals,
     forceSimulateDateKeysLocal,
+    forceModeledOutputKeepReferencePoolDateKeysLocal,
     emitAllIntervals = true,
     retainSimulatedDayResultDateKeysLocal,
   } = args;
@@ -664,6 +676,11 @@ export async function simulatePastUsageDataset(
     );
     const retainedSimulatedDayResultDateKeysLocal = new Set<string>(
       Array.from(retainSimulatedDayResultDateKeysLocal ?? [])
+        .map((dk) => String(dk ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    );
+    const forceModeledOutputKeepReferencePoolDateKeysLocalSet = new Set<string>(
+      Array.from(forceModeledOutputKeepReferencePoolDateKeysLocal ?? [])
         .map((dk) => String(dk ?? "").slice(0, 10))
         .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
     );
@@ -716,7 +733,13 @@ export async function simulatePastUsageDataset(
     const timezoneResolved = String(timezone ?? "").trim();
     const forcedUtcDateKeys = new Set<string>();
     const retainedResultUtcDateKeys = new Set<string>();
-    if (forcedSimulateDateKeysLocal.size > 0 && timezoneResolved) {
+    const keepRefUtcDateKeys = new Set<string>();
+    const needsUtcKeyWalk =
+      Boolean(timezoneResolved) &&
+      (forcedSimulateDateKeysLocal.size > 0 ||
+        retainedSimulatedDayResultDateKeysLocal.size > 0 ||
+        forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0);
+    if (needsUtcKeyWalk && timezoneResolved) {
       for (const dayStartMs of canonicalDayStartsMs) {
         const gridTs = getDayGridTimestamps(dayStartMs);
         if (!gridTs.length) continue;
@@ -730,17 +753,10 @@ export async function simulatePastUsageDataset(
           retainedSimulatedDayResultDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
         );
         if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
-      }
-    } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && timezoneResolved) {
-      for (const dayStartMs of canonicalDayStartsMs) {
-        const gridTs = getDayGridTimestamps(dayStartMs);
-        if (!gridTs.length) continue;
-        const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-        const intersectsRetainedLocalDay = gridTs.some((ts) =>
-          retainedSimulatedDayResultDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
+        const intersectsKeepRefLocalDay = gridTs.some((ts) =>
+          forceModeledOutputKeepReferencePoolDateKeysLocalSet.has(dateKeyInTimezone(ts, timezoneResolved))
         );
-        if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
+        if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
       }
     } else if (retainedSimulatedDayResultDateKeysLocal.size > 0 && !timezoneResolved) {
       for (const utcDateKey of canonicalDateKeys) {
@@ -748,6 +764,9 @@ export async function simulatePastUsageDataset(
         if (!retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) continue;
         retainedResultUtcDateKeys.add(utcDateKey);
       }
+    }
+    for (const utcKey of Array.from(keepRefUtcDateKeys)) {
+      if (forcedUtcDateKeys.has(utcKey)) keepRefUtcDateKeys.delete(utcKey);
     }
 
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
@@ -771,6 +790,8 @@ export async function simulatePastUsageDataset(
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
       collectSimulatedDayResultsDateKeys,
       forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
+      forceModeledOutputKeepReferencePoolDateKeys:
+        keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
       emitAllIntervals,
       debug: { out: pastDayCounts as any },
     });
@@ -819,7 +840,7 @@ export async function simulatePastUsageDataset(
         provenance.weatherSourceSummary === "mixed_actual_and_stub" ||
         provenance.weatherSourceSummary === "stub_only";
       dataset.meta = {
-        ...dataset.meta,
+        ...(dataset.meta as Record<string, unknown>),
         buildPathKind,
         sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
         derivationVersion: PAST_ENGINE_VERSION,
@@ -859,7 +880,12 @@ export async function simulatePastUsageDataset(
           ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
           : "Weather unavailable for shared past path.",
         simulatedDayDiagnosticsSample,
-      };
+        gapfillForceModeledKeepRefLocalDateKeys:
+          forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0
+            ? Array.from(forceModeledOutputKeepReferencePoolDateKeysLocalSet).sort()
+            : undefined,
+        gapfillForceModeledKeepRefUtcKeyCount: keepRefUtcDateKeys.size,
+      } as unknown as typeof dataset.meta;
     }
 
     return {
@@ -925,6 +951,7 @@ export async function simulatePastFullWindowShared(
           kwh: Number(row?.kwh) || 0,
         })))
       : [];
+    const metaAny = (sharedResult.meta ?? {}) as Record<string, unknown>;
     return {
       simulatedIntervals,
       simulatedDayResults: sharedResult.simulatedDayResults,
@@ -943,6 +970,13 @@ export async function simulatePastFullWindowShared(
       weatherFallbackReason: String((sharedResult.meta as any)?.weatherFallbackReason ?? "") || null,
       usageShapeProfileDiag: (sharedResult.meta as any)?.usageShapeProfileDiag as SharedSimUsageShapeProfileDiag | undefined,
       profileAutoBuilt: (sharedResult.meta as any)?.profileAutoBuilt === true,
+      gapfillForceModeledKeepRefLocalDateKeys: Array.isArray(metaAny.gapfillForceModeledKeepRefLocalDateKeys)
+        ? (metaAny.gapfillForceModeledKeepRefLocalDateKeys as string[])
+        : undefined,
+      gapfillForceModeledKeepRefUtcKeyCount:
+        typeof metaAny.gapfillForceModeledKeepRefUtcKeyCount === "number"
+          ? (metaAny.gapfillForceModeledKeepRefUtcKeyCount as number)
+          : undefined,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
@@ -972,6 +1006,7 @@ export async function simulatePastSelectedDaysShared(
     selectedDateKeysLocal,
     retainSimulatedDayResultDateKeysLocal,
     buildPathKind,
+    forceModeledOutputKeepReferencePoolDateKeysLocal,
   } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { simulatedIntervals: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
@@ -1013,6 +1048,7 @@ export async function simulatePastSelectedDaysShared(
       buildPathKind,
       actualIntervals: preloadedIntervals,
       includeSimulatedDayResults: true,
+      forceModeledOutputKeepReferencePoolDateKeysLocal,
     });
     if (sharedResult.simulatedIntervals === null) {
       return {
@@ -1057,6 +1093,8 @@ export async function simulatePastSelectedDaysShared(
       weatherKindUsed: sharedResult.weatherKindUsed,
       usageShapeProfileDiag: sharedResult.usageShapeProfileDiag,
       profileAutoBuilt: sharedResult.profileAutoBuilt,
+      gapfillForceModeledKeepRefLocalDateKeys: sharedResult.gapfillForceModeledKeepRefLocalDateKeys,
+      gapfillForceModeledKeepRefUtcKeyCount: sharedResult.gapfillForceModeledKeepRefUtcKeyCount,
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));

@@ -671,7 +671,13 @@ export type PastSimulatedDayDiagnostic = {
   monthKey: string;
   dow: number;
   dayType: "ACTUAL" | "SIMULATED";
-  simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" | "FORCED_SELECTED_DAY" | null;
+  simulatedReason:
+    | "EXCLUDED"
+    | "LEADING_MISSING"
+    | "INCOMPLETE"
+    | "FORCED_SELECTED_DAY"
+    | "GAPFILL_MODELED_KEEP_REF"
+    | null;
   dayIsExcluded: boolean;
   dayIsLeadingMissing: boolean;
   weatherUsed: boolean;
@@ -897,10 +903,16 @@ export function buildPastSimulatedBaselineV1(args: {
    */
   collectSimulatedDayResultsDateKeys?: Set<string>;
   /**
-   * Optional: force simulation for specific local date keys (YYYY-MM-DD).
-   * Forced-simulated days are excluded from reference-day selection.
+   * Optional: force simulation for specific UTC date keys (`dateKeyFromTimestamp` for the grid day).
+   * Forced-simulated days are excluded from reference-day selection (e.g. expanded selected-day forcing).
    */
   forceSimulateDateKeys?: Set<string>;
+  /**
+   * Gap-Fill Lab graded test days: same UTC keys as `forceSimulateDateKeys`, but **actual** intervals for
+   * these days **remain** in the reference-day pool while **stitched output** is modeled via `simulatePastDay`
+   * (same core as travel/vacant fills). Mutually exclusive use: do not duplicate keys in `forceSimulateDateKeys`.
+   */
+  forceModeledOutputKeepReferencePoolDateKeys?: Set<string>;
   /**
    * Optional: when false, omit passthrough actual intervals for non-simulated days.
    * Useful for selected-day fresh compare scoring where only simulated-day intervals are needed.
@@ -912,6 +924,7 @@ export function buildPastSimulatedBaselineV1(args: {
 } {
   const actualByTs = new Map<string, number>();
   const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
+  const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
   for (const p of args.actualIntervals ?? []) {
@@ -928,23 +941,32 @@ export function buildPastSimulatedBaselineV1(args: {
     const presentSlotCount = gridTs.reduce((acc, ts) => acc + (actualByTs.has(ts) ? 1 : 0), 0);
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
+    const dayIsForceModeledKeepRef = Boolean(dateKey) && keepRefModeledKeys.has(dateKey);
     const dayIsLeadingMissing =
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
     const dayIsIncomplete = !dayIsExcluded && !dayIsLeadingMissing && presentSlotCount < INTERVALS_PER_DAY;
-    const shouldSimulateDay = dayIsForcedSimulate || dayIsExcluded || dayIsLeadingMissing || dayIsIncomplete;
-    const isReferenceDay = !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing;
+    const shouldSimulateDay =
+      dayIsForcedSimulate ||
+      dayIsExcluded ||
+      dayIsLeadingMissing ||
+      dayIsIncomplete ||
+      dayIsForceModeledKeepRef;
+    /** Reference pool: good at-home days only; excludes travel (forced elsewhere) and incomplete/leading; includes Gap-Fill test days (keep-ref modeled). */
+    const isReferenceDayForPool =
+      !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing && !dayIsIncomplete;
     return {
       gridTs,
       dateKey,
       presentSlotCount,
       dayIsForcedSimulate,
+      dayIsForceModeledKeepRef,
       dayIsExcluded,
       dayIsLeadingMissing,
       dayIsIncomplete,
       shouldSimulateDay,
-      isReferenceDay,
+      isReferenceDayForPool,
     };
   };
 
@@ -965,7 +987,7 @@ export function buildPastSimulatedBaselineV1(args: {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
     if (!day.gridTs.length || !day.dateKey) continue;
-    if (!day.isReferenceDay) continue;
+    if (!day.isReferenceDayForPool) continue;
 
     const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
     for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(day.gridTs[i]) ?? 0) || 0;
@@ -1473,14 +1495,21 @@ export function buildPastSimulatedBaselineV1(args: {
 
     if (shouldSimulateDay) {
       simulatedDays += 1;
-      const simulatedReason: "EXCLUDED" | "LEADING_MISSING" | "INCOMPLETE" | "FORCED_SELECTED_DAY" =
-        day.dayIsForcedSimulate
-          ? "FORCED_SELECTED_DAY"
-          : day.dayIsExcluded
-            ? "EXCLUDED"
-            : day.dayIsLeadingMissing
-              ? "LEADING_MISSING"
-              : "INCOMPLETE";
+      const simulatedReason:
+        | "EXCLUDED"
+        | "LEADING_MISSING"
+        | "INCOMPLETE"
+        | "FORCED_SELECTED_DAY"
+        | "GAPFILL_MODELED_KEEP_REF" =
+        day.dayIsForceModeledKeepRef
+          ? "GAPFILL_MODELED_KEEP_REF"
+          : day.dayIsForcedSimulate
+            ? "FORCED_SELECTED_DAY"
+            : day.dayIsExcluded
+              ? "EXCLUDED"
+              : day.dayIsLeadingMissing
+                ? "LEADING_MISSING"
+                : "INCOMPLETE";
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       const result = simulatePastDay(

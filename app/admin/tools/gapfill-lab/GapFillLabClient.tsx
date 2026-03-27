@@ -956,6 +956,12 @@ export default function GapFillLabClient() {
     result && result.ok
       ? ((result as any).compareTruth ?? truthEnvelope?.compareTruth ?? null)
       : null;
+  const gapfillScoringDiagnostics =
+    result && result.ok
+      ? (((truthEnvelope as any)?.gapfillScoringDiagnostics ??
+          (result as any)?.modelAssumptions?.gapfillScoringDiagnostics) ??
+        null)
+      : null;
   const gapfillLoadCurveEmptyMessage =
     result && result.ok && !gapfillChartData?.fifteenCurve?.length
       ? (typeof (result as any)?.displaySimulated?.loadCurveMessage === "string" &&
@@ -3097,6 +3103,106 @@ export default function GapFillLabClient() {
               </div>
             </div>
           </details>
+
+          {gapfillScoringDiagnostics?.run && (
+            <details className="border border-amber-500/50 rounded bg-amber-50/40" open>
+              <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-amber-100/60 rounded-t">
+                Gap-Fill scoring source diagnostics (modeled compare vs actual)
+              </summary>
+              <div className="p-4 border-t border-amber-200/80 space-y-3 text-sm">
+                {Number((gapfillScoringDiagnostics as any).run?.scoredDaysMissingModeledCount ?? 0) > 0 && (
+                  <div className="font-semibold text-red-800 p-3 rounded border border-red-300 bg-red-50">
+                    {(gapfillScoringDiagnostics as any).run.scoredDaysMissingModeledCount} scored day(s) have missing modeled compare output
+                    (MISSING_SIM). Actual usage is never used as simulated compare output; missing stays missing.
+                  </div>
+                )}
+                <div className="text-xs text-brand-navy/80">
+                  {(gapfillScoringDiagnostics as any).run.referencePoolRuleSummary}
+                </div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Scoring mode</div>
+                    <div className="font-mono">{(gapfillScoringDiagnostics as any).run.scoringMode}</div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">One union run used</div>
+                    <div className="font-mono">
+                      {(gapfillScoringDiagnostics as any).run.oneUnionRunUsed ? "true" : "false"}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Same shared run as travel/vacant parity</div>
+                    <div className="font-mono">
+                      {(gapfillScoringDiagnostics as any).run.sameSharedRunAsParity ? "true" : "false"}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Test days in reference pool (non-travel)</div>
+                    <div className="font-mono">
+                      {String((gapfillScoringDiagnostics as any).run.testDaysInReferencePoolCount ?? "—")}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Travel/vacant excluded from pool (count)</div>
+                    <div className="font-mono">
+                      {String((gapfillScoringDiagnostics as any).run.travelVacantExcludedCount ?? "—")}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Modeled scored days / missing</div>
+                    <div className="font-mono">
+                      {(gapfillScoringDiagnostics as any).run.scoredDaysModeledCount} /{" "}
+                      {(gapfillScoringDiagnostics as any).run.scoredDaysMissingModeledCount}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Parity days validated</div>
+                    <div className="font-mono">
+                      {String((gapfillScoringDiagnostics as any).run.parityDaysValidatedCount ?? "—")}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded border border-brand-blue/20">
+                    <div className="text-xs text-brand-navy/70">Keep-ref local keys (engine)</div>
+                    <div className="font-mono break-all text-xs">
+                      {Array.isArray((gapfillScoringDiagnostics as any).run.gapfillForceModeledKeepRefLocalDateKeys)
+                        ? (gapfillScoringDiagnostics as any).run.gapfillForceModeledKeepRefLocalDateKeys.join(", ") || "—"
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-brand-blue/20">
+                  <div className="text-xs text-brand-navy/70 mb-2">Per scored day</div>
+                  <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table className="w-full text-xs border border-brand-blue/20">
+                      <thead>
+                        <tr className="bg-brand-blue/10">
+                          <th className="text-left p-2">Date</th>
+                          <th className="text-left p-2">In ref pool</th>
+                          <th className="text-left p-2">Compare source</th>
+                          <th className="text-left p-2">Ownership</th>
+                          <th className="text-left p-2">Passthrough prevented</th>
+                          <th className="text-left p-2">Modeling mode</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.isArray((gapfillScoringDiagnostics as any).scoredDays) &&
+                          (gapfillScoringDiagnostics as any).scoredDays.map((row: any) => (
+                            <tr key={row.selectedDateKey} className="border-t border-brand-blue/10">
+                              <td className="p-2 font-mono">{row.selectedDateKey}</td>
+                              <td className="p-2">{row.inReferencePool ? "yes" : "no"}</td>
+                              <td className="p-2 font-mono">{row.compareOutputSource}</td>
+                              <td className="p-2 font-mono">{row.compareOutputOwnership}</td>
+                              <td className="p-2">{row.wasMeterPassthroughPrevented ? "yes" : "no"}</td>
+                              <td className="p-2 font-mono">{row.dayModelingMode}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </details>
+          )}
 
           <details className="border border-brand-blue/20 rounded" open>
             <summary className="p-3 cursor-pointer font-semibold text-brand-navy bg-brand-blue/5 rounded-t">

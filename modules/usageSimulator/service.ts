@@ -692,6 +692,46 @@ export type GapfillScoredDayParityDisplayValueKind =
   | "missing_display_sim_reference"
   | "missing_fresh_compare_sim_day_total";
 
+/** Machine-checkable Gap-Fill scoring source/ownership diagnostics (shared compare). */
+export type GapfillScoringDiagnosticsDayRow = {
+  selectedDateKey: string;
+  inReferencePool: boolean;
+  excludedFromReferencePoolReason: "travel_vacant" | null;
+  compareOutputSource: "MODELED_SIM" | "MISSING_SIM";
+  compareOutputOwnership: "simulator_owned" | "missing";
+  compareOutputAuthority: "freshCompareScoredDaySimTotalsByDate";
+  actualSource: "actual_usage";
+  wasMeterPassthroughPrevented: boolean;
+  dayModelingMode:
+    | "forced_modeled_scored_day"
+    | "travel_vacant_overlap_scored_day"
+    | "missing_modeled_output";
+  sameSharedRunAsParity: boolean;
+};
+
+export type GapfillScoringDiagnosticsRun = {
+  scoringMode: "modeled_scored_days";
+  referencePoolRuleSummary: string;
+  testDaysInReferencePoolCount: number;
+  travelVacantExcludedCount: number;
+  scoredDaysModeledCount: number;
+  scoredDaysMissingModeledCount: number;
+  parityDaysValidatedCount: number;
+  compareSharedCalcPath: string;
+  compareFreshModeUsed: "selected_days" | "full_window" | "artifact_only";
+  oneUnionRunUsed: boolean;
+  sameSharedRunAsParity: boolean;
+  actualAsSimGuardWouldTrigger: boolean;
+  sharedRunFingerprint: string;
+  gapfillForceModeledKeepRefLocalDateKeys?: string[];
+  gapfillForceModeledKeepRefUtcKeyCount?: number;
+};
+
+export type GapfillScoringDiagnostics = {
+  run: GapfillScoringDiagnosticsRun;
+  scoredDays: GapfillScoringDiagnosticsDayRow[];
+};
+
 export type GapfillCompareSimSharedResult =
   | {
       ok: true;
@@ -771,6 +811,7 @@ export type GapfillCompareSimSharedResult =
       modelAssumptions: any;
       homeProfileFromModel: any | null;
       applianceProfileFromModel: any | null;
+      gapfillScoringDiagnostics?: GapfillScoringDiagnostics;
     }
   | {
       ok: false;
@@ -1992,6 +2033,8 @@ export async function buildGapfillCompareSimShared(args: {
   let selectedTestDailyTotalsByDate: Map<string, number> | null = null;
   let freshParityCanonicalSimulatedDayTotalsByDate: Record<string, number> = {};
   let freshParityIntervals: IntervalPoint[] = [];
+  let lastFreshGapfillKeepRefLocalDateKeys: string[] | undefined;
+  let lastFreshGapfillKeepRefUtcKeyCount: number | undefined;
 
   const needsFreshCompareForParity =
     boundedTestDateKeysLocal.size > 0 || travelVacantParityDateKeysLocal.length > 0;
@@ -2025,6 +2068,8 @@ export async function buildGapfillCompareSimShared(args: {
         timezone,
         buildPathKind: "lab_validation",
         includeSimulatedDayResults: true,
+        forceModeledOutputKeepReferencePoolDateKeysLocal:
+          boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
       });
       if (freshResult.simulatedIntervals === null) {
         const code = String(freshResult.error ?? "");
@@ -2060,6 +2105,8 @@ export async function buildGapfillCompareSimShared(args: {
         canonicalSimulatedDayTotalsByDate:
           freshResult.canonicalSimulatedDayTotalsByDate ?? {},
         weatherSourceSummary: String(freshResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
+        gapfillForceModeledKeepRefLocalDateKeys: freshResult.gapfillForceModeledKeepRefLocalDateKeys,
+        gapfillForceModeledKeepRefUtcKeyCount: freshResult.gapfillForceModeledKeepRefUtcKeyCount,
       };
     };
     if (effectiveCompareFreshMode === "selected_days") {
@@ -2085,6 +2132,8 @@ export async function buildGapfillCompareSimShared(args: {
             > | null,
             weatherKindUsed: null as string | null,
             weatherSourceSummary: weatherBasisUsed,
+            gapfillForceModeledKeepRefLocalDateKeys: undefined as string[] | undefined,
+            gapfillForceModeledKeepRefUtcKeyCount: undefined as number | undefined,
           };
         }
         const selectedDaysResult = await simulatePastSelectedDaysShared({
@@ -2100,6 +2149,8 @@ export async function buildGapfillCompareSimShared(args: {
           buildPathKind: "lab_validation",
           selectedDateKeysLocal,
           retainSimulatedDayResultDateKeysLocal: boundedTestDateKeysLocal,
+          forceModeledOutputKeepReferencePoolDateKeysLocal:
+            boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
         });
         if (selectedDaysResult.simulatedIntervals === null) {
           const code = String(selectedDaysResult.error ?? "");
@@ -2152,6 +2203,8 @@ export async function buildGapfillCompareSimShared(args: {
           actualWxByDateKey: selectedDaysResult.actualWxByDateKey ?? null,
           weatherKindUsed: String(selectedDaysResult.weatherKindUsed ?? "") || null,
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
+          gapfillForceModeledKeepRefLocalDateKeys: selectedDaysResult.gapfillForceModeledKeepRefLocalDateKeys,
+          gapfillForceModeledKeepRefUtcKeyCount: selectedDaysResult.gapfillForceModeledKeepRefUtcKeyCount,
         };
       };
       if (exactSelectedDaysRequiresSingleFullWindowSharedExecution) {
@@ -2211,6 +2264,8 @@ export async function buildGapfillCompareSimShared(args: {
         compareSharedCalcPath =
           "simulatePastFullWindowShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_selected_and_parity_days->buildGapfillCompareSimShared";
         weatherBasisUsed = fullWindowResult.weatherSourceSummary;
+        lastFreshGapfillKeepRefLocalDateKeys = fullWindowResult.gapfillForceModeledKeepRefLocalDateKeys;
+        lastFreshGapfillKeepRefUtcKeyCount = fullWindowResult.gapfillForceModeledKeepRefUtcKeyCount;
         const selectedWeatherRange = Array.from(boundedTestDateKeysLocal).sort();
         if (selectedWeatherRange.length > 0) {
           const fullWindowWeatherByDate = fullWindowResult.actualWxByDateKey ?? null;
@@ -2313,6 +2368,8 @@ export async function buildGapfillCompareSimShared(args: {
         compareFreshModeUsed = "selected_days";
         compareSharedCalcPath =
           "simulatePastSelectedDaysShared(simulatePastFullWindowShared->simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared";
+        lastFreshGapfillKeepRefLocalDateKeys = sharedSelectedDaysResult.gapfillForceModeledKeepRefLocalDateKeys;
+        lastFreshGapfillKeepRefUtcKeyCount = sharedSelectedDaysResult.gapfillForceModeledKeepRefUtcKeyCount;
         weatherBasisUsed =
           boundedTestDateKeysLocal.size > 0
             ? sharedSelectedDaysResult.weatherSourceSummary
@@ -2409,6 +2466,8 @@ export async function buildGapfillCompareSimShared(args: {
       compareSharedCalcPath =
         "simulatePastFullWindowShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->buildGapfillCompareSimShared";
       weatherBasisUsed = freshResult.weatherSourceSummary;
+      lastFreshGapfillKeepRefLocalDateKeys = freshResult.gapfillForceModeledKeepRefLocalDateKeys;
+      lastFreshGapfillKeepRefUtcKeyCount = freshResult.gapfillForceModeledKeepRefUtcKeyCount;
       const scoredDayWeatherPayload = buildScoredDayWeatherPayload({
         scoredDateKeysLocal: boundedTestDateKeysLocal,
         weatherByDateKey: freshResult.actualWxByDateKey,
@@ -3197,6 +3256,68 @@ export async function buildGapfillCompareSimShared(args: {
     Array.from(freshDailyTotalsByDate.entries()).map(([dk, kwh]) => [dk, round2Local(Number(kwh) || 0)] as const)
   );
 
+  const gapfillScoringDiagnostics: GapfillScoringDiagnostics | undefined = (() => {
+    if (!needsFreshCompareForParity) return undefined;
+    const keepRefSet = new Set(lastFreshGapfillKeepRefLocalDateKeys ?? []);
+    const testDaysInReferencePoolCount = Array.from(boundedTestDateKeysLocal).filter(
+      (dk) => !boundedTravelDateKeysLocal.has(dk)
+    ).length;
+    const sameSharedRunAsParityRun =
+      travelVacantParityDateKeysLocal.length === 0 ? true : needsFreshCompareForParity;
+    const scoredDays: GapfillScoringDiagnosticsDayRow[] = Array.from(boundedTestDateKeysLocal)
+      .sort()
+      .map((dk) => {
+        const inTravel = boundedTravelDateKeysLocal.has(dk);
+        const hasSim = freshDailyTotalsByDate.has(dk);
+        const inKeepRefMeta =
+          keepRefSet.size > 0 ? keepRefSet.has(dk) : boundedTestDateKeysLocal.has(dk);
+        return {
+          selectedDateKey: dk,
+          inReferencePool: !inTravel,
+          excludedFromReferencePoolReason: inTravel ? ("travel_vacant" as const) : null,
+          compareOutputSource: hasSim ? ("MODELED_SIM" as const) : ("MISSING_SIM" as const),
+          compareOutputOwnership: hasSim ? ("simulator_owned" as const) : ("missing" as const),
+          compareOutputAuthority: "freshCompareScoredDaySimTotalsByDate" as const,
+          actualSource: "actual_usage" as const,
+          wasMeterPassthroughPrevented: Boolean(inKeepRefMeta && hasSim && !inTravel),
+          dayModelingMode: !hasSim
+            ? ("missing_modeled_output" as const)
+            : inTravel
+              ? ("travel_vacant_overlap_scored_day" as const)
+              : ("forced_modeled_scored_day" as const),
+          sameSharedRunAsParity: sameSharedRunAsParityRun,
+        };
+      });
+    const scoredDaysModeledCount = scoredDays.filter((r) => r.compareOutputSource === "MODELED_SIM").length;
+    const scoredDaysMissingModeledCount = scoredDays.filter((r) => r.compareOutputSource === "MISSING_SIM").length;
+    const unionFp = [
+      ...Array.from(boundedTestDateKeysLocal).sort(),
+      ...travelVacantParityDateKeysLocal.slice().sort(),
+    ].join("|");
+    return {
+      run: {
+        scoringMode: "modeled_scored_days",
+        referencePoolRuleSummary:
+          "Reference pool excludes only travel/vacant; test-day actuals remain in the pool; compare uses shared modeled totals (keep-ref) for scored dates.",
+        testDaysInReferencePoolCount,
+        travelVacantExcludedCount: boundedTravelDateKeysLocal.size,
+        scoredDaysModeledCount,
+        scoredDaysMissingModeledCount,
+        parityDaysValidatedCount: travelVacantParityValidatedCount,
+        compareSharedCalcPath,
+        compareFreshModeUsed,
+        oneUnionRunUsed: needsFreshCompareForParity,
+        sameSharedRunAsParity: sameSharedRunAsParityRun,
+        actualAsSimGuardWouldTrigger: false,
+        sharedRunFingerprint: `${effectiveCompareFreshMode}:${compareCalculationScope}:${unionFp}`,
+        gapfillForceModeledKeepRefLocalDateKeys: lastFreshGapfillKeepRefLocalDateKeys,
+        gapfillForceModeledKeepRefUtcKeyCount: lastFreshGapfillKeepRefUtcKeyCount,
+      },
+      scoredDays,
+    };
+  })();
+  (modelAssumptions as Record<string, unknown>).gapfillScoringDiagnostics = gapfillScoringDiagnostics;
+
   return {
     ok: true,
     artifactAutoRebuilt,
@@ -3234,6 +3355,7 @@ export async function buildGapfillCompareSimShared(args: {
     artifactIntervals,
     simulatedTestIntervals,
     freshCompareScoredDaySimTotalsByDate,
+    gapfillScoringDiagnostics,
     simulatedChartIntervals,
     simulatedChartDaily,
     simulatedChartMonthly,

@@ -14,6 +14,7 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 
 ## Core principles / guardrails
 - **Compare / sim integrity (GapFill & shared Past)**: No hidden fallbacks in compare or fresh shared simulation. Missing canonical simulated values stay missing (null / explicit reason codes). **Actual usage must never be copied into simulated-side fields** for scoring or parity. **Invariant violations** (e.g. simulated-day `localDate` vs interval-derived local dates) must surface explicitly; compare fails with `SIMULATED_DAY_LOCAL_DATE_INTERVAL_INVARIANT_VIOLATION` rather than preferring one authority silently.
+- **Gap-Fill target pool semantics (product intent)**: The **reference / good-data pool** for the shared Past sim **excludes only** travel/vacant (and similar “bad at-home” exclusions). **Test compare days are good data**: their **actual** intervals **do** contribute to that pool. Travel/vacant days **do not** contribute as reference; they are **filled** by simulation using the rest of the window. **Simulated output** used to **grade** test days must still come from the **same** sim module as travel fills—not meter presented as “sim.”
 - **Never silently fabricate “real” usage**: simulated usage must be tagged and surfaced via a clear disclaimer in the UI.
 - **Mode-weighted evidence**: observed-history reconstruction prioritizes measured interval behavior + weather response; home details/appliances act as context/priors/fallback there, and become primary in overlay/synthetic/sparse-data modes.
 - **Deterministic + auditable**: given the same inputs, we should regenerate the same simulated series (or store the generated series + an inputs hash).
@@ -300,6 +301,30 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - No read-time re-stitching.
 - No second overlay pass on top of the saved Past baseline artifact.
 - No alternate rebuild path for the same Past baseline output.
+
+### Gap-Fill Lab: Target architecture (data pool, single run, scoring)
+
+**Purpose:** Tighten the **one** shared calculation module and build confidence that travel/vacant sim outputs are trustworthy—by scoring **modeled** sim vs **actual** on held-out test dates, using the **same** pipeline that produces travel/vacant fills.
+
+1. **Canonical window**  
+   One identity/coverage window (e.g. full Past year). All compare and parity logic refers to this frame.
+
+2. **Good-data pool (what informs the sim)**  
+   - Includes **all** days that represent trustworthy at-home usage, **including** selected **test compare** dates (their **actual** intervals feed neighbors, shape, empirical matching, etc.).  
+   - **Excludes only** **travel/vacant** (and any other explicitly “bad occupancy” exclusions): those intervals are **not** used as reference-quality inputs.
+
+3. **Bad-data days (travel/vacant)**  
+   Not in the reference pool. They are **simulated** using the **rest** of the good window. Parity checks validate artifact vs fresh **modeled** totals for those dates.
+
+4. **Single shared execution**  
+   One `simulatePast…` run over the window; **union** of scored test local dates and DB travel/vacant parity dates in selected-days mode (or full-window proof when required). **No** second simulator for “test only.” After the run, **slice**: travel/vacant → parity; test dates → grade sim vs actual.
+
+5. **What “sim” must mean for test scoring (target)**  
+   The **simulated** kWh (or intervals) used in the truth table for test days must be produced by the **same** day-level sim logic as travel/vacant **fills**—not **meter passthrough** labeled as sim. Actuals on test days **inform** the pool; they **must not** substitute for the simulated series when measuring model error.
+
+6. **Implemented (Gap-Fill vs meter passthrough)**  
+   Gap-Fill lab compare passes `forceModeledOutputKeepReferencePoolDateKeysLocal` (bounded scored test local dates) into `simulatePastUsageDataset` → `buildPastSimulatedBaselineV1` as **`forceModeledOutputKeepReferencePoolDateKeys`** (UTC grid keys). Those days **keep** actual intervals in the **reference-day pool** while **stitched compare output** for that day is produced via the same **`simulatePastDay`** path as travel/vacant fills (`simulatedReason: GAPFILL_MODELED_KEEP_REF`). Scored compare totals are read from **`freshCompareScoredDaySimTotalsByDate`** (simulator-owned), not meter passthrough.  
+   **Machine-checkable diagnostics:** `buildGapfillCompareSimShared` returns **`gapfillScoringDiagnostics`** (run summary + per-scored-day rows). The Gap-Fill Lab admin page surfaces a **Gap-Fill scoring source diagnostics** panel; **no raw JSON guessing** is required to confirm source/ownership.
 
 ### GapFill Shared Scoring Rule
 
