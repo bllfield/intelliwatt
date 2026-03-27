@@ -278,9 +278,25 @@ model GapfillCompareRunSnapshot {
   snapshotVersion           String?
   snapshotPersistedAt       DateTime?
   snapshotJson              Json?
+  /// Full normalized compare inputs for async replay (droplet worker); not used as simulated output.
+  queuedPayloadJson         Json?
   statusMetaJson            Json?
 
   @@index([houseId, createdAt])
   @@index([userId, createdAt])
   @@index([status, updatedAt])
+}
+
+/// Generic async droplet execution queue for shared sim workloads (Past recalc, etc.). Gap-Fill compare uses GapfillCompareRunSnapshot + compareRunId.
+model SimDropletJob {
+  id             String   @id @default(uuid())
+  jobKind        String   // e.g. past_sim_recalc
+  status         String   // queued | running | succeeded | failed
+  payloadJson    Json
+  failureMessage String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+  @@index([jobKind, status])
 }

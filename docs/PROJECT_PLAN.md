@@ -160,6 +160,15 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
   - [x] Canonical heavy retry now retries snapshot readers instead of recompute.
 - Runtime note: legacy `compare_heavy` compatibility may still exist, but it is not the canonical admin heavy path.
 
+### Implemented (2026-03) — Droplet execution for shared sim (Gap-Fill compare + Past recalc)
+
+- **Why:** Full-window shared Past work + Gap-Fill compare can exceed practical Vercel memory/time; async handoff moves heavy execution off the serverless request when webhook env is set.
+- **Gap-Fill persistence:** `GapfillCompareRunSnapshot.queuedPayloadJson` + **`runGapfillCompareCorePipeline`** on the droplet (`reason: "gapfill_compare"`). **`GAPFILL_COMPARE_INLINE=true`** forces in-request compare.
+- **Past recalc persistence:** `SimDropletJob` (usage DB) stores **`past_sim_recalc`** payload; worker runs **`recalcSimulatorBuild`** only—same function as synchronous routes. **`PAST_SIM_RECALC_INLINE=true`** or **`SIM_DROPLET_EXECUTION_INLINE=true`** forces inline recalc on Vercel.
+- **Webhook:** `deploy/droplet/webhook_server.py` — unified **`scripts/droplet/sim-job-run.ts`** for `gapfill_compare` and `past_sim_recalc`; same URL/secret as SMT triggers.
+- **Env (Vercel):** `DROPLET_WEBHOOK_URL` or `INTELLIWATT_WEBHOOK_URL` + matching secret.
+- **User/admin:** `POST /api/user/simulator/recalc` → optional `executionMode: "droplet_async"` + `jobId`; poll `GET` same path with `jobId`. Admin simulation-engines `recalc=1` and diagnostic `recalcFirst` use **`dispatchPastSimRecalc`** (diagnostic returns **202** with `pastRecalcJobId` when queued).
+
 Checklist for stabilization follow-up (narrow scope, only if still needed):
 - [ ] Admin dedupe/cleanup polish for any residual duplicate heavy-reader calls.
 - [ ] Optional legacy `compare_heavy` cleanup/deprecation if compatibility risk is low.

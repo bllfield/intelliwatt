@@ -7,7 +7,9 @@ import { normalizeEmailSafe } from "@/lib/utils/email";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { recalcSimulatorBuild, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
+import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +84,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "User not found for email." }, { status: 404 });
     }
 
+    const pastRecalcJobIdPoll = String(url.searchParams.get("pastRecalcJobId") ?? "").trim();
+    if (pastRecalcJobIdPoll) {
+      const job = await getPastSimRecalcJobForUser({ jobId: pastRecalcJobIdPoll, userId: user.id });
+      if (!job.ok) {
+        return NextResponse.json({ ok: false, error: "past_recalc_job_not_found" }, { status: 404 });
+      }
+      return NextResponse.json({
+        ok: true,
+        executionMode: "droplet_async",
+        pastRecalcJobId: pastRecalcJobIdPoll,
+        pastRecalcJobStatus: job.status,
+        failureMessage: job.failureMessage,
+      });
+    }
+
     const houses = await prisma.houseAddress.findMany({
       where: { userId: user.id, archivedAt: null },
       select: {
@@ -128,6 +145,9 @@ export async function GET(req: NextRequest) {
 
     const scenarioKey = scenarioId ?? "BASELINE";
 
+    let pastRecalcExecutionMode: "droplet_async" | "inline" | undefined;
+    let pastRecalcJobId: string | undefined;
+
     if (doRecalc) {
       const baselineBuild = await (prisma as any).usageSimulatorBuild
         .findUnique({
@@ -153,7 +173,7 @@ export async function GET(req: NextRequest) {
           ? weatherPreferenceRaw
           : undefined;
 
-      await recalcSimulatorBuild({
+      const dispatched = await dispatchPastSimRecalc({
         userId: user.id,
         houseId: selectedHouse.id,
         esiid: selectedHouse.esiid ?? null,
@@ -162,6 +182,15 @@ export async function GET(req: NextRequest) {
         weatherPreference: weatherPreference as any,
         persistPastSimBaseline: false,
       });
+      if (dispatched.executionMode === "droplet_async") {
+        pastRecalcExecutionMode = "droplet_async";
+        pastRecalcJobId = dispatched.jobId;
+      } else {
+        pastRecalcExecutionMode = "inline";
+        if (!dispatched.result.ok) {
+          return NextResponse.json(dispatched.result, { status: 400 });
+        }
+      }
     }
 
     const simulation = await getSimulatedUsageForHouseScenario({
@@ -267,6 +296,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      ...(pastRecalcExecutionMode != null
+        ? {
+            pastRecalcExecutionMode,
+            ...(pastRecalcJobId != null ? { pastRecalcJobId } : {}),
+          }
+        : {}),
       selection: {
         email,
         houseId: selectedHouse.id,

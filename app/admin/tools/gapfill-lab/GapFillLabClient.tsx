@@ -1784,6 +1784,56 @@ export default function GapFillLabClient() {
         },
         coreResponse: coreData,
       }));
+      if ((coreData as any)?.compareExecutionMode === "droplet_async") {
+        const rid =
+          typeof (coreData as any)?.compareRunId === "string" && String((coreData as any).compareRunId).trim()
+            ? String((coreData as any).compareRunId).trim()
+            : null;
+        if (!rid) {
+          setError("Compare was queued but compareRunId is missing.");
+          setProgressStatus(null);
+          return;
+        }
+        setProgressStatus("Compare running on droplet; waiting for snapshot…");
+        const pollMs = 2500;
+        const deadline = Date.now() + 45 * 60_000;
+        let polled: ApiResponse | null = null;
+        while (Date.now() < deadline) {
+          const pollResult = await postGapfill(
+            {
+              action: "compare_run_poll",
+              email: trimmed,
+              timezone,
+              houseId: houseId || undefined,
+              compareRunId: rid,
+            },
+            30_000
+          );
+          polled = pollResult.data;
+          syncCompareRunState(pollResult.data);
+          if (
+            pollResult.res.ok &&
+            pollResult.data.ok &&
+            (pollResult.data as any)?.compareRunSnapshotReady === true
+          ) {
+            break;
+          }
+          if (pollResult.res.ok && pollResult.data.ok && (pollResult.data as any)?.compareRunStatus === "failed") {
+            setError(String((pollResult.data as any)?.failureMessage ?? "Compare run failed on worker."));
+            finishPhase("compare_core", "error", { errorCode: "compare_run_failed_remote" });
+            setProgressStatus(null);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, pollMs));
+        }
+        if (!polled || !(polled as any).compareRunSnapshotReady) {
+          setError("Timed out waiting for droplet compare snapshot.");
+          finishPhase("compare_core", "error", { errorCode: "compare_async_poll_timeout" });
+          setProgressStatus(null);
+          return;
+        }
+        setProgressStatus(null);
+      }
       if (compareCoreIncludesHeavyPayload || !togglesSnapshot.runHeavyDiagnosticsStep) {
         const nowIso = new Date().toISOString();
         const skipReason = !togglesSnapshot.runHeavyDiagnosticsStep

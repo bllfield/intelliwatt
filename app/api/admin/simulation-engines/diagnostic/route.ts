@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
 import { normalizeEmailSafe } from "@/lib/utils/email";
-import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
+import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { normalizeScenarioKey } from "@/modules/usageSimulator/repo";
 import { runSimulatorDiagnostic } from "@/lib/admin/simulatorDiagnostic";
 
@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
 
     if (recalcFirst) {
       const mode = (buildRec.buildInputs as any)?.mode ?? "SMT_BASELINE";
-      await recalcSimulatorBuild({
+      const dispatched = await dispatchPastSimRecalc({
         userId: user.id,
         houseId: house.id,
         esiid: house.esiid ?? null,
@@ -200,6 +200,21 @@ export async function POST(req: NextRequest) {
         scenarioId: resolvedScenarioId,
         persistPastSimBaseline: false,
       });
+      if (dispatched.executionMode === "droplet_async") {
+        return NextResponse.json(
+          {
+            ok: true,
+            executionMode: "droplet_async",
+            pastRecalcJobId: dispatched.jobId,
+            message:
+              "Recalc queued on droplet. Poll GET /api/admin/simulation-engines?email=...&pastRecalcJobId=... until status is succeeded, then retry this diagnostic.",
+          },
+          { status: 202 }
+        );
+      }
+      if (!dispatched.result.ok) {
+        return NextResponse.json(dispatched.result, { status: 400 });
+      }
       const freshBuild = await (prisma as any).usageSimulatorBuild
         .findUnique({
           where: {

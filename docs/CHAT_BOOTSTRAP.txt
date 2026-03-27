@@ -16,6 +16,16 @@ Follow docs/CHATGPT_HOUSE_RULES.md:
 - Usage/simulation layer naming must follow `docs/USAGE_LAYER_MAP.md` and `modules/usageSimulator/kinds.ts` (`IntervalSeriesKind`).
 
 ========================================
+SHARED SIM → DROPLET (SHIPPED 2026-03-27, EXTENDED)
+========================================
+
+- **One runner:** `scripts/droplet/sim-job-run.ts <jobKind> <id>` — `jobKind` is **`gapfill_compare`** (`id` = `compareRunId`) or **`past_sim_recalc`** (`id` = `SimDropletJob` row id). Same repo checkout, usage DB, and TS entry pattern as other droplet jobs. Legacy `scripts/droplet/gapfill-compare-run.ts` still works but **`sim-job-run.ts` is canonical**.
+- **Webhook:** `deploy/droplet/webhook_server.py` on **`POST /trigger/smt-now`**: `reason: "gapfill_compare"` (body: `compareRunId`) and `reason: "past_sim_recalc"` (body: `jobId`). Same secret headers as SMT. **`INTELLIWATT_APP_ROOT`** → repo root for `npx tsx`.
+- **Gap-Fill compare enqueue:** When webhook URL + secret are set, admin `compare_core` persists **`queuedPayloadJson`** on `GapfillCompareRunSnapshot`, returns **`compareExecutionMode: "droplet_async"`**, triggers webhook. **`GAPFILL_COMPARE_INLINE=true`** forces in-request compare.
+- **Past sim recalc enqueue:** `dispatchPastSimRecalc` (`modules/usageSimulator/pastSimRecalcDispatch.ts`) calls the same **`recalcSimulatorBuild`** as before, either inline or via **`SimDropletJob`** + droplet worker (`runPastSimRecalcQueuedWorker`). User **`POST /api/user/simulator/recalc`** returns **`executionMode: "droplet_async"`** + **`jobId`**; poll **`GET /api/user/simulator/recalc?jobId=`**. Admin inspect **`GET /api/admin/simulation-engines?...&pastRecalcJobId=`** for status. **`PAST_SIM_RECALC_INLINE=true`** or **`SIM_DROPLET_EXECUTION_INLINE=true`** forces inline execution on Vercel.
+- **Shared pipeline (Gap-Fill):** `runGapfillCompareCorePipeline` — compare math only in **`buildGapfillCompareSimShared`** (`service.ts`). UI polls **`compare_run_poll`**, then **`compare_heavy_*`** by `compareRunId`.
+
+========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)
 ========================================
 

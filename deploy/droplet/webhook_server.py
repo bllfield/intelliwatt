@@ -498,6 +498,60 @@ def run_default_command() -> bytes:
     return (p.stdout or "ok\n").encode()
 
 
+def _spawn_sim_job_tsx(job_kind: str, job_arg: str) -> None:
+    """Run canonical TS sim jobs via one entrypoint (Gap-Fill compare, Past recalc, …)."""
+    app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
+    runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
+    if not os.path.isfile(runner):
+        raise FileNotFoundError(runner)
+
+    def _spawn() -> None:
+        try:
+            subprocess.Popen(
+                ["npx", "--yes", "tsx", runner, job_kind, job_arg],
+                cwd=app_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=os.environ.copy(),
+            )
+        except Exception as exc:
+            print(f"[ERROR] sim_job spawn failed ({job_kind}): {exc!r}", flush=True)
+
+    threading.Thread(target=_spawn, daemon=True).start()
+
+
+def handle_gapfill_compare(payload: dict) -> bytes:
+    """Authenticated trigger only: shared TS runner (no compare math in Python)."""
+    compare_run_id = str(payload.get("compareRunId") or "").strip()
+    if not compare_run_id:
+        return json.dumps({"ok": False, "error": "compareRunId_required"}).encode("utf-8")
+    app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
+    runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
+    if not os.path.isfile(runner):
+        return json.dumps({"ok": False, "error": "runner_missing", "path": runner}).encode("utf-8")
+    try:
+        _spawn_sim_job_tsx("gapfill_compare", compare_run_id)
+    except FileNotFoundError as e:
+        return json.dumps({"ok": False, "error": "runner_missing", "path": str(e)}).encode("utf-8")
+    return json.dumps({"ok": True, "queued": True, "compareRunId": compare_run_id}).encode("utf-8")
+
+
+def handle_past_sim_recalc(payload: dict) -> bytes:
+    """Queue Past sim recalc on droplet (same sim-job runner as Gap-Fill compare)."""
+    job_id = str(payload.get("jobId") or "").strip()
+    if not job_id:
+        return json.dumps({"ok": False, "error": "jobId_required"}).encode("utf-8")
+    app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
+    runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
+    if not os.path.isfile(runner):
+        return json.dumps({"ok": False, "error": "runner_missing", "path": runner}).encode("utf-8")
+    try:
+        _spawn_sim_job_tsx("past_sim_recalc", job_id)
+    except FileNotFoundError as e:
+        return json.dumps({"ok": False, "error": "runner_missing", "path": str(e)}).encode("utf-8")
+    return json.dumps({"ok": True, "queued": True, "jobId": job_id}).encode("utf-8")
+
+
 def handle_smt_authorized(payload: dict) -> bytes:
     """
     Handle customer-facing SMT authorization notifications.
@@ -2000,6 +2054,10 @@ class H(BaseHTTPRequestHandler):
                     resp_body = handle_smt_authorized(payload)
                 elif reason == "smt_meter_info":
                     resp_body = handle_smt_meter_info(payload)
+                elif reason == "gapfill_compare":
+                    resp_body = handle_gapfill_compare(payload)
+                elif reason == "past_sim_recalc":
+                    resp_body = handle_past_sim_recalc(payload)
 
             self.send_response(200)
             self.end_headers()

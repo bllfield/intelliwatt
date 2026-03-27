@@ -3723,34 +3723,34 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.missingData).toEqual(["rebuildGapfillSharedPastArtifact"]);
   });
 
-  it("classifies diagnostics full-report timeout vs non-timeout distinctly in source", () => {
-    const routeSource = readFileSync(
-      resolve(process.cwd(), "app/api/admin/tools/gapfill-lab/route.ts"),
+  it("classifies diagnostics full-report timeout vs non-timeout distinctly in compare pipeline source", () => {
+    const pipelineSource = readFileSync(
+      resolve(process.cwd(), "modules/usageSimulator/gapfillCompareCorePipeline.ts"),
       "utf8"
     );
-    expect(routeSource).toContain(
+    expect(pipelineSource).toContain(
       "const timedOut = normalizedError.code === \"compare_core_route_timeout_build_full_report\";"
     );
-    expect(routeSource).toContain("const aborted = normalizedError.code === \"compare_core_request_aborted_build_full_report\";");
-    expect(routeSource).toContain("error: aborted");
-    expect(routeSource).toContain("\"compare_core_request_aborted\"");
-    expect(routeSource).toContain("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS");
-    expect(routeSource).toContain("COMPARE_CORE_REQUEST_ABORTED_BUILD_DIAGNOSTICS");
-    expect(routeSource).toContain("COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS");
-    expect(routeSource).toContain("{ status: aborted ? 499 : timedOut ? 504 : 500 }");
-    expect(routeSource).toContain("Compare core timed out while building diagnostics report payload.");
-    expect(routeSource).toContain("Compare core request was aborted while building diagnostics report payload.");
-    expect(routeSource).toContain("Compare core failed while building diagnostics report payload.");
+    expect(pipelineSource).toContain("const aborted = normalizedError.code === \"compare_core_request_aborted_build_full_report\";");
+    expect(pipelineSource).toContain("error: aborted");
+    expect(pipelineSource).toContain("\"compare_core_request_aborted\"");
+    expect(pipelineSource).toContain("COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS");
+    expect(pipelineSource).toContain("COMPARE_CORE_REQUEST_ABORTED_BUILD_DIAGNOSTICS");
+    expect(pipelineSource).toContain("COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS");
+    expect(pipelineSource).toContain("{ status: aborted ? 499 : timedOut ? 504 : 500 }");
+    expect(pipelineSource).toContain("Compare core timed out while building diagnostics report payload.");
+    expect(pipelineSource).toContain("Compare core request was aborted while building diagnostics report payload.");
+    expect(pipelineSource).toContain("Compare core failed while building diagnostics report payload.");
   });
 
-  it("does not reconstruct scored-day weather rows in route source", () => {
-    const routeSource = readFileSync(
-      resolve(process.cwd(), "app/api/admin/tools/gapfill-lab/route.ts"),
+  it("does not reconstruct scored-day weather rows in compare pipeline source", () => {
+    const pipelineSource = readFileSync(
+      resolve(process.cwd(), "modules/usageSimulator/gapfillCompareCorePipeline.ts"),
       "utf8"
     );
-    expect(routeSource).toContain("Array.isArray((sharedSim as any)?.scoredDayWeatherRows)");
-    expect(routeSource).not.toContain("weatherApiRows.map((w) => ({");
-    expect(routeSource).not.toContain("weatherBasisUsed: String((sharedSim as any).weatherBasisUsed ?? null)");
+    expect(pipelineSource).toContain("Array.isArray((sharedSim as any)?.scoredDayWeatherRows)");
+    expect(pipelineSource).not.toContain("weatherApiRows.map((w) => ({");
+    expect(pipelineSource).not.toContain("weatherBasisUsed: String((sharedSim as any).weatherBasisUsed ?? null)");
   });
 
   it("binds compare-core weather truth directly in client source without heavy-only dependency", () => {

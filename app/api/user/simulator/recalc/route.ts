@@ -2,7 +2,8 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
-import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
+import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
+import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
@@ -27,6 +28,32 @@ async function requireHouse(userId: string, houseId: string) {
   return h ?? null;
 }
 
+export async function GET(request: NextRequest) {
+  try {
+    const u = await requireUser();
+    if (!u.ok) return NextResponse.json(u.body, { status: u.status });
+
+    const jobId = new URL(request.url).searchParams.get("jobId")?.trim() ?? "";
+    if (!jobId) {
+      return NextResponse.json({ ok: false, error: "jobId_required" }, { status: 400 });
+    }
+    const job = await getPastSimRecalcJobForUser({ jobId, userId: u.user.id });
+    if (!job.ok) {
+      return NextResponse.json({ ok: false, error: "job_not_found" }, { status: 404 });
+    }
+    return NextResponse.json({
+      ok: true,
+      executionMode: "droplet_async",
+      jobId,
+      jobStatus: job.status,
+      failureMessage: job.failureMessage,
+    });
+  } catch (e) {
+    console.error("[user/simulator/recalc] GET failed", e);
+    return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const u = await requireUser();
@@ -48,7 +75,7 @@ export async function POST(request: NextRequest) {
 
     const house = await requireHouse(u.user.id, houseId);
     if (!house) return NextResponse.json({ ok: false, error: "House not found for user" }, { status: 403 });
-    const out = await recalcSimulatorBuild({
+    const dispatched = await dispatchPastSimRecalc({
       userId: u.user.id,
       houseId,
       esiid: house.esiid ?? null,
@@ -57,8 +84,16 @@ export async function POST(request: NextRequest) {
       weatherPreference,
       persistPastSimBaseline: true,
     });
+    if (dispatched.executionMode === "droplet_async") {
+      return NextResponse.json({
+        ok: true,
+        executionMode: "droplet_async",
+        jobId: dispatched.jobId,
+      });
+    }
+    const out = dispatched.result;
     if (!out.ok) return NextResponse.json(out, { status: 400 });
-    return NextResponse.json(out);
+    return NextResponse.json({ ...out, executionMode: "inline" });
   } catch (e) {
     console.error("[user/simulator/recalc] failed", e);
     return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });

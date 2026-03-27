@@ -31,12 +31,17 @@ export async function createGapfillCompareRunStart(args: {
   requireExactArtifactMatch: boolean;
   artifactIdentitySource?: string | null;
   statusMeta?: Record<string, unknown> | null;
+  /** Full normalized replay payload for async droplet execution. */
+  queuedPayloadJson?: Record<string, unknown> | null;
+  /** Default started; use queued for enqueue-only handoff. */
+  initialStatus?: "started" | "queued";
+  initialPhase?: string | null;
 }): Promise<{
   ok: true;
   compareRunId: string;
   createdAt: string;
   updatedAt: string;
-  status: "started";
+  status: "started" | "queued";
 } | {
   ok: false;
   error: string;
@@ -52,10 +57,11 @@ export async function createGapfillCompareRunStart(args: {
   }
   try {
     const now = new Date();
+    const initialStatus = args.initialStatus ?? "started";
     const row = await model.create({
       data: {
-        status: "started",
-        phase: "compare_core_started",
+        status: initialStatus,
+        phase: args.initialPhase ?? (initialStatus === "queued" ? "compare_async_queued" : "compare_core_started"),
         startedAt: now,
         houseId: args.houseId ?? null,
         userId: args.userId ?? null,
@@ -66,6 +72,7 @@ export async function createGapfillCompareRunStart(args: {
         artifactIdentitySource: args.artifactIdentitySource ?? null,
         snapshotReady: false,
         statusMetaJson: args.statusMeta ?? null,
+        queuedPayloadJson: args.queuedPayloadJson ?? undefined,
       },
       select: {
         id: true,
@@ -194,6 +201,7 @@ export async function getGapfillCompareRunSnapshotById(args: { compareRunId: str
     snapshotPersistedAt: string | null;
     snapshotJson: Record<string, unknown> | null;
     statusMetaJson: Record<string, unknown> | null;
+    queuedPayloadJson: Record<string, unknown> | null;
   };
 } | {
   ok: false;
@@ -233,6 +241,7 @@ export async function getGapfillCompareRunSnapshotById(args: { compareRunId: str
         snapshotPersistedAt: true,
         snapshotJson: true,
         statusMetaJson: true,
+        queuedPayloadJson: true,
       },
     });
     if (!row) {
@@ -266,6 +275,10 @@ export async function getGapfillCompareRunSnapshotById(args: { compareRunId: str
         snapshotPersistedAt: row.snapshotPersistedAt ? new Date(row.snapshotPersistedAt).toISOString() : null,
         snapshotJson: row.snapshotJson && typeof row.snapshotJson === "object" ? (row.snapshotJson as Record<string, unknown>) : null,
         statusMetaJson: row.statusMetaJson && typeof row.statusMetaJson === "object" ? (row.statusMetaJson as Record<string, unknown>) : null,
+        queuedPayloadJson:
+          row.queuedPayloadJson && typeof row.queuedPayloadJson === "object"
+            ? (row.queuedPayloadJson as Record<string, unknown>)
+            : null,
       },
     };
   } catch (error: unknown) {
