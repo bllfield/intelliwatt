@@ -71,6 +71,7 @@ vi.mock("@/lib/admin/gapfillLab", async (importOriginal) => {
 
 import {
   collectSimulatedDayLocalDateIntervalConflicts,
+  fillMissingCanonicalSelectedDayTotalsFromSimulatedResults,
   simulatePastUsageDataset,
   simulatePastFullWindowShared,
   simulatePastSelectedDaysShared,
@@ -310,6 +311,25 @@ describe("shared sim usage-shape ensure path", () => {
       expect(out.simulatedDayResults.map((row) => row.localDate)).toEqual(["2026-01-02"]);
       expect(out.canonicalSimulatedDayTotalsByDate).toEqual({ "2026-01-02": 1 });
     }
+  });
+
+  it("fills missing selected-day canonical totals from SimulatedDayResult intervals (meta sparse vs local scored date)", () => {
+    // Meta map may omit a local scored date when dataset.meta keys align to localDate anchors only,
+    // while interval timestamps still carry simulator-owned kWh on a different local calendar day.
+    const filled = fillMissingCanonicalSelectedDayTotalsFromSimulatedResults({
+      selectedValid: new Set(["2026-01-02"]),
+      canonicalFromMeta: {},
+      simulatedDayResults: [
+        {
+          localDate: "2026-01-01",
+          intervals: [{ timestamp: "2026-01-02T08:00:00.000Z", kwh: 0.5 }],
+          intervalSumKwh: 0.5,
+          finalDayKwh: 0.5,
+        } as any,
+      ],
+      timezone: "America/Chicago",
+    });
+    expect(filled).toEqual({ "2026-01-02": 0.5 });
   });
 
   it("fails selected-day shared path when localDate conflicts with interval-derived local date keys", async () => {

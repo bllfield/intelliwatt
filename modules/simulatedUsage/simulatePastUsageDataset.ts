@@ -78,6 +78,63 @@ function simulatedDayResultIntersectsLocalDateKeys(
   return intervals.some((interval) => dateKeysLocal.has(dateKeyInTimezone(String(interval?.timestamp ?? ""), timezone)));
 }
 
+function round2CanonicalSimDayTotal(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Sum simulator-owned interval kWh for one local calendar day (timezone-local date key). */
+function sumSimulatedResultIntervalsForLocalDate(
+  intervals: Array<{ timestamp?: string; kwh?: unknown }> | undefined,
+  localDateKey: string,
+  timezone: string
+): number | null {
+  if (!Array.isArray(intervals) || intervals.length === 0) return null;
+  let sum = 0;
+  let any = false;
+  for (const iv of intervals) {
+    if (dateKeyInTimezone(String(iv?.timestamp ?? ""), timezone) !== localDateKey) continue;
+    sum += Number(iv?.kwh) || 0;
+    any = true;
+  }
+  return any ? round2CanonicalSimDayTotal(sum) : null;
+}
+
+/**
+ * `dataset.meta.canonicalArtifactSimulatedDayTotalsByDate` keys daily rows by the same date keys as
+ * `simulatedDayResult.localDate` (UTC grid anchors). Selected GapFill scored dates use local calendar
+ * keys; interval energy can fall on a different local day than `localDate`, so meta can omit a
+ * selected local date even when simulator-owned intervals exist. Fill only those gaps from the
+ * owning SimulatedDayResult (same authority as meta), never from unrelated passthrough.
+ */
+/** @internal Exported for unit tests — selected-days canonical backfill from simulator-owned results. */
+export function fillMissingCanonicalSelectedDayTotalsFromSimulatedResults(args: {
+  selectedValid: Set<string>;
+  canonicalFromMeta: Record<string, number>;
+  simulatedDayResults: SimulatedDayResult[] | undefined;
+  timezone: string;
+}): Record<string, number> {
+  const out: Record<string, number> = { ...args.canonicalFromMeta };
+  for (const dk of Array.from(args.selectedValid)) {
+    const raw = out[dk];
+    if (raw !== undefined && Number.isFinite(Number(raw))) continue;
+    const ownerResult = (args.simulatedDayResults ?? []).find((r) =>
+      simulatedDayResultIntersectsLocalDateKeys(r, new Set([dk]), args.timezone)
+    );
+    if (!ownerResult) continue;
+    const fromIntervals = sumSimulatedResultIntervalsForLocalDate(ownerResult.intervals, dk, args.timezone);
+    if (fromIntervals != null) {
+      out[dk] = fromIntervals;
+      continue;
+    }
+    const ld = String(ownerResult.localDate ?? "").slice(0, 10);
+    if (ld === dk) {
+      const kwh = Number(ownerResult.finalDayKwh ?? ownerResult.intervalSumKwh ?? ownerResult.displayDayKwh);
+      if (Number.isFinite(kwh)) out[dk] = round2CanonicalSimDayTotal(kwh);
+    }
+  }
+  return out;
+}
+
 /**
  * Interval timestamps → local date keys are authoritative for membership.
  * A single simulated day may span two local calendar days (e.g. 15‑minute grid around local midnight);
@@ -975,11 +1032,17 @@ export async function simulatePastSelectedDaysShared(
     const selectedResults = (sharedResult.simulatedDayResults ?? []).filter((r) =>
       simulatedDayResultIntersectsLocalDateKeys(r, selectedValid, timezoneResolved)
     );
-    const canonicalSimulatedDayTotalsByDate = Object.fromEntries(
+    const canonicalFromMetaFiltered = Object.fromEntries(
       Object.entries(sharedResult.canonicalSimulatedDayTotalsByDate ?? {}).filter(([dk]) =>
         selectedValid.has(String(dk).slice(0, 10))
       )
     );
+    const canonicalSimulatedDayTotalsByDate = fillMissingCanonicalSelectedDayTotalsFromSimulatedResults({
+      selectedValid,
+      canonicalFromMeta: canonicalFromMetaFiltered,
+      simulatedDayResults: sharedResult.simulatedDayResults,
+      timezone: timezoneResolved,
+    });
     const retainedSelectedResults =
       retainedValid.size > 0
         ? selectedResults.filter((r) => simulatedDayResultIntersectsLocalDateKeys(r, retainedValid, timezoneResolved))
