@@ -1158,6 +1158,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: { "2026-01-01": 0.5 },
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
       artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
@@ -1781,6 +1782,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: { "2026-01-01": 0.5 },
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
       artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 99 }],
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
@@ -1919,6 +1921,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: {},
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
       artifactSimulatedDayReferenceRows: [],
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
@@ -1952,13 +1955,14 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displayVsFreshParityForScoredDays?.availability).toBe("missing_expected_reference");
     expect(body.displayVsFreshParityForScoredDays?.reasonCode).toBe("ARTIFACT_SIMULATED_REFERENCE_MISSING");
     expect(body.scoredDayTruthRows?.[0]?.displayedPastStyleSimDayKwh).toBeNull();
-    expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(0.5);
+    expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.actualVsFreshErrorKwh).toBeNull();
     expect(body.scoredDayTruthRows?.[0]?.displayVsFreshParityMatch).toBeNull();
     expect(body.scoredDayTruthRows?.[0]?.parityAvailability).toBe("missing_expected_reference");
     expect(body.scoredDayTruthRows?.[0]?.parityReasonCode).toBe("ARTIFACT_SIMULATED_REFERENCE_MISSING");
     expect(body.scoredDayTruthRows?.[0]?.parityDisplayValueKind).toBe("missing_display_sim_reference");
     expect(body.scoredDayTruthRows?.[0]?.artifactSimulatedDayReferenceSource).toBe("canonical_artifact_simulated_day_totals");
-    expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).toBe("SIMULATED");
+    expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).toBe("MISSING_REFERENCE");
     expect(body.scoredDayTruthRows?.[0]?.scoredDayDisplaySource).not.toBe("ACTUAL");
   });
 
@@ -2008,6 +2012,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: {},
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
       artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
@@ -2033,6 +2038,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
+    expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBeNull();
+    expect(body.scoredDayTruthRows?.[0]?.actualVsFreshErrorKwh).toBeNull();
     expect(body.displayVsFreshParityForScoredDays?.availability).toBe("missing_fresh_compare_sim");
     expect(body.displayVsFreshParityForScoredDays?.reasonCode).toBe("SCORED_DAY_FRESH_COMPARE_SIM_MISSING");
     expect(body.displayVsFreshParityForScoredDays?.parityDisplayValueKind).toBe("missing_fresh_compare_sim_day_total");
@@ -2087,6 +2094,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-03-20T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-03-20T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: { "2026-03-20": 0.5 },
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
       artifactSimulatedDayReferenceRows: [{ date: "2026-03-20", simKwh: 0.5 }],
       simulatedChartIntervals: [{ timestamp: "2026-03-20T00:00:00.000Z", kwh: 0.25 }],
@@ -2178,6 +2186,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-02T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-02T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: { "2026-01-01": 0.5 },
       artifactSimulatedDayReferenceSource: "canonical_artifact_simulated_day_totals",
       artifactSimulatedDayReferenceRows: [{ date: "2026-01-01", simKwh: 0.5 }],
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
@@ -2208,8 +2217,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.displaySimulated?.daily?.map((row: any) => row.date)).toEqual(["2026-01-01", "2026-01-02"]);
     expect(missingRow).toMatchObject({
       date: "2026-01-02",
-      simKwh: 0.5,
-      source: "SIMULATED",
+      simKwh: 0,
+      source: "MISSING_REFERENCE",
       selectedTestDate: true,
       status: "missing_expected_reference",
       reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
@@ -2217,6 +2226,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(body.scoredDayTruthRows?.find((row: any) => row.localDate === "2026-01-02")).toMatchObject({
       parityAvailability: "missing_expected_reference",
       parityReasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+      freshCompareSimDayKwh: null,
+      actualVsFreshErrorKwh: null,
     });
   });
 
@@ -2252,6 +2263,7 @@ describe("gapfill-lab route artifact-only hard lock", () => {
         { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
         { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
       ],
+      freshCompareScoredDaySimTotalsByDate: { "2026-01-01": 0.5 },
       simulatedChartIntervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 }],
       simulatedChartDaily: [{ date: "2026-01-01", simKwh: 0.5, source: "SIMULATED" }],
       simulatedChartMonthly: [{ month: "2026-01", kwh: 0.5 }],

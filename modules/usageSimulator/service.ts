@@ -754,6 +754,8 @@ export type GapfillCompareSimSharedResult =
       boundedTravelDateKeysLocal: Set<string>;
       artifactIntervals: IntervalPoint[];
       simulatedTestIntervals: IntervalPoint[];
+      /** Canonical simulator-owned fresh compare day totals for scored dates (GapFill route; do not re-derive from interval sums in selected_days mode). */
+      freshCompareScoredDaySimTotalsByDate?: Record<string, number>;
       simulatedChartIntervals: IntervalPoint[];
       simulatedChartDaily: Array<{ date: string; simKwh: number; source: "ACTUAL" | "SIMULATED" }>;
       simulatedChartMonthly: Array<{ month: string; kwh: number }>;
@@ -3106,6 +3108,10 @@ export async function buildGapfillCompareSimShared(args: {
     travelVacantParityRowCount: travelVacantParityRows.length,
   });
 
+  const freshCompareScoredDaySimTotalsByDate = Object.fromEntries(
+    Array.from(freshDailyTotalsByDate.entries()).map(([dk, kwh]) => [dk, round2Local(Number(kwh) || 0)] as const)
+  );
+
   return {
     ok: true,
     artifactAutoRebuilt,
@@ -3142,6 +3148,7 @@ export async function buildGapfillCompareSimShared(args: {
     boundedTravelDateKeysLocal,
     artifactIntervals,
     simulatedTestIntervals,
+    freshCompareScoredDaySimTotalsByDate,
     simulatedChartIntervals,
     simulatedChartDaily,
     simulatedChartMonthly,

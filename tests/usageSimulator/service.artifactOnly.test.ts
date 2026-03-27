@@ -3279,6 +3279,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.simulatedTestIntervals).toHaveLength(96);
       expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(1);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-03": 24 });
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
         availability: "available",
         comparableDateCount: 1,
@@ -3346,6 +3347,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.simulatedTestIntervals).toHaveLength(0);
       expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({});
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
         availability: "missing_fresh_compare_sim",
         reasonCode: "SCORED_DAY_FRESH_COMPARE_SIM_MISSING",
@@ -3410,6 +3412,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.simulatedTestIntervals).toHaveLength(0);
       expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({});
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
         availability: "missing_fresh_compare_sim",
         reasonCode: "SCORED_DAY_FRESH_COMPARE_SIM_MISSING",

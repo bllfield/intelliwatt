@@ -3004,11 +3004,26 @@ export async function POST(req: NextRequest) {
     const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
     actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
   }
+  const compareFreshModeUsedForRoute = String((sharedSim as any)?.compareFreshModeUsed ?? "");
+  const canonicalFreshTotals = (sharedSim as any)?.freshCompareScoredDaySimTotalsByDate as Record<string, unknown> | undefined;
   const freshDailyByDate = new Map<string, number>();
-  for (const p of sharedSim.simulatedTestIntervals) {
-    const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
-    if (!scoringTestDateKeysLocal.has(dk)) continue;
-    freshDailyByDate.set(dk, round2((freshDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
+  if (compareFreshModeUsedForRoute === "selected_days") {
+    // Selected-days compare: use canonical simulator-owned day totals only. Summing
+    // simulatedTestIntervals can leak non-owned kWh (e.g. passthrough) onto scored rows.
+    if (canonicalFreshTotals && typeof canonicalFreshTotals === "object") {
+      for (const dk of Array.from(scoringTestDateKeysLocal)) {
+        if (!Object.prototype.hasOwnProperty.call(canonicalFreshTotals, dk)) continue;
+        const raw = canonicalFreshTotals[dk];
+        if (raw === undefined || raw === null || !Number.isFinite(Number(raw))) continue;
+        freshDailyByDate.set(dk, round2(Number(raw)));
+      }
+    }
+  } else {
+    for (const p of sharedSim.simulatedTestIntervals) {
+      const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
+      if (!scoringTestDateKeysLocal.has(dk)) continue;
+      freshDailyByDate.set(dk, round2((freshDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
+    }
   }
   const simulatedDayDiagnosticsRaw = Array.isArray((ma as any)?.simulatedDayDiagnosticsSample)
     ? ((ma as any).simulatedDayDiagnosticsSample as Array<Record<string, unknown>>)
