@@ -43,7 +43,9 @@ import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // Explicit rebuilds can run full-year canonical build before compare.
+// Keep the platform deadline aligned with the route's own compare/rebuild guards so
+// Vercel terminates stuck requests before the admin UI's client timeout fires first.
+export const maxDuration = 120;
 // Keep route compare-core timeout below client timeout so route-side
 // classification (failedStep/reasonCode) reaches UI before browser abort.
 const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
