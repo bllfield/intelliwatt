@@ -2854,7 +2854,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       const selectedDaysCalls = simulatePastSelectedDaysShared.mock.calls.slice(-1);
       expect(selectedDaysCalls).toHaveLength(1);
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       const sharedCallDateKeys = Array.from(
         (((selectedDaysCalls[0] ?? [])[0] as any)?.selectedDateKeysLocal ?? []) as string[]
       ).sort();
@@ -2958,7 +2958,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3137,7 +3137,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3739,7 +3739,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(false);
     if (!out.ok) {
       expect(decodeIntervalsV1).not.toHaveBeenCalled();
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
         availability: "mismatch_detected",
         mismatchCount: 2,
@@ -4016,7 +4016,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(false);
     if (!out.ok) {
-      expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+      expect(simulatePastFullWindowShared).toHaveBeenCalled();
       expect((out.body as any)?.travelVacantParityTruth).toMatchObject({
         availability: "mismatch_detected",
         mismatchCount: 1,
