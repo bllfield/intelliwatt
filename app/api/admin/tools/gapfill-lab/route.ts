@@ -43,9 +43,10 @@ import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
-// Keep the platform deadline aligned with the route's own compare/rebuild guards so
-// Vercel terminates stuck requests before the admin UI's client timeout fires first.
-export const maxDuration = 120;
+// Keep the platform deadline above the route's own 120s compare/rebuild guards so
+// timeout responses have headroom to serialize, while still finishing before the
+// admin UI's 150s client timeout.
+export const maxDuration = 135;
 // Keep route compare-core timeout below client timeout so route-side
 // classification (failedStep/reasonCode) reaches UI before browser abort.
 const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;

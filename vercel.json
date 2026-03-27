@@ -26,7 +26,7 @@
       "memory": 1024
     },
     "app/api/admin/tools/gapfill-lab/route.ts": {
-      "maxDuration": 120,
+      "maxDuration": 135,
       "memory": 1024
     },
     "app/api/admin/tools/prime-past-cache/route.ts": {
