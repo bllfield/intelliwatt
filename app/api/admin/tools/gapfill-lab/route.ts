@@ -50,6 +50,7 @@ import {
   getGapfillCompareEnqueueDiagnostics,
   shouldEnqueueGapfillCompareRemote,
   triggerDropletSimWebhook,
+  type DropletSimWebhookResult,
 } from "@/modules/usageSimulator/dropletSimWebhook";
 import {
   GapfillLabScoredDayTruthRow,
@@ -108,8 +109,10 @@ function hasAdminSessionCookie(request: NextRequest): boolean {
   return ADMIN_EMAILS.includes(email);
 }
 
-async function triggerGapfillCompareDropletWebhook(compareRunId: string): Promise<void> {
-  await triggerDropletSimWebhook({
+async function triggerGapfillCompareDropletWebhook(
+  compareRunId: string
+): Promise<DropletSimWebhookResult> {
+  return triggerDropletSimWebhook({
     reason: "gapfill_compare",
     compareRunId,
   });
@@ -943,11 +946,49 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
-    await triggerGapfillCompareDropletWebhook(run.compareRunId);
+    const dropletHandoff = await triggerGapfillCompareDropletWebhook(run.compareRunId);
+    const handoffFailed =
+      !dropletHandoff.ok || ("skipped" in dropletHandoff && dropletHandoff.skipped === true);
+    if (handoffFailed) {
+      const detail =
+        "skipped" in dropletHandoff && dropletHandoff.skipped
+          ? "droplet_webhook_missing_configuration_at_trigger"
+          : !dropletHandoff.ok && dropletHandoff.fetchError
+            ? dropletHandoff.fetchError
+            : !dropletHandoff.ok && dropletHandoff.bodySnippet
+              ? dropletHandoff.bodySnippet
+              : !dropletHandoff.ok
+                ? `http_${dropletHandoff.httpStatus ?? "error"}`
+                : "droplet_webhook_failed";
+      await markGapfillCompareRunFailed({
+        compareRunId: run.compareRunId,
+        phase: "compare_async_droplet_webhook_failed",
+        failureCode: "DROPLET_WEBHOOK_HANDOFF_FAILED",
+        failureMessage: detail.slice(0, 2000),
+        statusMeta: {
+          route: "admin_gapfill_lab",
+          dropletWebhookHttpStatus:
+            !dropletHandoff.ok && dropletHandoff.httpStatus != null ? dropletHandoff.httpStatus : null,
+        },
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "droplet_webhook_handoff_failed",
+          compareRunId: run.compareRunId,
+          compareRunStatus: "failed",
+          reasonCode: "DROPLET_WEBHOOK_HANDOFF_FAILED",
+          message:
+            "Droplet did not accept the compare job (webhook failed or misconfigured). See Vercel logs for [droplet_sim_webhook] and droplet journalctl.",
+        },
+        { status: 502 }
+      );
+    }
     console.info("[gapfill-lab][compare-enqueue]", {
       route: "admin_gapfill_lab",
       event: "droplet_webhook_triggered",
       compareRunId: run.compareRunId,
+      dropletHttpStatus: dropletHandoff.ok && !dropletHandoff.skipped ? dropletHandoff.httpStatus : null,
       ...enqueueEligibility,
     });
     compareRunId = run.compareRunId;

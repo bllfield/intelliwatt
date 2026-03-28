@@ -153,9 +153,28 @@ export async function enqueuePastSimRecalcDropletJob(
 ): Promise<{ ok: true; jobId: string } | { ok: false; error: string; message: string }> {
   const created = await createPastSimRecalcQueuedJob(payload);
   if (!created.ok) return created;
-  await triggerDropletSimWebhook({
+  const webhook = await triggerDropletSimWebhook({
     reason: SIM_DROPLET_JOB_KIND_PAST_SIM_RECALC,
     jobId: created.jobId,
   });
+  const handoffFailed = !webhook.ok || ("skipped" in webhook && webhook.skipped === true);
+  if (handoffFailed) {
+    const detail =
+      "skipped" in webhook && webhook.skipped
+        ? "droplet_webhook_missing_configuration_at_trigger"
+        : !webhook.ok && webhook.fetchError
+          ? webhook.fetchError
+          : !webhook.ok && webhook.bodySnippet
+            ? webhook.bodySnippet
+            : !webhook.ok
+              ? `http_${webhook.httpStatus ?? "error"}`
+              : "droplet_webhook_failed";
+    await markPastSimRecalcJobFailed(created.jobId, detail.slice(0, 2000));
+    return {
+      ok: false,
+      error: "droplet_webhook_failed",
+      message: "Droplet did not accept the recalc job (webhook failed or misconfigured).",
+    };
+  }
   return { ok: true, jobId: created.jobId };
 }

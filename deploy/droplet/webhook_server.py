@@ -499,7 +499,11 @@ def run_default_command() -> bytes:
 
 
 def _spawn_sim_job_tsx(job_kind: str, job_arg: str) -> None:
-    """Run canonical TS sim jobs via one entrypoint (Gap-Fill compare, Past recalc, …)."""
+    """Run canonical TS sim jobs via one entrypoint (Gap-Fill compare, Past recalc, …).
+
+    Performs subprocess.Popen synchronously so the HTTP handler can return 500 if
+    `npx`/`tsx` cannot start. Only the long wait+close runs in a background thread.
+    """
     app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
     runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
     if not os.path.isfile(runner):
@@ -512,46 +516,51 @@ def _spawn_sim_job_tsx(job_kind: str, job_arg: str) -> None:
         log_dir = app_root
     log_path = os.path.join(log_dir, "sim-job-run.log")
 
-    def _spawn() -> None:
+    argv = ["npx", "--yes", "tsx", runner, job_kind, job_arg]
+    print(
+        "[sim_job] spawn "
+        f"job_kind={job_kind!r} job_arg={job_arg!r} cwd={app_root!r} "
+        f"runner={runner!r} log={log_path!r}",
+        flush=True,
+    )
+    logf = open(log_path, "a", encoding="utf-8")
+    try:
+        logf.write(f"\n--- begin {job_kind} {job_arg} ---\n")
+        logf.flush()
+        p = subprocess.Popen(
+            argv,
+            cwd=app_root,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            env=os.environ.copy(),
+        )
+        print(f"[sim_job] spawned pid={p.pid}", flush=True)
+    except Exception as exc:
         try:
-            argv = ["npx", "--yes", "tsx", runner, job_kind, job_arg]
-            print(
-                "[sim_job] spawn "
-                f"job_kind={job_kind!r} job_arg={job_arg!r} cwd={app_root!r} "
-                f"runner={runner!r} log={log_path!r}",
-                flush=True,
-            )
-            logf = open(log_path, "a", encoding="utf-8")
-            logf.write(f"\n--- begin {job_kind} {job_arg} ---\n")
-            logf.flush()
-            p = subprocess.Popen(
-                argv,
-                cwd=app_root,
-                stdout=logf,
-                stderr=subprocess.STDOUT,
-                env=os.environ.copy(),
-            )
-            print(f"[sim_job] spawned pid={p.pid}", flush=True)
+            logf.close()
+        except Exception:
+            pass
+        print(f"[ERROR] sim_job spawn failed ({job_kind}): {exc!r}", flush=True)
+        raise
 
-            def _wait_and_close() -> None:
-                try:
-                    p.wait(timeout=7200)
-                except Exception:
-                    pass
-                try:
-                    logf.close()
-                except Exception:
-                    pass
+    def _wait_and_close() -> None:
+        try:
+            p.wait(timeout=7200)
+        except Exception:
+            pass
+        try:
+            logf.close()
+        except Exception:
+            pass
 
-            threading.Thread(target=_wait_and_close, daemon=True).start()
-        except Exception as exc:
-            print(f"[ERROR] sim_job spawn failed ({job_kind}): {exc!r}", flush=True)
-
-    threading.Thread(target=_spawn, daemon=True).start()
+    threading.Thread(target=_wait_and_close, daemon=True).start()
 
 
 def handle_gapfill_compare(payload: dict) -> bytes:
-    """Authenticated trigger only: shared TS runner (no compare math in Python)."""
+    """Authenticated trigger only: shared TS runner (no compare math in Python).
+
+    Spawn failures raise so the HTTP server returns 500; Vercel can mark the run failed.
+    """
     compare_run_id = str(payload.get("compareRunId") or "").strip()
     if not compare_run_id:
         return json.dumps({"ok": False, "error": "compareRunId_required"}).encode("utf-8")
@@ -559,11 +568,8 @@ def handle_gapfill_compare(payload: dict) -> bytes:
     app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
     runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
     if not os.path.isfile(runner):
-        return json.dumps({"ok": False, "error": "runner_missing", "path": runner}).encode("utf-8")
-    try:
-        _spawn_sim_job_tsx("gapfill_compare", compare_run_id)
-    except FileNotFoundError as e:
-        return json.dumps({"ok": False, "error": "runner_missing", "path": str(e)}).encode("utf-8")
+        raise FileNotFoundError(runner)
+    _spawn_sim_job_tsx("gapfill_compare", compare_run_id)
     return json.dumps({"ok": True, "queued": True, "compareRunId": compare_run_id}).encode("utf-8")
 
 
@@ -575,11 +581,8 @@ def handle_past_sim_recalc(payload: dict) -> bytes:
     app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
     runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
     if not os.path.isfile(runner):
-        return json.dumps({"ok": False, "error": "runner_missing", "path": runner}).encode("utf-8")
-    try:
-        _spawn_sim_job_tsx("past_sim_recalc", job_id)
-    except FileNotFoundError as e:
-        return json.dumps({"ok": False, "error": "runner_missing", "path": str(e)}).encode("utf-8")
+        raise FileNotFoundError(runner)
+    _spawn_sim_job_tsx("past_sim_recalc", job_id)
     return json.dumps({"ok": True, "queued": True, "jobId": job_id}).encode("utf-8")
 
 

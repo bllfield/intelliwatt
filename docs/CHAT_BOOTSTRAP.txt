@@ -334,6 +334,8 @@ When pulling changes directly on the droplet:
   git pull origin main
   sudo bash deploy/droplet/post_pull.sh
 
+
+sudo journalctl -u smt-webhook.service -n 200 -f
 ===========================================================
 MASTER DB MIGRATIONS (DRIFT-SAFE): DEV FIRST, THEN PROD
 ===========================================================
@@ -446,13 +448,17 @@ GAP-FILL COMPARE (DROPLET ASYNC) — POST-WEBHOOK PATH
 ----------------------------------------------------
 
 After Vercel POSTs to `/trigger/smt-now` with `reason: "gapfill_compare"` and `compareRunId`, the webhook
-spawns `npx tsx scripts/droplet/sim-job-run.ts gapfill_compare <compareRunId>` with cwd `INTELLIWATT_APP_ROOT`
-(default `/home/deploy/apps/intelliwatt`). The worker calls `runGapfillCompareQueuedWorker`, which should
-move the DB row off `queued` early (see `markGapfillCompareRunRunning` in `gapfillCompareCorePipeline` for
-`resumeExistingCompareRunId`). Subprocess stdout/stderr append to `deploy/droplet/logs/sim-job-run.log`
-under the app root; journal lines include `[gapfill_compare]`, `[sim_job] spawn`, and `[sim_job] spawned pid=`.
-If the row stays `queued` with no log lines, check `runner_missing` in the webhook JSON, `DATABASE_URL` for
-the Node process, and that `tsx` runs under the systemd service user.
+starts `npx tsx scripts/droplet/sim-job-run.ts gapfill_compare <compareRunId>` with cwd `INTELLIWATT_APP_ROOT`
+(default `/home/deploy/apps/intelliwatt`). **Spawn is synchronous:** if `Popen` fails (missing `npx`/`tsx`,
+bad cwd), the handler raises and the HTTP response is **500** — not a fake 200. Vercel’s
+`triggerDropletSimWebhook` treats success only when **HTTP OK and JSON `ok: true`**; otherwise it marks the
+compare run **failed** with `DROPLET_WEBHOOK_HANDOFF_FAILED` instead of leaving a silent `queued` row.
+The worker calls `runGapfillCompareQueuedWorker`, which should move the DB row off `queued` early (see
+`markGapfillCompareRunRunning` in `gapfillCompareCorePipeline` for `resumeExistingCompareRunId`). Subprocess
+stdout/stderr append to `deploy/droplet/logs/sim-job-run.log` under the app root; journal lines include
+`[gapfill_compare]`, `[sim_job] spawn`, and `[sim_job] spawned pid=`. If the row stays `queued` with no log
+lines after deploy, check droplet `DATABASE_URL` for the Node process and that `tsx` runs under the service
+user.
 
 DROPLET LOG TAILING (LAST 5 MINUTES)
 ------------------------------------

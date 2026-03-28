@@ -80,4 +80,30 @@ describe("droplet sim execution flags", () => {
     expect(d.webhookSecretSource).toBe("DROPLET_WEBHOOK_SECRET");
   });
 
+  it("triggerDropletSimWebhook returns ok when HTTP 200 and JSON ok true", async () => {
+    process.env.DROPLET_WEBHOOK_URL = "https://example.com/trigger/smt-now";
+    process.env.DROPLET_WEBHOOK_SECRET = "s";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true, queued: true }), { status: 200 }))
+    );
+    const { triggerDropletSimWebhook } = await import("@/modules/usageSimulator/dropletSimWebhook");
+    const r = await triggerDropletSimWebhook({ reason: "gapfill_compare", compareRunId: "x" });
+    expect(r.ok).toBe(true);
+    expect("skipped" in r && r.skipped).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("triggerDropletSimWebhook returns not ok when HTTP 200 but JSON ok false", async () => {
+    process.env.DROPLET_WEBHOOK_URL = "https://example.com/trigger/smt-now";
+    process.env.DROPLET_WEBHOOK_SECRET = "s";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "spawn_failed" }), { status: 200 }))
+    );
+    const { triggerDropletSimWebhook } = await import("@/modules/usageSimulator/dropletSimWebhook");
+    const r = await triggerDropletSimWebhook({ reason: "gapfill_compare", compareRunId: "x" });
+    expect(r.ok).toBe(false);
+    vi.unstubAllGlobals();
+  });
 });

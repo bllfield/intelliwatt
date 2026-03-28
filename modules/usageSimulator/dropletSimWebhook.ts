@@ -99,10 +99,31 @@ export function getGapfillCompareEnqueueDiagnostics(): GapfillCompareEnqueueDiag
   };
 }
 
-export async function triggerDropletSimWebhook(payload: Record<string, unknown>): Promise<void> {
+/** Result of POST to the droplet webhook (callers can mark queued jobs failed when `ok` is false). */
+export type DropletSimWebhookResult =
+  | { ok: true; skipped: true }
+  | {
+      ok: true;
+      skipped?: false;
+      httpStatus: number;
+      bodySnippet: string;
+    }
+  | {
+      ok: false;
+      skipped?: false;
+      httpStatus?: number;
+      bodySnippet?: string;
+      fetchError?: string;
+    };
+
+export async function triggerDropletSimWebhook(
+  payload: Record<string, unknown>
+): Promise<DropletSimWebhookResult> {
   const url = (resolveDropletWebhookUrlRaw() ?? "").trim();
   const secret = (resolveDropletWebhookSecretRaw() ?? "").trim();
-  if (!url || !secret) return;
+  if (!url || !secret) {
+    return { ok: true, skipped: true };
+  }
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -116,19 +137,44 @@ export async function triggerDropletSimWebhook(payload: Record<string, unknown>)
         ...payload,
       }),
     });
+    const text = await res.text().catch(() => "");
+    let parsed: { ok?: unknown } | null = null;
+    try {
+      parsed = text ? (JSON.parse(text) as { ok?: unknown }) : null;
+    } catch {
+      parsed = null;
+    }
+    const bodyOk =
+      parsed !== null &&
+      typeof parsed === "object" &&
+      (parsed as { ok?: unknown }).ok === true;
+    const ok = res.ok && bodyOk;
     if (!res.ok) {
-      const snip = await res.text().catch(() => "");
       console.warn("[droplet_sim_webhook] non_ok_response", {
         status: res.status,
         reason: payload.reason,
-        bodySnippet: snip.slice(0, 200),
+        bodySnippet: text.slice(0, 200),
+      });
+    } else if (!bodyOk) {
+      console.warn("[droplet_sim_webhook] body_not_ok", {
+        reason: payload.reason,
+        bodySnippet: text.slice(0, 200),
       });
     }
+    if (ok) {
+      return { ok: true, httpStatus: res.status, bodySnippet: text.slice(0, 500) };
+    }
+    return {
+      ok: false,
+      httpStatus: res.status,
+      bodySnippet: text.slice(0, 500),
+    };
   } catch (err: unknown) {
-    // Do not throw: callers may have already persisted a queued job; log for ops.
+    const message = err instanceof Error ? err.message : String(err);
     console.warn("[droplet_sim_webhook] fetch_failed", {
       reason: payload.reason,
-      message: err instanceof Error ? err.message : String(err),
+      message,
     });
+    return { ok: false, fetchError: message };
   }
 }

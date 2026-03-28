@@ -85,7 +85,7 @@ export async function createGapfillCompareRunStart(args: {
       compareRunId: String(row.id),
       createdAt: new Date(row.createdAt).toISOString(),
       updatedAt: new Date(row.updatedAt).toISOString(),
-      status: "started",
+      status: initialStatus,
     };
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "compare run start persistence failed";
