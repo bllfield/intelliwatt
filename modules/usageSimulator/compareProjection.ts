@@ -38,7 +38,8 @@ function cloneDatasetForProjection(dataset: any): any {
 
 export function projectBaselineFromCanonicalDataset(
   dataset: any,
-  timezoneHint: string | null | undefined
+  timezoneHint: string | null | undefined,
+  actualDailyByDate?: Map<string, number> | null
 ): any {
   const rawKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
     ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
@@ -47,6 +48,53 @@ export function projectBaselineFromCanonicalDataset(
     .map((v) => String(v ?? "").slice(0, 10))
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
   const projected = cloneDatasetForProjection(dataset);
+  const validationSet = new Set(validationOnlyDateKeysLocal);
+  const actualDaily = actualDailyByDate ?? new Map<string, number>();
+  const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+
+  if (Array.isArray(projected.daily) && validationSet.size > 0 && actualDaily.size > 0) {
+    projected.daily = projected.daily.map((row: any) => {
+      const dk = String(row?.date ?? "").slice(0, 10);
+      if (!validationSet.has(dk)) return row;
+      if (!actualDaily.has(dk)) return { ...row, source: "ACTUAL" };
+      return {
+        ...row,
+        kwh: round2(actualDaily.get(dk)!),
+        source: "ACTUAL",
+      };
+    });
+
+    const monthlyMap = new Map<string, number>();
+    for (const day of projected.daily as Array<{ date?: string; kwh?: number }>) {
+      const dk = String(day?.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+      const month = dk.slice(0, 7);
+      monthlyMap.set(month, (monthlyMap.get(month) ?? 0) + (Number(day?.kwh) || 0));
+    }
+    if (Array.isArray(projected.monthly)) {
+      projected.monthly = projected.monthly.map((m: any) => {
+        const month = String(m?.month ?? "").slice(0, 7);
+        if (!monthlyMap.has(month)) return m;
+        return { ...m, kwh: round2(monthlyMap.get(month) ?? 0) };
+      });
+    }
+    const totalKwh = Array.from(monthlyMap.values()).reduce((s, v) => s + v, 0);
+    if (projected.summary && typeof projected.summary === "object") {
+      projected.summary = {
+        ...projected.summary,
+        totalKwh: round2(totalKwh),
+      };
+    }
+    if (projected.totals && typeof projected.totals === "object") {
+      const exportKwh = Number((projected.totals as any)?.exportKwh ?? 0) || 0;
+      projected.totals = {
+        ...projected.totals,
+        importKwh: round2(totalKwh + exportKwh),
+        netKwh: round2(totalKwh),
+      };
+    }
+  }
+
   projected.meta = {
     ...(projected.meta ?? {}),
     validationOnlyDateKeysLocal,

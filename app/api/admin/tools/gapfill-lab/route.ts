@@ -56,6 +56,7 @@ import {
   ensureGlobalLabTestHomeHouse,
   getLabTestHomeLink,
   replaceGlobalLabTestHomeFromSource,
+  GAPFILL_LAB_TEST_HOME_LABEL,
 } from "@/modules/usageSimulator/labTestHome";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
@@ -493,8 +494,9 @@ export async function POST(req: NextRequest) {
           ? {
               id: testHome.id,
               esiid: testHome.esiid ? String(testHome.esiid) : null,
-              label: [testHome.addressLine1, testHome.addressCity, testHome.addressState].filter(Boolean).join(", ") || testHome.id,
+              label: "Test Home",
               identityLabel: testHome.label ?? null,
+              canonicalIdentity: GAPFILL_LAB_TEST_HOME_LABEL,
             }
           : null,
         homeProfile: testHomeProfiles.homeProfile,
@@ -913,7 +915,8 @@ export async function POST(req: NextRequest) {
       },
       testHome: {
         id: testHomeHouse.id,
-        label: [testHomeHouse.addressLine1, testHomeHouse.addressCity, testHomeHouse.addressState].filter(Boolean).join(", ") || testHomeHouse.id,
+        label: "Test Home",
+        canonicalIdentity: GAPFILL_LAB_TEST_HOME_LABEL,
       },
       timezone,
       homeProfile,

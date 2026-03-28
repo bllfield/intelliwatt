@@ -52,7 +52,7 @@ describe("baseline alias parity across usage routes", () => {
     prismaHouseFindMany.mockResolvedValue([
       {
         id: "h1",
-        label: "Home",
+        label: "GAPFILL_CANONICAL_LAB_TEST_HOME",
         addressLine1: "123 Main",
         addressCity: "Fort Worth",
         addressState: "TX",
@@ -81,6 +81,7 @@ describe("baseline alias parity across usage routes", () => {
     expect(simulatedRes.status).toBe(200);
     const simulatedBody = await simulatedRes.json();
 
+    expect(usageBody.houses[0].label).toBe("Home");
     expect(usageBody.houses[0].dataset.summary.intervalsCount).toBe(simulatedBody.dataset.summary.intervalsCount);
     expect(usageBody.houses[0].dataset.summary.totalKwh).toBe(simulatedBody.dataset.summary.totalKwh);
 

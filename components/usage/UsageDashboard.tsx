@@ -124,6 +124,12 @@ type UsageApiResponse =
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
 const SESSION_KEY_PREFIX = "usage_dashboard_v2";
 const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
+const INTERNAL_LAB_HOME_LABEL = "GAPFILL_CANONICAL_LAB_TEST_HOME";
+
+function publicHomeLabel(h: Pick<HouseUsage, "label" | "address">): string {
+  if (String(h.label ?? "").trim() === INTERNAL_LAB_HOME_LABEL) return "Home";
+  return h.label || h.address.line1 || "Home";
+}
 
 function sessionKey(mode: "REAL" | "SIMULATED") {
   return `${SESSION_KEY_PREFIX}:${mode}`;
@@ -764,7 +770,7 @@ export const UsageDashboard: React.FC<Props> = ({
               >
                 {houses.map((h) => (
                   <option key={h.houseId} value={h.houseId}>
-                    {h.label || h.address.line1 || "Home"}
+                    {publicHomeLabel(h)}
                   </option>
                 ))}
               </select>

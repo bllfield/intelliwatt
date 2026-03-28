@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
+import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -91,7 +92,11 @@ export async function GET(_request: NextRequest) {
           userId: user.id,
           userEmail,
           houseId: house.id,
-          houseLabel: house.label || house.addressLine1 || house.id,
+          houseLabel: toPublicHouseLabel({
+            label: house.label,
+            addressLine1: house.addressLine1,
+            fallbackId: house.id,
+          }),
           reasonCode: classification.reasonCode,
           reasonMessage: classification.reasonMessage,
           missingData: classification.missingData,
@@ -105,7 +110,11 @@ export async function GET(_request: NextRequest) {
       }
       results.push({
         houseId: house.id,
-        label: house.label || house.addressLine1,
+        label: toPublicHouseLabel({
+          label: house.label,
+          addressLine1: house.addressLine1,
+          fallbackId: house.id,
+        }),
         address: {
           line1: house.addressLine1,
           city: house.addressCity,

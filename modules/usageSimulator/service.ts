@@ -4463,6 +4463,45 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
+    let validationActualDailyCache: Map<string, number> | null | undefined = undefined;
+    const getValidationActualDailyByDate = async (dataset: any): Promise<Map<string, number> | null> => {
+      if (validationActualDailyCache !== undefined) return validationActualDailyCache;
+      const rawValidationKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
+        ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+        : [];
+      const validationKeys = rawValidationKeys
+        .map((v) => String(v ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+      if (validationKeys.length === 0) {
+        validationActualDailyCache = null;
+        return validationActualDailyCache;
+      }
+      const actualContextHouseId = String((dataset as any)?.meta?.actualContextHouseId ?? args.houseId);
+      let actualContextEsiid: string | null = actualContextHouseId === args.houseId ? house.esiid ?? null : null;
+      if (!actualContextEsiid && actualContextHouseId !== args.houseId) {
+        const contextHouse = await (prisma as any).houseAddress
+          .findUnique({
+            where: { id: actualContextHouseId },
+            select: { esiid: true },
+          })
+          .catch(() => null);
+        actualContextEsiid = contextHouse?.esiid ?? null;
+      }
+      const actualUsage = await getActualUsageDatasetForHouse(actualContextHouseId, actualContextEsiid).catch(() => null);
+      const dailyRows = Array.isArray((actualUsage as any)?.daily) ? ((actualUsage as any).daily as Array<{ date?: string; kwh?: number }>) : [];
+      if (dailyRows.length === 0) {
+        validationActualDailyCache = null;
+        return validationActualDailyCache;
+      }
+      const byDate = new Map<string, number>();
+      for (const row of dailyRows) {
+        const dk = String(row?.date ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+        byDate.set(dk, Number(row?.kwh ?? 0) || 0);
+      }
+      validationActualDailyCache = byDate;
+      return validationActualDailyCache;
+    };
 
     if (readMode === "artifact_only") {
       const scenarioIdForCache = scenarioId ?? "BASELINE";
@@ -4531,7 +4570,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
           projectionMode === "baseline"
             ? projectBaselineFromCanonicalDataset(
                 restored,
-                String((restored as any)?.meta?.timezone ?? "America/Chicago")
+                String((restored as any)?.meta?.timezone ?? "America/Chicago"),
+                await getValidationActualDailyByDate(restored)
               )
             : restored;
         const projected = attachValidationCompareProjection(projectedBaselineAware);
@@ -4689,7 +4729,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
         projectionMode === "baseline"
           ? projectBaselineFromCanonicalDataset(
               restored,
-              String((buildInputs as any)?.timezone ?? "America/Chicago")
+              String((buildInputs as any)?.timezone ?? "America/Chicago"),
+              await getValidationActualDailyByDate(restored)
             )
           : restored;
       const projected = attachValidationCompareProjection(projectedBaselineAware);
@@ -5192,7 +5233,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
       projectionMode === "baseline"
         ? projectBaselineFromCanonicalDataset(
             dataset,
-            String((buildInputs as any)?.timezone ?? "America/Chicago")
+            String((buildInputs as any)?.timezone ?? "America/Chicago"),
+            await getValidationActualDailyByDate(dataset)
           )
         : dataset;
     const projected = attachValidationCompareProjection(projectedBaselineAware);

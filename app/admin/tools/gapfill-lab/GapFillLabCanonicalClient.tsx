@@ -58,6 +58,7 @@ type RunResult = {
 };
 
 const EMPTY_RANGE: DateRange = { startDate: "", endDate: "" };
+const TEST_HOME_DISPLAY_LABEL = "Test Home";
 
 function prettyJson(v: unknown): string {
   return JSON.stringify(v ?? {}, null, 2);
@@ -139,6 +140,26 @@ export default function GapFillLabCanonicalClient() {
   const [requestDebug, setRequestDebug] = useState<any[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
+
+  const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
+  const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
+  const parsedApplianceProfile = useMemo(() => parseJsonSafe(applianceProfileJson), [applianceProfileJson]);
+
+  function updateHomeField(field: string, value: unknown) {
+    const parsed = parseJsonSafe(homeProfileJson);
+    if (!parsed.ok) return;
+    const next = { ...(parsed.value && typeof parsed.value === "object" ? parsed.value : {}) };
+    (next as any)[field] = value;
+    setHomeProfileJson(prettyJson(next));
+  }
+
+  function updateApplianceFuelConfiguration(value: string) {
+    const parsed = parseJsonSafe(applianceProfileJson);
+    if (!parsed.ok) return;
+    const next = { ...(parsed.value && typeof parsed.value === "object" ? parsed.value : {}) };
+    (next as any).fuelConfiguration = value;
+    setApplianceProfileJson(prettyJson(next));
+  }
 
   async function runAction(action: string, extra: Record<string, unknown> = {}) {
     setLoading(true);
@@ -268,7 +289,7 @@ export default function GapFillLabCanonicalClient() {
         <select className="border rounded px-3 py-2 text-sm" value={sourceHouseId} onChange={(e) => setSourceHouseId(e.target.value)}>
           <option value="">Select source house</option>
           {sourceHouses.map((h) => (
-            <option key={h.id} value={h.id}>{h.label}</option>
+            <option key={h.id} value={h.id}>{h.label} ({h.id})</option>
           ))}
         </select>
         <div className="flex gap-2">
@@ -283,7 +304,10 @@ export default function GapFillLabCanonicalClient() {
         <div className="border rounded p-4 bg-white">
           <div className="font-semibold text-sm mb-2">Source/Test-Home Identity</div>
           <div className="text-sm text-brand-navy/80">
-            Source: {sourceHouse ? sourceHouse.label : "—"} · Test Home: {testHome ? testHome.label : "—"}
+            Source Home: {sourceHouse ? `${sourceHouse.label} (${sourceHouse.id})` : "—"}
+          </div>
+          <div className="text-sm text-brand-navy/80">
+            {TEST_HOME_DISPLAY_LABEL}: {effectiveTestHomeId ? `${TEST_HOME_DISPLAY_LABEL} (${effectiveTestHomeId})` : "—"}
           </div>
           <div className="text-xs text-brand-navy/70 mt-1">
             Link status: {String(testHomeLink?.status ?? "unknown")} {testHomeLink?.statusMessage ? `· ${String(testHomeLink.statusMessage)}` : ""}
@@ -293,11 +317,69 @@ export default function GapFillLabCanonicalClient() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Canonical Home Inputs (Editable JSON)</div>
+          <div className="font-semibold text-sm mb-2">Test Home Details (form + JSON)</div>
+          <p className="text-xs text-brand-navy/70 mb-3">
+            These edits are saved only to <span className="font-semibold">{TEST_HOME_DISPLAY_LABEL}</span> ({effectiveTestHomeId || "not linked yet"}), never to the selected source home.
+          </p>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <label className="text-xs">
+              <span className="block mb-1">Square feet</span>
+              <input
+                className="w-full border rounded px-2 py-2 text-sm"
+                type="number"
+                value={parsedHomeProfile.ok ? (parsedHomeProfile.value?.squareFeet ?? "") : ""}
+                onChange={(e) => updateHomeField("squareFeet", e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </label>
+            <label className="text-xs">
+              <span className="block mb-1">Home age</span>
+              <input
+                className="w-full border rounded px-2 py-2 text-sm"
+                type="number"
+                value={parsedHomeProfile.ok ? (parsedHomeProfile.value?.homeAge ?? "") : ""}
+                onChange={(e) => updateHomeField("homeAge", e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </label>
+            <label className="text-xs">
+              <span className="block mb-1">Summer temp (F)</span>
+              <input
+                className="w-full border rounded px-2 py-2 text-sm"
+                type="number"
+                value={parsedHomeProfile.ok ? (parsedHomeProfile.value?.summerTemp ?? "") : ""}
+                onChange={(e) => updateHomeField("summerTemp", e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </label>
+            <label className="text-xs">
+              <span className="block mb-1">Winter temp (F)</span>
+              <input
+                className="w-full border rounded px-2 py-2 text-sm"
+                type="number"
+                value={parsedHomeProfile.ok ? (parsedHomeProfile.value?.winterTemp ?? "") : ""}
+                onChange={(e) => updateHomeField("winterTemp", e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </label>
+          </div>
           <textarea className="w-full h-80 border rounded p-2 font-mono text-xs" value={homeProfileJson} onChange={(e) => setHomeProfileJson(e.target.value)} />
         </div>
         <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Canonical Appliance Inputs (Editable JSON)</div>
+          <div className="font-semibold text-sm mb-2">Test Home Appliance Details (form + JSON)</div>
+          <p className="text-xs text-brand-navy/70 mb-3">
+            Structured field edits below write into the JSON payload and still save through the same test-home lab save action.
+          </p>
+          <div className="grid grid-cols-1 gap-2 mb-3">
+            <label className="text-xs">
+              <span className="block mb-1">Fuel configuration</span>
+              <select
+                className="w-full border rounded px-2 py-2 text-sm"
+                value={parsedApplianceProfile.ok ? String(parsedApplianceProfile.value?.fuelConfiguration ?? "") : ""}
+                onChange={(e) => updateApplianceFuelConfiguration(e.target.value)}
+              >
+                <option value="">Select…</option>
+                <option value="all_electric">all_electric</option>
+                <option value="mixed">mixed</option>
+              </select>
+            </label>
+          </div>
           <textarea className="w-full h-80 border rounded p-2 font-mono text-xs" value={applianceProfileJson} onChange={(e) => setApplianceProfileJson(e.target.value)} />
         </div>
       </div>
