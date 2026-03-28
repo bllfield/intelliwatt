@@ -47,6 +47,7 @@ import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/da
 import { runGapfillCompareCorePipeline } from "@/modules/usageSimulator/gapfillCompareCorePipeline";
 import { buildGapfillCompareQueuedPayloadV1 } from "@/modules/usageSimulator/gapfillCompareQueuedPayload";
 import {
+  getGapfillCompareEnqueueDiagnostics,
   shouldEnqueueGapfillCompareRemote,
   triggerDropletSimWebhook,
 } from "@/modules/usageSimulator/dropletSimWebhook";
@@ -114,11 +115,33 @@ async function triggerGapfillCompareDropletWebhook(compareRunId: string): Promis
   });
 }
 
-export async function POST(req: NextRequest) {
+function gateGapfillLabAdmin(req: NextRequest): NextResponse | null {
   if (!hasAdminSessionCookie(req)) {
     const gate = requireAdmin(req);
     if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
   }
+  return null;
+}
+
+/**
+ * GET `?diagnostics=enqueue` — safe enqueue eligibility (admin only). Use when debugging why compare stays on Vercel.
+ */
+export async function GET(req: NextRequest) {
+  const denied = gateGapfillLabAdmin(req);
+  if (denied) return denied;
+  const url = new URL(req.url);
+  if (url.searchParams.get("diagnostics") !== "enqueue") {
+    return NextResponse.json(
+      { ok: false, error: "invalid_query", message: "Use ?diagnostics=enqueue" },
+      { status: 400 }
+    );
+  }
+  return NextResponse.json({ ok: true, enqueueEligibility: getGapfillCompareEnqueueDiagnostics() });
+}
+
+export async function POST(req: NextRequest) {
+  const adminDenied = gateGapfillLabAdmin(req);
+  if (adminDenied) return adminDenied;
 
   let body: {
     email?: string;
@@ -852,6 +875,13 @@ export async function POST(req: NextRequest) {
 
   const compareFreshModeForQueue: "selected_days" | "full_window" =
     includeDiagnostics || includeFullReportText ? "full_window" : "selected_days";
+  const enqueueEligibility = getGapfillCompareEnqueueDiagnostics();
+  console.info("[gapfill-lab][compare-enqueue-eval]", {
+    route: "admin_gapfill_lab",
+    email: user.email,
+    houseId: house.id,
+    ...enqueueEligibility,
+  });
   if (shouldEnqueueGapfillCompareRemote()) {
     const queuedPayload = buildGapfillCompareQueuedPayloadV1({
       userId: user.id,
@@ -914,6 +944,12 @@ export async function POST(req: NextRequest) {
       );
     }
     await triggerGapfillCompareDropletWebhook(run.compareRunId);
+    console.info("[gapfill-lab][compare-enqueue]", {
+      route: "admin_gapfill_lab",
+      event: "droplet_webhook_triggered",
+      compareRunId: run.compareRunId,
+      ...enqueueEligibility,
+    });
     compareRunId = run.compareRunId;
     compareRunStatus = "queued";
     compareRunSnapshotReady = false;
@@ -929,9 +965,18 @@ export async function POST(req: NextRequest) {
       compareRunStatus: "queued",
       compareRunSnapshotReady: false,
       compareExecutionMode: "droplet_async",
+      enqueueEligibility,
       message: "Compare queued for droplet execution.",
     });
   }
+
+  console.info("[gapfill-lab][compare-path]", {
+    route: "admin_gapfill_lab",
+    path: "vercel_inline_pipeline",
+    email: user.email,
+    houseId: house.id,
+    ...enqueueEligibility,
+  });
 
   const pipelineState: import("@/modules/usageSimulator/gapfillCompareCorePipeline").GapfillComparePipelineState = {
     compareRequestTruthForLifecycle: null,
