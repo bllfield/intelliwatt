@@ -21,6 +21,7 @@ async function main() {
     );
     process.exit(1);
   }
+  console.error(`[sim-job-run] start kind=${kind} id=${id} cwd=${process.cwd()}`);
   if (kind === SIM_DROPLET_JOB_KIND_GAPFILL_COMPARE) {
     await runGapfillCompareQueuedWorker(id);
     console.log("[sim-job-run] gapfill_compare ok", id);

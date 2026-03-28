@@ -442,6 +442,18 @@ After `post_pull.sh` completes, the droplet nginx/site + systemd config for EFL 
   curl -i https://efl-pdftotext.intelliwatt.com/health
 Optional: run `git fetch origin` followed by `git status -sb`; it should show `## main...origin/main`.
 
+GAP-FILL COMPARE (DROPLET ASYNC) — POST-WEBHOOK PATH
+----------------------------------------------------
+
+After Vercel POSTs to `/trigger/smt-now` with `reason: "gapfill_compare"` and `compareRunId`, the webhook
+spawns `npx tsx scripts/droplet/sim-job-run.ts gapfill_compare <compareRunId>` with cwd `INTELLIWATT_APP_ROOT`
+(default `/home/deploy/apps/intelliwatt`). The worker calls `runGapfillCompareQueuedWorker`, which should
+move the DB row off `queued` early (see `markGapfillCompareRunRunning` in `gapfillCompareCorePipeline` for
+`resumeExistingCompareRunId`). Subprocess stdout/stderr append to `deploy/droplet/logs/sim-job-run.log`
+under the app root; journal lines include `[gapfill_compare]`, `[sim_job] spawn`, and `[sim_job] spawned pid=`.
+If the row stays `queued` with no log lines, check `runner_missing` in the webhook JSON, `DATABASE_URL` for
+the Node process, and that `tsx` runs under the systemd service user.
+
 DROPLET LOG TAILING (LAST 5 MINUTES)
 ------------------------------------
 

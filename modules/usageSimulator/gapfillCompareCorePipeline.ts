@@ -169,6 +169,17 @@ export async function runGapfillCompareCorePipeline(
   if (resumeExistingCompareRunId) {
     out.compareRunId = resumeExistingCompareRunId;
     out.compareRunStatus = "running";
+    // Droplet worker: move off `queued` before heavy I/O so poll does not spin forever on `compare_async_queued`.
+    await markGapfillCompareRunRunning({
+      compareRunId: resumeExistingCompareRunId,
+      phase: "compare_worker_loading_intervals",
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        compareRunId: resumeExistingCompareRunId,
+        dropletResume: true,
+        workerPhase: "pre_load_actual_intervals",
+      },
+    });
   }
 
   const testDateKeysSorted = Array.from(testDateKeysLocal).sort();
@@ -201,6 +212,20 @@ export async function runGapfillCompareCorePipeline(
       code: "no_actual_data",
       message: "No actual interval data for the test date window.",
     });
+    if (resumeExistingCompareRunId) {
+      await markGapfillCompareRunFailed({
+        compareRunId: resumeExistingCompareRunId,
+        phase: "compare_core_no_actual_data",
+        failureCode: "no_actual_data",
+        failureMessage: "No actual interval data for the test date window.",
+        statusMeta: {
+          route: "admin_gapfill_lab",
+          fetchStart,
+          fetchEnd,
+          dropletResume: true,
+        },
+      });
+    }
     await recordSimulationDataAlert({
       source: "GAPFILL_LAB",
       userId: user.id,

@@ -505,15 +505,45 @@ def _spawn_sim_job_tsx(job_kind: str, job_arg: str) -> None:
     if not os.path.isfile(runner):
         raise FileNotFoundError(runner)
 
+    log_dir = os.path.join(app_root, "deploy", "droplet", "logs")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        log_dir = app_root
+    log_path = os.path.join(log_dir, "sim-job-run.log")
+
     def _spawn() -> None:
         try:
-            subprocess.Popen(
-                ["npx", "--yes", "tsx", runner, job_kind, job_arg],
+            argv = ["npx", "--yes", "tsx", runner, job_kind, job_arg]
+            print(
+                "[sim_job] spawn "
+                f"job_kind={job_kind!r} job_arg={job_arg!r} cwd={app_root!r} "
+                f"runner={runner!r} log={log_path!r}",
+                flush=True,
+            )
+            logf = open(log_path, "a", encoding="utf-8")
+            logf.write(f"\n--- begin {job_kind} {job_arg} ---\n")
+            logf.flush()
+            p = subprocess.Popen(
+                argv,
                 cwd=app_root,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
                 env=os.environ.copy(),
             )
+            print(f"[sim_job] spawned pid={p.pid}", flush=True)
+
+            def _wait_and_close() -> None:
+                try:
+                    p.wait(timeout=7200)
+                except Exception:
+                    pass
+                try:
+                    logf.close()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_wait_and_close, daemon=True).start()
         except Exception as exc:
             print(f"[ERROR] sim_job spawn failed ({job_kind}): {exc!r}", flush=True)
 
@@ -525,6 +555,7 @@ def handle_gapfill_compare(payload: dict) -> bytes:
     compare_run_id = str(payload.get("compareRunId") or "").strip()
     if not compare_run_id:
         return json.dumps({"ok": False, "error": "compareRunId_required"}).encode("utf-8")
+    print(f"[gapfill_compare] webhook compareRunId={compare_run_id!r}", flush=True)
     app_root = os.environ.get("INTELLIWATT_APP_ROOT", "/home/deploy/apps/intelliwatt").strip()
     runner = os.path.join(app_root, "scripts", "droplet", "sim-job-run.ts")
     if not os.path.isfile(runner):

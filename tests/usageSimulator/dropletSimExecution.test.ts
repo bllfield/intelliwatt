@@ -60,6 +60,11 @@ describe("droplet sim execution flags", () => {
     expect(getGapfillCompareEnqueueDiagnostics().wouldEnqueueGapfillCompare).toBe(false);
   });
 
+  it("SIM_DROPLET_JOB_KIND_GAPFILL_COMPARE matches droplet webhook reason gapfill_compare", async () => {
+    const { SIM_DROPLET_JOB_KIND_GAPFILL_COMPARE } = await import("@/modules/usageSimulator/dropletSimWebhook");
+    expect(SIM_DROPLET_JOB_KIND_GAPFILL_COMPARE).toBe("gapfill_compare");
+  });
+
   it("whitespace-only DROPLET secret does not fall through to INTELLIWATT: diagnostics matches shouldEnqueue", async () => {
     process.env.DROPLET_WEBHOOK_URL = "https://example.com/trigger/smt-now";
     process.env.DROPLET_WEBHOOK_SECRET = "   ";

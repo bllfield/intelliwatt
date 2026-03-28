@@ -2,7 +2,10 @@ import { prisma } from "@/lib/db";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
 import { setIntersect } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
-import { getGapfillCompareRunSnapshotById } from "@/modules/usageSimulator/compareRunSnapshot";
+import {
+  getGapfillCompareRunSnapshotById,
+  markGapfillCompareRunFailed,
+} from "@/modules/usageSimulator/compareRunSnapshot";
 import { startCompareCoreTiming } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import {
   runGapfillCompareCorePipeline,
@@ -12,10 +15,40 @@ import {
 import type { GapfillCompareQueuedPayloadV1 } from "@/modules/usageSimulator/gapfillCompareQueuedPayload";
 import { GAPFILL_COMPARE_QUEUED_PAYLOAD_VERSION } from "@/modules/usageSimulator/gapfillCompareQueuedPayload";
 
+/** Thrown after failure has been persisted to GapfillCompareRunSnapshot (avoid duplicate marks). */
+export class WorkerFailurePersisted extends Error {
+  constructor() {
+    super("gapfill_compare_worker_failure_persisted");
+    this.name = "WorkerFailurePersisted";
+  }
+}
+
 /**
  * Droplet worker entry: replay queued compare using persisted payload + shared pipeline only.
  */
 export async function runGapfillCompareQueuedWorker(compareRunId: string): Promise<void> {
+  try {
+    await runGapfillCompareQueuedWorkerImpl(compareRunId);
+  } catch (err) {
+    if (err instanceof WorkerFailurePersisted) {
+      throw err;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    await markGapfillCompareRunFailed({
+      compareRunId,
+      phase: "compare_worker_exception",
+      failureCode: "GAPFILL_COMPARE_WORKER_EXCEPTION",
+      failureMessage: message.slice(0, 2000),
+      statusMeta: {
+        route: "gapfill_compare_queued_worker",
+        dropletWorker: true,
+      },
+    });
+    throw err;
+  }
+}
+
+async function runGapfillCompareQueuedWorkerImpl(compareRunId: string): Promise<void> {
   const read = await getGapfillCompareRunSnapshotById({ compareRunId });
   if (!read.ok) {
     throw new Error(read.message ?? "compare run read failed");
@@ -84,7 +117,7 @@ export async function runGapfillCompareQueuedWorker(compareRunId: string): Promi
     compareRunTerminalState: false,
   };
 
-  await runGapfillCompareCorePipeline({
+  const pipelineResponse = await runGapfillCompareCorePipeline({
     abortSignal: undefined,
     resumeExistingCompareRunId: compareRunId,
     state: pipelineState,
@@ -134,4 +167,43 @@ export async function runGapfillCompareQueuedWorker(compareRunId: string): Promi
     requestedCompareRunId: p.requestedCompareRunId,
     minDayCoveragePct: p.minDayCoveragePct,
   });
+
+  const rawText = await pipelineResponse.text();
+  let parsed: unknown = null;
+  try {
+    parsed = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    parsed = null;
+  }
+  const payloadOk =
+    pipelineResponse.ok &&
+    parsed &&
+    typeof parsed === "object" &&
+    (parsed as { ok?: unknown }).ok !== false;
+  if (!payloadOk) {
+    const errCode =
+      parsed && typeof parsed === "object" && typeof (parsed as { error?: unknown }).error === "string"
+        ? String((parsed as { error: string }).error)
+        : `http_${pipelineResponse.status}`;
+    const errMsg =
+      parsed && typeof parsed === "object" && typeof (parsed as { message?: unknown }).message === "string"
+        ? String((parsed as { message: string }).message)
+        : rawText.slice(0, 500);
+    // `no_actual_data` is already persisted in the pipeline for droplet resume; avoid overwriting.
+    if (errCode !== "no_actual_data") {
+      await markGapfillCompareRunFailed({
+        compareRunId,
+        phase: "compare_core_pipeline_error_response",
+        failureCode: errCode.slice(0, 120),
+        failureMessage: errMsg.slice(0, 2000),
+        statusMeta: {
+          route: "gapfill_compare_queued_worker",
+          dropletWorker: true,
+          httpStatus: pipelineResponse.status,
+        },
+      });
+    }
+    throw new WorkerFailurePersisted();
+  }
 }
+
