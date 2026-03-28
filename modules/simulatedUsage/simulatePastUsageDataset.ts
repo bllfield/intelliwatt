@@ -299,6 +299,8 @@ export async function loadWeatherForPastWindow(args: {
 
 export type SimulatePastUsageDatasetArgs = {
   houseId: string;
+  /** Optional shared actual-context house; defaults to houseId. */
+  actualContextHouseId?: string;
   userId: string;
   esiid: string | null;
   startDate: string;
@@ -639,6 +641,7 @@ export async function simulatePastUsageDataset(
 ): Promise<SimulatePastUsageDatasetResult | { dataset: null; error: string }> {
   const {
     houseId,
+    actualContextHouseId,
     userId,
     esiid,
     startDate,
@@ -654,6 +657,7 @@ export async function simulatePastUsageDataset(
     emitAllIntervals = true,
     retainSimulatedDayResultDateKeysLocal,
   } = args;
+  const actualHouseId = String(actualContextHouseId ?? houseId);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
@@ -662,7 +666,7 @@ export async function simulatePastUsageDataset(
   try {
     const actualIntervals =
       preloadedIntervals ??
-      (await getActualIntervalsForRange({ houseId, esiid, startDate, endDate })).map((p) => ({
+      (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
         timestamp: p.timestamp,
         kwh: p.kwh,
       }));
@@ -693,7 +697,7 @@ export async function simulatePastUsageDataset(
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
 
     const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
-      houseId,
+      houseId: actualHouseId,
       startDate,
       endDate,
       canonicalDateKeys,
@@ -718,7 +722,7 @@ export async function simulatePastUsageDataset(
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
       userId,
-      houseId,
+      houseId: actualHouseId,
       timezone,
       canonicalMonths,
     });

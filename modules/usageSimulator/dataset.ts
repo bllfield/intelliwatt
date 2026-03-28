@@ -506,6 +506,8 @@ export type SimulatorBuildInputsV1 = {
   intradayShape96: number[];
   weekdayWeekendShape96?: { weekday: number[]; weekend: number[] };
   travelRanges?: Array<{ startDate: string; endDate: string }>;
+  /** Optional shared actual-context source house; defaults to the scenario houseId. */
+  actualContextHouseId?: string;
   /**
    * Gap-Fill validation-only days simulated in the canonical recalc run.
    * These keys must be excluded from baseline projection displays.
@@ -637,6 +639,8 @@ export type SimulatedUsageDatasetMeta = {
    * Baseline projection must hide these days from baseline display surfaces.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Optional shared actual-context source house used to build this artifact. */
+  actualContextHouseId?: string;
 };
 
 export type SimulatedUsageDataset = {

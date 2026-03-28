@@ -287,6 +287,24 @@ model GapfillCompareRunSnapshot {
   @@index([status, updatedAt])
 }
 
+/// Global reusable lab test-home mapping for canonical Gap-Fill calibration flow.
+model GapfillLabTestHomeLink {
+  id              String   @id @default(cuid())
+  ownerUserId     String   @unique
+  testHomeHouseId String
+  sourceUserId    String?
+  sourceHouseId   String?
+  status          String   @default("ready") // ready | replacing | profile_syncing | failed
+  statusMessage   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastReplacedAt  DateTime?
+
+  @@index([testHomeHouseId])
+  @@index([sourceUserId, sourceHouseId])
+  @@index([status, updatedAt])
+}
+
 /// Generic async droplet execution queue for shared sim workloads (Past recalc, etc.). Gap-Fill compare uses GapfillCompareRunSnapshot + compareRunId.
 model SimDropletJob {
   id             String   @id @default(uuid())

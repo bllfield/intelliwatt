@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db";
+import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
+import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
@@ -21,6 +23,8 @@ import {
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
+import { validateHomeProfile } from "@/modules/homeProfile/validation";
+import { validateApplianceProfile, normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
   getSimulatedUsageForHouseScenario,
   recalcSimulatorBuild,
@@ -38,6 +42,11 @@ import {
   markGapfillCompareRunFailed,
   markGapfillCompareRunRunning,
 } from "@/modules/usageSimulator/compareRunSnapshot";
+import {
+  ensureGlobalLabTestHomeHouse,
+  getLabTestHomeLink,
+  replaceGlobalLabTestHomeFromSource,
+} from "@/modules/usageSimulator/labTestHome";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   classifySimulationFailure,
@@ -109,6 +118,29 @@ function hasAdminSessionCookie(request: NextRequest): boolean {
   return ADMIN_EMAILS.includes(email);
 }
 
+async function resolveLabOwnerUserId(request: NextRequest): Promise<string | null> {
+  const cookieEmail = normalizeEmailSafe(request.cookies.get("intelliwatt_admin")?.value ?? "");
+  if (cookieEmail) {
+    const cookieUser = await prisma.user
+      .findFirst({
+        where: { email: { equals: cookieEmail, mode: "insensitive" } },
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (cookieUser?.id) return String(cookieUser.id);
+  }
+  for (const adminEmail of ADMIN_EMAILS) {
+    const fallback = await prisma.user
+      .findFirst({
+        where: { email: { equals: adminEmail, mode: "insensitive" } },
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (fallback?.id) return String(fallback.id);
+  }
+  return null;
+}
+
 async function triggerGapfillCompareDropletWebhook(
   compareRunId: string
 ): Promise<DropletSimWebhookResult> {
@@ -160,6 +192,7 @@ export async function POST(req: NextRequest) {
     trainMaxDays?: number;
     trainGapDays?: number;
     houseId?: string;
+    sourceHouseId?: string;
     /** Weather source: ACTUAL_LAST_YEAR (last year temps), NORMAL_AVG (average temps), or open_meteo (live API). */
     weatherKind?: "ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo";
     /** Optional benchmark payload from a prior run for regression comparison (copy from report). */
@@ -184,6 +217,9 @@ export async function POST(req: NextRequest) {
     requireExactArtifactMatch?: unknown;
     artifactIdentitySource?: unknown;
     compareRunId?: unknown;
+    homeProfile?: unknown;
+    applianceProfile?: unknown;
+    travelRanges?: Array<{ startDate: string; endDate: string }>;
   };
   try {
     body = await req.json();
@@ -215,7 +251,8 @@ export async function POST(req: NextRequest) {
   const includeUsage365 = body?.includeUsage365 === true;
   const includeDiagnostics = body?.includeDiagnostics === true;
   const includeFullReportText = body?.includeFullReportText === true;
-  const action = toSnapshotReaderAction(body?.action);
+  const rawAction = String(body?.action ?? "").trim();
+  const action = toSnapshotReaderAction(rawAction);
   const heavyOnlyCompactResponse =
     body?.responseMode === "heavy_only_compact" && includeDiagnostics && includeFullReportText;
   const requestedArtifactInputHash =
@@ -286,6 +323,568 @@ export async function POST(req: NextRequest) {
     : houses[0];
   if (!house) {
     return NextResponse.json({ ok: false, error: "house_not_found", message: "House not found or not owned by user." }, { status: 404 });
+  }
+
+  const isCanonicalLabAction =
+    rawAction === "lookup_source_houses" ||
+    rawAction === "replace_test_home_from_source" ||
+    rawAction === "save_test_home_inputs" ||
+    rawAction === "run_test_home_canonical_recalc";
+  const labOwnerUserId = isCanonicalLabAction ? await resolveLabOwnerUserId(req) : null;
+  const sourceHouseIdParam = typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim()
+    ? body.sourceHouseId.trim()
+    : house.id;
+
+  if (rawAction === "lookup_source_houses") {
+    const link = labOwnerUserId ? await getLabTestHomeLink(labOwnerUserId) : null;
+    return NextResponse.json({
+      ok: true,
+      action: "lookup_source_houses",
+      sourceUser: { id: user.id, email: user.email },
+      sourceHouses: houses.map((h: any) => ({
+        id: h.id,
+        esiid: h.esiid ? String(h.esiid) : null,
+        label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
+      })),
+      selectedSourceHouseId: sourceHouseIdParam,
+      testHomeLink: link,
+    });
+  }
+
+  if (rawAction === "replace_test_home_from_source") {
+    if (!labOwnerUserId) {
+      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+    }
+    const selectedSourceHouse = houses.find((h: any) => String(h.id) === sourceHouseIdParam);
+    if (!selectedSourceHouse) {
+      return NextResponse.json({ ok: false, error: "source_house_not_found" }, { status: 404 });
+    }
+    const replaced = await replaceGlobalLabTestHomeFromSource({
+      ownerUserId: labOwnerUserId,
+      sourceUserId: user.id,
+      sourceHouseId: sourceHouseIdParam,
+    });
+    if (!replaced.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: replaced.error ?? "replace_test_home_failed",
+        },
+        { status: 500 }
+      );
+    }
+    const testHome = await (prisma as any).houseAddress.findUnique({
+      where: { id: replaced.testHomeHouseId },
+      select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true, label: true },
+    });
+    const testHomeProfiles = await loadDisplayProfilesForHouse({
+      userId: labOwnerUserId,
+      houseId: String(replaced.testHomeHouseId),
+    });
+    const testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
+    const link = await getLabTestHomeLink(labOwnerUserId);
+    return NextResponse.json({
+      ok: true,
+      action: "replace_test_home_from_source",
+      sourceUser: { id: user.id, email: user.email },
+      sourceHouse: {
+        id: selectedSourceHouse.id,
+        esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
+        label: [selectedSourceHouse.addressLine1, selectedSourceHouse.addressCity, selectedSourceHouse.addressState]
+          .filter(Boolean)
+          .join(", ") || selectedSourceHouse.id,
+      },
+      testHome: testHome
+        ? {
+            id: testHome.id,
+            esiid: testHome.esiid ? String(testHome.esiid) : null,
+            label: [testHome.addressLine1, testHome.addressCity, testHome.addressState].filter(Boolean).join(", ") || testHome.id,
+            identityLabel: testHome.label ?? null,
+          }
+        : null,
+      homeProfile: testHomeProfiles.homeProfile,
+      applianceProfile: testHomeProfiles.applianceProfile,
+      travelRangesFromDb: testHomeTravelRanges,
+      testHomeLink: link,
+    });
+  }
+
+  if (rawAction === "save_test_home_inputs") {
+    if (!labOwnerUserId) {
+      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+    }
+    const link = await getLabTestHomeLink(labOwnerUserId);
+    if (!link?.testHomeHouseId) {
+      return NextResponse.json({ ok: false, error: "test_home_not_ready", message: "Load/replace test home first." }, { status: 409 });
+    }
+    if (link.status !== "ready") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "test_home_replace_incomplete",
+          message: "Test home replacement is still in progress.",
+          testHomeLink: link,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (body?.homeProfile != null) {
+      const homeValidated = validateHomeProfile(body.homeProfile, { requirePastBaselineFields: true });
+      if (!homeValidated.ok) {
+        return NextResponse.json({ ok: false, error: "invalid_home_profile", detail: homeValidated.error }, { status: 400 });
+      }
+      await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
+        where: { userId_houseId: { userId: labOwnerUserId, houseId: link.testHomeHouseId } },
+        create: { userId: labOwnerUserId, houseId: link.testHomeHouseId, ...homeValidated.value },
+        update: { ...homeValidated.value },
+      });
+    }
+    if (body?.applianceProfile != null) {
+      const normalized = normalizeStoredApplianceProfile(body.applianceProfile);
+      const applianceValidated = validateApplianceProfile(normalized);
+      if (!applianceValidated.ok) {
+        return NextResponse.json({ ok: false, error: "invalid_appliance_profile", detail: applianceValidated.error }, { status: 400 });
+      }
+      await (appliancesPrisma as any).applianceProfileSimulated.upsert({
+        where: { userId_houseId: { userId: labOwnerUserId, houseId: link.testHomeHouseId } },
+        create: {
+          userId: labOwnerUserId,
+          houseId: link.testHomeHouseId,
+          appliancesJson: applianceValidated.value,
+        },
+        update: {
+          appliancesJson: applianceValidated.value,
+        },
+      });
+    }
+    if (Array.isArray(body?.travelRanges)) {
+      const ranges = body.travelRanges
+        .map((r: any) => ({
+          startDate: String(r?.startDate ?? "").slice(0, 10),
+          endDate: String(r?.endDate ?? "").slice(0, 10),
+        }))
+        .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
+      await (prisma as any).$transaction(async (tx: any) => {
+        let pastScenario = await tx.usageSimulatorScenario.findFirst({
+          where: {
+            userId: labOwnerUserId,
+            houseId: link.testHomeHouseId,
+            name: "Past (Corrected)",
+            archivedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!pastScenario?.id) {
+          pastScenario = await tx.usageSimulatorScenario.create({
+            data: {
+              userId: labOwnerUserId,
+              houseId: link.testHomeHouseId,
+              name: "Past (Corrected)",
+            },
+            select: { id: true },
+          });
+        }
+        await tx.usageSimulatorScenarioEvent.deleteMany({
+          where: {
+            scenarioId: String(pastScenario.id),
+            kind: "TRAVEL_RANGE",
+          },
+        });
+        if (ranges.length > 0) {
+          await tx.usageSimulatorScenarioEvent.createMany({
+            data: ranges.map((r) => ({
+              scenarioId: String(pastScenario.id),
+              effectiveMonth: r.startDate.slice(0, 7),
+              kind: "TRAVEL_RANGE",
+              payloadJson: { startDate: r.startDate, endDate: r.endDate },
+            })),
+          });
+        }
+      });
+    }
+
+    const refreshedProfiles = await loadDisplayProfilesForHouse({
+      userId: labOwnerUserId,
+      houseId: link.testHomeHouseId,
+    });
+    const refreshedTravel = await getTravelRangesFromDb(labOwnerUserId, link.testHomeHouseId);
+    return NextResponse.json({
+      ok: true,
+      action: "save_test_home_inputs",
+      testHomeHouseId: link.testHomeHouseId,
+      homeProfile: refreshedProfiles.homeProfile,
+      applianceProfile: refreshedProfiles.applianceProfile,
+      travelRangesFromDb: refreshedTravel,
+      message: "Saved canonical test-home inputs. Recalc to refresh outputs.",
+    });
+  }
+
+  if (rawAction === "run_test_home_canonical_recalc") {
+    if (!labOwnerUserId) {
+      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+    }
+    const link = await getLabTestHomeLink(labOwnerUserId);
+    if (!link?.testHomeHouseId || !link.sourceHouseId || !link.sourceUserId || link.status !== "ready") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "test_home_not_ready",
+          message: "Load/replace test home first and wait for ready state.",
+          testHomeLink: link ?? null,
+        },
+        { status: 409 }
+      );
+    }
+    const [labOwnerUser, testHomeHouse, sourceHouse] = await Promise.all([
+      prisma.user.findUnique({ where: { id: labOwnerUserId }, select: { id: true, email: true } }),
+      (prisma as any).houseAddress.findUnique({
+        where: { id: link.testHomeHouseId },
+        select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
+      }),
+      (prisma as any).houseAddress.findUnique({
+        where: { id: link.sourceHouseId },
+        select: { id: true, userId: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
+      }),
+    ]);
+    if (!labOwnerUser?.id || !testHomeHouse?.id || !sourceHouse?.id) {
+      return NextResponse.json({ ok: false, error: "test_home_context_not_found" }, { status: 404 });
+    }
+
+    const { homeProfile, applianceProfile } = await loadDisplayProfilesForHouse({
+      userId: labOwnerUser.id,
+      houseId: testHomeHouse.id,
+    });
+
+    const sourceEsiid = sourceHouse.esiid ? String(sourceHouse.esiid) : null;
+    const source = await chooseActualSource({ houseId: sourceHouse.id, esiid: sourceEsiid });
+    if (!source) {
+      return NextResponse.json(
+        { ok: false, error: "no_actual_data", message: "No actual interval data (SMT or Green Button) on source house." },
+        { status: 400 }
+      );
+    }
+    const canonicalWindow = await getSharedPastCoverageWindowForHouse({
+      userId: String(sourceHouse.userId ?? link.sourceUserId),
+      houseId: sourceHouse.id,
+    });
+    const canonicalMonths = monthsEndingAt(canonicalWindow.endDate.slice(0, 7), 12);
+    const canonicalWindowHelper = "resolveCanonicalUsage365CoverageWindow";
+    let usage365: Usage365Payload | undefined = undefined;
+    if (includeUsage365) {
+      const sourceLabel = String((source as any)?.source ?? (source as any)?.kind ?? "actual");
+      let usageDatasetResult:
+        | Awaited<ReturnType<typeof getActualUsageDatasetForHouse>>
+        | null = null;
+      try {
+        usageDatasetResult = await getActualUsageDatasetForHouse(sourceHouse.id, sourceEsiid, {
+          skipFullYearIntervalFetch: true,
+        });
+      } catch {
+        usageDatasetResult = null;
+      }
+      const usageDataset = usageDatasetResult?.dataset ?? null;
+      if (usageDataset) {
+        const boundedDaily = Array.isArray(usageDataset.daily)
+          ? usageDataset.daily
+              .filter((row) => {
+                const dk = String((row as any)?.date ?? "").slice(0, 10);
+                return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
+              })
+              .map((row) => ({ date: String((row as any)?.date ?? "").slice(0, 10), kwh: Number((row as any)?.kwh) || 0 }))
+          : [];
+        const monthlyRows = Array.isArray(usageDataset.monthly)
+          ? usageDataset.monthly.map((m) => ({
+              month: String((m as any)?.month ?? "").slice(0, 7),
+              kwh: Number((m as any)?.kwh) || 0,
+            }))
+          : [];
+        usage365 = {
+          source: String((usageDataset as any)?.summary?.source ?? sourceLabel),
+          timezone,
+          coverageStart: canonicalWindow.startDate,
+          coverageEnd: canonicalWindow.endDate,
+          intervalCount: Number((usageDataset as any)?.summary?.intervalsCount ?? 0) || 0,
+          daily: boundedDaily,
+          monthly: monthlyRows,
+          weekdayKwh: Number((usageDataset as any)?.insights?.weekdayVsWeekend?.weekday ?? 0) || 0,
+          weekendKwh: Number((usageDataset as any)?.insights?.weekdayVsWeekend?.weekend ?? 0) || 0,
+          fifteenCurve: normalizeFifteenCurve96((usageDataset as any)?.insights?.fifteenMinuteAverages),
+          stitchedMonth: ((usageDataset as any)?.insights?.stitchedMonth ?? null) as Usage365Payload["stitchedMonth"],
+        };
+      }
+    }
+
+    const travelRangesFromDb = await getTravelRangesFromDb(labOwnerUser.id, testHomeHouse.id);
+    const travelDateKeysLocal = new Set<string>(
+      travelRangesFromDb.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
+    );
+
+    const selectedTestRanges = testRanges;
+    let testDateKeysLocal = new Set<string>();
+    let testRangesUsed: Array<{ startDate: string; endDate: string }> = [];
+    let testSelectionMode: "manual_ranges" | "random_days" = "manual_ranges";
+    let testDaysSelected = 0;
+    let seedUsed: string | null = null;
+    if (testDaysRequested != null) {
+      const coverageSelection = await getCandidateDateCoverageForSelection({
+        houseId: sourceHouse.id,
+        scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
+        windowStart: canonicalWindow.startDate,
+        windowEnd: canonicalWindow.endDate,
+        timezone,
+        minDayCoveragePct,
+        stratifyByMonth,
+        stratifyByWeekend,
+        loadIntervalsForWindow: async () =>
+          await getActualIntervalsForRange({
+            houseId: sourceHouse.id,
+            esiid: sourceEsiid,
+            startDate: canonicalWindow.startDate,
+            endDate: canonicalWindow.endDate,
+          }),
+      });
+      const candidateDateKeys = coverageSelection.candidateDateKeys;
+      seedUsed = seed || `${sourceHouse.id}-${canonicalWindow.endDate}`;
+      const picked = pickRandomTestDateKeys({
+        candidateDateKeys,
+        travelDateKeysSet: travelDateKeysLocal,
+        testDays: testDaysRequested,
+        seed: seedUsed,
+        stratifyByMonth,
+        stratifyByWeekend,
+        isWeekendLocalKey: (dk) => {
+          const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+          return dow === 0 || dow === 6;
+        },
+        monthKeyFromLocalKey: (dk) => dk.slice(0, 7),
+      });
+      testRangesUsed = mergeDateKeysToRanges(picked);
+      testDateKeysLocal = new Set(picked);
+      testSelectionMode = "random_days";
+      testDaysSelected = picked.length;
+    } else {
+      testDateKeysLocal = new Set<string>(
+        selectedTestRanges.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
+      );
+      testRangesUsed = selectedTestRanges;
+      testSelectionMode = "manual_ranges";
+      testDaysSelected = testDateKeysLocal.size;
+    }
+    if (testDateKeysLocal.size === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "test_ranges_required",
+          message: "At least one valid test-day range is required.",
+        },
+        { status: 400 }
+      );
+    }
+    const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
+    if (overlapLocal.size > 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "test_overlaps_travel",
+          message: "Test dates overlap saved vacant/travel dates.",
+          overlapCount: overlapLocal.size,
+        },
+        { status: 400 }
+      );
+    }
+
+    const pastScenario = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: {
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          name: "Past (Corrected)",
+          archivedAt: null,
+        },
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (!pastScenario?.id) {
+      return NextResponse.json(
+        { ok: false, error: "no_past_scenario", message: "No Past (Corrected) scenario found on test home." },
+        { status: 400 }
+      );
+    }
+
+    const recalcOut = await recalcSimulatorBuild({
+      userId: labOwnerUser.id,
+      houseId: testHomeHouse.id,
+      esiid: sourceEsiid,
+      actualContextHouseId: sourceHouse.id,
+      mode: "SMT_BASELINE",
+      scenarioId: String(pastScenario.id),
+      persistPastSimBaseline: true,
+      validationOnlyDateKeysLocal: testDateKeysLocal,
+    });
+    if (!recalcOut.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "canonical_recalc_failed",
+          message: String(recalcOut.error ?? "Canonical recalc failed."),
+        },
+        { status: 500 }
+      );
+    }
+
+    const [canonicalRead, baselineRead] = await Promise.all([
+      getSimulatedUsageForHouseScenario({
+        userId: labOwnerUser.id,
+        houseId: testHomeHouse.id,
+        scenarioId: String(pastScenario.id),
+        readMode: "allow_rebuild",
+        projectionMode: "raw",
+      }),
+      getSimulatedUsageForHouseScenario({
+        userId: labOwnerUser.id,
+        houseId: testHomeHouse.id,
+        scenarioId: String(pastScenario.id),
+        readMode: "allow_rebuild",
+        projectionMode: "baseline",
+      }),
+    ]);
+    if (!canonicalRead.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "canonical_read_failed",
+          message: canonicalRead.message ?? "Canonical read failed.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const canonicalDataset = canonicalRead.dataset as any;
+    const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
+    const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
+    const testDateKeySet = new Set<string>(selectedDateKeysSorted);
+    const actualIntervalsForSelected = (
+      await getActualIntervalsForRange({
+        houseId: sourceHouse.id,
+        esiid: sourceEsiid,
+        startDate: shiftIsoDateUtc(selectedDateKeysSorted[0] ?? canonicalWindow.startDate, -1),
+        endDate: shiftIsoDateUtc(
+          selectedDateKeysSorted[selectedDateKeysSorted.length - 1] ?? canonicalWindow.endDate,
+          1
+        ),
+      })
+    ).filter((row) =>
+      testDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
+    );
+    const simulatedIntervalsForSelected = Array.isArray(canonicalDataset?.series?.intervals15)
+      ? (canonicalDataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).filter((row) =>
+          testDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
+        )
+      : [];
+    const simulatedByTs = new Map<string, number>();
+    for (const row of simulatedIntervalsForSelected) {
+      simulatedByTs.set(canonicalIntervalKey(String(row?.timestamp ?? "")), Number(row?.kwh) || 0);
+    }
+    const actualDailyByDate = new Map<string, number>();
+    for (const row of actualIntervalsForSelected) {
+      const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
+      if (!testDateKeySet.has(dk)) continue;
+      actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(row?.kwh) || 0)));
+    }
+    const simDailyFromMeta = (() => {
+      const src =
+        (canonicalDataset?.meta?.canonicalArtifactSimulatedDayTotalsByDate as
+          | Record<string, number>
+          | undefined) ??
+        {};
+      const out = new Map<string, number>();
+      for (const [dk, kwh] of Object.entries(src)) {
+        const key = String(dk).slice(0, 10);
+        if (!testDateKeySet.has(key)) continue;
+        out.set(key, round2(Number(kwh) || 0));
+      }
+      return out;
+    })();
+    const metrics = computeGapFillMetrics({
+      actual: actualIntervalsForSelected,
+      simulated: simulatedIntervalsForSelected,
+      simulatedByTs,
+      timezone,
+    });
+    const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
+      const actualDayKwh = round2(actualDailyByDate.get(dk) ?? 0);
+      const freshCompareSimDayKwh = round2(simDailyFromMeta.get(dk) ?? 0);
+      const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+      return {
+        localDate: dk,
+        actualDayKwh,
+        freshCompareSimDayKwh,
+        displayedPastStyleSimDayKwh: freshCompareSimDayKwh,
+        actualVsFreshErrorKwh: round2(actualDayKwh - freshCompareSimDayKwh),
+        displayVsFreshParityMatch: true,
+        parityAvailability: "available",
+        parityReasonCode: "display_matches_canonical_artifact",
+        dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
+      };
+    });
+
+    return NextResponse.json({
+      ok: true,
+      action: "run_test_home_canonical_recalc",
+      mode: "canonical_test_home_lab",
+      email: user.email,
+      sourceUserId: user.id,
+      sourceHouse: {
+        id: sourceHouse.id,
+        label: [sourceHouse.addressLine1, sourceHouse.addressCity, sourceHouse.addressState].filter(Boolean).join(", ") || sourceHouse.id,
+      },
+      testHome: {
+        id: testHomeHouse.id,
+        label: [testHomeHouse.addressLine1, testHomeHouse.addressCity, testHomeHouse.addressState].filter(Boolean).join(", ") || testHomeHouse.id,
+      },
+      timezone,
+      homeProfile,
+      applianceProfile,
+      weatherKind,
+      canonicalWindow: {
+        startDate: canonicalWindow.startDate,
+        endDate: canonicalWindow.endDate,
+        helper: canonicalWindowHelper,
+      },
+      travelRangesFromDb,
+      testRangesUsed,
+      testSelectionMode,
+      testDaysRequested,
+      testDaysSelected,
+      seedUsed,
+      usage365,
+      baselineDatasetProjection: baselineDataset,
+      scoredDayTruthRows,
+      metrics: {
+        mae: metrics.mae,
+        rmse: metrics.rmse,
+        mape: metrics.mape,
+        wape: metrics.wape,
+        maxAbs: metrics.maxAbs,
+        totalActualKwhMasked: metrics.totalActualKwhMasked,
+        totalSimKwhMasked: metrics.totalSimKwhMasked,
+        deltaKwhMasked: metrics.deltaKwhMasked,
+        mapeFiltered: metrics.mapeFiltered,
+        mapeFilteredCount: metrics.mapeFilteredCount,
+      },
+      compareTruth: {
+        canonicalReadLayer: "getSimulatedUsageForHouseScenario",
+        canonicalReadRoute: "/api/user/usage/simulated/house",
+        validationDaysTruthSource: "canonical_saved_artifact_family",
+      },
+      modelAssumptions: {
+        canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
+        projectionMode: "baseline_vs_accuracy",
+        validationOnlyDateKeysLocal: selectedDateKeysSorted,
+        actualContextHouseId: sourceHouse.id,
+      },
+    });
   }
 
   if (action) {

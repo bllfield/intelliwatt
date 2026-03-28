@@ -128,6 +128,7 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - Test days do not create a new artifact, do not create a new fingerprint, and do not change artifact identity or ownership metadata.
 - GapFill is a scoring/reporting workflow only. It may select test days, load actual intervals for those days, read matching simulated intervals from shared simulator output tied to the shared artifact identity (cached restore or fresh shared build), and compute metrics/reports.
 - GapFill core compare defaults to selected-day fresh shared scoring (`compareFreshMode=selected_days`) while display rows remain shared artifact output.
+- Canonical calibration lab main path uses reusable test-home actions (`lookup_source_houses`, `replace_test_home_from_source`, `save_test_home_inputs`, `run_test_home_canonical_recalc`) and must derive both baseline and accuracy projections from the same saved simulator output family.
 - GapFill selected-days compare must simulate the **union** of scored test days and DB travel/vacant parity-validation days in one shared `simulatePastSelectedDaysShared` run; compare vs parity differ only after simulation (slicing and reporting), not as separate sim math paths inside Gap-Fill.
 - GapFill heavy diagnostics may explicitly request full-window shared fresh scoring (`compareFreshMode=full_window`) as an optional proof path.
 - Artifact fingerprint ownership and usage-shape identity behavior remain unchanged by this step; deferred identity/profile changes stay out of scope.

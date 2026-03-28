@@ -15,11 +15,22 @@ const chooseActualSource = vi.fn();
 const getSharedPastCoverageWindowForHouse = vi.fn();
 const rebuildGapfillSharedPastArtifact = vi.fn();
 const getGapfillCompareRunSnapshotById = vi.fn();
+const getLabTestHomeLink = vi.fn();
+const replaceGlobalLabTestHomeFromSource = vi.fn();
+const ensureGlobalLabTestHomeHouse = vi.fn();
+
+const homeDetailsPrisma: any = {
+  homeProfileSimulated: { upsert: vi.fn() },
+};
+const appliancesPrisma: any = {
+  applianceProfileSimulated: { upsert: vi.fn() },
+};
 
 const prisma: any = {
   user: { findUnique: vi.fn(), findFirst: vi.fn() },
-  houseAddress: { findFirst: vi.fn(), findMany: vi.fn() },
+  houseAddress: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
   usageSimulatorScenario: { findFirst: vi.fn() },
+  $transaction: vi.fn(),
 };
 
 vi.mock("@/lib/auth/admin", () => ({
@@ -27,6 +38,8 @@ vi.mock("@/lib/auth/admin", () => ({
 }));
 
 vi.mock("@/lib/db", () => ({ prisma }));
+vi.mock("@/lib/db/homeDetailsClient", () => ({ homeDetailsPrisma }));
+vi.mock("@/lib/db/appliancesClient", () => ({ appliancesPrisma }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualIntervalsForRange: (...args: any[]) => getActualIntervalsForRange(...args),
@@ -54,6 +67,12 @@ vi.mock("@/modules/usageSimulator/compareRunSnapshot", () => ({
   markGapfillCompareRunFailed: (...args: any[]) => markGapfillCompareRunFailed(...args),
   markGapfillCompareRunRunning: vi.fn(),
   getGapfillCompareRunSnapshotById: (...args: any[]) => getGapfillCompareRunSnapshotById(...args),
+}));
+
+vi.mock("@/modules/usageSimulator/labTestHome", () => ({
+  getLabTestHomeLink: (...args: any[]) => getLabTestHomeLink(...args),
+  replaceGlobalLabTestHomeFromSource: (...args: any[]) => replaceGlobalLabTestHomeFromSource(...args),
+  ensureGlobalLabTestHomeHouse: (...args: any[]) => ensureGlobalLabTestHomeHouse(...args),
 }));
 
 vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", async () => {
@@ -94,7 +113,26 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     prisma.houseAddress.findMany.mockResolvedValue([
       { id: "h1", addressLine1: "1 Main", addressCity: "Austin", addressState: "TX", esiid: "E1" },
     ]);
+    prisma.houseAddress.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where?.id === "test-home-1") {
+        return { id: "test-home-1", userId: "u1", esiid: null, addressLine1: "Lab Home", addressCity: "Austin", addressState: "TX" };
+      }
+      if (where?.id === "h1") {
+        return { id: "h1", userId: "u1", esiid: "E1", addressLine1: "1 Main", addressCity: "Austin", addressState: "TX" };
+      }
+      return null;
+    });
     prisma.usageSimulatorScenario.findFirst.mockResolvedValue({ id: "past-s1" });
+    prisma.$transaction.mockImplementation(async (fn: any) => await fn({
+      usageSimulatorScenario: {
+        findFirst: vi.fn().mockResolvedValue({ id: "past-s1" }),
+        create: vi.fn().mockResolvedValue({ id: "past-s1" }),
+      },
+      usageSimulatorScenarioEvent: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    }));
 
     chooseActualSource.mockResolvedValue({ source: "SMT" });
     loadDisplayProfilesForHouse.mockResolvedValue({
@@ -133,6 +171,17 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       error: "compare_run_not_found",
       message: "not found",
     });
+    getLabTestHomeLink.mockResolvedValue({
+      ownerUserId: "u1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "u1",
+      sourceHouseId: "h1",
+      status: "ready",
+      statusMessage: null,
+      lastReplacedAt: null,
+    });
+    replaceGlobalLabTestHomeFromSource.mockResolvedValue({ ok: true, testHomeHouseId: "test-home-1", sourceHouseId: "h1" });
+    ensureGlobalLabTestHomeHouse.mockResolvedValue({ id: "test-home-1", esiid: null, label: "LAB" });
     recalcSimulatorBuild.mockResolvedValue({
       ok: true,
       houseId: "h1",
@@ -280,5 +329,80 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual(["raw", "baseline"]);
     expect(body.baselineDatasetProjection?.meta?.validationProjectionApplied).toBe(true);
+  });
+
+  it("runs canonical test-home recalc with generic actual-context source", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("run_test_home_canonical_recalc");
+    expect(recalcSimulatorBuild).toHaveBeenCalledTimes(1);
+    const arg = recalcSimulatorBuild.mock.calls[0]?.[0];
+    expect(arg.houseId).toBe("test-home-1");
+    expect(arg.actualContextHouseId).toBe("h1");
+    expect(arg.scenarioId).toBe("past-s1");
+    const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
+    expect(projectionModes).toEqual(["raw", "baseline"]);
+  });
+
+  it("blocks save when test-home replace status is not ready", async () => {
+    getLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "u1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "u1",
+      sourceHouseId: "h1",
+      status: "profile_syncing",
+      statusMessage: "syncing",
+      lastReplacedAt: null,
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "save_test_home_inputs",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      homeProfile: { homeAge: 20 },
+      applianceProfile: { version: 1, fuelConfiguration: "electric", appliances: [] },
+      travelRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("test_home_replace_incomplete");
+  });
+
+  it("replaces test home from selected source house", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "replace_test_home_from_source",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("replace_test_home_from_source");
+    expect(replaceGlobalLabTestHomeFromSource).toHaveBeenCalledWith({
+      ownerUserId: "u1",
+      sourceUserId: "u1",
+      sourceHouseId: "h1",
+    });
   });
 });

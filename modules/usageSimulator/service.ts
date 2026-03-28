@@ -498,6 +498,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     const pastResult = await simulatePastUsageDataset({
       userId: args.userId,
       houseId: args.houseId,
+      actualContextHouseId: String((buildInputs as any)?.actualContextHouseId ?? args.houseId),
       esiid: houseResolved.esiid ?? null,
       travelRanges: buildTravelRanges,
       buildInputs,
@@ -3484,6 +3485,8 @@ export async function recalcSimulatorBuild(args: {
   userId: string;
   houseId: string;
   esiid: string | null;
+  /** Optional shared actual-context source house; defaults to houseId. */
+  actualContextHouseId?: string;
   mode: SimulatorMode;
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;
@@ -3496,6 +3499,7 @@ export async function recalcSimulatorBuild(args: {
   now?: Date;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
+  const actualContextHouseId = String(args.actualContextHouseId ?? houseId);
   const scenarioKey = normalizeScenarioKey(args.scenarioId);
   const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
   const requestedValidationOnlyDateKeysLocal = normalizeValidationOnlyDateKeysLocal(
@@ -3517,8 +3521,12 @@ export async function recalcSimulatorBuild(args: {
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const actualOk = await hasActualIntervals({ houseId, esiid: esiid ?? null, canonicalMonths: canonical.months });
-  const actualSource = await chooseActualSource({ houseId, esiid: esiid ?? null });
+  const actualOk = await hasActualIntervals({
+    houseId: actualContextHouseId,
+    esiid: esiid ?? null,
+    canonicalMonths: canonical.months,
+  });
+  const actualSource = await chooseActualSource({ houseId: actualContextHouseId, esiid: esiid ?? null });
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
   if (mode === "SMT_BASELINE" && !actualOk) {
@@ -3626,7 +3634,7 @@ export async function recalcSimulatorBuild(args: {
     homeProfile: homeProfile as any,
     applianceProfile: applianceProfile as any,
     esiidForSmt: esiid,
-    houseIdForActual: houseId,
+    houseIdForActual: actualContextHouseId,
     baselineHomeProfile: homeProfile,
     baselineApplianceProfile: applianceProfile,
     canonicalMonths: canonicalForBuild.months,
@@ -3816,7 +3824,7 @@ export async function recalcSimulatorBuild(args: {
   let smtAnchorPeriods: Array<{ id: string; startDate: string; endDate: string }> | undefined;
   if (mode === "SMT_BASELINE") {
     try {
-      const actualResult = await getActualUsageDatasetForHouse(houseId, esiid ?? null);
+      const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null);
       const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
       const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
       if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
@@ -3844,9 +3852,10 @@ export async function recalcSimulatorBuild(args: {
         smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
         canonicalWindow?.end ??
         `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
+      const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
       const boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
         requestedValidationOnlyDateKeysLocal,
-        { startDate, endDate }
+        sharedCoverageWindow
       );
       const recalcBuildInputs: SimulatorBuildInputsV1 = {
         version: 1,
@@ -3859,10 +3868,12 @@ export async function recalcSimulatorBuild(args: {
         notes: built.notes ?? [],
         filledMonths: built.filledMonths ?? [],
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
+        actualContextHouseId,
         snapshots: { homeProfile, applianceProfile },
       };
       const result = await simulatePastUsageDataset({
         houseId,
+        actualContextHouseId,
         userId,
         esiid: esiid ?? null,
         startDate,
@@ -3910,6 +3921,7 @@ export async function recalcSimulatorBuild(args: {
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
     travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
+    actualContextHouseId,
     validationOnlyDateKeysLocal: Array.from(
       boundDateKeysToCoverageWindow(
         requestedValidationOnlyDateKeysLocal,
@@ -4005,6 +4017,7 @@ export async function recalcSimulatorBuild(args: {
     scenarioId,
     monthProvenanceByMonth,
     actualSource: built.source?.actualSource ?? actualSource ?? null,
+    actualContextHouseId,
     validationOnlyDateKeysLocal: Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
       ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
       : [],
@@ -4112,6 +4125,8 @@ export type SimulatedUsageHouseRow = {
 export async function getPastSimulatedDatasetForHouse(args: {
   userId: string;
   houseId: string;
+  /** Optional shared actual-context source house; defaults to houseId. */
+  actualContextHouseId?: string;
   esiid: string | null;
   travelRanges: Array<{ startDate: string; endDate: string }>;
   buildInputs: SimulatorBuildInputsV1;
@@ -4135,6 +4150,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
   const {
     userId,
     houseId,
+    actualContextHouseId,
     esiid,
     travelRanges,
     buildInputs,
@@ -4150,6 +4166,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
   try {
     const result = await simulatePastUsageDataset({
       houseId,
+      actualContextHouseId,
       userId,
       esiid,
       startDate,
