@@ -182,7 +182,7 @@ export async function runGapfillCompareCorePipeline(
     });
     if (!markedRunning) {
       out.compareRunStatus = "failed";
-      await markGapfillCompareRunFailed({
+      const markedFailed = await markGapfillCompareRunFailed({
         compareRunId: resumeExistingCompareRunId,
         phase: "compare_worker_mark_running_failed",
         failureCode: "COMPARE_RUN_STATE_UPDATE_FAILED",
@@ -197,7 +197,10 @@ export async function runGapfillCompareCorePipeline(
         {
           ok: false,
           error: "compare_run_state_update_failed",
-          message: "Compare run could not be marked running on the usage database.",
+          message: markedFailed
+            ? "Compare run could not be marked running on the usage database."
+            : "Compare run could not be marked running, and failure details could not be saved to the usage database. The row may still show as queued.",
+          failurePersisted: markedFailed,
           compareRunId: resumeExistingCompareRunId,
           compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
         },
