@@ -337,6 +337,32 @@ function normalizeValidationOnlyDateKeysLocal(
   return out;
 }
 
+function cloneDatasetForProjection(dataset: any): any {
+  if (!dataset || typeof dataset !== "object") return dataset;
+  return {
+    ...dataset,
+    summary:
+      dataset.summary && typeof dataset.summary === "object"
+        ? { ...dataset.summary }
+        : dataset.summary,
+    meta:
+      dataset.meta && typeof dataset.meta === "object"
+        ? { ...dataset.meta }
+        : dataset.meta,
+    daily: Array.isArray(dataset.daily) ? [...dataset.daily] : dataset.daily,
+    monthly: Array.isArray(dataset.monthly) ? [...dataset.monthly] : dataset.monthly,
+    series:
+      dataset.series && typeof dataset.series === "object"
+        ? {
+            ...dataset.series,
+            intervals15: Array.isArray(dataset.series.intervals15)
+              ? [...dataset.series.intervals15]
+              : dataset.series.intervals15,
+          }
+        : dataset.series,
+  };
+}
+
 export async function rebuildGapfillSharedPastArtifact(args: {
   userId: string;
   houseId: string;
