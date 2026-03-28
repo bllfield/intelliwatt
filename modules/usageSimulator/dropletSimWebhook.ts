@@ -10,11 +10,23 @@ export type SimDropletJobKind =
   | typeof SIM_DROPLET_JOB_KIND_GAPFILL_COMPARE
   | typeof SIM_DROPLET_JOB_KIND_PAST_SIM_RECALC;
 
+/**
+ * Raw `||` precedence then trim — must match `getGapfillCompareEnqueueDiagnostics` and `triggerDropletSimWebhook`.
+ * Note: a whitespace-only value is truthy for `||` and blocks the fallback env (same as Node `process.env` merge).
+ */
+function resolveDropletWebhookUrlRaw(): string | undefined {
+  return process.env.DROPLET_WEBHOOK_URL || process.env.INTELLIWATT_WEBHOOK_URL;
+}
+
+function resolveDropletWebhookSecretRaw(): string | undefined {
+  return process.env.DROPLET_WEBHOOK_SECRET || process.env.INTELLIWATT_WEBHOOK_SECRET;
+}
+
 /** When true, never hand off heavy sim jobs to the droplet (dev / emergency). */
 export function shouldEnqueueDropletSimJobsBase(): boolean {
   if (process.env.SIM_DROPLET_EXECUTION_INLINE === "true") return false;
-  const url = process.env.DROPLET_WEBHOOK_URL || process.env.INTELLIWATT_WEBHOOK_URL;
-  const secret = process.env.DROPLET_WEBHOOK_SECRET || process.env.INTELLIWATT_WEBHOOK_SECRET;
+  const url = resolveDropletWebhookUrlRaw();
+  const secret = resolveDropletWebhookSecretRaw();
   return Boolean(url?.trim() && secret?.trim());
 }
 
@@ -42,63 +54,54 @@ export type GapfillCompareEnqueueDiagnostics = {
   dropletSimJobsBaseEligible: boolean;
 };
 
-function resolveWebhookUrlMeta(): {
-  trimmed: string;
-  source: GapfillCompareEnqueueDiagnostics["webhookUrlSource"];
-} {
-  const droplet = (process.env.DROPLET_WEBHOOK_URL ?? "").trim();
-  if (droplet) return { trimmed: droplet, source: "DROPLET_WEBHOOK_URL" };
-  const intl = (process.env.INTELLIWATT_WEBHOOK_URL ?? "").trim();
-  if (intl) return { trimmed: intl, source: "INTELLIWATT_WEBHOOK_URL" };
-  return { trimmed: "", source: "none" };
+/** Which env name “won” for `a || b` (truthiness), not trim-first fallback — matches enqueue gating. */
+function webhookUrlSourceFromEnv(): GapfillCompareEnqueueDiagnostics["webhookUrlSource"] {
+  if (process.env.DROPLET_WEBHOOK_URL) return "DROPLET_WEBHOOK_URL";
+  if (process.env.INTELLIWATT_WEBHOOK_URL) return "INTELLIWATT_WEBHOOK_URL";
+  return "none";
 }
 
-function resolveWebhookSecretMeta(): {
-  trimmed: string;
-  source: GapfillCompareEnqueueDiagnostics["webhookSecretSource"];
-} {
-  const droplet = (process.env.DROPLET_WEBHOOK_SECRET ?? "").trim();
-  if (droplet) return { trimmed: droplet, source: "DROPLET_WEBHOOK_SECRET" };
-  const intl = (process.env.INTELLIWATT_WEBHOOK_SECRET ?? "").trim();
-  if (intl) return { trimmed: intl, source: "INTELLIWATT_WEBHOOK_SECRET" };
-  return { trimmed: "", source: "none" };
+function webhookSecretSourceFromEnv(): GapfillCompareEnqueueDiagnostics["webhookSecretSource"] {
+  if (process.env.DROPLET_WEBHOOK_SECRET) return "DROPLET_WEBHOOK_SECRET";
+  if (process.env.INTELLIWATT_WEBHOOK_SECRET) return "INTELLIWATT_WEBHOOK_SECRET";
+  return "none";
 }
 
 /** Booleans + non-sensitive sources only — use in Vercel logs and admin GET. */
 export function getGapfillCompareEnqueueDiagnostics(): GapfillCompareEnqueueDiagnostics {
   const gapfillCompareInline = process.env.GAPFILL_COMPARE_INLINE === "true";
   const simDropletExecutionInline = process.env.SIM_DROPLET_EXECUTION_INLINE === "true";
-  const urlMeta = resolveWebhookUrlMeta();
-  const secretMeta = resolveWebhookSecretMeta();
-  const hasWebhookUrl = urlMeta.trimmed.length > 0;
-  const hasWebhookSecret = secretMeta.trimmed.length > 0;
+  const urlTrimmed = resolveDropletWebhookUrlRaw()?.trim() ?? "";
+  const secretTrimmed = resolveDropletWebhookSecretRaw()?.trim() ?? "";
+  const hasWebhookUrl = urlTrimmed.length > 0;
+  const hasWebhookSecret = secretTrimmed.length > 0;
   let webhookUrlScheme: GapfillCompareEnqueueDiagnostics["webhookUrlScheme"] = "none";
   if (hasWebhookUrl) {
     try {
-      const u = new URL(urlMeta.trimmed);
+      const u = new URL(urlTrimmed);
       webhookUrlScheme = u.protocol === "https:" ? "https" : "http";
     } catch {
       webhookUrlScheme = "none";
     }
   }
-  const dropletSimJobsBaseEligible = !simDropletExecutionInline && hasWebhookUrl && hasWebhookSecret;
-  const wouldEnqueueGapfillCompare = !gapfillCompareInline && dropletSimJobsBaseEligible;
+  const dropletSimJobsBaseEligible = shouldEnqueueDropletSimJobsBase();
+  const wouldEnqueueGapfillCompare = shouldEnqueueGapfillCompareRemote();
   return {
     wouldEnqueueGapfillCompare,
     gapfillCompareInline,
     simDropletExecutionInline,
     hasWebhookUrl,
     hasWebhookSecret,
-    webhookUrlSource: urlMeta.source,
-    webhookSecretSource: secretMeta.source,
+    webhookUrlSource: webhookUrlSourceFromEnv(),
+    webhookSecretSource: webhookSecretSourceFromEnv(),
     webhookUrlScheme,
     dropletSimJobsBaseEligible,
   };
 }
 
 export async function triggerDropletSimWebhook(payload: Record<string, unknown>): Promise<void> {
-  const url = (process.env.DROPLET_WEBHOOK_URL || process.env.INTELLIWATT_WEBHOOK_URL || "").trim();
-  const secret = (process.env.DROPLET_WEBHOOK_SECRET || process.env.INTELLIWATT_WEBHOOK_SECRET || "").trim();
+  const url = (resolveDropletWebhookUrlRaw() ?? "").trim();
+  const secret = (resolveDropletWebhookSecretRaw() ?? "").trim();
   if (!url || !secret) return;
   try {
     const res = await fetch(url, {
