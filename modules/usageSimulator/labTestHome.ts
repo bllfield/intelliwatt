@@ -17,6 +17,13 @@ type LabTestHomeLink = {
   lastReplacedAt: Date | null;
 };
 
+function resolveModel(db: any, modelName: string): any | null {
+  const fromDb = db?.[modelName];
+  if (fromDb) return fromDb;
+  const fromRoot = (prisma as any)?.[modelName];
+  return fromRoot ?? null;
+}
+
 function getLabLinkModel(): any | null {
   try {
     const model = (usagePrisma as any).gapfillLabTestHomeLink;
@@ -144,14 +151,22 @@ async function copyScenariosAndEvents(args: {
   targetUserId: string;
   targetHouseId: string;
 }) {
-  const sourceScenarios = await args.tx.usageSimulatorScenario.findMany({
+  const usageSimulatorScenarioModel = resolveModel(args.tx, "usageSimulatorScenario");
+  const usageSimulatorScenarioEventModel = resolveModel(args.tx, "usageSimulatorScenarioEvent");
+  if (!usageSimulatorScenarioModel?.findMany || !usageSimulatorScenarioModel?.create) {
+    throw new Error("usageSimulatorScenario_model_unavailable");
+  }
+  if (!usageSimulatorScenarioEventModel?.findMany || !usageSimulatorScenarioEventModel?.createMany) {
+    throw new Error("usageSimulatorScenarioEvent_model_unavailable");
+  }
+  const sourceScenarios = await usageSimulatorScenarioModel.findMany({
     where: { userId: args.sourceUserId, houseId: args.sourceHouseId, archivedAt: null },
     select: { id: true, name: true, archivedAt: true },
   });
   if (!sourceScenarios.length) return;
 
   const sourceScenarioIds = sourceScenarios.map((s: any) => String(s.id));
-  const sourceEvents = await args.tx.usageSimulatorScenarioEvent.findMany({
+  const sourceEvents = await usageSimulatorScenarioEventModel.findMany({
     where: { scenarioId: { in: sourceScenarioIds } },
     select: { scenarioId: true, effectiveMonth: true, kind: true, payloadJson: true },
     orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }],
@@ -159,7 +174,7 @@ async function copyScenariosAndEvents(args: {
 
   const scenarioIdByOld = new Map<string, string>();
   for (const sourceScenario of sourceScenarios) {
-    const created = await args.tx.usageSimulatorScenario.create({
+    const created = await usageSimulatorScenarioModel.create({
       data: {
         userId: args.targetUserId,
         houseId: args.targetHouseId,
@@ -189,7 +204,7 @@ async function copyScenariosAndEvents(args: {
     payloadJson: unknown;
   }>;
   if (eventRows.length > 0) {
-    await args.tx.usageSimulatorScenarioEvent.createMany({
+    await usageSimulatorScenarioEventModel.createMany({
       data: eventRows,
     });
   }
@@ -202,7 +217,11 @@ async function copyManualUsageInput(args: {
   targetUserId: string;
   targetHouseId: string;
 }) {
-  const sourceManual = await args.tx.manualUsageInput.findUnique({
+  const manualUsageInputModel = resolveModel(args.tx, "manualUsageInput");
+  if (!manualUsageInputModel?.findUnique || !manualUsageInputModel?.upsert) {
+    throw new Error("manualUsageInput_model_unavailable");
+  }
+  const sourceManual = await manualUsageInputModel.findUnique({
     where: { userId_houseId: { userId: args.sourceUserId, houseId: args.sourceHouseId } },
     select: {
       mode: true,
@@ -214,7 +233,7 @@ async function copyManualUsageInput(args: {
   });
   if (!sourceManual) return;
 
-  await args.tx.manualUsageInput.upsert({
+  await manualUsageInputModel.upsert({
     where: { userId_houseId: { userId: args.targetUserId, houseId: args.targetHouseId } },
     create: {
       userId: args.targetUserId,
@@ -290,35 +309,51 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       statusMessage: "Replacing reusable lab test-home data from selected source house.",
     });
     await (prisma as any).$transaction(async (tx: any) => {
+      const usageSimulatorBuildModel = resolveModel(tx, "usageSimulatorBuild");
+      const usageSimulatorScenarioModel = resolveModel(tx, "usageSimulatorScenario");
+      const usageSimulatorScenarioEventModel = resolveModel(tx, "usageSimulatorScenarioEvent");
+      const manualUsageInputModel = resolveModel(tx, "manualUsageInput");
+      const pastSimulatedDatasetCacheModel = resolveModel(tx, "pastSimulatedDatasetCache");
+      const gapfillCompareRunSnapshotModel = resolveModel(tx, "gapfillCompareRunSnapshot");
+      const houseAddressModel = resolveModel(tx, "houseAddress");
+      if (!usageSimulatorBuildModel?.deleteMany) throw new Error("usageSimulatorBuild_model_unavailable");
+      if (!usageSimulatorScenarioModel?.findMany || !usageSimulatorScenarioModel?.deleteMany) {
+        throw new Error("usageSimulatorScenario_model_unavailable");
+      }
+      if (!usageSimulatorScenarioEventModel?.deleteMany) throw new Error("usageSimulatorScenarioEvent_model_unavailable");
+      if (!manualUsageInputModel?.deleteMany) throw new Error("manualUsageInput_model_unavailable");
+      if (!pastSimulatedDatasetCacheModel?.deleteMany) throw new Error("pastSimulatedDatasetCache_model_unavailable");
+      if (!gapfillCompareRunSnapshotModel?.deleteMany) throw new Error("gapfillCompareRunSnapshot_model_unavailable");
+      if (!houseAddressModel?.update) throw new Error("houseAddress_model_unavailable");
       // Remove all existing lab-owned data first.
-      await tx.usageSimulatorBuild.deleteMany({
+      await usageSimulatorBuildModel.deleteMany({
         where: { userId: args.ownerUserId, houseId: testHome!.id },
       });
-      const testHomeScenarioRows = await tx.usageSimulatorScenario.findMany({
+      const testHomeScenarioRows = await usageSimulatorScenarioModel.findMany({
         where: { userId: args.ownerUserId, houseId: testHome!.id },
         select: { id: true },
       });
       const testHomeScenarioIds = testHomeScenarioRows.map((s: any) => String(s.id));
       if (testHomeScenarioIds.length > 0) {
-        await tx.usageSimulatorScenarioEvent.deleteMany({
+        await usageSimulatorScenarioEventModel.deleteMany({
           where: { scenarioId: { in: testHomeScenarioIds } },
         });
-        await tx.usageSimulatorScenario.deleteMany({
+        await usageSimulatorScenarioModel.deleteMany({
           where: { id: { in: testHomeScenarioIds } },
         });
       }
-      await tx.manualUsageInput.deleteMany({
+      await manualUsageInputModel.deleteMany({
         where: { userId: args.ownerUserId, houseId: testHome!.id },
       });
-      await tx.pastSimulatedDatasetCache.deleteMany({
+      await pastSimulatedDatasetCacheModel.deleteMany({
         where: { houseId: testHome!.id },
       });
-      await tx.gapfillCompareRunSnapshot.deleteMany({
+      await gapfillCompareRunSnapshotModel.deleteMany({
         where: { houseId: testHome!.id },
       });
 
       // Copy selected source-house location/detail fields onto test home identity.
-      await tx.houseAddress.update({
+      await houseAddressModel.update({
         where: { id: testHome!.id },
         data: {
           addressLine1: sourceHouse.addressLine1,
