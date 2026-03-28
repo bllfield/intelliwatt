@@ -118,6 +118,29 @@ function hasAdminSessionCookie(request: NextRequest): boolean {
   return ADMIN_EMAILS.includes(email);
 }
 
+function normalizeLabHomeProfileInput(input: any): any {
+  const src = (input && typeof input === "object") ? input : {};
+  const occupants = (src.occupants && typeof src.occupants === "object") ? src.occupants : {};
+  const pool = (src.pool && typeof src.pool === "object") ? src.pool : {};
+  return {
+    ...src,
+    insulationType: src.insulationType ?? src.insulation ?? src.insulation_type ?? null,
+    windowType: src.windowType ?? src.windows ?? src.window_type ?? null,
+    summerTemp: src.summerTemp ?? src.thermostatSummerF ?? src.summer_temp ?? null,
+    winterTemp: src.winterTemp ?? src.thermostatWinterF ?? src.winter_temp ?? null,
+    occupantsWork: src.occupantsWork ?? occupants.work ?? 0,
+    occupantsSchool: src.occupantsSchool ?? occupants.school ?? 0,
+    occupantsHomeAllDay: src.occupantsHomeAllDay ?? occupants.homeAllDay ?? 0,
+    hasPool: src.hasPool ?? pool.hasPool ?? false,
+    poolPumpType: src.poolPumpType ?? pool.pumpType ?? null,
+    poolPumpHp: src.poolPumpHp ?? pool.pumpHp ?? null,
+    poolSummerRunHoursPerDay: src.poolSummerRunHoursPerDay ?? pool.summerRunHoursPerDay ?? null,
+    poolWinterRunHoursPerDay: src.poolWinterRunHoursPerDay ?? pool.winterRunHoursPerDay ?? null,
+    hasPoolHeater: src.hasPoolHeater ?? pool.heaterInstalled ?? false,
+    poolHeaterType: src.poolHeaterType ?? pool.poolHeaterType ?? null,
+  };
+}
+
 async function resolveLabOwnerUserId(request: NextRequest): Promise<string | null> {
   const cookieEmail = normalizeEmailSafe(request.cookies.get("intelliwatt_admin")?.value ?? "");
   if (cookieEmail) {
@@ -386,6 +409,11 @@ export async function POST(req: NextRequest) {
         houseId: String(replaced.testHomeHouseId),
       });
       const testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
+      const sourceTravelRanges = await getTravelRangesFromDb(user.id, sourceHouseIdParam);
+      const effectiveTravelRanges =
+        testHomeTravelRanges.length > 0
+          ? testHomeTravelRanges
+          : sourceTravelRanges;
       const link = await getLabTestHomeLink(labOwnerUserId);
       return NextResponse.json({
         ok: true,
@@ -408,7 +436,9 @@ export async function POST(req: NextRequest) {
           : null,
         homeProfile: testHomeProfiles.homeProfile,
         applianceProfile: testHomeProfiles.applianceProfile,
-        travelRangesFromDb: testHomeTravelRanges,
+        travelRangesFromDb: effectiveTravelRanges,
+        travelRangesSource:
+          testHomeTravelRanges.length > 0 ? "test_home" : "source_house_fallback",
         testHomeLink: link,
       });
     } catch (postLoadError: unknown) {
@@ -449,7 +479,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (body?.homeProfile != null) {
-      const homeValidated = validateHomeProfile(body.homeProfile, { requirePastBaselineFields: true });
+      const homeValidated = validateHomeProfile(normalizeLabHomeProfileInput(body.homeProfile), { requirePastBaselineFields: true });
       if (!homeValidated.ok) {
         return NextResponse.json({ ok: false, error: "invalid_home_profile", detail: homeValidated.error }, { status: 400 });
       }
