@@ -38,7 +38,24 @@ type BuildsResp =
   | { ok: false; error: string };
 
 type ScenarioHouseResp =
-  | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
+  | {
+      ok: true;
+      houseId: string;
+      scenarioKey: string;
+      scenarioId: string | null;
+      dataset: any;
+      compareProjection?: {
+        rows?: Array<{
+          localDate: string;
+          dayType: "weekday" | "weekend";
+          actualDayKwh: number;
+          simulatedDayKwh: number;
+          errorKwh: number;
+          percentError: number | null;
+        }>;
+        metrics?: Record<string, number | null>;
+      };
+    }
   | { ok: false; code: string; message: string };
 
 type RequirementsDbStatus = "ok" | "missing_env" | "unreachable" | "error";
@@ -128,6 +145,17 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [builds, setBuilds] = useState<BuildsResp extends { ok: true } ? BuildsResp["builds"] : any[]>([]);
   const [scenarioSimHouseOverride, setScenarioSimHouseOverride] = useState<any[] | null>(null);
   const [scenarioBanner, setScenarioBanner] = useState<string | null>(null);
+  const [scenarioCompareProjection, setScenarioCompareProjection] = useState<{
+    rows: Array<{
+      localDate: string;
+      dayType: "weekday" | "weekend";
+      actualDayKwh: number;
+      simulatedDayKwh: number;
+      errorKwh: number;
+      percentError: number | null;
+    }>;
+    metrics: Record<string, number | null>;
+  } | null>(null);
   const [scenarioLoading, setScenarioLoading] = useState(false);
 
   const WORKSPACE_PAST_NAME = "Past (Corrected)";
@@ -425,6 +453,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       setScenarioSimHouseOverride(null);
       if (!viewScenarioId || viewScenarioId === "baseline") {
         setScenarioLoading(false);
+        setScenarioCompareProjection(null);
         return;
       }
       setScenarioLoading(true);
@@ -464,6 +493,26 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             alternatives: { smt: null, greenButton: null },
           },
         ]);
+        const compareRows = Array.isArray((j as any)?.compareProjection?.rows)
+          ? ((j as any).compareProjection.rows as Array<any>)
+          : Array.isArray((j as any)?.dataset?.meta?.validationCompareRows)
+            ? ((j as any).dataset.meta.validationCompareRows as Array<any>)
+            : [];
+        const compareMetrics = (j as any)?.compareProjection?.metrics ?? (j as any)?.dataset?.meta?.validationCompareMetrics ?? {};
+        setScenarioCompareProjection({
+          rows: compareRows.map((row) => ({
+            localDate: String(row?.localDate ?? "").slice(0, 10),
+            dayType: row?.dayType === "weekend" ? "weekend" : "weekday",
+            actualDayKwh: Number(row?.actualDayKwh ?? 0) || 0,
+            simulatedDayKwh: Number(row?.simulatedDayKwh ?? row?.freshCompareSimDayKwh ?? 0) || 0,
+            errorKwh: Number(row?.errorKwh ?? row?.actualVsFreshErrorKwh ?? 0) || 0,
+            percentError:
+              row?.percentError == null
+                ? null
+                : Number(row.percentError) || 0,
+          })),
+          metrics: (compareMetrics && typeof compareMetrics === "object") ? compareMetrics : {},
+        });
       } catch (e: any) {
         if (!cancelled) {
           const timedOut = e?.name === "AbortError";
@@ -473,6 +522,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               : "Unable to load scenario dataset. Try saving again to recompute."
           );
           setScenarioSimHouseOverride(null);
+          setScenarioCompareProjection(null);
         }
       } finally {
         if (timeoutId != null) clearTimeout(timeoutId);
@@ -1200,6 +1250,48 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           </div>
         ) : null}
       </div>
+
+      {curveView === "PAST" && scenarioCompareProjection?.rows?.length ? (
+        <div className="mt-4 rounded-2xl border border-brand-blue/10 bg-white p-4">
+          <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+          <div className="mt-1 text-xs text-brand-navy/70">
+            This section compares modeled vs actual on validation days for simulator accuracy transparency.
+          </div>
+          <div className="mt-2 text-xs text-brand-navy/80">
+            WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% ·
+            MAE {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} ·
+            RMSE {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
+          </div>
+          <div className="mt-3 overflow-auto">
+            <table className="min-w-full text-xs border border-brand-blue/10">
+              <thead className="bg-brand-blue/5">
+                <tr>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Date</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Day Type</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual kWh</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim kWh</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Error</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">% Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenarioCompareProjection.rows.map((row) => (
+                  <tr key={row.localDate}>
+                    <td className="border border-brand-blue/10 px-2 py-1">{row.localDate}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1">{row.dayType}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actualDayKwh.toFixed(2)}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedDayKwh.toFixed(2)}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.errorKwh.toFixed(2)}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">
+                      {row.percentError == null ? "—" : `${Number(row.percentError).toFixed(2)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div id="preview">
         {curveView !== "BASELINE" && scenarioLoading ? (

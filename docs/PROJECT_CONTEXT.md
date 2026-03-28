@@ -634,3 +634,15 @@ All CSP documentation, SMT tickets, and API requests must reference these identi
 
 Usage = canonical UTC 15-minute timestamps. Weather = station-based daily lookup by UTC `dateKey` for temp/HDD/CDD drivers. Solar (future) = separate tile/grid source aligned to the same canonical UTC 15-minute timestamps (or deterministic upsample), not station-based.
 
+### Validation-Day Selection Context (2026-03-28)
+
+- Canonical selector modes are shared and additive:
+  - `manual`
+  - `random_simple`
+  - `customer_style_seasonal_mix`
+  - `stratified_weather_balanced`
+- A system-wide setting controls the default mode for future user recalcs.
+- Admin lab can choose a run-only mode independently.
+- Saved artifacts are immutable with respect to mode changes; existing artifacts are not retroactively rewritten.
+- Validation-day compare values are surfaced as a sidecar projection from the same canonical artifact family.
+

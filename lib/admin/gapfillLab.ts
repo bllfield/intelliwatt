@@ -513,6 +513,12 @@ export function pickExtremeWeatherTestDateKeys(args: {
   };
 }
 
+export {
+  selectValidationDayKeys,
+  type ValidationDaySelectionMode,
+  type ValidationDaySelectionDiagnostics,
+} from "@/modules/usageSimulator/validationSelection";
+
 /** Daily coverage: for each date key, count intervals and pct vs expected 96. */
 export function summarizeDailyCoverageFromIntervals(
   intervals: IntervalPoint[],

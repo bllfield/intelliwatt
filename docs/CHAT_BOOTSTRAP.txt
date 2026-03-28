@@ -450,7 +450,13 @@ GAP-FILL COMPARE CANONICAL PATH (INLINE)
 Gap-Fill compare now uses one canonical in-request path:
 1) run canonical recalc for Past with travel/vacant + validation-only date keys
 2) read canonical simulated output from `getSimulatedUsageForHouseScenario` (same family as `/api/user/usage/simulated/house`)
-3) generate baseline projection (validation keys excluded) and accuracy projection (validation keys only)
+3) generate baseline projection (validation keys remain actual) and compare projection sidecar (modeled values for validation keys only)
+
+Validation-day selector model (canonical):
+- Admin page has two selectors:
+  - System-wide user-facing default (`userDefaultValidationSelectionMode`) for future user recalcs only.
+  - Admin-lab per-run mode (does not implicitly change system default).
+- Changing system default never rewrites existing artifacts; old artifacts keep their saved effective mode/output until recalculated.
 
 Any droplet `gapfill_compare` route remains legacy fallback only and must not be treated as canonical truth ownership.
 

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
@@ -80,7 +81,17 @@ export async function GET(request: NextRequest) {
     }
     // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).
     const cacheControl = scenarioId ? "private, no-store" : "private, max-age=30";
-    if (out.ok) return NextResponse.json(out, { headers: { "Cache-Control": cacheControl } });
+    if (out.ok) {
+      const datasetAny = (out as any)?.dataset ?? {};
+      const compareProjection = buildValidationCompareProjectionSidecar(datasetAny);
+      return NextResponse.json(
+        {
+          ...out,
+          compareProjection,
+        },
+        { headers: { "Cache-Control": cacheControl } }
+      );
+    }
 
     if (out.code === "NO_BUILD") return NextResponse.json(out, { status: 404 });
     if (out.code === "HOUSE_NOT_FOUND") return NextResponse.json(out, { status: 403 });

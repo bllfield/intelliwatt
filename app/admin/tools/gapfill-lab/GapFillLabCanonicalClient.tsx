@@ -45,6 +45,10 @@ type RunResult = {
   canonicalWindow?: { startDate: string; endDate: string; helper?: string };
   modelAssumptions?: Record<string, unknown>;
   compareTruth?: Record<string, unknown>;
+  userDefaultValidationSelectionMode?: string;
+  adminLabDefaultValidationSelectionMode?: string;
+  supportedValidationSelectionModes?: string[];
+  selectionDiagnostics?: Record<string, unknown>;
 } | {
   ok: false;
   error: string;
@@ -119,6 +123,14 @@ export default function GapFillLabCanonicalClient() {
   const [randomMode, setRandomMode] = useState(false);
   const [testDays, setTestDays] = useState(21);
   const [weatherKind, setWeatherKind] = useState<"ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo">("open_meteo");
+  const [userDefaultValidationSelectionMode, setUserDefaultValidationSelectionMode] = useState("random_simple");
+  const [adminLabValidationSelectionMode, setAdminLabValidationSelectionMode] = useState("stratified_weather_balanced");
+  const [supportedValidationSelectionModes, setSupportedValidationSelectionModes] = useState<string[]>([
+    "manual",
+    "random_simple",
+    "customer_style_seasonal_mix",
+    "stratified_weather_balanced",
+  ]);
   const [homeProfileJson, setHomeProfileJson] = useState("{}");
   const [applianceProfileJson, setApplianceProfileJson] = useState("{}");
   const [result, setResult] = useState<RunResult | null>(null);
@@ -138,6 +150,7 @@ export default function GapFillLabCanonicalClient() {
       sourceHouseId: sourceHouseId || undefined,
       weatherKind,
       includeUsage365: true,
+      adminLabValidationSelectionMode,
       testRanges: randomMode ? [] : testRanges.filter((r) => r.startDate && r.endDate),
       testDays: randomMode ? testDays : undefined,
       ...extra,
@@ -172,6 +185,15 @@ export default function GapFillLabCanonicalClient() {
     if (json.sourceHouse) setSourceHouse(json.sourceHouse);
     if (json.testHome) setTestHome(json.testHome);
     if (json.testHomeLink != null) setTestHomeLink(json.testHomeLink);
+    if (json.userDefaultValidationSelectionMode) {
+      setUserDefaultValidationSelectionMode(String(json.userDefaultValidationSelectionMode));
+    }
+    if (Array.isArray(json.supportedValidationSelectionModes) && json.supportedValidationSelectionModes.length > 0) {
+      setSupportedValidationSelectionModes(json.supportedValidationSelectionModes.map((m) => String(m)));
+    }
+    if (!json.userDefaultValidationSelectionMode && json.adminLabDefaultValidationSelectionMode) {
+      setAdminLabValidationSelectionMode(String(json.adminLabDefaultValidationSelectionMode));
+    }
     if (json.travelRangesFromDb) {
       setTravelRanges(json.travelRangesFromDb);
     }
@@ -183,6 +205,13 @@ export default function GapFillLabCanonicalClient() {
 
   async function onLookup() {
     await runAction("lookup_source_houses");
+  }
+
+  async function onSaveUserDefaultValidationMode() {
+    await runAction("set_user_default_validation_selection_mode", {
+      userDefaultValidationSelectionMode,
+      includeUsage365: false,
+    });
   }
 
   async function onReplace() {
@@ -277,6 +306,39 @@ export default function GapFillLabCanonicalClient() {
         <div className="font-semibold text-sm">Travel/Vacant + Validation-Day Controls</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <label className="text-xs">
+            <span className="block mb-1">System default mode (user page; future recalcs)</span>
+            <div className="flex gap-2">
+              <select
+                className="w-full border rounded px-2 py-2 text-sm"
+                value={userDefaultValidationSelectionMode}
+                onChange={(e) => setUserDefaultValidationSelectionMode(e.target.value)}
+              >
+                {supportedValidationSelectionModes.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <button
+                className="px-2 py-2 border rounded text-xs"
+                disabled={loading}
+                onClick={onSaveUserDefaultValidationMode}
+              >
+                Save
+              </button>
+            </div>
+          </label>
+          <label className="text-xs">
+            <span className="block mb-1">Admin lab mode (this run only)</span>
+            <select
+              className="w-full border rounded px-2 py-2 text-sm"
+              value={adminLabValidationSelectionMode}
+              onChange={(e) => setAdminLabValidationSelectionMode(e.target.value)}
+            >
+              {supportedValidationSelectionModes.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs">
             <span className="block mb-1">Weather Source</span>
             <select className="w-full border rounded px-2 py-2 text-sm" value={weatherKind} onChange={(e) => setWeatherKind(e.target.value as any)}>
               <option value="open_meteo">Live (Open-Meteo)</option>
@@ -354,7 +416,7 @@ export default function GapFillLabCanonicalClient() {
 
       {baselineChart?.daily?.length ? (
         <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Normal Baseline Display (validation days excluded)</div>
+          <div className="font-semibold text-sm mb-2">Normal Baseline Display (validation days remain actual)</div>
           <UsageChartsPanel
             monthly={baselineChart.monthly}
             stitchedMonth={baselineChart.stitchedMonth ?? null}
@@ -407,6 +469,7 @@ export default function GapFillLabCanonicalClient() {
                   <th className="text-right p-2 border">Actual kWh</th>
                   <th className="text-right p-2 border">Sim kWh</th>
                   <th className="text-right p-2 border">Error kWh</th>
+                  <th className="text-right p-2 border">Percent Error</th>
                 </tr>
               </thead>
               <tbody>
@@ -417,6 +480,11 @@ export default function GapFillLabCanonicalClient() {
                     <td className="p-2 border text-right">{row.actualDayKwh.toFixed(2)}</td>
                     <td className="p-2 border text-right">{row.freshCompareSimDayKwh.toFixed(2)}</td>
                     <td className="p-2 border text-right">{row.actualVsFreshErrorKwh.toFixed(2)}</td>
+                    <td className="p-2 border text-right">
+                      {Math.abs(row.actualDayKwh) > 1e-6
+                        ? `${((Math.abs(row.actualVsFreshErrorKwh) / Math.abs(row.actualDayKwh)) * 100).toFixed(2)}%`
+                        : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -433,6 +501,9 @@ export default function GapFillLabCanonicalClient() {
               canonicalWindow: result.canonicalWindow ?? null,
               modelAssumptions: result.modelAssumptions ?? null,
               compareTruth: result.compareTruth ?? null,
+              selectionDiagnostics: result.selectionDiagnostics ?? null,
+              userDefaultValidationSelectionMode,
+              adminLabValidationSelectionMode,
               testHomeLink,
             }, null, 2)}
           </pre>

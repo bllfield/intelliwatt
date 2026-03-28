@@ -14,10 +14,39 @@ const loadDisplayProfilesForHouse = vi.fn();
 const chooseActualSource = vi.fn();
 const getSharedPastCoverageWindowForHouse = vi.fn();
 const rebuildGapfillSharedPastArtifact = vi.fn();
+const getUserDefaultValidationSelectionMode = vi.fn();
+const setUserDefaultValidationSelectionMode = vi.fn();
+const getAdminLabDefaultValidationSelectionMode = vi.fn();
+const selectValidationDayKeys = vi.fn();
+const buildValidationCompareProjectionSidecar = vi.fn();
 const getGapfillCompareRunSnapshotById = vi.fn();
 const getLabTestHomeLink = vi.fn();
 const replaceGlobalLabTestHomeFromSource = vi.fn();
 const ensureGlobalLabTestHomeHouse = vi.fn();
+const selectValidationDayKeys = vi.fn((args: any) => {
+  const mode = String(args?.mode ?? "manual");
+  const manual = Array.isArray(args?.manualDateKeys)
+    ? args.manualDateKeys
+        .map((dk: unknown) => String(dk ?? "").slice(0, 10))
+        .filter((dk: string) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    : [];
+  const selectedDateKeys = mode === "manual" && manual.length > 0 ? Array.from(new Set(manual)).sort() : ["2025-04-10"];
+  return {
+    selectedDateKeys,
+    diagnostics: {
+      modeUsed: mode,
+      targetCount: Number(args?.targetCount ?? selectedDateKeys.length),
+      selectedCount: selectedDateKeys.length,
+      fallbackSubstitutions: 0,
+      excludedTravelVacantCount: 0,
+      excludedWeakCoverageCount: 0,
+      weekdayWeekendSplit: { weekday: selectedDateKeys.length, weekend: 0 },
+      seasonalSplit: { winter: 0, summer: 0, shoulder: selectedDateKeys.length },
+      bucketCounts: { mocked: selectedDateKeys.length },
+      shortfallReason: null,
+    },
+  };
+});
 
 const homeDetailsPrisma: any = {
   homeProfileSimulated: { upsert: vi.fn() },
@@ -59,6 +88,9 @@ vi.mock("@/modules/usageSimulator/service", () => ({
   recalcSimulatorBuild: (...args: any[]) => recalcSimulatorBuild(...args),
   getSharedPastCoverageWindowForHouse: (...args: any[]) => getSharedPastCoverageWindowForHouse(...args),
   rebuildGapfillSharedPastArtifact: (...args: any[]) => rebuildGapfillSharedPastArtifact(...args),
+  getUserDefaultValidationSelectionMode: (...args: any[]) => getUserDefaultValidationSelectionMode(...args),
+  setUserDefaultValidationSelectionMode: (...args: any[]) => setUserDefaultValidationSelectionMode(...args),
+  getAdminLabDefaultValidationSelectionMode: (...args: any[]) => getAdminLabDefaultValidationSelectionMode(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/compareRunSnapshot", () => ({
@@ -73,6 +105,46 @@ vi.mock("@/modules/usageSimulator/labTestHome", () => ({
   getLabTestHomeLink: (...args: any[]) => getLabTestHomeLink(...args),
   replaceGlobalLabTestHomeFromSource: (...args: any[]) => replaceGlobalLabTestHomeFromSource(...args),
   ensureGlobalLabTestHomeHouse: (...args: any[]) => ensureGlobalLabTestHomeHouse(...args),
+}));
+
+vi.mock("@/modules/usageSimulator/validationSelection", () => ({
+  VALIDATION_DAY_SELECTION_MODES: [
+    "manual",
+    "random_simple",
+    "customer_style_seasonal_mix",
+    "stratified_weather_balanced",
+  ],
+  normalizeValidationSelectionMode: (value: unknown) => {
+    const raw = String(value ?? "").trim().toLowerCase();
+    return ["manual", "random_simple", "customer_style_seasonal_mix", "stratified_weather_balanced"].includes(raw)
+      ? raw
+      : null;
+  },
+  selectValidationDayKeys: (...args: any[]) => selectValidationDayKeys(...args),
+}));
+
+vi.mock("@/modules/usageSimulator/compareProjection", () => ({
+  buildValidationCompareProjectionSidecar: (...args: any[]) => buildValidationCompareProjectionSidecar(...args),
+}));
+vi.mock("@/modules/usageSimulator/validationSelection", () => ({
+  VALIDATION_DAY_SELECTION_MODES: [
+    "manual",
+    "random_simple",
+    "customer_style_seasonal_mix",
+    "stratified_weather_balanced",
+  ],
+  normalizeValidationSelectionMode: (value: unknown) => {
+    const raw = String(value ?? "").trim().toLowerCase();
+    return [
+      "manual",
+      "random_simple",
+      "customer_style_seasonal_mix",
+      "stratified_weather_balanced",
+    ].includes(raw)
+      ? (raw as any)
+      : null;
+  },
+  selectValidationDayKeys: (args: any) => selectValidationDayKeys(args),
 }));
 
 vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", async () => {
@@ -143,6 +215,31 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       startDate: "2025-03-01",
       endDate: "2026-02-28",
     });
+    getUserDefaultValidationSelectionMode.mockResolvedValue("random_simple");
+    setUserDefaultValidationSelectionMode.mockResolvedValue({ ok: true, mode: "random_simple" });
+    getAdminLabDefaultValidationSelectionMode.mockReturnValue("stratified_weather_balanced");
+    selectValidationDayKeys.mockImplementation((args: any) => {
+      const picked = Array.from(new Set(args?.manualDateKeys?.length ? args.manualDateKeys : ["2025-04-10"])).sort();
+      return {
+        selectedDateKeys: picked,
+        diagnostics: {
+          modeUsed: args?.mode ?? "manual",
+          targetCount: Number(args?.targetCount ?? picked.length) || picked.length,
+          selectedCount: picked.length,
+          fallbackSubstitutions: 0,
+          excludedTravelVacantCount: 0,
+          excludedWeakCoverageCount: 0,
+          weekdayWeekendSplit: { weekday: picked.length, weekend: 0 },
+          seasonalSplit: { winter: 0, summer: 0, shoulder: picked.length },
+          bucketCounts: { manual: picked.length },
+          shortfallReason: null,
+        },
+      };
+    });
+    buildValidationCompareProjectionSidecar.mockImplementation((dataset: any) => ({
+      rows: Array.isArray(dataset?.meta?.validationCompareRows) ? dataset.meta.validationCompareRows : [],
+      metrics: dataset?.meta?.validationCompareMetrics ?? {},
+    }));
     getActualUsageDatasetForHouse.mockResolvedValue({
       dataset: {
         summary: { source: "SMT", intervalsCount: 0, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
@@ -229,6 +326,25 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
               "2025-05-02": 12.25,
             },
             validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+            validationCompareRows: [
+              {
+                localDate: "2025-04-10",
+                dayType: "weekday",
+                actualDayKwh: 2,
+                simulatedDayKwh: 9.5,
+                errorKwh: 7.5,
+                percentError: 375,
+              },
+              {
+                localDate: "2025-05-02",
+                dayType: "weekday",
+                actualDayKwh: 2,
+                simulatedDayKwh: 12.25,
+                errorKwh: 10.25,
+                percentError: 512.5,
+              },
+            ],
+            validationCompareMetrics: { wape: 10, mae: 1, rmse: 1, mape: 10, maxAbs: 10.25, totalActualKwhMasked: 4, totalSimKwhMasked: 21.75, deltaKwhMasked: 17.75, mapeFiltered: 10, mapeFilteredCount: 2 },
           },
         },
       };
@@ -351,12 +467,58 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.ok).toBe(true);
     expect(body.action).toBe("run_test_home_canonical_recalc");
     expect(recalcSimulatorBuild).toHaveBeenCalledTimes(1);
+    expect(selectValidationDayKeys).toHaveBeenCalledTimes(1);
     const arg = recalcSimulatorBuild.mock.calls[0]?.[0];
     expect(arg.houseId).toBe("test-home-1");
     expect(arg.actualContextHouseId).toBe("h1");
     expect(arg.scenarioId).toBe("past-s1");
+    expect(selectValidationDayKeys).toHaveBeenCalledTimes(1);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual(["raw", "baseline"]);
+  });
+
+  it("uses shared compare projection sidecar for canonical test-home compare output", async () => {
+    buildValidationCompareProjectionSidecar.mockReturnValueOnce({
+      rows: [
+        {
+          localDate: "2025-04-10",
+          dayType: "weekday",
+          actualDayKwh: 10,
+          simulatedDayKwh: 9.5,
+          errorKwh: -0.5,
+          percentError: 5,
+        },
+      ],
+      metrics: {
+        wape: 5,
+        mae: 0.5,
+        rmse: 0.5,
+        mape: 5,
+        maxAbs: 0.5,
+        totalActualKwhMasked: 10,
+        totalSimKwhMasked: 9.5,
+        deltaKwhMasked: -0.5,
+        mapeFiltered: 5,
+        mapeFilteredCount: 1,
+      },
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(buildValidationCompareProjectionSidecar).toHaveBeenCalledTimes(1);
+    expect(body.metrics?.wape).toBe(5);
+    expect(body.scoredDayTruthRows?.[0]?.freshCompareSimDayKwh).toBe(9.5);
   });
 
   it("blocks save when test-home replace status is not ready", async () => {

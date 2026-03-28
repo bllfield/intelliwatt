@@ -421,3 +421,13 @@ Baseload is computed as a normal-life always-on metric and now excludes low-sign
 
 This logic is used consistently for Actual and Simulated insight baseloads. It does not modify intervals, totals, or pricing inputs.
 
+## Canonical Validation-Day Selection (2026-03-28)
+
+- One canonical simulator path remains unchanged: recalc/build/read still flows through `dispatchPastSimRecalc -> recalcSimulatorBuild -> simulatePastUsageDataset -> getSimulatedUsageForHouseScenario`.
+- Validation-day selection is now mode-based and shared (`manual`, `random_simple`, `customer_style_seasonal_mix`, `stratified_weather_balanced`), with diagnostics captured on artifact/build metadata.
+- Admin has two selectors:
+  - System-wide default for user-facing future recalcs.
+  - Admin-lab run mode for the current lab execution.
+- Future-recalcs-only rule is explicit: changing system default does not rewrite existing artifacts.
+- Baseline contract: validation days remain ACTUAL in baseline outputs; modeled values appear in compare projection sidecar only.
+

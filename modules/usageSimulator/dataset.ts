@@ -510,9 +510,17 @@ export type SimulatorBuildInputsV1 = {
   actualContextHouseId?: string;
   /**
    * Gap-Fill validation-only days simulated in the canonical recalc run.
-   * These keys must be excluded from baseline projection displays.
+   * These keys remain ACTUAL in baseline display surfaces and are used for compare projection sidecar output.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Effective selector used for this build's validation-day selection. */
+  effectiveValidationSelectionMode?:
+    | "manual"
+    | "random_simple"
+    | "customer_style_seasonal_mix"
+    | "stratified_weather_balanced";
+  /** Optional diagnostics snapshot for explainability of selected validation days. */
+  validationSelectionDiagnostics?: Record<string, unknown>;
   notes?: string[];
   filledMonths?: string[];
   // Snapshots (for auditing / future UI): not required for regen.
@@ -636,9 +644,38 @@ export type SimulatedUsageDatasetMeta = {
   canonicalArtifactSimulatedDayTotalsByDate?: Record<string, number>;
   /**
    * Gap-Fill validation-only scored day keys.
-   * Baseline projection must hide these days from baseline display surfaces.
+   * These keys stay actual in baseline display/totals and are used by compare projection surfaces.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Effective selector used when this artifact/build was generated. */
+  effectiveValidationSelectionMode?:
+    | "manual"
+    | "random_simple"
+    | "customer_style_seasonal_mix"
+    | "stratified_weather_balanced";
+  /** Optional diagnostics snapshot for explainability of selected validation days. */
+  validationSelectionDiagnostics?: Record<string, unknown>;
+  /** Compare-only projection rows for validation/test days from this same canonical family. */
+  validationCompareRows?: Array<{
+    localDate: string;
+    dayType: "weekday" | "weekend";
+    actualDayKwh: number;
+    simulatedDayKwh: number;
+    errorKwh: number;
+    percentError: number | null;
+  }>;
+  validationCompareMetrics?: {
+    mae: number;
+    rmse: number;
+    mape: number;
+    wape: number;
+    maxAbs: number;
+    totalActualKwhMasked: number;
+    totalSimKwhMasked: number;
+    deltaKwhMasked: number;
+    mapeFiltered: number | null;
+    mapeFilteredCount: number;
+  };
   /** Optional shared actual-context source house used to build this artifact. */
   actualContextHouseId?: string;
 };

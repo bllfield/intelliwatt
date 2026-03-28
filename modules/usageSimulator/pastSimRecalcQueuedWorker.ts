@@ -41,6 +41,8 @@ export async function runPastSimRecalcQueuedWorker(jobId: string): Promise<void>
     scenarioId: payload.scenarioId ?? null,
     weatherPreference: payload.weatherPreference,
     persistPastSimBaseline: payload.persistPastSimBaseline === true,
+    validationDaySelectionMode: payload.validationDaySelectionMode,
+    validationDayCount: payload.validationDayCount,
   });
   if (!out.ok) {
     await markPastSimRecalcJobFailed(

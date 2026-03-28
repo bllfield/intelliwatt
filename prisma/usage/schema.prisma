@@ -305,6 +305,15 @@ model GapfillLabTestHomeLink {
   @@index([status, updatedAt])
 }
 
+/// System-wide canonical validation-day selection defaults.
+model UsageSimulatorSettings {
+  /// Singleton key. Use "default" for the active record.
+  id                               String   @id @default("default")
+  userDefaultValidationSelectionMode String @default("random_simple")
+  createdAt                        DateTime @default(now())
+  updatedAt                        DateTime @updatedAt
+}
+
 /// Generic async droplet execution queue for shared sim workloads (Past recalc, etc.). Gap-Fill compare uses GapfillCompareRunSnapshot + compareRunId.
 model SimDropletJob {
   id             String   @id @default(uuid())

@@ -20,6 +20,13 @@ import {
   filterCandidateDateKeysBySeason,
   pickExtremeWeatherTestDateKeys,
 } from "@/lib/admin/gapfillLab";
+import {
+  selectValidationDayKeys,
+  normalizeValidationSelectionMode,
+  VALIDATION_DAY_SELECTION_MODES,
+  type ValidationDaySelectionMode,
+} from "@/modules/usageSimulator/validationSelection";
+import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
@@ -28,6 +35,9 @@ import { validateApplianceProfile, normalizeStoredApplianceProfile } from "@/mod
 import {
   getSimulatedUsageForHouseScenario,
   recalcSimulatorBuild,
+  getUserDefaultValidationSelectionMode,
+  setUserDefaultValidationSelectionMode,
+  getAdminLabDefaultValidationSelectionMode,
   type GapfillCompareBuildPhase,
   type GapfillScoredDayParityAvailability,
   type GapfillScoredDayParityDisplayValueKind,
@@ -110,6 +120,9 @@ export const maxDuration = 120;
 const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 75_000;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
+const VALIDATION_SELECTION_MODES = [
+  ...VALIDATION_DAY_SELECTION_MODES,
+] as const;
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
   const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
@@ -243,6 +256,8 @@ export async function POST(req: NextRequest) {
     homeProfile?: unknown;
     applianceProfile?: unknown;
     travelRanges?: Array<{ startDate: string; endDate: string }>;
+    adminLabValidationSelectionMode?: unknown;
+    userDefaultValidationSelectionMode?: unknown;
   };
   try {
     body = await req.json();
@@ -350,6 +365,8 @@ export async function POST(req: NextRequest) {
 
   const isCanonicalLabAction =
     rawAction === "lookup_source_houses" ||
+    rawAction === "get_validation_selection_settings" ||
+    rawAction === "set_user_default_validation_selection_mode" ||
     rawAction === "replace_test_home_from_source" ||
     rawAction === "save_test_home_inputs" ||
     rawAction === "run_test_home_canonical_recalc";
@@ -357,9 +374,52 @@ export async function POST(req: NextRequest) {
   const sourceHouseIdParam = typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim()
     ? body.sourceHouseId.trim()
     : house.id;
+  const explicitAdminLabValidationMode =
+    normalizeValidationSelectionMode(body?.adminLabValidationSelectionMode);
+  const requestedUserDefaultValidationMode =
+    normalizeValidationSelectionMode(body?.userDefaultValidationSelectionMode);
+
+  if (rawAction === "get_validation_selection_settings") {
+    const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
+    return NextResponse.json({
+      ok: true,
+      action: "get_validation_selection_settings",
+      userDefaultValidationSelectionMode,
+      adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
+      supportedModes: VALIDATION_SELECTION_MODES,
+    });
+  }
+
+  if (rawAction === "set_user_default_validation_selection_mode") {
+    if (!requestedUserDefaultValidationMode) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "invalid_validation_selection_mode",
+          message: "Provide a valid userDefaultValidationSelectionMode.",
+          supportedModes: VALIDATION_SELECTION_MODES,
+        },
+        { status: 400 }
+      );
+    }
+    const write = await setUserDefaultValidationSelectionMode(requestedUserDefaultValidationMode);
+    if (!write.ok) {
+      return NextResponse.json(
+        { ok: false, error: write.error, message: "Could not save system-wide user-facing validation-day mode." },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      action: "set_user_default_validation_selection_mode",
+      userDefaultValidationSelectionMode: write.mode,
+      message: "System-wide user-facing validation-day mode saved (future recalcs only).",
+    });
+  }
 
   if (rawAction === "lookup_source_houses") {
     const link = labOwnerUserId ? await getLabTestHomeLink(labOwnerUserId) : null;
+    const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
     return NextResponse.json({
       ok: true,
       action: "lookup_source_houses",
@@ -371,6 +431,9 @@ export async function POST(req: NextRequest) {
       })),
       selectedSourceHouseId: sourceHouseIdParam,
       testHomeLink: link,
+      userDefaultValidationSelectionMode,
+      adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
+      supportedValidationSelectionModes: VALIDATION_SELECTION_MODES,
     });
   }
 
@@ -670,56 +733,51 @@ export async function POST(req: NextRequest) {
     );
 
     const selectedTestRanges = testRanges;
-    let testDateKeysLocal = new Set<string>();
-    let testRangesUsed: Array<{ startDate: string; endDate: string }> = [];
-    let testSelectionMode: "manual_ranges" | "random_days" = "manual_ranges";
-    let testDaysSelected = 0;
-    let seedUsed: string | null = null;
-    if (testDaysRequested != null) {
-      const coverageSelection = await getCandidateDateCoverageForSelection({
-        houseId: sourceHouse.id,
-        scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
-        windowStart: canonicalWindow.startDate,
-        windowEnd: canonicalWindow.endDate,
-        timezone,
-        minDayCoveragePct,
-        stratifyByMonth,
-        stratifyByWeekend,
-        loadIntervalsForWindow: async () =>
-          await getActualIntervalsForRange({
-            houseId: sourceHouse.id,
-            esiid: sourceEsiid,
-            startDate: canonicalWindow.startDate,
-            endDate: canonicalWindow.endDate,
-          }),
-      });
-      const candidateDateKeys = coverageSelection.candidateDateKeys;
-      seedUsed = seed || `${sourceHouse.id}-${canonicalWindow.endDate}`;
-      const picked = pickRandomTestDateKeys({
-        candidateDateKeys,
-        travelDateKeysSet: travelDateKeysLocal,
-        testDays: testDaysRequested,
-        seed: seedUsed,
-        stratifyByMonth,
-        stratifyByWeekend,
-        isWeekendLocalKey: (dk) => {
-          const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
-          return dow === 0 || dow === 6;
-        },
-        monthKeyFromLocalKey: (dk) => dk.slice(0, 7),
-      });
-      testRangesUsed = mergeDateKeysToRanges(picked);
-      testDateKeysLocal = new Set(picked);
-      testSelectionMode = "random_days";
-      testDaysSelected = picked.length;
-    } else {
-      testDateKeysLocal = new Set<string>(
-        selectedTestRanges.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
-      );
-      testRangesUsed = selectedTestRanges;
-      testSelectionMode = "manual_ranges";
-      testDaysSelected = testDateKeysLocal.size;
-    }
+    const targetValidationDayCount = testDaysRequested != null ? testDaysRequested : 21;
+    const seedUsed = seed || `${sourceHouse.id}-${canonicalWindow.endDate}`;
+    const coverageSelection = await getCandidateDateCoverageForSelection({
+      houseId: sourceHouse.id,
+      scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
+      windowStart: canonicalWindow.startDate,
+      windowEnd: canonicalWindow.endDate,
+      timezone,
+      minDayCoveragePct,
+      stratifyByMonth,
+      stratifyByWeekend,
+      loadIntervalsForWindow: async () =>
+        await getActualIntervalsForRange({
+          houseId: sourceHouse.id,
+          esiid: sourceEsiid,
+          startDate: canonicalWindow.startDate,
+          endDate: canonicalWindow.endDate,
+        }),
+    });
+    const manualDateKeys = selectedTestRanges.flatMap((r) =>
+      localDateKeysInRange(r.startDate, r.endDate, timezone)
+    );
+    const requestedModeRaw: ValidationDaySelectionMode =
+      explicitAdminLabValidationMode ??
+      (testDaysRequested != null
+        ? getAdminLabDefaultValidationSelectionMode()
+        : ("manual" as ValidationDaySelectionMode));
+    const requestedMode =
+      requestedModeRaw === "manual" && manualDateKeys.length === 0
+        ? ("customer_style_seasonal_mix" as ValidationDaySelectionMode)
+        : requestedModeRaw;
+    const selectedValidation = selectValidationDayKeys({
+      mode: requestedMode,
+      targetCount: targetValidationDayCount,
+      candidateDateKeys: coverageSelection.candidateDateKeys,
+      travelDateKeysSet: travelDateKeysLocal,
+      timezone,
+      seed: seedUsed,
+      manualDateKeys,
+    });
+    const testDateKeysLocal = new Set(selectedValidation.selectedDateKeys);
+    const testRangesUsed = mergeDateKeysToRanges(selectedValidation.selectedDateKeys);
+    const testSelectionMode = requestedMode;
+    const testDaysSelected = selectedValidation.selectedDateKeys.length;
+    const selectionDiagnostics = selectedValidation.diagnostics;
     if (testDateKeysLocal.size === 0) {
       return NextResponse.json(
         {
@@ -770,6 +828,8 @@ export async function POST(req: NextRequest) {
       scenarioId: String(pastScenario.id),
       persistPastSimBaseline: true,
       validationOnlyDateKeysLocal: testDateKeysLocal,
+      validationDaySelectionMode: testSelectionMode,
+      validationDayCount: targetValidationDayCount,
     });
     if (!recalcOut.ok) {
       return NextResponse.json(
@@ -812,59 +872,18 @@ export async function POST(req: NextRequest) {
     const canonicalDataset = canonicalRead.dataset as any;
     const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
     const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
-    const testDateKeySet = new Set<string>(selectedDateKeysSorted);
-    const actualIntervalsForSelected = (
-      await getActualIntervalsForRange({
-        houseId: sourceHouse.id,
-        esiid: sourceEsiid,
-        startDate: shiftIsoDateUtc(selectedDateKeysSorted[0] ?? canonicalWindow.startDate, -1),
-        endDate: shiftIsoDateUtc(
-          selectedDateKeysSorted[selectedDateKeysSorted.length - 1] ?? canonicalWindow.endDate,
-          1
-        ),
-      })
-    ).filter((row) =>
-      testDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
-    );
-    const simulatedIntervalsForSelected = Array.isArray(canonicalDataset?.series?.intervals15)
-      ? (canonicalDataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).filter((row) =>
-          testDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
-        )
-      : [];
-    const simulatedByTs = new Map<string, number>();
-    for (const row of simulatedIntervalsForSelected) {
-      simulatedByTs.set(canonicalIntervalKey(String(row?.timestamp ?? "")), Number(row?.kwh) || 0);
-    }
-    const actualDailyByDate = new Map<string, number>();
-    for (const row of actualIntervalsForSelected) {
-      const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
-      if (!testDateKeySet.has(dk)) continue;
-      actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(row?.kwh) || 0)));
-    }
-    const simDailyFromMeta = (() => {
-      const src =
-        (canonicalDataset?.meta?.canonicalArtifactSimulatedDayTotalsByDate as
-          | Record<string, number>
-          | undefined) ??
-        {};
-      const out = new Map<string, number>();
-      for (const [dk, kwh] of Object.entries(src)) {
-        const key = String(dk).slice(0, 10);
-        if (!testDateKeySet.has(key)) continue;
-        out.set(key, round2(Number(kwh) || 0));
-      }
-      return out;
-    })();
-    const metrics = computeGapFillMetrics({
-      actual: actualIntervalsForSelected,
-      simulated: simulatedIntervalsForSelected,
-      simulatedByTs,
-      timezone,
-    });
+    // Shared compare sidecar remains the canonical modeled-vs-actual projection family.
+    const compareProjection = buildValidationCompareProjectionSidecar(canonicalDataset);
     const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
-      const actualDayKwh = round2(actualDailyByDate.get(dk) ?? 0);
-      const freshCompareSimDayKwh = round2(simDailyFromMeta.get(dk) ?? 0);
-      const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+      const row = Array.isArray(compareProjection.rows)
+        ? compareProjection.rows.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk)
+        : null;
+      const actualDayKwh = round2(Number(row?.actualDayKwh ?? 0) || 0);
+      const freshCompareSimDayKwh = round2(Number(row?.simulatedDayKwh ?? 0) || 0);
+      const percentError =
+        row?.percentError == null
+          ? null
+          : round2(Number(row.percentError) || 0);
       return {
         localDate: dk,
         actualDayKwh,
@@ -874,9 +893,13 @@ export async function POST(req: NextRequest) {
         displayVsFreshParityMatch: true,
         parityAvailability: "available",
         parityReasonCode: "display_matches_canonical_artifact",
-        dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
+        dayType: row?.dayType === "weekend" ? "weekend" : "weekday",
+        percentError,
       };
     });
+    const compareMetrics = (compareProjection.metrics && typeof compareProjection.metrics === "object")
+      ? compareProjection.metrics as Record<string, unknown>
+      : {};
 
     return NextResponse.json({
       ok: true,
@@ -907,20 +930,21 @@ export async function POST(req: NextRequest) {
       testDaysRequested,
       testDaysSelected,
       seedUsed,
+      selectionDiagnostics,
       usage365,
       baselineDatasetProjection: baselineDataset,
       scoredDayTruthRows,
       metrics: {
-        mae: metrics.mae,
-        rmse: metrics.rmse,
-        mape: metrics.mape,
-        wape: metrics.wape,
-        maxAbs: metrics.maxAbs,
-        totalActualKwhMasked: metrics.totalActualKwhMasked,
-        totalSimKwhMasked: metrics.totalSimKwhMasked,
-        deltaKwhMasked: metrics.deltaKwhMasked,
-        mapeFiltered: metrics.mapeFiltered,
-        mapeFilteredCount: metrics.mapeFilteredCount,
+        mae: Number(compareMetrics.mae ?? 0) || 0,
+        rmse: Number(compareMetrics.rmse ?? 0) || 0,
+        mape: Number(compareMetrics.mape ?? 0) || 0,
+        wape: Number(compareMetrics.wape ?? 0) || 0,
+        maxAbs: Number(compareMetrics.maxAbs ?? 0) || 0,
+        totalActualKwhMasked: Number(compareMetrics.totalActualKwhMasked ?? 0) || 0,
+        totalSimKwhMasked: Number(compareMetrics.totalSimKwhMasked ?? 0) || 0,
+        deltaKwhMasked: Number(compareMetrics.deltaKwhMasked ?? 0) || 0,
+        mapeFiltered: compareMetrics.mapeFiltered == null ? null : (Number(compareMetrics.mapeFiltered) || 0),
+        mapeFilteredCount: Number(compareMetrics.mapeFilteredCount ?? 0) || 0,
       },
       compareTruth: {
         canonicalReadLayer: "getSimulatedUsageForHouseScenario",
@@ -932,6 +956,8 @@ export async function POST(req: NextRequest) {
         projectionMode: "baseline_vs_accuracy",
         validationOnlyDateKeysLocal: selectedDateKeysSorted,
         actualContextHouseId: sourceHouse.id,
+        userDefaultValidationSelectionMode: await getUserDefaultValidationSelectionMode(),
+        adminLabValidationSelectionMode: testSelectionMode,
       },
     });
   }

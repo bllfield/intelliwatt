@@ -6465,3 +6465,13 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - **Weather backfill** replaces stale STUB_V1 rows when actual Open-Meteo data is available; repair script and procedure for existing bad data: see `docs/PAST_WEATHER_STUB_REPAIR.md`.
 - **Admin simulation diagnostics:** Tool on `/admin/simulation-engines` (Past pipeline diagnostics section) validates the shared production simulator/weather pipeline for a selected house without shell/droplet: Past path meta, weather provenance, stub audit, cold/cache/recalc parity, weather repair action, and shared GapFill scoring parity.
 - **Parity fix:** When "Include parity" is checked, cold build uses the stored build's `travelRanges` (not UI override) so cold, production, and recalc are compared on the same inputs; parity cards now show per-side `scenarioId`, `buildInputsHash`, `travelRangesUsed`, `coverageStart`/`coverageEnd`, `buildPathKind`, `source`, `lastBuiltAt`. Cache restore sets `weatherFallbackReason` to `null` when `weatherSourceSummary === "actual_only"` so parity weather metadata matches cold.
+
+## Canonical Test-Day Selection Update (2026-03-28)
+
+- Added shared validation-day mode contract and persisted system default setting in usage DB.
+- Admin tooling now separates:
+  - system-wide user-facing selection mode (future recalcs only),
+  - admin-lab run mode (current run scope).
+- Canonical artifacts now persist effective selection mode and optional diagnostics snapshot for explainability.
+- User simulated-house route exposes compare projection sidecar from the same canonical artifact family.
+- Baseline behavior is preserved: validation/test days remain actual in baseline display/totals.

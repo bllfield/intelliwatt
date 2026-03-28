@@ -8,8 +8,9 @@ import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, typ
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
-import { getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
+import { getActualIntervalsForRange, getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
+import { usagePrisma } from "@/lib/db/usageClient";
 import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
@@ -48,7 +49,22 @@ import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
-import { canonicalIntervalKey, dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import {
+  canonicalIntervalKey,
+  dateKeyInTimezone,
+  getCandidateDateCoverageForSelection,
+  localDateKeysInRange,
+} from "@/lib/admin/gapfillLab";
+import {
+  selectValidationDayKeys,
+  normalizeValidationSelectionMode,
+  type ValidationDaySelectionMode,
+  type ValidationDaySelectionDiagnostics,
+} from "@/modules/usageSimulator/validationSelection";
+import {
+  attachValidationCompareProjection,
+  projectBaselineFromCanonicalDataset,
+} from "@/modules/usageSimulator/compareProjection";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
@@ -71,6 +87,49 @@ type ManualUsagePayloadAny = any;
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 const WORKSPACE_FUTURE_NAME = "Future (What-if)";
+const DEFAULT_SYSTEM_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode = "random_simple";
+const DEFAULT_ADMIN_LAB_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode = "stratified_weather_balanced";
+
+export async function getUserDefaultValidationSelectionMode(): Promise<ValidationDaySelectionMode> {
+  try {
+    const row = await (usagePrisma as any).usageSimulatorSettings.findUnique({
+      where: { id: "default" },
+      select: { userDefaultValidationSelectionMode: true },
+    });
+    return (
+      normalizeValidationSelectionMode(row?.userDefaultValidationSelectionMode) ??
+      DEFAULT_SYSTEM_VALIDATION_SELECTION_MODE
+    );
+  } catch {
+    return DEFAULT_SYSTEM_VALIDATION_SELECTION_MODE;
+  }
+}
+
+export async function setUserDefaultValidationSelectionMode(
+  mode: ValidationDaySelectionMode
+): Promise<{ ok: true; mode: ValidationDaySelectionMode } | { ok: false; error: string }> {
+  try {
+    const normalized = normalizeValidationSelectionMode(mode);
+    if (!normalized) return { ok: false, error: "invalid_validation_selection_mode" };
+    await (usagePrisma as any).usageSimulatorSettings.upsert({
+      where: { id: "default" },
+      create: {
+        id: "default",
+        userDefaultValidationSelectionMode: normalized,
+      },
+      update: {
+        userDefaultValidationSelectionMode: normalized,
+      },
+    });
+    return { ok: true, mode: normalized };
+  } catch {
+    return { ok: false, error: "usage_simulator_settings_write_failed" };
+  }
+}
+
+export function getAdminLabDefaultValidationSelectionMode(): ValidationDaySelectionMode {
+  return DEFAULT_ADMIN_LAB_VALIDATION_SELECTION_MODE;
+}
 async function reportSimulationDataIssue(args: {
   source: "GAPFILL_LAB" | "USER_SIMULATION" | "USAGE_DASHBOARD";
   userId: string;
@@ -335,32 +394,6 @@ function normalizeValidationOnlyDateKeysLocal(
     if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
   }
   return out;
-}
-
-function cloneDatasetForProjection(dataset: any): any {
-  if (!dataset || typeof dataset !== "object") return dataset;
-  return {
-    ...dataset,
-    summary:
-      dataset.summary && typeof dataset.summary === "object"
-        ? { ...dataset.summary }
-        : dataset.summary,
-    meta:
-      dataset.meta && typeof dataset.meta === "object"
-        ? { ...dataset.meta }
-        : dataset.meta,
-    daily: Array.isArray(dataset.daily) ? [...dataset.daily] : dataset.daily,
-    monthly: Array.isArray(dataset.monthly) ? [...dataset.monthly] : dataset.monthly,
-    series:
-      dataset.series && typeof dataset.series === "object"
-        ? {
-            ...dataset.series,
-            intervals15: Array.isArray(dataset.series.intervals15)
-              ? [...dataset.series.intervals15]
-              : dataset.series.intervals15,
-          }
-        : dataset.series,
-  };
 }
 
 export async function rebuildGapfillSharedPastArtifact(args: {
@@ -3496,6 +3529,10 @@ export async function recalcSimulatorBuild(args: {
    * These keys are simulated in the same shared recalc run and persisted on the same build/artifact family.
    */
   validationOnlyDateKeysLocal?: Set<string> | string[];
+  /** Optional selection mode for auto-picking validation days when explicit keys are not provided. */
+  validationDaySelectionMode?: ValidationDaySelectionMode;
+  /** Optional count target for auto-picked validation days. */
+  validationDayCount?: number;
   now?: Date;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
@@ -3505,6 +3542,10 @@ export async function recalcSimulatorBuild(args: {
   const requestedValidationOnlyDateKeysLocal = normalizeValidationOnlyDateKeysLocal(
     args.validationOnlyDateKeysLocal
   );
+  let effectiveValidationSelectionMode =
+    normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
+    (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
+  let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
 
   // Load persisted baseline inputs
   const [manualRec, homeRec, applianceRec] = await Promise.all([
@@ -3838,8 +3879,61 @@ export async function recalcSimulatorBuild(args: {
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
+  let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
+  if (
+    effectiveValidationOnlyDateKeysLocal.size === 0 &&
+    mode === "SMT_BASELINE" &&
+    scenario?.name === WORKSPACE_PAST_NAME
+  ) {
+    const autoMode =
+      effectiveValidationSelectionMode ?? (await getUserDefaultValidationSelectionMode());
+    const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
+    const selectionStart = canonicalWindow?.start ?? resolveCanonicalUsage365CoverageWindow().startDate;
+    const selectionEnd = canonicalWindow?.end ?? resolveCanonicalUsage365CoverageWindow().endDate;
+    const targetCount = Math.max(1, Math.min(365, Math.floor(Number(args.validationDayCount) || 21)));
+    const travelDateKeysLocal = new Set<string>(
+      (allTravelRanges ?? []).flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezoneForStoredBuild))
+    );
+    try {
+      const coverageSelection = await getCandidateDateCoverageForSelection({
+        houseId: actualContextHouseId,
+        scenarioIdentity: `past_shared:${scenarioId ?? "BASELINE"}`,
+        windowStart: selectionStart,
+        windowEnd: selectionEnd,
+        timezone: timezoneForStoredBuild,
+        minDayCoveragePct: 0.95,
+        stratifyByMonth: true,
+        stratifyByWeekend: true,
+        loadIntervalsForWindow: async () =>
+          await getActualIntervalsForRange({
+            houseId: actualContextHouseId,
+            esiid: esiid ?? null,
+            startDate: selectionStart,
+            endDate: selectionEnd,
+          }),
+      });
+      const selection = selectValidationDayKeys({
+        mode: autoMode,
+        targetCount,
+        candidateDateKeys: coverageSelection.candidateDateKeys,
+        travelDateKeysSet: travelDateKeysLocal,
+        timezone: timezoneForStoredBuild,
+        seed: `${actualContextHouseId}-${selectionEnd}`,
+      });
+      effectiveValidationOnlyDateKeysLocal = new Set(selection.selectedDateKeys);
+      validationSelectionDiagnostics = selection.diagnostics;
+      effectiveValidationSelectionMode = autoMode;
+    } catch {
+      effectiveValidationOnlyDateKeysLocal = new Set<string>();
+      validationSelectionDiagnostics = null;
+      effectiveValidationSelectionMode = autoMode;
+    }
+  }
+  if (!effectiveValidationSelectionMode && effectiveValidationOnlyDateKeysLocal.size > 0) {
+    effectiveValidationSelectionMode = "manual";
+  }
   const boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
-    requestedValidationOnlyDateKeysLocal,
+    effectiveValidationOnlyDateKeysLocal,
     resolveCanonicalUsage365CoverageWindow()
   );
   let pastSimulatedMonths: string[] | undefined;
@@ -3867,6 +3961,8 @@ export async function recalcSimulatorBuild(args: {
         notes: built.notes ?? [],
         filledMonths: built.filledMonths ?? [],
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
+        effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
+        validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
         actualContextHouseId,
         snapshots: { homeProfile, applianceProfile },
       };
@@ -3922,6 +4018,8 @@ export async function recalcSimulatorBuild(args: {
     travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
     actualContextHouseId,
     validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
+    effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
+    validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
     timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,
@@ -4356,66 +4454,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
   // Canonical simulated read family for user/admin consumers.
   // Gap-Fill accuracy must derive simulated truth from this same saved scenario/artifact family
   // (and /api/user/usage/simulated/house), then apply projection-only filtering.
-  const projectBaselineFromCanonicalDataset = (
-    dataset: any,
-    timezoneHint: string | null | undefined
-  ): any => {
-    const rawKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
-      ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
-      : [];
-    const validationOnlyDateKeysLocal = rawKeys
-      .map((v) => String(v ?? "").slice(0, 10))
-      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
-    if (validationOnlyDateKeysLocal.length === 0) return dataset;
-    const keySet = new Set<string>(validationOnlyDateKeysLocal);
-    const tz = String(timezoneHint ?? (dataset as any)?.meta?.timezone ?? "America/Chicago");
-    const projected = cloneDatasetForProjection(dataset);
-    if (Array.isArray(projected.daily)) {
-      projected.daily = projected.daily.filter(
-        (row: any) => !keySet.has(String(row?.date ?? "").slice(0, 10))
-      );
-    }
-    if (Array.isArray(projected?.series?.intervals15)) {
-      projected.series = {
-        ...(projected.series ?? {}),
-        intervals15: projected.series.intervals15.filter(
-          (row: any) => !keySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), tz))
-        ),
-      };
-    }
-    if (Array.isArray(projected.monthly) && Array.isArray(projected.daily)) {
-      const byMonth = new Map<string, number>();
-      for (const row of projected.daily as Array<{ date?: string; kwh?: number }>) {
-        const month = String(row?.date ?? "").slice(0, 7);
-        if (!/^\d{4}-\d{2}$/.test(month)) continue;
-        byMonth.set(month, (byMonth.get(month) ?? 0) + (Number(row?.kwh) || 0));
-      }
-      projected.monthly = projected.monthly.map((row: any) => ({
-        ...row,
-        kwh: Number(byMonth.get(String(row?.month ?? "").slice(0, 7)) ?? 0),
-      }));
-    }
-    if (projected?.summary && Array.isArray(projected.daily)) {
-      const totalKwh = projected.daily.reduce(
-        (sum: number, row: any) => sum + (Number(row?.kwh) || 0),
-        0
-      );
-      projected.summary = {
-        ...projected.summary,
-        totalKwh,
-        intervalsCount: Array.isArray(projected?.series?.intervals15)
-          ? projected.series.intervals15.length
-          : projected.summary.intervalsCount,
-      };
-    }
-    projected.meta = {
-      ...(projected.meta ?? {}),
-      validationOnlyDateKeysLocal,
-      validationProjectionApplied: true,
-      validationProjectionType: "baseline_excluding_validation_only_days",
-    };
-    return projected;
-  };
   try {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
@@ -4489,13 +4527,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
           });
           return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
         }
-        const projected =
+        const projectedBaselineAware =
           projectionMode === "baseline"
             ? projectBaselineFromCanonicalDataset(
                 restored,
                 String((restored as any)?.meta?.timezone ?? "America/Chicago")
               )
             : restored;
+        const projected = attachValidationCompareProjection(projectedBaselineAware);
         return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
       }
 
@@ -4646,13 +4685,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
         });
         return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
       }
-      const projected =
+      const projectedBaselineAware =
         projectionMode === "baseline"
           ? projectBaselineFromCanonicalDataset(
               restored,
               String((buildInputs as any)?.timezone ?? "America/Chicago")
             )
           : restored;
+      const projected = attachValidationCompareProjection(projectedBaselineAware);
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
     }
 
@@ -5148,13 +5188,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
       });
       return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
     }
-    const projected =
+    const projectedBaselineAware =
       projectionMode === "baseline"
         ? projectBaselineFromCanonicalDataset(
             dataset,
             String((buildInputs as any)?.timezone ?? "America/Chicago")
           )
         : dataset;
+    const projected = attachValidationCompareProjection(projectedBaselineAware);
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
   } catch (e) {
     console.error("[usageSimulator/service] getSimulatedUsageForHouseScenario failed", e);

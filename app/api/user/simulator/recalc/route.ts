@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
+import { getUserDefaultValidationSelectionMode } from "@/modules/usageSimulator/service";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
       weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
         ? (weatherPreferenceRaw as WeatherPreference)
         : undefined;
+    const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
     if (mode !== "MANUAL_TOTALS" && mode !== "NEW_BUILD_ESTIMATE" && mode !== "SMT_BASELINE") {
       return NextResponse.json({ ok: false, error: "mode_invalid" }, { status: 400 });
@@ -83,6 +85,8 @@ export async function POST(request: NextRequest) {
       scenarioId,
       weatherPreference,
       persistPastSimBaseline: true,
+      validationDaySelectionMode: userDefaultValidationSelectionMode,
+      validationDayCount: 21,
     });
     if (dispatched.executionMode === "droplet_async") {
       return NextResponse.json({
