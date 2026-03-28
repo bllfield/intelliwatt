@@ -111,26 +111,30 @@ export async function upsertLabTestHomeLink(args: {
 }): Promise<void> {
   const model = getLabLinkModel();
   if (!model) return;
-  await model.upsert({
-    where: { ownerUserId: args.ownerUserId },
-    create: {
-      ownerUserId: args.ownerUserId,
-      testHomeHouseId: args.testHomeHouseId,
-      sourceUserId: args.sourceUserId ?? null,
-      sourceHouseId: args.sourceHouseId ?? null,
-      status: args.status,
-      statusMessage: args.statusMessage ?? null,
-      lastReplacedAt: args.lastReplacedAt ?? null,
-    },
-    update: {
-      testHomeHouseId: args.testHomeHouseId,
-      sourceUserId: args.sourceUserId ?? null,
-      sourceHouseId: args.sourceHouseId ?? null,
-      status: args.status,
-      statusMessage: args.statusMessage ?? null,
-      lastReplacedAt: args.lastReplacedAt ?? undefined,
-    },
-  });
+  try {
+    await model.upsert({
+      where: { ownerUserId: args.ownerUserId },
+      create: {
+        ownerUserId: args.ownerUserId,
+        testHomeHouseId: args.testHomeHouseId,
+        sourceUserId: args.sourceUserId ?? null,
+        sourceHouseId: args.sourceHouseId ?? null,
+        status: args.status,
+        statusMessage: args.statusMessage ?? null,
+        lastReplacedAt: args.lastReplacedAt ?? null,
+      },
+      update: {
+        testHomeHouseId: args.testHomeHouseId,
+        sourceUserId: args.sourceUserId ?? null,
+        sourceHouseId: args.sourceHouseId ?? null,
+        status: args.status,
+        statusMessage: args.statusMessage ?? null,
+        lastReplacedAt: args.lastReplacedAt ?? undefined,
+      },
+    });
+  } catch {
+    // Table may be unavailable during rollout; replacement logic can proceed without link persistence.
+  }
 }
 
 async function copyScenariosAndEvents(args: {
@@ -274,24 +278,24 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
     return { ok: false, error: "source_house_not_found" };
   }
 
-  const testHome = await ensureGlobalLabTestHomeHouse(args.ownerUserId);
-  await upsertLabTestHomeLink({
-    ownerUserId: args.ownerUserId,
-    testHomeHouseId: testHome.id,
-    sourceUserId: args.sourceUserId,
-    sourceHouseId: args.sourceHouseId,
-    status: "replacing",
-    statusMessage: "Replacing reusable lab test-home data from selected source house.",
-  });
-
+  let testHome: { id: string; esiid: string | null; label: string } | null = null;
   try {
+    testHome = await ensureGlobalLabTestHomeHouse(args.ownerUserId);
+    await upsertLabTestHomeLink({
+      ownerUserId: args.ownerUserId,
+      testHomeHouseId: testHome.id,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      status: "replacing",
+      statusMessage: "Replacing reusable lab test-home data from selected source house.",
+    });
     await (prisma as any).$transaction(async (tx: any) => {
       // Remove all existing lab-owned data first.
       await tx.usageSimulatorBuild.deleteMany({
-        where: { userId: args.ownerUserId, houseId: testHome.id },
+        where: { userId: args.ownerUserId, houseId: testHome!.id },
       });
       const testHomeScenarioRows = await tx.usageSimulatorScenario.findMany({
-        where: { userId: args.ownerUserId, houseId: testHome.id },
+        where: { userId: args.ownerUserId, houseId: testHome!.id },
         select: { id: true },
       });
       const testHomeScenarioIds = testHomeScenarioRows.map((s: any) => String(s.id));
@@ -304,18 +308,18 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         });
       }
       await tx.manualUsageInput.deleteMany({
-        where: { userId: args.ownerUserId, houseId: testHome.id },
+        where: { userId: args.ownerUserId, houseId: testHome!.id },
       });
       await tx.pastSimulatedDatasetCache.deleteMany({
-        where: { houseId: testHome.id },
+        where: { houseId: testHome!.id },
       });
       await tx.gapfillCompareRunSnapshot.deleteMany({
-        where: { houseId: testHome.id },
+        where: { houseId: testHome!.id },
       });
 
       // Copy selected source-house location/detail fields onto test home identity.
       await tx.houseAddress.update({
-        where: { id: testHome.id },
+        where: { id: testHome!.id },
         data: {
           addressLine1: sourceHouse.addressLine1,
           addressLine2: sourceHouse.addressLine2,
@@ -344,20 +348,20 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         sourceUserId: args.sourceUserId,
         sourceHouseId: args.sourceHouseId,
         targetUserId: args.ownerUserId,
-        targetHouseId: testHome.id,
+        targetHouseId: testHome!.id,
       });
       await copyManualUsageInput({
         tx,
         sourceUserId: args.sourceUserId,
         sourceHouseId: args.sourceHouseId,
         targetUserId: args.ownerUserId,
-        targetHouseId: testHome.id,
+        targetHouseId: testHome!.id,
       });
     });
 
     await upsertLabTestHomeLink({
       ownerUserId: args.ownerUserId,
-      testHomeHouseId: testHome.id,
+      testHomeHouseId: testHome!.id,
       sourceUserId: args.sourceUserId,
       sourceHouseId: args.sourceHouseId,
       status: "profile_syncing",
@@ -380,7 +384,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
         create: {
           userId: args.ownerUserId,
-          houseId: testHome.id,
+          houseId: testHome!.id,
           ...sourceHomeProfile,
         },
         update: {
@@ -393,7 +397,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
         create: {
           userId: args.ownerUserId,
-          houseId: testHome.id,
+          houseId: testHome!.id,
           appliancesJson: sourceApplianceProfile.appliancesJson,
         },
         update: {
@@ -410,7 +414,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
 
     await upsertLabTestHomeLink({
       ownerUserId: args.ownerUserId,
-      testHomeHouseId: testHome.id,
+      testHomeHouseId: testHome!.id,
       sourceUserId: args.sourceUserId,
       sourceHouseId: args.sourceHouseId,
       status: "ready",
@@ -420,18 +424,20 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
 
     return {
       ok: true,
-      testHomeHouseId: testHome.id,
+      testHomeHouseId: testHome!.id,
       sourceHouseId: args.sourceHouseId,
     };
   } catch (error) {
-    await upsertLabTestHomeLink({
-      ownerUserId: args.ownerUserId,
-      testHomeHouseId: testHome.id,
-      sourceUserId: args.sourceUserId,
-      sourceHouseId: args.sourceHouseId,
-      status: "failed",
-      statusMessage: error instanceof Error ? error.message : "replace_lab_test_home_failed",
-    });
+    if (testHome?.id) {
+      await upsertLabTestHomeLink({
+        ownerUserId: args.ownerUserId,
+        testHomeHouseId: testHome.id,
+        sourceUserId: args.sourceUserId,
+        sourceHouseId: args.sourceHouseId,
+        status: "failed",
+        statusMessage: error instanceof Error ? error.message : "replace_lab_test_home_failed",
+      });
+    }
     return { ok: false, error: "replace_lab_test_home_failed" };
   }
 }

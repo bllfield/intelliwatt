@@ -373,40 +373,56 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
-    const testHome = await (prisma as any).houseAddress.findUnique({
-      where: { id: replaced.testHomeHouseId },
-      select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true, label: true },
-    });
-    const testHomeProfiles = await loadDisplayProfilesForHouse({
-      userId: labOwnerUserId,
-      houseId: String(replaced.testHomeHouseId),
-    });
-    const testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
-    const link = await getLabTestHomeLink(labOwnerUserId);
-    return NextResponse.json({
-      ok: true,
-      action: "replace_test_home_from_source",
-      sourceUser: { id: user.id, email: user.email },
-      sourceHouse: {
-        id: selectedSourceHouse.id,
-        esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
-        label: [selectedSourceHouse.addressLine1, selectedSourceHouse.addressCity, selectedSourceHouse.addressState]
-          .filter(Boolean)
-          .join(", ") || selectedSourceHouse.id,
-      },
-      testHome: testHome
-        ? {
-            id: testHome.id,
-            esiid: testHome.esiid ? String(testHome.esiid) : null,
-            label: [testHome.addressLine1, testHome.addressCity, testHome.addressState].filter(Boolean).join(", ") || testHome.id,
-            identityLabel: testHome.label ?? null,
-          }
-        : null,
-      homeProfile: testHomeProfiles.homeProfile,
-      applianceProfile: testHomeProfiles.applianceProfile,
-      travelRangesFromDb: testHomeTravelRanges,
-      testHomeLink: link,
-    });
+    try {
+      const testHome = await (prisma as any).houseAddress.findUnique({
+        where: { id: replaced.testHomeHouseId },
+        select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true, label: true },
+      });
+      const testHomeProfiles = await loadDisplayProfilesForHouse({
+        userId: labOwnerUserId,
+        houseId: String(replaced.testHomeHouseId),
+      });
+      const testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
+      const link = await getLabTestHomeLink(labOwnerUserId);
+      return NextResponse.json({
+        ok: true,
+        action: "replace_test_home_from_source",
+        sourceUser: { id: user.id, email: user.email },
+        sourceHouse: {
+          id: selectedSourceHouse.id,
+          esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
+          label: [selectedSourceHouse.addressLine1, selectedSourceHouse.addressCity, selectedSourceHouse.addressState]
+            .filter(Boolean)
+            .join(", ") || selectedSourceHouse.id,
+        },
+        testHome: testHome
+          ? {
+              id: testHome.id,
+              esiid: testHome.esiid ? String(testHome.esiid) : null,
+              label: [testHome.addressLine1, testHome.addressCity, testHome.addressState].filter(Boolean).join(", ") || testHome.id,
+              identityLabel: testHome.label ?? null,
+            }
+          : null,
+        homeProfile: testHomeProfiles.homeProfile,
+        applianceProfile: testHomeProfiles.applianceProfile,
+        travelRangesFromDb: testHomeTravelRanges,
+        testHomeLink: link,
+      });
+    } catch (postLoadError: unknown) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "replace_test_home_postload_failed",
+          message:
+            postLoadError instanceof Error
+              ? postLoadError.message
+              : "Test-home replacement succeeded but post-load snapshot failed.",
+          sourceHouseId: sourceHouseIdParam,
+          testHomeHouseId: replaced.testHomeHouseId ?? null,
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (rawAction === "save_test_home_inputs") {
