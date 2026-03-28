@@ -1251,45 +1251,53 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         ) : null}
       </div>
 
-      {curveView === "PAST" && scenarioCompareProjection?.rows?.length ? (
+      {curveView === "PAST" ? (
         <div className="mt-4 rounded-2xl border border-brand-blue/10 bg-white p-4">
           <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
           <div className="mt-1 text-xs text-brand-navy/70">
             This section compares modeled vs actual on validation days for simulator accuracy transparency.
           </div>
-          <div className="mt-2 text-xs text-brand-navy/80">
-            WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% ·
-            MAE {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} ·
-            RMSE {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
-          </div>
-          <div className="mt-3 overflow-auto">
-            <table className="min-w-full text-xs border border-brand-blue/10">
-              <thead className="bg-brand-blue/5">
-                <tr>
-                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Date</th>
-                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Day Type</th>
-                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual kWh</th>
-                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim kWh</th>
-                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Error</th>
-                  <th className="border border-brand-blue/10 px-2 py-1 text-right">% Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scenarioCompareProjection.rows.map((row) => (
-                  <tr key={row.localDate}>
-                    <td className="border border-brand-blue/10 px-2 py-1">{row.localDate}</td>
-                    <td className="border border-brand-blue/10 px-2 py-1">{row.dayType}</td>
-                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actualDayKwh.toFixed(2)}</td>
-                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedDayKwh.toFixed(2)}</td>
-                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.errorKwh.toFixed(2)}</td>
-                    <td className="border border-brand-blue/10 px-2 py-1 text-right">
-                      {row.percentError == null ? "—" : `${Number(row.percentError).toFixed(2)}%`}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {scenarioCompareProjection?.rows?.length ? (
+            <>
+              <div className="mt-2 text-xs text-brand-navy/80">
+                WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% ·
+                MAE {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} ·
+                RMSE {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
+              </div>
+              <div className="mt-3 overflow-auto">
+                <table className="min-w-full text-xs border border-brand-blue/10">
+                  <thead className="bg-brand-blue/5">
+                    <tr>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-left">Date</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-left">Day Type</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual kWh</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim kWh</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Error</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">% Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scenarioCompareProjection.rows.map((row) => (
+                      <tr key={row.localDate}>
+                        <td className="border border-brand-blue/10 px-2 py-1">{row.localDate}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1">{row.dayType}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actualDayKwh.toFixed(2)}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedDayKwh.toFixed(2)}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.errorKwh.toFixed(2)}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">
+                          {row.percentError == null ? "—" : `${Number(row.percentError).toFixed(2)}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="mt-2 text-xs text-brand-navy/70">
+              No validation/test-day compare rows are available for this Past scenario yet.
+            </div>
+          )}
         </div>
       ) : null}
 

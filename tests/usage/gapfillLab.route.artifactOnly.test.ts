@@ -482,6 +482,29 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     });
   });
 
+  it("prefills lookup travel ranges from linked test home", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock.mockResolvedValueOnce([
+      { startDate: "2025-08-13", endDate: "2025-08-17" },
+    ]);
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "lookup_source_houses",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("lookup_source_houses");
+    expect(body.travelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.travelRangesSource).toBe("test_home");
+  });
+
   it("saves home/appliance inputs only to test-home house id", async () => {
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({

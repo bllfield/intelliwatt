@@ -4488,7 +4488,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
         actualContextEsiid = contextHouse?.esiid ?? null;
       }
       const actualUsage = await getActualUsageDatasetForHouse(actualContextHouseId, actualContextEsiid).catch(() => null);
-      const dailyRows = Array.isArray((actualUsage as any)?.daily) ? ((actualUsage as any).daily as Array<{ date?: string; kwh?: number }>) : [];
+      const dailyRows = Array.isArray((actualUsage as any)?.dataset?.daily)
+        ? ((actualUsage as any).dataset.daily as Array<{ date?: string; kwh?: number }>)
+        : Array.isArray((actualUsage as any)?.daily)
+          ? ((actualUsage as any).daily as Array<{ date?: string; kwh?: number }>)
+          : [];
       if (dailyRows.length === 0) {
         validationActualDailyCache = null;
         return validationActualDailyCache;

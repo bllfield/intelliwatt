@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
+import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
 type DateRange = { startDate: string; endDate: string };
@@ -72,6 +74,27 @@ function parseJsonSafe(s: string): { ok: true; value: any } | { ok: false; error
   }
 }
 
+function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  if (!props.open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-5xl rounded-3xl border border-brand-blue/15 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-brand-blue/10 px-6 py-4">
+          <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
+          <button
+            type="button"
+            onClick={props.onClose}
+            className="rounded-full border border-brand-blue/20 bg-white px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-blue/5"
+          >
+            Close
+          </button>
+        </div>
+        <div className="max-h-[80vh] overflow-auto px-6 py-5">{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
 function toPayloadFromBaseline(dataset: any, timezone: string): UsagePayload | null {
   if (!dataset || typeof dataset !== "object") return null;
   const daily = Array.isArray(dataset.daily)
@@ -140,8 +163,28 @@ export default function GapFillLabCanonicalClient() {
   const [requestDebug, setRequestDebug] = useState<any[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
+  const [openFullHomeEditor, setOpenFullHomeEditor] = useState(false);
+  const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
+  const linkedSourceHomeId = String(testHomeLink?.sourceHouseId ?? "").trim();
+  const sourceDropdownOptions = useMemo(
+    () =>
+      sourceHouses.map((h) => {
+        const isLinkedTestHome = effectiveTestHomeId.length > 0 && String(h.id) === effectiveTestHomeId;
+        const isLinkedSourceHome = linkedSourceHomeId.length > 0 && String(h.id) === linkedSourceHomeId;
+        const roleSuffix = isLinkedTestHome
+          ? " - Test Home (do not use as source)"
+          : isLinkedSourceHome
+            ? " - Current Source Home"
+            : "";
+        return {
+          ...h,
+          displayLabel: `${h.label} (${h.id})${roleSuffix}`,
+        };
+      }),
+    [sourceHouses, effectiveTestHomeId, linkedSourceHomeId]
+  );
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
   const parsedApplianceProfile = useMemo(() => parseJsonSafe(applianceProfileJson), [applianceProfileJson]);
 
@@ -288,8 +331,8 @@ export default function GapFillLabCanonicalClient() {
         <input className="border rounded px-3 py-2 text-sm" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Timezone" />
         <select className="border rounded px-3 py-2 text-sm" value={sourceHouseId} onChange={(e) => setSourceHouseId(e.target.value)}>
           <option value="">Select source house</option>
-          {sourceHouses.map((h) => (
-            <option key={h.id} value={h.id}>{h.label} ({h.id})</option>
+          {sourceDropdownOptions.map((h) => (
+            <option key={h.id} value={h.id}>{h.displayLabel}</option>
           ))}
         </select>
         <div className="flex gap-2">
@@ -321,6 +364,14 @@ export default function GapFillLabCanonicalClient() {
           <p className="text-xs text-brand-navy/70 mb-3">
             These edits are saved only to <span className="font-semibold">{TEST_HOME_DISPLAY_LABEL}</span> ({effectiveTestHomeId || "not linked yet"}), never to the selected source home.
           </p>
+          <button
+            type="button"
+            className="mb-3 px-3 py-2 border rounded text-xs font-semibold"
+            disabled={!effectiveTestHomeId}
+            onClick={() => setOpenFullHomeEditor(true)}
+          >
+            Open Full Home Details Editor (all variables)
+          </button>
           <div className="grid grid-cols-2 gap-2 mb-3">
             <label className="text-xs">
               <span className="block mb-1">Square feet</span>
@@ -366,6 +417,14 @@ export default function GapFillLabCanonicalClient() {
           <p className="text-xs text-brand-navy/70 mb-3">
             Structured field edits below write into the JSON payload and still save through the same test-home lab save action.
           </p>
+          <button
+            type="button"
+            className="mb-3 px-3 py-2 border rounded text-xs font-semibold"
+            disabled={!effectiveTestHomeId}
+            onClick={() => setOpenFullApplianceEditor(true)}
+          >
+            Open Full Appliances Editor (all variables)
+          </button>
           <div className="grid grid-cols-1 gap-2 mb-3">
             <label className="text-xs">
               <span className="block mb-1">Fuel configuration</span>
@@ -602,6 +661,53 @@ export default function GapFillLabCanonicalClient() {
           ))}
         </div>
       </details>
+
+      <Modal
+        open={openFullHomeEditor}
+        title="Test Home Details (Full Editor)"
+        onClose={() => setOpenFullHomeEditor(false)}
+      >
+        <HomeDetailsClient
+          houseId={effectiveTestHomeId || "test-home"}
+          loadUrl="/api/admin/tools/gapfill-lab/test-home/home-profile"
+          saveUrl="/api/admin/tools/gapfill-lab/test-home/home-profile"
+          prefillUrl="/api/admin/tools/gapfill-lab/test-home/home-profile/prefill"
+          awardEntries={false}
+          onSaved={async () => {
+            const refreshed = await fetch("/api/admin/tools/gapfill-lab/test-home/home-profile?houseId=test-home", {
+              cache: "no-store",
+            })
+              .then((r) => r.json())
+              .catch(() => null);
+            if (refreshed?.ok && refreshed?.profile) {
+              setHomeProfileJson(prettyJson(refreshed.profile));
+            }
+          }}
+        />
+      </Modal>
+
+      <Modal
+        open={openFullApplianceEditor}
+        title="Test Home Appliances (Full Editor)"
+        onClose={() => setOpenFullApplianceEditor(false)}
+      >
+        <AppliancesClient
+          houseId={effectiveTestHomeId || "test-home"}
+          loadUrl="/api/admin/tools/gapfill-lab/test-home/appliances"
+          saveUrl="/api/admin/tools/gapfill-lab/test-home/appliances"
+          awardEntries={false}
+          onSaved={async () => {
+            const refreshed = await fetch("/api/admin/tools/gapfill-lab/test-home/appliances?houseId=test-home", {
+              cache: "no-store",
+            })
+              .then((r) => r.json())
+              .catch(() => null);
+            if (refreshed?.ok && refreshed?.profile) {
+              setApplianceProfileJson(prettyJson(refreshed.profile));
+            }
+          }}
+        />
+      </Modal>
     </div>
   );
 }

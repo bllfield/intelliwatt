@@ -192,7 +192,21 @@ function applyPrefill(state: FormState, p: any): FormState {
   return mergePrefillIntoHomeDetailsState(state as any, p as any) as any;
 }
 
-export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSaved?: () => void | Promise<void> }) {
+export function HomeDetailsClient({
+  houseId,
+  onSaved,
+  loadUrl = "/api/user/home-profile",
+  saveUrl = "/api/user/home-profile",
+  prefillUrl = "/api/user/home-profile/prefill",
+  awardEntries = true,
+}: {
+  houseId: string;
+  onSaved?: () => void | Promise<void>;
+  loadUrl?: string;
+  saveUrl?: string;
+  prefillUrl?: string;
+  awardEntries?: boolean;
+}) {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -208,8 +222,8 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
       setError(null);
       try {
         const [profileRes, prefillRes] = await Promise.all([
-          fetch(`/api/user/home-profile?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" }),
-          fetch(`/api/user/home-profile/prefill?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" }),
+          fetch(`${loadUrl}?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" }),
+          fetch(`${prefillUrl}?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" }),
         ]);
         const profileJson = (await profileRes.json().catch(() => null)) as LoadResp | null;
         const prefillJson = (await prefillRes.json().catch(() => null)) as PrefillResp | null;
@@ -273,7 +287,7 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
     return () => {
       cancelled = true;
     };
-  }, [houseId]);
+  }, [houseId, loadUrl, prefillUrl]);
 
   const resetToPrefill = () => {
     if (prefill && (prefill as any).ok === true) {
@@ -338,7 +352,7 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
           : undefined,
       };
 
-      const res = await fetch("/api/user/home-profile", {
+      const res = await fetch(saveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -355,19 +369,21 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
       setSavedAt((json as any).updatedAt ?? new Date().toISOString());
 
       // Award entry (client-side best-effort; server-side status refresh can also compute later).
-      try {
-        const stored = localStorage.getItem("intelliwatt_home_details_complete");
-        if (stored !== "true") {
-          await fetch("/api/user/entries", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: "home_details_complete", amount: 1, houseId }),
-          });
-          window.dispatchEvent(new CustomEvent("entriesUpdated"));
-          localStorage.setItem("intelliwatt_home_details_complete", "true");
+      if (awardEntries) {
+        try {
+          const stored = localStorage.getItem("intelliwatt_home_details_complete");
+          if (stored !== "true") {
+            await fetch("/api/user/entries", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type: "home_details_complete", amount: 1, houseId }),
+            });
+            window.dispatchEvent(new CustomEvent("entriesUpdated"));
+            localStorage.setItem("intelliwatt_home_details_complete", "true");
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
 
       if (onSaved) await Promise.resolve(onSaved());

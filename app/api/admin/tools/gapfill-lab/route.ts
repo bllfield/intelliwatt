@@ -420,6 +420,10 @@ export async function POST(req: NextRequest) {
 
   if (rawAction === "lookup_source_houses") {
     const link = labOwnerUserId ? await getLabTestHomeLink(labOwnerUserId) : null;
+    const testHomeTravelRanges =
+      labOwnerUserId && link?.testHomeHouseId
+        ? await getTravelRangesFromDb(labOwnerUserId, String(link.testHomeHouseId))
+        : [];
     const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
     return NextResponse.json({
       ok: true,
@@ -430,8 +434,10 @@ export async function POST(req: NextRequest) {
         esiid: h.esiid ? String(h.esiid) : null,
         label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
       })),
-      selectedSourceHouseId: sourceHouseIdParam,
+      selectedSourceHouseId: sourceHouseIdParam || String(link?.sourceHouseId ?? ""),
       testHomeLink: link,
+      travelRangesFromDb: testHomeTravelRanges,
+      travelRangesSource: "test_home",
       userDefaultValidationSelectionMode,
       adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
       supportedValidationSelectionModes: VALIDATION_SELECTION_MODES,

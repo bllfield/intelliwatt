@@ -543,7 +543,19 @@ const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSaved?: () => void | Promise<void> }) {
+export function AppliancesClient({
+  houseId,
+  onSaved,
+  loadUrl = "/api/user/appliances",
+  saveUrl = "/api/user/appliances",
+  awardEntries = true,
+}: {
+  houseId: string;
+  onSaved?: () => void | Promise<void>;
+  loadUrl?: string;
+  saveUrl?: string;
+  awardEntries?: boolean;
+}) {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -557,7 +569,7 @@ export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSave
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/user/appliances?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" });
+        const res = await fetch(`${loadUrl}?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" });
         const json = (await res.json().catch(() => null)) as LoadResp | null;
         if (!res.ok || !json || json.ok !== true) throw new Error(friendlyErrorMessage((json as any)?.error || `HTTP ${res.status}`));
         if (cancelled) return;
@@ -575,7 +587,7 @@ export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSave
     return () => {
       cancelled = true;
     };
-  }, [houseId]);
+  }, [houseId, loadUrl]);
 
   const removeRow = (id: string) => setRows((r) => r.filter((x) => x.id !== id));
   const addUnit = (type: ApplianceType) => setRows((r) => [...r, { id: uid(), type, data: {} }]);
@@ -589,7 +601,7 @@ export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSave
       if (!requireNonEmptyString(fuelConfiguration)) {
         throw new Error("Please select a fuel configuration before saving.");
       }
-      const res = await fetch("/api/user/appliances", {
+      const res = await fetch(saveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ houseId, profile: { version: 1, fuelConfiguration, appliances: rows } }),
@@ -601,19 +613,21 @@ export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSave
       setSavedAt(json.updatedAt ?? new Date().toISOString());
 
       // Best-effort entry award.
-      try {
-        const stored = localStorage.getItem("intelliwatt_appliances_complete");
-        if (stored !== "true") {
-          await fetch("/api/user/entries", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: "appliance_details_complete", amount: 1, houseId }),
-          });
-          window.dispatchEvent(new CustomEvent("entriesUpdated"));
-          localStorage.setItem("intelliwatt_appliances_complete", "true");
+      if (awardEntries) {
+        try {
+          const stored = localStorage.getItem("intelliwatt_appliances_complete");
+          if (stored !== "true") {
+            await fetch("/api/user/entries", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type: "appliance_details_complete", amount: 1, houseId }),
+            });
+            window.dispatchEvent(new CustomEvent("entriesUpdated"));
+            localStorage.setItem("intelliwatt_appliances_complete", "true");
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
 
       if (onSaved) await Promise.resolve(onSaved());

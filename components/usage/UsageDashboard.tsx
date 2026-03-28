@@ -760,7 +760,7 @@ export const UsageDashboard: React.FC<Props> = ({
             </div>
           ) : null}
 
-          {houses.length > 1 ? (
+          {!dashboardVariant && houses.length > 1 ? (
             <label className="text-sm text-neutral-700">
               <span className="mr-2 text-xs uppercase tracking-wide text-neutral-500">Home</span>
               <select
