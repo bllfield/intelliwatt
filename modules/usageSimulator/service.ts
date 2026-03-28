@@ -4332,7 +4332,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
     if (validationOnlyDateKeysLocal.length === 0) return dataset;
     const keySet = new Set<string>(validationOnlyDateKeysLocal);
     const tz = String(timezoneHint ?? (dataset as any)?.meta?.timezone ?? "America/Chicago");
-    const projected = dataset;
+    const projected = cloneDatasetForProjection(dataset);
     if (Array.isArray(projected.daily)) {
       projected.daily = projected.daily.filter(
         (row: any) => !keySet.has(String(row?.date ?? "").slice(0, 10))
