@@ -3838,6 +3838,10 @@ export async function recalcSimulatorBuild(args: {
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
+  let boundedValidationOnlyDateKeysLocalForBuild = boundDateKeysToCoverageWindow(
+    requestedValidationOnlyDateKeysLocal,
+    resolveCanonicalUsage365CoverageWindow()
+  );
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
@@ -3852,11 +3856,11 @@ export async function recalcSimulatorBuild(args: {
         smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
         canonicalWindow?.end ??
         `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
-      const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
       const boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
         requestedValidationOnlyDateKeysLocal,
-        sharedCoverageWindow
+        { startDate, endDate }
       );
+      boundedValidationOnlyDateKeysLocalForBuild = boundedValidationOnlyDateKeysLocal;
       const recalcBuildInputs: SimulatorBuildInputsV1 = {
         version: 1,
         mode,
@@ -3922,12 +3926,7 @@ export async function recalcSimulatorBuild(args: {
     weekdayWeekendShape96: built.weekdayWeekendShape96,
     travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
     actualContextHouseId,
-    validationOnlyDateKeysLocal: Array.from(
-      boundDateKeysToCoverageWindow(
-        requestedValidationOnlyDateKeysLocal,
-        resolveCanonicalUsage365CoverageWindow()
-      )
-    ).sort(),
+    validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocalForBuild).sort(),
     timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,
