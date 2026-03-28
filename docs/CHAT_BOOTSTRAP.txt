@@ -19,11 +19,11 @@ Follow docs/CHATGPT_HOUSE_RULES.md:
 SHARED SIM → DROPLET (SHIPPED 2026-03-27, EXTENDED)
 ========================================
 
-- **One runner:** `scripts/droplet/sim-job-run.ts <jobKind> <id>` — `jobKind` is **`gapfill_compare`** (`id` = `compareRunId`) or **`past_sim_recalc`** (`id` = `SimDropletJob` row id). Same repo checkout, usage DB, and TS entry pattern as other droplet jobs. Legacy `scripts/droplet/gapfill-compare-run.ts` still works but **`sim-job-run.ts` is canonical**.
-- **Webhook:** `deploy/droplet/webhook_server.py` on **`POST /trigger/smt-now`**: `reason: "gapfill_compare"` (body: `compareRunId`) and `reason: "past_sim_recalc"` (body: `jobId`). Same secret headers as SMT. **`INTELLIWATT_APP_ROOT`** → repo root for `npx tsx`.
-- **Gap-Fill compare enqueue:** When webhook URL + secret are set, admin `compare_core` persists **`queuedPayloadJson`** on `GapfillCompareRunSnapshot`, returns **`compareExecutionMode: "droplet_async"`**, triggers webhook. **`GAPFILL_COMPARE_INLINE=true`** forces in-request compare.
+- **One runner:** `scripts/droplet/sim-job-run.ts <jobKind> <id>` remains for droplet workers; `jobKind` can be **`gapfill_compare`** (legacy/rollback path) or **`past_sim_recalc`** (active for recalc jobs).
+- **Webhook:** `deploy/droplet/webhook_server.py` still handles **`POST /trigger/smt-now`** for both reasons above.
+- **Gap-Fill compare canonical path:** admin `compare_core` is now **inline canonical** and uses one recalc + one canonical read family (`getSimulatedUsageForHouseScenario` / `GET /api/user/usage/simulated/house`) for simulated truth. Droplet compare exists only for legacy rollback diagnostics.
 - **Past sim recalc enqueue:** `dispatchPastSimRecalc` (`modules/usageSimulator/pastSimRecalcDispatch.ts`) calls the same **`recalcSimulatorBuild`** as before, either inline or via **`SimDropletJob`** + droplet worker (`runPastSimRecalcQueuedWorker`). User **`POST /api/user/simulator/recalc`** returns **`executionMode: "droplet_async"`** + **`jobId`**; poll **`GET /api/user/simulator/recalc?jobId=`**. Admin inspect **`GET /api/admin/simulation-engines?...&pastRecalcJobId=`** for status. **`PAST_SIM_RECALC_INLINE=true`** or **`SIM_DROPLET_EXECUTION_INLINE=true`** forces inline execution on Vercel.
-- **Shared pipeline (Gap-Fill):** `runGapfillCompareCorePipeline` — compare math only in **`buildGapfillCompareSimShared`** (`service.ts`). UI polls **`compare_run_poll`**, then **`compare_heavy_*`** by `compareRunId`.
+- **Shared pipeline (Gap-Fill):** canonical compare path recalcs Past once with validation-only keys, reads from canonical saved artifact family, then applies baseline-vs-accuracy projection only (no compare-only simulator as canonical truth).
 
 ========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)
@@ -444,21 +444,15 @@ After `post_pull.sh` completes, the droplet nginx/site + systemd config for EFL 
   curl -i https://efl-pdftotext.intelliwatt.com/health
 Optional: run `git fetch origin` followed by `git status -sb`; it should show `## main...origin/main`.
 
-GAP-FILL COMPARE (DROPLET ASYNC) — POST-WEBHOOK PATH
-----------------------------------------------------
+GAP-FILL COMPARE CANONICAL PATH (INLINE)
+----------------------------------------
 
-After Vercel POSTs to `/trigger/smt-now` with `reason: "gapfill_compare"` and `compareRunId`, the webhook
-starts `npx tsx scripts/droplet/sim-job-run.ts gapfill_compare <compareRunId>` with cwd `INTELLIWATT_APP_ROOT`
-(default `/home/deploy/apps/intelliwatt`). **Spawn is synchronous:** if `Popen` fails (missing `npx`/`tsx`,
-bad cwd), the handler raises and the HTTP response is **500** — not a fake 200. Vercel’s
-`triggerDropletSimWebhook` treats success only when **HTTP OK and JSON `ok: true`**; otherwise it marks the
-compare run **failed** with `DROPLET_WEBHOOK_HANDOFF_FAILED` instead of leaving a silent `queued` row.
-The worker calls `runGapfillCompareQueuedWorker`, which should move the DB row off `queued` early (see
-`markGapfillCompareRunRunning` in `gapfillCompareCorePipeline` for `resumeExistingCompareRunId`). Subprocess
-stdout/stderr append to `deploy/droplet/logs/sim-job-run.log` under the app root; journal lines include
-`[gapfill_compare]`, `[sim_job] spawn`, and `[sim_job] spawned pid=`. If the row stays `queued` with no log
-lines after deploy, check droplet `DATABASE_URL` for the Node process and that `tsx` runs under the service
-user.
+Gap-Fill compare now uses one canonical in-request path:
+1) run canonical recalc for Past with travel/vacant + validation-only date keys
+2) read canonical simulated output from `getSimulatedUsageForHouseScenario` (same family as `/api/user/usage/simulated/house`)
+3) generate baseline projection (validation keys excluded) and accuracy projection (validation keys only)
+
+Any droplet `gapfill_compare` route remains legacy fallback only and must not be treated as canonical truth ownership.
 
 DROPLET LOG TAILING (LAST 5 MINUTES)
 ------------------------------------

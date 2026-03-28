@@ -325,6 +325,18 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   return canonicalCoverage;
 }
 
+function normalizeValidationOnlyDateKeysLocal(
+  dateKeys: Set<string> | string[] | null | undefined
+): Set<string> {
+  const out = new Set<string>();
+  if (!dateKeys) return out;
+  for (const raw of Array.isArray(dateKeys) ? dateKeys : Array.from(dateKeys)) {
+    const dk = String(raw ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+  }
+  return out;
+}
+
 export async function rebuildGapfillSharedPastArtifact(args: {
   userId: string;
   houseId: string;
@@ -3450,11 +3462,19 @@ export async function recalcSimulatorBuild(args: {
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;
   persistPastSimBaseline?: boolean;
+  /**
+   * Canonical Gap-Fill validation-only scored days.
+   * These keys are simulated in the same shared recalc run and persisted on the same build/artifact family.
+   */
+  validationOnlyDateKeysLocal?: Set<string> | string[];
   now?: Date;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
   const scenarioKey = normalizeScenarioKey(args.scenarioId);
   const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
+  const requestedValidationOnlyDateKeysLocal = normalizeValidationOnlyDateKeysLocal(
+    args.validationOnlyDateKeysLocal
+  );
 
   // Load persisted baseline inputs
   const [manualRec, homeRec, applianceRec] = await Promise.all([
@@ -3798,6 +3818,10 @@ export async function recalcSimulatorBuild(args: {
         smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
         canonicalWindow?.end ??
         `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
+      const boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
+        requestedValidationOnlyDateKeysLocal,
+        { startDate, endDate }
+      );
       const recalcBuildInputs: SimulatorBuildInputsV1 = {
         version: 1,
         mode,
@@ -3808,6 +3832,7 @@ export async function recalcSimulatorBuild(args: {
         intradayShape96: built.intradayShape96,
         notes: built.notes ?? [],
         filledMonths: built.filledMonths ?? [],
+        validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
         snapshots: { homeProfile, applianceProfile },
       };
       const result = await simulatePastUsageDataset({
@@ -3820,6 +3845,8 @@ export async function recalcSimulatorBuild(args: {
         travelRanges: allTravelRanges,
         buildInputs: recalcBuildInputs,
         buildPathKind: "recalc",
+        forceModeledOutputKeepReferencePoolDateKeysLocal:
+          boundedValidationOnlyDateKeysLocal.size > 0 ? boundedValidationOnlyDateKeysLocal : undefined,
       });
       if (result.dataset !== null && result.stitchedCurve) {
         pastPatchedCurve = result.stitchedCurve;
@@ -3857,6 +3884,12 @@ export async function recalcSimulatorBuild(args: {
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
     travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
+    validationOnlyDateKeysLocal: Array.from(
+      boundDateKeysToCoverageWindow(
+        requestedValidationOnlyDateKeysLocal,
+        resolveCanonicalUsage365CoverageWindow()
+      )
+    ).sort(),
     timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,
@@ -3946,6 +3979,9 @@ export async function recalcSimulatorBuild(args: {
     scenarioId,
     monthProvenanceByMonth,
     actualSource: built.source?.actualSource ?? actualSource ?? null,
+    validationOnlyDateKeysLocal: Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
+      ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
+      : [],
   };
 
   await upsertSimulatorBuild({
@@ -4269,6 +4305,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
   scenarioId?: string | null;
   readMode?: "artifact_only" | "allow_rebuild";
   forceRebuildArtifact?: boolean;
+  projectionMode?: "baseline" | "raw";
 }): Promise<
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | {
@@ -4279,11 +4316,75 @@ export async function getSimulatedUsageForHouseScenario(args: {
       engineVersion?: string;
     }
 > {
+  // Canonical simulated read family for user/admin consumers.
+  // Gap-Fill accuracy must derive simulated truth from this same saved scenario/artifact family
+  // (and /api/user/usage/simulated/house), then apply projection-only filtering.
+  const projectBaselineFromCanonicalDataset = (
+    dataset: any,
+    timezoneHint: string | null | undefined
+  ): any => {
+    const rawKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
+      ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+      : [];
+    const validationOnlyDateKeysLocal = rawKeys
+      .map((v) => String(v ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+    if (validationOnlyDateKeysLocal.length === 0) return dataset;
+    const keySet = new Set<string>(validationOnlyDateKeysLocal);
+    const tz = String(timezoneHint ?? (dataset as any)?.meta?.timezone ?? "America/Chicago");
+    const projected = dataset;
+    if (Array.isArray(projected.daily)) {
+      projected.daily = projected.daily.filter(
+        (row: any) => !keySet.has(String(row?.date ?? "").slice(0, 10))
+      );
+    }
+    if (Array.isArray(projected?.series?.intervals15)) {
+      projected.series = {
+        ...(projected.series ?? {}),
+        intervals15: projected.series.intervals15.filter(
+          (row: any) => !keySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), tz))
+        ),
+      };
+    }
+    if (Array.isArray(projected.monthly) && Array.isArray(projected.daily)) {
+      const byMonth = new Map<string, number>();
+      for (const row of projected.daily as Array<{ date?: string; kwh?: number }>) {
+        const month = String(row?.date ?? "").slice(0, 7);
+        if (!/^\d{4}-\d{2}$/.test(month)) continue;
+        byMonth.set(month, (byMonth.get(month) ?? 0) + (Number(row?.kwh) || 0));
+      }
+      projected.monthly = projected.monthly.map((row: any) => ({
+        ...row,
+        kwh: Number(byMonth.get(String(row?.month ?? "").slice(0, 7)) ?? 0),
+      }));
+    }
+    if (projected?.summary && Array.isArray(projected.daily)) {
+      const totalKwh = projected.daily.reduce(
+        (sum: number, row: any) => sum + (Number(row?.kwh) || 0),
+        0
+      );
+      projected.summary = {
+        ...projected.summary,
+        totalKwh,
+        intervalsCount: Array.isArray(projected?.series?.intervals15)
+          ? projected.series.intervals15.length
+          : projected.summary.intervalsCount,
+      };
+    }
+    projected.meta = {
+      ...(projected.meta ?? {}),
+      validationOnlyDateKeysLocal,
+      validationProjectionApplied: true,
+      validationProjectionType: "baseline_excluding_validation_only_days",
+    };
+    return projected;
+  };
   try {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
     const readMode = args.readMode ?? "allow_rebuild";
     const forceRebuildArtifact = args.forceRebuildArtifact === true;
+    const projectionMode = args.projectionMode ?? "baseline";
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
@@ -4351,7 +4452,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
           });
           return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
         }
-        return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: restored };
+        const projected =
+          projectionMode === "baseline"
+            ? projectBaselineFromCanonicalDataset(
+                restored,
+                String((restored as any)?.meta?.timezone ?? "America/Chicago")
+              )
+            : restored;
+        return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
       }
 
       const buildRec = await (prisma as any).usageSimulatorBuild
@@ -4501,7 +4609,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
         });
         return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
       }
-      return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: restored };
+      const projected =
+        projectionMode === "baseline"
+          ? projectBaselineFromCanonicalDataset(
+              restored,
+              String((buildInputs as any)?.timezone ?? "America/Chicago")
+            )
+          : restored;
+      return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
     }
 
     let scenarioRow: { id: string; name: string } | null = null;
@@ -4996,7 +5111,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
       });
       return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
     }
-    return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset };
+    const projected =
+      projectionMode === "baseline"
+        ? projectBaselineFromCanonicalDataset(
+            dataset,
+            String((buildInputs as any)?.timezone ?? "America/Chicago")
+          )
+        : dataset;
+    return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
   } catch (e) {
     console.error("[usageSimulator/service] getSimulatedUsageForHouseScenario failed", e);
     return { ok: false, code: "INTERNAL_ERROR", message: "Internal error" };

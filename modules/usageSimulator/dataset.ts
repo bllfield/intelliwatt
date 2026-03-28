@@ -506,6 +506,11 @@ export type SimulatorBuildInputsV1 = {
   intradayShape96: number[];
   weekdayWeekendShape96?: { weekday: number[]; weekend: number[] };
   travelRanges?: Array<{ startDate: string; endDate: string }>;
+  /**
+   * Gap-Fill validation-only days simulated in the canonical recalc run.
+   * These keys must be excluded from baseline projection displays.
+   */
+  validationOnlyDateKeysLocal?: string[];
   notes?: string[];
   filledMonths?: string[];
   // Snapshots (for auditing / future UI): not required for regen.
@@ -627,6 +632,11 @@ export type SimulatedUsageDatasetMeta = {
   }>;
   /** Canonical shared-sim daily totals keyed by simulated local date. */
   canonicalArtifactSimulatedDayTotalsByDate?: Record<string, number>;
+  /**
+   * Gap-Fill validation-only scored day keys.
+   * Baseline projection must hide these days from baseline display surfaces.
+   */
+  validationOnlyDateKeysLocal?: string[];
 };
 
 export type SimulatedUsageDataset = {
