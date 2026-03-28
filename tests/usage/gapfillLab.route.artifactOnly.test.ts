@@ -2814,7 +2814,8 @@ describe("gapfill-lab route artifact-only hard lock", () => {
     expect(clientSource).toContain("snapshotReaderAction");
     expect(clientSource).toContain("scoredDayTruthRowsCompact");
     expect(clientSource).toContain("const [compareRunId, setCompareRunId] = useState<string | null>(null);");
-    expect(clientSource).toContain("const [compareRunStatus, setCompareRunStatus] = useState<\"started\" | \"running\" | \"succeeded\" | \"failed\" | null>(null);");
+    expect(clientSource).toContain("const [compareRunStatus, setCompareRunStatus] = useState<");
+    expect(clientSource).toContain("\"queued\"");
     expect(clientSource).toContain("function syncCompareRunState(data: ApiResponse | null | undefined)");
     expect(clientSource).toContain("...prev,");
   });

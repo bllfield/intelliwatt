@@ -151,7 +151,7 @@ type ApiResponse =
       compareCoreMode?: string;
       compareCoreStepTimings?: Record<string, number>;
       compareRunId?: string | null;
-      compareRunStatus?: "started" | "running" | "succeeded" | "failed" | null;
+      compareRunStatus?: "started" | "running" | "succeeded" | "failed" | "queued" | null;
       compareRunSnapshotReady?: boolean;
       selectedFreshIntervalCount?: number;
       selectedActualIntervalCount?: number;
@@ -212,7 +212,7 @@ type ApiResponse =
       overlapCount?: number;
       overlapSample?: string[];
       compareRunId?: string | null;
-      compareRunStatus?: "started" | "running" | "succeeded" | "failed" | null;
+      compareRunStatus?: "started" | "running" | "succeeded" | "failed" | "queued" | null;
       compareRunSnapshotReady?: boolean;
     };
 
@@ -714,7 +714,9 @@ export default function GapFillLabClient() {
   >(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
-  const [compareRunStatus, setCompareRunStatus] = useState<"started" | "running" | "succeeded" | "failed" | null>(null);
+  const [compareRunStatus, setCompareRunStatus] = useState<
+    "started" | "running" | "succeeded" | "failed" | "queued" | null
+  >(null);
   const [compareRunSnapshotReady, setCompareRunSnapshotReady] = useState<boolean | null>(null);
   const [travelRangesFromDb, setTravelRangesFromDb] = useState<RangeRow[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
@@ -1192,7 +1194,8 @@ export default function GapFillLabClient() {
       runStatusRaw === "started" ||
       runStatusRaw === "running" ||
       runStatusRaw === "succeeded" ||
-      runStatusRaw === "failed"
+      runStatusRaw === "failed" ||
+      runStatusRaw === "queued"
     ) {
       setCompareRunStatus(runStatusRaw);
     }
@@ -1794,7 +1797,7 @@ export default function GapFillLabClient() {
           setProgressStatus(null);
           return;
         }
-        setProgressStatus("Compare running on droplet; waiting for snapshot…");
+        setProgressStatus("Droplet compare: polling…");
         const pollMs = 2500;
         const deadline = Date.now() + 45 * 60_000;
         let polled: ApiResponse | null = null;
@@ -1811,6 +1814,16 @@ export default function GapFillLabClient() {
           );
           polled = pollResult.data;
           syncCompareRunState(pollResult.data);
+          if (pollResult.res.ok && pollResult.data && typeof pollResult.data === "object") {
+            const d = pollResult.data as any;
+            const st = d.compareRunStatus ?? "—";
+            const ph = d.phase ?? d.compareRunTiming?.phase ?? "—";
+            const upd =
+              typeof d.compareRunTiming?.updatedAt === "string" ? d.compareRunTiming.updatedAt : "";
+            setProgressStatus(
+              `Droplet compare: status=${String(st)} · phase=${String(ph)}${upd ? ` · row updated ${upd}` : ""}`
+            );
+          }
           if (
             pollResult.res.ok &&
             pollResult.data.ok &&

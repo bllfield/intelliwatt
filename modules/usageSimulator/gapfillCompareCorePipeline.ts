@@ -170,7 +170,7 @@ export async function runGapfillCompareCorePipeline(
     out.compareRunId = resumeExistingCompareRunId;
     out.compareRunStatus = "running";
     // Droplet worker: move off `queued` before heavy I/O so poll does not spin forever on `compare_async_queued`.
-    await markGapfillCompareRunRunning({
+    const markedRunning = await markGapfillCompareRunRunning({
       compareRunId: resumeExistingCompareRunId,
       phase: "compare_worker_loading_intervals",
       statusMeta: {
@@ -180,6 +180,30 @@ export async function runGapfillCompareCorePipeline(
         workerPhase: "pre_load_actual_intervals",
       },
     });
+    if (!markedRunning) {
+      out.compareRunStatus = "failed";
+      await markGapfillCompareRunFailed({
+        compareRunId: resumeExistingCompareRunId,
+        phase: "compare_worker_mark_running_failed",
+        failureCode: "COMPARE_RUN_STATE_UPDATE_FAILED",
+        failureMessage:
+          "Could not persist running status for this compare run (usage DB unavailable or row update failed).",
+        statusMeta: {
+          route: "admin_gapfill_lab",
+          dropletResume: true,
+        },
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "compare_run_state_update_failed",
+          message: "Compare run could not be marked running on the usage database.",
+          compareRunId: resumeExistingCompareRunId,
+          compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
+        },
+        { status: 503 }
+      );
+    }
   }
 
   const testDateKeysSorted = Array.from(testDateKeysLocal).sort();
