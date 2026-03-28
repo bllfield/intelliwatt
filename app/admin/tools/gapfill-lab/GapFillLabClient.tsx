@@ -652,6 +652,28 @@ function isArtifactRebuildRequiredError(errorCode: unknown): boolean {
   );
 }
 
+const DROPLET_WEBHOOK_DEBUG_NOTE =
+  "The droplet webhook is not called from this page; Vercel POSTs to the droplet. For [gapfill_compare] / [sim_job] lines and npx output, SSH to the droplet: journalctl for the webhook service, and INTELLIWATT_APP_ROOT/deploy/droplet/logs/sim-job-run.log.";
+
+/** Small subset of compare_run_poll JSON for Step Payloads / Last Attempt (avoids large snapshot fields). */
+function slimCompareRunPollResponse(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  return {
+    ok: d.ok,
+    action: d.action,
+    compareRunId: d.compareRunId,
+    compareRunStatus: d.compareRunStatus,
+    compareRunSnapshotReady: d.compareRunSnapshotReady,
+    phase: d.phase,
+    failureCode: d.failureCode,
+    failureMessage: d.failureMessage,
+    compareRunTiming: d.compareRunTiming,
+    compareFreshMode: d.compareFreshMode,
+    noRecompute: d.noRecompute,
+  };
+}
+
 /** Re-compute when Chicago calendar day rolls so `resolveCanonicalUsage365CoverageWindow()` label fallbacks stay in sync. */
 function useChicagoCalendarDayKey(): string {
   const [key, setKey] = useState(() => chicagoDateKey());
@@ -1814,6 +1836,20 @@ export default function GapFillLabClient() {
           );
           polled = pollResult.data;
           syncCompareRunState(pollResult.data);
+          setLastAttemptDebug((prev) => ({
+            ...(prev ?? {}),
+            dropletComparePollLastAt: new Date().toISOString(),
+            dropletComparePollHttpStatus: pollResult.res.status,
+            dropletComparePollRequest: {
+              action: "compare_run_poll",
+              email: trimmed,
+              timezone,
+              houseId: houseId || undefined,
+              compareRunId: rid,
+            },
+            dropletComparePollResponseSlim: slimCompareRunPollResponse(pollResult.data),
+            dropletWebhookDebugNote: DROPLET_WEBHOOK_DEBUG_NOTE,
+          }));
           if (pollResult.res.ok && pollResult.data && typeof pollResult.data === "object") {
             const d = pollResult.data as any;
             const st = d.compareRunStatus ?? "—";
@@ -2855,6 +2891,33 @@ export default function GapFillLabClient() {
               { key: "usage365_load", request: (lastAttemptDebug as any).usageBody, response: (lastAttemptDebug as any).usageResponse, status: (lastAttemptDebug as any).usageStatus },
               { key: "artifact_ensure", request: (lastAttemptDebug as any).ensureBody, response: (lastAttemptDebug as any).ensureResponse, status: (lastAttemptDebug as any).ensureStatus },
               { key: "compare_core", request: (lastAttemptDebug as any).compareCoreBody, response: (lastAttemptDebug as any).coreResponse, status: (lastAttemptDebug as any).coreStatus },
+              {
+                key: "compare_run_poll (droplet wait)",
+                request: (lastAttemptDebug as any).dropletComparePollRequest ?? null,
+                response: (lastAttemptDebug as any).dropletComparePollResponseSlim ?? null,
+                status: (lastAttemptDebug as any).dropletComparePollHttpStatus ?? null,
+              },
+              ...(((lastAttemptDebug as any).dropletComparePollLastAt
+                ? [
+                    {
+                      key: "droplet_webhook (not on Vercel)",
+                      request: {
+                        note: (lastAttemptDebug as any).dropletWebhookDebugNote ?? DROPLET_WEBHOOK_DEBUG_NOTE,
+                      },
+                      response: {
+                        lastPollAt: (lastAttemptDebug as any).dropletComparePollLastAt ?? null,
+                        hint:
+                          "This UI only shows usage-DB state via compare_run_poll. Webhook HTTP and npx/tsx stderr live on the droplet (journal + sim-job-run.log).",
+                      },
+                      status: null,
+                    },
+                  ]
+                : []) as Array<{
+                key: string;
+                request: unknown;
+                response: unknown;
+                status: number | null;
+              }>),
               {
                 key: "snapshot_manifest_reader",
                 request: latestSnapshotReaderByAction.compare_heavy_manifest?.requestSummary ?? null,
