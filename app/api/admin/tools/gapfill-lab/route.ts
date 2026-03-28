@@ -369,6 +369,9 @@ export async function POST(req: NextRequest) {
         {
           ok: false,
           error: replaced.error ?? "replace_test_home_failed",
+          message:
+            replaced.message ??
+            "Test-home replace failed before post-load snapshot.",
         },
         { status: 500 }
       );

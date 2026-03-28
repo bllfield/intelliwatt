@@ -263,6 +263,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
   testHomeHouseId?: string;
   sourceHouseId?: string;
   error?: string;
+  message?: string;
 }> {
   const sourceHouse = await (prisma as any).houseAddress
     .findFirst({
@@ -313,8 +314,6 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       const usageSimulatorScenarioModel = resolveModel(tx, "usageSimulatorScenario");
       const usageSimulatorScenarioEventModel = resolveModel(tx, "usageSimulatorScenarioEvent");
       const manualUsageInputModel = resolveModel(tx, "manualUsageInput");
-      const pastSimulatedDatasetCacheModel = resolveModel(tx, "pastSimulatedDatasetCache");
-      const gapfillCompareRunSnapshotModel = resolveModel(tx, "gapfillCompareRunSnapshot");
       const houseAddressModel = resolveModel(tx, "houseAddress");
       if (!usageSimulatorBuildModel?.deleteMany) throw new Error("usageSimulatorBuild_model_unavailable");
       if (!usageSimulatorScenarioModel?.findMany || !usageSimulatorScenarioModel?.deleteMany) {
@@ -322,8 +321,6 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       }
       if (!usageSimulatorScenarioEventModel?.deleteMany) throw new Error("usageSimulatorScenarioEvent_model_unavailable");
       if (!manualUsageInputModel?.deleteMany) throw new Error("manualUsageInput_model_unavailable");
-      if (!pastSimulatedDatasetCacheModel?.deleteMany) throw new Error("pastSimulatedDatasetCache_model_unavailable");
-      if (!gapfillCompareRunSnapshotModel?.deleteMany) throw new Error("gapfillCompareRunSnapshot_model_unavailable");
       if (!houseAddressModel?.update) throw new Error("houseAddress_model_unavailable");
       // Remove all existing lab-owned data first.
       await usageSimulatorBuildModel.deleteMany({
@@ -344,12 +341,6 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       }
       await manualUsageInputModel.deleteMany({
         where: { userId: args.ownerUserId, houseId: testHome!.id },
-      });
-      await pastSimulatedDatasetCacheModel.deleteMany({
-        where: { houseId: testHome!.id },
-      });
-      await gapfillCompareRunSnapshotModel.deleteMany({
-        where: { houseId: testHome!.id },
       });
 
       // Copy selected source-house location/detail fields onto test home identity.
@@ -393,6 +384,18 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         targetHouseId: testHome!.id,
       });
     });
+
+    // usage-module records are owned by usagePrisma, so clear them outside the main-db transaction.
+    await (usagePrisma as any).pastSimulatedDatasetCache
+      ?.deleteMany?.({
+        where: { houseId: testHome!.id },
+      })
+      .catch(() => null);
+    await (usagePrisma as any).gapfillCompareRunSnapshot
+      ?.deleteMany?.({
+        where: { houseId: testHome!.id },
+      })
+      .catch(() => null);
 
     await upsertLabTestHomeLink({
       ownerUserId: args.ownerUserId,
@@ -473,7 +476,11 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         statusMessage: error instanceof Error ? error.message : "replace_lab_test_home_failed",
       });
     }
-    return { ok: false, error: "replace_lab_test_home_failed" };
+    return {
+      ok: false,
+      error: "replace_lab_test_home_failed",
+      message: error instanceof Error ? error.message : "replace_lab_test_home_failed",
+    };
   }
 }
 
