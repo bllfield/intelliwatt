@@ -125,8 +125,8 @@ export default function GapFillLabCanonicalClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requestDebug, setRequestDebug] = useState<any[]>([]);
-  const [usageMonthlyView, setUsageMonthlyView] = useState<"bar" | "line">("bar");
-  const [usageDailyView, setUsageDailyView] = useState<"line" | "bars">("line");
+  const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
+  const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
 
   async function runAction(action: string, extra: Record<string, unknown> = {}) {
     setLoading(true);
