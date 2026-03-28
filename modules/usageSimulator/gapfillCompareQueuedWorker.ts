@@ -62,7 +62,10 @@ export async function runGapfillCompareQueuedWorker(compareRunId: string): Promi
     p.travelRangesFromDb.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, p.timezone))
   );
   const testDateKeysLocal = new Set<string>(p.testDateKeysLocal);
-  const guardrailExcludedDateKeysLocal = new Set<string>([...travelDateKeysLocal, ...testDateKeysLocal]);
+  const guardrailExcludedDateKeysLocal = new Set<string>([
+    ...Array.from(travelDateKeysLocal),
+    ...Array.from(testDateKeysLocal),
+  ]);
   const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
   if (overlapLocal.size > 0) {
     throw new Error("test_overlaps_travel_replay");
