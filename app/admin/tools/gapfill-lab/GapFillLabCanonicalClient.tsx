@@ -94,6 +94,8 @@ type RunResult = {
 
 const EMPTY_RANGE: DateRange = { startDate: "", endDate: "" };
 const TEST_HOME_DISPLAY_LABEL = "Test Home";
+/** Client wait for gapfill-lab POST; keep under `maxDuration` in `app/api/admin/tools/gapfill-lab/route.ts` (300s). */
+const GAPFILL_LAB_HTTP_FETCH_MS = 295_000;
 
 function prettyJson(v: unknown): string {
   return JSON.stringify(v ?? {}, null, 2);
@@ -244,7 +246,7 @@ export default function GapFillLabCanonicalClient() {
     let json: RunResult;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      const timeoutId = setTimeout(() => controller.abort(), GAPFILL_LAB_HTTP_FETCH_MS);
       try {
         resp = await fetch("/api/admin/tools/gapfill-lab", {
           method: "POST",

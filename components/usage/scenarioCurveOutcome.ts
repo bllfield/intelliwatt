@@ -33,7 +33,7 @@ export function scenarioCurveOutcomeFromFetch(params: {
     return {
       kind: "timeout",
       message:
-        "Loading timed out. Check your connection and retry, or save again to recompute.",
+        "Loading exceeded the browser wait limit (Past sim can take several minutes on first load). Retry, or wait and refresh after save/recompute finishes.",
     };
   }
 

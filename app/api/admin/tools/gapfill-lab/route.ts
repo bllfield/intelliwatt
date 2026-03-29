@@ -125,12 +125,15 @@ import {
 
 
 export const dynamic = "force-dynamic";
-// Vercel serverless ceiling (seconds). Keep tight: OOM/thrash can otherwise run many minutes before the
-// platform kills the instance; shorter wall-clock returns a 504/classified timeout sooner on bad runs.
-// Sum(shared compare + report) must stay under this with margin.
-export const maxDuration = 120;
-// Cooperative abort for rebuild/compare; keep sum(shared + report) under maxDuration with margin.
-const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 75_000;
+// Vercel serverless ceiling (seconds). Canonical test-home recalc can run several minutes (fingerprints + day sim).
+// Keep sum(recalc timeout + post-recalc artifact read) under this with margin.
+export const maxDuration = 300;
+/** Shared rebuilds (artifact ensure, etc.); stay well under maxDuration. */
+const ROUTE_REBUILD_SHARED_TIMEOUT_MS = 120_000;
+/** `run_test_home_canonical_recalc`: `recalcSimulatorBuild` alone can exceed 75s on real houses. */
+const ROUTE_CANONICAL_RECALC_TIMEOUT_MS = 240_000;
+/** Read after successful recalc; must leave headroom under maxDuration when added to recalc. */
+const ROUTE_CANONICAL_READ_AFTER_RECALC_TIMEOUT_MS = 55_000;
 
 const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
 const VALIDATION_SELECTION_MODES = [
@@ -1065,7 +1068,7 @@ export async function POST(req: NextRequest) {
           correlationId: labCorrelationId,
           adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
         }),
-        ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+        ROUTE_CANONICAL_RECALC_TIMEOUT_MS,
         "canonical_recalc_timeout"
       );
     } catch (recalcError: unknown) {
@@ -1081,7 +1084,7 @@ export async function POST(req: NextRequest) {
           userId: labOwnerUser.id,
           houseId: testHomeHouse.id,
           scenarioId: String(pastScenario.id),
-          durationMs: ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+          durationMs: ROUTE_CANONICAL_RECALC_TIMEOUT_MS,
         });
       }
       return NextResponse.json(
@@ -1123,7 +1126,7 @@ export async function POST(req: NextRequest) {
           projectionMode: "baseline",
           correlationId: labCorrelationId,
         }),
-        ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+        ROUTE_CANONICAL_READ_AFTER_RECALC_TIMEOUT_MS,
         "canonical_read_timeout"
       );
     } catch (readError: unknown) {

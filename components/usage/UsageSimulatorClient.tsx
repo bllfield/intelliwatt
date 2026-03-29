@@ -17,6 +17,12 @@ import {
   scenarioCurveOutcomeFromFetch,
 } from "@/components/usage/scenarioCurveOutcome";
 
+/**
+ * Client wait for GET `/api/user/usage/simulated/house` (Past/Future curve + compare).
+ * Keep below `maxDuration` in `app/api/user/usage/simulated/house/route.ts` (300s); fingerprint + day sim can exceed 2 minutes.
+ */
+const SIMULATED_HOUSE_SCENARIO_FETCH_MS = 280_000;
+
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 
 type UsageApiResp =
@@ -466,8 +472,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       const curveLabel = curveView === "PAST" ? "Past" : "Future";
       try {
         const controller = new AbortController();
-        // Avoid indefinite "Showing baseline..." state if the scenario endpoint hangs.
-        timeoutId = setTimeout(() => controller.abort(), 120_000);
+        // Avoid indefinite loading if the scenario endpoint hangs (server allows up to maxDuration).
+        timeoutId = setTimeout(() => controller.abort(), SIMULATED_HOUSE_SCENARIO_FETCH_MS);
         const r = await fetch(
           `/api/user/usage/simulated/house?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(viewScenarioId)}`,
           { cache: "no-store", signal: controller.signal },
