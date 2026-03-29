@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { GAPFILL_CANONICAL_LAB_TREATMENT_MODE } from "@/lib/api/gapfillLabAdminSerialization";
 
 vi.mock("server-only", () => ({}));
 
@@ -34,8 +35,16 @@ const prisma: any = {
   user: { findUnique: vi.fn(), findFirst: vi.fn() },
   houseAddress: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
   usageSimulatorScenario: { findFirst: vi.fn() },
+  usageSimulatorBuild: { findUnique: vi.fn() },
   $transaction: vi.fn(),
 };
+
+const pastSimulatedDatasetCacheFindFirst = vi.fn();
+vi.mock("@/lib/db/usageClient", () => ({
+  usagePrisma: {
+    pastSimulatedDatasetCache: { findFirst: (...args: any[]) => pastSimulatedDatasetCacheFindFirst(...args) },
+  },
+}));
 
 vi.mock("@/lib/auth/admin", () => ({
   requireAdmin: () => ({ ok: true, status: 200, body: { ok: true } }),
@@ -156,6 +165,21 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       return null;
     });
     prisma.usageSimulatorScenario.findFirst.mockResolvedValue({ id: "past-s1" });
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValue({
+      id: "build-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
+      buildInputsHash: "hash-from-build-row",
+      buildInputs: {
+        effectiveValidationSelectionMode: "manual",
+        validationSelectionDiagnostics: { modeUsed: "manual" },
+      },
+    });
+    pastSimulatedDatasetCacheFindFirst.mockResolvedValue({
+      id: "artifact-1",
+      updatedAt: new Date("2026-01-02T00:01:00.000Z"),
+      inputHash: "artifact-input-hash",
+      engineVersion: "production_past_stitched_v1",
+    });
     prisma.$transaction.mockImplementation(async (fn: any) => await fn({
       usageSimulatorScenario: {
         findFirst: vi.fn().mockResolvedValue({ id: "past-s1" }),
@@ -254,7 +278,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
             daily: [{ date: "2025-04-11", kwh: 8 }],
             monthly: [{ month: "2025-04", kwh: 8 }],
             series: { intervals15: [{ timestamp: "2025-04-11T00:00:00.000Z", kwh: 2 }] },
-            meta: { validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"], validationProjectionApplied: true },
+            meta: {
+              validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+              validationProjectionApplied: true,
+              artifactHashMatch: true,
+              artifactUpdatedAt: "2026-01-02T00:00:00.000Z",
+              artifactSourceNote: "exact",
+              artifactRecomputed: false,
+              artifactSourceMode: "exact_hash_match",
+            },
           },
         };
       }
@@ -434,6 +466,18 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(projectionModes).toEqual(["baseline"]);
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
     expect(readModes).toEqual(["artifact_only"]);
+    expect(body.sourceHouseId).toBe("h1");
+    expect(body.testHomeId).toBe("test-home-1");
+    // Fixed admin-lab visibility key for this action today (not a runtime treatment switch).
+    expect(body.treatmentMode).toBe(GAPFILL_CANONICAL_LAB_TREATMENT_MODE);
+    expect(body.adminValidationMode).toBeTruthy();
+    expect(body.effectiveValidationSelectionMode).toBe("manual");
+    expect(body.effectiveValidationSelectionModeSource).toBe("usage_simulator_build");
+    expect(body.buildId).toBe("build-1");
+    expect(body.artifactId).toBe("artifact-1");
+    expect(body.fingerprintBuildFreshness?.state).toBe("ready");
+    expect(body.fingerprintBuildFreshness?.builtAt).toBe("2026-01-02T00:00:00.000Z");
+    expect(body.failureCode).toBeUndefined();
   });
 
   it("returns explicit canonical recalc timeout without route hang", async () => {
@@ -460,6 +504,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(res.status).toBe(504);
     expect(body.ok).toBe(false);
     expect(body.error).toBe("canonical_recalc_timeout");
+    expect(body.failureCode).toBeTruthy();
+    expect(body.failureMessage).toBeTruthy();
   });
 
   it("blocks save when test-home replace status is not ready", async () => {

@@ -11,7 +11,11 @@ import {
   type AdjustmentType,
 } from "@/lib/usageScenario/catalog";
 import { ScenarioUpgradesEditor } from "@/components/upgrades/ScenarioUpgradesEditor";
-
+import {
+  type ScenarioCurveOutcome,
+  recalcUserMessageFromResponse,
+  scenarioCurveOutcomeFromFetch,
+} from "@/components/usage/scenarioCurveOutcome";
 
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 
@@ -56,7 +60,7 @@ type ScenarioHouseResp =
         metrics?: Record<string, number | null>;
       };
     }
-  | { ok: false; code: string; message: string };
+  | { ok: false; code: string; message: string; failureCode?: string; failureMessage?: string };
 
 type RequirementsDbStatus = "ok" | "missing_env" | "unreachable" | "error";
 
@@ -126,6 +130,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [loadingActual, setLoadingActual] = useState(false);
   const [recalcBusy, setRecalcBusy] = useState(false);
   const [recalcNote, setRecalcNote] = useState<string | null>(null);
+  /** Recalc strip coloring (plan §8 — timeout vs success vs failure). */
+  const [recalcBannerTone, setRecalcBannerTone] = useState<"neutral" | "success" | "warning" | "error">("neutral");
   const [refreshToken, setRefreshToken] = useState(0);
   const [canRecalc, setCanRecalc] = useState(false);
   const [missingRequirements, setMissingRequirements] = useState<string[]>([]);
@@ -144,7 +150,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [scenarios, setScenarios] = useState<Array<{ id: string; name: string }>>([]);
   const [builds, setBuilds] = useState<BuildsResp extends { ok: true } ? BuildsResp["builds"] : any[]>([]);
   const [scenarioSimHouseOverride, setScenarioSimHouseOverride] = useState<any[] | null>(null);
-  const [scenarioBanner, setScenarioBanner] = useState<string | null>(null);
+  const [scenarioCurveOutcome, setScenarioCurveOutcome] = useState<ScenarioCurveOutcome | null>(null);
   const [scenarioCompareProjection, setScenarioCompareProjection] = useState<{
     rows: Array<{
       localDate: string;
@@ -449,7 +455,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     let cancelled = false;
     (async () => {
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      setScenarioBanner(null);
+      setScenarioCurveOutcome(null);
       setScenarioSimHouseOverride(null);
       if (!viewScenarioId || viewScenarioId === "baseline") {
         setScenarioLoading(false);
@@ -457,6 +463,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         return;
       }
       setScenarioLoading(true);
+      const curveLabel = curveView === "PAST" ? "Past" : "Future";
       try {
         const controller = new AbortController();
         // Avoid indefinite "Showing baseline..." state if the scenario endpoint hangs.
@@ -467,44 +474,48 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         );
         const j = (await r.json().catch(() => null)) as ScenarioHouseResp | null;
         if (cancelled) return;
-        if (!r.ok) {
-          const isGatewayTimeout = r.status === 504 || r.status === 502;
-          const msg =
-            isGatewayTimeout
-              ? `${curveView === "PAST" ? "Past" : "Future"} simulated usage timed out before completion. Recalculate and try again.`
-              : j && "message" in j && typeof (j as any).message === "string"
-                ? String((j as any).message)
-                : "Scenario not computed yet. Save changes in this workspace to compute it.";
-          setScenarioBanner(msg);
+        const outcome = scenarioCurveOutcomeFromFetch({
+          httpOk: r.ok,
+          httpStatus: r.status,
+          json: (j ?? null) as Record<string, unknown> | null,
+          aborted: false,
+          curveLabel,
+        });
+        setScenarioCurveOutcome(outcome);
+        if (outcome.kind !== "success") {
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
           return;
         }
-        if (!j?.ok) {
-          const msg = j?.message ? String(j.message) : "Scenario not computed yet. Save changes in this workspace to compute it.";
-          setScenarioBanner(msg);
+        if (!j || j.ok !== true) {
+          setScenarioCurveOutcome({
+            kind: "failed",
+            message: "Simulated usage response was incomplete. Try again or save to recompute.",
+          });
           setScenarioSimHouseOverride(null);
+          setScenarioCompareProjection(null);
           return;
         }
-        setScenarioBanner(null);
+        const okBody = j;
         setScenarioSimHouseOverride([
           {
             houseId,
             label: "Scenario",
             address: { line1: "", city: null, state: null },
             esiid: null,
-            dataset: j.dataset,
+            dataset: okBody.dataset,
             alternatives: { smt: null, greenButton: null },
           },
         ]);
-        const compareRows = Array.isArray((j as any)?.compareProjection?.rows)
-          ? ((j as any).compareProjection.rows as Array<any>)
-          : Array.isArray((j as any)?.dataset?.meta?.validationCompareRows)
-            ? ((j as any).dataset.meta.validationCompareRows as Array<any>)
+        const compareRows = Array.isArray(okBody.compareProjection?.rows)
+          ? okBody.compareProjection.rows
+          : Array.isArray(okBody.dataset?.meta?.validationCompareRows)
+            ? okBody.dataset.meta.validationCompareRows
             : [];
-        const compareMetrics = (j as any)?.compareProjection?.metrics ?? (j as any)?.dataset?.meta?.validationCompareMetrics ?? {};
+        const compareMetrics =
+          okBody.compareProjection?.metrics ?? okBody.dataset?.meta?.validationCompareMetrics ?? {};
         setScenarioCompareProjection({
-          rows: compareRows.map((row) => ({
+          rows: compareRows.map((row: Record<string, unknown> & { dayType?: string }) => ({
             localDate: String(row?.localDate ?? "").slice(0, 10),
             dayType: row?.dayType === "weekend" ? "weekend" : "weekday",
             actualDayKwh: Number(row?.actualDayKwh ?? 0) || 0,
@@ -519,11 +530,15 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         });
       } catch (e: any) {
         if (!cancelled) {
-          const timedOut = e?.name === "AbortError";
-          setScenarioBanner(
-            timedOut
-              ? "Scenario calculation is taking longer than expected. Try again, or save once more to recompute."
-              : "Unable to load scenario dataset. Try saving again to recompute."
+          const aborted = e?.name === "AbortError";
+          setScenarioCurveOutcome(
+            scenarioCurveOutcomeFromFetch({
+              httpOk: false,
+              httpStatus: 0,
+              json: null,
+              aborted,
+              curveLabel,
+            })
           );
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
@@ -788,6 +803,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
   async function recalcNow(args: { scenarioId: string | null; note?: string }) {
     setRecalcBusy(true);
+    setRecalcBannerTone("neutral");
     setRecalcNote(args.note ?? "Updating curves…");
     try {
       const r = await fetch("/api/user/simulator/recalc", {
@@ -800,21 +816,36 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           weatherPreference,
         }),
       });
-      const j = (await r.json().catch(() => null)) as any;
-      if (!r.ok || !j?.ok) {
-        if (j?.error === "requirements_unmet" && Array.isArray(j?.missingItems) && j.missingItems.length > 0) {
-          setMissingRequirements(j.missingItems);
-          setRecalcNote("Complete the required details below before we can calculate.");
+      const j = (await r.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!r.ok || !j || j.ok !== true) {
+        if (j && j.error === "requirements_unmet" && Array.isArray((j as any).missingItems) && (j as any).missingItems.length > 0) {
+          setMissingRequirements((j as any).missingItems as string[]);
         } else {
-          setRecalcNote(j?.error ? String(j.error) : `Recalc failed (${r.status})`);
+          setMissingRequirements([]);
         }
+        const feedback = recalcUserMessageFromResponse({
+          httpOk: r.ok,
+          httpStatus: r.status,
+          json: j,
+        });
+        setRecalcNote(feedback.text);
+        setRecalcBannerTone(
+          feedback.tone === "success" ? "success" : feedback.tone === "timeout" ? "warning" : "error"
+        );
         return;
       }
       setMissingRequirements([]);
-      setRecalcNote("Updated.");
+      const feedback = recalcUserMessageFromResponse({
+        httpOk: true,
+        httpStatus: r.status,
+        json: j,
+      });
+      setRecalcNote(feedback.text);
+      setRecalcBannerTone(feedback.tone === "success" ? "success" : "neutral");
       setRefreshToken((x) => x + 1);
     } catch (e: any) {
       setRecalcNote(e?.message ?? String(e));
+      setRecalcBannerTone("error");
     } finally {
       setRecalcBusy(false);
     }
@@ -1172,20 +1203,60 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                 </div>
                 <div className="md:col-span-4">
                   {curveView !== "BASELINE" && scenarioLoading ? (
-                    <div className="rounded-xl border border-brand-cyan/20 bg-brand-cyan/5 px-3 py-2 text-xs text-brand-cyan flex items-center gap-2">
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="rounded-xl border border-brand-cyan/20 bg-brand-cyan/5 px-3 py-2 text-xs text-brand-cyan flex items-center gap-2"
+                    >
                       <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-cyan/40 border-t-brand-cyan" aria-hidden />
-                      {curveView === "PAST" ? "Calculating Past simulated usage…" : "Calculating Future simulated usage…"}
+                      {curveView === "PAST" ? "Loading Past simulated usage…" : "Loading Future simulated usage…"}
                     </div>
-                  ) : curveView !== "BASELINE" && scenarioBanner ? (
-                    <div className="rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-cyan/80">
-                      <div>{scenarioBanner}</div>
+                  ) : curveView !== "BASELINE" && scenarioCurveOutcome?.kind === "no_build" ? (
+                    <div className="rounded-xl border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-50">
+                      <div className="font-semibold text-amber-100">Not calculated yet</div>
+                      <div className="mt-1 text-amber-50/95">{scenarioCurveOutcome.message}</div>
                       <button
                         type="button"
                         onClick={() => {
-                          setScenarioBanner(null);
+                          setScenarioCurveOutcome(null);
                           setRefreshToken((x) => x + 1);
                         }}
-                        className="mt-2 inline-flex rounded-lg border border-brand-cyan/30 bg-brand-cyan/10 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan hover:bg-brand-cyan/20"
+                        className="mt-2 inline-flex rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-50 hover:bg-amber-500/30"
+                      >
+                        Retry load
+                      </button>
+                    </div>
+                  ) : curveView !== "BASELINE" && scenarioCurveOutcome?.kind === "timeout" ? (
+                    <div className="rounded-xl border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-50">
+                      <div className="font-semibold text-amber-100">Timed out</div>
+                      <div className="mt-1 text-amber-50/95">{scenarioCurveOutcome.message}</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScenarioCurveOutcome(null);
+                          setRefreshToken((x) => x + 1);
+                        }}
+                        className="mt-2 inline-flex rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-50 hover:bg-amber-500/30"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : curveView !== "BASELINE" && scenarioCurveOutcome?.kind === "failed" ? (
+                    <div className="rounded-xl border border-rose-400/35 bg-rose-700/20 px-3 py-2 text-xs text-rose-50">
+                      <div className="font-semibold text-rose-100">Could not load simulated usage</div>
+                      <div className="mt-1 text-rose-50/95">{scenarioCurveOutcome.message}</div>
+                      {scenarioCurveOutcome.failureCode ? (
+                        <div className="mt-1 text-[0.65rem] font-mono text-rose-200/90">
+                          {scenarioCurveOutcome.failureCode}
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScenarioCurveOutcome(null);
+                          setRefreshToken((x) => x + 1);
+                        }}
+                        className="mt-2 inline-flex rounded-lg border border-rose-300/40 bg-rose-500/25 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-rose-50 hover:bg-rose-500/35"
                       >
                         Retry
                       </button>
@@ -1242,15 +1313,45 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       Future
                     </button>
                   </div>
+                  {recalcBusy ? (
+                    <div
+                      className="mt-2 flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-wide text-brand-cyan/75"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-brand-cyan/35 border-t-brand-cyan"
+                        aria-hidden
+                      />
+                      {curveView === "BASELINE"
+                        ? "Rebuilding usage curve…"
+                        : curveView === "PAST"
+                          ? "Rebuilding Past simulated curve…"
+                          : "Rebuilding Future simulated curve…"}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {recalcBusy || recalcNote ? (
+        {!recalcBusy && recalcNote ? (
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <div className="text-xs text-brand-cyan/80">{recalcBusy ? "Updating curves…" : recalcNote}</div>
+            <div
+              className={[
+                "text-xs",
+                recalcBannerTone === "success"
+                  ? "text-emerald-300/90"
+                  : recalcBannerTone === "warning"
+                    ? "text-amber-200/90"
+                    : recalcBannerTone === "error"
+                      ? "text-rose-200/90"
+                      : "text-brand-cyan/80",
+              ].join(" ")}
+            >
+              {recalcNote}
+            </div>
           </div>
         ) : null}
       </div>
@@ -1261,7 +1362,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           <div className="mt-1 text-xs text-brand-navy/70">
             This section compares modeled vs actual on validation days for simulator accuracy transparency.
           </div>
-          {scenarioCompareProjection?.rows?.length ? (
+          {scenarioLoading ? (
+            <div className="mt-2 text-xs text-brand-navy/70" role="status" aria-live="polite">
+              Loading compare data…
+            </div>
+          ) : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length ? (
             <>
               <div className="mt-2 text-xs text-brand-navy/80">
                 WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% ·
@@ -1297,6 +1402,18 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                 </table>
               </div>
             </>
+          ) : scenarioCurveOutcome?.kind === "success" ? (
+            <div className="mt-2 text-xs text-brand-navy/70">
+              No validation/test-day compare rows are available for this Past scenario yet.
+            </div>
+          ) : scenarioCurveOutcome?.kind === "no_build" ? (
+            <div className="mt-2 text-xs text-brand-navy/70">
+              Compare is unavailable until Past simulated usage is built. Recalculate or save your workspace, then retry.
+            </div>
+          ) : scenarioCurveOutcome?.kind === "timeout" || scenarioCurveOutcome?.kind === "failed" ? (
+            <div className="mt-2 text-xs text-brand-navy/70">
+              Compare is unavailable until simulated usage loads successfully.
+            </div>
           ) : (
             <div className="mt-2 text-xs text-brand-navy/70">
               No validation/test-day compare rows are available for this Past scenario yet.
@@ -1306,44 +1423,92 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       ) : null}
 
       <div id="preview">
-        {curveView !== "BASELINE" && scenarioLoading ? (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-brand-navy/30 bg-brand-navy/10 px-3 py-2 text-xs text-brand-navy">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-navy/40 border-t-brand-navy" aria-hidden />
-            Showing baseline while {curveView === "PAST" ? "Past" : "Future"} simulated usage is calculated…
-          </div>
-        ) : null}
-        {curveView !== "BASELINE" && !scenarioLoading && scenarioBanner ? (
-          <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-            <div className="font-semibold">
-              {curveView === "PAST" ? "Past simulated usage failed to load." : "Future simulated usage failed to load."}
-            </div>
-            <div className="mt-1">{scenarioBanner}</div>
-            <button
-              type="button"
-              onClick={() => {
-                setScenarioBanner(null);
-                setRefreshToken((x) => x + 1);
-              }}
-              className="mt-2 inline-flex rounded-lg border border-red-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-red-700 hover:bg-red-100"
-            >
-              Retry scenario load
-            </button>
-          </div>
-        ) : (
+        {curveView === "BASELINE" ? (
           <UsageDashboard
             forcedMode="SIMULATED"
             allowModeToggle={false}
             initialMode="SIMULATED"
             refreshToken={refreshToken}
-            simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
-            fetchModeOverride={curveView === "BASELINE" ? "REAL" : undefined}
+            simulatedHousesOverride={null}
+            fetchModeOverride="REAL"
+            dashboardVariant="USAGE"
+          />
+        ) : scenarioLoading ? (
+          <div
+            className="mb-2 flex items-center gap-2 rounded-lg border border-brand-navy/30 bg-brand-navy/10 px-3 py-2 text-xs text-brand-navy"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-navy/40 border-t-brand-navy" aria-hidden />
+            Preparing {curveView === "PAST" ? "Past" : "Future"} curve — not showing placeholder data.
+          </div>
+        ) : scenarioCurveOutcome?.kind === "success" ? (
+          <UsageDashboard
+            forcedMode="SIMULATED"
+            allowModeToggle={false}
+            initialMode="SIMULATED"
+            refreshToken={refreshToken}
+            simulatedHousesOverride={scenarioSimHouseOverride}
+            fetchModeOverride={undefined}
             dashboardVariant={
-              curveView === "BASELINE" ? "USAGE" : curveView === "PAST" ? "PAST_SIMULATED_USAGE" : "FUTURE_SIMULATED_USAGE"
+              curveView === "PAST" ? "PAST_SIMULATED_USAGE" : "FUTURE_SIMULATED_USAGE"
             }
             pastVariables={curveView === "PAST" || curveView === "FUTURE" ? dashboardPastVariables : undefined}
             futureVariables={curveView === "FUTURE" ? dashboardFutureVariables : undefined}
           />
-        )}
+        ) : scenarioCurveOutcome?.kind === "no_build" ? (
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-950">
+            <div className="font-semibold">
+              {curveView === "PAST" ? "Past simulated usage is not built yet." : "Future simulated usage is not built yet."}
+            </div>
+            <div className="mt-1">{scenarioCurveOutcome.message}</div>
+            <button
+              type="button"
+              onClick={() => {
+                setScenarioCurveOutcome(null);
+                setRefreshToken((x) => x + 1);
+              }}
+              className="mt-2 inline-flex rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-900 hover:bg-amber-100"
+            >
+              Retry load
+            </button>
+          </div>
+        ) : scenarioCurveOutcome?.kind === "timeout" ? (
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-950">
+            <div className="font-semibold">Request timed out</div>
+            <div className="mt-1">{scenarioCurveOutcome.message}</div>
+            <button
+              type="button"
+              onClick={() => {
+                setScenarioCurveOutcome(null);
+                setRefreshToken((x) => x + 1);
+              }}
+              className="mt-2 inline-flex rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-900 hover:bg-amber-100"
+            >
+              Retry scenario load
+            </button>
+          </div>
+        ) : scenarioCurveOutcome?.kind === "failed" ? (
+          <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-900">
+            <div className="font-semibold">
+              {curveView === "PAST" ? "Past simulated usage failed to load." : "Future simulated usage failed to load."}
+            </div>
+            <div className="mt-1">{scenarioCurveOutcome.message}</div>
+            {scenarioCurveOutcome.failureCode ? (
+              <div className="mt-1 text-[0.65rem] font-mono text-red-800/90">{scenarioCurveOutcome.failureCode}</div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setScenarioCurveOutcome(null);
+                setRefreshToken((x) => x + 1);
+              }}
+              className="mt-2 inline-flex rounded-lg border border-red-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-red-800 hover:bg-red-100"
+            >
+              Retry scenario load
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <Modal

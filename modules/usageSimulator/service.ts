@@ -1305,6 +1305,8 @@ export async function buildGapfillCompareSimShared(args: {
    * to avoid holding two full-year interval arrays during selected-days / full-window fresh sim.
    */
   preloadedIdentityActualIntervals?: Array<{ timestamp: string; kwh: number }>;
+  /** Observability: threaded into cold/shared Past sim via `getPastSimulatedDatasetForHouse` → `simulatePastUsageDataset`. */
+  correlationId?: string;
 }): Promise<GapfillCompareSimSharedResult> {
   const {
     userId,
@@ -1326,6 +1328,7 @@ export async function buildGapfillCompareSimShared(args: {
     onPhaseUpdate,
     abortSignal,
     preloadedIdentityActualIntervals,
+    correlationId: compareSharedCorrelationId,
   } = args;
   const actualIntervalsForSharedPastSim =
     preloadedIdentityActualIntervals != null && preloadedIdentityActualIntervals.length > 0
@@ -1593,6 +1596,7 @@ export async function buildGapfillCompareSimShared(args: {
       buildPathKind: "lab_validation",
       // Exact artifact parity depends on canonical simulated-day totals from the shared build.
       includeSimulatedDayResults: true,
+      correlationId: compareSharedCorrelationId,
     });
     if (pastResult.dataset === null) {
       return {
@@ -4366,6 +4370,8 @@ export async function getPastSimulatedDatasetForHouse(args: {
   buildPathKind?: "cold_build" | "recalc" | "lab_validation";
   /** Explicit caller intent; defaults true to preserve current behavior. */
   includeSimulatedDayResults?: boolean;
+  /** Observability: threaded into `simulatePastUsageDataset` when set (cold build trace alignment). */
+  correlationId?: string;
 }): Promise<
   | {
       dataset: Awaited<ReturnType<typeof buildSimulatedUsageDatasetFromCurve>>;
@@ -4387,6 +4393,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
     timezone,
     buildPathKind = "cold_build",
     includeSimulatedDayResults = true,
+    correlationId,
   } = args;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
@@ -4404,6 +4411,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
       buildInputs,
       buildPathKind,
       includeSimulatedDayResults,
+      correlationId,
     });
     if (result.dataset === null) {
       return { dataset: null, error: (result as { error: string }).error ?? "simulatePastUsageDataset failed" };
@@ -5319,6 +5327,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               startDate,
               endDate,
               timezone,
+              correlationId: args.correlationId,
             });
             if (pastResult.dataset === null) {
               await reportSimulationDataIssue({

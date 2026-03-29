@@ -60,6 +60,12 @@ import {
 } from "@/modules/usageSimulator/labTestHome";
 import { createSimCorrelationId, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { attachFailureContract } from "@/lib/api/usageSimulationApiContract";
+import {
+  GAPFILL_CANONICAL_LAB_TREATMENT_MODE,
+  readEffectiveValidationFromBuildInputs,
+  serializeFingerprintBuildFreshnessFromDatasetMeta,
+} from "@/lib/api/gapfillLabAdminSerialization";
+import { usagePrisma } from "@/lib/db/usageClient";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   classifySimulationFailure,
@@ -560,12 +566,18 @@ export async function POST(req: NextRequest) {
         esiid: h.esiid ? String(h.esiid) : null,
         label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
       })),
+      sourceHouseId: selectedSourceHouseId,
+      testHomeId: testHomeHouseId || null,
       selectedSourceHouseId,
       testHomeLink: link,
       travelRangesFromDb: testHomeTravelRanges,
       travelRangesSource: "test_home",
       userDefaultValidationSelectionMode,
       adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
+      /** No UsageSimulatorBuild context until recalc; UI should not infer. */
+      effectiveValidationSelectionMode: null,
+      adminValidationMode: null,
+      treatmentMode: null,
       supportedValidationSelectionModes: VALIDATION_SELECTION_MODES,
     });
   }
@@ -645,6 +657,8 @@ export async function POST(req: NextRequest) {
         ok: true,
         action: "replace_test_home_from_source",
         sourceUser: { id: user.id, email: user.email },
+        sourceHouseId: selectedSourceHouse.id,
+        testHomeId: testHome?.id ?? String(replaced.testHomeHouseId ?? ""),
         sourceHouse: {
           id: selectedSourceHouse.id,
           esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
@@ -667,6 +681,11 @@ export async function POST(req: NextRequest) {
         travelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home" : "source_house_fallback",
         testHomeLink: refreshedLink,
+        userDefaultValidationSelectionMode: await getUserDefaultValidationSelectionMode(),
+        adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
+        effectiveValidationSelectionMode: null,
+        adminValidationMode: null,
+        treatmentMode: null,
       });
     } catch (postLoadError: unknown) {
       return NextResponse.json(
@@ -780,6 +799,13 @@ export async function POST(req: NextRequest) {
       ok: true,
       action: "save_test_home_inputs",
       testHomeHouseId: link.testHomeHouseId,
+      sourceHouseId: link.sourceHouseId ?? null,
+      testHomeId: link.testHomeHouseId,
+      userDefaultValidationSelectionMode: await getUserDefaultValidationSelectionMode(),
+      adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
+      effectiveValidationSelectionMode: null,
+      adminValidationMode: null,
+      treatmentMode: null,
       homeProfile: refreshedProfiles.homeProfile,
       applianceProfile: refreshedProfiles.applianceProfile,
       travelRangesFromDb: refreshedTravel,
@@ -1106,6 +1132,41 @@ export async function POST(req: NextRequest) {
     }
 
     const baselineDataset = baselineRead.dataset as any;
+    const metaRaw =
+      baselineDataset && typeof baselineDataset === "object" && baselineDataset.meta && typeof baselineDataset.meta === "object"
+        ? (baselineDataset.meta as Record<string, unknown>)
+        : null;
+    const fingerprintBuildFreshness = serializeFingerprintBuildFreshnessFromDatasetMeta(metaRaw);
+
+    const buildRow = await (prisma as any).usageSimulatorBuild
+      .findUnique({
+        where: {
+          userId_houseId_scenarioKey: {
+            userId: labOwnerUser.id,
+            houseId: testHomeHouse.id,
+            scenarioKey: String(pastScenario.id),
+          },
+        },
+        select: { id: true, lastBuiltAt: true, buildInputsHash: true, buildInputs: true },
+      })
+      .catch(() => null);
+
+    const { effectiveValidationSelectionMode, fromBuildInputs: effectiveValidationFromBuild } =
+      readEffectiveValidationFromBuildInputs(
+        buildRow?.buildInputs as Record<string, unknown> | undefined,
+        testSelectionMode
+      );
+
+    const artifactRow = await (usagePrisma as any).pastSimulatedDatasetCache
+      .findFirst({
+        where: { houseId: testHomeHouse.id, scenarioId: String(pastScenario.id) },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true, updatedAt: true, inputHash: true, engineVersion: true },
+      })
+      .catch(() => null);
+
+    const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
+
     const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
     // Shared compare sidecar remains the canonical modeled-vs-actual projection family.
     const compareProjection = buildValidationCompareProjectionSidecar(baselineDataset);
@@ -1140,8 +1201,14 @@ export async function POST(req: NextRequest) {
       ok: true,
       action: "run_test_home_canonical_recalc",
       mode: "canonical_test_home_lab",
+      correlationId: labCorrelationId,
       email: user.email,
       sourceUserId: user.id,
+      sourceHouseId: sourceHouse.id,
+      testHomeId: testHomeHouse.id,
+      /** Authoritative visibility: single fixed matrix key for this action today (not a selector). See `GAPFILL_CANONICAL_LAB_TREATMENT_MODE`. */
+      treatmentMode: GAPFILL_CANONICAL_LAB_TREATMENT_MODE,
+      simulatorMode: "SMT_BASELINE",
       sourceHouse: {
         id: sourceHouse.id,
         label: [sourceHouse.addressLine1, sourceHouse.addressCity, sourceHouse.addressState].filter(Boolean).join(", ") || sourceHouse.id,
@@ -1163,12 +1230,25 @@ export async function POST(req: NextRequest) {
       travelRangesFromDb,
       testRangesUsed,
       testSelectionMode,
+      adminValidationMode: testSelectionMode,
+      userDefaultValidationSelectionMode,
+      effectiveValidationSelectionMode,
+      effectiveValidationSelectionModeSource: effectiveValidationFromBuild ? "usage_simulator_build" : "request_fallback",
       testDaysRequested,
       testDaysSelected,
       seedUsed,
       selectionDiagnostics,
+      validationSelectionDiagnostics: selectionDiagnostics,
       usage365,
       baselineDatasetProjection: baselineDataset,
+      buildId: buildRow?.id ?? null,
+      buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,
+      buildInputsHash: buildRow?.buildInputsHash ?? recalcOut.buildInputsHash,
+      artifactId: artifactRow?.id ?? null,
+      artifactInputHash: artifactRow?.inputHash ?? null,
+      artifactCacheUpdatedAt: artifactRow?.updatedAt instanceof Date ? artifactRow.updatedAt.toISOString() : null,
+      artifactEngineVersion: artifactRow?.engineVersion ?? null,
+      fingerprintBuildFreshness,
       scoredDayTruthRows,
       metrics: {
         mae: Number(compareMetrics.mae ?? 0) || 0,
@@ -1192,7 +1272,7 @@ export async function POST(req: NextRequest) {
         projectionMode: "baseline_vs_accuracy",
         validationOnlyDateKeysLocal: selectedDateKeysSorted,
         actualContextHouseId: sourceHouse.id,
-        userDefaultValidationSelectionMode: await getUserDefaultValidationSelectionMode(),
+        userDefaultValidationSelectionMode,
         adminLabValidationSelectionMode: testSelectionMode,
       },
     });

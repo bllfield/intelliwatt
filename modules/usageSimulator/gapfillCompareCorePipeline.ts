@@ -499,6 +499,7 @@ export async function runGapfillCompareCorePipeline(
         : reportSharedComparePhaseLogOnly,
       abortSignal: compareCoreAbort.signal,
       preloadedIdentityActualIntervals: actualIntervals,
+      correlationId: out.compareRunId ?? undefined,
     });
   } catch (err: unknown) {
     const normalizedError = normalizeRouteError(

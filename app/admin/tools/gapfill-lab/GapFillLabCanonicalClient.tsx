@@ -4,6 +4,12 @@ import { useMemo, useState } from "react";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
+import {
+  gapfillFailureFieldsFromJson,
+  gapfillPrimaryErrorLine,
+  type GapfillFailureFields,
+} from "@/components/admin/gapfillLabAdminUi";
+import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdminSerialization";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
 type DateRange = { startDate: string; endDate: string };
@@ -42,6 +48,7 @@ type RunResult = {
     freshCompareSimDayKwh: number;
     actualVsFreshErrorKwh: number;
     dayType: "weekday" | "weekend";
+    percentError?: number | null;
   }>;
   metrics?: Record<string, number>;
   canonicalWindow?: { startDate: string; endDate: string; helper?: string };
@@ -51,12 +58,34 @@ type RunResult = {
   adminLabDefaultValidationSelectionMode?: string;
   supportedValidationSelectionModes?: string[];
   selectionDiagnostics?: Record<string, unknown>;
+  validationSelectionDiagnostics?: Record<string, unknown>;
+  weatherKind?: string;
+  testSelectionMode?: string;
+  sourceHouseId?: string;
+  testHomeId?: string;
+  treatmentMode?: string | null;
+  simulatorMode?: string;
+  adminValidationMode?: string;
+  effectiveValidationSelectionMode?: string | null;
+  effectiveValidationSelectionModeSource?: string;
+  fingerprintBuildFreshness?: FingerprintBuildFreshnessPayload | null;
+  buildId?: string | null;
+  artifactId?: string | null;
+  correlationId?: string;
+  artifactCacheUpdatedAt?: string | null;
+  artifactEngineVersion?: string | null;
+  artifactInputHash?: string | null;
+  buildLastBuiltAt?: string | null;
+  buildInputsHash?: string | null;
 } | {
   ok: false;
   error: string;
   message?: string;
   detail?: string;
   testHomeLink?: any;
+  failureCode?: string;
+  failureMessage?: string;
+  reasonCode?: string;
 };
 
 const EMPTY_RANGE: DateRange = { startDate: "", endDate: "" };
@@ -160,6 +189,8 @@ export default function GapFillLabCanonicalClient() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastFailureFields, setLastFailureFields] = useState<GapfillFailureFields | null>(null);
+  const [lastHttpStatus, setLastHttpStatus] = useState<number | null>(null);
   const [requestDebug, setRequestDebug] = useState<any[]>([]);
   const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
@@ -189,6 +220,8 @@ export default function GapFillLabCanonicalClient() {
   async function runAction(action: string, extra: Record<string, unknown> = {}) {
     setLoading(true);
     setError(null);
+    setLastFailureFields(null);
+    setLastHttpStatus(null);
     const payload = {
       action,
       email,
@@ -235,6 +268,8 @@ export default function GapFillLabCanonicalClient() {
             ? err.message
             : "Request failed.",
       };
+      const ff = gapfillFailureFieldsFromJson(fallback as Record<string, unknown>);
+      setLastFailureFields({ ...ff, failureCode: timedOut ? "REQUEST_TIMEOUT" : "REQUEST_FAILED", failureMessage: gapfillPrimaryErrorLine(ff) });
       setRequestDebug((prev) => [
         {
           at: new Date().toISOString(),
@@ -246,10 +281,11 @@ export default function GapFillLabCanonicalClient() {
         ...prev,
       ].slice(0, 12));
       setResult(fallback);
-      setError(fallback.message ?? fallback.error);
+      setError(gapfillPrimaryErrorLine(ff));
       setLoading(false);
       return fallback;
     }
+    setLastHttpStatus(resp.status);
     setRequestDebug((prev) => [
       {
         at: new Date().toISOString(),
@@ -262,7 +298,13 @@ export default function GapFillLabCanonicalClient() {
     ].slice(0, 12));
     setResult(json);
     if (!json.ok) {
-      setError(json.message ?? json.error);
+      const ff = gapfillFailureFieldsFromJson(json as Record<string, unknown>);
+      setLastFailureFields(ff);
+      const isTimeout = resp.status === 504 || resp.status === 502 || String(json.error ?? "").includes("timeout");
+      const line = isTimeout
+        ? gapfillPrimaryErrorLine(ff) || "Server timed out before completion."
+        : gapfillPrimaryErrorLine(ff);
+      setError(line);
       setLoading(false);
       return json;
     }
@@ -285,7 +327,9 @@ export default function GapFillLabCanonicalClient() {
     if (Array.isArray(json.supportedValidationSelectionModes) && json.supportedValidationSelectionModes.length > 0) {
       setSupportedValidationSelectionModes(json.supportedValidationSelectionModes.map((m) => String(m)));
     }
-    if (!json.userDefaultValidationSelectionMode && json.adminLabDefaultValidationSelectionMode) {
+    if (typeof json.testSelectionMode === "string" && json.testSelectionMode.trim()) {
+      setAdminLabValidationSelectionMode(String(json.testSelectionMode));
+    } else if (!json.userDefaultValidationSelectionMode && json.adminLabDefaultValidationSelectionMode) {
       setAdminLabValidationSelectionMode(String(json.adminLabDefaultValidationSelectionMode));
     }
     if (json.travelRangesFromDb) {
@@ -355,6 +399,51 @@ export default function GapFillLabCanonicalClient() {
     return toPayloadFromBaseline(result.baselineDatasetProjection, timezone);
   }, [result, timezone]);
 
+  const hasCurveData = Boolean(
+    (usageChart?.daily && usageChart.daily.length > 0) || (baselineChart?.daily && baselineChart.daily.length > 0)
+  );
+
+  const visibilityFromResult = useMemo(() => {
+    if (!result?.ok) return null;
+    const r = result;
+    const ma = r.modelAssumptions && typeof r.modelAssumptions === "object" ? r.modelAssumptions : null;
+    const userDef =
+      (typeof r.userDefaultValidationSelectionMode === "string" ? r.userDefaultValidationSelectionMode : null) ??
+      (ma && typeof (ma as any).userDefaultValidationSelectionMode === "string"
+        ? (ma as any).userDefaultValidationSelectionMode
+        : null);
+    const adminLabVal =
+      (typeof r.adminValidationMode === "string" ? r.adminValidationMode : null) ??
+      (typeof r.testSelectionMode === "string" ? r.testSelectionMode : null) ??
+      (ma && typeof (ma as any).adminLabValidationSelectionMode === "string"
+        ? (ma as any).adminLabValidationSelectionMode
+        : null);
+    const apiFresh = r.fingerprintBuildFreshness ?? null;
+    return {
+      userDefaultValidationSelectionMode: userDef,
+      adminLabValidationSelectionMode: adminLabVal,
+      weatherKind: typeof r.weatherKind === "string" ? r.weatherKind : null,
+      /** From API `treatmentMode` only — never derived client-side. */
+      treatmentMode: r.treatmentMode ?? null,
+      simulatorMode: r.simulatorMode ?? null,
+      effectiveValidationSelectionMode:
+        typeof r.effectiveValidationSelectionMode === "string" ? r.effectiveValidationSelectionMode : null,
+      effectiveValidationSelectionModeSource: r.effectiveValidationSelectionModeSource ?? null,
+      buildId: r.buildId ?? null,
+      artifactId: r.artifactId ?? null,
+      correlationId: r.correlationId ?? null,
+      artifactCacheUpdatedAt: r.artifactCacheUpdatedAt ?? null,
+      artifactEngineVersion: r.artifactEngineVersion ?? null,
+      artifactInputHash: r.artifactInputHash ?? null,
+      buildLastBuiltAt: r.buildLastBuiltAt ?? null,
+      buildInputsHash: r.buildInputsHash ?? null,
+      fingerprintBuildFreshness: apiFresh,
+    };
+  }, [result]);
+
+  const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
+  const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       <div>
@@ -378,20 +467,138 @@ export default function GapFillLabCanonicalClient() {
         </div>
       </div>
 
-      {(sourceHouse || testHome || testHomeLink) && (
+      {(sourceHouse || testHome || testHomeLink || sourceHouseId) && (
         <div className="border rounded p-4 bg-white">
-          <div className="font-semibold text-sm mb-2">Source/Test-Home Identity</div>
-          <div className="text-sm text-brand-navy/80">
-            Source Home: {sourceHouse ? `${sourceHouse.label} (${sourceHouse.id})` : "—"}
+          <div className="font-semibold text-sm mb-2">Source / test home identity (plan §23)</div>
+          <div className="grid gap-1 text-sm text-brand-navy/80 md:grid-cols-2">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Source house id</span>
+              <div className="font-mono text-xs mt-0.5">{(apiSourceHouseId ?? sourceHouse?.id ?? sourceHouseId) || "—"}</div>
+              {sourceHouse?.label ? <div className="text-xs text-brand-navy/60">{sourceHouse.label}</div> : null}
+            </div>
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test home id</span>
+              <div className="font-mono text-xs mt-0.5">{(apiTestHomeId ?? effectiveTestHomeId) || "—"}</div>
+            </div>
           </div>
-          <div className="text-sm text-brand-navy/80">
-            {TEST_HOME_DISPLAY_LABEL}: {effectiveTestHomeId ? `${TEST_HOME_DISPLAY_LABEL} (${effectiveTestHomeId})` : "—"}
-          </div>
-          <div className="text-xs text-brand-navy/70 mt-1">
-            Link status: {String(testHomeLink?.status ?? "unknown")} {testHomeLink?.statusMessage ? `· ${String(testHomeLink.statusMessage)}` : ""}
+          <div className="text-xs text-brand-navy/70 mt-2">
+            Link status: {String(testHomeLink?.status ?? "unknown")}{" "}
+            {testHomeLink?.statusMessage ? `· ${String(testHomeLink.statusMessage)}` : ""}
           </div>
         </div>
       )}
+
+      <div className="border rounded p-4 bg-white space-y-3">
+        <div className="font-semibold text-sm">Modes & diagnostics (authoritative API fields)</div>
+        <div className="grid gap-3 md:grid-cols-2 text-sm">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab weather treatment</div>
+            <div className="mt-0.5 text-brand-navy/90">
+              Control: <span className="font-mono">{weatherKind}</span>
+              {visibilityFromResult?.weatherKind != null ? (
+                <span className="text-brand-navy/70">
+                  {" "}
+                  · Last successful recalc response: <span className="font-mono">{visibilityFromResult.weatherKind}</span>
+                </span>
+              ) : (
+                <span className="text-brand-navy/60"> · Run recalc to record server echo.</span>
+              )}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab treatment (API)</div>
+            <div className="mt-0.5 font-mono text-xs">{visibilityFromResult?.treatmentMode ?? "—"}</div>
+            <div className="text-xs text-brand-navy/60 mt-1">
+              Shown after recalc: backend label for this route today (Section 24 matrix{" "}
+              <code className="font-mono">actual_data_fingerprint</code> row). Not a multi-mode selector yet.
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Simulator mode</div>
+            <div className="mt-0.5 font-mono text-xs">{visibilityFromResult?.simulatorMode ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">System user-facing validation-day mode</div>
+            <div className="mt-0.5 font-mono text-xs">
+              {visibilityFromResult?.userDefaultValidationSelectionMode ?? userDefaultValidationSelectionMode}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab validation-day mode</div>
+            <div className="mt-0.5 font-mono text-xs">
+              {visibilityFromResult?.adminLabValidationSelectionMode ?? adminLabValidationSelectionMode}
+            </div>
+            <div className="text-xs text-brand-navy/60 mt-1">Form control sends this on the next recalc; server echoes adminValidationMode when present.</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Effective validation-day mode</div>
+            <div className="mt-0.5 font-mono text-xs">
+              {visibilityFromResult?.effectiveValidationSelectionMode ?? "—"}
+            </div>
+            {visibilityFromResult?.effectiveValidationSelectionModeSource ? (
+              <div className="text-xs text-brand-navy/60 mt-1">
+                Source: {visibilityFromResult.effectiveValidationSelectionModeSource}
+              </div>
+            ) : null}
+          </div>
+          <div className="md:col-span-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Build &amp; artifact ids</div>
+            <dl className="mt-1 grid gap-1 text-xs font-mono sm:grid-cols-2">
+              <div>buildId: {visibilityFromResult?.buildId ?? "—"}</div>
+              <div>buildLastBuiltAt: {visibilityFromResult?.buildLastBuiltAt ?? "—"}</div>
+              <div>buildInputsHash: {visibilityFromResult?.buildInputsHash ?? "—"}</div>
+              <div>artifactId: {visibilityFromResult?.artifactId ?? "—"}</div>
+              <div>artifactInputHash: {visibilityFromResult?.artifactInputHash ?? "—"}</div>
+              <div>artifactCacheUpdatedAt: {visibilityFromResult?.artifactCacheUpdatedAt ?? "—"}</div>
+              <div>artifactEngineVersion: {visibilityFromResult?.artifactEngineVersion ?? "—"}</div>
+              <div>correlationId: {visibilityFromResult?.correlationId ?? "—"}</div>
+            </dl>
+          </div>
+          <div className="md:col-span-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Fingerprint / build freshness (API serialization)</div>
+            {visibilityFromResult?.fingerprintBuildFreshness ? (
+              <dl className="mt-1 grid gap-1 text-xs font-mono sm:grid-cols-2">
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="text-brand-navy/55">state</dt>
+                  <dd>{visibilityFromResult.fingerprintBuildFreshness.state ?? "—"}</dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="text-brand-navy/55">builtAt</dt>
+                  <dd>{visibilityFromResult.fingerprintBuildFreshness.builtAt ?? "—"}</dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2 sm:col-span-2">
+                  <dt className="text-brand-navy/55">staleReason</dt>
+                  <dd className="whitespace-pre-wrap break-all">{visibilityFromResult.fingerprintBuildFreshness.staleReason ?? "—"}</dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="text-brand-navy/55">artifactHashMatch</dt>
+                  <dd>
+                    {visibilityFromResult.fingerprintBuildFreshness.artifactHashMatch == null
+                      ? "—"
+                      : String(visibilityFromResult.fingerprintBuildFreshness.artifactHashMatch)}
+                  </dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="text-brand-navy/55">artifactSourceMode</dt>
+                  <dd>{visibilityFromResult.fingerprintBuildFreshness.artifactSourceMode ?? "—"}</dd>
+                </div>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="text-brand-navy/55">artifactRecomputed</dt>
+                  <dd>
+                    {visibilityFromResult.fingerprintBuildFreshness.artifactRecomputed == null
+                      ? "—"
+                      : String(visibilityFromResult.fingerprintBuildFreshness.artifactRecomputed)}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <div className="mt-1 text-xs text-brand-navy/60">
+                Not provided on last response — run canonical recalc, or API did not serialize freshness.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="border rounded p-4">
@@ -588,7 +795,48 @@ export default function GapFillLabCanonicalClient() {
         </div>
       </div>
 
-      {error ? <div className="p-3 rounded border border-red-300 bg-red-50 text-sm text-red-800">{error}</div> : null}
+      {loading ? (
+        <div
+          className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5 text-sm text-brand-navy"
+          role="status"
+          aria-live="polite"
+        >
+          Loading…
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="p-3 rounded border border-rose-300 bg-rose-50 text-sm text-rose-900 space-y-2">
+          <div className="font-semibold">Request did not complete successfully</div>
+          <div>{error}</div>
+          {lastHttpStatus != null ? (
+            <div className="text-xs font-mono text-rose-800/90">HTTP {lastHttpStatus}</div>
+          ) : null}
+          {(lastFailureFields?.failureCode || lastFailureFields?.failureMessage) ? (
+            <dl className="text-xs font-mono space-y-1 border-t border-rose-200/80 pt-2">
+              {lastFailureFields.failureCode ? (
+                <div>
+                  <dt className="inline text-rose-800/70">failureCode:</dt>{" "}
+                  <dd className="inline">{lastFailureFields.failureCode}</dd>
+                </div>
+              ) : null}
+              {lastFailureFields.failureMessage ? (
+                <div>
+                  <dt className="inline text-rose-800/70">failureMessage:</dt>{" "}
+                  <dd className="inline whitespace-pre-wrap">{lastFailureFields.failureMessage}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
+          <div className="text-xs text-rose-800/80">Retry the action after fixing inputs or waiting out a timeout.</div>
+        </div>
+      ) : null}
+
+      {result?.ok && !loading && !hasCurveData ? (
+        <div className="p-3 rounded border border-amber-200 bg-amber-50 text-sm text-amber-950">
+          No curve data in this response (empty usage / baseline daily series). This is not a success state for visualization — run lookup or recalc when inputs are ready.
+        </div>
+      ) : null}
 
       {baselineChart?.daily?.length ? (
         <div className="border rounded p-4">
@@ -657,8 +905,8 @@ export default function GapFillLabCanonicalClient() {
                     <td className="p-2 border text-right">{row.freshCompareSimDayKwh.toFixed(2)}</td>
                     <td className="p-2 border text-right">{row.actualVsFreshErrorKwh.toFixed(2)}</td>
                     <td className="p-2 border text-right">
-                      {Math.abs(row.actualDayKwh) > 1e-6
-                        ? `${((Math.abs(row.actualVsFreshErrorKwh) / Math.abs(row.actualDayKwh)) * 100).toFixed(2)}%`
+                      {row.percentError != null && Number.isFinite(row.percentError)
+                        ? `${Number(row.percentError).toFixed(2)}%`
                         : "—"}
                     </td>
                   </tr>
@@ -666,6 +914,10 @@ export default function GapFillLabCanonicalClient() {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : result?.ok && Array.isArray(result.scoredDayTruthRows) && result.scoredDayTruthRows.length === 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          No validation compare rows in this response (empty selection or compare sidecar). Not showing a compare table.
         </div>
       ) : null}
 
@@ -678,6 +930,8 @@ export default function GapFillLabCanonicalClient() {
               modelAssumptions: result.modelAssumptions ?? null,
               compareTruth: result.compareTruth ?? null,
               selectionDiagnostics: result.selectionDiagnostics ?? null,
+              visibilityEcho: visibilityFromResult,
+              fingerprintBuildFreshness: result.fingerprintBuildFreshness ?? null,
               userDefaultValidationSelectionMode,
               adminLabValidationSelectionMode,
               testHomeLink,
