@@ -99,6 +99,7 @@ import {
 describe("resolveSharedPastRecalcWindow", () => {
   it("uses SMT anchor window when available so selection and simulation can align", () => {
     const out = resolveSharedPastRecalcWindow({
+      mode: "SMT_BASELINE",
       canonicalMonths: ["2025-03", "2026-02"],
       smtAnchorPeriods: [{ startDate: "2025-03-14", endDate: "2026-03-13" }],
     });
@@ -111,6 +112,7 @@ describe("resolveSharedPastRecalcWindow", () => {
 
   it("falls back to canonical month range when no SMT anchor exists", () => {
     const out = resolveSharedPastRecalcWindow({
+      mode: "SMT_BASELINE",
       canonicalMonths: ["2025-03", "2026-02"],
       smtAnchorPeriods: undefined,
     });
@@ -118,6 +120,34 @@ describe("resolveSharedPastRecalcWindow", () => {
       startDate: "2025-03-01",
       endDate: "2026-02-28",
       source: "canonical_month_range",
+    });
+  });
+
+  it("uses canonical coverage window for MANUAL_TOTALS (regression guard for window-lock rule)", () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    const out = resolveSharedPastRecalcWindow({
+      mode: "MANUAL_TOTALS",
+      canonicalMonths: ["2025-03", "2026-02"],
+      smtAnchorPeriods: undefined,
+    });
+    expect(out).toMatchObject({
+      startDate: canonicalCoverage.startDate,
+      endDate: canonicalCoverage.endDate,
+      source: "canonical_coverage_fallback",
+    });
+  });
+
+  it("uses canonical coverage window for NEW_BUILD_ESTIMATE (regression guard for window-lock rule)", () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    const out = resolveSharedPastRecalcWindow({
+      mode: "NEW_BUILD_ESTIMATE",
+      canonicalMonths: ["2025-03", "2026-02"],
+      smtAnchorPeriods: undefined,
+    });
+    expect(out).toMatchObject({
+      startDate: canonicalCoverage.startDate,
+      endDate: canonicalCoverage.endDate,
+      source: "canonical_coverage_fallback",
     });
   });
 });

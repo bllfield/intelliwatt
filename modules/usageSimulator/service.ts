@@ -3476,6 +3476,7 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
 }
 
 export function resolveSharedPastRecalcWindow(args: {
+  mode: "SMT_BASELINE" | "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE";
   canonicalMonths: string[];
   smtAnchorPeriods?: Array<{ startDate: string; endDate: string }> | undefined;
 }): {
@@ -3483,6 +3484,14 @@ export function resolveSharedPastRecalcWindow(args: {
   endDate: string;
   source: "smt_anchor" | "canonical_month_range" | "canonical_coverage_fallback";
 } {
+  if (args.mode !== "SMT_BASELINE") {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    return {
+      startDate: canonicalCoverage.startDate,
+      endDate: canonicalCoverage.endDate,
+      source: "canonical_coverage_fallback",
+    };
+  }
   const anchorPeriods = Array.isArray(args.smtAnchorPeriods) ? args.smtAnchorPeriods : [];
   const anchorStart = anchorPeriods[0]?.startDate;
   const anchorEnd = anchorPeriods[anchorPeriods.length - 1]?.endDate;
@@ -4041,6 +4050,7 @@ async function recalcSimulatorBuildImpl(args: {
   const sharedPastRecalcWindow =
     scenario?.name === WORKSPACE_PAST_NAME
       ? resolveSharedPastRecalcWindow({
+          mode: simMode,
           canonicalMonths: built.canonicalMonths,
           smtAnchorPeriods: simMode === "SMT_BASELINE" ? smtAnchorPeriods : undefined,
         })
