@@ -265,6 +265,8 @@ type Props = {
   dashboardVariant?: "USAGE" | "PAST_SIMULATED_USAGE" | "FUTURE_SIMULATED_USAGE";
   pastVariables?: ScenarioVariable[];
   futureVariables?: ScenarioVariable[];
+  /** When false, hide the multi-home selector (main Energy Usage page uses a single primary home). Default true. */
+  showHouseSelector?: boolean;
 };
 
 const DASHBOARD_LABELS: Record<NonNullable<Props["dashboardVariant"]>, string> = {
@@ -283,6 +285,7 @@ export const UsageDashboard: React.FC<Props> = ({
   dashboardVariant,
   pastVariables = [],
   futureVariables = [],
+  showHouseSelector = true,
 }) => {
   const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
   const [houses, setHouses] = useState<HouseUsage[]>([]);
@@ -760,7 +763,7 @@ export const UsageDashboard: React.FC<Props> = ({
             </div>
           ) : null}
 
-          {!dashboardVariant && houses.length > 1 ? (
+          {showHouseSelector && !dashboardVariant && houses.length > 1 ? (
             <label className="text-sm text-neutral-700">
               <span className="mr-2 text-xs uppercase tracking-wide text-neutral-500">Home</span>
               <select
