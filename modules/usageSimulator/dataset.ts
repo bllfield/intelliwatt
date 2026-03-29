@@ -1,3 +1,4 @@
+import { logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
@@ -849,7 +850,15 @@ export function buildCurveFromPatchedIntervals(args: {
   startDate: string;
   endDate: string;
   intervals: Array<{ timestamp: string; kwh: number }>;
+  /** Observability: plan §6 stitch (Slice 2). */
+  correlationId?: string;
 }): SimulatedCurve {
+  if (args.correlationId) {
+    logSimPipelineEvent("stitch_curve_start", {
+      correlationId: args.correlationId,
+      source: "buildCurveFromPatchedIntervals",
+    });
+  }
   const rows = (args.intervals ?? [])
     .map((p) => ({ timestamp: String(p?.timestamp ?? ""), consumption_kwh: Number(p?.kwh) || 0, interval_minutes: 15 as const }))
     .filter((p) => p.timestamp.length > 0)
@@ -866,7 +875,7 @@ export function buildCurveFromPatchedIntervals(args: {
     .sort((a, b) => (a.month < b.month ? -1 : 1));
   const annualTotalKwh = monthlyTotals.reduce((s, m) => s + m.kwh, 0);
 
-  return {
+  const curve: SimulatedCurve = {
     start: String(args.startDate).slice(0, 10),
     end: String(args.endDate).slice(0, 10),
     intervals: rows,
@@ -874,6 +883,14 @@ export function buildCurveFromPatchedIntervals(args: {
     annualTotalKwh: Math.round(annualTotalKwh * 100) / 100,
     meta: { excludedDays: 0, renormalized: false },
   };
+  if (args.correlationId) {
+    logSimPipelineEvent("stitch_curve_success", {
+      correlationId: args.correlationId,
+      source: "buildCurveFromPatchedIntervals",
+      intervalRowCount: rows.length,
+    });
+  }
+  return curve;
 }
 
 /** Build dataset from a precomputed curve (e.g. Past stitched actual + simulated). Use when the curve was built outside generateSimulatedCurve. */
@@ -899,8 +916,16 @@ export function buildSimulatedUsageDatasetFromCurve(
      * and normal-life baseload math (heavy on CPU/allocations; not used for compare_core scoring).
      */
     skipHeavyInsights?: boolean;
+    /** Observability: plan §6 stitch (Slice 2). */
+    correlationId?: string;
   }
 ): SimulatedUsageDataset {
+  if (options?.correlationId) {
+    logSimPipelineEvent("stitch_dataset_start", {
+      correlationId: options.correlationId,
+      source: "buildSimulatedUsageDatasetFromCurve",
+    });
+  }
   const dailyMap = new Map<string, number>();
   for (let j = 0; j < curve.intervals.length; j++) {
     const dk = toDateKey(curve.intervals[j].timestamp);
@@ -1047,6 +1072,13 @@ export function buildSimulatedUsageDatasetFromCurve(
   };
   (dataset as SimulatedUsageDataset & { canonicalArtifactSimulatedDayTotalsByDate: Record<string, number> })
     .canonicalArtifactSimulatedDayTotalsByDate = canonicalArtifactSimulatedDayTotalsByDate;
+  if (options?.correlationId) {
+    logSimPipelineEvent("stitch_dataset_success", {
+      correlationId: options.correlationId,
+      source: "buildSimulatedUsageDatasetFromCurve",
+      dailyRowCount: daily.length,
+    });
+  }
   return dataset;
 }
 

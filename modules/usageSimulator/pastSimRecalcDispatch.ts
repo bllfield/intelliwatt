@@ -2,6 +2,7 @@ import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
+import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
 import {
   enqueuePastSimRecalcDropletJob,
   PAST_SIM_RECALC_PAYLOAD_V,
@@ -32,7 +33,9 @@ export async function dispatchPastSimRecalc(args: {
   persistPastSimBaseline?: boolean;
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;
+  correlationId?: string;
 }): Promise<PastSimRecalcDispatchResult> {
+  const correlationId = args.correlationId ?? createSimCorrelationId();
   const payload: PastSimRecalcQueuedPayloadV1 = {
     v: PAST_SIM_RECALC_PAYLOAD_V,
     userId: args.userId,
@@ -44,6 +47,7 @@ export async function dispatchPastSimRecalc(args: {
     persistPastSimBaseline: args.persistPastSimBaseline === true,
     validationDaySelectionMode: args.validationDaySelectionMode,
     validationDayCount: args.validationDayCount,
+    correlationId,
   };
   if (shouldEnqueuePastSimRecalcRemote()) {
     const enq = await enqueuePastSimRecalcDropletJob(payload);
@@ -61,6 +65,7 @@ export async function dispatchPastSimRecalc(args: {
     persistPastSimBaseline: args.persistPastSimBaseline,
     validationDaySelectionMode: args.validationDaySelectionMode,
     validationDayCount: args.validationDayCount,
+    correlationId,
   });
   return { executionMode: "inline", result };
 }

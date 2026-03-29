@@ -42,6 +42,11 @@ import {
   type CanonicalArtifactSimulatedDayTotalsByDate,
 } from "@/modules/usageSimulator/pastCache";
 import {
+  createSimCorrelationId,
+  logSimObservabilityEvent,
+  logSimPipelineEvent,
+} from "@/modules/usageSimulator/simObservability";
+import {
   encodeIntervalsV1,
   decodeIntervalsV1,
   INTERVAL_CODEC_V1,
@@ -3555,7 +3560,7 @@ export type SimulatorRecalcErr = {
   missingItems?: string[];
 };
 
-export async function recalcSimulatorBuild(args: {
+async function recalcSimulatorBuildImpl(args: {
   userId: string;
   houseId: string;
   esiid: string | null;
@@ -3574,6 +3579,8 @@ export async function recalcSimulatorBuild(args: {
   validationDaySelectionMode?: ValidationDaySelectionMode;
   /** Optional count target for auto-picked validation days. */
   validationDayCount?: number;
+  /** Correlation id for observability (plan §6); set by wrapper or droplet worker. */
+  correlationId?: string;
   now?: Date;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
@@ -4020,6 +4027,7 @@ export async function recalcSimulatorBuild(args: {
         buildPathKind: "recalc",
         forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedValidationOnlyDateKeysLocal.size > 0 ? boundedValidationOnlyDateKeysLocal : undefined,
+        correlationId: args.correlationId,
       });
       if (result.dataset !== null && result.stitchedCurve) {
         pastPatchedCurve = result.stitchedCurve;
@@ -4235,6 +4243,93 @@ export async function recalcSimulatorBuild(args: {
   }
 
   return { ok: true, houseId, buildInputsHash, dataset };
+}
+
+export type RecalcSimulatorBuildArgs = {
+  userId: string;
+  houseId: string;
+  esiid: string | null;
+  actualContextHouseId?: string;
+  mode: SimulatorMode;
+  scenarioId?: string | null;
+  weatherPreference?: WeatherPreference;
+  persistPastSimBaseline?: boolean;
+  validationOnlyDateKeysLocal?: Set<string> | string[];
+  validationDaySelectionMode?: ValidationDaySelectionMode;
+  validationDayCount?: number;
+  correlationId?: string;
+  now?: Date;
+};
+
+/**
+ * Canonical Past Sim recalc entry. Emits structured recalc lifecycle logs (plan §6).
+ */
+export async function recalcSimulatorBuild(
+  args: RecalcSimulatorBuildArgs
+): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
+  const correlationId = args.correlationId ?? createSimCorrelationId();
+  const scenarioKeyForLog = normalizeScenarioKey(args.scenarioId);
+  const scenarioIdForLog = scenarioKeyForLog === "BASELINE" ? null : scenarioKeyForLog;
+  const startedAt = Date.now();
+  logSimObservabilityEvent({
+    stage: "recalc_start",
+    correlationId,
+    userId: args.userId,
+    houseId: args.houseId,
+    mode: String(args.mode),
+    scenarioId: scenarioIdForLog,
+    source: "recalcSimulatorBuild",
+  });
+  try {
+    const result = await recalcSimulatorBuildImpl({ ...args, correlationId });
+    const durationMs = Date.now() - startedAt;
+    if (result.ok) {
+      logSimObservabilityEvent({
+        stage: "recalc_success",
+        correlationId,
+        durationMs,
+        userId: args.userId,
+        houseId: args.houseId,
+        mode: String(args.mode),
+        scenarioId: scenarioIdForLog,
+        buildInputsHash: result.buildInputsHash,
+        source: "recalcSimulatorBuild",
+      });
+    } else {
+      const failureMessage =
+        result.missingItems && result.missingItems.length > 0
+          ? `${result.error}: ${result.missingItems.join("; ")}`
+          : result.error;
+      logSimObservabilityEvent({
+        stage: "recalc_failure",
+        correlationId,
+        durationMs,
+        userId: args.userId,
+        houseId: args.houseId,
+        mode: String(args.mode),
+        scenarioId: scenarioIdForLog,
+        failureCode: result.error,
+        failureMessage,
+        source: "recalcSimulatorBuild",
+      });
+    }
+    return result;
+  } catch (e: unknown) {
+    const durationMs = Date.now() - startedAt;
+    logSimObservabilityEvent({
+      stage: "recalc_failure",
+      correlationId,
+      durationMs,
+      userId: args.userId,
+      houseId: args.houseId,
+      mode: String(args.mode),
+      scenarioId: scenarioIdForLog,
+      failureCode: "exception",
+      failureMessage: e instanceof Error ? e.message : String(e),
+      source: "recalcSimulatorBuild",
+    });
+    throw e;
+  }
 }
 
 export type SimulatedUsageHouseRow = {
@@ -4490,6 +4585,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
   readMode?: "artifact_only" | "allow_rebuild";
   forceRebuildArtifact?: boolean;
   projectionMode?: "baseline" | "raw";
+  /** Observability: plan §6 (Slice 2). */
+  correlationId?: string;
 }): Promise<
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | {
@@ -4506,6 +4603,34 @@ export async function getSimulatedUsageForHouseScenario(args: {
   try {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
+    const correlationId = args.correlationId ?? createSimCorrelationId();
+    const attachCompareWithObservability = (projectedBaselineAware: any) => {
+      logSimPipelineEvent("compareProjection_start", {
+        correlationId,
+        houseId: args.houseId,
+        scenarioKey,
+        source: "getSimulatedUsageForHouseScenario",
+      });
+      try {
+        const out = attachValidationCompareProjection(projectedBaselineAware);
+        logSimPipelineEvent("compareProjection_success", {
+          correlationId,
+          houseId: args.houseId,
+          scenarioKey,
+          source: "getSimulatedUsageForHouseScenario",
+        });
+        return out;
+      } catch (e) {
+        logSimPipelineEvent("compareProjection_failure", {
+          correlationId,
+          houseId: args.houseId,
+          scenarioKey,
+          failureMessage: e instanceof Error ? e.message : String(e),
+          source: "getSimulatedUsageForHouseScenario",
+        });
+        throw e;
+      }
+    };
     const readMode = args.readMode ?? "allow_rebuild";
     const forceRebuildArtifact = args.forceRebuildArtifact === true;
     const projectionMode = args.projectionMode ?? "baseline";
@@ -4588,7 +4713,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 })
               )
             : restored;
-        const projected = attachValidationCompareProjection(projectedBaselineAware);
+        const projected = attachCompareWithObservability(projectedBaselineAware);
         return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
       }
 
@@ -4659,6 +4784,24 @@ export async function getSimulatedUsageForHouseScenario(args: {
         scenarioId: scenarioIdForCache,
         inputHash,
       });
+      if (exactCached && exactCached.intervalsCodec === INTERVAL_CODEC_V1) {
+        logSimPipelineEvent("artifact_cache_hit", {
+          correlationId,
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+          inputHash,
+          artifactInputHash: String((exactCached as any).inputHash ?? ""),
+          source: "getSimulatedUsageForHouseScenario",
+        });
+      } else {
+        logSimPipelineEvent("artifact_cache_miss", {
+          correlationId,
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+          inputHash,
+          source: "getSimulatedUsageForHouseScenario",
+        });
+      }
       // Shared artifact: Sim Past and gapfill-lab both use the same Past scenario (CUID) and same cache.
       // If exact inputHash miss (e.g. fingerprint drifted), use latest cached artifact for this scenario
       // so gapfill can see what Sim Past (or rebuild) produced.
@@ -4677,6 +4820,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
         if (latestIsFallbackCompatible) {
           exactCached = latestCached;
           artifactSourceMode = "latest_by_scenario_fallback";
+          logSimPipelineEvent("artifact_stale_detected", {
+            correlationId,
+            houseId: args.houseId,
+            scenarioId: scenarioIdForCache,
+            requestedInputHash: inputHash,
+            artifactInputHashUsed: String((latestCached as any)?.inputHash ?? ""),
+            artifactSourceMode: "latest_by_scenario_fallback",
+            source: "getSimulatedUsageForHouseScenario",
+          });
         }
       }
       if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
@@ -4751,7 +4903,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               })
             )
           : restored;
-      const projected = attachValidationCompareProjection(projectedBaselineAware);
+      const projected = attachCompareWithObservability(projectedBaselineAware);
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
     }
 
@@ -5309,7 +5461,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             })
           )
         : dataset;
-    const projected = attachValidationCompareProjection(projectedBaselineAware);
+    const projected = attachCompareWithObservability(projectedBaselineAware);
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
   } catch (e) {
     console.error("[usageSimulator/service] getSimulatedUsageForHouseScenario failed", e);

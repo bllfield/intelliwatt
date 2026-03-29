@@ -28,6 +28,7 @@ import { buildMonthKeyedDailyAverages } from "@/modules/usageShapeProfile/derive
 import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
+import { createSimCorrelationId, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
@@ -325,6 +326,8 @@ export type SimulatePastUsageDatasetArgs = {
   emitAllIntervals?: boolean;
   /** Optional local dates whose simulated-day payloads should be retained for downstream consumers. */
   retainSimulatedDayResultDateKeysLocal?: Set<string>;
+  /** Observability: plan §6 (Slice 2); threaded from recalc. */
+  correlationId?: string;
 };
 
 export type SimulatePastUsageDatasetResult = {
@@ -658,8 +661,25 @@ export async function simulatePastUsageDataset(
     retainSimulatedDayResultDateKeysLocal,
   } = args;
   const actualHouseId = String(actualContextHouseId ?? houseId);
+  const correlationId = args.correlationId ?? createSimCorrelationId();
+  const daySimStartedAt = Date.now();
+  logSimPipelineEvent("day_simulation_start", {
+    correlationId,
+    houseId,
+    userId,
+    buildPathKind,
+    source: "simulatePastUsageDataset",
+  });
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    logSimPipelineEvent("day_simulation_failure", {
+      correlationId,
+      houseId,
+      userId,
+      failureMessage: "Invalid startDate or endDate (expect YYYY-MM-DD).",
+      durationMs: Date.now() - daySimStartedAt,
+      source: "simulatePastUsageDataset",
+    });
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
   }
 
@@ -703,6 +723,14 @@ export async function simulatePastUsageDataset(
       canonicalDateKeys,
     });
     if (provenance.weatherSourceSummary !== "actual_only") {
+      logSimPipelineEvent("day_simulation_failure", {
+        correlationId,
+        houseId,
+        userId,
+        failureMessage: `actual_weather_required:${provenance.weatherSourceSummary}`,
+        durationMs: Date.now() - daySimStartedAt,
+        source: "simulatePastUsageDataset",
+      });
       return {
         dataset: null,
         error: `actual_weather_required:${provenance.weatherSourceSummary}`,
@@ -728,6 +756,14 @@ export async function simulatePastUsageDataset(
     });
     const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     if (!usageShapeProfileSnap) {
+      logSimPipelineEvent("day_simulation_failure", {
+        correlationId,
+        houseId,
+        userId,
+        failureMessage: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
+        durationMs: Date.now() - daySimStartedAt,
+        source: "simulatePastUsageDataset",
+      });
       return {
         dataset: null,
         error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
@@ -817,6 +853,7 @@ export async function simulatePastUsageDataset(
       startDate,
       endDate,
       intervals: patchedIntervals,
+      correlationId,
     });
     // `buildCurveFromPatchedIntervals` copies into `stitchedCurve.intervals`; release the engine
     // output array before dataset construction to lower peak heap on full-window runs.
@@ -838,6 +875,7 @@ export async function simulatePastUsageDataset(
         useUtcMonth: true,
         simulatedDayResults: dayResults,
         skipHeavyInsights: skipHeavyDatasetInsights,
+        correlationId,
       }
     );
 
@@ -905,6 +943,14 @@ export async function simulatePastUsageDataset(
       } as unknown as typeof dataset.meta;
     }
 
+    logSimPipelineEvent("day_simulation_success", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      durationMs: Date.now() - daySimStartedAt,
+      source: "simulatePastUsageDataset",
+    });
     return {
       dataset,
       meta: (dataset?.meta as Record<string, unknown>) ?? {},
@@ -918,6 +964,14 @@ export async function simulatePastUsageDataset(
     };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
+    logSimPipelineEvent("day_simulation_failure", {
+      correlationId,
+      houseId,
+      userId,
+      failureMessage: err.message,
+      durationMs: Date.now() - daySimStartedAt,
+      source: "simulatePastUsageDataset",
+    });
     console.warn("[simulatePastUsageDataset] failed", { houseId, err: e });
     return { dataset: null, error: err.message };
   }

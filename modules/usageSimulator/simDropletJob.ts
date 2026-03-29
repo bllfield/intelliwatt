@@ -20,6 +20,8 @@ export type PastSimRecalcQueuedPayloadV1 = {
   persistPastSimBaseline?: boolean;
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;
+  /** Observability: same id logged on enqueue and worker recalc (plan §6). */
+  correlationId?: string;
 };
 
 function getSimDropletJobModel(): {
