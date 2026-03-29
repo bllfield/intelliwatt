@@ -99,6 +99,7 @@ import {
   ensureSimulatorFingerprintsWithContext,
   resolveSimFingerprintWithContext,
 } from "@/modules/usageSimulator/fingerprintOrchestration";
+import { createRecalcIntervalPreloadContext } from "@/modules/usageSimulator/recalcIntervalPreload";
 import {
   applyAdminLabTreatmentToResolvedFingerprint,
   isAdminLabManualConstraintTreatmentMode,
@@ -3989,6 +3990,15 @@ async function recalcSimulatorBuildImpl(args: {
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
+  const recalcIntervalPreload =
+    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
+      ? createRecalcIntervalPreloadContext({
+          houseId: actualContextHouseId,
+          esiid: esiid ?? null,
+          correlationId: args.correlationId,
+          source: "recalcSimulatorBuildImpl",
+        })
+      : null;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -4005,6 +4015,7 @@ async function recalcSimulatorBuildImpl(args: {
       (allTravelRanges ?? []).flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezoneForStoredBuild))
     );
     try {
+      const validationSelectionStartedAt = Date.now();
       const coverageSelection = await getCandidateDateCoverageForSelection({
         houseId: actualContextHouseId,
         scenarioIdentity: `past_shared:${scenarioId ?? "BASELINE"}`,
@@ -4014,13 +4025,21 @@ async function recalcSimulatorBuildImpl(args: {
         minDayCoveragePct: 0.95,
         stratifyByMonth: true,
         stratifyByWeekend: true,
-        loadIntervalsForWindow: async () =>
-          await getActualIntervalsForRange({
+        loadIntervalsForWindow: async () => {
+          if (recalcIntervalPreload) {
+            const preloaded = await recalcIntervalPreload.getIntervals({
+              startDate: selectionStart,
+              endDate: selectionEnd,
+            });
+            return preloaded.intervals;
+          }
+          return await getActualIntervalsForRange({
             houseId: actualContextHouseId,
             esiid: esiid ?? null,
             startDate: selectionStart,
             endDate: selectionEnd,
-          }),
+          });
+        },
       });
       const selection = selectValidationDayKeys({
         mode: autoMode,
@@ -4033,6 +4052,18 @@ async function recalcSimulatorBuildImpl(args: {
       effectiveValidationOnlyDateKeysLocal = new Set(selection.selectedDateKeys);
       validationSelectionDiagnostics = selection.diagnostics;
       effectiveValidationSelectionMode = autoMode;
+      const preloadStats = recalcIntervalPreload?.getStats();
+      logSimPipelineEvent("recalc_validation_selection_with_shared_intervals", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        durationMs: Date.now() - validationSelectionStartedAt,
+        preloadFetchCount: preloadStats?.fetchCount,
+        preloadReuseCount: preloadStats?.reuseCount,
+        preloadCachedWindowCount: preloadStats?.cachedWindowCount,
+        memoryRssMb: getMemoryRssMb(),
+        source: "recalcSimulatorBuildImpl",
+      });
     } catch {
       effectiveValidationOnlyDateKeysLocal = new Set<string>();
       validationSelectionDiagnostics = null;
@@ -4121,6 +4152,27 @@ async function recalcSimulatorBuildImpl(args: {
         snapshots: { homeProfile, applianceProfile },
         ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
       };
+      let preloadedActualIntervalsForSim: Array<{ timestamp: string; kwh: number }> | undefined;
+      let simulationPreloadCacheHit: boolean | undefined;
+      if (recalcIntervalPreload && simMode === "SMT_BASELINE") {
+        const simIntervalPreloadStartedAt = Date.now();
+        const preloaded = await recalcIntervalPreload.getIntervals({ startDate, endDate });
+        preloadedActualIntervalsForSim = preloaded.intervals;
+        simulationPreloadCacheHit = preloaded.cacheHit;
+        logSimPipelineEvent("recalc_simulation_shared_interval_preload", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          startDate,
+          endDate,
+          cacheHit: preloaded.cacheHit,
+          intervalRowCount: preloaded.intervals.length,
+          duplicateIntervalLoadAvoided: preloaded.cacheHit,
+          durationMs: Date.now() - simIntervalPreloadStartedAt,
+          memoryRssMb: getMemoryRssMb(),
+          source: "recalcSimulatorBuildImpl",
+        });
+      }
       const result = await simulatePastUsageDataset({
         houseId,
         actualContextHouseId,
@@ -4135,7 +4187,21 @@ async function recalcSimulatorBuildImpl(args: {
         forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedValidationOnlyDateKeysLocal.size > 0 ? boundedValidationOnlyDateKeysLocal : undefined,
         correlationId: args.correlationId,
+        ...(preloadedActualIntervalsForSim != null ? { actualIntervals: preloadedActualIntervalsForSim } : {}),
       });
+      if (simulationPreloadCacheHit != null) {
+        const preloadStats = recalcIntervalPreload?.getStats();
+        logSimPipelineEvent("recalc_simulation_shared_interval_preload_summary", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          preloadFetchCount: preloadStats?.fetchCount,
+          preloadReuseCount: preloadStats?.reuseCount,
+          preloadCachedWindowCount: preloadStats?.cachedWindowCount,
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
+      }
       if (result.dataset !== null && result.stitchedCurve) {
         pastPatchedCurve = result.stitchedCurve;
         pastSimulatedDayResults = result.simulatedDayResults;
