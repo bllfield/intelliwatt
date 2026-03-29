@@ -8,7 +8,12 @@ import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, typ
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
-import { getActualIntervalsForRange, getActualUsageDatasetForHouse, getIntervalDataFingerprint } from "@/lib/usage/actualDatasetForHouse";
+import {
+  getActualDailyKwhForLocalDateKeys,
+  getActualIntervalsForRange,
+  getActualUsageDatasetForHouse,
+  getIntervalDataFingerprint,
+} from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -209,19 +214,12 @@ async function getValidationActualDailyByDateForDataset(args: {
     actualContextEsiid = actualHouse?.esiid ?? null;
   }
 
-  const actualUsage = await getActualUsageDatasetForHouse(actualContextHouseId, actualContextEsiid).catch(() => null);
-  const actualDailyRows = Array.isArray((actualUsage as any)?.dataset?.daily)
-    ? ((actualUsage as any).dataset.daily as Array<any>)
-    : [];
-  if (actualDailyRows.length === 0) return null;
-
-  const map = new Map<string, number>();
-  const keySet = new Set(validationKeys);
-  for (const row of actualDailyRows) {
-    const dk = String(row?.date ?? "").slice(0, 10);
-    if (!keySet.has(dk)) continue;
-    map.set(dk, Number(row?.kwh ?? 0) || 0);
-  }
+  // Compare-only: fetch actual kWh for validation keys only (no full-year interval load).
+  const map = await getActualDailyKwhForLocalDateKeys({
+    houseId: actualContextHouseId,
+    esiid: actualContextEsiid,
+    dateKeysLocal: validationKeys,
+  });
   return map.size > 0 ? map : null;
 }
 

@@ -727,6 +727,92 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
 }
 
 /**
+ * Daily actual kWh for specific local calendar keys only (YYYY-MM-DD). Resolves SMT vs Green Button the same
+ * way as `chooseActualSource` — without loading full-year 15‑minute intervals or running full Usage insights.
+ * Used only for Past validation/compare (baseline overlay + compare rows), not for changing Past sim output.
+ */
+export async function getActualDailyKwhForLocalDateKeys(args: {
+  houseId: string;
+  esiid: string | null;
+  dateKeysLocal: string[];
+}): Promise<Map<string, number>> {
+  const keys = Array.from(
+    new Set(
+      args.dateKeysLocal
+        .map((v) => String(v ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    )
+  ).sort();
+  if (keys.length === 0) return new Map();
+
+  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid ?? null });
+  if (!source) return new Map();
+
+  if (source === "SMT") {
+    const esiid = String(args.esiid ?? "").trim();
+    if (!esiid) return new Map();
+    try {
+      const dateInList = Prisma.join(
+        keys.map((d) => Prisma.sql`${d}`),
+        ", "
+      );
+      const dailyRows = await prisma.$queryRaw<Array<{ date: string; kwh: number }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') IN (${dateInList})
+          GROUP BY "ts"
+        )
+        SELECT to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
+               COALESCE(SUM("kwh"), 0)::float AS kwh
+        FROM iv
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `);
+      const map = new Map<string, number>();
+      for (const r of dailyRows) {
+        map.set(String(r.date).slice(0, 10), round2(Number(r.kwh) || 0));
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+
+  if (!USAGE_DB_ENABLED) return new Map();
+  try {
+    const usageClient = usagePrisma as any;
+    const latestRaw = await usageClient.rawGreenButton.findFirst({
+      where: { homeId: args.houseId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (!latestRaw?.id) return new Map();
+    const dateInList = Prisma.join(
+      keys.map((d) => Prisma.sql`${d}`),
+      ", "
+    );
+    const dailyRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
+             SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
+        AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') IN (${dateInList})
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `)) as Array<{ date: string; kwh: number }>;
+    const map = new Map<string, number>();
+    for (const r of dailyRows) {
+      map.set(String(r.date).slice(0, 10), round2(Number(r.kwh) || 0));
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
  * Returns the actual usage dataset for a single house (same shape and data as the Usage page).
  * Use this when the simulator serves BASELINE with SMT or Green Button so baseline = actual usage.
  */
