@@ -114,6 +114,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
         canonicalMonths: ["2026-01"],
         timezone: "America/Chicago",
         travelRanges: [],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
       },
     });
     computePastInputHash.mockReturnValue("hash-past-expected");
@@ -329,6 +330,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
         canonicalMonths: ["2026-01"],
         timezone: "America/Chicago",
         travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
       },
     });
     getCachedPastDataset.mockResolvedValueOnce(null);

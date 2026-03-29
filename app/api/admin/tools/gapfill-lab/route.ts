@@ -878,18 +878,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const recalcOut = await recalcSimulatorBuild({
-      userId: labOwnerUser.id,
-      houseId: testHomeHouse.id,
-      esiid: sourceEsiid,
-      actualContextHouseId: sourceHouse.id,
-      mode: "SMT_BASELINE",
-      scenarioId: String(pastScenario.id),
-      persistPastSimBaseline: true,
-      validationOnlyDateKeysLocal: testDateKeysLocal,
-      validationDaySelectionMode: testSelectionMode,
-      validationDayCount: targetValidationDayCount,
-    });
+    let recalcOut: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
+    try {
+      recalcOut = await withTimeout(
+        recalcSimulatorBuild({
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          esiid: sourceEsiid,
+          actualContextHouseId: sourceHouse.id,
+          mode: "SMT_BASELINE",
+          scenarioId: String(pastScenario.id),
+          persistPastSimBaseline: true,
+          validationOnlyDateKeysLocal: testDateKeysLocal,
+          validationDaySelectionMode: testSelectionMode,
+          validationDayCount: targetValidationDayCount,
+        }),
+        ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+        "canonical_recalc_timeout"
+      );
+    } catch (recalcError: unknown) {
+      const timedOut =
+        recalcError instanceof Error &&
+        ((recalcError as any).code === "canonical_recalc_timeout" ||
+          /canonical_recalc_timeout/i.test(String(recalcError.message ?? "")));
+      return NextResponse.json(
+        {
+          ok: false,
+          error: timedOut ? "canonical_recalc_timeout" : "canonical_recalc_failed",
+          message: timedOut
+            ? "Canonical recalc exceeded route timeout. Retry, or run with smaller compare scope."
+            : recalcError instanceof Error
+              ? recalcError.message
+              : "Canonical recalc failed.",
+        },
+        { status: timedOut ? 504 : 500 }
+      );
+    }
     if (!recalcOut.ok) {
       return NextResponse.json(
         {
@@ -901,38 +925,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [canonicalRead, baselineRead] = await Promise.all([
-      getSimulatedUsageForHouseScenario({
-        userId: labOwnerUser.id,
-        houseId: testHomeHouse.id,
-        scenarioId: String(pastScenario.id),
-        readMode: "allow_rebuild",
-        projectionMode: "raw",
-      }),
-      getSimulatedUsageForHouseScenario({
-        userId: labOwnerUser.id,
-        houseId: testHomeHouse.id,
-        scenarioId: String(pastScenario.id),
-        readMode: "allow_rebuild",
-        projectionMode: "baseline",
-      }),
-    ]);
-    if (!canonicalRead.ok) {
+    const baselineRead = await getSimulatedUsageForHouseScenario({
+      userId: labOwnerUser.id,
+      houseId: testHomeHouse.id,
+      scenarioId: String(pastScenario.id),
+      readMode: "allow_rebuild",
+      projectionMode: "baseline",
+    });
+    if (!baselineRead.ok) {
       return NextResponse.json(
         {
           ok: false,
           error: "canonical_read_failed",
-          message: canonicalRead.message ?? "Canonical read failed.",
+          message: baselineRead.message ?? "Canonical read failed.",
         },
         { status: 500 }
       );
     }
 
-    const canonicalDataset = canonicalRead.dataset as any;
-    const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
+    const baselineDataset = baselineRead.dataset as any;
     const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
     // Shared compare sidecar remains the canonical modeled-vs-actual projection family.
-    const compareProjection = buildValidationCompareProjectionSidecar(canonicalDataset);
+    const compareProjection = buildValidationCompareProjectionSidecar(baselineDataset);
     const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
       const row = Array.isArray(compareProjection.rows)
         ? compareProjection.rows.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk)

@@ -468,12 +468,16 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         const j = (await r.json().catch(() => null)) as ScenarioHouseResp | null;
         if (cancelled) return;
         if (!r.ok) {
+          const isGatewayTimeout = r.status === 504 || r.status === 502;
           const msg =
-            j && "message" in j && typeof (j as any).message === "string"
-              ? String((j as any).message)
-              : "Scenario not computed yet. Save changes in this workspace to compute it.";
+            isGatewayTimeout
+              ? `${curveView === "PAST" ? "Past" : "Future"} simulated usage timed out before completion. Recalculate and try again.`
+              : j && "message" in j && typeof (j as any).message === "string"
+                ? String((j as any).message)
+                : "Scenario not computed yet. Save changes in this workspace to compute it.";
           setScenarioBanner(msg);
           setScenarioSimHouseOverride(null);
+          setScenarioCompareProjection(null);
           return;
         }
         if (!j?.ok) {
@@ -1308,19 +1312,38 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             Showing baseline while {curveView === "PAST" ? "Past" : "Future"} simulated usage is calculated…
           </div>
         ) : null}
-        <UsageDashboard
-          forcedMode="SIMULATED"
-          allowModeToggle={false}
-          initialMode="SIMULATED"
-          refreshToken={refreshToken}
-          simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
-          fetchModeOverride={curveView === "BASELINE" ? "REAL" : undefined}
-          dashboardVariant={
-            curveView === "BASELINE" ? "USAGE" : curveView === "PAST" ? "PAST_SIMULATED_USAGE" : "FUTURE_SIMULATED_USAGE"
-          }
-          pastVariables={curveView === "PAST" || curveView === "FUTURE" ? dashboardPastVariables : undefined}
-          futureVariables={curveView === "FUTURE" ? dashboardFutureVariables : undefined}
-        />
+        {curveView !== "BASELINE" && !scenarioLoading && scenarioBanner ? (
+          <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+            <div className="font-semibold">
+              {curveView === "PAST" ? "Past simulated usage failed to load." : "Future simulated usage failed to load."}
+            </div>
+            <div className="mt-1">{scenarioBanner}</div>
+            <button
+              type="button"
+              onClick={() => {
+                setScenarioBanner(null);
+                setRefreshToken((x) => x + 1);
+              }}
+              className="mt-2 inline-flex rounded-lg border border-red-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-red-700 hover:bg-red-100"
+            >
+              Retry scenario load
+            </button>
+          </div>
+        ) : (
+          <UsageDashboard
+            forcedMode="SIMULATED"
+            allowModeToggle={false}
+            initialMode="SIMULATED"
+            refreshToken={refreshToken}
+            simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
+            fetchModeOverride={curveView === "BASELINE" ? "REAL" : undefined}
+            dashboardVariant={
+              curveView === "BASELINE" ? "USAGE" : curveView === "PAST" ? "PAST_SIMULATED_USAGE" : "FUTURE_SIMULATED_USAGE"
+            }
+            pastVariables={curveView === "PAST" || curveView === "FUTURE" ? dashboardPastVariables : undefined}
+            futureVariables={curveView === "FUTURE" ? dashboardFutureVariables : undefined}
+          />
+        )}
       </div>
 
       <Modal

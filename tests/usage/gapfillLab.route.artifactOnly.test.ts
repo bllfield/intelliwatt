@@ -431,7 +431,33 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(arg.actualContextHouseId).toBe("h1");
     expect(arg.scenarioId).toBe("past-s1");
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
-    expect(projectionModes).toEqual(["raw", "baseline"]);
+    expect(projectionModes).toEqual(["baseline"]);
+  });
+
+  it("returns explicit canonical recalc timeout without route hang", async () => {
+    const timeoutErr = new Error("canonical_recalc_timeout");
+    (timeoutErr as any).code = "canonical_recalc_timeout";
+    recalcSimulatorBuild.mockImplementationOnce(async () => {
+      throw timeoutErr;
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(504);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("canonical_recalc_timeout");
   });
 
   it("blocks save when test-home replace status is not ready", async () => {
