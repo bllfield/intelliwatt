@@ -319,5 +319,48 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(dbg.referenceDaysUsed).toBe(2);
     const actualPassthrough = (dbg.dayDiagnostics ?? []).filter((d) => d.dayType === "ACTUAL").length;
     expect(actualPassthrough).toBe(0);
+    const keepRefReasons = (dbg.dayDiagnostics ?? []).map((d: any) => d.simulatedReason).filter(Boolean);
+    expect(keepRefReasons.every((r: string) => r === "GAPFILL_MODELED_KEEP_REF")).toBe(true);
+  });
+
+  it("travel/vacant excluded days remain modeled and labeled as SIMULATED/EXCLUDED", () => {
+    const day1StartMs = new Date("2026-09-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-09-02T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const keptDate = dateKeyFromTimestamp(day1Grid[0]!);
+    const excludedDate = dateKeyFromTimestamp(day2Grid[0]!);
+    const actualIntervals = day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 1 + (idx % 7) * 0.03 }));
+    const wx = { tAvgF: 76, tMinF: 70, tMaxF: 84, hdd65: 0, cdd65: 8 };
+    const actualWxByDateKey = new Map<string, typeof wx>([
+      [keptDate, wx],
+      [excludedDate, wx],
+    ]);
+    const dbg: { dayDiagnostics?: Array<{ dateKey?: string; dayType?: string; simulatedReason?: string | null }> } = {};
+
+    buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>([excludedDate]),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey,
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-09": 48 },
+        weekendAvgByMonthKey: { "2026-09": 44 },
+      },
+      timezoneForProfile: "UTC",
+      homeProfile: { squareFeet: 2200 },
+      resolvedSimFingerprint: baseResolved({ blendMode: "usage_only", usageBlendWeight: 1 }),
+      debug: { out: dbg as any, collectDayDiagnostics: true, maxDayDiagnostics: 10 },
+    });
+
+    const excludedDiag = (dbg.dayDiagnostics ?? []).find((d) => d.dateKey === excludedDate);
+    expect(excludedDiag).toMatchObject({
+      dateKey: excludedDate,
+      dayType: "SIMULATED",
+      simulatedReason: "EXCLUDED",
+    });
   });
 });

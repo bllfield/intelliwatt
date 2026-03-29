@@ -3475,6 +3475,45 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   return { start, end, days: Math.max(1, days) };
 }
 
+export function resolveSharedPastRecalcWindow(args: {
+  canonicalMonths: string[];
+  smtAnchorPeriods?: Array<{ startDate: string; endDate: string }> | undefined;
+}): {
+  startDate: string;
+  endDate: string;
+  source: "smt_anchor" | "canonical_month_range" | "canonical_coverage_fallback";
+} {
+  const anchorPeriods = Array.isArray(args.smtAnchorPeriods) ? args.smtAnchorPeriods : [];
+  const anchorStart = anchorPeriods[0]?.startDate;
+  const anchorEnd = anchorPeriods[anchorPeriods.length - 1]?.endDate;
+  if (
+    typeof anchorStart === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(anchorStart) &&
+    typeof anchorEnd === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(anchorEnd)
+  ) {
+    return {
+      startDate: anchorStart,
+      endDate: anchorEnd,
+      source: "smt_anchor",
+    };
+  }
+  const canonicalWindow = canonicalWindowDateRange(args.canonicalMonths);
+  if (canonicalWindow) {
+    return {
+      startDate: canonicalWindow.start,
+      endDate: canonicalWindow.end,
+      source: "canonical_month_range",
+    };
+  }
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  return {
+    startDate: canonicalCoverage.startDate,
+    endDate: canonicalCoverage.endDate,
+    source: "canonical_coverage_fallback",
+  };
+}
+
 function monthsIntersectingTravelRanges(
   canonicalMonths: string[],
   travelRanges: Array<{ startDate: string; endDate: string }>
@@ -3999,6 +4038,28 @@ async function recalcSimulatorBuildImpl(args: {
           source: "recalcSimulatorBuildImpl",
         })
       : null;
+  const sharedPastRecalcWindow =
+    scenario?.name === WORKSPACE_PAST_NAME
+      ? resolveSharedPastRecalcWindow({
+          canonicalMonths: built.canonicalMonths,
+          smtAnchorPeriods: simMode === "SMT_BASELINE" ? smtAnchorPeriods : undefined,
+        })
+      : null;
+  if (recalcIntervalPreload && sharedPastRecalcWindow) {
+    logSimPipelineEvent("recalc_shared_interval_window_selected", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      preloadWindowStart: sharedPastRecalcWindow.startDate,
+      preloadWindowEnd: sharedPastRecalcWindow.endDate,
+      preloadWindowSource: sharedPastRecalcWindow.source,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+  }
+  let validationSelectionUsedSharedPreloadWindow = false;
+  let validationSelectionPreloadWindowStart: string | null = null;
+  let validationSelectionPreloadWindowEnd: string | null = null;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -4007,9 +4068,8 @@ async function recalcSimulatorBuildImpl(args: {
   ) {
     const autoMode =
       effectiveValidationSelectionMode ?? (await getUserDefaultValidationSelectionMode());
-    const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
-    const selectionStart = canonicalWindow?.start ?? resolveCanonicalUsage365CoverageWindow().startDate;
-    const selectionEnd = canonicalWindow?.end ?? resolveCanonicalUsage365CoverageWindow().endDate;
+    const selectionStart = sharedPastRecalcWindow?.startDate ?? resolveCanonicalUsage365CoverageWindow().startDate;
+    const selectionEnd = sharedPastRecalcWindow?.endDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
     const targetCount = Math.max(1, Math.min(365, Math.floor(Number(args.validationDayCount) || 21)));
     const travelDateKeysLocal = new Set<string>(
       (allTravelRanges ?? []).flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezoneForStoredBuild))
@@ -4052,11 +4112,18 @@ async function recalcSimulatorBuildImpl(args: {
       effectiveValidationOnlyDateKeysLocal = new Set(selection.selectedDateKeys);
       validationSelectionDiagnostics = selection.diagnostics;
       effectiveValidationSelectionMode = autoMode;
+      validationSelectionUsedSharedPreloadWindow = Boolean(sharedPastRecalcWindow);
+      validationSelectionPreloadWindowStart = selectionStart;
+      validationSelectionPreloadWindowEnd = selectionEnd;
       const preloadStats = recalcIntervalPreload?.getStats();
       logSimPipelineEvent("recalc_validation_selection_with_shared_intervals", {
         correlationId: args.correlationId,
         houseId,
         sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        preloadWindowStart: selectionStart,
+        preloadWindowEnd: selectionEnd,
+        preloadWindowSource: sharedPastRecalcWindow?.source ?? "canonical_coverage_fallback",
+        validationSelectionUsesSharedPreloadWindow: Boolean(sharedPastRecalcWindow),
         durationMs: Date.now() - validationSelectionStartedAt,
         preloadFetchCount: preloadStats?.fetchCount,
         preloadReuseCount: preloadStats?.reuseCount,
@@ -4126,9 +4193,9 @@ async function recalcSimulatorBuildImpl(args: {
   if (scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode)) {
     try {
       const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
-      const startDate = smtAnchorPeriods?.[0]?.startDate ?? canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
+      const startDate = sharedPastRecalcWindow?.startDate ?? canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
       const endDate =
-        smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
+        sharedPastRecalcWindow?.endDate ??
         canonicalWindow?.end ??
         `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
       const recalcBuildInputs: SimulatorBuildInputsV1 = {
@@ -4159,13 +4226,27 @@ async function recalcSimulatorBuildImpl(args: {
         const preloaded = await recalcIntervalPreload.getIntervals({ startDate, endDate });
         preloadedActualIntervalsForSim = preloaded.intervals;
         simulationPreloadCacheHit = preloaded.cacheHit;
+        const reuseMissReason = preloaded.cacheHit
+          ? null
+          : !validationSelectionUsedSharedPreloadWindow
+            ? "validation_selection_not_preloaded"
+            : validationSelectionPreloadWindowStart !== startDate || validationSelectionPreloadWindowEnd !== endDate
+              ? "validation_selection_window_mismatch"
+              : "cache_miss_unexpected";
         logSimPipelineEvent("recalc_simulation_shared_interval_preload", {
           correlationId: args.correlationId,
           houseId,
           sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
           startDate,
           endDate,
+          preloadWindowSource: sharedPastRecalcWindow?.source ?? "simulation_fallback_range",
+          simulationUsesSharedPreloadWindow: Boolean(sharedPastRecalcWindow),
+          sharedWindowWithValidationSelection:
+            sharedPastRecalcWindow != null &&
+            sharedPastRecalcWindow.startDate === startDate &&
+            sharedPastRecalcWindow.endDate === endDate,
           cacheHit: preloaded.cacheHit,
+          reuseMissReason,
           intervalRowCount: preloaded.intervals.length,
           duplicateIntervalLoadAvoided: preloaded.cacheHit,
           durationMs: Date.now() - simIntervalPreloadStartedAt,

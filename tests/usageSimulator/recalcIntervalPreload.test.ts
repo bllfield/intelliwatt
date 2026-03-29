@@ -62,5 +62,27 @@ describe("recalc interval preload context", () => {
       cachedWindowCount: 2,
     });
   });
+
+  it("avoids a second load when validation and simulation share one aligned window", async () => {
+    getActualIntervalsForRangeMock.mockResolvedValue([
+      { timestamp: "2025-03-14T00:00:00.000Z", kwh: 0.2 },
+    ]);
+    const { createRecalcIntervalPreloadContext } = await import(
+      "@/modules/usageSimulator/recalcIntervalPreload"
+    );
+    const ctx = createRecalcIntervalPreloadContext({
+      houseId: "h1",
+      esiid: "e1",
+      source: "test",
+    });
+    const alignedWindow = { startDate: "2025-03-14", endDate: "2026-03-13" };
+
+    const validationLoad = await ctx.getIntervals(alignedWindow);
+    const simulationLoad = await ctx.getIntervals(alignedWindow);
+
+    expect(validationLoad.cacheHit).toBe(false);
+    expect(simulationLoad.cacheHit).toBe(true);
+    expect(getActualIntervalsForRangeMock).toHaveBeenCalledTimes(1);
+  });
 });
 

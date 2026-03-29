@@ -91,9 +91,36 @@ vi.mock("@/modules/weather/identity", () => ({
 import {
   buildGapfillCompareSimShared,
   getSimulatedUsageForHouseScenario,
+  resolveSharedPastRecalcWindow,
   rebuildGapfillSharedPastArtifact,
   type GapfillCompareBuildPhase,
 } from "@/modules/usageSimulator/service";
+
+describe("resolveSharedPastRecalcWindow", () => {
+  it("uses SMT anchor window when available so selection and simulation can align", () => {
+    const out = resolveSharedPastRecalcWindow({
+      canonicalMonths: ["2025-03", "2026-02"],
+      smtAnchorPeriods: [{ startDate: "2025-03-14", endDate: "2026-03-13" }],
+    });
+    expect(out).toMatchObject({
+      startDate: "2025-03-14",
+      endDate: "2026-03-13",
+      source: "smt_anchor",
+    });
+  });
+
+  it("falls back to canonical month range when no SMT anchor exists", () => {
+    const out = resolveSharedPastRecalcWindow({
+      canonicalMonths: ["2025-03", "2026-02"],
+      smtAnchorPeriods: undefined,
+    });
+    expect(out).toMatchObject({
+      startDate: "2025-03-01",
+      endDate: "2026-02-28",
+      source: "canonical_month_range",
+    });
+  });
+});
 
 describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   beforeEach(() => {
