@@ -178,6 +178,57 @@ async function resolveLabOwnerUserId(request: NextRequest): Promise<string | nul
   return null;
 }
 
+async function replaceTravelRangesForHousePastScenario(
+  userId: string,
+  houseId: string,
+  rangesInput: Array<{ startDate: string; endDate: string }>
+): Promise<void> {
+  const ranges = rangesInput
+    .map((r) => ({
+      startDate: String(r?.startDate ?? "").slice(0, 10),
+      endDate: String(r?.endDate ?? "").slice(0, 10),
+    }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
+
+  await (prisma as any).$transaction(async (tx: any) => {
+    let pastScenario = await tx.usageSimulatorScenario.findFirst({
+      where: {
+        userId,
+        houseId,
+        name: "Past (Corrected)",
+        archivedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!pastScenario?.id) {
+      pastScenario = await tx.usageSimulatorScenario.create({
+        data: {
+          userId,
+          houseId,
+          name: "Past (Corrected)",
+        },
+        select: { id: true },
+      });
+    }
+    await tx.usageSimulatorScenarioEvent.deleteMany({
+      where: {
+        scenarioId: String(pastScenario.id),
+        kind: "TRAVEL_RANGE",
+      },
+    });
+    if (ranges.length > 0) {
+      await tx.usageSimulatorScenarioEvent.createMany({
+        data: ranges.map((r) => ({
+          scenarioId: String(pastScenario.id),
+          effectiveMonth: r.startDate.slice(0, 7),
+          kind: "TRAVEL_RANGE",
+          payloadJson: { startDate: r.startDate, endDate: r.endDate },
+        })),
+      });
+    }
+  });
+}
+
 async function triggerGapfillCompareDropletWebhook(
   compareRunId: string
 ): Promise<DropletSimWebhookResult> {
@@ -420,6 +471,24 @@ export async function POST(req: NextRequest) {
 
   if (rawAction === "lookup_source_houses") {
     const link = labOwnerUserId ? await getLabTestHomeLink(labOwnerUserId) : null;
+    const testHomeHouseId = String(link?.testHomeHouseId ?? "").trim();
+    const sourceHouseOptions = houses.filter(
+      (h: any) => !(testHomeHouseId && String(h.id) === testHomeHouseId)
+    );
+    const requestedSourceHouseId = String(sourceHouseIdParam ?? "").trim();
+    const linkedSourceHouseId = String(link?.sourceHouseId ?? "").trim();
+    const selectedSourceHouseId =
+      (requestedSourceHouseId &&
+      requestedSourceHouseId !== testHomeHouseId &&
+      sourceHouseOptions.some((h: any) => String(h.id) === requestedSourceHouseId)
+        ? requestedSourceHouseId
+        : linkedSourceHouseId &&
+            linkedSourceHouseId !== testHomeHouseId &&
+            sourceHouseOptions.some((h: any) => String(h.id) === linkedSourceHouseId)
+          ? linkedSourceHouseId
+          : sourceHouseOptions[0]?.id
+            ? String(sourceHouseOptions[0].id)
+            : "");
     const testHomeTravelRanges =
       labOwnerUserId && link?.testHomeHouseId
         ? await getTravelRangesFromDb(labOwnerUserId, String(link.testHomeHouseId))
@@ -429,12 +498,12 @@ export async function POST(req: NextRequest) {
       ok: true,
       action: "lookup_source_houses",
       sourceUser: { id: user.id, email: user.email },
-      sourceHouses: houses.map((h: any) => ({
+      sourceHouses: sourceHouseOptions.map((h: any) => ({
         id: h.id,
         esiid: h.esiid ? String(h.esiid) : null,
         label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
       })),
-      selectedSourceHouseId: sourceHouseIdParam || String(link?.sourceHouseId ?? ""),
+      selectedSourceHouseId,
       testHomeLink: link,
       travelRangesFromDb: testHomeTravelRanges,
       travelRangesSource: "test_home",
@@ -447,6 +516,18 @@ export async function POST(req: NextRequest) {
   if (rawAction === "replace_test_home_from_source") {
     if (!labOwnerUserId) {
       return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+    }
+    const link = await getLabTestHomeLink(labOwnerUserId);
+    const testHomeHouseId = String(link?.testHomeHouseId ?? "").trim();
+    if (testHomeHouseId && String(sourceHouseIdParam ?? "").trim() === testHomeHouseId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "invalid_source_house",
+          message: "Select a real source home. The canonical test home cannot be used as source.",
+        },
+        { status: 400 }
+      );
     }
     const selectedSourceHouse = houses.find((h: any) => String(h.id) === sourceHouseIdParam);
     if (!selectedSourceHouse) {
@@ -478,13 +559,21 @@ export async function POST(req: NextRequest) {
         userId: labOwnerUserId,
         houseId: String(replaced.testHomeHouseId),
       });
-      const testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
+      let testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
       const sourceTravelRanges = await getTravelRangesFromDb(user.id, sourceHouseIdParam);
+      if (testHomeTravelRanges.length === 0 && sourceTravelRanges.length > 0) {
+        await replaceTravelRangesForHousePastScenario(
+          labOwnerUserId,
+          String(replaced.testHomeHouseId),
+          sourceTravelRanges
+        );
+        testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
+      }
       const effectiveTravelRanges =
         testHomeTravelRanges.length > 0
           ? testHomeTravelRanges
           : sourceTravelRanges;
-      const link = await getLabTestHomeLink(labOwnerUserId);
+      const refreshedLink = await getLabTestHomeLink(labOwnerUserId);
       return NextResponse.json({
         ok: true,
         action: "replace_test_home_from_source",
@@ -510,7 +599,7 @@ export async function POST(req: NextRequest) {
         travelRangesFromDb: effectiveTravelRanges,
         travelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home" : "source_house_fallback",
-        testHomeLink: link,
+        testHomeLink: refreshedLink,
       });
     } catch (postLoadError: unknown) {
       return NextResponse.json(
@@ -579,49 +668,11 @@ export async function POST(req: NextRequest) {
       });
     }
     if (Array.isArray(body?.travelRanges)) {
-      const ranges = body.travelRanges
-        .map((r: any) => ({
-          startDate: String(r?.startDate ?? "").slice(0, 10),
-          endDate: String(r?.endDate ?? "").slice(0, 10),
-        }))
-        .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
-      await (prisma as any).$transaction(async (tx: any) => {
-        let pastScenario = await tx.usageSimulatorScenario.findFirst({
-          where: {
-            userId: labOwnerUserId,
-            houseId: link.testHomeHouseId,
-            name: "Past (Corrected)",
-            archivedAt: null,
-          },
-          select: { id: true },
-        });
-        if (!pastScenario?.id) {
-          pastScenario = await tx.usageSimulatorScenario.create({
-            data: {
-              userId: labOwnerUserId,
-              houseId: link.testHomeHouseId,
-              name: "Past (Corrected)",
-            },
-            select: { id: true },
-          });
-        }
-        await tx.usageSimulatorScenarioEvent.deleteMany({
-          where: {
-            scenarioId: String(pastScenario.id),
-            kind: "TRAVEL_RANGE",
-          },
-        });
-        if (ranges.length > 0) {
-          await tx.usageSimulatorScenarioEvent.createMany({
-            data: ranges.map((r) => ({
-              scenarioId: String(pastScenario.id),
-              effectiveMonth: r.startDate.slice(0, 7),
-              kind: "TRAVEL_RANGE",
-              payloadJson: { startDate: r.startDate, endDate: r.endDate },
-            })),
-          });
-        }
-      });
+      await replaceTravelRangesForHousePastScenario(
+        labOwnerUserId,
+        link.testHomeHouseId,
+        body.travelRanges
+      );
     }
 
     const refreshedProfiles = await loadDisplayProfilesForHouse({

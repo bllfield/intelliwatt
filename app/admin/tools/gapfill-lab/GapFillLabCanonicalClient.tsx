@@ -167,24 +167,6 @@ export default function GapFillLabCanonicalClient() {
   const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
-  const linkedSourceHomeId = String(testHomeLink?.sourceHouseId ?? "").trim();
-  const sourceDropdownOptions = useMemo(
-    () =>
-      sourceHouses.map((h) => {
-        const isLinkedTestHome = effectiveTestHomeId.length > 0 && String(h.id) === effectiveTestHomeId;
-        const isLinkedSourceHome = linkedSourceHomeId.length > 0 && String(h.id) === linkedSourceHomeId;
-        const roleSuffix = isLinkedTestHome
-          ? " - Test Home (do not use as source)"
-          : isLinkedSourceHome
-            ? " - Current Source Home"
-            : "";
-        return {
-          ...h,
-          displayLabel: `${h.label} (${h.id})${roleSuffix}`,
-        };
-      }),
-    [sourceHouses, effectiveTestHomeId, linkedSourceHomeId]
-  );
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
   const parsedApplianceProfile = useMemo(() => parseJsonSafe(applianceProfileJson), [applianceProfileJson]);
 
@@ -244,7 +226,12 @@ export default function GapFillLabCanonicalClient() {
 
     if (json.sourceHouses) {
       setSourceHouses(json.sourceHouses);
-      if (!sourceHouseId && json.selectedSourceHouseId) setSourceHouseId(json.selectedSourceHouseId);
+      const selected = String(json.selectedSourceHouseId ?? "").trim();
+      if (selected) {
+        setSourceHouseId(selected);
+      } else if (!sourceHouseId && json.sourceHouses.length > 0) {
+        setSourceHouseId(String(json.sourceHouses[0]?.id ?? ""));
+      }
     }
     if (json.sourceHouse) setSourceHouse(json.sourceHouse);
     if (json.testHome) setTestHome(json.testHome);
@@ -279,6 +266,14 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onReplace() {
+    if (!sourceHouseId) {
+      const lookupResult = await runAction("lookup_source_houses");
+      const selected = String((lookupResult as any)?.selectedSourceHouseId ?? "").trim();
+      if (!selected) {
+        setError("No eligible source home was found for this user.");
+        return;
+      }
+    }
     await runAction("replace_test_home_from_source");
   }
 
@@ -329,15 +324,12 @@ export default function GapFillLabCanonicalClient() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <input className="border rounded px-3 py-2 text-sm" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Source user email" />
         <input className="border rounded px-3 py-2 text-sm" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Timezone" />
-        <select className="border rounded px-3 py-2 text-sm" value={sourceHouseId} onChange={(e) => setSourceHouseId(e.target.value)}>
-          <option value="">Select source house</option>
-          {sourceDropdownOptions.map((h) => (
-            <option key={h.id} value={h.id}>{h.displayLabel}</option>
-          ))}
-        </select>
+        <div className="border rounded px-3 py-2 text-sm text-brand-navy/70 flex items-center">
+          Source home is auto-selected from lookup
+        </div>
         <div className="flex gap-2">
           <button className="px-3 py-2 rounded bg-brand-blue text-white text-sm" disabled={loading} onClick={onLookup}>Lookup</button>
-          <button className="px-3 py-2 rounded bg-brand-navy text-white text-sm" disabled={loading || !sourceHouseId} onClick={onReplace}>
+          <button className="px-3 py-2 rounded bg-brand-navy text-white text-sm" disabled={loading} onClick={onReplace}>
             Load/Replace Test Home
           </button>
         </div>
