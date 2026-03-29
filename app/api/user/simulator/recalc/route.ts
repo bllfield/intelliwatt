@@ -7,6 +7,11 @@ import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJ
 import { getUserDefaultValidationSelectionMode } from "@/modules/usageSimulator/service";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
+import {
+  attachFailureContract,
+  correlationHeaders,
+  failureContractFromRecalcErr,
+} from "@/lib/api/usageSimulationApiContract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,10 +19,22 @@ export const runtime = "nodejs";
 async function requireUser() {
   const cookieStore = cookies();
   const rawEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
-  if (!rawEmail) return { ok: false as const, status: 401, body: { ok: false, error: "Not authenticated" } };
+  if (!rawEmail) {
+    return {
+      ok: false as const,
+      status: 401,
+      body: attachFailureContract({ ok: false, error: "not_authenticated", message: "Not authenticated" }),
+    };
+  }
   const email = normalizeEmail(rawEmail);
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (!user) return { ok: false as const, status: 404, body: { ok: false, error: "User not found" } };
+  if (!user) {
+    return {
+      ok: false as const,
+      status: 404,
+      body: attachFailureContract({ ok: false, error: "user_not_found", message: "User not found" }),
+    };
+  }
   return { ok: true as const, user };
 }
 
@@ -36,11 +53,17 @@ export async function GET(request: NextRequest) {
 
     const jobId = new URL(request.url).searchParams.get("jobId")?.trim() ?? "";
     if (!jobId) {
-      return NextResponse.json({ ok: false, error: "jobId_required" }, { status: 400 });
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "jobId_required", message: "jobId query parameter is required." }),
+        { status: 400 }
+      );
     }
     const job = await getPastSimRecalcJobForUser({ jobId, userId: u.user.id });
     if (!job.ok) {
-      return NextResponse.json({ ok: false, error: "job_not_found" }, { status: 404 });
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "job_not_found", message: "No job found for this user." }),
+        { status: 404 }
+      );
     }
     return NextResponse.json({
       ok: true,
@@ -51,7 +74,10 @@ export async function GET(request: NextRequest) {
     });
   } catch (e) {
     console.error("[user/simulator/recalc] GET failed", e);
-    return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      attachFailureContract({ ok: false, error: "internal_error", message: "Internal server error" }),
+      { status: 500 }
+    );
   }
 }
 
@@ -70,13 +96,30 @@ export async function POST(request: NextRequest) {
         ? (weatherPreferenceRaw as WeatherPreference)
         : undefined;
     const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
-    if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
+    if (!houseId) {
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "houseId_required", message: "houseId is required." }),
+        { status: 400 }
+      );
+    }
     if (mode !== "MANUAL_TOTALS" && mode !== "NEW_BUILD_ESTIMATE" && mode !== "SMT_BASELINE") {
-      return NextResponse.json({ ok: false, error: "mode_invalid" }, { status: 400 });
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "mode_invalid",
+          message: "mode must be MANUAL_TOTALS, NEW_BUILD_ESTIMATE, or SMT_BASELINE.",
+        }),
+        { status: 400 }
+      );
     }
 
     const house = await requireHouse(u.user.id, houseId);
-    if (!house) return NextResponse.json({ ok: false, error: "House not found for user" }, { status: 403 });
+    if (!house) {
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "house_not_found_for_user", message: "House not found for user" }),
+        { status: 403 }
+      );
+    }
     const dispatched = await dispatchPastSimRecalc({
       userId: u.user.id,
       houseId,
@@ -89,18 +132,44 @@ export async function POST(request: NextRequest) {
       validationDayCount: 21,
     });
     if (dispatched.executionMode === "droplet_async") {
-      return NextResponse.json({
-        ok: true,
-        executionMode: "droplet_async",
-        jobId: dispatched.jobId,
-      });
+      return NextResponse.json(
+        {
+          ok: true,
+          executionMode: "droplet_async",
+          jobId: dispatched.jobId,
+          correlationId: dispatched.correlationId,
+        },
+        { headers: correlationHeaders(dispatched.correlationId) }
+      );
     }
     const out = dispatched.result;
-    if (!out.ok) return NextResponse.json(out, { status: 400 });
-    return NextResponse.json({ ...out, executionMode: "inline" });
+    if (!out.ok) {
+      const status = out.error === "recalc_timeout" ? 504 : 400;
+      const { failureCode, failureMessage } = failureContractFromRecalcErr(out);
+      return NextResponse.json(
+        {
+          ...out,
+          executionMode: "inline" as const,
+          correlationId: dispatched.correlationId,
+          failureCode,
+          failureMessage,
+        },
+        { status, headers: correlationHeaders(dispatched.correlationId) }
+      );
+    }
+    return NextResponse.json(
+      {
+        ...out,
+        executionMode: "inline" as const,
+        correlationId: dispatched.correlationId,
+      },
+      { headers: correlationHeaders(dispatched.correlationId) }
+    );
   } catch (e) {
     console.error("[user/simulator/recalc] failed", e);
-    return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      attachFailureContract({ ok: false, error: "internal_error", message: "Internal server error" }),
+      { status: 500 }
+    );
   }
 }
-

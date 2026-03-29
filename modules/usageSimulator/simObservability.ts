@@ -5,7 +5,37 @@ export function createSimCorrelationId(): string {
   return randomUUID();
 }
 
+/** Wall-clock ceiling for `dispatchPastSimRecalc` inline path (before droplet queue). Plan §6 (A) `recalc_timeout`. */
+export const USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS = 90_000;
+
 export type RecalcLifecycleStage = "recalc_start" | "recalc_success" | "recalc_failure";
+
+/**
+ * Plan §6 (B) fingerprint pipeline event names. Builders (Slices 9–10) should emit these via
+ * `logSimPipelineEvent` (or future dedicated helpers). Exported for type-safe wiring.
+ */
+export const FINGERPRINT_PIPELINE_EVENT = {
+  wholeHomeFingerprintBuildStart: "whole_home_fingerprint_build_start",
+  wholeHomeFingerprintBuildSuccess: "whole_home_fingerprint_build_success",
+  wholeHomeFingerprintBuildFailure: "whole_home_fingerprint_build_failure",
+  usageFingerprintBuildStart: "usage_fingerprint_build_start",
+  usageFingerprintBuildSuccess: "usage_fingerprint_build_success",
+  usageFingerprintBuildFailure: "usage_fingerprint_build_failure",
+  resolvedSimFingerprintResolutionStart: "resolved_sim_fingerprint_resolution_start",
+  resolvedSimFingerprintResolutionSuccess: "resolved_sim_fingerprint_resolution_success",
+  resolvedSimFingerprintResolutionFailure: "resolved_sim_fingerprint_resolution_failure",
+} as const;
+
+export type FingerprintPipelineEventName =
+  (typeof FINGERPRINT_PIPELINE_EVENT)[keyof typeof FINGERPRINT_PIPELINE_EVENT];
+
+/** No-op placeholder until fingerprint builders log real stages (Slices 9–10). */
+export function logFingerprintPipelineStub(
+  _event: FingerprintPipelineEventName,
+  _fields?: Record<string, string | number | boolean | null | undefined>
+): void {
+  // Intentionally empty — event names are canonical; wiring happens in builder slices.
+}
 
 export type SimObservabilityRecalcPayload = {
   stage: RecalcLifecycleStage;

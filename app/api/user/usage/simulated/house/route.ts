@@ -7,6 +7,8 @@ import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulato
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
+import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
+import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,14 +17,27 @@ export const maxDuration = 300; // Past scenario may hit cache; cold path uses c
 async function requireUser() {
   const cookieStore = cookies();
   const rawEmail = cookieStore.get("intelliwatt_user")?.value;
-  if (!rawEmail) return { ok: false as const, status: 401, body: { ok: false, error: "Not authenticated" } };
+  if (!rawEmail) {
+    return {
+      ok: false as const,
+      status: 401,
+      body: attachFailureContract({ ok: false, error: "not_authenticated", message: "Not authenticated" }),
+    };
+  }
   const userEmail = normalizeEmail(rawEmail);
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
-  if (!user) return { ok: false as const, status: 404, body: { ok: false, error: "User not found" } };
+  if (!user) {
+    return {
+      ok: false as const,
+      status: 404,
+      body: attachFailureContract({ ok: false, error: "user_not_found", message: "User not found" }),
+    };
+  }
   return { ok: true as const, user };
 }
 
 export async function GET(request: NextRequest) {
+  const correlationId = createSimCorrelationId();
   try {
     const u = await requireUser();
     if (!u.ok) return NextResponse.json(u.body, { status: u.status });
@@ -34,7 +49,12 @@ export async function GET(request: NextRequest) {
     // Treat "baseline" (client string) same as null so both dashboard and simulation page use same actual data.
     const scenarioId = scenarioIdTrimmed === "baseline" ? null : scenarioIdTrimmed;
 
-    if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
+    if (!houseId) {
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "houseId_required", message: "houseId is required." }),
+        { status: 400, headers: correlationHeaders(correlationId) }
+      );
+    }
 
     // Baseline alias path: scenarioId omitted/null/"baseline" resolves to ACTUAL_USAGE_INTERVALS.
     if (!scenarioId) {
@@ -44,8 +64,15 @@ export async function GET(request: NextRequest) {
       });
       if (!house) {
         return NextResponse.json(
-          { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" },
-          { status: 403 }
+          {
+            ...attachFailureContract({
+              ok: false,
+              error: "house_not_found",
+              message: "House not found for user",
+            }),
+            code: "HOUSE_NOT_FOUND",
+          },
+          { status: 403, headers: correlationHeaders(correlationId) }
         );
       }
       const resolved = await resolveIntervalsLayer({
@@ -57,13 +84,20 @@ export async function GET(request: NextRequest) {
         esiid: house.esiid ?? null,
       });
       const dataset = resolved?.dataset ?? null;
+      const baselineHeaders = new Headers({ "Cache-Control": "private, max-age=30" });
+      baselineHeaders.set("X-Correlation-Id", correlationId);
       return NextResponse.json(
-        { ok: true, houseId: house.id, scenarioKey: "BASELINE", scenarioId: null, dataset },
-        { headers: { "Cache-Control": "private, max-age=30" } }
+        { ok: true, houseId: house.id, scenarioKey: "BASELINE", scenarioId: null, dataset, correlationId },
+        { headers: baselineHeaders }
       );
     }
 
-    let out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
+    let out = await getSimulatedUsageForHouseScenario({
+      userId: u.user.id,
+      houseId,
+      scenarioId,
+      correlationId,
+    });
     const message = String((out as any)?.message ?? "");
     const shouldAutoBuildProfile =
       !out.ok &&
@@ -76,7 +110,7 @@ export async function GET(request: NextRequest) {
         timezone: "America/Chicago",
       });
       if (rebuilt.ok) {
-        out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
+        out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId, correlationId });
       }
     }
     // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).
@@ -84,22 +118,41 @@ export async function GET(request: NextRequest) {
     if (out.ok) {
       const datasetAny = (out as any)?.dataset ?? {};
       const compareProjection = buildValidationCompareProjectionSidecar(datasetAny);
+      const okHeaders = new Headers({ "Cache-Control": cacheControl });
+      okHeaders.set("X-Correlation-Id", correlationId);
       return NextResponse.json(
         {
           ...out,
           compareProjection,
+          correlationId,
         },
-        { headers: { "Cache-Control": cacheControl } }
+        { headers: okHeaders }
       );
     }
 
-    if (out.code === "NO_BUILD") return NextResponse.json(out, { status: 404 });
-    if (out.code === "HOUSE_NOT_FOUND") return NextResponse.json(out, { status: 403 });
-    if (out.code === "SCENARIO_NOT_FOUND") return NextResponse.json(out, { status: 404 });
-    return NextResponse.json(out, { status: 500 });
+    const failureBody = {
+      ...out,
+      correlationId,
+      failureCode: out.code,
+      failureMessage: out.message,
+    };
+    if (out.code === "NO_BUILD") return NextResponse.json(failureBody, { status: 404, headers: correlationHeaders(correlationId) });
+    if (out.code === "HOUSE_NOT_FOUND") return NextResponse.json(failureBody, { status: 403, headers: correlationHeaders(correlationId) });
+    if (out.code === "SCENARIO_NOT_FOUND") return NextResponse.json(failureBody, { status: 404, headers: correlationHeaders(correlationId) });
+    if (out.code === "ARTIFACT_MISSING") return NextResponse.json(failureBody, { status: 404, headers: correlationHeaders(correlationId) });
+    return NextResponse.json(failureBody, { status: 500, headers: correlationHeaders(correlationId) });
   } catch (e) {
     console.error("[user/usage/simulated/house] failed", e);
-    return NextResponse.json({ ok: false, code: "INTERNAL_ERROR", message: "Internal error" }, { status: 500 });
+    return NextResponse.json(
+      {
+        ...attachFailureContract({
+          ok: false,
+          error: "internal_error",
+          message: "Internal error",
+        }),
+        code: "INTERNAL_ERROR",
+      },
+      { status: 500, headers: correlationHeaders(correlationId) }
+    );
   }
 }
-

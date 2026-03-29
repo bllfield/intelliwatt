@@ -206,6 +206,7 @@ export async function POST(req: NextRequest) {
             ok: true,
             executionMode: "droplet_async",
             pastRecalcJobId: dispatched.jobId,
+            correlationId: dispatched.correlationId,
             message:
               "Recalc queued on droplet. Poll GET /api/admin/simulation-engines?email=...&pastRecalcJobId=... until status is succeeded, then retry this diagnostic.",
           },
@@ -213,7 +214,11 @@ export async function POST(req: NextRequest) {
         );
       }
       if (!dispatched.result.ok) {
-        return NextResponse.json(dispatched.result, { status: 400 });
+        const status = dispatched.result.error === "recalc_timeout" ? 504 : 400;
+        return NextResponse.json(
+          { ...dispatched.result, correlationId: dispatched.correlationId },
+          { status }
+        );
       }
       const freshBuild = await (prisma as any).usageSimulatorBuild
         .findUnique({

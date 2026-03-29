@@ -58,6 +58,8 @@ import {
   replaceGlobalLabTestHomeFromSource,
   GAPFILL_LAB_TEST_HOME_LABEL,
 } from "@/modules/usageSimulator/labTestHome";
+import { createSimCorrelationId, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import { attachFailureContract } from "@/lib/api/usageSimulationApiContract";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   classifySimulationFailure,
@@ -241,7 +243,24 @@ async function triggerGapfillCompareDropletWebhook(
 function gateGapfillLabAdmin(req: NextRequest): NextResponse | null {
   if (!hasAdminSessionCookie(req)) {
     const gate = requireAdmin(req);
-    if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+    if (!gate.ok) {
+      const raw = gate.body as { error?: string };
+      const errMsg = typeof raw?.error === "string" ? raw.error : "Admin gate denied";
+      const errKey =
+        errMsg === "Unauthorized"
+          ? "admin_unauthorized"
+          : errMsg === "ADMIN_TOKEN not configured"
+            ? "admin_token_not_configured"
+            : "admin_gate_denied";
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: errKey,
+          message: errMsg,
+        }),
+        { status: gate.status }
+      );
+    }
   }
   return null;
 }
@@ -255,7 +274,11 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   if (url.searchParams.get("diagnostics") !== "enqueue") {
     return NextResponse.json(
-      { ok: false, error: "invalid_query", message: "Use ?diagnostics=enqueue" },
+      attachFailureContract({
+        ok: false,
+        error: "invalid_query",
+        message: "Use ?diagnostics=enqueue",
+      }),
       { status: 400 }
     );
   }
@@ -314,7 +337,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
+    return NextResponse.json(attachFailureContract({ ok: false, error: "invalid_json" }), { status: 400 });
   }
 
   let compareRunId: string | null = null;
@@ -328,13 +351,17 @@ export async function POST(req: NextRequest) {
   try {
   const email = normalizeEmailSafe(body?.email ?? "");
   if (!email) {
-    return NextResponse.json({ ok: false, error: "email_required" }, { status: 400 });
+    return NextResponse.json(attachFailureContract({ ok: false, error: "email_required" }), { status: 400 });
   }
 
   const timezone = String(body?.timezone ?? "America/Chicago").trim() || "America/Chicago";
   if (!isValidIanaTimezone(timezone)) {
     return NextResponse.json(
-      { ok: false, error: "invalid_timezone", message: "Timezone must be a valid IANA timezone." },
+      attachFailureContract({
+        ok: false,
+        error: "invalid_timezone",
+        message: "Timezone must be a valid IANA timezone.",
+      }),
       { status: 400 }
     );
   }
@@ -394,7 +421,14 @@ export async function POST(req: NextRequest) {
     select: { id: true, email: true },
   });
   if (!user) {
-    return NextResponse.json({ ok: false, error: "user_not_found", message: "No user with that email." }, { status: 404 });
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "user_not_found",
+        message: "No user with that email.",
+      }),
+      { status: 404 }
+    );
   }
 
   const houses = await (prisma as any).houseAddress.findMany({
@@ -404,7 +438,10 @@ export async function POST(req: NextRequest) {
   });
 
   if (!houses?.length) {
-    return NextResponse.json({ ok: false, error: "no_houses", message: "User has no houses." }, { status: 404 });
+    return NextResponse.json(
+      attachFailureContract({ ok: false, error: "no_houses", message: "User has no houses." }),
+      { status: 404 }
+    );
   }
 
   const houseIdParam = typeof body?.houseId === "string" ? body.houseId.trim() : "";
@@ -412,7 +449,14 @@ export async function POST(req: NextRequest) {
     ? houses.find((h: any) => h.id === houseIdParam)
     : houses[0];
   if (!house) {
-    return NextResponse.json({ ok: false, error: "house_not_found", message: "House not found or not owned by user." }, { status: 404 });
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "house_not_found",
+        message: "House not found or not owned by user.",
+      }),
+      { status: 404 }
+    );
   }
 
   const isCanonicalLabAction =
@@ -445,19 +489,23 @@ export async function POST(req: NextRequest) {
   if (rawAction === "set_user_default_validation_selection_mode") {
     if (!requestedUserDefaultValidationMode) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "invalid_validation_selection_mode",
           message: "Provide a valid userDefaultValidationSelectionMode.",
           supportedModes: VALIDATION_SELECTION_MODES,
-        },
+        }),
         { status: 400 }
       );
     }
     const write = await setUserDefaultValidationSelectionMode(requestedUserDefaultValidationMode);
     if (!write.ok) {
       return NextResponse.json(
-        { ok: false, error: write.error, message: "Could not save system-wide user-facing validation-day mode." },
+        attachFailureContract({
+          ok: false,
+          error: String(write.error ?? "usage_simulator_settings_write_failed"),
+          message: "Could not save system-wide user-facing validation-day mode.",
+        }),
         { status: 500 }
       );
     }
@@ -494,6 +542,15 @@ export async function POST(req: NextRequest) {
         ? await getTravelRangesFromDb(labOwnerUserId, String(link.testHomeHouseId))
         : [];
     const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
+    const labCorrelationId = createSimCorrelationId();
+    logSimPipelineEvent("admin_lab_source_house_selected", {
+      correlationId: labCorrelationId,
+      source: "gapfill_lab",
+      action: "lookup_source_houses",
+      userId: user.id,
+      sourceHouseId: selectedSourceHouseId,
+      testHomeId: testHomeHouseId || undefined,
+    });
     return NextResponse.json({
       ok: true,
       action: "lookup_source_houses",
@@ -515,23 +572,23 @@ export async function POST(req: NextRequest) {
 
   if (rawAction === "replace_test_home_from_source") {
     if (!labOwnerUserId) {
-      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+      return NextResponse.json(attachFailureContract({ ok: false, error: "lab_owner_not_found" }), { status: 400 });
     }
     const link = await getLabTestHomeLink(labOwnerUserId);
     const testHomeHouseId = String(link?.testHomeHouseId ?? "").trim();
     if (testHomeHouseId && String(sourceHouseIdParam ?? "").trim() === testHomeHouseId) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "invalid_source_house",
           message: "Select a real source home. The canonical test home cannot be used as source.",
-        },
+        }),
         { status: 400 }
       );
     }
     const selectedSourceHouse = houses.find((h: any) => String(h.id) === sourceHouseIdParam);
     if (!selectedSourceHouse) {
-      return NextResponse.json({ ok: false, error: "source_house_not_found" }, { status: 404 });
+      return NextResponse.json(attachFailureContract({ ok: false, error: "source_house_not_found" }), { status: 404 });
     }
     const replaced = await replaceGlobalLabTestHomeFromSource({
       ownerUserId: labOwnerUserId,
@@ -540,13 +597,13 @@ export async function POST(req: NextRequest) {
     });
     if (!replaced.ok) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
-          error: replaced.error ?? "replace_test_home_failed",
+          error: String(replaced.error ?? "replace_test_home_failed"),
           message:
             replaced.message ??
             "Test-home replace failed before post-load snapshot.",
-        },
+        }),
         { status: 500 }
       );
     }
@@ -574,6 +631,16 @@ export async function POST(req: NextRequest) {
           ? testHomeTravelRanges
           : sourceTravelRanges;
       const refreshedLink = await getLabTestHomeLink(labOwnerUserId);
+      const labCorrelationId = createSimCorrelationId();
+      logSimPipelineEvent("admin_lab_test_home_replaced", {
+        correlationId: labCorrelationId,
+        source: "gapfill_lab",
+        action: "replace_test_home_from_source",
+        userId: labOwnerUserId,
+        sourceUserId: user.id,
+        sourceHouseId: sourceHouseIdParam,
+        testHomeId: String(replaced.testHomeHouseId ?? ""),
+      });
       return NextResponse.json({
         ok: true,
         action: "replace_test_home_from_source",
@@ -603,7 +670,7 @@ export async function POST(req: NextRequest) {
       });
     } catch (postLoadError: unknown) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "replace_test_home_postload_failed",
           message:
@@ -612,7 +679,7 @@ export async function POST(req: NextRequest) {
               : "Test-home replacement succeeded but post-load snapshot failed.",
           sourceHouseId: sourceHouseIdParam,
           testHomeHouseId: replaced.testHomeHouseId ?? null,
-        },
+        }),
         { status: 500 }
       );
     }
@@ -620,20 +687,27 @@ export async function POST(req: NextRequest) {
 
   if (rawAction === "save_test_home_inputs") {
     if (!labOwnerUserId) {
-      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+      return NextResponse.json(attachFailureContract({ ok: false, error: "lab_owner_not_found" }), { status: 400 });
     }
     const link = await getLabTestHomeLink(labOwnerUserId);
     if (!link?.testHomeHouseId) {
-      return NextResponse.json({ ok: false, error: "test_home_not_ready", message: "Load/replace test home first." }, { status: 409 });
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "test_home_not_ready",
+          message: "Load/replace test home first.",
+        }),
+        { status: 409 }
+      );
     }
     if (link.status !== "ready") {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "test_home_replace_incomplete",
           message: "Test home replacement is still in progress.",
           testHomeLink: link,
-        },
+        }),
         { status: 409 }
       );
     }
@@ -641,7 +715,14 @@ export async function POST(req: NextRequest) {
     if (body?.homeProfile != null) {
       const homeValidated = validateHomeProfile(normalizeLabHomeProfileInput(body.homeProfile), { requirePastBaselineFields: true });
       if (!homeValidated.ok) {
-        return NextResponse.json({ ok: false, error: "invalid_home_profile", detail: homeValidated.error }, { status: 400 });
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "invalid_home_profile",
+            detail: homeValidated.error,
+          }),
+          { status: 400 }
+        );
       }
       await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
         where: { userId_houseId: { userId: labOwnerUserId, houseId: link.testHomeHouseId } },
@@ -653,7 +734,14 @@ export async function POST(req: NextRequest) {
       const normalized = normalizeStoredApplianceProfile(body.applianceProfile);
       const applianceValidated = validateApplianceProfile(normalized);
       if (!applianceValidated.ok) {
-        return NextResponse.json({ ok: false, error: "invalid_appliance_profile", detail: applianceValidated.error }, { status: 400 });
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "invalid_appliance_profile",
+            detail: applianceValidated.error,
+          }),
+          { status: 400 }
+        );
       }
       await (appliancesPrisma as any).applianceProfileSimulated.upsert({
         where: { userId_houseId: { userId: labOwnerUserId, houseId: link.testHomeHouseId } },
@@ -680,6 +768,14 @@ export async function POST(req: NextRequest) {
       houseId: link.testHomeHouseId,
     });
     const refreshedTravel = await getTravelRangesFromDb(labOwnerUserId, link.testHomeHouseId);
+    const labCorrelationId = createSimCorrelationId();
+    logSimPipelineEvent("admin_lab_test_home_input_save", {
+      correlationId: labCorrelationId,
+      source: "gapfill_lab",
+      action: "save_test_home_inputs",
+      userId: labOwnerUserId,
+      testHomeId: link.testHomeHouseId,
+    });
     return NextResponse.json({
       ok: true,
       action: "save_test_home_inputs",
@@ -693,17 +789,17 @@ export async function POST(req: NextRequest) {
 
   if (rawAction === "run_test_home_canonical_recalc") {
     if (!labOwnerUserId) {
-      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+      return NextResponse.json(attachFailureContract({ ok: false, error: "lab_owner_not_found" }), { status: 400 });
     }
     const link = await getLabTestHomeLink(labOwnerUserId);
     if (!link?.testHomeHouseId || !link.sourceHouseId || !link.sourceUserId || link.status !== "ready") {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "test_home_not_ready",
           message: "Load/replace test home first and wait for ready state.",
           testHomeLink: link ?? null,
-        },
+        }),
         { status: 409 }
       );
     }
@@ -719,7 +815,10 @@ export async function POST(req: NextRequest) {
       }),
     ]);
     if (!labOwnerUser?.id || !testHomeHouse?.id || !sourceHouse?.id) {
-      return NextResponse.json({ ok: false, error: "test_home_context_not_found" }, { status: 404 });
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "test_home_context_not_found" }),
+        { status: 404 }
+      );
     }
 
     const { homeProfile, applianceProfile } = await loadDisplayProfilesForHouse({
@@ -731,7 +830,11 @@ export async function POST(req: NextRequest) {
     const source = await chooseActualSource({ houseId: sourceHouse.id, esiid: sourceEsiid });
     if (!source) {
       return NextResponse.json(
-        { ok: false, error: "no_actual_data", message: "No actual interval data (SMT or Green Button) on source house." },
+        attachFailureContract({
+          ok: false,
+          error: "no_actual_data",
+          message: "No actual interval data (SMT or Green Button) on source house.",
+        }),
         { status: 400 }
       );
     }
@@ -839,23 +942,24 @@ export async function POST(req: NextRequest) {
     const selectionDiagnostics = selectedValidation.diagnostics;
     if (testDateKeysLocal.size === 0) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "test_ranges_required",
           message: "At least one valid test-day range is required.",
-        },
+          validationSelectionDiagnostics: selectionDiagnostics,
+        }),
         { status: 400 }
       );
     }
     const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
     if (overlapLocal.size > 0) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "test_overlaps_travel",
           message: "Test dates overlap saved vacant/travel dates.",
           overlapCount: overlapLocal.size,
-        },
+        }),
         { status: 400 }
       );
     }
@@ -873,10 +977,25 @@ export async function POST(req: NextRequest) {
       .catch(() => null);
     if (!pastScenario?.id) {
       return NextResponse.json(
-        { ok: false, error: "no_past_scenario", message: "No Past (Corrected) scenario found on test home." },
+        attachFailureContract({
+          ok: false,
+          error: "no_past_scenario",
+          message: "No Past (Corrected) scenario found on test home.",
+        }),
         { status: 400 }
       );
     }
+
+    const labCorrelationId = createSimCorrelationId();
+    logSimPipelineEvent("admin_lab_run_test_home_canonical_recalc", {
+      correlationId: labCorrelationId,
+      source: "gapfill_lab",
+      action: "run_test_home_canonical_recalc",
+      userId: labOwnerUser.id,
+      sourceHouseId: sourceHouse.id,
+      testHomeId: testHomeHouse.id,
+      scenarioId: String(pastScenario.id),
+    });
 
     let recalcOut: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
     try {
@@ -892,6 +1011,7 @@ export async function POST(req: NextRequest) {
           validationOnlyDateKeysLocal: testDateKeysLocal,
           validationDaySelectionMode: testSelectionMode,
           validationDayCount: targetValidationDayCount,
+          correlationId: labCorrelationId,
         }),
         ROUTE_REBUILD_SHARED_TIMEOUT_MS,
         "canonical_recalc_timeout"
@@ -901,8 +1021,19 @@ export async function POST(req: NextRequest) {
         recalcError instanceof Error &&
         ((recalcError as any).code === "canonical_recalc_timeout" ||
           /canonical_recalc_timeout/i.test(String(recalcError.message ?? "")));
+      if (timedOut) {
+        logSimPipelineEvent("recalc_timeout", {
+          correlationId: labCorrelationId,
+          source: "gapfill_lab",
+          action: "run_test_home_canonical_recalc",
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          scenarioId: String(pastScenario.id),
+          durationMs: ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+        });
+      }
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: timedOut ? "canonical_recalc_timeout" : "canonical_recalc_failed",
           message: timedOut
@@ -910,17 +1041,19 @@ export async function POST(req: NextRequest) {
             : recalcError instanceof Error
               ? recalcError.message
               : "Canonical recalc failed.",
-        },
+          correlationId: labCorrelationId,
+        }),
         { status: timedOut ? 504 : 500 }
       );
     }
     if (!recalcOut.ok) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "canonical_recalc_failed",
           message: String(recalcOut.error ?? "Canonical recalc failed."),
-        },
+          correlationId: labCorrelationId,
+        }),
         { status: 500 }
       );
     }
@@ -936,6 +1069,7 @@ export async function POST(req: NextRequest) {
           // does not trigger another heavy rebuild leg after a successful recalc.
           readMode: "artifact_only",
           projectionMode: "baseline",
+          correlationId: labCorrelationId,
         }),
         ROUTE_REBUILD_SHARED_TIMEOUT_MS,
         "canonical_read_timeout"
@@ -946,7 +1080,7 @@ export async function POST(req: NextRequest) {
         ((readError as any).code === "canonical_read_timeout" ||
           /canonical_read_timeout/i.test(String(readError.message ?? "")));
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: timedOut ? "canonical_read_timeout" : "canonical_read_failed",
           message: timedOut
@@ -954,17 +1088,19 @@ export async function POST(req: NextRequest) {
             : readError instanceof Error
               ? readError.message
               : "Canonical read failed.",
-        },
+          correlationId: labCorrelationId,
+        }),
         { status: timedOut ? 504 : 500 }
       );
     }
     if (!baselineRead.ok) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "canonical_read_failed",
           message: baselineRead.message ?? "Canonical read failed.",
-        },
+          correlationId: labCorrelationId,
+        }),
         { status: 500 }
       );
     }
@@ -1065,13 +1201,13 @@ export async function POST(req: NextRequest) {
   if (action) {
     if (!requestedCompareRunId) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "compare_run_id_required",
           message: "Snapshot reader action requires compareRunId.",
           reasonCode: "COMPARE_RUN_ID_REQUIRED",
           action,
-        },
+        }),
         { status: 400 }
       );
     }
@@ -1081,41 +1217,41 @@ export async function POST(req: NextRequest) {
     if (!compareRunRead.ok) {
       const notFound = compareRunRead.error === "compare_run_not_found";
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: notFound ? "compare_run_not_found" : "compare_run_read_failed",
           message: compareRunRead.message,
           reasonCode: notFound ? "COMPARE_RUN_NOT_FOUND" : "COMPARE_RUN_READ_FAILED",
           action,
           compareRunId: requestedCompareRunId,
-        },
+        }),
         { status: notFound ? 404 : 500 }
       );
     }
     const runRow = compareRunRead.row;
     if (runRow.userId && runRow.userId !== user.id) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "compare_run_not_found",
           message: "No compare-run snapshot record exists for the provided compareRunId.",
           reasonCode: "COMPARE_RUN_NOT_FOUND",
           action,
           compareRunId: requestedCompareRunId,
-        },
+        }),
         { status: 404 }
       );
     }
     if (runRow.houseId && runRow.houseId !== house.id) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "compare_run_not_found",
           message: "No compare-run snapshot record exists for the provided compareRunId.",
           reasonCode: "COMPARE_RUN_NOT_FOUND",
           action,
           compareRunId: requestedCompareRunId,
-        },
+        }),
         { status: 404 }
       );
     }
@@ -1135,7 +1271,7 @@ export async function POST(req: NextRequest) {
     }
     if (runRow.status === "failed") {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "compare_run_failed",
           message: runRow.failureMessage ?? "Compare run failed before snapshot readers could serve data.",
@@ -1145,13 +1281,13 @@ export async function POST(req: NextRequest) {
             compareRunId: requestedCompareRunId,
             row: runRow,
           }),
-        },
+        }),
         { status: 409 }
       );
     }
     if (!runRow.snapshotReady || !runRow.snapshotJson) {
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: "compare_snapshot_not_ready",
           message: "Compare snapshot is not ready for staged heavy readers yet.",
@@ -1161,7 +1297,7 @@ export async function POST(req: NextRequest) {
             compareRunId: requestedCompareRunId,
             row: runRow,
           }),
-        },
+        }),
         { status: 409 }
       );
     }
@@ -1282,7 +1418,11 @@ export async function POST(req: NextRequest) {
   const source = await chooseActualSource({ houseId: house.id, esiid });
   if (!source) {
     return NextResponse.json(
-      { ok: false, error: "no_actual_data", message: "No actual interval data (SMT or Green Button)." },
+      attachFailureContract({
+        ok: false,
+        error: "no_actual_data",
+        message: "No actual interval data (SMT or Green Button).",
+      }),
       { status: 400 }
     );
   }
@@ -1462,7 +1602,11 @@ export async function POST(req: NextRequest) {
       const lon = houseWx?.lng != null && Number.isFinite(houseWx.lng) ? houseWx.lng : null;
       if (lat == null || lon == null) {
         return NextResponse.json(
-          { ok: false, error: "extreme_weather_requires_coordinates", message: "testMode=extreme_weather requires house lat/lng. Add coordinates to the house address." },
+          attachFailureContract({
+            ok: false,
+            error: "extreme_weather_requires_coordinates",
+            message: "testMode=extreme_weather requires house lat/lng. Add coordinates to the house address.",
+          }),
           { status: 400 }
         );
       }
@@ -1533,12 +1677,12 @@ export async function POST(req: NextRequest) {
 
   if (testDateKeysLocal.size === 0) {
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "test_ranges_required",
         message: "At least one valid Test Date range is required (or use Random Test Days).",
         compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
-      },
+      }),
       { status: 400 }
     );
   }
@@ -1547,7 +1691,7 @@ export async function POST(req: NextRequest) {
   const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
   if (overlapLocal.size > 0) {
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "test_overlaps_travel",
         message: "Test Dates overlap saved Vacant/Travel dates. Remove overlap and retry.",
@@ -1556,7 +1700,7 @@ export async function POST(req: NextRequest) {
         testDateKeysCount: testDateKeysLocal.size,
         travelDateKeysCount: travelDateKeysLocal.size,
         compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
-      },
+      }),
       { status: 400 }
     );
   }
@@ -1582,7 +1726,7 @@ export async function POST(req: NextRequest) {
       );
       const timedOut = normalizedError.code === "artifact_ensure_route_timeout_rebuild_shared_artifact";
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: timedOut ? "artifact_ensure_route_timeout" : "artifact_ensure_route_exception",
           message: timedOut
@@ -1593,7 +1737,7 @@ export async function POST(req: NextRequest) {
             ? "ARTIFACT_ENSURE_ROUTE_TIMEOUT"
             : "ARTIFACT_ENSURE_ROUTE_EXCEPTION",
           timeoutMs: timedOut ? ROUTE_REBUILD_SHARED_TIMEOUT_MS : undefined,
-        },
+        }),
         { status: timedOut ? 504 : 500 }
       );
     }
@@ -1603,14 +1747,14 @@ export async function POST(req: NextRequest) {
         message: String((rebuilt as any)?.message ?? ""),
       });
       return NextResponse.json(
-        {
+        attachFailureContract({
           ok: false,
           error: String((rebuilt as any)?.error ?? "past_rebuild_failed"),
           message: String((rebuilt as any)?.message ?? "Failed to rebuild shared Past artifact."),
           explanation: classification.userFacingExplanation,
           missingData: classification.missingData,
           reasonCode: classification.reasonCode,
-        },
+        }),
         { status: 500 }
       );
     }
@@ -1667,11 +1811,11 @@ export async function POST(req: NextRequest) {
     .catch(() => null);
   if (!pastScenario?.id) {
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "no_past_scenario",
         message: "No Past (Corrected) scenario found for this house.",
-      },
+      }),
       { status: 400 }
     );
   }
@@ -1694,12 +1838,12 @@ export async function POST(req: NextRequest) {
   });
   if (!run.ok) {
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
-        error: run.error,
+        error: String(run.error ?? "compare_run_queue_persist_failed"),
         message: run.message,
         reasonCode: "COMPARE_RUN_QUEUE_PERSIST_FAILED",
-      },
+      }),
       { status: 500 }
     );
   }
@@ -1727,13 +1871,13 @@ export async function POST(req: NextRequest) {
     compareRunStatus = "failed";
     compareRunTerminalState = true;
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "compare_core_recalc_failed",
         message: String(recalcOut.error ?? "Canonical recalc failed."),
         compareRunId: run.compareRunId,
         compareRunStatus: "failed",
-      },
+      }),
       { status: 500 }
     );
   }
@@ -1757,13 +1901,13 @@ export async function POST(req: NextRequest) {
     compareRunStatus = "failed";
     compareRunTerminalState = true;
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "compare_core_canonical_read_failed",
         message: String(canonicalRead.message ?? "Canonical read failed."),
         compareRunId: run.compareRunId,
         compareRunStatus: "failed",
-      },
+      }),
       { status: 500 }
     );
   }
@@ -1962,13 +2106,13 @@ export async function POST(req: NextRequest) {
     compareRunStatus = "failed";
     compareRunTerminalState = true;
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "compare_core_snapshot_persist_failed",
         message: "Could not persist compare snapshot payload.",
         compareRunId: run.compareRunId,
         compareRunStatus: "failed",
-      },
+      }),
       { status: 500 }
     );
   }
@@ -2082,7 +2226,7 @@ export async function POST(req: NextRequest) {
       });
     }
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
         error: "server_error",
         message: "The request took too long or failed. Try a shorter date range or try again.",
@@ -2094,7 +2238,7 @@ export async function POST(req: NextRequest) {
               compareRunSnapshotReady,
             }
           : {}),
-      },
+      }),
       { status: 500 }
     );
   }

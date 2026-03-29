@@ -188,7 +188,11 @@ export async function GET(req: NextRequest) {
       } else {
         pastRecalcExecutionMode = "inline";
         if (!dispatched.result.ok) {
-          return NextResponse.json(dispatched.result, { status: 400 });
+          const status = dispatched.result.error === "recalc_timeout" ? 504 : 400;
+          return NextResponse.json(
+            { ...dispatched.result, correlationId: dispatched.correlationId },
+            { status }
+          );
         }
       }
     }

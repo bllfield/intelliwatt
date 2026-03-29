@@ -2,7 +2,12 @@ import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
-import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
+import {
+  createSimCorrelationId,
+  logSimPipelineEvent,
+  USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS,
+} from "@/modules/usageSimulator/simObservability";
+import { raceWithTimeout } from "@/modules/usageSimulator/promiseRaceTimeout";
 import {
   enqueuePastSimRecalcDropletJob,
   PAST_SIM_RECALC_PAYLOAD_V,
@@ -10,14 +15,18 @@ import {
 } from "@/modules/usageSimulator/simDropletJob";
 import { shouldEnqueuePastSimRecalcRemote } from "@/modules/usageSimulator/dropletSimWebhook";
 
+const PAST_SIM_RECALC_INLINE_TIMEOUT_CODE = "past_sim_recalc_inline_timeout";
+
 export type PastSimRecalcDispatchResult =
   | {
       executionMode: "droplet_async";
       jobId: string;
+      correlationId: string;
     }
   | {
       executionMode: "inline";
       result: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
+      correlationId: string;
     };
 
 /**
@@ -52,20 +61,50 @@ export async function dispatchPastSimRecalc(args: {
   if (shouldEnqueuePastSimRecalcRemote()) {
     const enq = await enqueuePastSimRecalcDropletJob(payload);
     if (enq.ok) {
-      return { executionMode: "droplet_async", jobId: enq.jobId };
+      return { executionMode: "droplet_async", jobId: enq.jobId, correlationId };
     }
   }
-  const result = await recalcSimulatorBuild({
-    userId: args.userId,
-    houseId: args.houseId,
-    esiid: args.esiid,
-    mode: args.mode,
-    scenarioId: args.scenarioId ?? null,
-    weatherPreference: args.weatherPreference,
-    persistPastSimBaseline: args.persistPastSimBaseline,
-    validationDaySelectionMode: args.validationDaySelectionMode,
-    validationDayCount: args.validationDayCount,
-    correlationId,
-  });
-  return { executionMode: "inline", result };
+  let result: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
+  try {
+    result = await raceWithTimeout(
+      recalcSimulatorBuild({
+        userId: args.userId,
+        houseId: args.houseId,
+        esiid: args.esiid,
+        mode: args.mode,
+        scenarioId: args.scenarioId ?? null,
+        weatherPreference: args.weatherPreference,
+        persistPastSimBaseline: args.persistPastSimBaseline,
+        validationDaySelectionMode: args.validationDaySelectionMode,
+        validationDayCount: args.validationDayCount,
+        correlationId,
+      }),
+      USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS,
+      PAST_SIM_RECALC_INLINE_TIMEOUT_CODE
+    );
+  } catch (e: unknown) {
+    const code =
+      e instanceof Error ? (e as { code?: string }).code ?? (e as Error).message : String(e);
+    const timedOut =
+      code === PAST_SIM_RECALC_INLINE_TIMEOUT_CODE ||
+      /past_sim_recalc_inline_timeout/i.test(String(code));
+    if (timedOut) {
+      logSimPipelineEvent("recalc_timeout", {
+        correlationId,
+        userId: args.userId,
+        houseId: args.houseId,
+        mode: String(args.mode),
+        scenarioId: args.scenarioId ?? null,
+        durationMs: USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS,
+        source: "dispatchPastSimRecalc",
+      });
+      return {
+        executionMode: "inline",
+        result: { ok: false, error: "recalc_timeout" },
+        correlationId,
+      };
+    }
+    throw e;
+  }
+  return { executionMode: "inline", result, correlationId };
 }
