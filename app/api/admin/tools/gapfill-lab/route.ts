@@ -925,13 +925,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const baselineRead = await getSimulatedUsageForHouseScenario({
-      userId: labOwnerUser.id,
-      houseId: testHomeHouse.id,
-      scenarioId: String(pastScenario.id),
-      readMode: "allow_rebuild",
-      projectionMode: "baseline",
-    });
+    let baselineRead: Awaited<ReturnType<typeof getSimulatedUsageForHouseScenario>>;
+    try {
+      baselineRead = await withTimeout(
+        getSimulatedUsageForHouseScenario({
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          scenarioId: String(pastScenario.id),
+          // Recalc just persisted the canonical artifact; read it directly so this route
+          // does not trigger another heavy rebuild leg after a successful recalc.
+          readMode: "artifact_only",
+          projectionMode: "baseline",
+        }),
+        ROUTE_REBUILD_SHARED_TIMEOUT_MS,
+        "canonical_read_timeout"
+      );
+    } catch (readError: unknown) {
+      const timedOut =
+        readError instanceof Error &&
+        ((readError as any).code === "canonical_read_timeout" ||
+          /canonical_read_timeout/i.test(String(readError.message ?? "")));
+      return NextResponse.json(
+        {
+          ok: false,
+          error: timedOut ? "canonical_read_timeout" : "canonical_read_failed",
+          message: timedOut
+            ? "Canonical read exceeded route timeout. Retry recalc."
+            : readError instanceof Error
+              ? readError.message
+              : "Canonical read failed.",
+        },
+        { status: timedOut ? 504 : 500 }
+      );
+    }
     if (!baselineRead.ok) {
       return NextResponse.json(
         {

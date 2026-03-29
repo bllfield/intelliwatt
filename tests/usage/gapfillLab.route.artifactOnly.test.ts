@@ -432,6 +432,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(arg.scenarioId).toBe("past-s1");
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual(["baseline"]);
+    const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
+    expect(readModes).toEqual(["artifact_only"]);
   });
 
   it("returns explicit canonical recalc timeout without route hang", async () => {

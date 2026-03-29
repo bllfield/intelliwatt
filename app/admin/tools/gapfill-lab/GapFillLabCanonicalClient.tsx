@@ -201,12 +201,55 @@ export default function GapFillLabCanonicalClient() {
       testDays: randomMode ? testDays : undefined,
       ...extra,
     };
-    const resp = await fetch("/api/admin/tools/gapfill-lab", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = (await resp.json()) as RunResult;
+    let resp: Response;
+    let json: RunResult;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      try {
+        resp = await fetch("/api/admin/tools/gapfill-lab", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      json = (await resp.json().catch(async () => {
+        const text = await resp.text().catch(() => "");
+        return {
+          ok: false,
+          error: "route_response_parse_failed",
+          message: text || `Request failed (${resp.status}).`,
+        };
+      })) as RunResult;
+    } catch (err: unknown) {
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      const fallback: RunResult = {
+        ok: false,
+        error: timedOut ? "request_timeout" : "request_failed",
+        message: timedOut
+          ? "Request timed out before server response. Retry recalc."
+          : err instanceof Error
+            ? err.message
+            : "Request failed.",
+      };
+      setRequestDebug((prev) => [
+        {
+          at: new Date().toISOString(),
+          action,
+          status: 0,
+          request: payload,
+          response: fallback,
+        },
+        ...prev,
+      ].slice(0, 12));
+      setResult(fallback);
+      setError(fallback.message ?? fallback.error);
+      setLoading(false);
+      return fallback;
+    }
     setRequestDebug((prev) => [
       {
         at: new Date().toISOString(),
