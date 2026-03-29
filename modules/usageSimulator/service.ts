@@ -68,6 +68,7 @@ import {
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
+import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -180,6 +181,48 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
     };
   }
   return { ok: true };
+}
+
+async function getValidationActualDailyByDateForDataset(args: {
+  dataset: any;
+  fallbackHouseId: string;
+  fallbackEsiid: string | null;
+}): Promise<Map<string, number> | null> {
+  const rawValidationKeys = Array.isArray(args.dataset?.meta?.validationOnlyDateKeysLocal)
+    ? (args.dataset.meta.validationOnlyDateKeysLocal as unknown[])
+    : [];
+  const validationKeys = rawValidationKeys
+    .map((v) => String(v ?? "").slice(0, 10))
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+  if (validationKeys.length === 0) return null;
+
+  const actualContextHouseId = String(args.dataset?.meta?.actualContextHouseId ?? args.fallbackHouseId);
+  let actualContextEsiid: string | null =
+    actualContextHouseId === args.fallbackHouseId ? args.fallbackEsiid ?? null : null;
+  if (!actualContextEsiid && actualContextHouseId !== args.fallbackHouseId) {
+    const actualHouse = await (prisma as any).houseAddress
+      .findUnique({
+        where: { id: actualContextHouseId },
+        select: { esiid: true },
+      })
+      .catch(() => null);
+    actualContextEsiid = actualHouse?.esiid ?? null;
+  }
+
+  const actualUsage = await getActualUsageDatasetForHouse(actualContextHouseId, actualContextEsiid).catch(() => null);
+  const actualDailyRows = Array.isArray((actualUsage as any)?.dataset?.daily)
+    ? ((actualUsage as any).dataset.daily as Array<any>)
+    : [];
+  if (actualDailyRows.length === 0) return null;
+
+  const map = new Map<string, number>();
+  const keySet = new Set(validationKeys);
+  for (const row of actualDailyRows) {
+    const dk = String(row?.date ?? "").slice(0, 10);
+    if (!keySet.has(dk)) continue;
+    map.set(dk, Number(row?.kwh ?? 0) || 0);
+  }
+  return map.size > 0 ? map : null;
 }
 
 type DateRange = { startDate: string; endDate: string };
@@ -4379,7 +4422,11 @@ export async function getSimulatedUsageForUser(args: {
               source: "USER_SIMULATION",
               userId: args.userId,
               houseId: h.id,
-              houseLabel: h.label || h.addressLine1 || h.id,
+              houseLabel: toPublicHouseLabel({
+                label: h.label,
+                addressLine1: h.addressLine1,
+                fallbackId: h.id,
+              }),
               reasonCode: classification.reasonCode,
               reasonMessage: classification.reasonMessage,
               missingData: classification.missingData,
@@ -4418,7 +4465,11 @@ export async function getSimulatedUsageForUser(args: {
 
       results.push({
         houseId: h.id,
-        label: h.label || h.addressLine1,
+        label: toPublicHouseLabel({
+          label: h.label,
+          addressLine1: h.addressLine1,
+          fallbackId: h.id,
+        }),
         address: { line1: h.addressLine1, city: h.addressCity, state: h.addressState },
         esiid: h.esiid,
         dataset,
@@ -4463,49 +4514,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
-    let validationActualDailyCache: Map<string, number> | null | undefined = undefined;
-    const getValidationActualDailyByDate = async (dataset: any): Promise<Map<string, number> | null> => {
-      if (validationActualDailyCache !== undefined) return validationActualDailyCache;
-      const rawValidationKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
-        ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
-        : [];
-      const validationKeys = rawValidationKeys
-        .map((v) => String(v ?? "").slice(0, 10))
-        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
-      if (validationKeys.length === 0) {
-        validationActualDailyCache = null;
-        return validationActualDailyCache;
-      }
-      const actualContextHouseId = String((dataset as any)?.meta?.actualContextHouseId ?? args.houseId);
-      let actualContextEsiid: string | null = actualContextHouseId === args.houseId ? house.esiid ?? null : null;
-      if (!actualContextEsiid && actualContextHouseId !== args.houseId) {
-        const contextHouse = await (prisma as any).houseAddress
-          .findUnique({
-            where: { id: actualContextHouseId },
-            select: { esiid: true },
-          })
-          .catch(() => null);
-        actualContextEsiid = contextHouse?.esiid ?? null;
-      }
-      const actualUsage = await getActualUsageDatasetForHouse(actualContextHouseId, actualContextEsiid).catch(() => null);
-      const dailyRows = Array.isArray((actualUsage as any)?.dataset?.daily)
-        ? ((actualUsage as any).dataset.daily as Array<{ date?: string; kwh?: number }>)
-        : Array.isArray((actualUsage as any)?.daily)
-          ? ((actualUsage as any).daily as Array<{ date?: string; kwh?: number }>)
-          : [];
-      if (dailyRows.length === 0) {
-        validationActualDailyCache = null;
-        return validationActualDailyCache;
-      }
-      const byDate = new Map<string, number>();
-      for (const row of dailyRows) {
-        const dk = String(row?.date ?? "").slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-        byDate.set(dk, Number(row?.kwh ?? 0) || 0);
-      }
-      validationActualDailyCache = byDate;
-      return validationActualDailyCache;
-    };
 
     if (readMode === "artifact_only") {
       const scenarioIdForCache = scenarioId ?? "BASELINE";
@@ -4575,7 +4583,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
             ? projectBaselineFromCanonicalDataset(
                 restored,
                 String((restored as any)?.meta?.timezone ?? "America/Chicago"),
-                await getValidationActualDailyByDate(restored)
+                await getValidationActualDailyByDateForDataset({
+                  dataset: restored,
+                  fallbackHouseId: args.houseId,
+                  fallbackEsiid: house.esiid ?? null,
+                })
               )
             : restored;
         const projected = attachValidationCompareProjection(projectedBaselineAware);
@@ -4734,7 +4746,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ? projectBaselineFromCanonicalDataset(
               restored,
               String((buildInputs as any)?.timezone ?? "America/Chicago"),
-              await getValidationActualDailyByDate(restored)
+              await getValidationActualDailyByDateForDataset({
+                dataset: restored,
+                fallbackHouseId: args.houseId,
+                fallbackEsiid: house.esiid ?? null,
+              })
             )
           : restored;
       const projected = attachValidationCompareProjection(projectedBaselineAware);
@@ -4792,7 +4808,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
     }
 
-    const buildRec = await (prisma as any).usageSimulatorBuild
+    let buildRec = await (prisma as any).usageSimulatorBuild
       .findUnique({
         where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
         select: { buildInputs: true, buildInputsHash: true, lastBuiltAt: true },
@@ -4802,7 +4818,57 @@ export async function getSimulatedUsageForHouseScenario(args: {
       return { ok: false, code: "NO_BUILD", message: "Recalculate to generate this scenario." };
     }
 
-    const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+    let buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+    // Backfill validation-day compare support on first read for older Past builds
+    // that predate validation-key persistence.
+    const buildValidationKeys = Array.isArray((buildInputs as any)?.validationOnlyDateKeysLocal)
+      ? ((buildInputs as any).validationOnlyDateKeysLocal as unknown[])
+          .map((v) => String(v ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      : [];
+    const isPastScenarioForValidationBackfill =
+      Boolean(scenarioId) &&
+      scenarioRow?.name === WORKSPACE_PAST_NAME &&
+      String((buildInputs as any)?.mode ?? "") === "SMT_BASELINE" &&
+      buildValidationKeys.length === 0;
+    if (isPastScenarioForValidationBackfill) {
+      const weatherPreferenceRaw = String((buildInputs as any)?.weatherPreference ?? "NONE");
+      const weatherPreference: WeatherPreference =
+        weatherPreferenceRaw === "NONE" ||
+        weatherPreferenceRaw === "LAST_YEAR_WEATHER" ||
+        weatherPreferenceRaw === "LONG_TERM_AVERAGE"
+          ? (weatherPreferenceRaw as WeatherPreference)
+          : "NONE";
+      const defaultValidationMode = await getUserDefaultValidationSelectionMode();
+      const backfillRecalc = await recalcSimulatorBuild({
+        userId: args.userId,
+        houseId: args.houseId,
+        esiid: house.esiid ?? null,
+        mode: "SMT_BASELINE",
+        scenarioId,
+        weatherPreference,
+        persistPastSimBaseline: true,
+        validationDaySelectionMode: defaultValidationMode,
+        validationDayCount: 21,
+      });
+      if (!backfillRecalc.ok) {
+        return {
+          ok: false,
+          code: "INTERNAL_ERROR",
+          message: backfillRecalc.error ?? "Failed to backfill validation-day compare for Past scenario.",
+        };
+      }
+      buildRec = await (prisma as any).usageSimulatorBuild
+        .findUnique({
+          where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
+          select: { buildInputs: true, buildInputsHash: true, lastBuiltAt: true },
+        })
+        .catch(() => null);
+      if (!buildRec?.buildInputs) {
+        return { ok: false, code: "NO_BUILD", message: "Recalculate to generate this scenario." };
+      }
+      buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+    }
     const mode = (buildInputs as any).mode;
     const actualSource = (buildInputs as any)?.snapshots?.actualSource ?? null;
     const snapshotScenarioName = String((buildInputs as any)?.snapshots?.scenario?.name ?? "");
@@ -5238,7 +5304,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
         ? projectBaselineFromCanonicalDataset(
             dataset,
             String((buildInputs as any)?.timezone ?? "America/Chicago"),
-            await getValidationActualDailyByDate(dataset)
+            await getValidationActualDailyByDateForDataset({
+              dataset,
+              fallbackHouseId: args.houseId,
+              fallbackEsiid: house.esiid ?? null,
+            })
           )
         : dataset;
     const projected = attachValidationCompareProjection(projectedBaselineAware);
