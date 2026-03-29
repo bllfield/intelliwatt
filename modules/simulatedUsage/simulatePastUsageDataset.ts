@@ -822,6 +822,8 @@ export async function simulatePastUsageDataset(
     const collectSimulatedDayResultsDateKeys =
       retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined;
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
+    // Single shared day-level model (Section 21 / Phase 1): travel/vacant and Gap-Fill keep-ref modeled days
+    // both flow through buildPastSimulatedBaselineV1 → simulatePastDay; stitch/compare remain downstream consumers only.
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
       canonicalDayStartsMs,
@@ -841,6 +843,7 @@ export async function simulatePastUsageDataset(
         keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
       emitAllIntervals,
       debug: { out: pastDayCounts as any },
+      resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
     });
 
     const referenceDaysCount =
@@ -940,6 +943,7 @@ export async function simulatePastUsageDataset(
             ? Array.from(forceModeledOutputKeepReferencePoolDateKeysLocalSet).sort()
             : undefined,
         gapfillForceModeledKeepRefUtcKeyCount: keepRefUtcDateKeys.size,
+        resolvedSimFingerprint: (buildInputs as { resolvedSimFingerprint?: unknown }).resolvedSimFingerprint ?? undefined,
       } as unknown as typeof dataset.meta;
     }
 

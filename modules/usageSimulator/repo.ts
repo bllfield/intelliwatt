@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -77,6 +78,29 @@ export async function loadExistingSimulatorBuild(args: { userId: string; houseId
   return rec ?? null;
 }
 
+function fingerprintRefsPatch(
+  fp:
+    | {
+        wholeHomeFingerprintArtifactId?: string | null;
+        usageFingerprintArtifactId?: string | null;
+        fingerprintProvenanceJson?: Prisma.InputJsonValue | null;
+      }
+    | undefined
+): Record<string, unknown> {
+  if (!fp) return {};
+  const out: Record<string, unknown> = {};
+  if (fp.wholeHomeFingerprintArtifactId !== undefined) {
+    out.wholeHomeFingerprintArtifactId = fp.wholeHomeFingerprintArtifactId;
+  }
+  if (fp.usageFingerprintArtifactId !== undefined) {
+    out.usageFingerprintArtifactId = fp.usageFingerprintArtifactId;
+  }
+  if (fp.fingerprintProvenanceJson !== undefined) {
+    out.fingerprintProvenanceJson = fp.fingerprintProvenanceJson;
+  }
+  return out;
+}
+
 export async function upsertSimulatorBuild(args: {
   userId: string;
   houseId: string;
@@ -93,7 +117,14 @@ export async function upsertSimulatorBuild(args: {
     intradayTemplateVersion: string;
     smtShapeDerivationVersion: string;
   };
+  /** Optional: opaque usage-DB fingerprint row ids + denormalized provenance for this build. */
+  fingerprintRefs?: {
+    wholeHomeFingerprintArtifactId?: string | null;
+    usageFingerprintArtifactId?: string | null;
+    fingerprintProvenanceJson?: Prisma.InputJsonValue | null;
+  };
 }) {
+  const fp = fingerprintRefsPatch(args.fingerprintRefs);
   await (prisma as any).usageSimulatorBuild.upsert({
     where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: args.scenarioKey } },
     create: {
@@ -111,6 +142,7 @@ export async function upsertSimulatorBuild(args: {
       intradayTemplateVersion: args.versions.intradayTemplateVersion,
       smtShapeDerivationVersion: args.versions.smtShapeDerivationVersion,
       lastBuiltAt: new Date(),
+      ...fp,
     },
     update: {
       mode: args.mode,
@@ -124,6 +156,7 @@ export async function upsertSimulatorBuild(args: {
       intradayTemplateVersion: args.versions.intradayTemplateVersion,
       smtShapeDerivationVersion: args.versions.smtShapeDerivationVersion,
       lastBuiltAt: new Date(),
+      ...fp,
     },
   });
 }

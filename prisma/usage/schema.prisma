@@ -43,6 +43,14 @@ enum IntervalSeriesKind {
   FUTURE_SIM_USAGE
 }
 
+/// Section 13 / UNIFIED_SIM_FINGERPRINT_PLAN: fingerprint row lifecycle (not a second artifact family).
+enum SimulatorFingerprintStatus {
+  ready
+  stale
+  building
+  failed
+}
+
 model UsageModuleBootstrap {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -232,6 +240,51 @@ model UsageShapeProfile {
 
   @@unique([houseId, version])
   @@index([houseId])
+}
+
+/// Persisted WholeHomeFingerprint artifact (Phase 2a). One logical row per house (upsert).
+/// Modeled outputs remain PastSimulatedDatasetCache / shared sim chain only.
+model WholeHomeFingerprint {
+  id               String   @id @default(cuid())
+  houseId          String
+  /// Section 13 state: ready | stale | building | failed
+  status           SimulatorFingerprintStatus
+  /// Builder / algorithm revision (e.g. semver or internal tag).
+  algorithmVersion String
+  /// Dependency hash over inputs that define validity (per plan Section 13).
+  sourceHash       String
+  /// Set when status is stale or failed (operator- or machine-readable).
+  staleReason      String?
+  /// Last successful materialization (null when never built successfully).
+  builtAt          DateTime?
+  /// Serialized fingerprint payload or structured JSON per builder contract.
+  payloadJson      Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([houseId])
+  @@index([houseId])
+  @@index([status])
+  @@index([sourceHash])
+}
+
+/// Persisted UsageFingerprint artifact (Phase 2a). One logical row per house (upsert).
+model UsageFingerprint {
+  id               String   @id @default(cuid())
+  houseId          String
+  status           SimulatorFingerprintStatus
+  algorithmVersion String
+  sourceHash       String
+  staleReason      String?
+  builtAt          DateTime?
+  payloadJson      Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([houseId])
+  @@index([houseId])
+  @@index([status])
+  @@index([sourceHash])
 }
 
 /// Cache for Past simulated dataset (one canonical builder; avoid full rebuild on every GET).

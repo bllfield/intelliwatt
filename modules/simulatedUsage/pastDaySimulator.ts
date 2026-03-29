@@ -284,6 +284,13 @@ const HEATING_MULT_MAX_NON_EVENT = 1.15;
 const COOLING_MULT_MIN_NON_EVENT = 0.97;
 const COOLING_MULT_MAX_NON_EVENT = 1.1;
 const AUX_HEAT_SLOPE = 0.15;
+/**
+ * Phase 1 / Section 21: for `weather_scaled_day`, the daily total is primarily
+ * `preBlendAdjustedDayKwh` (profile × temperature-response multiplier). A small
+ * fraction of the profile anchor remains for stability (not a rigid bucket quota).
+ */
+export const WEATHER_SCALED_PROFILE_ANCHOR_FRAC = 0.12;
+
 /** Phase 1 safety cap: aux heat adder per day (kWh). */
 const AUX_HEAT_KWH_CAP = 12;
 /** Aux heat only when daily min temp <= 0 C (freezing or below). */
@@ -467,8 +474,10 @@ function computeWeatherAdjustedDayTotal(args: {
   ) {
     finalSelectedDayKwh = fullEventKwh;
   } else {
-    // weather_scaled_day: stronger blend-back toward profile (80% profile, 20% pre-blend)
-    finalSelectedDayKwh = baseDayKwh * 0.8 + preBlendAdjustedDayKwh * 0.2;
+    // weather_scaled_day: temperature-response primary; light profile anchor
+    finalSelectedDayKwh =
+      baseDayKwh * WEATHER_SCALED_PROFILE_ANCHOR_FRAC +
+      preBlendAdjustedDayKwh * (1 - WEATHER_SCALED_PROFILE_ANCHOR_FRAC);
     blendedBackTowardProfile = true;
   }
 

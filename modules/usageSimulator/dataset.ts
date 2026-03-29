@@ -3,6 +3,7 @@ import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
+import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
 
@@ -544,6 +545,8 @@ export type SimulatorBuildInputsV1 = {
     pastScenario?: { id: string; name: string } | null;
     pastScenarioEvents?: any[];
   };
+  /** Phase 2c: single shared resolver output; attached during recalc for canonical sim chain provenance. */
+  resolvedSimFingerprint?: ResolvedSimFingerprint;
 };
 
 export type SimulatedUsageDatasetMeta = {

@@ -93,6 +93,9 @@ import {
   resolveCanonicalUsage365CoverageWindow,
   resolveReportedCoverageWindow,
 } from "@/modules/usageSimulator/metadataWindow";
+import { ensureSimulatorFingerprintsForRecalc } from "@/modules/usageSimulator/fingerprintOrchestration";
+import { resolveSimFingerprint } from "@/modules/usageSimulator/resolveSimFingerprint";
+import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type ManualUsagePayloadAny = any;
 
@@ -3988,6 +3991,42 @@ async function recalcSimulatorBuildImpl(args: {
     effectiveValidationOnlyDateKeysLocal,
     resolveCanonicalUsage365CoverageWindow()
   );
+
+  const canonicalWindowForFp = canonicalWindowDateRange(built.canonicalMonths);
+  const fingerprintWindowStart =
+    smtAnchorPeriods?.[0]?.startDate ?? canonicalWindowForFp?.start ?? `${built.canonicalMonths[0]}-01`;
+  const fingerprintWindowEnd =
+    smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
+    canonicalWindowForFp?.end ??
+    `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
+  try {
+    await ensureSimulatorFingerprintsForRecalc({
+      houseId,
+      actualContextHouseId,
+      esiid: esiid ?? null,
+      homeProfile: homeProfile as any,
+      applianceProfile: applianceProfile as any,
+      mode,
+      actualOk,
+      windowStart: fingerprintWindowStart,
+      windowEnd: fingerprintWindowEnd,
+      correlationId: args.correlationId,
+    });
+  } catch (e) {
+    console.warn("[usageSimulator] ensureSimulatorFingerprintsForRecalc failed", e);
+  }
+
+  let resolvedSimFingerprint: ResolvedSimFingerprint | undefined;
+  try {
+    resolvedSimFingerprint = await resolveSimFingerprint({
+      houseId,
+      actualContextHouseId,
+      mode,
+    });
+  } catch (e) {
+    console.warn("[usageSimulator] resolveSimFingerprint failed", e);
+  }
+
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
@@ -4017,6 +4056,7 @@ async function recalcSimulatorBuildImpl(args: {
         validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
         actualContextHouseId,
         snapshots: { homeProfile, applianceProfile },
+        ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
       };
       const result = await simulatePastUsageDataset({
         houseId,
@@ -4094,6 +4134,7 @@ async function recalcSimulatorBuildImpl(args: {
       pastScenario: pastOverlay ? pastScenario : null,
       pastScenarioEvents: pastOverlay ? pastEventsForOverlay : [],
     } as any,
+    ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
     scenarioKey,
     scenarioId,
     versions,
@@ -4179,6 +4220,23 @@ async function recalcSimulatorBuildImpl(args: {
     buildInputs,
     buildInputsHash,
     versions,
+    fingerprintRefs:
+      resolvedSimFingerprint != null
+        ? {
+            wholeHomeFingerprintArtifactId: resolvedSimFingerprint.wholeHomeFingerprintArtifactId,
+            usageFingerprintArtifactId: resolvedSimFingerprint.usageFingerprintArtifactId,
+            fingerprintProvenanceJson: {
+              resolverVersion: resolvedSimFingerprint.resolverVersion,
+              resolvedHash: resolvedSimFingerprint.resolvedHash,
+              blendMode: resolvedSimFingerprint.blendMode,
+              wholeHomeSourceHash: resolvedSimFingerprint.wholeHomeSourceHash,
+              usageSourceHash: resolvedSimFingerprint.usageSourceHash,
+              usageBlendWeight: resolvedSimFingerprint.usageBlendWeight,
+              wholeHomeHouseId: resolvedSimFingerprint.wholeHomeHouseId,
+              usageFingerprintHouseId: resolvedSimFingerprint.usageFingerprintHouseId,
+            },
+          }
+        : undefined,
   });
 
   // Persist usage buckets for Past/Future so plan costing can use simulated usage.

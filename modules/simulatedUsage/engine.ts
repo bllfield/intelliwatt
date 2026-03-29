@@ -20,6 +20,7 @@ import type {
 } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
 import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
+import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
@@ -865,6 +866,145 @@ function getLocalDateKeyAndDow(dayStartMs: number, timezone: string): { dateKey:
   };
 }
 
+/**
+ * Blend reference-interval profile with usage-shape-merged profile.
+ * `usageWeight` is the weight on the merged (usage-side) profile; `(1-usageWeight)` on reference.
+ */
+function blendPastDayProfileLite(
+  reference: PastDayProfileLite,
+  merged: PastDayProfileLite,
+  usageWeight: number
+): PastDayProfileLite {
+  const w = Math.min(1, Math.max(0, Number(usageWeight) || 0));
+  const keys = Array.from(new Set([...reference.monthKeys, ...merged.monthKeys])).sort();
+  const idxOf = (p: PastDayProfileLite, ym: string) => p.monthKeys.indexOf(ym);
+  const wdByMonth: number[] = [];
+  const weByMonth: number[] = [];
+  const wdCount: Record<string, number> = {};
+  const weCount: Record<string, number> = {};
+  const monthOverallAvg: Record<string, number> = {};
+  const monthOverallCount: Record<string, number> = {};
+  for (let i = 0; i < keys.length; i++) {
+    const ym = keys[i]!;
+    const ri = idxOf(reference, ym);
+    const mi = idxOf(merged, ym);
+    const rWd = ri >= 0 ? reference.avgKwhPerDayWeekdayByMonth[ri] ?? 0 : 0;
+    const mWd = mi >= 0 ? merged.avgKwhPerDayWeekdayByMonth[mi] ?? 0 : 0;
+    const rWe = ri >= 0 ? reference.avgKwhPerDayWeekendByMonth[ri] ?? 0 : 0;
+    const mWe = mi >= 0 ? merged.avgKwhPerDayWeekendByMonth[mi] ?? 0 : 0;
+    wdByMonth[i] = (1 - w) * rWd + w * mWd;
+    weByMonth[i] = (1 - w) * rWe + w * mWe;
+    const rcWd = reference.weekdayCountByMonth[ym] ?? 0;
+    const rcWe = reference.weekendCountByMonth[ym] ?? 0;
+    const mcWd = merged.weekdayCountByMonth[ym] ?? 0;
+    const mcWe = merged.weekendCountByMonth[ym] ?? 0;
+    wdCount[ym] = Math.round((1 - w) * rcWd + w * mcWd) || (w >= 0.5 ? mcWd : rcWd);
+    weCount[ym] = Math.round((1 - w) * rcWe + w * mcWe) || (w >= 0.5 ? mcWe : rcWe);
+    monthOverallCount[ym] = wdCount[ym]! + weCount[ym]!;
+    monthOverallAvg[ym] =
+      monthOverallCount[ym]! > 0
+        ? (wdByMonth[i]! * wdCount[ym]! + weByMonth[i]! * weCount[ym]!) / monthOverallCount[ym]!
+        : 0;
+  }
+  return {
+    monthKeys: keys,
+    avgKwhPerDayWeekdayByMonth: wdByMonth,
+    avgKwhPerDayWeekendByMonth: weByMonth,
+    weekdayCountByMonth: wdCount,
+    weekendCountByMonth: weCount,
+    monthOverallAvgByMonth: monthOverallAvg,
+    monthOverallCountByMonth: monthOverallCount,
+  };
+}
+
+const WHOLE_HOME_SYNTHETIC_MIN_DAYS = 4;
+
+function uniformShape96(): number[] {
+  return Array.from({ length: 96 }, () => 1 / 96);
+}
+
+/**
+ * Intraday shape for `whole_home_only`: uniform 96-slot curves only (no reference-interval aggregation).
+ * Populates `PastShapeVariants` so `selectShape96` never falls through to meter-derived `legacyByMonth96`.
+ */
+function syntheticWholeHomeShapeVariants(monthKeys: string[]): PastShapeVariants {
+  const u = uniformShape96();
+  const keys = monthKeys.length > 0 ? monthKeys : ["2000-01"];
+  const byMonth96: Record<string, number[]> = {};
+  const byMonthDayType96: NonNullable<PastShapeVariants["byMonthDayType96"]> = {};
+  const byMonthWeatherDayType96: NonNullable<PastShapeVariants["byMonthWeatherDayType96"]> = {};
+  for (const ym of keys) {
+    byMonth96[ym] = u;
+    byMonthDayType96[ym] = { weekday: u, weekend: u };
+    byMonthWeatherDayType96[ym] = {
+      weekday: { heating: u, cooling: u, neutral: u },
+      weekend: { heating: u, cooling: u, neutral: u },
+    };
+  }
+  return {
+    byMonth96,
+    byMonthDayType96,
+    byMonthWeatherDayType96,
+    weekdayWeekend96: { weekday: u, weekend: u },
+    weekdayWeekendWeather96: {
+      weekday: { heating: u, cooling: u, neutral: u },
+      weekend: { heating: u, cooling: u, neutral: u },
+    },
+  };
+}
+
+/**
+ * Whole-home prior profile for `ResolvedSimFingerprint.blendMode === "whole_home_only"`:
+ * derived only from `homeProfile` / `applianceProfile` (same feature family as WholeHomeFingerprint), not from
+ * interval reference pools or usage-shape merge.
+ */
+function syntheticWholeHomePastDayProfileLite(args: {
+  monthKeys: string[];
+  homeProfile?: any;
+  applianceProfile?: any;
+}): PastDayProfileLite {
+  const monthKeys = args.monthKeys.length > 0 ? args.monthKeys : ["2000-01"];
+  const h = args.homeProfile ?? {};
+  const sqft = Math.max(500, Math.min(20000, Number(h.squareFeet) || 2000));
+  const evRaw = Number(h.evAvgKwhPerDay);
+  const evKwh = Number.isFinite(evRaw) && evRaw > 0 ? Math.min(80, evRaw) : 0;
+  let baseWd = 10 + (sqft / 2500) * 28;
+  baseWd += evKwh * 0.35;
+  if (Boolean(h.hasPool)) baseWd += 3;
+  baseWd = Math.max(8, Math.min(120, baseWd));
+  const baseWe = baseWd * 0.93;
+  const wdByMonth: number[] = [];
+  const weByMonth: number[] = [];
+  const wdCount: Record<string, number> = {};
+  const weCount: Record<string, number> = {};
+  const monthOverallAvg: Record<string, number> = {};
+  const monthOverallCount: Record<string, number> = {};
+  for (let i = 0; i < monthKeys.length; i++) {
+    const ym = monthKeys[i]!;
+    const monthNum = Number(ym.slice(5, 7)) || 6;
+    const season =
+      monthNum >= 11 || monthNum <= 2 ? 1.12 : monthNum >= 6 && monthNum <= 8 ? 1.08 : 1;
+    wdByMonth[i] = baseWd * season;
+    weByMonth[i] = baseWe * season;
+    wdCount[ym] = WHOLE_HOME_SYNTHETIC_MIN_DAYS;
+    weCount[ym] = WHOLE_HOME_SYNTHETIC_MIN_DAYS;
+    monthOverallCount[ym] = WHOLE_HOME_SYNTHETIC_MIN_DAYS * 2;
+    monthOverallAvg[ym] =
+      monthOverallCount[ym]! > 0
+        ? (wdByMonth[i]! * wdCount[ym]! + weByMonth[i]! * weCount[ym]!) / monthOverallCount[ym]!
+        : 0;
+  }
+  return {
+    monthKeys,
+    avgKwhPerDayWeekdayByMonth: wdByMonth,
+    avgKwhPerDayWeekendByMonth: weByMonth,
+    weekdayCountByMonth: wdCount,
+    weekendCountByMonth: weCount,
+    monthOverallAvgByMonth: monthOverallAvg,
+    monthOverallCountByMonth: monthOverallCount,
+  };
+}
+
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
@@ -918,6 +1058,14 @@ export function buildPastSimulatedBaselineV1(args: {
    * Useful for selected-day fresh compare scoring where only simulated-day intervals are needed.
    */
   emitAllIntervals?: boolean;
+  /**
+   * Optional: `ResolvedSimFingerprint` from `resolveSimFingerprint` — shapes how reference-interval
+   * profile vs usage-shape merge participates in `PastDayProfileLite` (shared sim input contract).
+   * `whole_home_only` replaces that merged/reference profile with a home/appliance-only synthetic
+   * `PastDayProfileLite`, clears neighbor-day totals and usage-anchored training stats for day-total
+   * selection, and uses synthetic uniform intraday shapes (no reference-interval shape aggregation).
+   */
+  resolvedSimFingerprint?: ResolvedSimFingerprint | null;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -1169,6 +1317,18 @@ export function buildPastSimulatedBaselineV1(args: {
     monthOverallCountByMonth: monthOverallCountByMonthRef,
   };
 
+  const monthKeysFromCanonical = Array.from(
+    new Set(
+      (args.canonicalDayStartsMs ?? [])
+        .filter((ms) => Number.isFinite(ms))
+        .map((ms) => {
+          const gridTs = args.getDayGridTimestamps(ms);
+          return gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]).slice(0, 7) : "";
+        })
+        .filter((k) => isYearMonth(k))
+    )
+  ).sort();
+
   // When usageShapeProfile is provided, merge it so excluded months get profile-based daily totals (then weather-scaled).
   // Otherwise months with few reference days (e.g. one day in March during travel) produce a flat repeated value.
   // Profile month keys are from the training window (e.g. 2024-03..2025-02); simulation may use 2025-03. Use same-calendar-month fallback.
@@ -1183,19 +1343,15 @@ export function buildPastSimulatedBaselineV1(args: {
     const v = sameMonth?.[1];
     return v != null && Number.isFinite(v) && v > 0 ? v : undefined;
   };
+  const rf = args.resolvedSimFingerprint ?? undefined;
+  const skipUsageShapeMerge = rf?.blendMode === "whole_home_only";
+
   let finalProfile: PastDayProfileLite = pastProfile;
-  if (args.usageShapeProfile?.weekdayAvgByMonthKey || args.usageShapeProfile?.weekendAvgByMonthKey) {
-    const monthKeysFromCanonical = Array.from(
-      new Set(
-        (args.canonicalDayStartsMs ?? [])
-          .filter((ms) => Number.isFinite(ms))
-          .map((ms) => {
-            const gridTs = args.getDayGridTimestamps(ms);
-            return gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]).slice(0, 7) : "";
-          })
-          .filter((k) => isYearMonth(k))
-      )
-    ).sort();
+  let mergedFromUsageShape: PastDayProfileLite | null = null;
+  if (
+    !skipUsageShapeMerge &&
+    (args.usageShapeProfile?.weekdayAvgByMonthKey || args.usageShapeProfile?.weekendAvgByMonthKey)
+  ) {
     const fullMonthKeys = Array.from(new Set([...pastProfile.monthKeys, ...monthKeysFromCanonical])).sort();
     const wdByMonth: number[] = [];
     const weByMonth: number[] = [];
@@ -1247,6 +1403,21 @@ export function buildPastSimulatedBaselineV1(args: {
       monthOverallAvgByMonth: monthOverallAvg,
       monthOverallCountByMonth: monthOverallCount,
     };
+    mergedFromUsageShape = finalProfile;
+  }
+
+  if (rf?.blendMode === "blended" && mergedFromUsageShape != null) {
+    finalProfile = blendPastDayProfileLite(pastProfile, mergedFromUsageShape, rf.usageBlendWeight);
+  }
+
+  if (rf?.blendMode === "whole_home_only") {
+    const mk =
+      monthKeysFromCanonical.length > 0 ? monthKeysFromCanonical : pastProfile.monthKeys;
+    finalProfile = syntheticWholeHomePastDayProfileLite({
+      monthKeys: mk,
+      homeProfile: args.homeProfile,
+      applianceProfile: args.applianceProfile,
+    });
   }
 
   const trainingDayKwhByDate = new Map<string, number>();
@@ -1365,12 +1536,19 @@ export function buildPastSimulatedBaselineV1(args: {
       neutral: normalizedFromAcc(weekdayWeekendWeatherAcc[dt].neutral),
     };
   }
+  const wholeHomeOnlyPrior =
+    args.resolvedSimFingerprint?.blendMode === "whole_home_only";
+  const shapeVariantsForContext = wholeHomeOnlyPrior
+    ? syntheticWholeHomeShapeVariants(
+        finalProfile.monthKeys.length > 0 ? finalProfile.monthKeys : monthKeysRef
+      )
+    : shapeVariants;
   const pastContext = buildPastDaySimulationContext({
     profile: finalProfile,
-    trainingWeatherStats: trainingWeatherStatsPast,
+    trainingWeatherStats: wholeHomeOnlyPrior ? null : trainingWeatherStatsPast,
     weatherByDateKey: weatherByDateKeyPast,
-    neighborDayTotals,
-    shapeVariants,
+    neighborDayTotals: wholeHomeOnlyPrior ? null : neighborDayTotals,
+    shapeVariants: shapeVariantsForContext,
   });
 
   const NEAREST_WEATHER_K = 7;
@@ -1485,6 +1663,7 @@ export function buildPastSimulatedBaselineV1(args: {
   const collectDayDiagnostics = Boolean(args.debug?.collectDayDiagnostics);
   const maxDayDiagnostics = Math.max(0, Number(args.debug?.maxDayDiagnostics ?? 0) || 0);
   const dayDiagnostics: PastSimulatedDayDiagnostic[] = [];
+  const legacyShapeByMonth96ForPastDay = wholeHomeOnlyPrior ? {} : shapeByMonth96Ref;
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
@@ -1517,6 +1696,7 @@ export function buildPastSimulatedBaselineV1(args: {
                 : "INCOMPLETE";
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
+      // One shared core for all modeled-day reasons (travel, incomplete, forced, keep-ref modeled).
       const result = simulatePastDay(
         {
           localDate: dateKey,
@@ -1527,7 +1707,7 @@ export function buildPastSimulatedBaselineV1(args: {
         pastContext,
         args.homeProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayHomeProfile | null,
         args.applianceProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayApplianceProfile | null,
-        shapeByMonth96Ref
+        legacyShapeByMonth96ForPastDay
       );
       const blendedResult =
         day.dayIsIncomplete

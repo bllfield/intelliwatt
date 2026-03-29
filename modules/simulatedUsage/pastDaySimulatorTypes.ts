@@ -132,7 +132,7 @@ export type SimulatedDayResult = {
   referenceHeatingSeverity?: number;
   /** Pre-blend adjusted total (profile × weatherSeverityMultiplier, before aux/pool adders and blend). */
   preBlendAdjustedDayKwh?: number;
-  /** True when day was weather_scaled_day and 80/20 blend-back toward profile was applied. */
+  /** True when day was weather_scaled_day and a small profile anchor was blended with temperature-primary total. */
   blendedBackTowardProfile?: boolean;
 };
 
