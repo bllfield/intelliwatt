@@ -32,6 +32,8 @@ type RunResult = {
   ok: true;
   action: string;
   sourceUser?: { id: string; email: string };
+  /** Present on several actions including canonical recalc when the lab resolves the owner user. */
+  sourceUserId?: string;
   sourceHouses?: HouseOption[];
   selectedSourceHouseId?: string;
   sourceHouse?: HouseOption;
@@ -62,6 +64,8 @@ type RunResult = {
   weatherKind?: string;
   testSelectionMode?: string;
   sourceHouseId?: string;
+  /** Past sim scenario id for the test-home build when returned by the API. */
+  scenarioId?: string | null;
   testHomeId?: string;
   treatmentMode?: string | null;
   simulatorMode?: string;
@@ -178,6 +182,8 @@ export default function GapFillLabCanonicalClient() {
   const [weatherKind, setWeatherKind] = useState<"ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo">("open_meteo");
   const [userDefaultValidationSelectionMode, setUserDefaultValidationSelectionMode] = useState("random_simple");
   const [adminLabValidationSelectionMode, setAdminLabValidationSelectionMode] = useState("stratified_weather_balanced");
+  /** Section 24 admin-only treatment; sent on recalc only — server applies in shared `recalcSimulatorBuild`. */
+  const [adminLabTreatmentMode, setAdminLabTreatmentMode] = useState("actual_data_fingerprint");
   const [supportedValidationSelectionModes, setSupportedValidationSelectionModes] = useState<string[]>([
     "manual",
     "random_simple",
@@ -383,7 +389,7 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onRunRecalc() {
-    await runAction("run_test_home_canonical_recalc");
+    await runAction("run_test_home_canonical_recalc", { adminLabTreatmentMode });
   }
 
   const usageChart = useMemo(() => {
@@ -472,6 +478,27 @@ export default function GapFillLabCanonicalClient() {
           <div className="font-semibold text-sm mb-2">Source / test home identity (plan §23)</div>
           <div className="grid gap-1 text-sm text-brand-navy/80 md:grid-cols-2">
             <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Source user (id / email)</span>
+              <div className="font-mono text-xs mt-0.5">
+                {result?.ok ? (
+                  (() => {
+                    const uid = result.sourceUser?.id ?? result.sourceUserId;
+                    const uemail = result.sourceUser?.email ?? email;
+                    return uid ? (
+                      <>
+                        <span className="block">{uid}</span>
+                        <span className="text-brand-navy/70">{uemail}</span>
+                      </>
+                    ) : (
+                      uemail
+                    );
+                  })()
+                ) : (
+                  email
+                )}
+              </div>
+            </div>
+            <div>
               <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Source house id</span>
               <div className="font-mono text-xs mt-0.5">{(apiSourceHouseId ?? sourceHouse?.id ?? sourceHouseId) || "—"}</div>
               {sourceHouse?.label ? <div className="text-xs text-brand-navy/60">{sourceHouse.label}</div> : null}
@@ -480,6 +507,12 @@ export default function GapFillLabCanonicalClient() {
               <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test home id</span>
               <div className="font-mono text-xs mt-0.5">{(apiTestHomeId ?? effectiveTestHomeId) || "—"}</div>
             </div>
+            {result?.ok && result.scenarioId ? (
+              <div className="md:col-span-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Scenario id (Past Sim)</span>
+                <div className="font-mono text-xs mt-0.5">{result.scenarioId}</div>
+              </div>
+            ) : null}
           </div>
           <div className="text-xs text-brand-navy/70 mt-2">
             Link status: {String(testHomeLink?.status ?? "unknown")}{" "}
@@ -506,11 +539,33 @@ export default function GapFillLabCanonicalClient() {
             </div>
           </div>
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab treatment (API)</div>
-            <div className="mt-0.5 font-mono text-xs">{visibilityFromResult?.treatmentMode ?? "—"}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab treatment (Section 24)</div>
+            <div className="mt-1">
+              <label className="sr-only" htmlFor="admin-lab-treatment">
+                Admin simulation treatment mode
+              </label>
+              <select
+                id="admin-lab-treatment"
+                className="w-full max-w-md border rounded px-2 py-1.5 text-xs font-mono bg-white"
+                value={adminLabTreatmentMode}
+                onChange={(e) => setAdminLabTreatmentMode(e.target.value)}
+                disabled={loading}
+              >
+                <option value="actual_data_fingerprint">actual_data_fingerprint</option>
+                <option value="whole_home_prior_only">whole_home_prior_only</option>
+                <option value="manual_monthly_constrained">manual_monthly_constrained (MANUAL_TOTALS from source actuals)</option>
+                <option value="manual_annual_constrained">manual_annual_constrained (MANUAL_TOTALS annual sum from source actuals)</option>
+              </select>
+            </div>
+            <div className="mt-0.5 font-mono text-xs">
+              Last recalc echo: {visibilityFromResult?.treatmentMode ?? "—"}
+            </div>
             <div className="text-xs text-brand-navy/60 mt-1">
-              Shown after recalc: backend label for this route today (Section 24 matrix{" "}
-              <code className="font-mono">actual_data_fingerprint</code> row). Not a multi-mode selector yet.
+              Sent on &quot;Run canonical recalc&quot; only. Manual constraint modes upgrade the shared chain to{" "}
+              <code className="font-mono">MANUAL_TOTALS</code> using monthly/annual totals from the source home&apos;s actual usage for the
+              canonical window (same <code className="font-mono">fetchActualCanonicalMonthlyTotals</code> as baseline). Fingerprint treatment
+              still applies after <code className="font-mono">resolveSimFingerprint</code>. Requires a ready whole-home fingerprint on the test
+              home for constrained resolver surfaces. Echo: <span className="font-mono">simulatorMode</span> from the API after recalc.
             </div>
           </div>
           <div>

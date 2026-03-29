@@ -5,6 +5,17 @@ export function createSimCorrelationId(): string {
   return randomUUID();
 }
 
+/** Lightweight RSS snapshot for Phase 3 measurement (plan §12 / §16). Node `process.memoryUsage()` only. */
+export function getMemoryRssMb(): number {
+  try {
+    const rss = process.memoryUsage?.()?.rss;
+    if (typeof rss !== "number" || !Number.isFinite(rss)) return 0;
+    return Math.round((rss / (1024 * 1024)) * 1000) / 1000;
+  } catch {
+    return 0;
+  }
+}
+
 /** Wall-clock ceiling for `dispatchPastSimRecalc` inline path (before droplet queue). Plan §6 (A) `recalc_timeout`. */
 export const USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS = 90_000;
 
@@ -29,12 +40,15 @@ export const FINGERPRINT_PIPELINE_EVENT = {
 export type FingerprintPipelineEventName =
   (typeof FINGERPRINT_PIPELINE_EVENT)[keyof typeof FINGERPRINT_PIPELINE_EVENT];
 
-/** No-op placeholder until fingerprint builders log real stages (Slices 9–10). */
+/**
+ * Deprecated no-op: fingerprint builders emit via `logSimPipelineEvent` + `FINGERPRINT_PIPELINE_EVENT` (Slice 11).
+ * @deprecated
+ */
 export function logFingerprintPipelineStub(
   _event: FingerprintPipelineEventName,
   _fields?: Record<string, string | number | boolean | null | undefined>
 ): void {
-  // Intentionally empty — event names are canonical; wiring happens in builder slices.
+  // Intentionally empty — retained for backward compatibility with any stale imports.
 }
 
 export type SimObservabilityRecalcPayload = {

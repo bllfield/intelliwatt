@@ -23,7 +23,11 @@ export {
   resolveSimFingerprint,
   RESOLVED_SIM_FINGERPRINT_VERSION,
 } from "@/modules/usageSimulator/resolveSimFingerprint";
+export { buildCohortPriorV1, COHORT_PRIOR_VERSION } from "@/modules/usageSimulator/cohortPriorBuilder";
+export { inferManualTotalsConstraintKind } from "@/modules/usageSimulator/manualUsageConstraint";
+export { computeWholeHomeSourceHashWithCohort } from "@/modules/usageSimulator/wholeHomeFingerprintInputs";
 export type {
   ResolvedSimFingerprint,
   ResolvedSimFingerprintBlendMode,
+  ResolvedSimFingerprintUnderlyingMix,
 } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";

@@ -28,8 +28,16 @@ import { buildMonthKeyedDailyAverages } from "@/modules/usageShapeProfile/derive
 import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
-import { createSimCorrelationId, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import {
+  createSimCorrelationId,
+  getMemoryRssMb,
+  logSimPipelineEvent,
+} from "@/modules/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import {
+  buildSyntheticIntervalsForSharedPastWindow,
+  buildUsageShapeSnapFromMonthlyTotalsForLowData,
+} from "@/modules/usageSimulator/lowDataPastSimAdapter";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 
@@ -177,6 +185,28 @@ export function collectSimulatedDayLocalDateIntervalConflicts(
     }
   }
   return out;
+}
+
+type HouseWeatherDayMap = Awaited<ReturnType<typeof getHouseWeatherDays>>;
+
+function mergeActualWxWithNormalForLowDataModes(args: {
+  actualWxByDateKey: HouseWeatherDayMap;
+  normalWxByDateKey: HouseWeatherDayMap;
+  canonicalDateKeys: string[];
+}): { mergedActualWxByDateKey: HouseWeatherDayMap; normalFilledDateKeyCount: number } {
+  const merged = new Map(args.actualWxByDateKey);
+  let normalFilledDateKeyCount = 0;
+  for (const dk of args.canonicalDateKeys) {
+    const row = merged.get(dk);
+    const isStub = !row || String(row?.source ?? "").trim() === WEATHER_STUB_SOURCE;
+    if (!isStub) continue;
+    const n = args.normalWxByDateKey.get(dk);
+    if (n && String(n?.source ?? "").trim() !== WEATHER_STUB_SOURCE) {
+      merged.set(dk, n);
+      normalFilledDateKeyCount += 1;
+    }
+  }
+  return { mergedActualWxByDateKey: merged, normalFilledDateKeyCount };
 }
 
 function summarizePastWindowWeatherProvenance(args: {
@@ -668,6 +698,7 @@ export async function simulatePastUsageDataset(
     houseId,
     userId,
     buildPathKind,
+    memoryRssMb: getMemoryRssMb(),
     source: "simulatePastUsageDataset",
   });
 
@@ -678,18 +709,29 @@ export async function simulatePastUsageDataset(
       userId,
       failureMessage: "Invalid startDate or endDate (expect YYYY-MM-DD).",
       durationMs: Date.now() - daySimStartedAt,
+      memoryRssMb: getMemoryRssMb(),
       source: "simulatePastUsageDataset",
     });
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
   }
 
   try {
+    const isLowDataSharedPastMode =
+      buildInputs.mode === "MANUAL_TOTALS" || buildInputs.mode === "NEW_BUILD_ESTIMATE";
     const actualIntervals =
-      preloadedIntervals ??
-      (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
-        timestamp: p.timestamp,
-        kwh: p.kwh,
-      }));
+      preloadedIntervals != null
+        ? preloadedIntervals
+        : isLowDataSharedPastMode
+          ? buildSyntheticIntervalsForSharedPastWindow({
+              buildInputs,
+              startDate,
+              endDate,
+              timezone,
+            })
+          : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
+              timestamp: p.timestamp,
+              kwh: p.kwh,
+            }));
 
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
@@ -716,19 +758,43 @@ export async function simulatePastUsageDataset(
     );
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
 
+    /**
+     * MANUAL_TOTALS / NEW_BUILD_ESTIMATE: synthetic intervals are complete for every day, so the shared
+     * engine would otherwise treat most days as reference/passthrough. Union Gap-Fill keep-ref keys with
+     * every non-travel day in the window so each day is modeled via simulatePastDay while synthetic
+     * intervals remain in the reference pool (same mechanism as Gap-Fill graded test days).
+     */
+    const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
+    if (isLowDataSharedPastMode) {
+      const tzForKeepRef = String(timezone ?? "").trim();
+      for (const dayStartMs of canonicalDayStartsMs) {
+        const gridTs = getDayGridTimestamps(dayStartMs);
+        if (!gridTs.length) continue;
+        const localKey = tzForKeepRef
+          ? dateKeyInTimezone(gridTs[0], tzForKeepRef)
+          : dateKeyFromTimestamp(gridTs[0]);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(localKey)) continue;
+        if (!excludedDateKeys.has(localKey)) {
+          mergedKeepRefLocalDateKeys.add(localKey);
+        }
+      }
+    }
+
     const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
       houseId: actualHouseId,
       startDate,
       endDate,
       canonicalDateKeys,
     });
-    if (provenance.weatherSourceSummary !== "actual_only") {
+    const smtBaselineStrictWeather = buildInputs.mode === "SMT_BASELINE";
+    if (smtBaselineStrictWeather && provenance.weatherSourceSummary !== "actual_only") {
       logSimPipelineEvent("day_simulation_failure", {
         correlationId,
         houseId,
         userId,
         failureMessage: `actual_weather_required:${provenance.weatherSourceSummary}`,
         durationMs: Date.now() - daySimStartedAt,
+        memoryRssMb: getMemoryRssMb(),
         source: "simulatePastUsageDataset",
       });
       return {
@@ -736,6 +802,13 @@ export async function simulatePastUsageDataset(
         error: `actual_weather_required:${provenance.weatherSourceSummary}`,
       };
     }
+    const { mergedActualWxByDateKey, normalFilledDateKeyCount } = smtBaselineStrictWeather
+      ? { mergedActualWxByDateKey: actualWxByDateKey, normalFilledDateKeyCount: 0 }
+      : mergeActualWxWithNormalForLowDataModes({
+          actualWxByDateKey,
+          normalWxByDateKey,
+          canonicalDateKeys,
+        });
 
     const [homeRecForPast, applianceRecForPast] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
@@ -754,7 +827,15 @@ export async function simulatePastUsageDataset(
       timezone,
       canonicalMonths,
     });
-    const usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
+    let usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
+    let lowDataShapeAdapterUsed = false;
+    if (!usageShapeProfileSnap && isLowDataSharedPastMode) {
+      usageShapeProfileSnap = buildUsageShapeSnapFromMonthlyTotalsForLowData({
+        canonicalMonths,
+        monthlyTotalsKwhByMonth: (buildInputs as SimulatorBuildInputsV1).monthlyTotalsKwhByMonth ?? {},
+      });
+      lowDataShapeAdapterUsed = true;
+    }
     if (!usageShapeProfileSnap) {
       logSimPipelineEvent("day_simulation_failure", {
         correlationId,
@@ -762,6 +843,7 @@ export async function simulatePastUsageDataset(
         userId,
         failureMessage: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
         durationMs: Date.now() - daySimStartedAt,
+        memoryRssMb: getMemoryRssMb(),
         source: "simulatePastUsageDataset",
       });
       return {
@@ -769,7 +851,15 @@ export async function simulatePastUsageDataset(
         error: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
       };
     }
-    const usageShapeProfileDiag = ensuredUsageShape.usageShapeProfileDiag;
+    const usageShapeProfileDiag = {
+      ...ensuredUsageShape.usageShapeProfileDiag,
+      ...(lowDataShapeAdapterUsed
+        ? {
+            reasonNotUsed: "low_data_monthly_shape_adapter",
+            inlineDerivedFromActual: false,
+          }
+        : {}),
+    };
     const timezoneResolved = String(timezone ?? "").trim();
     const forcedUtcDateKeys = new Set<string>();
     const retainedResultUtcDateKeys = new Set<string>();
@@ -778,7 +868,7 @@ export async function simulatePastUsageDataset(
       Boolean(timezoneResolved) &&
       (forcedSimulateDateKeysLocal.size > 0 ||
         retainedSimulatedDayResultDateKeysLocal.size > 0 ||
-        forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0);
+        mergedKeepRefLocalDateKeys.size > 0);
     if (needsUtcKeyWalk && timezoneResolved) {
       for (const dayStartMs of canonicalDayStartsMs) {
         const gridTs = getDayGridTimestamps(dayStartMs);
@@ -794,7 +884,7 @@ export async function simulatePastUsageDataset(
         );
         if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
         const intersectsKeepRefLocalDay = gridTs.some((ts) =>
-          forceModeledOutputKeepReferencePoolDateKeysLocalSet.has(dateKeyInTimezone(ts, timezoneResolved))
+          mergedKeepRefLocalDateKeys.has(dateKeyInTimezone(ts, timezoneResolved))
         );
         if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
       }
@@ -802,14 +892,14 @@ export async function simulatePastUsageDataset(
       !timezoneResolved &&
       (forcedSimulateDateKeysLocal.size > 0 ||
         retainedSimulatedDayResultDateKeysLocal.size > 0 ||
-        forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0)
+        mergedKeepRefLocalDateKeys.size > 0)
     ) {
       // No IANA timezone: local date keys are treated as canonical UTC calendar keys (same as retained fallback).
       for (const utcDateKey of canonicalDateKeys) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
         if (forcedSimulateDateKeysLocal.has(utcDateKey)) forcedUtcDateKeys.add(utcDateKey);
         if (retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) retainedResultUtcDateKeys.add(utcDateKey);
-        if (forceModeledOutputKeepReferencePoolDateKeysLocalSet.has(utcDateKey)) keepRefUtcDateKeys.add(utcDateKey);
+        if (mergedKeepRefLocalDateKeys.has(utcDateKey)) keepRefUtcDateKeys.add(utcDateKey);
       }
     }
     for (const utcKey of Array.from(keepRefUtcDateKeys)) {
@@ -824,6 +914,7 @@ export async function simulatePastUsageDataset(
     const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
     // Single shared day-level model (Section 21 / Phase 1): travel/vacant and Gap-Fill keep-ref modeled days
     // both flow through buildPastSimulatedBaselineV1 → simulatePastDay; stitch/compare remain downstream consumers only.
+    const baselinePhaseStartedAt = Date.now();
     const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
       actualIntervals,
       canonicalDayStartsMs,
@@ -834,7 +925,7 @@ export async function simulatePastUsageDataset(
       applianceProfile: applianceProfileForPast,
       usageShapeProfile: usageShapeProfileSnap ?? undefined,
       timezoneForProfile: timezone ?? undefined,
-      actualWxByDateKey,
+      actualWxByDateKey: mergedActualWxByDateKey,
       _normalWxByDateKey: normalWxByDateKey,
       collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
       collectSimulatedDayResultsDateKeys,
@@ -844,6 +935,15 @@ export async function simulatePastUsageDataset(
       emitAllIntervals,
       debug: { out: pastDayCounts as any },
       resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
+    });
+    logSimPipelineEvent("day_simulation_baseline_phase", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      durationMs: Date.now() - baselinePhaseStartedAt,
+      memoryRssMb: getMemoryRssMb(),
+      source: "simulatePastUsageDataset",
     });
 
     const referenceDaysCount =
@@ -900,6 +1000,14 @@ export async function simulatePastUsageDataset(
       dataset.meta = {
         ...(dataset.meta as Record<string, unknown>),
         buildPathKind,
+        sharedWeatherTimelineContract: smtBaselineStrictWeather
+          ? "last365_actual_strict"
+          : "last365_actual_with_normal_gapfill",
+        weatherNormalGapFillDateKeyCount: smtBaselineStrictWeather ? undefined : normalFilledDateKeyCount,
+        lowDataSharedPastAdapter: isLowDataSharedPastMode ? true : undefined,
+        lowDataShapeAdapterUsed: lowDataShapeAdapterUsed ? true : undefined,
+        /** Full-window keep-ref: synthetic seed stays in reference pool; day totals come from simulatePastDay. */
+        lowDataKeepRefModeledDays: isLowDataSharedPastMode ? true : undefined,
         sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
         derivationVersion: PAST_ENGINE_VERSION,
         simVersion: PAST_ENGINE_VERSION,
@@ -935,7 +1043,13 @@ export async function simulatePastUsageDataset(
         weatherActualRowCount: provenance.weatherActualRowCount,
         weatherUsed,
         weatherNote: weatherUsed
-          ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
+          ? smtBaselineStrictWeather
+            ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
+            : `Weather integrated in shared past path (${provenance.weatherSourceSummary}${
+                normalFilledDateKeyCount > 0
+                  ? `; normal-climate gap-fill ${normalFilledDateKeyCount} day(s)`
+                  : ""
+              }).`
           : "Weather unavailable for shared past path.",
         simulatedDayDiagnosticsSample,
         gapfillForceModeledKeepRefLocalDateKeys:
@@ -953,6 +1067,7 @@ export async function simulatePastUsageDataset(
       userId,
       buildPathKind,
       durationMs: Date.now() - daySimStartedAt,
+      memoryRssMb: getMemoryRssMb(),
       source: "simulatePastUsageDataset",
     });
     return {
@@ -960,7 +1075,7 @@ export async function simulatePastUsageDataset(
       meta: (dataset?.meta as Record<string, unknown>) ?? {},
       pastDayCounts,
       shapeMonthsPresent,
-      actualWxByDateKey: actualWxByDateKey,
+      actualWxByDateKey: mergedActualWxByDateKey,
       // lab_validation (Gap-Fill / shared compare): dataset already carries `series.intervals15`;
       // omitting duplicate `SimulatedCurve` cuts peak heap. cold_build/recalc still return it.
       stitchedCurve: buildPathKind === "lab_validation" ? undefined : stitchedCurve,
@@ -974,6 +1089,7 @@ export async function simulatePastUsageDataset(
       userId,
       failureMessage: err.message,
       durationMs: Date.now() - daySimStartedAt,
+      memoryRssMb: getMemoryRssMb(),
       source: "simulatePastUsageDataset",
     });
     console.warn("[simulatePastUsageDataset] failed", { houseId, err: e });

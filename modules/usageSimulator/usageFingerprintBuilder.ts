@@ -10,6 +10,11 @@ import {
 } from "@/modules/usageSimulator/fingerprintArtifactsRepo";
 import { sha256HexUtf8, stableStringify } from "@/modules/usageSimulator/fingerprintHash";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
+import {
+  FINGERPRINT_PIPELINE_EVENT,
+  getMemoryRssMb,
+  logSimPipelineEvent,
+} from "@/modules/usageSimulator/simObservability";
 
 export const USAGE_FINGERPRINT_ALGORITHM_VERSION = "usage_fp_v1";
 
@@ -37,7 +42,14 @@ export async function buildAndPersistUsageFingerprint(args: {
   endDate: string;
   correlationId?: string;
 }): Promise<{ ok: true; sourceHash: string } | { ok: false; error: string }> {
-  const { houseId, esiid, startDate, endDate } = args;
+  const { houseId, esiid, startDate, endDate, correlationId } = args;
+  const startedAt = Date.now();
+  logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.usageFingerprintBuildStart, {
+    correlationId,
+    houseId,
+    source: "buildAndPersistUsageFingerprint",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const prior = await getLatestUsageFingerprintByHouseId(houseId).catch(() => null);
   const pendingHash = prior?.sourceHash ?? "pending";
 
@@ -67,6 +79,15 @@ export async function buildAndPersistUsageFingerprint(args: {
         builtAt: null,
         payloadJson: { error: "interval_fingerprint_unavailable", window: { startDate, endDate } },
       });
+      logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.usageFingerprintBuildFailure, {
+        correlationId,
+        houseId,
+        durationMs: Date.now() - startedAt,
+        failureCode: "interval_fingerprint_unavailable",
+        failureMessage: "interval_fingerprint_unavailable",
+        memoryRssMb: getMemoryRssMb(),
+        source: "buildAndPersistUsageFingerprint",
+      });
       return { ok: false, error: "interval_fingerprint_unavailable" };
     }
 
@@ -94,6 +115,13 @@ export async function buildAndPersistUsageFingerprint(args: {
       builtAt: new Date(),
       payloadJson,
     });
+    logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.usageFingerprintBuildSuccess, {
+      correlationId,
+      houseId,
+      durationMs: Date.now() - startedAt,
+      memoryRssMb: getMemoryRssMb(),
+      source: "buildAndPersistUsageFingerprint",
+    });
     return { ok: true, sourceHash };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -106,6 +134,14 @@ export async function buildAndPersistUsageFingerprint(args: {
       builtAt: null,
       payloadJson: { error: msg, phase: "failed" },
     }).catch(() => {});
+    logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.usageFingerprintBuildFailure, {
+      correlationId,
+      houseId,
+      durationMs: Date.now() - startedAt,
+      failureMessage: msg,
+      memoryRssMb: getMemoryRssMb(),
+      source: "buildAndPersistUsageFingerprint",
+    });
     return { ok: false, error: msg };
   }
 }

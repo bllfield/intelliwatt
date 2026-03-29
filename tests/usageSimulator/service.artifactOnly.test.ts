@@ -6,6 +6,15 @@ import * as usageDatasetModule from "@/modules/usageSimulator/dataset";
 
 vi.mock("server-only", () => ({}));
 
+const { logPipeline } = vi.hoisted(() => ({
+  logPipeline: vi.fn(),
+}));
+
+vi.mock("@/modules/usageSimulator/simObservability", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/modules/usageSimulator/simObservability")>();
+  return { ...mod, logSimPipelineEvent: logPipeline };
+});
+
 const scenarioFindFirst = vi.fn();
 const usageSimulatorBuildFindUnique = vi.fn();
 const getHouseAddressForUserHouse = vi.fn();
@@ -88,6 +97,7 @@ import {
 
 describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   beforeEach(() => {
+    logPipeline.mockClear();
     scenarioFindFirst.mockReset();
     usageSimulatorBuildFindUnique.mockReset();
     getHouseAddressForUserHouse.mockReset();
@@ -222,6 +232,36 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       expect(Array.isArray(out.dataset?.series?.intervals15)).toBe(true);
     }
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
+
+  it("emits compareProjection measurement events with correlationId, durationMs, and memoryRssMb (Slice 11)", async () => {
+    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+      inputHash: "hash1",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01", latest: "2026-01-01" },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const cid = "33333333-3333-4333-8333-333333333333";
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+      correlationId: cid,
+    });
+
+    expect(out.ok).toBe(true);
+    const startEv = logPipeline.mock.calls.find((c) => c[0] === "compareProjection_start");
+    const okEv = logPipeline.mock.calls.find((c) => c[0] === "compareProjection_success");
+    expect(startEv?.[1]).toMatchObject({ correlationId: cid, houseId: "h1" });
+    expect(okEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (okEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(okEv?.[1]).toHaveProperty("memoryRssMb");
   });
 
   it("preserves restored canonical summary totals instead of overwriting them from decoded intervals", async () => {

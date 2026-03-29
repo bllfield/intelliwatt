@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
+import { RESOLVED_SIM_FINGERPRINT_VERSION } from "@/modules/usageSimulator/resolveSimFingerprint";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 function baseResolved(overrides: Partial<ResolvedSimFingerprint> = {}): ResolvedSimFingerprint {
   return {
-    resolverVersion: "resolved_sim_fp_v1",
+    resolverVersion: RESOLVED_SIM_FINGERPRINT_VERSION,
     resolvedHash: "h",
     blendMode: "blended",
+    underlyingSourceMix: "blended",
+    manualTotalsConstraint: "none",
+    resolutionNotes: [],
     wholeHomeHouseId: "h1",
     usageFingerprintHouseId: "h1",
     wholeHomeFingerprintArtifactId: "wh",
@@ -267,5 +271,53 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     const b = outB.dayResults.find((r) => String(r.localDate).slice(0, 10) === excludedDate);
     const l1 = (a?.shape96Used ?? []).reduce((s, v, i) => s + Math.abs(v - (b?.shape96Used?.[i] ?? 0)), 0);
     expect(l1).toBeGreaterThan(0.05);
+  });
+
+  it("keep-ref full-window runs simulatePastDay for every day (no ACTUAL passthrough dominance)", () => {
+    const day1StartMs = new Date("2026-04-05T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-04-06T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const k1 = dateKeyFromTimestamp(day1Grid[0]!);
+    const k2 = dateKeyFromTimestamp(day2Grid[0]!);
+    const mkIntervals = (grid: string[]) => grid.map((ts, idx) => ({ timestamp: ts, kwh: 1.5 + (idx % 11) * 0.02 }));
+    const actualIntervals = [...mkIntervals(day1Grid), ...mkIntervals(day2Grid)];
+
+    const wx = { tAvgF: 55, tMinF: 45, tMaxF: 65, hdd65: 10, cdd65: 5 };
+    const actualWxByDateKey = new Map<string, typeof wx>([
+      [k1, wx],
+      [k2, wx],
+    ]);
+
+    const dbg: {
+      totalDays?: number;
+      simulatedDays?: number;
+      referenceDaysUsed?: number;
+      dayDiagnostics?: Array<{ dayType?: string }>;
+    } = {};
+    buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-04": 45 },
+        weekendAvgByMonthKey: { "2026-04": 42 },
+      },
+      timezoneForProfile: "UTC",
+      homeProfile: { squareFeet: 2200 },
+      forceModeledOutputKeepReferencePoolDateKeys: new Set([k1, k2]),
+      resolvedSimFingerprint: baseResolved({ blendMode: "usage_only", usageBlendWeight: 1 }),
+      actualWxByDateKey,
+      debug: { out: dbg as any, collectDayDiagnostics: true, maxDayDiagnostics: 10 },
+    });
+
+    expect(dbg.totalDays).toBe(2);
+    expect(dbg.simulatedDays).toBe(2);
+    expect(dbg.referenceDaysUsed).toBe(2);
+    const actualPassthrough = (dbg.dayDiagnostics ?? []).filter((d) => d.dayType === "ACTUAL").length;
+    expect(actualPassthrough).toBe(0);
   });
 });

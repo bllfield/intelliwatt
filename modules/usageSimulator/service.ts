@@ -43,6 +43,7 @@ import {
 } from "@/modules/usageSimulator/pastCache";
 import {
   createSimCorrelationId,
+  getMemoryRssMb,
   logSimObservabilityEvent,
   logSimPipelineEvent,
 } from "@/modules/usageSimulator/simObservability";
@@ -95,6 +96,11 @@ import {
 } from "@/modules/usageSimulator/metadataWindow";
 import { ensureSimulatorFingerprintsForRecalc } from "@/modules/usageSimulator/fingerprintOrchestration";
 import { resolveSimFingerprint } from "@/modules/usageSimulator/resolveSimFingerprint";
+import {
+  applyAdminLabTreatmentToResolvedFingerprint,
+  isAdminLabManualConstraintTreatmentMode,
+} from "@/modules/usageSimulator/adminLabTreatment";
+import { buildAdminLabSyntheticManualUsagePayload } from "@/modules/usageSimulator/adminLabManualFromActuals";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type ManualUsagePayloadAny = any;
@@ -3559,6 +3565,8 @@ export type SimulatorRecalcOk = {
   houseId: string;
   buildInputsHash: string;
   dataset: any;
+  /** Effective shared-chain mode after admin-lab upgrades (e.g. MANUAL_TOTALS for manual constraint treatments). */
+  effectiveSimulatorMode?: SimulatorMode;
 };
 
 export type SimulatorRecalcErr = {
@@ -3589,6 +3597,8 @@ async function recalcSimulatorBuildImpl(args: {
   /** Correlation id for observability (plan §6); set by wrapper or droplet worker. */
   correlationId?: string;
   now?: Date;
+  /** Admin calibration lab only (plan §24): applied after `resolveSimFingerprint`, same shared chain. */
+  adminLabTreatmentMode?: import("@/modules/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
   const actualContextHouseId = String(args.actualContextHouseId ?? houseId);
@@ -3611,7 +3621,7 @@ async function recalcSimulatorBuildImpl(args: {
     getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
   ]);
 
-  const manualUsagePayload = (manualRec?.payload as any) ?? null;
+  let manualUsagePayload = (manualRec?.payload as any) ?? null;
   const canonical = canonicalMonthsForRecalc({ mode, manualUsagePayload, now: args.now });
 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
@@ -3696,9 +3706,6 @@ async function recalcSimulatorBuildImpl(args: {
   if (!homeProfile) return { ok: false, error: "homeProfile_required" };
   if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
 
-  // Enforce mode->baseKind mapping (no mismatches)
-  const baseKind = baseKindFromMode(mode);
-
   // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).
   let canonicalForBuild = canonical;
   let baselineInputsForRecalc: any = null;
@@ -3724,8 +3731,48 @@ async function recalcSimulatorBuildImpl(args: {
   }
 
   const travelRangesForBuild = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : undefined;
+
+  const adminLabManualConstraint =
+    Boolean(args.adminLabTreatmentMode) && isAdminLabManualConstraintTreatmentMode(args.adminLabTreatmentMode);
+  let simMode: SimulatorMode = mode;
+  if (adminLabManualConstraint) {
+    try {
+      manualUsagePayload = await buildAdminLabSyntheticManualUsagePayload({
+        treatmentMode: args.adminLabTreatmentMode as "manual_monthly_constrained" | "manual_annual_constrained",
+        canonicalMonths: canonicalForBuild.months,
+        actualContextHouseId,
+        esiid,
+        travelRanges: travelRangesForBuild,
+      });
+    } catch (e) {
+      return {
+        ok: false,
+        error: "requirements_unmet",
+        missingItems: [
+          `Admin lab could not derive manual totals from actual-context usage: ${e instanceof Error ? e.message : String(e)}`,
+        ],
+      };
+    }
+    simMode = "MANUAL_TOTALS";
+    const reqManual = computeRequirements(
+      {
+        manualUsagePayload: manualUsagePayload as any,
+        homeProfile: homeProfile as any,
+        applianceProfile: applianceProfile as any,
+        hasActualIntervals: actualOk,
+      },
+      "MANUAL_TOTALS",
+    );
+    if (!reqManual.canRecalc) {
+      return { ok: false, error: "requirements_unmet", missingItems: reqManual.missingItems };
+    }
+  }
+
+  // Enforce simMode->baseKind mapping (no mismatches). `simMode` may upgrade to MANUAL_TOTALS for admin lab manual treatments.
+  const baseKind = baseKindFromMode(simMode);
+
   const built = await buildSimulatorInputs({
-    mode: mode as BuildMode,
+    mode: simMode as BuildMode,
     manualUsagePayload: manualUsagePayload as any,
     homeProfile: homeProfile as any,
     applianceProfile: applianceProfile as any,
@@ -3841,7 +3888,7 @@ async function recalcSimulatorBuildImpl(args: {
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
   // Past SMT patch baseline mode uses day-level patching and must not use month-level travel uplift.
   const allTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
-  const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && mode === "SMT_BASELINE";
+  const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && simMode === "SMT_BASELINE";
   if (allTravelRanges.length > 0 && !isPastSmtPatchMode) {
     const excludeSet = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
     for (const ym of built.canonicalMonths) {
@@ -3866,6 +3913,11 @@ async function recalcSimulatorBuildImpl(args: {
   }
 
   const notes = [...(built.notes ?? [])];
+  if (adminLabManualConstraint) {
+    notes.push(
+      "Admin lab: MANUAL_TOTALS constraints derived from actual-context usage via shared fetchActualCanonicalMonthlyTotals (travel exclusions honored)."
+    );
+  }
   if (scenarioId) {
     notes.push(`Scenario applied: ${scenario?.name ?? scenarioId}`);
     if ((overlay?.inactiveEventIds?.length ?? 0) > 0) notes.push(`Scenario: ${overlay!.inactiveEventIds.length} inactive event(s).`);
@@ -3901,7 +3953,7 @@ async function recalcSimulatorBuildImpl(args: {
   };
 
   const manualCanonicalPeriods =
-    mode === "MANUAL_TOTALS" && manualUsagePayload
+    simMode === "MANUAL_TOTALS" && manualUsagePayload
       ? (() => {
           const p = manualUsagePayload as any;
           const endKey =
@@ -3918,7 +3970,7 @@ async function recalcSimulatorBuildImpl(args: {
 
   // SMT_BASELINE: use actual data's date range (anchor) so Baseline, Past, and Future all show the same dates (e.g. 02/18/2025 – 02/18/2026).
   let smtAnchorPeriods: Array<{ id: string; startDate: string; endDate: string }> | undefined;
-  if (mode === "SMT_BASELINE") {
+  if (simMode === "SMT_BASELINE") {
     try {
       const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null);
       const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
@@ -3937,7 +3989,7 @@ async function recalcSimulatorBuildImpl(args: {
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
-    mode === "SMT_BASELINE" &&
+    simMode === "SMT_BASELINE" &&
     scenario?.name === WORKSPACE_PAST_NAME
   ) {
     const autoMode =
@@ -4006,7 +4058,7 @@ async function recalcSimulatorBuildImpl(args: {
       esiid: esiid ?? null,
       homeProfile: homeProfile as any,
       applianceProfile: applianceProfile as any,
-      mode,
+      mode: simMode,
       actualOk,
       windowStart: fingerprintWindowStart,
       windowEnd: fingerprintWindowEnd,
@@ -4021,19 +4073,26 @@ async function recalcSimulatorBuildImpl(args: {
     resolvedSimFingerprint = await resolveSimFingerprint({
       houseId,
       actualContextHouseId,
-      mode,
+      mode: simMode,
+      correlationId: args.correlationId,
+      manualUsagePayload: simMode === "MANUAL_TOTALS" ? manualUsagePayload : null,
     });
   } catch (e) {
     console.warn("[usageSimulator] resolveSimFingerprint failed", e);
+  }
+  if (resolvedSimFingerprint && args.adminLabTreatmentMode) {
+    resolvedSimFingerprint = applyAdminLabTreatmentToResolvedFingerprint({
+      resolved: resolvedSimFingerprint,
+      treatmentMode: args.adminLabTreatmentMode,
+      simulatorMode: simMode,
+    });
   }
 
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
-  if (
-    scenario?.name === WORKSPACE_PAST_NAME &&
-    mode === "SMT_BASELINE"
-  ) {
+  const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
+  if (scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode)) {
     try {
       const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
       const startDate = smtAnchorPeriods?.[0]?.startDate ?? canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
@@ -4043,12 +4102,16 @@ async function recalcSimulatorBuildImpl(args: {
         `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
       const recalcBuildInputs: SimulatorBuildInputsV1 = {
         version: 1,
-        mode,
+        mode: simMode,
         baseKind: built.baseKind,
         canonicalEndMonth: built.canonicalMonths[built.canonicalMonths.length - 1] ?? "",
         canonicalMonths: built.canonicalMonths,
-        monthlyTotalsKwhByMonth: built.monthlyTotalsKwhByMonth,
+        canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : smtAnchorPeriods ?? undefined,
+        weatherPreference,
+        monthlyTotalsKwhByMonth,
         intradayShape96: built.intradayShape96,
+        weekdayWeekendShape96: built.weekdayWeekendShape96,
+        travelRanges: allTravelRanges,
         notes: built.notes ?? [],
         filledMonths: built.filledMonths ?? [],
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
@@ -4098,7 +4161,7 @@ async function recalcSimulatorBuildImpl(args: {
     timezone?: string;
   } = {
     version: 1,
-    mode,
+    mode: simMode,
     baseKind,
     canonicalEndMonth: canonicalForBuild.endMonth,
     canonicalMonths: built.canonicalMonths,
@@ -4133,6 +4196,12 @@ async function recalcSimulatorBuildImpl(args: {
       scenarioOverlay: overlay ?? null,
       pastScenario: pastOverlay ? pastScenario : null,
       pastScenarioEvents: pastOverlay ? pastEventsForOverlay : [],
+      ...(adminLabManualConstraint
+        ? {
+            adminLabSyntheticManualUsage: true,
+            adminLabTreatmentMode: args.adminLabTreatmentMode,
+          }
+        : {}),
     } as any,
     ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
     scenarioKey,
@@ -4193,7 +4262,7 @@ async function recalcSimulatorBuildImpl(args: {
   const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
   for (const ym of buildInputs.canonicalMonths ?? []) {
     monthProvenanceByMonth[String(ym)] =
-      mode === "SMT_BASELINE" && !scenarioId && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+      simMode === "SMT_BASELINE" && !scenarioId && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
   }
   dataset.meta = {
     ...(dataset.meta ?? {}),
@@ -4213,7 +4282,7 @@ async function recalcSimulatorBuildImpl(args: {
     userId,
     houseId,
     scenarioKey,
-    mode,
+    mode: simMode,
     baseKind,
     canonicalEndMonth: buildInputs.canonicalEndMonth,
     canonicalMonths: buildInputs.canonicalMonths,
@@ -4255,8 +4324,8 @@ async function recalcSimulatorBuildImpl(args: {
 
   const shouldPersistPastSeries =
     args.persistPastSimBaseline === true &&
-    mode === "SMT_BASELINE" &&
-    scenario?.name === WORKSPACE_PAST_NAME;
+    scenario?.name === WORKSPACE_PAST_NAME &&
+    (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS");
   if (shouldPersistPastSeries) {
     const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
     if (intervals15.length > 0) {
@@ -4304,7 +4373,7 @@ async function recalcSimulatorBuildImpl(args: {
     }
   }
 
-  return { ok: true, houseId, buildInputsHash, dataset };
+  return { ok: true, houseId, buildInputsHash, dataset, effectiveSimulatorMode: simMode };
 }
 
 export type RecalcSimulatorBuildArgs = {
@@ -4321,6 +4390,8 @@ export type RecalcSimulatorBuildArgs = {
   validationDayCount?: number;
   correlationId?: string;
   now?: Date;
+  /** Admin calibration lab only (plan §24). */
+  adminLabTreatmentMode?: import("@/modules/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
 };
 
 /**
@@ -4671,10 +4742,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
     const correlationId = args.correlationId ?? createSimCorrelationId();
     const attachCompareWithObservability = (projectedBaselineAware: any) => {
+      const compareStartedAt = Date.now();
       logSimPipelineEvent("compareProjection_start", {
         correlationId,
         houseId: args.houseId,
         scenarioKey,
+        scenarioId,
+        memoryRssMb: getMemoryRssMb(),
         source: "getSimulatedUsageForHouseScenario",
       });
       try {
@@ -4683,6 +4757,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
           correlationId,
           houseId: args.houseId,
           scenarioKey,
+          scenarioId,
+          durationMs: Date.now() - compareStartedAt,
+          memoryRssMb: getMemoryRssMb(),
           source: "getSimulatedUsageForHouseScenario",
         });
         return out;
@@ -4691,7 +4768,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
           correlationId,
           houseId: args.houseId,
           scenarioKey,
+          scenarioId,
+          durationMs: Date.now() - compareStartedAt,
           failureMessage: e instanceof Error ? e.message : String(e),
+          memoryRssMb: getMemoryRssMb(),
           source: "getSimulatedUsageForHouseScenario",
         });
         throw e;

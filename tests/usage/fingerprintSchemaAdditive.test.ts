@@ -23,4 +23,11 @@ describe("usage schema Slice 8 additive invariants", () => {
     expect(raw).toContain("staleReason");
     expect(raw).toContain("builtAt");
   });
+
+  it("keeps UsageSimulatorBuild in primary schema for persisted simulator identity", () => {
+    const schemaPath = join(__dirname, "../../prisma/schema.prisma");
+    const raw = readFileSync(schemaPath, "utf8");
+    expect(raw).toContain("model UsageSimulatorBuild");
+    expect(raw).toMatch(/buildInputs/);
+  });
 });

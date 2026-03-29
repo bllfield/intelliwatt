@@ -4,71 +4,41 @@
 
 import type { Prisma } from "@/.prisma/usage-client";
 import { SimulatorFingerprintStatus } from "@/.prisma/usage-client";
+import { buildCohortPriorV1 } from "@/modules/usageSimulator/cohortPriorBuilder";
 import {
   getLatestWholeHomeFingerprintByHouseId,
   upsertWholeHomeFingerprintArtifact,
 } from "@/modules/usageSimulator/fingerprintArtifactsRepo";
-import { sha256HexUtf8, stableStringify } from "@/modules/usageSimulator/fingerprintHash";
+import { sha256HexUtf8 } from "@/modules/usageSimulator/fingerprintHash";
+import {
+  FINGERPRINT_PIPELINE_EVENT,
+  getMemoryRssMb,
+  logSimPipelineEvent,
+} from "@/modules/usageSimulator/simObservability";
+import {
+  computeWholeHomeSourceHashWithCohort,
+  pickWholeHomeFingerprintInputs,
+  WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
+  computeWholeHomeSourceHashFromInputs,
+} from "@/modules/usageSimulator/wholeHomeFingerprintInputs";
 
-export const WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION = "whole_home_fp_v1";
-
-/** Audited home + appliance fields aligned to UNIFIED_SIM_FINGERPRINT_PLAN Section 17 (subset for hashing). */
-export function pickWholeHomeFingerprintInputs(args: {
-  homeProfile: Record<string, unknown> | null | undefined;
-  applianceProfile: Record<string, unknown> | null | undefined;
-}): Record<string, unknown> {
-  const h = args.homeProfile ?? {};
-  const a = args.applianceProfile ?? {};
-  return {
-    squareFeet: h.squareFeet,
-    stories: h.stories,
-    insulationType: h.insulationType,
-    windowType: h.windowType,
-    foundation: h.foundation,
-    occupantsWork: h.occupantsWork,
-    occupantsSchool: h.occupantsSchool,
-    occupantsHomeAllDay: h.occupantsHomeAllDay,
-    summerTemp: h.summerTemp,
-    winterTemp: h.winterTemp,
-    fuelConfiguration: h.fuelConfiguration,
-    hvacType: h.hvacType,
-    heatingType: h.heatingType,
-    hasPool: h.hasPool,
-    poolPumpType: h.poolPumpType,
-    poolPumpHp: h.poolPumpHp,
-    poolSummerRunHoursPerDay: h.poolSummerRunHoursPerDay,
-    poolWinterRunHoursPerDay: h.poolWinterRunHoursPerDay,
-    hasPoolHeater: h.hasPoolHeater,
-    poolHeaterType: h.poolHeaterType,
-    evHasVehicle: h.evHasVehicle,
-    evCount: h.evCount,
-    evChargerType: h.evChargerType,
-    evAvgMilesPerDay: h.evAvgMilesPerDay,
-    evAvgKwhPerDay: h.evAvgKwhPerDay,
-    evChargingBehavior: h.evChargingBehavior,
-    evPreferredStartHr: h.evPreferredStartHr,
-    evPreferredEndHr: h.evPreferredEndHr,
-    evSmartCharger: h.evSmartCharger,
-    applianceFuelConfiguration: a.fuelConfiguration,
-    appliances: a.appliances,
-  };
-}
-
-export function computeWholeHomeSourceHashFromInputs(inputs: Record<string, unknown>): string {
-  return sha256HexUtf8(
-    stableStringify({
-      algorithmVersion: WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
-      inputs,
-    })
-  );
-}
+export { WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION, pickWholeHomeFingerprintInputs, computeWholeHomeSourceHashFromInputs };
+export { computeWholeHomeSourceHashWithCohort } from "@/modules/usageSimulator/wholeHomeFingerprintInputs";
 
 export async function buildAndPersistWholeHomeFingerprint(args: {
   houseId: string;
   homeProfile: Record<string, unknown> | null | undefined;
   applianceProfile: Record<string, unknown> | null | undefined;
+  correlationId?: string;
 }): Promise<{ ok: true; sourceHash: string } | { ok: false; error: string }> {
-  const { houseId, homeProfile, applianceProfile } = args;
+  const { houseId, homeProfile, applianceProfile, correlationId } = args;
+  const startedAt = Date.now();
+  logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.wholeHomeFingerprintBuildStart, {
+    correlationId,
+    houseId,
+    source: "buildAndPersistWholeHomeFingerprint",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const prior = await getLatestWholeHomeFingerprintByHouseId(houseId).catch(() => null);
   const pendingHash = prior?.sourceHash ?? "pending";
 
@@ -84,11 +54,18 @@ export async function buildAndPersistWholeHomeFingerprint(args: {
     });
 
     const picked = pickWholeHomeFingerprintInputs({ homeProfile, applianceProfile });
-    const sourceHash = computeWholeHomeSourceHashFromInputs(picked);
+    const cohortPrior = buildCohortPriorV1({ homeProfile, applianceProfile });
+    const sourceHash = computeWholeHomeSourceHashWithCohort({ inputs: picked, cohortPrior });
     const payloadJson = {
       version: WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
       features: JSON.parse(JSON.stringify(picked)) as Prisma.InputJsonValue,
-      cohort: { placeholder: true },
+      cohortPrior,
+      cohortProvenance: {
+        incorporated: true,
+        cohortPriorVersion: cohortPrior.cohortPriorVersion,
+        similarityFeatureVectorVersion: cohortPrior.similarityFeatureVectorVersion,
+        confidence: cohortPrior.confidence,
+      },
     } satisfies Prisma.InputJsonValue;
 
     await upsertWholeHomeFingerprintArtifact({
@@ -99,6 +76,13 @@ export async function buildAndPersistWholeHomeFingerprint(args: {
       staleReason: null,
       builtAt: new Date(),
       payloadJson,
+    });
+    logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.wholeHomeFingerprintBuildSuccess, {
+      correlationId,
+      houseId,
+      durationMs: Date.now() - startedAt,
+      memoryRssMb: getMemoryRssMb(),
+      source: "buildAndPersistWholeHomeFingerprint",
     });
     return { ok: true, sourceHash };
   } catch (e: unknown) {
@@ -112,6 +96,14 @@ export async function buildAndPersistWholeHomeFingerprint(args: {
       builtAt: null,
       payloadJson: { error: msg, phase: "failed" },
     }).catch(() => {});
+    logSimPipelineEvent(FINGERPRINT_PIPELINE_EVENT.wholeHomeFingerprintBuildFailure, {
+      correlationId,
+      houseId,
+      durationMs: Date.now() - startedAt,
+      failureMessage: msg,
+      memoryRssMb: getMemoryRssMb(),
+      source: "buildAndPersistWholeHomeFingerprint",
+    });
     return { ok: false, error: msg };
   }
 }

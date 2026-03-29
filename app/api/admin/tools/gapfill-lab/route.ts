@@ -65,6 +65,10 @@ import {
   readEffectiveValidationFromBuildInputs,
   serializeFingerprintBuildFreshnessFromDatasetMeta,
 } from "@/lib/api/gapfillLabAdminSerialization";
+import {
+  ADMIN_LAB_TREATMENT_MODES,
+  isAdminLabTreatmentMode,
+} from "@/modules/usageSimulator/adminLabTreatment";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
@@ -339,6 +343,8 @@ export async function POST(req: NextRequest) {
     travelRanges?: Array<{ startDate: string; endDate: string }>;
     adminLabValidationSelectionMode?: unknown;
     userDefaultValidationSelectionMode?: unknown;
+    /** Section 24 admin-only simulation treatment (canonical lab recalc). */
+    adminLabTreatmentMode?: unknown;
   };
   try {
     body = await req.json();
@@ -411,6 +417,25 @@ export async function POST(req: NextRequest) {
   type WeatherKindParam = (typeof VALID_WEATHER_KINDS)[number];
   const rawWeatherKind = String(body?.weatherKind ?? "open_meteo").trim();
   const weatherKind: WeatherKindParam = VALID_WEATHER_KINDS.includes(rawWeatherKind as WeatherKindParam) ? (rawWeatherKind as WeatherKindParam) : "open_meteo";
+
+  const rawAdminLabTreatment = typeof body?.adminLabTreatmentMode === "string" ? body.adminLabTreatmentMode.trim() : "";
+  const adminLabTreatmentModeForRecalc =
+    rawAdminLabTreatment === ""
+      ? GAPFILL_CANONICAL_LAB_TREATMENT_MODE
+      : isAdminLabTreatmentMode(rawAdminLabTreatment)
+        ? rawAdminLabTreatment
+        : null;
+  if (rawAdminLabTreatment !== "" && adminLabTreatmentModeForRecalc === null) {
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "invalid_admin_lab_treatment_mode",
+        message: "adminLabTreatmentMode must be one of the Section 24 admin treatment keys.",
+        supportedModes: [...ADMIN_LAB_TREATMENT_MODES],
+      }),
+      { status: 400 }
+    );
+  }
 
   const rawTestRanges = body?.testRanges ?? body?.rangesToMask ?? [];
   let testRanges = Array.isArray(rawTestRanges)
@@ -1038,6 +1063,7 @@ export async function POST(req: NextRequest) {
           validationDaySelectionMode: testSelectionMode,
           validationDayCount: targetValidationDayCount,
           correlationId: labCorrelationId,
+          adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
         }),
         ROUTE_REBUILD_SHARED_TIMEOUT_MS,
         "canonical_recalc_timeout"
@@ -1204,11 +1230,17 @@ export async function POST(req: NextRequest) {
       correlationId: labCorrelationId,
       email: user.email,
       sourceUserId: user.id,
+      scenarioId: String(pastScenario.id),
       sourceHouseId: sourceHouse.id,
       testHomeId: testHomeHouse.id,
-      /** Authoritative visibility: single fixed matrix key for this action today (not a selector). See `GAPFILL_CANONICAL_LAB_TREATMENT_MODE`. */
-      treatmentMode: GAPFILL_CANONICAL_LAB_TREATMENT_MODE,
-      simulatorMode: "SMT_BASELINE",
+      /** Requested Section 24 admin treatment; applied in shared `recalcSimulatorBuild` after `resolveSimFingerprint`. */
+      treatmentMode: adminLabTreatmentModeForRecalc,
+      supportedAdminTreatmentModes: [...ADMIN_LAB_TREATMENT_MODES],
+      simulatorMode:
+        recalcOut.effectiveSimulatorMode ??
+        (typeof (buildRow?.buildInputs as Record<string, unknown> | undefined)?.mode === "string"
+          ? String((buildRow?.buildInputs as Record<string, unknown>).mode)
+          : "SMT_BASELINE"),
       sourceHouse: {
         id: sourceHouse.id,
         label: [sourceHouse.addressLine1, sourceHouse.addressCity, sourceHouse.addressState].filter(Boolean).join(", ") || sourceHouse.id,

@@ -46,9 +46,13 @@ vi.mock("@/modules/usageShapeProfile/autoBuild", () => ({
   ensureUsageShapeProfileForUserHouse: (...args: any[]) => ensureUsageShapeProfileForUserHouse(...args),
 }));
 
-vi.mock("@/modules/simulatedUsage/engine", () => ({
-  buildPastSimulatedBaselineV1: (...args: any[]) => buildPastSimulatedBaselineV1(...args),
-}));
+vi.mock("@/modules/simulatedUsage/engine", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/modules/simulatedUsage/engine")>();
+  return {
+    ...mod,
+    buildPastSimulatedBaselineV1: (...args: any[]) => buildPastSimulatedBaselineV1(...args),
+  };
+});
 
 vi.mock("@/modules/usageSimulator/metadataWindow", async (importOriginal) => {
   const actual = await importOriginal<any>();
@@ -67,6 +71,15 @@ vi.mock("@/lib/admin/gapfillLab", async (importOriginal) => {
     ...actual,
     dateKeyInTimezone: (iso: string) => String(iso).slice(0, 10),
   };
+});
+
+const { logPipeline } = vi.hoisted(() => ({
+  logPipeline: vi.fn(),
+}));
+
+vi.mock("@/modules/usageSimulator/simObservability", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/modules/usageSimulator/simObservability")>();
+  return { ...mod, logSimPipelineEvent: logPipeline };
 });
 
 import {
@@ -110,6 +123,7 @@ function validUsageShapeRow() {
 
 describe("shared sim usage-shape ensure path", () => {
   beforeEach(() => {
+    logPipeline.mockClear();
     getActualIntervalsForRange.mockReset();
     getHouseWeatherDays.mockReset();
     ensureHouseWeatherBackfill.mockReset();
@@ -194,6 +208,41 @@ describe("shared sim usage-shape ensure path", () => {
       });
       expect(out.canonicalSimulatedDayTotalsByDate).toEqual({ "2026-01-01": 0.5 });
     }
+  });
+
+  it("emits day_simulation measurement events with correlationId, durationMs, memoryRssMb, and baseline_phase timing (Slice 11)", async () => {
+    getLatestUsageShapeProfile.mockResolvedValueOnce(null).mockResolvedValueOnce(validUsageShapeRow());
+    ensureUsageShapeProfileForUserHouse.mockResolvedValue({
+      ok: true,
+      profileId: "shape-1",
+      diagnostics: { dependentPastRebuildRequired: true },
+    });
+    const cid = "22222222-2222-4222-8222-222222222222";
+    await simulatePastFullWindowShared({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        snapshots: {},
+      } as any,
+      buildPathKind: "lab_validation",
+      includeSimulatedDayResults: false,
+      correlationId: cid,
+    });
+    const startEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_start");
+    const successEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_success");
+    const baselineEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_baseline_phase");
+    expect(startEv?.[1]).toMatchObject({ correlationId: cid, houseId: "h1" });
+    expect(successEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (successEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(baselineEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (baselineEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(successEv?.[1]).toHaveProperty("memoryRssMb");
   });
 
   it("refreshes stale usage shape in selected-days shared sim before simulation runs", async () => {

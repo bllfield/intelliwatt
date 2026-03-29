@@ -30,6 +30,7 @@ export async function ensureSimulatorFingerprintsForRecalc(args: EnsureSimulator
     houseId: args.houseId,
     homeProfile: args.homeProfile,
     applianceProfile: args.applianceProfile,
+    correlationId: args.correlationId,
   });
 
   if (args.mode === "SMT_BASELINE" && args.actualOk) {

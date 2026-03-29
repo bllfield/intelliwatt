@@ -117,6 +117,20 @@ vi.mock("@/modules/usageSimulator/validationSelection", () => ({
   selectValidationDayKeys: (args: any) => selectValidationDayKeys(args),
 }));
 
+const buildValidationCompareProjectionSidecarCalls: unknown[] = [];
+vi.mock("@/modules/usageSimulator/compareProjection", async () => {
+  const actual = await vi.importActual<typeof import("@/modules/usageSimulator/compareProjection")>(
+    "@/modules/usageSimulator/compareProjection"
+  );
+  return {
+    ...actual,
+    buildValidationCompareProjectionSidecar: (dataset: unknown) => {
+      buildValidationCompareProjectionSidecarCalls.push(dataset);
+      return actual.buildValidationCompareProjectionSidecar(dataset);
+    },
+  };
+});
+
 vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", async () => {
   const actual = await vi.importActual<any>("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
   return {
@@ -140,6 +154,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    buildValidationCompareProjectionSidecarCalls.length = 0;
 
     prisma.user.findUnique.mockResolvedValue({ id: "u1", email: "brian@intellipath-solutions.com" });
     prisma.user.findFirst.mockResolvedValue({ id: "u1", email: "brian@intellipath-solutions.com" });
@@ -467,9 +482,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
     expect(readModes).toEqual(["artifact_only"]);
     expect(body.sourceHouseId).toBe("h1");
+    expect(body.scenarioId).toBe("past-s1");
     expect(body.testHomeId).toBe("test-home-1");
-    // Fixed admin-lab visibility key for this action today (not a runtime treatment switch).
     expect(body.treatmentMode).toBe(GAPFILL_CANONICAL_LAB_TREATMENT_MODE);
+    expect(arg.adminLabTreatmentMode).toBe(GAPFILL_CANONICAL_LAB_TREATMENT_MODE);
     expect(body.adminValidationMode).toBeTruthy();
     expect(body.effectiveValidationSelectionMode).toBe("manual");
     expect(body.effectiveValidationSelectionModeSource).toBe("usage_simulator_build");
@@ -478,6 +494,80 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.fingerprintBuildFreshness?.state).toBe("ready");
     expect(body.fingerprintBuildFreshness?.builtAt).toBe("2026-01-02T00:00:00.000Z");
     expect(body.failureCode).toBeUndefined();
+    expect(buildValidationCompareProjectionSidecarCalls.length).toBeGreaterThanOrEqual(1);
+    const compareInput = buildValidationCompareProjectionSidecarCalls[buildValidationCompareProjectionSidecarCalls.length - 1] as {
+      meta?: { validationOnlyDateKeysLocal?: string[] };
+    };
+    expect(Array.isArray(compareInput?.meta?.validationOnlyDateKeysLocal)).toBe(true);
+  });
+
+  it("rejects invalid adminLabTreatmentMode on canonical recalc", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      adminLabTreatmentMode: "not_a_real_treatment",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("invalid_admin_lab_treatment_mode");
+    expect(Array.isArray(body.supportedModes)).toBe(true);
+  });
+
+  it("forwards whole_home_prior_only to recalcSimulatorBuild on canonical recalc", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      adminLabTreatmentMode: "whole_home_prior_only",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.treatmentMode).toBe("whole_home_prior_only");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("whole_home_prior_only");
+  });
+
+  it("echoes effectiveSimulatorMode from recalc (e.g. MANUAL_TOTALS for manual constraint treatments)", async () => {
+    recalcSimulatorBuild.mockResolvedValueOnce({
+      ok: true,
+      houseId: "h1",
+      buildInputsHash: "hash-manual",
+      dataset: {},
+      effectiveSimulatorMode: "MANUAL_TOTALS",
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      adminLabTreatmentMode: "manual_monthly_constrained",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.simulatorMode).toBe("MANUAL_TOTALS");
+    expect(body.treatmentMode).toBe("manual_monthly_constrained");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
   });
 
   it("returns explicit canonical recalc timeout without route hang", async () => {

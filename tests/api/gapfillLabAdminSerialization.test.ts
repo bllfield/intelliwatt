@@ -41,7 +41,7 @@ describe("readEffectiveValidationFromBuildInputs", () => {
 });
 
 describe("GAPFILL_CANONICAL_LAB_TREATMENT_MODE", () => {
-  it("is the serialized treatmentMode for run_test_home_canonical_recalc today (fixed key; not a multi-mode selector)", () => {
+  it("is the default admin-lab treatment when the client omits adminLabTreatmentMode (Section 24)", () => {
     expect(GAPFILL_CANONICAL_LAB_TREATMENT_MODE).toBe("actual_data_fingerprint");
   });
 });
