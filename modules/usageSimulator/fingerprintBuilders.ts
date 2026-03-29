@@ -9,15 +9,21 @@ export {
 } from "@/modules/usageSimulator/fingerprintOrchestration";
 export {
   buildAndPersistWholeHomeFingerprint,
+  prepareWholeHomeFingerprintBuild,
   computeWholeHomeSourceHashFromInputs,
   pickWholeHomeFingerprintInputs,
   WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
 } from "@/modules/usageSimulator/wholeHomeFingerprintBuilder";
 export {
   buildAndPersistUsageFingerprint,
+  prepareUsageFingerprintBuild,
   computeUsageFingerprintSourceHash,
   USAGE_FINGERPRINT_ALGORITHM_VERSION,
 } from "@/modules/usageSimulator/usageFingerprintBuilder";
+export {
+  evaluateWholeHomeFingerprintPolicy,
+  evaluateUsageFingerprintPolicy,
+} from "@/modules/usageSimulator/fingerprintArtifactPolicy";
 export { fingerprintIsStaleForExpectedSourceHash } from "@/modules/usageSimulator/fingerprintFreshness";
 export {
   resolveSimFingerprint,

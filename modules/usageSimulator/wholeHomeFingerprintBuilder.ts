@@ -25,11 +25,45 @@ import {
 export { WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION, pickWholeHomeFingerprintInputs, computeWholeHomeSourceHashFromInputs };
 export { computeWholeHomeSourceHashWithCohort } from "@/modules/usageSimulator/wholeHomeFingerprintInputs";
 
+export type PreparedWholeHomeFingerprintBuild = {
+  sourceHash: string;
+  payloadJson: Prisma.InputJsonValue;
+};
+
+export function prepareWholeHomeFingerprintBuild(args: {
+  homeProfile: Record<string, unknown> | null | undefined;
+  applianceProfile: Record<string, unknown> | null | undefined;
+}): PreparedWholeHomeFingerprintBuild {
+  const picked = pickWholeHomeFingerprintInputs({
+    homeProfile: args.homeProfile,
+    applianceProfile: args.applianceProfile,
+  });
+  const cohortPrior = buildCohortPriorV1({
+    homeProfile: args.homeProfile,
+    applianceProfile: args.applianceProfile,
+  });
+  const sourceHash = computeWholeHomeSourceHashWithCohort({ inputs: picked, cohortPrior });
+  const payloadJson = {
+    version: WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
+    features: JSON.parse(JSON.stringify(picked)) as Prisma.InputJsonValue,
+    cohortPrior,
+    cohortProvenance: {
+      incorporated: true,
+      cohortPriorVersion: cohortPrior.cohortPriorVersion,
+      similarityFeatureVectorVersion: cohortPrior.similarityFeatureVectorVersion,
+      confidence: cohortPrior.confidence,
+    },
+  } satisfies Prisma.InputJsonValue;
+  return { sourceHash, payloadJson };
+}
+
 export async function buildAndPersistWholeHomeFingerprint(args: {
   houseId: string;
   homeProfile: Record<string, unknown> | null | undefined;
   applianceProfile: Record<string, unknown> | null | undefined;
   correlationId?: string;
+  prepared?: PreparedWholeHomeFingerprintBuild;
+  priorArtifact?: { sourceHash?: string | null; status?: string | null } | null;
 }): Promise<{ ok: true; sourceHash: string } | { ok: false; error: string }> {
   const { houseId, homeProfile, applianceProfile, correlationId } = args;
   const startedAt = Date.now();
@@ -39,7 +73,7 @@ export async function buildAndPersistWholeHomeFingerprint(args: {
     source: "buildAndPersistWholeHomeFingerprint",
     memoryRssMb: getMemoryRssMb(),
   });
-  const prior = await getLatestWholeHomeFingerprintByHouseId(houseId).catch(() => null);
+  const prior = args.priorArtifact ?? (await getLatestWholeHomeFingerprintByHouseId(houseId).catch(() => null));
   const pendingHash = prior?.sourceHash ?? "pending";
 
   try {
@@ -53,20 +87,14 @@ export async function buildAndPersistWholeHomeFingerprint(args: {
       payloadJson: { phase: "building", priorStatus: prior?.status ?? null },
     });
 
-    const picked = pickWholeHomeFingerprintInputs({ homeProfile, applianceProfile });
-    const cohortPrior = buildCohortPriorV1({ homeProfile, applianceProfile });
-    const sourceHash = computeWholeHomeSourceHashWithCohort({ inputs: picked, cohortPrior });
-    const payloadJson = {
-      version: WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
-      features: JSON.parse(JSON.stringify(picked)) as Prisma.InputJsonValue,
-      cohortPrior,
-      cohortProvenance: {
-        incorporated: true,
-        cohortPriorVersion: cohortPrior.cohortPriorVersion,
-        similarityFeatureVectorVersion: cohortPrior.similarityFeatureVectorVersion,
-        confidence: cohortPrior.confidence,
-      },
-    } satisfies Prisma.InputJsonValue;
+    const prepared =
+      args.prepared ??
+      prepareWholeHomeFingerprintBuild({
+        homeProfile,
+        applianceProfile,
+      });
+    const sourceHash = prepared.sourceHash;
+    const payloadJson = prepared.payloadJson;
 
     await upsertWholeHomeFingerprintArtifact({
       houseId,

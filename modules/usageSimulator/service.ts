@@ -94,8 +94,11 @@ import {
   resolveCanonicalUsage365CoverageWindow,
   resolveReportedCoverageWindow,
 } from "@/modules/usageSimulator/metadataWindow";
-import { ensureSimulatorFingerprintsForRecalc } from "@/modules/usageSimulator/fingerprintOrchestration";
-import { resolveSimFingerprint } from "@/modules/usageSimulator/resolveSimFingerprint";
+import {
+  createFingerprintRecalcContext,
+  ensureSimulatorFingerprintsWithContext,
+  resolveSimFingerprintWithContext,
+} from "@/modules/usageSimulator/fingerprintOrchestration";
 import {
   applyAdminLabTreatmentToResolvedFingerprint,
   isAdminLabManualConstraintTreatmentMode,
@@ -4051,30 +4054,27 @@ async function recalcSimulatorBuildImpl(args: {
     smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
     canonicalWindowForFp?.end ??
     `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
+  const fingerprintContext = createFingerprintRecalcContext({
+    houseId,
+    actualContextHouseId,
+    esiid: esiid ?? null,
+    homeProfile: homeProfile as any,
+    applianceProfile: applianceProfile as any,
+    mode: simMode,
+    actualOk,
+    windowStart: fingerprintWindowStart,
+    windowEnd: fingerprintWindowEnd,
+    correlationId: args.correlationId,
+  });
   try {
-    await ensureSimulatorFingerprintsForRecalc({
-      houseId,
-      actualContextHouseId,
-      esiid: esiid ?? null,
-      homeProfile: homeProfile as any,
-      applianceProfile: applianceProfile as any,
-      mode: simMode,
-      actualOk,
-      windowStart: fingerprintWindowStart,
-      windowEnd: fingerprintWindowEnd,
-      correlationId: args.correlationId,
-    });
+    await ensureSimulatorFingerprintsWithContext(fingerprintContext);
   } catch (e) {
     console.warn("[usageSimulator] ensureSimulatorFingerprintsForRecalc failed", e);
   }
 
   let resolvedSimFingerprint: ResolvedSimFingerprint | undefined;
   try {
-    resolvedSimFingerprint = await resolveSimFingerprint({
-      houseId,
-      actualContextHouseId,
-      mode: simMode,
-      correlationId: args.correlationId,
+    resolvedSimFingerprint = await resolveSimFingerprintWithContext(fingerprintContext, {
       manualUsagePayload: simMode === "MANUAL_TOTALS" ? manualUsagePayload : null,
     });
   } catch (e) {

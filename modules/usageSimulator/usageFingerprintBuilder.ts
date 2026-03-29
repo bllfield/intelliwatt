@@ -18,6 +18,19 @@ import {
 
 export const USAGE_FINGERPRINT_ALGORITHM_VERSION = "usage_fp_v1";
 
+export type PreparedUsageFingerprintBuild = {
+  intervalDataFingerprint: string;
+  weatherIdentity: string;
+  sourceHash: string;
+  payloadJson: {
+    version: string;
+    window: { startDate: string; endDate: string };
+    intervalDataFingerprint: string;
+    weatherIdentity: string;
+    summary: { note: string };
+  };
+};
+
 export function computeUsageFingerprintSourceHash(args: {
   intervalDataFingerprint: string;
   weatherIdentity: string;
@@ -35,12 +48,41 @@ export function computeUsageFingerprintSourceHash(args: {
   );
 }
 
+export async function prepareUsageFingerprintBuild(args: {
+  houseId: string;
+  esiid: string | null;
+  startDate: string;
+  endDate: string;
+}): Promise<PreparedUsageFingerprintBuild> {
+  const { houseId, esiid, startDate, endDate } = args;
+  const [intervalDataFingerprint, weatherIdentity] = await Promise.all([
+    getIntervalDataFingerprint({ houseId, esiid, startDate, endDate }),
+    computePastWeatherIdentity({ houseId, startDate, endDate }),
+  ]);
+  const sourceHash = computeUsageFingerprintSourceHash({
+    intervalDataFingerprint,
+    weatherIdentity,
+    windowStart: startDate,
+    windowEnd: endDate,
+  });
+  const payloadJson = {
+    version: USAGE_FINGERPRINT_ALGORITHM_VERSION,
+    window: { startDate, endDate },
+    intervalDataFingerprint,
+    weatherIdentity,
+    summary: { note: "usage_fp_v1 training summary placeholder" },
+  };
+  return { intervalDataFingerprint, weatherIdentity, sourceHash, payloadJson };
+}
+
 export async function buildAndPersistUsageFingerprint(args: {
   houseId: string;
   esiid: string | null;
   startDate: string;
   endDate: string;
   correlationId?: string;
+  prepared?: PreparedUsageFingerprintBuild;
+  priorArtifact?: { sourceHash?: string | null; status?: string | null } | null;
 }): Promise<{ ok: true; sourceHash: string } | { ok: false; error: string }> {
   const { houseId, esiid, startDate, endDate, correlationId } = args;
   const startedAt = Date.now();
@@ -50,7 +92,7 @@ export async function buildAndPersistUsageFingerprint(args: {
     source: "buildAndPersistUsageFingerprint",
     memoryRssMb: getMemoryRssMb(),
   });
-  const prior = await getLatestUsageFingerprintByHouseId(houseId).catch(() => null);
+  const prior = args.priorArtifact ?? (await getLatestUsageFingerprintByHouseId(houseId).catch(() => null));
   const pendingHash = prior?.sourceHash ?? "pending";
 
   try {
@@ -64,10 +106,15 @@ export async function buildAndPersistUsageFingerprint(args: {
       payloadJson: { phase: "building", correlationId: args.correlationId ?? null },
     });
 
-    const [intervalDataFingerprint, weatherIdentity] = await Promise.all([
-      getIntervalDataFingerprint({ houseId, esiid, startDate, endDate }),
-      computePastWeatherIdentity({ houseId, startDate, endDate }),
-    ]);
+    const prepared =
+      args.prepared ??
+      (await prepareUsageFingerprintBuild({
+        houseId,
+        esiid,
+        startDate,
+        endDate,
+      }));
+    const { intervalDataFingerprint, weatherIdentity, sourceHash, payloadJson } = prepared;
 
     if (!intervalDataFingerprint) {
       await upsertUsageFingerprintArtifact({
@@ -90,21 +137,6 @@ export async function buildAndPersistUsageFingerprint(args: {
       });
       return { ok: false, error: "interval_fingerprint_unavailable" };
     }
-
-    const sourceHash = computeUsageFingerprintSourceHash({
-      intervalDataFingerprint,
-      weatherIdentity,
-      windowStart: startDate,
-      windowEnd: endDate,
-    });
-
-    const payloadJson = {
-      version: USAGE_FINGERPRINT_ALGORITHM_VERSION,
-      window: { startDate, endDate },
-      intervalDataFingerprint,
-      weatherIdentity,
-      summary: { note: "usage_fp_v1 training summary placeholder" },
-    };
 
     await upsertUsageFingerprintArtifact({
       houseId,
