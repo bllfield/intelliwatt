@@ -2,6 +2,7 @@
  * Single shared WholeHomeFingerprint builder (Phase 2b). Same entrypoint for recalc and future prebuild.
  */
 
+import type { Prisma } from "@/.prisma/usage-client";
 import { SimulatorFingerprintStatus } from "@/.prisma/usage-client";
 import {
   getLatestWholeHomeFingerprintByHouseId,
@@ -86,9 +87,9 @@ export async function buildAndPersistWholeHomeFingerprint(args: {
     const sourceHash = computeWholeHomeSourceHashFromInputs(picked);
     const payloadJson = {
       version: WHOLE_HOME_FINGERPRINT_ALGORITHM_VERSION,
-      features: picked,
+      features: JSON.parse(JSON.stringify(picked)) as Prisma.InputJsonValue,
       cohort: { placeholder: true },
-    };
+    } satisfies Prisma.InputJsonValue;
 
     await upsertWholeHomeFingerprintArtifact({
       houseId,
