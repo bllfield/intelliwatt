@@ -221,6 +221,7 @@ export default function GapFillLabCanonicalClient() {
   const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
   const [openFullHomeEditor, setOpenFullHomeEditor] = useState(false);
   const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
@@ -493,6 +494,125 @@ export default function GapFillLabCanonicalClient() {
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
+  const exportPayload = useMemo(
+    () => ({
+      exportedAt: new Date().toISOString(),
+      workspace: "gapfill-lab-canonical-client",
+      formState: {
+        email,
+        timezone,
+        sourceHouseId,
+        weatherKind,
+        randomMode,
+        testDays,
+        userDefaultValidationSelectionMode,
+        adminLabValidationSelectionMode,
+        adminLabTreatmentMode,
+        supportedValidationSelectionModes,
+        travelRanges,
+        testRanges,
+        homeProfileJson,
+        applianceProfileJson,
+      },
+      uiState: {
+        loading,
+        error,
+        lastHttpStatus,
+        lastFailureFields,
+        usageMonthlyView,
+        usageDailyView,
+        effectiveTestHomeId,
+      },
+      linkedIdentity: {
+        sourceHouse,
+        testHome,
+        testHomeLink,
+        apiSourceHouseId,
+        apiTestHomeId,
+      },
+      result: result ?? null,
+      derived: {
+        visibilityFromResult: visibilityFromResult ?? null,
+        usageChart: usageChart ?? null,
+        baselineChart: baselineChart ?? null,
+        compareProjectionForDisplay: compareProjectionForDisplay ?? null,
+      },
+      requestDebug,
+    }),
+    [
+      adminLabTreatmentMode,
+      adminLabValidationSelectionMode,
+      apiSourceHouseId,
+      apiTestHomeId,
+      applianceProfileJson,
+      baselineChart,
+      compareProjectionForDisplay,
+      effectiveTestHomeId,
+      email,
+      error,
+      homeProfileJson,
+      lastFailureFields,
+      lastHttpStatus,
+      loading,
+      randomMode,
+      requestDebug,
+      result,
+      sourceHouse,
+      sourceHouseId,
+      supportedValidationSelectionModes,
+      testDays,
+      testHome,
+      testHomeLink,
+      testRanges,
+      timezone,
+      travelRanges,
+      usageChart,
+      usageDailyView,
+      usageMonthlyView,
+      userDefaultValidationSelectionMode,
+      visibilityFromResult,
+      weatherKind,
+    ]
+  );
+
+  async function onCopyAllData() {
+    const payloadText = JSON.stringify(exportPayload, null, 2);
+    try {
+      await navigator.clipboard.writeText(payloadText);
+      setExportNotice("Copied full Gapfill data bundle to clipboard.");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = payloadText;
+        ta.setAttribute("readonly", "true");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setExportNotice("Copied full Gapfill data bundle to clipboard.");
+      } catch {
+        setExportNotice("Copy failed. Use Save all to file.");
+      }
+    }
+  }
+
+  function onSaveAllToFile() {
+    const payloadText = JSON.stringify(exportPayload, null, 2);
+    const nowIso = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `gapfill-lab-export-${nowIso}.json`;
+    const blob = new Blob([payloadText], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setExportNotice(`Saved full Gapfill data bundle to ${fileName}.`);
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -891,7 +1011,24 @@ export default function GapFillLabCanonicalClient() {
           <button className="px-3 py-2 rounded bg-brand-blue text-white text-sm" onClick={onRunRecalc} disabled={loading}>
             Recalc Canonical Past Sim
           </button>
+          <button
+            className="px-3 py-2 rounded border text-sm"
+            onClick={onCopyAllData}
+            disabled={loading}
+            type="button"
+          >
+            Copy all data
+          </button>
+          <button
+            className="px-3 py-2 rounded border text-sm"
+            onClick={onSaveAllToFile}
+            disabled={loading}
+            type="button"
+          >
+            Save all to file
+          </button>
         </div>
+        {exportNotice ? <div className="text-xs text-brand-navy/70">{exportNotice}</div> : null}
       </div>
 
       {loading ? (

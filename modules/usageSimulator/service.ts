@@ -93,6 +93,7 @@ import {
   boundDateKeysToCoverageWindow,
   resolveCanonicalUsage365CoverageWindow,
   resolveReportedCoverageWindow,
+  type CoverageWindow,
 } from "@/modules/usageSimulator/metadataWindow";
 import {
   createFingerprintRecalcContext,
@@ -414,10 +415,10 @@ function sharedPastArtifactMetaFailsCurveShapingStaleGuard(
 function applyCanonicalCoverageMetadataForNonBaseline(
   dataset: any,
   scenarioKey: string,
-  options?: { buildInputs?: unknown }
+  options?: { buildInputs?: unknown; coverageWindow?: CoverageWindow }
 ): { startDate: string; endDate: string } | null {
   if (scenarioKey === "BASELINE" || !dataset?.summary) return null;
-  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const canonicalCoverage = options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
   dataset.summary.start = canonicalCoverage.startDate;
   dataset.summary.end = canonicalCoverage.endDate;
   dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
@@ -5585,7 +5586,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
         artifactSourceMode === "exact_hash_match"
           ? "Artifact source: exact identity match on Past input hash."
           : "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).";
-      applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, { buildInputs });
+      applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, {
+        buildInputs,
+        coverageWindow: sharedCoverageWindow,
+      });
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {
         await reportSimulationDataIssue({
