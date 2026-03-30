@@ -35,9 +35,9 @@ Summary:
 - **Target for test rows:** “Fresh sim” in Gap-Fill grading is **modeled** by that same day-level logic as travel fills via **`forceModeledOutputKeepReferencePoolDateKeys`** (see `USAGE_SIMULATION_PLAN.md` § Gap-Fill Lab target architecture §6).
 ## What changed to match the target (engineering checklist)
 
-- **Gap-Fill compare path:** `buildGapfillCompareSimShared` passes bounded scored test dates as **`forceModeledOutputKeepReferencePoolDateKeysLocal`** into **`simulatePastSelectedDaysShared` / `simulatePastFullWindowShared`** → **`simulatePastUsageDataset`** → **`buildPastSimulatedBaselineV1`**. Test-day actuals **remain** in the reference pool; stitched **compare** output for those days is **modeled** (`GAPFILL_MODELED_KEEP_REF`), not meter-as-sim.
+- **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
 - **Engine / flags:** Complements **`forceSimulateDateKeys`** (which **excludes** days from the reference pool). Keep-ref keys must stay **disjoint** from forced-sim keys for the same calendar day.
-- **UI / API truth:** Route payload includes **`gapfillScoringDiagnostics`**; Gap-Fill Lab shows a **scoring source diagnostics** panel. Truth tables still use **`freshCompareScoredDaySimTotalsByDate`** for scored-day simulated totals (simulator-owned).
+- **UI / API truth:** Route payload may include **`gapfillScoringDiagnostics`**, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`), not an admin-only recomputed simulated truth path.
 - **Docs/tests:** Service artifact tests assert keep-ref args and diagnostics; shared-window ownership rules unchanged.
 
 ## Active architecture authority
@@ -45,13 +45,13 @@ Summary:
 - Past Sim and GapFill compare use the same shared artifact identity/fingerprint and the same shared simulator logic.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
-- GapFill must consume simulated intervals from shared simulator output for that artifact identity (cached restore or fresh shared build). It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
-- GapFill default scoring mode is selected-day fresh shared execution (`compareFreshMode=selected_days`) with artifact-backed display output retained.
+- GapFill must consume canonical stored sim outputs for compare truth and must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild a second compare truth path locally.
+- Optional fresh/parity diagnostics are additive analytics only and must never replace canonical stored compare truth rows.
 - Lightweight selected-days `compare_core` must reduce early: keep selected-day actual/simulated intervals, canonical artifact simulated-day totals, and compact truth metadata only; do not serialize full-window diagnostics/weather arrays in the core response.
 - DB travel/vacant dates are not guardrail-only metadata in compare-core: the shared/service layer must pull the bounded DB travel set, execute those dates through the same shared simulator family used by Past Sim, and validate canonical artifact simulated-day totals against fresh shared compare day totals. In Gap-Fill selected-days mode, travel/vacant parity-validation days must be simulated in the **same** shared selected-days execution as scored test days (union of local date keys), then sliced for parity vs compare—not a second Gap-Fill-only simulation path for travel/vacant alone.
 - Compare-core must also return compact scored-day weather truth from the shared compare/service execution for the scored local dates only; route/UI consumers must not reconstruct scored-day weather independently.
 - Scored-day compare/sim integrity: simulated-side fields come only from canonical shared simulated outputs (`simulatePastSelectedDaysShared` / `simulatePastFullWindowShared` and artifact canonical simulated-day totals). **ACTUAL must never substitute for simulated** on the simulated side; missing simulated references stay missing with explicit `missing_expected_reference` / reason codes, not silent recovery. If `SimulatedDayResult.localDate` disagrees with interval-timestamp-derived local date keys, shared paths fail with `simulated_day_local_date_interval_invariant_violation` (no fallback to `localDate`).
-- Full-window fresh shared compare remains available as an explicit heavy proof mode (`compareFreshMode=full_window`), not a default route path.
+- Full-window fresh diagnostics (when enabled) are additive proof/analytics only; compare truth ownership remains canonical stored output.
 - Heavy diagnostics/report retries should use compact merge-only response shaping so the heavy step returns diagnostics/report data without re-serializing the full core payload.
 - Heavy report expands the same compact scored-day weather truth into richer weather inspection/report output; no separate route-only weather path is allowed.
 - Compare success must not claim shared-path parity for DB travel/vacant validation unless both canonical artifact simulated-day totals and fresh shared compare day totals exist for those dates; exact-identity-sensitive runs must fail explicitly when that proof cannot be established.

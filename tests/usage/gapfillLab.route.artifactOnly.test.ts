@@ -780,6 +780,94 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(compareInput?.meta?.validationOnlyDateKeysLocal)).toBe(true);
   });
 
+  it("keeps gapfill compare on shared recalc->stored-artifact read path", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(recalcSimulatorBuild).toHaveBeenCalledTimes(1);
+    const recalcArg = recalcSimulatorBuild.mock.calls[0]?.[0];
+    expect(recalcArg.houseId).toBe("test-home-1");
+    expect(recalcArg.actualContextHouseId).toBe("h1");
+    const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
+    const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
+    expect(projectionModes).toEqual(["baseline"]);
+    expect(readModes).toEqual(["artifact_only"]);
+  });
+
+  it("returns compare rows from same stored sidecar shape used by user-facing past", async () => {
+    const expectedRows = [
+      {
+        localDate: "2025-04-10",
+        dayType: "weekday",
+        actualDayKwh: 2,
+        simulatedDayKwh: 9.5,
+        errorKwh: 7.5,
+        percentError: 375,
+      },
+    ];
+    getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
+      const dataset = {
+        summary: { source: "SIMULATED", totalKwh: 120, intervalsCount: 3, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
+        daily: [
+          { date: "2025-04-10", kwh: 2.0, source: "ACTUAL", sourceDetail: "ACTUAL_VALIDATION_TEST_DAY" },
+          { date: "2025-04-11", kwh: 8.0, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" },
+        ],
+        monthly: [{ month: "2025-04", kwh: 10 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10"],
+          validationProjectionApplied: args?.projectionMode === "baseline",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2025-04-10": 9.5 },
+          validationCompareRows: expectedRows,
+          validationCompareMetrics: { wape: 375, mae: 7.5, rmse: 7.5, mape: 375, maxAbs: 7.5, totalActualKwhMasked: 2, totalSimKwhMasked: 9.5, deltaKwhMasked: 7.5, mapeFiltered: 375, mapeFilteredCount: 1 },
+        },
+      };
+      return {
+        ok: true,
+        houseId: "h1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset,
+      };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const gapfillReq = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const gapfillRes = await POST(gapfillReq);
+    const gapfillBody = await gapfillRes.json();
+
+    expect(gapfillRes.status).toBe(200);
+    expect(gapfillBody.compareProjection?.rows).toEqual(expectedRows);
+    const validationDay = (gapfillBody.baselineDatasetProjection?.daily ?? []).find((d: any) => d.date === "2025-04-10");
+    const travelDay = (gapfillBody.baselineDatasetProjection?.daily ?? []).find((d: any) => d.date === "2025-04-11");
+    expect(validationDay?.source).toBe("ACTUAL");
+    expect(validationDay?.sourceDetail).toBe("ACTUAL_VALIDATION_TEST_DAY");
+    expect(travelDay?.source).toBe("SIMULATED");
+    expect(travelDay?.sourceDetail).toBe("SIMULATED_TRAVEL_VACANT");
+  });
+
   it("keeps source-faithful calibration baseline travel/vacant totals stable for edge dates", async () => {
     const edgeDates = ["2025-03-28", "2025-03-29", "2025-03-30", "2025-03-31"];
     const edgeTotals: Record<string, number> = {

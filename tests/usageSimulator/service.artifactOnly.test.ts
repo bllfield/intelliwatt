@@ -1693,7 +1693,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBe(96);
+      expect(out.simulatedTestIntervals.length).toBe(72);
       expect(out.artifactUsesTestDaysInIdentity).toBe(false);
     }
   });
@@ -1727,7 +1727,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBe(96);
+      expect(out.simulatedTestIntervals.length).toBe(72);
     }
   });
 
@@ -1794,10 +1794,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBe(96);
-      expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
-      expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
-      expect(out.compareSimSource).toBe("shared_selected_days_calc");
+      expect(out.simulatedTestIntervals.length).toBe(72);
+      expect(out.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
+      expect(out.compareCalculationScope).toBe("artifact_read_then_scored_day_filter");
+      expect(out.compareSimSource).toBe("shared_artifact_cache");
       expect(out.simulatedTestIntervals.every((p) => p.kwh === 24 / 96)).toBe(true);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(1);
@@ -2506,8 +2506,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
-      expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
+      expect(out.compareCalculationScope).toBe("artifact_read_then_scored_day_filter");
+      expect(out.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
       expect(out.artifactIntervals).toEqual([]);
       expect(out.simulatedChartIntervals).toEqual([]);
       expect((out.modelAssumptions as any)?.intervalCount).toBe(0);
@@ -2553,7 +2553,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.scoringExcludedSource).toBe("shared_past_travel_vacant_excludedDateKeysFingerprint");
-      expect(out.simulatedTestIntervals.length).toBe(96);
+      expect(out.simulatedTestIntervals.length).toBe(72);
       expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(0);
     }
   });
@@ -2779,15 +2779,15 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     );
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.scoringSimulatedSource).toBe("shared_fresh_simulated_intervals15");
-      expect(out.compareSimSource).toBe("shared_fresh_calc");
-      expect(out.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
-      expect(out.comparePulledFromSharedArtifactOnly).toBe(false);
-      expect(out.compareSharedCalcPath).toContain("simulatePastFullWindowShared");
-      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
-      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+      expect(out.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
+      expect(out.compareSimSource).toBe("shared_artifact_cache");
+      expect(out.compareCalculationScope).toBe("artifact_read_then_scored_day_filter");
+      expect(out.comparePulledFromSharedArtifactOnly).toBe(true);
+      expect(out.compareSharedCalcPath).toBe("artifact_cache_only");
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(1);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
-      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(true);
+      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
       expect(out.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
       expect(out.displayVsFreshParityForScoredDays?.granularity).toBe("daily_kwh_rounded_2dp");
       expect(out.weatherBasisUsed).toBe("actual_only");
@@ -2839,8 +2839,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (outA.ok && outB.ok) {
       expect(outA.simulatedTestIntervals).toEqual(outB.simulatedTestIntervals);
       expect(outA.displayVsFreshParityForScoredDays).toEqual(outB.displayVsFreshParityForScoredDays);
-      expect(outA.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
-      expect(outB.compareCalculationScope).toBe("full_window_shared_path_then_scored_day_filter");
+      expect(outA.compareCalculationScope).toBe("artifact_read_then_scored_day_filter");
+      expect(outB.compareCalculationScope).toBe("artifact_read_then_scored_day_filter");
     }
   });
 
@@ -2935,13 +2935,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
-      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(12);
-      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toHaveLength(10);
-      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(testDates.slice(0, 10));
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBeNull();
+      expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toHaveLength(0);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual([]);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.comparableDateCount).toBe(12);
-      expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
+      expect(out.displayVsFreshParityForScoredDays?.complete).toBeNull();
     }
   });
 
@@ -2992,7 +2992,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.artifactSimulatedDayReferenceSource).toBe("canonical_artifact_simulated_day_totals");
       expect(out.displayVsFreshParityForScoredDays?.parityDisplayValueKind).toBe("missing_display_sim_reference");
       expect(out.displayVsFreshParityForScoredDays?.comparisonBasis).toBe(
-        "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
+        "display_shared_artifact_vs_compare_artifact_filter_only"
       );
     }
   });
@@ -3087,7 +3087,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(decodeIntervalsV1).not.toHaveBeenCalled();
-      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(true);
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBeNull();
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
       expect(out.scoredDayWeatherTruth?.availability).toBe("available");
@@ -3194,8 +3194,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       });
       expect(out.simulatedChartMonthly).toEqual([{ month: "2026-01", kwh: 744 }]);
       expect((out as any).selectedDaysRequestedCount ?? (out.modelAssumptions as any)?.selectedDaysRequestedCount).toBe(2);
-      expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(2);
-      expect((out as any).freshSimIntervalCountSelectedDays ?? (out.modelAssumptions as any)?.freshSimIntervalCountSelectedDays).toBe(192);
+      expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
+      expect((out as any).freshSimIntervalCountSelectedDays ?? (out.modelAssumptions as any)?.freshSimIntervalCountSelectedDays).toBe(0);
       expect((out as any).artifactReferenceDayCountUsed ?? (out.modelAssumptions as any)?.artifactReferenceDayCountUsed).toBe(2);
       expect((out.modelAssumptions as any)?.weatherApiData?.map((row: any) => row.dateKey)).toEqual(selectedDates);
       expect((out.modelAssumptions as any)?.simulatedDayDiagnosticsSample?.map((row: any) => row.localDate)).toEqual(selectedDates);
@@ -3295,9 +3295,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       );
       expect(out.gapfillScoringDiagnostics?.run?.scoringMode).toBe("modeled_scored_days");
       expect(out.gapfillScoringDiagnostics?.run?.oneUnionRunUsed).toBe(true);
-      expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.compareOutputSource).toBe("MODELED_SIM");
-      expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.wasMeterPassthroughPrevented).toBe(true);
-      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
+      expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.compareOutputSource).toBe("MISSING_SIM");
+      expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.wasMeterPassthroughPrevented).toBe(false);
+      expect(out.compareSharedCalcPath).toBe("artifact_cache_only");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3398,10 +3398,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(out.compareFreshModeUsed).toBe("artifact_only");
       expect(simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBeforePhases)).toHaveLength(0);
       expect(simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore)).toHaveLength(1);
-      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
+      expect(out.compareSharedCalcPath).toBe("artifact_cache_only");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3496,7 +3496,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(out.compareFreshModeUsed).toBe("artifact_only");
       expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
       expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(availableDailyDates);
       expect(out.displayVsFreshParityForScoredDays?.availability).toBe("available");
@@ -3712,10 +3712,10 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(out.compareFreshModeUsed).toBe("artifact_only");
       expect(simulatePastFullWindowShared.mock.calls.slice(fullWindowCallsBeforeDoubleCount)).toHaveLength(0);
       expect(simulatePastSelectedDaysShared.mock.calls.slice(selectedDaysCallsBefore)).toHaveLength(1);
-      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
+      expect(out.compareSharedCalcPath).toBe("artifact_cache_only");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -3803,11 +3803,11 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(out.simulatedTestIntervals).toHaveLength(96);
-      expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(1);
-      expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(1);
-      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-03": 24 });
+      expect(out.compareFreshModeUsed).toBe("artifact_only");
+      expect(out.simulatedTestIntervals).toHaveLength(0);
+      expect((out as any).selectedDaysScoredCount ?? (out.modelAssumptions as any)?.selectedDaysScoredCount).toBe(0);
+      expect(out.scoredTestDaysMissingSimulatedOwnershipCount).toBe(2);
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({});
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
         availability: "available",
         comparableDateCount: 1,
@@ -4026,7 +4026,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
     expect(out.ok).toBe(true);
     if (out.ok) {
-      expect(out.compareFreshModeUsed).toBe("selected_days");
+      expect(out.compareFreshModeUsed).toBe("artifact_only");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -4169,14 +4169,11 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(computePastWeatherIdentity.mock.calls.length).toBe(weatherIdentityCallsBefore);
       expect(getUsageShapeProfileIdentityForPast.mock.calls.length).toBe(usageShapeIdentityCallsBefore);
       expect(decodeIntervalsV1).not.toHaveBeenCalled();
-      expect(out.compareCalculationScope).toBe("selected_days_shared_path_only");
-      expect(out.compareFreshModeUsed).toBe("selected_days");
-      expect(out.compareSharedCalcPath).toContain("simulatePastSelectedDaysShared");
-      expect(out.compareSharedCalcPath).toContain("simulatePastUsageDataset");
-      expect(out.compareSharedCalcPath).toContain("buildSimulatedUsageDatasetFromCurve");
-      expect(out.compareSharedCalcPath).toContain("slice_test_days_and_parity_days_from_same_union_run");
-      expect(out.compareSimSource).toBe("shared_selected_days_calc");
-      expect(out.scoringSimulatedSource).toBe("shared_selected_days_simulated_intervals15");
+      expect(out.compareCalculationScope).toBe("artifact_read_then_scored_day_filter");
+      expect(out.compareFreshModeUsed).toBe("artifact_only");
+      expect(out.compareSharedCalcPath).toBe("artifact_cache_only");
+      expect(out.compareSimSource).toBe("shared_artifact_cache");
+      expect(out.scoringSimulatedSource).toBe("shared_artifact_simulated_intervals15");
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         requestedDateCount: 2,
@@ -4200,7 +4197,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
           parityMatch: true,
         }),
       ]);
-      expect(out.simulatedTestIntervals).toHaveLength(96);
+      expect(out.simulatedTestIntervals).toHaveLength(0);
       expect(out.simulatedChartDaily.map((row) => row.date)).toEqual(["2026-01-01"]);
       expect(loadWeatherForPastWindow).not.toHaveBeenCalled();
       expect(out.scoredDayWeatherRows).toEqual([
@@ -4748,20 +4745,18 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     if (out.ok) {
       expect(simulatePastSelectedDaysShared).toHaveBeenCalled();
       expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
-      expect((out.modelAssumptions as any)?.canonicalArtifactSimulatedDayTotalsFullWindowBackfillCount).toBe(1);
-      expect((out.modelAssumptions as any)?.canonicalArtifactSimulatedDayTotalsFullWindowBackfillSource).toBe(
-        "selected_shared_full_window_simulated_day_totals"
-      );
+      expect((out.modelAssumptions as any)?.canonicalArtifactSimulatedDayTotalsFullWindowBackfillCount).toBeUndefined();
+      expect((out.modelAssumptions as any)?.canonicalArtifactSimulatedDayTotalsFullWindowBackfillSource).toBeUndefined();
       expect(out.displayVsFreshParityForScoredDays).toMatchObject({
-        availability: "available",
-        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE",
-        matches: true,
+        availability: "missing_expected_reference",
+        reasonCode: "ARTIFACT_SIMULATED_REFERENCE_MISSING",
+        matches: null,
         mismatchCount: 0,
-        missingDisplaySimCount: 0,
-        comparableDateCount: 1,
-        complete: true,
+        missingDisplaySimCount: 1,
+        comparableDateCount: 0,
+        complete: null,
       });
-      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual([]);
+      expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimSampleDates).toEqual(["2026-01-01"]);
       expect(out.travelVacantParityTruth).toMatchObject({
         availability: "validated",
         exactProofSatisfied: true,

@@ -336,8 +336,8 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill is a holdout validation workflow, not an artifact-building workflow.
 - GapFill may select test days, fetch actual intervals for those days, read matching simulated intervals from shared simulator output for that artifact identity (cached artifact or fresh shared build), and compute metrics/reports.
-- GapFill compare default scoring path is shared selected-day fresh calculation (`compareFreshMode=selected_days`) while display/chart rows remain shared artifact-backed.
-- Heavy proof mode may explicitly run shared full-window fresh calculation (`compareFreshMode=full_window`) for deeper diagnostics; it is non-default.
+- GapFill compare truth is artifact-backed: compare rows are read from canonical stored simulated-day outputs (same stored family used by user-facing Past) via `validationCompareRows` / `validationCompareMetrics`.
+- GapFill may run additional parity analytics, but those analytics are not a second compare truth source and must not override artifact-backed compare rows.
 - Artifact identity/fingerprint ownership and usage-shape profile contracts remain unchanged in this step; any further identity changes are deferred.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
 - Current branch note: `simulatePastSelectedDaysShared()` is now post-output slicing only, so the older wrapper-level `forceSimulateDateKeysLocal` / `emitAllIntervals` divergence is no longer current runtime behavior.
@@ -429,5 +429,5 @@ This logic is used consistently for Actual and Simulated insight baseloads. It d
   - System-wide default for user-facing future recalcs.
   - Admin-lab run mode for the current lab execution.
 - Future-recalcs-only rule is explicit: changing system default does not rewrite existing artifacts.
-- Baseline contract: validation days remain ACTUAL in baseline outputs; modeled values appear in compare projection sidecar only.
+- Baseline contract: validation/test days remain ACTUAL in baseline stitch/display outputs; modeled test-day values are surfaced through compare projection sidecar from the same stored simulated-day ownership used by both Past and GapFill.
 

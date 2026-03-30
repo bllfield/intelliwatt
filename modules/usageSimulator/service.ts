@@ -2385,22 +2385,6 @@ export async function buildGapfillCompareSimShared(args: {
             },
           };
         }
-        simulatedTestIntervals = filterIntervalsToLocalDateKeys(
-          sharedSelectedDaysResult.simulatedIntervals,
-          timezone,
-          boundedTestDateKeysLocal
-        );
-        selectedTestDailyTotalsByDate = new Map(
-          Array.from(sharedSelectedDaysResult.dailyTotalsByDate.entries()).filter(([dk]) =>
-            boundedTestDateKeysLocal.has(dk)
-          )
-        );
-        mergeSparseDailyTotalsFromIntervalsForBoundedKeys(
-          selectedTestDailyTotalsByDate,
-          simulatedTestIntervals,
-          boundedTestDateKeysLocal,
-          timezone
-        );
         freshParityWeatherSourceSummary = sharedSelectedDaysResult.weatherSourceSummary;
         if (travelVacantParityDateKeySet.size > 0) {
           // Parity uses the same shared selected-days execution as compare (union of test + travel/vacant keys).
@@ -2419,13 +2403,7 @@ export async function buildGapfillCompareSimShared(args: {
           freshParityCanonicalSimulatedDayTotalsByDate = {};
           freshParityIntervals = [];
         }
-        scoringSimulatedSource = "shared_selected_days_simulated_intervals15";
-        comparePulledFromSharedArtifactOnly = false;
-        compareSimSource = "shared_selected_days_calc";
-        compareCalculationScope = "selected_days_shared_path_only";
-        compareFreshModeUsed = "selected_days";
-        compareSharedCalcPath =
-          "simulatePastSelectedDaysShared(simulatePastFullWindowShared->simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->slice_test_days_and_parity_days_from_same_union_run->buildGapfillCompareSimShared";
+        // Compare truth ownership stays artifact-backed; selected-days fresh output is parity analytics only.
         lastFreshGapfillKeepRefLocalDateKeys = sharedSelectedDaysResult.gapfillForceModeledKeepRefLocalDateKeys;
         lastFreshGapfillKeepRefUtcKeyCount = sharedSelectedDaysResult.gapfillForceModeledKeepRefUtcKeyCount;
         weatherBasisUsed =
@@ -2509,16 +2487,7 @@ export async function buildGapfillCompareSimShared(args: {
       }
       freshParityIntervals = freshResult.simulatedIntervals;
       freshParityCanonicalSimulatedDayTotalsByDate = freshResult.canonicalSimulatedDayTotalsByDate ?? {};
-      simulatedTestIntervals = freshResult.simulatedIntervals.filter((p) =>
-        boundedTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, timezone))
-      );
-      scoringSimulatedSource = "shared_fresh_simulated_intervals15";
-      comparePulledFromSharedArtifactOnly = false;
-      compareSimSource = "shared_fresh_calc";
-      compareCalculationScope = "full_window_shared_path_then_scored_day_filter";
-      compareFreshModeUsed = "full_window";
-      compareSharedCalcPath =
-        "simulatePastFullWindowShared(simulatePastUsageDataset->buildPastSimulatedBaselineV1->buildCurveFromPatchedIntervals->buildSimulatedUsageDatasetFromCurve)->buildGapfillCompareSimShared";
+      // Compare truth ownership stays artifact-backed; full-window fresh output is parity analytics only.
       weatherBasisUsed = freshResult.weatherSourceSummary;
       lastFreshGapfillKeepRefLocalDateKeys = freshResult.gapfillForceModeledKeepRefLocalDateKeys;
       lastFreshGapfillKeepRefUtcKeyCount = freshResult.gapfillForceModeledKeepRefUtcKeyCount;
@@ -2553,18 +2522,11 @@ export async function buildGapfillCompareSimShared(args: {
       freshParityIntervalsCount: freshParityIntervals.length,
     });
   }
-  const availableTestDateKeysFromSimulated =
-    compareFreshModeUsed === "selected_days" &&
-    selectedTestDailyTotalsByDate &&
-    selectedTestDailyTotalsByDate.size > 0
-      ? new Set<string>(
-          Array.from(selectedTestDailyTotalsByDate.keys()).filter((dk) => boundedTestDateKeysLocal.has(dk))
-        )
-      : new Set<string>(
-          simulatedTestIntervals
-            .map((p) => dateKeyInTimezone(p.timestamp, timezone))
-            .filter((dk) => boundedTestDateKeysLocal.has(dk))
-        );
+  const availableTestDateKeysFromSimulated = new Set<string>(
+    simulatedTestIntervals
+      .map((p) => dateKeyInTimezone(p.timestamp, timezone))
+      .filter((dk) => boundedTestDateKeysLocal.has(dk))
+  );
   const scoredTestDaysMissingSimulatedOwnershipCount = Array.from(boundedTestDateKeysLocal).filter(
     (dk) => !availableTestDateKeysFromSimulated.has(dk)
   ).length;
@@ -2735,36 +2697,6 @@ export async function buildGapfillCompareSimShared(args: {
     canonicalArtifactSimulatedDayTotalsByDate,
     compactCanonicalDateKeys
   );
-  // Selected-days compare (union or legacy full-window slice): artifact meta can omit scored test
-  // dates in canonicalArtifactSimulatedDayTotalsByDate while the shared fresh run already produced
-  // simulator-owned per-day totals for those dates. Backfill the canonical map from that map so
-  // display parity and artifact reference rows align without using actual usage as simulated display.
-  if (
-    (compareCalculationScope === "full_window_shared_path_then_scored_day_filter" ||
-      (compareCalculationScope === "selected_days_shared_path_only" &&
-        exactArtifactReadRequired &&
-        travelVacantParityDateKeysLocal.length > 0)) &&
-    selectedTestDailyTotalsByDate != null &&
-    selectedTestDailyTotalsByDate.size > 0
-  ) {
-    let fullWindowSharedCanonicalBackfillCount = 0;
-    for (const dk of Array.from(boundedTestDateKeysLocal)) {
-      const raw = (canonicalArtifactSimulatedDayTotalsByDate as Record<string, unknown>)[dk];
-      if (Number.isFinite(Number(raw))) continue;
-      const fromFresh = selectedTestDailyTotalsByDate.get(dk);
-      if (!Number.isFinite(Number(fromFresh))) continue;
-      (canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>)[dk] = round2Local(
-        Number(fromFresh) || 0
-      );
-      fullWindowSharedCanonicalBackfillCount++;
-    }
-    if (fullWindowSharedCanonicalBackfillCount > 0) {
-      (modelAssumptions as any).canonicalArtifactSimulatedDayTotalsFullWindowBackfillCount =
-        fullWindowSharedCanonicalBackfillCount;
-      (modelAssumptions as any).canonicalArtifactSimulatedDayTotalsFullWindowBackfillSource =
-        "selected_shared_full_window_simulated_day_totals";
-    }
-  }
   if (compareCoreMemoryReducedPath) {
     await reportPhase("compact_pre_bounded_meta_read_done", {
       preservedMetaCanonicalKeyCount: Object.keys(canonicalArtifactSimulatedDayTotalsByDate).length,
@@ -2844,24 +2776,15 @@ export async function buildGapfillCompareSimShared(args: {
     artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
   });
 
-  const freshDailyTotalsByDate =
-    compareFreshModeUsed === "selected_days" &&
-    selectedTestDailyTotalsByDate &&
-    selectedTestDailyTotalsByDate.size > 0
-      ? new Map<string, number>(
-          Array.from(selectedTestDailyTotalsByDate.entries())
-            .filter(([dk]) => boundedTestDateKeysLocal.has(dk))
-            .map(([dk, kwh]) => [dk, round2Local(Number(kwh) || 0)] as const)
-        )
-      : (() => {
-          const totals = new Map<string, number>();
-          for (const p of simulatedTestIntervals) {
-            const dk = dateKeyInTimezone(p.timestamp, timezone);
-            if (!boundedTestDateKeysLocal.has(dk)) continue;
-            totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
-          }
-          return totals;
-        })();
+  const freshDailyTotalsByDate = (() => {
+    const totals = new Map<string, number>();
+    for (const p of simulatedTestIntervals) {
+      const dk = dateKeyInTimezone(p.timestamp, timezone);
+      if (!boundedTestDateKeysLocal.has(dk)) continue;
+      totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
+    }
+    return totals;
+  })();
   const canonicalArtifactDailyByDate = new Map<string, number>(
     Object.entries(canonicalArtifactSimulatedDayTotalsByDate)
       .map(([date, simKwh]) => [String(date).slice(0, 10), round2Local(Number(simKwh) || 0)] as const)
@@ -2906,11 +2829,7 @@ export async function buildGapfillCompareSimShared(args: {
     | "display_shared_artifact_vs_compare_artifact_filter_only"
     | "display_shared_artifact_vs_compare_selected_days_fresh_calc"
     | "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc" =
-    compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
-      ? "display_shared_artifact_vs_compare_shared_full_window_then_filter"
-      : compareCalculationScope === "selected_days_shared_path_only"
-        ? "artifact_simulated_display_rows_vs_compare_selected_days_fresh_calc"
-        : "display_shared_artifact_vs_compare_artifact_filter_only";
+    "display_shared_artifact_vs_compare_artifact_filter_only";
   const scoredDayParityAvailability: GapfillScoredDayParityAvailability =
     expectedMissingDisplaySimDates.length === 0
       ? parityDisplayDailyByDate.size > 0
