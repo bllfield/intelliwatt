@@ -110,6 +110,8 @@ type RunResult = {
   sharedResultPayloadSummary?: Record<string, unknown>;
   pipelineDiagnosticsSummary?: Record<string, unknown>;
   diagnosticsVerdict?: Record<string, unknown>;
+  /** Optional standalone source-home Past Sim read payload (action: run_source_home_past_sim_snapshot). */
+  pastSimSnapshot?: Record<string, unknown>;
 } | {
   ok: false;
   error: string;
@@ -253,6 +255,7 @@ export default function GapFillLabCanonicalClient() {
   const [openFullHomeEditor, setOpenFullHomeEditor] = useState(false);
   const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [pastSimSnapshot, setPastSimSnapshot] = useState<Record<string, unknown> | null>(null);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
@@ -394,6 +397,13 @@ export default function GapFillLabCanonicalClient() {
     }
     if (json.homeProfile) setHomeProfileJson(prettyJson(json.homeProfile));
     if (json.applianceProfile) setApplianceProfileJson(prettyJson(json.applianceProfile));
+    if (action === "run_source_home_past_sim_snapshot") {
+      setPastSimSnapshot(
+        json.ok && json.pastSimSnapshot && typeof json.pastSimSnapshot === "object"
+          ? (json.pastSimSnapshot as Record<string, unknown>)
+          : null
+      );
+    }
     setLoading(false);
     return json;
   }
@@ -441,6 +451,24 @@ export default function GapFillLabCanonicalClient() {
 
   async function onRunRecalc() {
     await runAction("run_test_home_canonical_recalc", { adminLabTreatmentMode });
+  }
+
+  async function onRunPastSimSnapshot() {
+    await runAction("run_source_home_past_sim_snapshot", {
+      includeUsage365: false,
+      includeUserPipelineParity: false,
+    });
+  }
+
+  async function onCopyPastSimSnapshot() {
+    if (!pastSimSnapshot) return;
+    const payloadText = JSON.stringify(pastSimSnapshot, null, 2);
+    try {
+      await navigator.clipboard.writeText(payloadText);
+      setExportNotice("Copied source-home Past Sim snapshot to clipboard.");
+    } catch {
+      setExportNotice("Copy failed for source-home Past Sim snapshot.");
+    }
   }
 
   const usageChart = useMemo(() => {
@@ -1045,6 +1073,17 @@ export default function GapFillLabCanonicalClient() {
           <button className="px-3 py-2 rounded bg-brand-blue text-white text-sm" onClick={onRunRecalc} disabled={loading}>
             Recalc Canonical Past Sim
           </button>
+          <button className="px-3 py-2 rounded border text-sm" onClick={onRunPastSimSnapshot} disabled={loading}>
+            Run Source-home Past Sim Snapshot
+          </button>
+          <button
+            className="px-3 py-2 rounded border text-sm"
+            onClick={onCopyPastSimSnapshot}
+            disabled={loading || !pastSimSnapshot}
+            type="button"
+          >
+            Copy Past Sim Snapshot
+          </button>
           <button
             className="px-3 py-2 rounded border text-sm"
             onClick={onCopyAllData}
@@ -1064,6 +1103,15 @@ export default function GapFillLabCanonicalClient() {
         </div>
         {exportNotice ? <div className="text-xs text-brand-navy/70">{exportNotice}</div> : null}
       </div>
+
+      {pastSimSnapshot ? (
+        <details className="border rounded p-4">
+          <summary className="cursor-pointer font-semibold text-sm">Source-home Past Sim Snapshot (separate run)</summary>
+          <pre className="mt-3 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+            {JSON.stringify(pastSimSnapshot, null, 2)}
+          </pre>
+        </details>
+      ) : null}
 
       {loading ? (
         <div

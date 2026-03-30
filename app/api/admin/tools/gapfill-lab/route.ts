@@ -323,6 +323,8 @@ export async function POST(req: NextRequest) {
     benchmark?: unknown;
     /** Include usage365 chart payload (expensive); compare path can disable for performance. */
     includeUsage365?: boolean;
+    /** Optional: run user-pipeline parity read alongside compare core (extra read + payload). */
+    includeUserPipelineParity?: boolean;
     /** Explicit write action: regenerate + resave canonical shared Past artifact before compare. */
     rebuildArtifact?: boolean;
     /** Rebuild artifact only, then return immediately (no compare in same request). */
@@ -1541,6 +1543,105 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (rawAction === "run_source_home_past_sim_snapshot") {
+    const selectedSourceHouse = houses.find((h: any) => String(h.id) === sourceHouseIdParam);
+    if (!selectedSourceHouse) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "source_house_not_found",
+          message: "Selected source house was not found for this user.",
+        }),
+        { status: 404 }
+      );
+    }
+    const pastScenario = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: {
+          userId: user.id,
+          houseId: selectedSourceHouse.id,
+          name: "Past (Corrected)",
+          archivedAt: null,
+        },
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (!pastScenario?.id) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "no_past_scenario",
+          message: "No Past (Corrected) scenario found for source house.",
+        }),
+        { status: 400 }
+      );
+    }
+    const [defaultRead, baselineRead, rawRead] = await Promise.all([
+      getSimulatedUsageForHouseScenario({
+        userId: user.id,
+        houseId: selectedSourceHouse.id,
+        scenarioId: String(pastScenario.id),
+        readMode: "artifact_only",
+      }),
+      getSimulatedUsageForHouseScenario({
+        userId: user.id,
+        houseId: selectedSourceHouse.id,
+        scenarioId: String(pastScenario.id),
+        readMode: "artifact_only",
+        projectionMode: "baseline",
+      }),
+      getSimulatedUsageForHouseScenario({
+        userId: user.id,
+        houseId: selectedSourceHouse.id,
+        scenarioId: String(pastScenario.id),
+        readMode: "artifact_only",
+        projectionMode: "raw",
+      }),
+    ]);
+    const compactDataset = (dataset: any) => {
+      if (!dataset || typeof dataset !== "object") return null;
+      return {
+        summary: dataset.summary ?? null,
+        daily: Array.isArray(dataset.daily) ? dataset.daily : [],
+        monthly: Array.isArray(dataset.monthly) ? dataset.monthly : [],
+        meta:
+          dataset.meta && typeof dataset.meta === "object"
+            ? {
+                excludedDateKeysCount: (dataset.meta as any).excludedDateKeysCount ?? null,
+                excludedDateKeysFingerprint: (dataset.meta as any).excludedDateKeysFingerprint ?? null,
+                canonicalArtifactSimulatedDayTotalsByDate:
+                  (dataset.meta as any).canonicalArtifactSimulatedDayTotalsByDate ??
+                  (dataset as any).canonicalArtifactSimulatedDayTotalsByDate ??
+                  null,
+                validationOnlyDateKeysLocal: (dataset.meta as any).validationOnlyDateKeysLocal ?? null,
+              }
+            : null,
+      };
+    };
+    const payload = {
+      sourceHouseId: selectedSourceHouse.id,
+      scenarioId: String(pastScenario.id),
+      reads: {
+        defaultProjection: defaultRead.ok
+          ? { ok: true, dataset: compactDataset((defaultRead as any).dataset) }
+          : { ok: false, code: defaultRead.code, message: defaultRead.message },
+        baselineProjection: baselineRead.ok
+          ? { ok: true, dataset: compactDataset((baselineRead as any).dataset) }
+          : { ok: false, code: baselineRead.code, message: baselineRead.message },
+        rawProjection: rawRead.ok
+          ? { ok: true, dataset: compactDataset((rawRead as any).dataset) }
+          : { ok: false, code: rawRead.code, message: rawRead.message },
+      },
+    };
+    return NextResponse.json({
+      ok: true,
+      action: "run_source_home_past_sim_snapshot",
+      sourceHouseId: selectedSourceHouse.id,
+      scenarioId: String(pastScenario.id),
+      pastSimSnapshot: payload,
+    });
+  }
+
   if (action) {
     if (!requestedCompareRunId) {
       return NextResponse.json(
@@ -2264,13 +2365,16 @@ export async function POST(req: NextRequest) {
   const canonicalDataset = canonicalRead.dataset as any;
   const baselineReadUsedCanonicalRawFallback = !baselineRead.ok;
   const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
-  const userPipelineRead = await getSimulatedUsageForHouseScenario({
-    userId: user.id,
-    houseId: house.id,
-    scenarioId: String(pastScenario.id),
-    readMode: "allow_rebuild",
-  });
-  const userPipelineDataset = userPipelineRead.ok ? (userPipelineRead.dataset as any) : null;
+  const includeUserPipelineParity = body?.includeUserPipelineParity === true;
+  const userPipelineRead = includeUserPipelineParity
+    ? await getSimulatedUsageForHouseScenario({
+        userId: user.id,
+        houseId: house.id,
+        scenarioId: String(pastScenario.id),
+        readMode: "allow_rebuild",
+      })
+    : null;
+  const userPipelineDataset = userPipelineRead?.ok ? (userPipelineRead.dataset as any) : null;
   const gapfillBaselineDaily = new Map<string, number>();
   for (const row of Array.isArray(baselineDataset?.daily) ? baselineDataset.daily : []) {
     const dk = String(row?.date ?? "").slice(0, 10);
@@ -2313,15 +2417,19 @@ export async function POST(req: NextRequest) {
       }
     }
   }
-  const userPipelineParitySource = baselineReadUsedCanonicalRawFallback
-    ? "getSimulatedUsageForHouseScenario(raw_projection_fallback_from_failed_baseline_read)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar"
-    : "getSimulatedUsageForHouseScenario(baseline_projection)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar";
+  const userPipelineParitySource = !includeUserPipelineParity
+    ? "not_requested"
+    : baselineReadUsedCanonicalRawFallback
+      ? "getSimulatedUsageForHouseScenario(raw_projection_fallback_from_failed_baseline_read)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar"
+      : "getSimulatedUsageForHouseScenario(baseline_projection)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar";
   const userPipelineParity = {
-    status: userPipelineRead.ok
-      ? baselineReadUsedCanonicalRawFallback
-        ? "available_with_baseline_fallback_raw_projection"
-        : "available"
-      : "read_failed",
+    status: !includeUserPipelineParity
+      ? "not_requested"
+      : userPipelineRead?.ok
+        ? baselineReadUsedCanonicalRawFallback
+          ? "available_with_baseline_fallback_raw_projection"
+          : "available"
+        : "read_failed",
     source: userPipelineParitySource,
     baselineProjectionRequested: "baseline",
     baselineProjectionUsed: baselineReadUsedCanonicalRawFallback ? "raw_fallback" : "baseline",
@@ -2330,14 +2438,20 @@ export async function POST(req: NextRequest) {
       ? null
       : String(baselineRead.message ?? "baseline_projection_read_failed"),
     userPipelineProjectionUsed: "default",
+    includeUserPipelineParity,
     comparedDateCount: dailyParityDateKeys.length,
     mismatchDateCount: dailyParityMismatchCount,
     maxAbsKwhDiff: round2(dailyParityMaxAbsKwhDiff),
     totalAbsKwhDiff: round2(dailyParityTotalAbsKwhDiff),
     mismatchSample: dailyParityMismatchSample,
-    userPipelineReadError: userPipelineRead.ok ? null : String(userPipelineRead.message ?? "user_pipeline_read_failed"),
+    userPipelineReadError:
+      !includeUserPipelineParity
+        ? null
+        : userPipelineRead?.ok
+          ? null
+          : String(userPipelineRead?.message ?? "user_pipeline_read_failed"),
   };
-  const userPipelineCompareProjection = userPipelineRead.ok
+  const userPipelineCompareProjection = userPipelineRead?.ok
     ? buildValidationCompareProjectionSidecar(userPipelineDataset)
     : null;
 
