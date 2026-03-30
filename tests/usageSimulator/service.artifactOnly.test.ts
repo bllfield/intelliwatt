@@ -89,6 +89,7 @@ vi.mock("@/modules/weather/identity", () => ({
 }));
 
 import {
+  buildSmtAnchorPeriodsFromActualSummary,
   buildGapfillCompareSimShared,
   emitRecalcPreIntervalStageEvent,
   getSimulatedUsageForHouseScenario,
@@ -203,6 +204,36 @@ describe("emitRecalcPreIntervalStageEvent", () => {
       durationMs: 12,
       source: "recalcSimulatorBuildImpl",
     });
+  });
+});
+
+describe("buildSmtAnchorPeriodsFromActualSummary", () => {
+  it("returns null for unusable summary dates", () => {
+    const out = buildSmtAnchorPeriodsFromActualSummary({
+      summaryStart: "not-a-date",
+      summaryEnd: "2026-03-13",
+    });
+    expect(out).toBeNull();
+    expect(
+      shouldEmitRecalcValidationSetupSuccess({
+        mode: "SMT_BASELINE",
+        validationSetupFailed: out == null,
+      })
+    ).toBe(false);
+  });
+
+  it("returns anchor periods for valid summary dates", () => {
+    const out = buildSmtAnchorPeriodsFromActualSummary({
+      summaryStart: "2025-03-14",
+      summaryEnd: "2026-03-13",
+    });
+    expect(out).toEqual([{ id: "anchor", startDate: "2025-03-14", endDate: "2026-03-13" }]);
+    expect(
+      shouldEmitRecalcValidationSetupSuccess({
+        mode: "SMT_BASELINE",
+        validationSetupFailed: out == null,
+      })
+    ).toBe(true);
   });
 });
 
