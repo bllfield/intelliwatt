@@ -494,9 +494,8 @@ export default function GapFillLabCanonicalClient() {
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
-  const exportPayload = useMemo(
+  const exportPayloadBase = useMemo(
     () => ({
-      exportedAt: new Date().toISOString(),
       workspace: "gapfill-lab-canonical-client",
       formState: {
         email,
@@ -575,8 +574,15 @@ export default function GapFillLabCanonicalClient() {
     ]
   );
 
+  function buildExportPayload() {
+    return {
+      ...exportPayloadBase,
+      exportedAt: new Date().toISOString(),
+    };
+  }
+
   async function onCopyAllData() {
-    const payloadText = JSON.stringify(exportPayload, null, 2);
+    const payloadText = JSON.stringify(buildExportPayload(), null, 2);
     try {
       await navigator.clipboard.writeText(payloadText);
       setExportNotice("Copied full Gapfill data bundle to clipboard.");
@@ -599,7 +605,7 @@ export default function GapFillLabCanonicalClient() {
   }
 
   function onSaveAllToFile() {
-    const payloadText = JSON.stringify(exportPayload, null, 2);
+    const payloadText = JSON.stringify(buildExportPayload(), null, 2);
     const nowIso = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `gapfill-lab-export-${nowIso}.json`;
     const blob = new Blob([payloadText], { type: "application/json;charset=utf-8" });
