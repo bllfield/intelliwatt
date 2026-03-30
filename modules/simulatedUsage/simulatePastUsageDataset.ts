@@ -40,8 +40,13 @@ import {
 } from "@/modules/usageSimulator/lowDataPastSimAdapter";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
+import {
+  normalizePastProducerBuildPathKind,
+  type PastProducerBuildPathKind,
+} from "@/modules/simulatedUsage/pastProducerBuildPath";
 
-export type BuildPathKind = "cold_build" | "recalc" | "lab_validation";
+export type BuildPathKind = PastProducerBuildPathKind;
+export { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
 
 export type WeatherFallbackReason =
   | "missing_lat_lng"
@@ -754,7 +759,7 @@ export async function simulatePastUsageDataset(
     timezone,
     travelRanges,
     buildInputs,
-    buildPathKind,
+    buildPathKind: buildPathKindRaw,
     includeSimulatedDayResults = true,
     actualIntervals: preloadedIntervals,
     forceSimulateDateKeysLocal,
@@ -762,6 +767,7 @@ export async function simulatePastUsageDataset(
     emitAllIntervals = true,
     retainSimulatedDayResultDateKeysLocal,
   } = args;
+  const buildPathKind = normalizePastProducerBuildPathKind(buildPathKindRaw);
   const actualHouseId = String(actualContextHouseId ?? houseId);
   const correlationId = args.correlationId ?? createSimCorrelationId();
   const daySimStartedAt = Date.now();

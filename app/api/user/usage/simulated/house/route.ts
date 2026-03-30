@@ -140,6 +140,8 @@ export async function GET(request: NextRequest) {
     if (out.code === "HOUSE_NOT_FOUND") return NextResponse.json(failureBody, { status: 403, headers: correlationHeaders(correlationId) });
     if (out.code === "SCENARIO_NOT_FOUND") return NextResponse.json(failureBody, { status: 404, headers: correlationHeaders(correlationId) });
     if (out.code === "ARTIFACT_MISSING") return NextResponse.json(failureBody, { status: 404, headers: correlationHeaders(correlationId) });
+    if (out.code === "COMPARE_TRUTH_INCOMPLETE")
+      return NextResponse.json(failureBody, { status: 409, headers: correlationHeaders(correlationId) });
     return NextResponse.json(failureBody, { status: 500, headers: correlationHeaders(correlationId) });
   } catch (e) {
     console.error("[user/usage/simulated/house] failed", e);

@@ -58,5 +58,68 @@ describe("dataset simulated day separation", () => {
     });
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual(["2025-08-11"]);
     expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual(["2025-08-12"]);
+    const travelSet = new Set(dataset.meta.simulatedTravelVacantDateKeysLocal ?? []);
+    for (const dk of dataset.meta.simulatedTestModeledDateKeysLocal ?? []) {
+      expect(travelSet.has(dk)).toBe(false);
+    }
+  });
+
+  it("maps FORCED_SELECTED_DAY producer results to SIMULATED_TEST_DAY (TEST category, not OTHER)", () => {
+    const intervals = [...makeUtcDayIntervals("2025-09-01", 0.1), ...makeUtcDayIntervals("2025-09-02", 0.1)];
+    const curve: SimulatedCurve = {
+      start: "2025-09-01",
+      end: "2025-09-02",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      curve,
+      { baseKind: "SMT_ACTUAL_BASELINE", mode: "SMT_BASELINE", canonicalEndMonth: "2025-09" },
+      {
+        simulatedDayResults: [
+          { localDate: "2025-09-02", displayDayKwh: 7.7, simulatedReasonCode: "FORCED_SELECTED_DAY" } as any,
+        ],
+      }
+    );
+    const byDate = new Map(dataset.daily.map((row) => [row.date, row]));
+    expect(byDate.get("2025-09-02")).toMatchObject({
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_TEST_DAY",
+    });
+    expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual(["2025-09-02"]);
+    expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
+  });
+
+  it("maps INCOMPLETE_METER_DAY and LEADING_MISSING_DAY to SIMULATED_OTHER (not TEST or TRAVEL_VACANT)", () => {
+    const intervals = [
+      ...makeUtcDayIntervals("2025-10-01", 0.1),
+      ...makeUtcDayIntervals("2025-10-02", 0.1),
+      ...makeUtcDayIntervals("2025-10-03", 0.1),
+    ];
+    const curve: SimulatedCurve = {
+      start: "2025-10-01",
+      end: "2025-10-03",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      curve,
+      { baseKind: "SMT_ACTUAL_BASELINE", mode: "SMT_BASELINE", canonicalEndMonth: "2025-10" },
+      {
+        simulatedDayResults: [
+          { localDate: "2025-10-02", displayDayKwh: 1, simulatedReasonCode: "INCOMPLETE_METER_DAY" } as any,
+          { localDate: "2025-10-03", displayDayKwh: 2, simulatedReasonCode: "LEADING_MISSING_DAY" } as any,
+        ],
+      }
+    );
+    const byDate = new Map(dataset.daily.map((row) => [row.date, row]));
+    expect(byDate.get("2025-10-02")?.sourceDetail).toBe("SIMULATED_OTHER");
+    expect(byDate.get("2025-10-03")?.sourceDetail).toBe("SIMULATED_OTHER");
+    expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual([]);
+    expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
   });
 });

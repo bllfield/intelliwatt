@@ -36,6 +36,7 @@ vi.mock("@/modules/usageSimulator/pastCache", () => ({
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualUsageDatasetForHouse: vi.fn(),
+  getActualDailyKwhForLocalDateKeys: vi.fn().mockResolvedValue(new Map()),
   getIntervalDataFingerprint: (...args: any[]) => getIntervalDataFingerprint(...args),
 }));
 
@@ -116,16 +117,8 @@ describe("getSimulatedUsageForHouseScenario artifact identity matching", () => {
     expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 
-  it("returns artifact with latest_by_scenario_fallback diagnostics when latest cached is used", async () => {
+  it("does not substitute latest-by-scenario artifact when exact hash misses (fail-closed)", async () => {
     getCachedPastDataset.mockResolvedValue(null);
-    const updatedAt = new Date("2026-01-02T00:00:00.000Z");
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "old-hash",
-      updatedAt,
-      datasetJson: { summary: { start: "2026-01-01", end: "2026-01-31" }, series: {} },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
 
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
@@ -134,29 +127,14 @@ describe("getSimulatedUsageForHouseScenario artifact identity matching", () => {
       readMode: "artifact_only",
     });
 
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      const meta = out.dataset?.meta ?? {};
-      expect(meta.artifactReadMode).toBe("artifact_only");
-      expect(meta.artifactInputHash).toBe("old-hash");
-      expect(meta.requestedInputHash).toBe("expected-hash");
-      expect(meta.artifactInputHashUsed).toBe("old-hash");
-      expect(meta.artifactHashMatch).toBe(false);
-      expect(meta.artifactSourceMode).toBe("latest_by_scenario_fallback");
-      expect(meta.artifactScenarioId).toBe("past_scenario_1");
-      expect(meta.artifactUpdatedAt).toBe(updatedAt.toISOString());
-      expect(typeof meta.artifactSourceNote).toBe("string");
-      expect(Array.isArray(out.dataset?.series?.intervals15)).toBe(true);
-    }
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.code).toBe("ARTIFACT_MISSING");
     expect(getCachedPastDataset).toHaveBeenCalledWith({
       houseId: "h1",
       scenarioId: "past_scenario_1",
       inputHash: "expected-hash",
     });
-    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalledWith({
-      houseId: "h1",
-      scenarioId: "past_scenario_1",
-    });
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 });
 

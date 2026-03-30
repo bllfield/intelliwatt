@@ -127,6 +127,12 @@ export async function getCachedPastDataset(args: {
   };
 }
 
+/**
+ * Returns the most recently updated cache row for (houseId, scenarioId), regardless of input hash.
+ * Do not use for artifact identity, compare truth, or user-facing Past/GapFill correctness surfaces;
+ * those require `getCachedPastDataset` with a proven input hash. Intended for non-authoritative
+ * tooling or diagnostics only.
+ */
 export async function getLatestCachedPastDatasetByScenario(args: {
   houseId: string;
   scenarioId: string;
@@ -161,6 +167,11 @@ export async function getLatestCachedPastDatasetByScenario(args: {
   };
 }
 
+/**
+ * Upsert replaces the full `datasetJson` + `intervalsCompressed` for this (houseId, scenarioId, inputHash).
+ * A new run with the same identity key must not merge with prior rows; callers choose `inputHash` so scope
+ * changes (e.g. validation days, travel ranges) produce a new key and a new stored row.
+ */
 export async function saveCachedPastDataset(args: {
   houseId: string;
   scenarioId: string;

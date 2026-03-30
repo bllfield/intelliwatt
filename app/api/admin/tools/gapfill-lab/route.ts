@@ -26,7 +26,11 @@ import {
   VALIDATION_DAY_SELECTION_MODES,
   type ValidationDaySelectionMode,
 } from "@/modules/usageSimulator/validationSelection";
-import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+import {
+  attachValidationCompareProjection,
+  buildValidationCompareProjectionSidecar,
+  CompareTruthIncompleteError,
+} from "@/modules/usageSimulator/compareProjection";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
@@ -1210,8 +1214,53 @@ export async function POST(req: NextRequest) {
     const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
 
     const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
-    // Shared compare sidecar remains the canonical modeled-vs-actual projection family.
-    const compareProjection = buildValidationCompareProjectionSidecar(baselineDataset);
+    const metadataValidationOnlyDateKeysLocal = Array.isArray((baselineDataset as any)?.meta?.validationOnlyDateKeysLocal)
+      ? ((baselineDataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+          .map((v) => String(v ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      : [];
+    const effectiveValidationOnlyDateKeysLocal =
+      selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
+
+    let datasetForCompare: any = baselineDataset;
+    if (effectiveValidationOnlyDateKeysLocal.length > 0) {
+      const metaKeySet = new Set(metadataValidationOnlyDateKeysLocal);
+      const missingMetaKeys = effectiveValidationOnlyDateKeysLocal.filter((dk) => !metaKeySet.has(dk));
+      if (missingMetaKeys.length > 0) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "compare_truth_incomplete",
+            message: `Canonical GapFill compare requires validation-day metadata for: ${missingMetaKeys.join(", ")}.`,
+            reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+            missingDateKeysLocal: missingMetaKeys,
+            correlationId: labCorrelationId,
+          }),
+          { status: 409 }
+        );
+      }
+      try {
+        datasetForCompare = attachValidationCompareProjection(JSON.parse(JSON.stringify(baselineDataset)) as Record<string, unknown>);
+      } catch (e: unknown) {
+        if (e instanceof CompareTruthIncompleteError) {
+          return NextResponse.json(
+            attachFailureContract({
+              ok: false,
+              error: "compare_truth_incomplete",
+              message: e.message,
+              reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+              missingDateKeysLocal: e.missingDateKeysLocal,
+              correlationId: labCorrelationId,
+            }),
+            { status: 409 }
+          );
+        }
+        throw e;
+      }
+    }
+
+    // Shared compare sidecar reads rows produced by the same attachValidationCompareProjection path as user Past.
+    const compareProjection = buildValidationCompareProjectionSidecar(datasetForCompare);
     const baselineDailyRows = Array.isArray(baselineDataset?.daily) ? (baselineDataset.daily as Array<Record<string, unknown>>) : [];
     const baselineActualDayCount = baselineDailyRows.reduce((count, row) => {
       const source = String((row as any)?.source ?? "").toUpperCase();
@@ -1221,14 +1270,7 @@ export async function POST(req: NextRequest) {
       const source = String((row as any)?.source ?? "").toUpperCase();
       return source === "SIMULATED" ? count + 1 : count;
     }, 0);
-    const metadataValidationOnlyDateKeysLocal = Array.isArray((baselineDataset as any)?.meta?.validationOnlyDateKeysLocal)
-      ? ((baselineDataset as any).meta.validationOnlyDateKeysLocal as unknown[])
-          .map((v) => String(v ?? "").slice(0, 10))
-          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-      : [];
     // Single source of truth for this response: scored rows and summaries must use the same effective date set.
-    const effectiveValidationOnlyDateKeysLocal =
-      selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
     const effectiveValidationDateKeySet = new Set<string>(effectiveValidationOnlyDateKeysLocal);
     const compareProjectionRowsFiltered = Array.isArray(compareProjection.rows)
       ? compareProjection.rows.filter((row) =>
@@ -1283,8 +1325,9 @@ export async function POST(req: NextRequest) {
         : typeof metaRaw?.artifactInputHash === "string"
           ? String(metaRaw.artifactInputHash)
           : null;
-    const usedFallbackArtifact = artifactSourceMode === "latest_by_scenario_fallback";
-    const exactCanonicalReadSucceeded = artifactHashMatch === true && !usedFallbackArtifact;
+    /** Latest-by-scenario artifact substitution is removed; kept false for response shape compatibility. */
+    const usedFallbackArtifact = false;
+    const exactCanonicalReadSucceeded = artifactHashMatch === true;
     const baselineProjectionExpected = effectiveValidationOnlyDateKeysLocal.length > 0;
     const validationLeakDatesInBaseline = baselineDailyRows
       .filter((row) => {
@@ -1332,7 +1375,7 @@ export async function POST(req: NextRequest) {
       projectionMode: "baseline",
       readLayer: "getSimulatedUsageForHouseScenario",
       readFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
-      fallbackAllowed: true,
+      fallbackAllowed: false,
       exactCanonicalReadSucceeded,
       usedFallbackArtifact,
       artifactSourceMode,

@@ -52,6 +52,9 @@ import {
   mergeDateKeysToRanges,
 } from "@/lib/admin/gapfillLab";
 import type { GapfillLabScoredDayTruthRow } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
+import { INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE } from "@/modules/usageSimulator/gapfillCompareCoreContract";
+
+export { INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE } from "@/modules/usageSimulator/gapfillCompareCoreContract";
 
 export type GapfillComparePipelineState = {
   compareRequestTruthForLifecycle: Record<string, unknown> | null;
@@ -483,7 +486,7 @@ export async function runGapfillCompareCorePipeline(
       rebuildArtifact,
       autoEnsureArtifact: autoEnsureArtifactForCompare,
       compareFreshMode,
-      includeFreshCompareCalc: compareFreshMode === "full_window",
+      includeFreshCompareCalc: INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE,
       selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
       includeDiagnostics,
       includeFullReportText,
@@ -1066,11 +1069,9 @@ export async function runGapfillCompareCorePipeline(
   }
   const artifactSourceNote =
     ma.artifactSourceNote ??
-    (artifactSourceMode === "latest_by_scenario_fallback"
-      ? "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss)."
-      : artifactSourceMode === "exact_hash_match"
-        ? "Artifact source: exact identity match on Past input hash."
-        : null);
+    (artifactSourceMode === "exact_hash_match"
+      ? "Artifact source: exact identity match on Past input hash."
+      : null);
   const chartIntervalCount = Array.isArray(sharedSim.simulatedChartIntervals)
     ? sharedSim.simulatedChartIntervals.length
     : Number(ma.intervalCount ?? 0) || 0;
@@ -1622,7 +1623,7 @@ export async function runGapfillCompareCorePipeline(
       pathKind:
         sharedSim.artifactAutoRebuilt || rebuildArtifact
           ? "full_rebuild"
-          : artifactSourceMode === "exact_hash_match" || artifactSourceMode === "latest_by_scenario_fallback"
+          : artifactSourceMode === "exact_hash_match"
             ? "cheap_read"
             : "unknown",
     },

@@ -965,10 +965,11 @@ export function buildSimulatedUsageDatasetFromCurve(
     );
     simulatedSourceByDate.add(dk);
     const reason = String((row as any)?.simulatedReasonCode ?? "");
+    // Override contract: TRAVEL_VACANT vs TEST (compare) vs OTHER (incomplete/leading-missing stitch fills; not compare TEST).
     const detail =
       reason === "TRAVEL_VACANT"
         ? "SIMULATED_TRAVEL_VACANT"
-        : reason === "TEST_MODELED_KEEP_REF"
+        : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
           ? "SIMULATED_TEST_DAY"
           : "SIMULATED_OTHER";
     simulatedSourceDetailByDate.set(dk, detail);

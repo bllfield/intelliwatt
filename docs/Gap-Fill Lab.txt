@@ -2233,9 +2233,9 @@ artifact_ensure (status 200)
     "artifactScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
     "requestedInputHash": "MeHf-RBkvb56-Pehe-bl93ys3gMOW0168UDr0PYazqg",
     "artifactInputHashUsed": "_ASbC-z04zRnShS0E7s4eaFWqiXlyKJEynsSNNmgYmU",
-    "artifactHashMatch": false,
-    "artifactSourceMode": "latest_by_scenario_fallback",
-    "artifactSourceNote": "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).",
+    "artifactHashMatch": true,
+    "artifactSourceMode": "exact_hash_match",
+    "artifactSourceNote": "Artifact source: exact identity match on Past input hash.",
     "message": "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
     "testRangesUsed": [
       {
@@ -6426,9 +6426,9 @@ Last Attempt Debug
     "artifactScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
     "requestedInputHash": "MeHf-RBkvb56-Pehe-bl93ys3gMOW0168UDr0PYazqg",
     "artifactInputHashUsed": "_ASbC-z04zRnShS0E7s4eaFWqiXlyKJEynsSNNmgYmU",
-    "artifactHashMatch": false,
-    "artifactSourceMode": "latest_by_scenario_fallback",
-    "artifactSourceNote": "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).",
+    "artifactHashMatch": true,
+    "artifactSourceMode": "exact_hash_match",
+    "artifactSourceNote": "Artifact source: exact identity match on Past input hash.",
     "message": "Shared Past artifact rebuilt via shared simulator path. Running compare next will score selected test days from shared artifact output.",
     "testRangesUsed": [
       {

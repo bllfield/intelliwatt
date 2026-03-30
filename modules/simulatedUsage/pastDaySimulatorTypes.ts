@@ -108,6 +108,7 @@ export type SimulatedDayResult = {
    * Shared post-sim reason tag used by downstream consumers to separate
    * travel/vacant simulation from test-day modeled output.
    */
+  /** Producer-owned; TRAVEL_VACANT vs TEST (TEST_MODELED_KEEP_REF | FORCED_SELECTED_DAY) per architecture override. */
   simulatedReasonCode?:
     | "TRAVEL_VACANT"
     | "TEST_MODELED_KEEP_REF"

@@ -1,3 +1,19 @@
+/** Thrown when validation compare rows cannot be built without substituting missing simulated-day truth. */
+export class CompareTruthIncompleteError extends Error {
+  readonly code = "COMPARE_TRUTH_INCOMPLETE" as const;
+  constructor(
+    public readonly missingDateKeysLocal: string[],
+    message?: string
+  ) {
+    super(
+      message ??
+        "Compare projection requires finite canonical simulated-day totals for every validation day; missing or non-finite for: " +
+          missingDateKeysLocal.join(", ")
+    );
+    this.name = "CompareTruthIncompleteError";
+  }
+}
+
 export type ValidationCompareProjectionSidecar = {
   rows: Array<{
     localDate: string;
@@ -145,10 +161,17 @@ export function attachValidationCompareProjection(dataset: any): any {
     ((projected as any)?.meta?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
     ((projected as any)?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
     {};
+  const missingSimTotals = validationOnlyDateKeysLocal.filter((dk) => {
+    const raw = simSrc[dk];
+    return raw === undefined || raw === null || !Number.isFinite(Number(raw));
+  });
+  if (missingSimTotals.length > 0) {
+    throw new CompareTruthIncompleteError(missingSimTotals);
+  }
   const rows = validationOnlyDateKeysLocal
     .map((dk) => {
       const actualDayKwh = Number(actualByDate.get(dk) ?? 0) || 0;
-      const simulatedDayKwh = Number(simSrc[dk] ?? 0) || 0;
+      const simulatedDayKwh = Number(simSrc[dk]) || 0;
       const errorKwh = simulatedDayKwh - actualDayKwh;
       const percentError = Math.abs(actualDayKwh) > 1e-6 ? (Math.abs(errorKwh) / Math.abs(actualDayKwh)) * 100 : null;
       const d = new Date(`${dk}T12:00:00.000Z`);

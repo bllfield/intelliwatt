@@ -954,7 +954,7 @@ export default function GapFillLabClient() {
           pathKind:
             (result as any)?.artifactAutoRebuilt || (result as any)?.rebuilt
               ? "full_rebuild"
-              : ["exact_hash_match", "latest_by_scenario_fallback"].includes(String((result as any)?.artifactSourceMode ?? ""))
+              : String((result as any)?.artifactSourceMode ?? "") === "exact_hash_match"
                 ? "cheap_read"
                 : null,
         }

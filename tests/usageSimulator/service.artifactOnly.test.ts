@@ -81,6 +81,7 @@ vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualUsageDatasetForHouse: vi.fn(),
+  getActualDailyKwhForLocalDateKeys: vi.fn().mockResolvedValue(new Map([["2026-01-01", 0.5]])),
   getIntervalDataFingerprint: (...args: any[]) => getIntervalDataFingerprint(...args),
 }));
 
@@ -382,16 +383,43 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
         weatherActualRowCount: Array.isArray(canonicalDateKeys) ? canonicalDateKeys.length : 0,
       },
     }));
+    getCachedPastDataset.mockImplementation(async (args: any) => {
+      if (String(args?.scenarioId) === "gapfill_lab" && String(args?.inputHash) === "hash1") {
+        return {
+          inputHash: "hash1",
+          updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+          datasetJson: {
+            summary: {
+              source: "SIMULATED",
+              intervalsCount: 2,
+              totalKwh: 0.75,
+              start: "2026-01-01",
+              end: "2026-01-01",
+              latest: "2026-01-01",
+            },
+            meta: {
+              validationOnlyDateKeysLocal: ["2026-01-01"],
+              canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
+            },
+            series: {},
+          },
+          intervalsCodec: "v1_delta_varint",
+          intervalsCompressed: Buffer.from("00", "hex"),
+        };
+      }
+      return null;
+    });
   });
 
   it("returns ARTIFACT_MISSING instead of rebuilding when cache artifact is missing", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue(null);
+    getCachedPastDataset.mockResolvedValue(null);
 
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
       houseId: "h1",
       scenarioId: "gapfill_lab",
       readMode: "artifact_only",
+      exactArtifactInputHash: "nope",
     });
 
     expect(out.ok).toBe(false);
@@ -399,23 +427,64 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
-  it("returns artifact dataset when persisted cache exists and does not rebuild", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash1",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01", latest: "2026-01-01" },
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
-
+  it("returns ARTIFACT_MISSING when gapfill_lab read omits exactArtifactInputHash", async () => {
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
       houseId: "h1",
       scenarioId: "gapfill_lab",
       readMode: "artifact_only",
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.code).toBe("ARTIFACT_MISSING");
+      expect(String(out.message)).toContain("exactArtifactInputHash");
+    }
+  });
+
+  it("returns COMPARE_TRUTH_INCOMPLETE when validation compare lacks canonical simulated-day totals (no zero-fill)", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash1",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: "2026-01-01",
+          end: "2026-01-01",
+          latest: "2026-01-01",
+        },
+        meta: {
+          validationOnlyDateKeysLocal: ["2026-01-01"],
+          canonicalArtifactSimulatedDayTotalsByDate: {},
+        },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+      exactArtifactInputHash: "hash1",
+      projectionMode: "raw",
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.code).toBe("COMPARE_TRUTH_INCOMPLETE");
+      expect(Array.isArray((out as any).missingCanonicalDateKeysLocal)).toBe(true);
+    }
+  });
+
+  it("returns artifact dataset when persisted cache exists and does not rebuild", async () => {
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+      exactArtifactInputHash: "hash1",
     });
 
     expect(out.ok).toBe(true);
@@ -427,23 +496,13 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   });
 
   it("emits compareProjection measurement events with correlationId, durationMs, and memoryRssMb (Slice 11)", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash1",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01", latest: "2026-01-01" },
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
-
     const cid = "33333333-3333-4333-8333-333333333333";
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
       houseId: "h1",
       scenarioId: "gapfill_lab",
       readMode: "artifact_only",
+      exactArtifactInputHash: "hash1",
       correlationId: cid,
     });
 
@@ -457,7 +516,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   });
 
   it("preserves restored canonical summary totals instead of overwriting them from decoded intervals", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash3",
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
@@ -470,6 +529,10 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
           latest: "2026-01-01",
         },
         totals: { importKwh: 9999.99, netKwh: 9999.99 },
+        meta: {
+          validationOnlyDateKeysLocal: ["2026-01-01"],
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 9999.99 },
+        },
         series: {},
       },
       intervalsCodec: "v1_delta_varint",
@@ -481,6 +544,8 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       houseId: "h1",
       scenarioId: "gapfill_lab",
       readMode: "artifact_only",
+      exactArtifactInputHash: "hash3",
+      projectionMode: "raw",
     });
 
     expect(out.ok).toBe(true);
@@ -493,11 +558,15 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
 
   it("artifact_only does not require usageSimulatorScenario row for cache-backed scenarios", async () => {
     scenarioFindFirst.mockResolvedValue(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash2",
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01", latest: "2026-01-01" },
+        meta: {
+          validationOnlyDateKeysLocal: ["2026-01-01"],
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
+        },
         series: {},
       },
       intervalsCodec: "v1_delta_varint",
@@ -509,6 +578,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       houseId: "h1",
       scenarioId: "gapfill_lab",
       readMode: "artifact_only",
+      exactArtifactInputHash: "hash2",
     });
 
     expect(out.ok).toBe(true);
@@ -516,7 +586,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
-  it("artifact_only fallback ignores legacy compare metadata when shared travel fingerprint matches", async () => {
+  it("artifact_only does not substitute latest-by-scenario artifact when exact hash misses (fail-closed)", async () => {
     scenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
     usageSimulatorBuildFindUnique.mockResolvedValue({
       buildInputs: {
@@ -528,21 +598,6 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     });
     computePastInputHash.mockReturnValue("hash-exact-miss");
     getCachedPastDataset.mockResolvedValue(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-compare-artifact",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
-        meta: {
-          artifactScope: "gapfill_compare",
-          excludedDateKeysFingerprint: "2026-01-01",
-          compareMaskDateKeysFingerprint: "2026-01-01,2026-01-02",
-        },
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
 
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
@@ -551,11 +606,13 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       readMode: "artifact_only",
     });
 
-    expect(out.ok).toBe(true);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.code).toBe("ARTIFACT_MISSING");
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 
-  it("artifact_only fallback compatibility uses canonical coverage fingerprint window", async () => {
+  it("artifact_only exact hash miss does not use latest compatible artifact (canonical coverage window)", async () => {
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
@@ -566,20 +623,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       },
     });
     computePastInputHash.mockReturnValueOnce("hash-exact-miss");
-    getCachedPastDataset.mockResolvedValueOnce(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce({
-      inputHash: "hash-latest",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
-        meta: {
-          excludedDateKeysFingerprint: canonicalCoverage.startDate,
-        },
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
+    getCachedPastDataset.mockResolvedValue(null);
 
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
@@ -588,9 +632,10 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       readMode: "artifact_only",
     });
 
-    expect(out.ok).toBe(true);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.code).toBe("ARTIFACT_MISSING");
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
-    expect((out as any)?.dataset?.meta?.artifactSourceMode).toBe("latest_by_scenario_fallback");
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 
   it("artifact_only exact hash mode does not fallback when exact match is required", async () => {
@@ -603,7 +648,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       },
     });
     getCachedPastDataset.mockResolvedValueOnce(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce({
+    getCachedPastDataset.mockResolvedValueOnce({
       inputHash: "hash-latest",
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
@@ -1492,6 +1537,34 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         weatherProviderName: "OPEN_METEO",
       },
     }));
+    getCachedPastDataset.mockImplementation(async (args: any) => {
+      if (String(args?.inputHash) === "hash-selected-default") {
+        return {
+          inputHash: "hash-selected-default",
+          updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+          datasetJson: {
+            summary: {
+              source: "SIMULATED",
+              intervalsCount: 96,
+              totalKwh: 24,
+              start: "2026-01-01",
+              end: "2026-01-01",
+            },
+            meta: {
+              curveShapingVersion: "shared_curve_v2",
+              excludedDateKeysFingerprint: "",
+              canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+            },
+            daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+            monthly: [{ month: "2026-01", kwh: 24 }],
+            series: {},
+          },
+          intervalsCodec: "v1_delta_varint",
+          intervalsCompressed: Buffer.from("00", "hex"),
+        };
+      }
+      return null;
+    });
   });
 
   it("returns rebuild-required when shared artifact is missing for the requested identity", async () => {
@@ -1516,19 +1589,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("treats cached artifact missing curveShapingVersion as stale (curve-shaping guard)", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-exact-curve",
-      updatedAt: new Date(),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: { excludedDateKeysFingerprint: "" },
-        daily: [],
-        monthly: [],
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
     computePastInputHash.mockReturnValue("hash-exact-curve");
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-exact-curve",
@@ -1577,24 +1637,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("falls back to latest scenario artifact when exact hash misses after rebuild and ownership scope matches", async () => {
+  it("does not substitute latest-by-scenario artifact when exact hash misses (fail-closed)", async () => {
     getCachedPastDataset.mockResolvedValue(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-latest-scenario",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: {
-          curveShapingVersion: "shared_curve_v2",
-          excludedDateKeysFingerprint: "",
-        },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 24 }],
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
 
     const out = await buildGapfillCompareSimShared({
       userId: "u1",
@@ -1606,15 +1650,12 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       includeFreshCompareCalc: false,
     });
 
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      expect(out.simulatedTestIntervals.length).toBeGreaterThan(0);
-      expect((out.modelAssumptions as any)?.artifactSourceMode).toBe("latest_by_scenario_fallback");
-      expect(typeof (out.modelAssumptions as any)?.requestedInputHash).toBe("string");
-      expect((out.modelAssumptions as any)?.artifactInputHashUsed).toBe("hash-latest-scenario");
-      expect((out.modelAssumptions as any)?.requestedInputHash).not.toBe("hash-latest-scenario");
-      expect((out.modelAssumptions as any)?.artifactHashMatch).toBe(false);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_missing_rebuild_required");
     }
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 
   it("clears exact-hash artifact source mode after auto-rebuilding from incompatible fallback", async () => {
@@ -1643,22 +1684,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         intervalsCodec: "v1_delta_varint",
         intervalsCompressed: Buffer.from("00", "hex"),
       });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-incompatible-latest",
-      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
-      datasetJson: {
-        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
-        meta: {
-          curveShapingVersion: "shared_curve_v2",
-          excludedDateKeysFingerprint: "2026-01-02",
-        },
-        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
-        monthly: [{ month: "2026-01", kwh: 24 }],
-        series: {},
-      },
-      intervalsCodec: "v1_delta_varint",
-      intervalsCompressed: Buffer.from("00", "hex"),
-    });
     simulatePastUsageDataset.mockResolvedValue({
       dataset: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
@@ -1728,7 +1753,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         intervalsCodec: "v1_delta_varint",
         intervalsCompressed: Buffer.from("00", "hex"),
       });
-    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce(null);
+    getCachedPastDataset.mockResolvedValueOnce(null);
     simulatePastUsageDataset.mockResolvedValueOnce({
       dataset: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
@@ -1956,12 +1981,13 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
   it("emits compact compare_core memory-reduced phase and skips monthly/chart materialization when diagnostics and full report are off", async () => {
     const compactArtifact = {
-      inputHash: "hash-compact-core",
+      inputHash: "hash-selected-default",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
         meta: {
           curveShapingVersion: "shared_curve_v2",
           excludedDateKeysFingerprint: "",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
         },
         daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
         monthly: [{ month: "2026-01", kwh: 9999 }],
@@ -1970,7 +1996,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     };
-    getLatestCachedPastDatasetByScenario.mockResolvedValue(compactArtifact);
     getCachedPastDataset.mockResolvedValue(compactArtifact);
     decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
 
@@ -2062,7 +2087,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
     bloatedMetaTotals["2026-01-01"] = 24;
     const compactArtifact = {
-      inputHash: "hash-bloated-meta",
+      inputHash: "hash-selected-default",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
         meta: {
@@ -2077,7 +2102,6 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCodec: "v1_delta_varint",
       intervalsCompressed: Buffer.from("00", "hex"),
     };
-    getLatestCachedPastDatasetByScenario.mockResolvedValue(compactArtifact);
     getCachedPastDataset.mockResolvedValue(compactArtifact);
     decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
 
@@ -2382,7 +2406,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       scenarioId: "gapfill_lab",
       inputHash: "hash-latest-lightweight",
     });
-    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalledTimes(1);
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
     if (out.ok) {
       expect((out.modelAssumptions as any)?.requestedInputHash).toBe("hash-latest-lightweight");
       expect((out.modelAssumptions as any)?.artifactSourceMode).toBe("exact_hash_match");
@@ -2394,7 +2418,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
   it("fails loudly instead of silently falling back when same-run exact lightweight artifact identity is missing", async () => {
     getCachedPastDataset.mockResolvedValueOnce(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce({
+    getCachedPastDataset.mockResolvedValueOnce({
       inputHash: "hash-stale-latest",
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
@@ -2436,7 +2460,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect((out.body as any)?.fallbackOccurred).toBe(false);
       expect((out.body as any)?.fallbackReason).toBe("requested_exact_identity_not_found");
     }
-    expect(getLatestCachedPastDatasetByScenario).toHaveBeenCalledTimes(1);
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 
   it("fails invariant instead of returning exact-hash success with unresolved artifact identity", async () => {
@@ -2480,7 +2504,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
-  it("fails early with artifact handoff error when same-run exact compare resolves to fallback identity", async () => {
+  it("same-run exact compare does not read latest-by-scenario substitute when exact hash misses (fail-closed)", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -2490,7 +2514,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       },
     });
     getCachedPastDataset.mockResolvedValueOnce(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-fallback-latest",
       updatedAt: new Date("2026-03-12T00:00:00.000Z"),
       datasetJson: {
@@ -2526,11 +2550,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     expect(out.ok).toBe(false);
     if (!out.ok) {
       expect(out.status).toBe(409);
-      expect((out.body as any)?.error).toBe("artifact_exact_identity_unresolved");
-      expect((out.body as any)?.reasonCode).toBe("ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED");
-      expect((out.body as any)?.artifactSourceMode).toBe("latest_by_scenario_fallback");
-      expect((out.body as any)?.artifactInputHashUsed).toBe("hash-fallback-latest");
+      expect((out.body as any)?.error).toBe("artifact_missing_rebuild_required");
     }
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
   });
 
   it("recomputes excluded fingerprint from current travel ranges during lightweight artifact reads", async () => {
@@ -2542,14 +2564,15 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-01" }],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-latest-lightweight-stale-meta",
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
           curveShapingVersion: "shared_curve_v2",
           // stale ownership fingerprint from older travel range
           excludedDateKeysFingerprint: "2026-01-02",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
@@ -2581,13 +2604,14 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   it("allows lightweight selected-days reads to proceed with incomplete artifact windows", async () => {
     // canonicalMonths in beforeEach yields expected full-month interval count (31 * 96),
     // while decode mock provides only a single day. Lightweight mode should still proceed.
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
-      inputHash: "hash-latest-lightweight-incomplete",
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
       datasetJson: {
         summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
         meta: {
           curveShapingVersion: "shared_curve_v2",
           excludedDateKeysFingerprint: "",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
         },
         daily: [{ date: "2026-01-01", source: "SIMULATED" }],
         series: {},
@@ -2900,6 +2924,221 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     }
   });
 
+  it("selected_days freshCompareScoredDaySimTotalsByDate uses canonical simulator day totals, not interval re-sums", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01", 24)],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 99 },
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      actualWxByDateKey: new Map([
+        ["2026-01-01", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
+      ]),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: true,
+    });
+
+    expect(simulatePastFullWindowShared).not.toHaveBeenCalled();
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.artifactSimulatedDayReferenceRows).toEqual([{ date: "2026-01-01", simKwh: 24 }]);
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-01": 99 });
+      expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
+      const diag = (out.modelAssumptions as { gapfillScoringDiagnostics?: { scoredDays?: Array<{ compareOutputAuthority?: string }> } })
+        ?.gapfillScoringDiagnostics;
+      expect(diag?.scoredDays?.[0]?.compareOutputAuthority).toBe("freshCompareScoredDaySimTotalsByDate");
+    }
+  });
+
+  it("selected_days defaults includeFreshCompareCalc to true (matches GapFill INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE)", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96, totalKwh: 24, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue(oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96));
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01", 24)],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 77 },
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      actualWxByDateKey: new Map([
+        ["2026-01-01", { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO" }],
+      ]),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-01": 77 });
+    }
+  });
+
+  it("fails closed when selected_days fresh run omits canonical totals for a scored test day (no interval substitute)", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96 * 2, totalKwh: 48, start: "2026-01-01", end: "2026-01-02" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24, "2026-01-02": 24 },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-02", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 48 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue([
+      ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+    ]);
+    simulatePastSelectedDaysShared.mockResolvedValue({
+      simulatedIntervals: [
+        ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+      ],
+      simulatedDayResults: [simulatedDayResultForLocalDay("2026-01-01", 24)],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+      pastDayCounts: {},
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      actualWxByDateKey: new Map(),
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-02" },
+      testDateKeysLocal: new Set<string>(["2026-01-01", "2026-01-02"]),
+      rebuildArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: true,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(500);
+      expect((out.body as { reasonCode?: string }).reasonCode).toBe("FRESH_COMPARE_CANONICAL_DAY_TOTALS_MISSING");
+      expect((out.body as { error?: string }).error).toBe("fresh_compare_canonical_totals_missing");
+    }
+  });
+
+  it("fails closed when full_window fresh run omits canonical totals for a scored test day", async () => {
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-selected-default",
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 96 * 2, totalKwh: 48, start: "2026-01-01", end: "2026-01-02" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherSourceSummary: "actual_only",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 24, "2026-01-02": 24 },
+        },
+        daily: [
+          { date: "2026-01-01", kwh: 24, source: "SIMULATED" },
+          { date: "2026-01-02", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-01", kwh: 48 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue([
+      ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+      ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+    ]);
+    simulatePastFullWindowShared.mockResolvedValue({
+      simulatedIntervals: [
+        ...oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
+        ...oneChicagoLocalDayIntervals96("2026-01-02", 24 / 96),
+      ],
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+      actualWxByDateKey: new Map(),
+      weatherSourceSummary: "actual_only",
+      weatherKindUsed: "ACTUAL_LAST_YEAR",
+      weatherProviderName: "OPEN_METEO",
+      weatherFallbackReason: null,
+    });
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-02" },
+      testDateKeysLocal: new Set<string>(["2026-01-01", "2026-01-02"]),
+      rebuildArtifact: false,
+      compareFreshMode: "full_window",
+      includeFreshCompareCalc: true,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(500);
+      expect((out.body as { reasonCode?: string }).reasonCode).toBe("FRESH_COMPARE_CANONICAL_DAY_TOTALS_MISSING");
+    }
+  });
+
   it("returns deterministic fresh compare outputs across repeated calls with identical inputs", async () => {
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",
@@ -3000,7 +3239,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
   it("reports full mismatch totals while capping mismatch samples at ten dates", async () => {
     const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3151,7 +3390,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("uses stored canonical artifact simulated-day totals for lightweight parity without decoding intervals", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3220,7 +3459,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
     const allDates = Array.from({ length: 31 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
     const selectedDates = ["2026-01-05", "2026-01-20"];
     getCachedPastDataset.mockResolvedValue(null);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",
       updatedAt: new Date("2026-01-31T00:00:00.000Z"),
       datasetJson: {
@@ -3318,7 +3557,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3441,7 +3680,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-daily-totals");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-daily-totals",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3541,7 +3781,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       return `2026-01-${day}`;
     });
     const availableDailyDates = selectedDates.slice(0, 19);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-21-with-19-daily");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-21-with-19-daily",
       updatedAt: new Date("2026-01-31T00:00:00.000Z"),
       datasetJson: {
@@ -3628,7 +3869,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-iso-meta-keys");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-iso-meta-keys",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3695,7 +3937,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-daily-augment-canonical");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-daily-augment-canonical",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3758,7 +4001,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-no-double-count");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-no-double-count",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3853,7 +4097,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-03" }],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-owned-days-only");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-owned-days-only",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3923,7 +4168,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("does not use localDate-only selected-day results as simulated ownership", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-no-localdate-fallback");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-no-localdate-fallback",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -3995,7 +4241,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
   });
 
   it("does not derive selected-day compare totals from day results when canonical selected-day totals are absent", async () => {
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-missing-canonical-selected-total");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-missing-canonical-selected-total",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -4068,7 +4315,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
       },
     });
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    computePastInputHash.mockReturnValue("hash-selected-parity-interval-basis");
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-parity-interval-basis",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {
@@ -4166,6 +4414,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
         travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
       },
     });
+    computePastInputHash.mockReturnValue("hash-selected-exact");
     getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-exact",
       datasetJson: {
@@ -4711,7 +4960,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
 
   it("reports full missing-reference totals when simulated artifact days are missing canonical references", async () => {
     const testDates = Array.from({ length: 12 }, (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`);
-    getLatestCachedPastDatasetByScenario.mockResolvedValue({
+    getCachedPastDataset.mockResolvedValue({
       inputHash: "hash-selected-default",
       updatedAt: new Date("2026-01-20T00:00:00.000Z"),
       datasetJson: {

@@ -838,11 +838,9 @@
   }
   const artifactSourceNote =
     ma.artifactSourceNote ??
-    (artifactSourceMode === "latest_by_scenario_fallback"
-      ? "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss)."
-      : artifactSourceMode === "exact_hash_match"
-        ? "Artifact source: exact identity match on Past input hash."
-        : null);
+    (artifactSourceMode === "exact_hash_match"
+      ? "Artifact source: exact identity match on Past input hash."
+      : null);
   const chartIntervalCount = Array.isArray(sharedSim.simulatedChartIntervals)
     ? sharedSim.simulatedChartIntervals.length
     : Number(ma.intervalCount ?? 0) || 0;
@@ -1394,7 +1392,7 @@
       pathKind:
         sharedSim.artifactAutoRebuilt || rebuildArtifact
           ? "full_rebuild"
-          : artifactSourceMode === "exact_hash_match" || artifactSourceMode === "latest_by_scenario_fallback"
+          : artifactSourceMode === "exact_hash_match"
             ? "cheap_read"
             : "unknown",
     },

@@ -291,9 +291,17 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
           scenarioId: "past-s1",
           dataset: {
             summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
-            daily: [{ date: "2025-04-11", kwh: 8 }],
-            monthly: [{ month: "2025-04", kwh: 8 }],
-            series: { intervals15: [{ timestamp: "2025-04-11T00:00:00.000Z", kwh: 2 }] },
+            daily: [
+              { date: "2025-04-10", kwh: 9.5, source: "ACTUAL" },
+              { date: "2025-05-02", kwh: 12.25, source: "ACTUAL" },
+            ],
+            monthly: [{ month: "2025-04", kwh: 9.5 }, { month: "2025-05", kwh: 12.25 }],
+            series: {
+              intervals15: [
+                { timestamp: "2025-04-10T00:00:00.000Z", kwh: 1.2 },
+                { timestamp: "2025-05-02T00:00:00.000Z", kwh: 2.3 },
+              ],
+            },
             meta: {
               validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
               validationProjectionApplied: true,
@@ -302,6 +310,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
               artifactSourceNote: "exact",
               artifactRecomputed: false,
               artifactSourceMode: "exact_hash_match",
+              canonicalArtifactSimulatedDayTotalsByDate: {
+                "2025-04-10": 9.5,
+                "2025-05-02": 12.25,
+              },
             },
           },
         };
@@ -741,7 +753,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
     expect(body.canonicalReadResultSummary?.ok).toBe(true);
     expect(body.canonicalReadResultSummary?.readMode).toBe("artifact_only");
-    expect(body.canonicalReadResultSummary?.fallbackAllowed).toBe(true);
+    expect(body.canonicalReadResultSummary?.fallbackAllowed).toBe(false);
     expect(body.canonicalReadResultSummary?.exactCanonicalReadSucceeded).toBe(true);
     expect(body.canonicalReadResultSummary?.metadataValidationOnlyDateKeysLocal).toEqual([
       "2025-04-10",
@@ -906,7 +918,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
             validationProjectionApplied: true,
             excludedDateKeysCount: 4,
             excludedDateKeysFingerprint: edgeDates.join(","),
-            canonicalArtifactSimulatedDayTotalsByDate: edgeTotals,
+            canonicalArtifactSimulatedDayTotalsByDate: { ...edgeTotals, "2025-04-10": 9.5 },
           },
         },
       };
@@ -965,12 +977,14 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
           monthly: [{ month: "2025-03", kwh: 27.78 }],
           series: { intervals15: [{ timestamp: "2025-03-29T00:00:00.000Z", kwh: 1 }] },
           meta: {
-            validationOnlyDateKeysLocal: ["2025-04-10"],
+            validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
             validationProjectionApplied: true,
             excludedDateKeysCount: 4,
             excludedDateKeysFingerprint: excludedFingerprint,
             canonicalArtifactSimulatedDayTotalsByDate: {
               "2025-03-29": 27.78,
+              "2025-04-10": 9.5,
+              "2025-05-02": 12.25,
             },
           },
         },
@@ -1072,12 +1086,24 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
           end: "2026-02-28",
           latest: "2026-02-28T23:45:00Z",
         },
-        daily: [{ date: "2025-04-11", kwh: 8 }],
-        monthly: [{ month: "2025-04", kwh: 8 }],
-        series: { intervals15: [{ timestamp: "2025-04-11T00:00:00.000Z", kwh: 2 }] },
+        daily: [
+          { date: "2025-04-10", kwh: 2, source: "ACTUAL" },
+          { date: "2025-05-02", kwh: 2, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2025-04", kwh: 2 }, { month: "2025-05", kwh: 2 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 },
+            { timestamp: "2025-05-02T00:00:00.000Z", kwh: 1 },
+          ],
+        },
         meta: {
           validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
           validationProjectionApplied: true,
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2025-04-10": 9.5,
+            "2025-05-02": 12.25,
+          },
           validationCompareRows: [
             {
               localDate: "2025-04-10",
@@ -1142,7 +1168,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.diagnosticsVerdict?.compareRowsMatchSelectedDates).toBe(true);
   });
 
-  it("surfaces fallback and baseline validation leak diagnostics when present", async () => {
+  it("run_test_home_canonical_recalc fails closed (409) when canonical simulated-day totals are missing for validation days", async () => {
     getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
       ok: true,
       houseId: "h1",
@@ -1150,16 +1176,57 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       scenarioId: "past-s1",
       dataset: {
         summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
-        daily: [{ date: "2025-04-10", kwh: 8, source: "SIMULATED" }],
+        daily: [{ date: "2025-04-10", kwh: 8, source: "ACTUAL" }],
         monthly: [{ month: "2025-04", kwh: 8 }],
         series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 2 }] },
         meta: {
           validationOnlyDateKeysLocal: ["2025-04-10"],
-          validationProjectionApplied: false,
-          artifactHashMatch: false,
-          artifactSourceMode: "latest_by_scenario_fallback",
-          requestedInputHash: "req-hash",
-          artifactInputHashUsed: "artifact-hash",
+          validationProjectionApplied: true,
+          artifactHashMatch: true,
+          artifactSourceMode: "exact_hash_match",
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("compare_truth_incomplete");
+    expect(body.reasonCode).toBe("COMPARE_TRUTH_INCOMPLETE");
+    expect(Array.isArray(body.missingDateKeysLocal)).toBe(true);
+    expect((body.missingDateKeysLocal as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("run_test_home_canonical_recalc succeeds when compare metadata is complete for validation days", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+        daily: [{ date: "2025-04-10", kwh: 8, source: "ACTUAL" }],
+        monthly: [{ month: "2025-04", kwh: 8 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 2 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10"],
+          validationProjectionApplied: true,
+          artifactHashMatch: true,
+          artifactSourceMode: "exact_hash_match",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2025-04-10": 9.5 },
         },
       },
     }));
@@ -1179,13 +1246,60 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.canonicalReadResultSummary?.usedFallbackArtifact).toBe(true);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("run_test_home_canonical_recalc");
+    expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
+    expect(body.compareProjection?.rows?.length).toBe(1);
+    expect(body.failureCode).toBeUndefined();
+  });
+
+  it("surfaces baseline validation leak diagnostics when hash match fails (no latest-by-scenario substitution)", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+        daily: [{ date: "2025-04-10", kwh: 8, source: "SIMULATED" }],
+        monthly: [{ month: "2025-04", kwh: 8 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 2 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10"],
+          validationProjectionApplied: false,
+          artifactHashMatch: false,
+          artifactSourceMode: "exact_hash_match",
+          requestedInputHash: "req-hash",
+          artifactInputHashUsed: "artifact-hash",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2025-04-10": 10.5,
+          },
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.canonicalReadResultSummary?.usedFallbackArtifact).toBe(false);
     expect(body.canonicalReadResultSummary?.exactCanonicalReadSucceeded).toBe(false);
     expect(body.canonicalReadResultSummary?.requestedInputHash).toBe("req-hash");
     expect(body.canonicalReadResultSummary?.artifactInputHashUsed).toBe("artifact-hash");
     expect(body.baselineProjectionSummary?.applied).toBe(false);
     expect(body.baselineProjectionSummary?.validationLeakCountInBaseline).toBe(1);
-    expect(body.diagnosticsVerdict?.usedFallbackArtifact).toBe(true);
+    expect(body.diagnosticsVerdict?.usedFallbackArtifact).toBe(false);
     expect(body.diagnosticsVerdict?.artifactHashMatch).toBe(false);
     expect(body.diagnosticsVerdict?.baselineProjectionCorrect).toBe(false);
     expect(body.diagnosticsVerdict?.validationLeakDatesInBaseline).toEqual(["2025-04-10"]);

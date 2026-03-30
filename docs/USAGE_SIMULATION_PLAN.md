@@ -431,3 +431,277 @@ This logic is used consistently for Actual and Simulated insight baseloads. It d
 - Future-recalcs-only rule is explicit: changing system default does not rewrite existing artifacts.
 - Baseline contract: validation/test days remain ACTUAL in baseline stitch/display outputs; modeled test-day values are surfaced through compare projection sidecar from the same stored simulated-day ownership used by both Past and GapFill.
 
+Where earlier sections in this file conflict with the following, the following section takes precedence.
+
+## AUTHORITATIVE SIMULATOR ARCHITECTURE OVERRIDE
+
+This section overrides any older contradictory guidance in this file.
+
+This override applies to every simulator execution mode and entrypoint, without exception, including:
+- initial run
+- cold start
+- cold build
+- cache miss rebuild
+- allow_rebuild
+- refresh
+- explicit recalc
+- admin canonical recalc
+- user-triggered rebuild
+- artifact refresh
+- artifact ensure
+- snapshot-producing rebuilds
+- any future renamed equivalent of these modes
+
+No execution mode is exempt from the rules below.
+
+### 1) One shared simulator producer path only
+
+User Past Sim and GapFill may begin with different user inputs, but after input normalization they must enter the exact same shared simulator producer path.
+
+There must not be:
+- a separate user producer path
+- a separate admin producer path
+- a separate GapFill producer truth path
+- a separate "cold_build truth" path for stored simulator outputs
+- a separate "recalc truth" path for stored simulator outputs
+- a separate "refresh truth" path for stored simulator outputs
+- a separate "allow_rebuild truth" path for stored simulator outputs
+- a separate "artifact ensure truth" path for stored simulator outputs
+
+Input values may differ. Producer code path may not differ.
+
+### 2) Shared producer output types
+
+The shared simulator producer path must derive and label simulated day outputs before downstream consumers use them.
+
+The labeled simulated day output categories are:
+
+- `TRAVEL_VACANT`
+- `TEST`
+
+These labels are producer-owned truth, not UI-only annotations.
+
+### 3) Fingerprint ownership rule
+
+Fingerprint ownership must follow this exact rule:
+
+- exclude only `TRAVEL_VACANT` days from the usage fingerprint
+- keep actual usage for `TEST` days included in the usage fingerprint
+
+`TEST` days are not excluded from the usage fingerprint.
+
+This fingerprint rule applies in every simulator execution mode listed above.
+
+### 4) Storage rule
+
+After the shared simulator producer derives simulated day outputs, those outputs become the stored simulator truth used by downstream consumers.
+
+Downstream consumers must not replace this with a separate admin-only simulated truth source.
+
+This storage rule applies regardless of whether the run began as a cold start, refresh, allow_rebuild, explicit recalc, artifact ensure, or any other execution mode.
+
+### 5) Downstream split of responsibilities
+
+After simulated day outputs are produced and stored:
+
+- `stitch` consumes `ACTUAL` days plus `TRAVEL_VACANT` simulated days only to build the stitched Past chart
+- `compare` consumes `TEST` simulated days only and compares them against actual interval data for those same test days
+
+`TEST` simulated days do not belong in the stitched Past chart.
+
+`TRAVEL_VACANT` simulated days do not belong in the test-day compare set.
+
+This downstream split applies in every simulator execution mode listed above.
+
+### 6) User page and GapFill truth source
+
+User Past Sim and GapFill must both read the same stored simulation truth and the same stored compare truth when available.
+
+GapFill may add deeper analytics, diagnostics, and tuning surfaces on top of that shared truth, but GapFill must not own a separate simulator truth source or a separate compare truth source.
+
+This is true for cold starts, refreshes, rebuilds, recalc runs, artifact refreshes, and all other simulator entrypoints.
+
+### 7) Compare ownership rule
+
+Compare truth must remain artifact-backed or stored-output-backed. Fresh admin calculations may exist only as diagnostics and must never replace compare truth.
+
+If fresh diagnostics are shown, they must be clearly treated as diagnostics only.
+
+This compare ownership rule applies in every simulator execution mode listed above.
+
+### 8) Selected-days fresh diagnostics rule
+
+In `selected_days` fresh diagnostics mode, scored day totals must come from canonical simulator-owned day totals.
+
+They must not be re-derived by summing intervals in selected-days mode.
+
+Canonical simulator-owned scored day totals are the source of truth for selected-days fresh diagnostics.
+
+### 9) No pre-DB branch divergence
+
+Any divergence between User Past Sim and GapFill before simulated day outputs are written to storage is a bug.
+
+Differences are allowed only in:
+- input values
+- downstream presentation
+- downstream analytics depth
+
+Differences are not allowed in the pre-DB producer path.
+
+This prohibition applies to all execution modes, including cold start, cold build, refresh, allow_rebuild, explicit recalc, admin canonical recalc, artifact ensure, snapshot-producing rebuilds, and future renamed equivalents.
+
+### 10) No execution-mode loophole
+
+A different execution mode name does not create a valid architecture exception.
+
+It is invalid to claim that any of the following may use a different pre-DB producer truth path:
+- cold start
+- cold build
+- refresh
+- allow_rebuild
+- recalc
+- admin canonical recalc
+- artifact ensure
+- artifact refresh
+- cache miss rebuild
+- snapshot-producing rebuild
+- any future renamed equivalent
+
+If the simulator is producing simulated day outputs before storage, it must be using the same shared producer path.
+
+### 11) No stale simulated data rule
+
+Whenever a simulator run produces new simulated outputs for the same scope and identity, stale simulated data from prior runs must not remain mixed into the new stored results.
+
+This rule applies to both `TRAVEL_VACANT` simulated days and `TEST` simulated days.
+
+For the same scope and identity, a new run must clear, replace, or fully overwrite prior stored simulated-day outputs so the resulting stored truth contains only the outputs from the current run.
+
+Old simulated days from prior test-day selections, prior travel/vacant ranges, prior tuning parameters, prior calculation versions, or prior execution modes must not remain included in the new stored result set.
+
+This no-stale-data rule applies in every simulator execution mode listed above, including refresh, allow_rebuild, explicit recalc, admin canonical recalc, artifact ensure, and any future renamed equivalent.
+
+### 12) Practical interpretation rule for future chats
+
+If a future chat or edit proposal implies any of the following, it is off-plan and must be rejected:
+
+- user Past Sim and GapFill produce stored simulator outputs through different code paths
+- a specific execution mode such as cold build, refresh, or recalc is exempt from the shared producer rule
+- `TEST` simulated days are not part of shared simulator outputs
+- `TEST` days should be excluded from the usage fingerprint
+- `TEST` simulated days belong in the stitched Past chart
+- GapFill owns a separate simulator truth path
+- compare truth should come from a fresh admin-only path instead of stored simulator outputs
+- selected-days fresh diagnostics may re-derive scored day totals from interval sums
+- stale simulated days from prior runs may remain mixed into the current stored output set
+
+This project must be treated as having one shared simulator producer path, one stored simulator truth, one compare truth source, one stitch ownership rule, and one no-stale-data replacement rule.
+
+## AUTHORITATIVE FAIL-CLOSED TRUTH OVERRIDE
+
+This section overrides any older contradictory guidance in this file.
+
+This fail-closed rule applies to every simulator, artifact, compare, stitch, snapshot, cache-read, cache-write, refresh, rebuild, recalc, allow_rebuild, artifact ensure, artifact refresh, user-facing route, admin route, and any future renamed equivalent of those paths.
+
+### 1) Truth-preserving fallbacks are allowed
+
+A fallback is allowed only if it preserves the same truth and cannot change the meaning of the result.
+
+Allowed examples:
+- reading valid cached weather from the database, then falling back to a fresh weather API for the same weather truth
+- using a backup weather provider when the primary weather provider is unavailable, if the backup still returns correct weather truth for the same request
+- reading equivalent stored source data from a different trusted storage layer when it represents the same identity and same truth
+
+These are allowed because they are source fallbacks, not truth substitutions.
+
+### 2) Truth-substituting fallbacks are forbidden
+
+If the correct simulator truth, compare truth, artifact truth, or stored-output truth cannot be proven correct for the requested surface, the system must fail with an explicit failure state.
+
+It must not silently fall back to:
+- latest compatible artifact when exact or correct identity is not proven
+- latest by scenario when that may return stale or different truth
+- stale data from a prior run
+- mixed old and new simulated outputs
+- synthetic substitute data
+- empty success payloads
+- zero-filled compare values
+- artifact data substituted for fresh diagnostics truth
+- fresh diagnostics substituted for compare truth
+- partial data presented as complete truth
+- any other substitute source that can change the meaning or correctness of the result
+
+### 3) Fail closed when truth cannot be proven
+
+If correctness cannot be proven, the system must:
+- return an explicit failure status
+- return an explicit failure code
+- return an explicit failure message
+
+The system must not silently degrade into a different truth source.
+
+### 4) Exact identity rule
+
+When a surface requires exact simulator or artifact identity, failure to resolve that exact identity must return an explicit failure.
+
+It must not fall back to:
+- latest artifact
+- latest by scenario
+- nearby identity
+- compatible identity
+- prior cached identity
+- user-page truth substituted into snapshot/admin truth
+- admin truth substituted into user-page truth
+
+### 5) Compare rule
+
+Compare truth must remain stored-output-backed or artifact-backed.
+
+If compare truth is missing, incomplete, stale, mixed, or unproven, the compare result must fail explicitly.
+
+Missing compare simulator totals must not be silently converted into numeric `0` values and presented as valid compare output.
+
+### 6) Fresh diagnostics rule
+
+Fresh diagnostics are diagnostics only.
+
+Fresh diagnostics must never replace compare truth.
+
+If canonical simulator-owned fresh scored day totals are required and are missing or incomplete, fresh diagnostics must fail explicitly.
+
+They must not fall back to interval re-sums, artifact totals, zero values, or any substitute source that can change correctness.
+
+### 7) Snapshot rule
+
+If a snapshot surface cannot prove the requested truth, it must return explicit failure.
+
+It must not silently substitute:
+- user-facing Past truth
+- admin GapFill truth
+- another projection
+- another artifact
+- another scenario
+- another identity
+- empty success output
+
+### 8) Stale and mixed data rule
+
+Whenever a new simulator run produces new simulated outputs for the same scope and identity, stale simulated data from prior runs must not remain mixed into the new stored results.
+
+This applies to both:
+- `TRAVEL_VACANT` simulated days
+- `TEST` simulated days
+
+For the same scope and identity, a new run must clear, replace, or fully overwrite prior stored simulated-day outputs so the resulting stored truth contains only the outputs from the current run.
+
+Old simulated days from prior test-day selections, prior travel/vacant ranges, prior tuning parameters, prior calculation versions, prior execution modes, or prior rebuild paths must not remain included in the new stored result set.
+
+### 9) Practical interpretation rule
+
+Future chats and edits must apply this distinction:
+
+- a fallback that preserves the same truth is allowed
+- a fallback that can change, dilute, substitute, guess, merge, or misrepresent truth is forbidden
+
+If there is any real risk that a fallback can produce bad data, misleading data, stale data, mixed data, substitute data, or falsely successful data, that fallback must not be used.
+

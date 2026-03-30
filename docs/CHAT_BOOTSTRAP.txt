@@ -503,3 +503,64 @@ sudo journalctl -u green-button-upload.service --since "5 minutes ago" --no-page
   - Droplet inbox: `/home/deploy/smt_inbox`.
   - Files may be `*.csv` or `*.CSV.*.asc`; ingest logic must handle both.
 - SMT remains droplet-only: Next.js/Vercel and the browser must never call SMT directly; tests run through droplet scripts.
+
+Where earlier content in this file conflicts with the following, the following section takes precedence.
+
+AUTHORITATIVE SIMULATOR ARCHITECTURE OVERRIDE
+
+This section overrides any older contradictory guidance in this file.
+
+This override applies to every simulator execution mode and entrypoint, including initial run, cold start, cold build, cache miss rebuild, allow_rebuild, refresh, explicit recalc, admin canonical recalc, user-triggered rebuild, artifact refresh, artifact ensure, snapshot-producing rebuilds, and any future renamed equivalent. No execution mode is exempt.
+
+User Past Sim and GapFill may start with different inputs, but after input normalization they must enter the exact same shared simulator producer path.
+
+There is only one pre-DB simulator producer path.
+
+Producer labels must include:
+- TRAVEL_VACANT
+- TEST
+
+Fingerprint rule:
+- exclude only TRAVEL_VACANT days from the usage fingerprint
+- keep TEST-day actual usage included in the usage fingerprint
+
+After simulated day outputs are derived and stored:
+- stitch uses ACTUAL + TRAVEL_VACANT simulated days only
+- compare uses TEST simulated days only against actual interval data for those same days
+
+TEST simulated days do not go into the stitched Past chart.
+
+User Past Sim and GapFill must read the same stored simulator truth and the same stored compare truth. GapFill may add more analytics, but not a separate truth path.
+
+Fresh diagnostics are diagnostics only. They do not replace stored compare truth.
+
+In selected_days fresh diagnostics mode, scored day totals must come from canonical simulator-owned day totals, not interval re-sums.
+
+Whenever a new simulator run produces new simulated outputs for the same scope and identity, stale simulated data from prior runs must be cleared, replaced, or fully overwritten. Old test-day outputs, old travel/vacant outputs, old tuning outputs, and old calculation-version outputs must not remain mixed into the current stored result set.
+
+If a future chat proposes separate pre-DB producer paths for user Past Sim and GapFill, claims that a specific mode like cold build, refresh, or recalc is exempt, or allows stale simulated data from prior runs to remain mixed into current stored outputs, that proposal is off-plan and must be rejected.
+
+AUTHORITATIVE FAIL-CLOSED TRUTH OVERRIDE
+
+This section overrides any older contradictory guidance in this file.
+
+Truth-preserving fallbacks are allowed. Truth-substituting fallbacks are not.
+
+Allowed examples:
+- cached weather in DB falling back to a fresh weather API for the same weather truth
+- primary weather provider falling back to a backup weather provider when the backup still returns correct weather truth for the same request
+- equivalent trusted source-layer fallback that preserves the same identity and same truth
+
+Forbidden fallbacks include anything that can return bad, stale, mixed, substitute, guessed, zero-filled, partial, or misleading truth.
+
+If the correct simulator truth, compare truth, artifact truth, or stored-output truth cannot be proven correct, the system must fail with an explicit failure status, code, and message.
+
+When exact identity is required, failure to resolve exact identity must not fall back to latest artifact, latest by scenario, compatible identity, or any substitute source.
+
+Compare truth must remain stored-output-backed or artifact-backed. Missing compare simulator totals must not be converted into numeric 0 values and shown as valid compare output.
+
+Fresh diagnostics are diagnostics only. They must not replace compare truth. If canonical fresh scored day totals are required and missing, diagnostics must fail explicitly.
+
+Whenever a new simulator run produces new simulated outputs for the same scope and identity, prior simulated outputs must be cleared, replaced, or fully overwritten so stale outputs are not mixed into the current result set.
+
+If a fallback preserves the same truth, it is allowed. If it can produce bad data or misleading data, it is forbidden.

@@ -35,7 +35,6 @@ import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import {
   computePastInputHash,
   getCachedPastDataset,
-  getLatestCachedPastDatasetByScenario,
   saveCachedPastDataset,
   PAST_ENGINE_VERSION,
   type CachedPastDataset,
@@ -74,12 +73,14 @@ import {
 } from "@/modules/usageSimulator/validationSelection";
 import {
   attachValidationCompareProjection,
+  CompareTruthIncompleteError,
   projectBaselineFromCanonicalDataset,
 } from "@/modules/usageSimulator/compareProjection";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
+import { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -468,7 +469,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       requestedInputHash: string | null;
       artifactInputHashUsed: string | null;
       artifactHashMatch: boolean | null;
-      artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" | null;
+      artifactSourceMode: "exact_hash_match" | null;
       artifactSourceNote: string | null;
     }
   | { ok: false; error: string; message: string }
@@ -1367,9 +1368,8 @@ export async function buildGapfillCompareSimShared(args: {
       // Phase reporting is best-effort observability and must not alter compare behavior.
     }
   };
-  // Keep the request flag for backward-compatible payloads, but default compare scoring
-  // mode stays selected-days unless the caller explicitly asks for full_window.
-  void includeFreshCompareCalc;
+  // Canonical scored-day fresh totals (see freshDailyTotalsByDate) apply when includeFreshCompareCalc is true.
+  // GapFill compare_core always passes true via gapfillCompareCoreContract; explicit false is for tests/opt-out.
   const effectiveCompareFreshMode = compareFreshMode ?? "selected_days";
   let useSelectedDaysLightweightArtifactRead =
     selectedDaysLightweightArtifactRead === true &&
@@ -1457,33 +1457,6 @@ export async function buildGapfillCompareSimShared(args: {
     .sort((a, b) => (a < b ? -1 : 1));
   const expectedChartIntervalCount = chartDateKeysLocal.size * 96;
 
-  // Cheap pre-read: if scenario has no artifact rows at all, short-circuit before identity/fingerprint work.
-  if (!rebuildArtifact && !autoEnsureArtifact) {
-    let latestScenarioArtifact: any;
-    try {
-      latestScenarioArtifact = await getLatestCachedPastDatasetByScenario({
-        houseId,
-        scenarioId: pastScenarioId,
-      });
-    } catch {
-      latestScenarioArtifact = undefined;
-    }
-    if (latestScenarioArtifact === null) {
-      return {
-        ok: false,
-        status: 409,
-        body: {
-          ok: false,
-          error: "artifact_missing_rebuild_required",
-          message:
-            "No saved shared Past artifact found for this identity. Trigger explicit rebuildArtifact=true before compare.",
-          mode: "artifact_only",
-          scenarioId: pastScenarioId,
-        },
-      };
-    }
-  }
-
   const sharedScenarioCacheId = pastScenarioId;
   const requestedArtifactScenarioId =
     typeof artifactExactScenarioId === "string" && artifactExactScenarioId.trim()
@@ -1510,7 +1483,7 @@ export async function buildGapfillCompareSimShared(args: {
     includeDiagnostics !== true &&
     includeFullReportText !== true;
   let sharedInputHash = exactArtifactIdentityRequested ? requestedArtifactInputHash : "";
-  if (!useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested) {
+  if (!exactArtifactIdentityRequested) {
     const intervalDataFingerprint = await getIntervalDataFingerprint({
       houseId,
       esiid: houseResolved.esiid ?? null,
@@ -1704,18 +1677,7 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
 
-  let artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" | null =
-    rebuildArtifact
-      ? null
-      : useSelectedDaysLightweightArtifactRead
-        ? exactArtifactIdentityRequested
-          ? "exact_hash_match"
-          : "latest_by_scenario_fallback"
-        : "exact_hash_match";
-  let artifactFallbackReason: string | null =
-    !rebuildArtifact && useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested
-      ? "lightweight_compare_without_exact_identity_uses_latest_scenario_artifact"
-      : null;
+  let artifactSourceMode: "exact_hash_match" | null = rebuildArtifact ? null : "exact_hash_match";
   let cached = !rebuildArtifact
     ? exactArtifactIdentityRequested
       ? await getCachedPastDataset({
@@ -1723,12 +1685,7 @@ export async function buildGapfillCompareSimShared(args: {
           scenarioId: requestedArtifactScenarioId,
           inputHash: requestedArtifactInputHash,
         })
-      : useSelectedDaysLightweightArtifactRead
-        ? await getLatestCachedPastDatasetByScenario({
-            houseId,
-            scenarioId: sharedScenarioCacheId,
-          })
-        : await getCachedPastDataset({
+      : await getCachedPastDataset({
           houseId,
           scenarioId: sharedScenarioCacheId,
           inputHash: sharedInputHash,
@@ -1739,54 +1696,25 @@ export async function buildGapfillCompareSimShared(args: {
     exactArtifactIdentityRequested &&
     (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)
   ) {
-    if (exactArtifactReadRequired) {
-      return {
+    return {
+      ok: false,
+      status: 409,
+      body: {
         ok: false,
-        status: 409,
-        body: {
-          ok: false,
-          error: "artifact_exact_identity_missing_rebuild_required",
-          message:
-            "Compare expected the exact shared Past artifact rebuilt earlier in this run, but that scenario/inputHash could not be read. Re-run artifact ensure before compare.",
-          mode: "artifact_only",
-          scenarioId: sharedScenarioCacheId,
-          requestedArtifactScenarioId,
-          requestedInputHash: requestedArtifactInputHash,
-          requireExactArtifactMatch: true,
-          artifactIdentitySource: artifactIdentitySourceNormalized,
-          artifactSourceMode: "exact_hash_match",
-          fallbackOccurred: false,
-          fallbackReason: "requested_exact_identity_not_found",
-        },
-      };
-    }
-    cached = await getLatestCachedPastDatasetByScenario({
-      houseId,
-      scenarioId: sharedScenarioCacheId,
-    });
-    if (cached) {
-      artifactSourceMode = "latest_by_scenario_fallback";
-      artifactFallbackReason = "requested_exact_identity_not_found_fell_back_to_latest_by_scenario";
-    }
-  }
-  // If exact identity hash misses, fall back to latest scenario artifact when ownership scope
-  // is compatible so compare can read the same shared Past output that rebuild just produced.
-  if (!useSelectedDaysLightweightArtifactRead && !rebuildArtifact && (!cached || cached.intervalsCodec !== INTERVAL_CODEC_V1)) {
-    const latestCached = await getLatestCachedPastDatasetByScenario({
-      houseId,
-      scenarioId: sharedScenarioCacheId,
-    });
-    const latestMeta = (((latestCached as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>) ?? {};
-    const latestExcludedFingerprint = String(latestMeta?.excludedDateKeysFingerprint ?? "");
-    const latestIsFallbackCompatible =
-      latestCached != null &&
-      latestCached.intervalsCodec === INTERVAL_CODEC_V1 &&
-      latestExcludedFingerprint === travelFingerprint;
-    if (latestIsFallbackCompatible) {
-      cached = latestCached as any;
-      artifactSourceMode = "latest_by_scenario_fallback";
-      artifactFallbackReason = "exact_hash_miss_fell_back_to_latest_by_scenario";
-    }
+        error: "artifact_exact_identity_missing_rebuild_required",
+        message:
+          "Compare expected the exact shared Past artifact rebuilt earlier in this run, but that scenario/inputHash could not be read. Re-run artifact ensure before compare.",
+        mode: "artifact_only",
+        scenarioId: sharedScenarioCacheId,
+        requestedArtifactScenarioId,
+        requestedInputHash: requestedArtifactInputHash,
+        requireExactArtifactMatch: exactArtifactReadRequired,
+        artifactIdentitySource: artifactIdentitySourceNormalized,
+        artifactSourceMode: "exact_hash_match",
+        fallbackOccurred: false,
+        fallbackReason: "requested_exact_identity_not_found",
+      },
+    };
   }
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
     const restored = restoreCachedArtifactDataset({
@@ -1819,9 +1747,7 @@ export async function buildGapfillCompareSimShared(args: {
     if (!rebuilt.ok) return rebuilt;
     dataset = rebuilt.dataset;
     artifactAutoRebuilt = true;
-    artifactSourceMode =
-      useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested ? null : "exact_hash_match";
-    artifactFallbackReason = null;
+    artifactSourceMode = "exact_hash_match";
   }
 
   if (!dataset?.series?.intervals15) {
@@ -1871,11 +1797,9 @@ export async function buildGapfillCompareSimShared(args: {
       const rebuilt = await rebuildSharedArtifactDataset();
       if (!rebuilt.ok) return rebuilt;
       dataset = rebuilt.dataset;
-      artifactAutoRebuilt = true;
-      artifactSourceMode =
-        useSelectedDaysLightweightArtifactRead && !exactArtifactIdentityRequested ? null : "exact_hash_match";
-      artifactFallbackReason = null;
-      continue;
+    artifactAutoRebuilt = true;
+    artifactSourceMode = "exact_hash_match";
+    continue;
     }
     if (needsRebuildForStaleWindow) {
       return {
@@ -1943,11 +1867,7 @@ export async function buildGapfillCompareSimShared(args: {
       : exactArtifactIdentityRequested
         ? null
         : sharedInputHash || null;
-  const requestedInputHash = exactArtifactIdentityRequested
-    ? requestedArtifactInputHash
-    : useSelectedDaysLightweightArtifactRead
-      ? null
-      : sharedInputHash;
+  const requestedInputHash = exactArtifactIdentityRequested ? requestedArtifactInputHash : sharedInputHash;
   modelAssumptions.artifactReadMode = "artifact_only";
   modelAssumptions.artifactSource = artifactAutoRebuilt ? "rebuild" : "past_cache";
   modelAssumptions.artifactScenarioId = sharedScenarioCacheId;
@@ -1968,9 +1888,8 @@ export async function buildGapfillCompareSimShared(args: {
     requestedArtifactScenarioId === sharedScenarioCacheId;
   modelAssumptions.artifactIdentitySource = artifactIdentitySourceNormalized;
   modelAssumptions.artifactSameRunEnsureIdentity = artifactIdentitySourceNormalized === "same_run_artifact_ensure";
-  modelAssumptions.artifactFallbackOccurred = artifactSourceMode === "latest_by_scenario_fallback";
-  modelAssumptions.artifactFallbackReason =
-    artifactSourceMode === "latest_by_scenario_fallback" ? artifactFallbackReason : null;
+  modelAssumptions.artifactFallbackOccurred = false;
+  modelAssumptions.artifactFallbackReason = null;
   modelAssumptions.artifactExactIdentifierUsed =
     artifactInputHashUsed && sharedScenarioCacheId ? `${sharedScenarioCacheId}:${artifactInputHashUsed}` : null;
   const hasContradictoryExactHashTruth =
@@ -2067,10 +1986,7 @@ export async function buildGapfillCompareSimShared(args: {
   }
   if (artifactSourceMode) {
     modelAssumptions.artifactSourceMode = artifactSourceMode;
-    modelAssumptions.artifactSourceNote =
-      artifactSourceMode === "exact_hash_match"
-        ? "Artifact source: exact identity match on Past input hash."
-        : "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).";
+    modelAssumptions.artifactSourceNote = "Artifact source: exact identity match on Past input hash.";
   } else {
     delete modelAssumptions.artifactSourceMode;
     delete modelAssumptions.artifactSourceNote;
@@ -2140,8 +2056,6 @@ export async function buildGapfillCompareSimShared(args: {
     ? new Set<string>(Array.from(boundedTestDateKeysLocal))
     : chartDateKeysLocal;
   let simulatedTestIntervals = artifactSimulatedTestIntervals;
-  // Keep fresh parity diagnostics separate from artifact-backed compare ownership.
-  let freshParityScoredTestIntervals: IntervalPoint[] | null = null;
   let scoringSimulatedSource:
     | "shared_artifact_simulated_intervals15"
     | "shared_fresh_simulated_intervals15"
@@ -2419,14 +2333,40 @@ export async function buildGapfillCompareSimShared(args: {
           freshParityCanonicalSimulatedDayTotalsByDate = {};
           freshParityIntervals = [];
         }
-        freshParityScoredTestIntervals = filterIntervalsToLocalDateKeys(
-          sharedSelectedDaysResult.simulatedIntervals,
-          timezone,
-          boundedTestDateKeysLocal
-        );
         // Compare truth ownership stays artifact-backed; selected-days fresh output is parity analytics only.
         lastFreshGapfillKeepRefLocalDateKeys = sharedSelectedDaysResult.gapfillForceModeledKeepRefLocalDateKeys;
         lastFreshGapfillKeepRefUtcKeyCount = sharedSelectedDaysResult.gapfillForceModeledKeepRefUtcKeyCount;
+        selectedTestDailyTotalsByDate = new Map<string, number>();
+        for (const dk of Array.from(boundedTestDateKeysLocal)) {
+          const raw = sharedSelectedDaysResult.canonicalSimulatedDayTotalsByDate?.[dk];
+          if (raw === undefined) continue;
+          const num = Number(raw);
+          if (!Number.isFinite(num)) continue;
+          selectedTestDailyTotalsByDate.set(dk, round2Local(num));
+        }
+        if (includeFreshCompareCalc && boundedTestDateKeysLocal.size > 0) {
+          const missingCanonicalForScoredTestDays = Array.from(boundedTestDateKeysLocal).filter(
+            (dk) => !selectedTestDailyTotalsByDate!.has(dk)
+          );
+          if (missingCanonicalForScoredTestDays.length > 0) {
+            return {
+              ok: false,
+              status: 500,
+              body: {
+                ok: false,
+                error: "fresh_compare_canonical_totals_missing",
+                message:
+                  "Fresh selected-days diagnostics require canonical simulator-owned day totals for every scored test day. Missing or non-finite totals for: " +
+                  missingCanonicalForScoredTestDays.slice(0, 25).join(", ") +
+                  (missingCanonicalForScoredTestDays.length > 25 ? " …" : ""),
+                mode: "artifact_only",
+                scenarioId: sharedScenarioCacheId,
+                reasonCode: "FRESH_COMPARE_CANONICAL_DAY_TOTALS_MISSING" as const,
+                missingCanonicalDateKeysLocal: missingCanonicalForScoredTestDays,
+              },
+            };
+          }
+        }
         weatherBasisUsed =
           boundedTestDateKeysLocal.size > 0
             ? sharedSelectedDaysResult.weatherSourceSummary
@@ -2508,11 +2448,30 @@ export async function buildGapfillCompareSimShared(args: {
       }
       freshParityIntervals = freshResult.simulatedIntervals;
       freshParityCanonicalSimulatedDayTotalsByDate = freshResult.canonicalSimulatedDayTotalsByDate ?? {};
-      freshParityScoredTestIntervals = filterIntervalsToLocalDateKeys(
-        freshResult.simulatedIntervals,
-        timezone,
-        boundedTestDateKeysLocal
-      );
+      if (includeFreshCompareCalc && boundedTestDateKeysLocal.size > 0) {
+        const missingCanonicalForScoredTestDays = Array.from(boundedTestDateKeysLocal).filter((dk) => {
+          const raw = freshParityCanonicalSimulatedDayTotalsByDate[dk];
+          return raw === undefined || !Number.isFinite(Number(raw));
+        });
+        if (missingCanonicalForScoredTestDays.length > 0) {
+          return {
+            ok: false,
+            status: 500,
+            body: {
+              ok: false,
+              error: "fresh_compare_canonical_totals_missing",
+              message:
+                "Fresh full-window diagnostics require canonical simulator-owned day totals for every scored test day. Missing or non-finite totals for: " +
+                missingCanonicalForScoredTestDays.slice(0, 25).join(", ") +
+                (missingCanonicalForScoredTestDays.length > 25 ? " …" : ""),
+              mode: "artifact_only",
+              scenarioId: sharedScenarioCacheId,
+              reasonCode: "FRESH_COMPARE_CANONICAL_DAY_TOTALS_MISSING" as const,
+              missingCanonicalDateKeysLocal: missingCanonicalForScoredTestDays,
+            },
+          };
+        }
+      }
       // Compare truth ownership stays artifact-backed; full-window fresh output is parity analytics only.
       weatherBasisUsed = freshResult.weatherSourceSummary;
       lastFreshGapfillKeepRefLocalDateKeys = freshResult.gapfillForceModeledKeepRefLocalDateKeys;
@@ -2801,13 +2760,39 @@ export async function buildGapfillCompareSimShared(args: {
     simulatedChartDailyCount: simulatedChartDaily.length,
     artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
   });
-  const scoredParityIntervals = includeFreshCompareCalc ? (freshParityScoredTestIntervals ?? []) : [];
 
   const freshDailyTotalsByDate = (() => {
     const totals = new Map<string, number>();
-    for (const p of scoredParityIntervals) {
+    // Canonical simulator-owned day totals for scored fresh diagnostics (not interval re-sums) when
+    // includeFreshCompareCalc is true (GapFill compare_core: always). Explicit false keeps interval-only fallback for narrow tests.
+    const useCanonicalFromSelectedDays =
+      includeFreshCompareCalc &&
+      needsFreshCompareForParity &&
+      effectiveCompareFreshMode === "selected_days" &&
+      selectedTestDailyTotalsByDate !== null;
+    const useCanonicalFromFullWindow =
+      includeFreshCompareCalc &&
+      needsFreshCompareForParity &&
+      effectiveCompareFreshMode === "full_window" &&
+      Object.keys(freshParityCanonicalSimulatedDayTotalsByDate).length > 0;
+    if (useCanonicalFromSelectedDays) {
+      for (const dk of Array.from(boundedTestDateKeysLocal)) {
+        const v = selectedTestDailyTotalsByDate!.get(dk);
+        if (v !== undefined) totals.set(dk, round2Local(v));
+      }
+    } else if (useCanonicalFromFullWindow) {
+      for (const dk of Array.from(boundedTestDateKeysLocal)) {
+        const raw = freshParityCanonicalSimulatedDayTotalsByDate[dk];
+        if (raw === undefined) continue;
+        const num = Number(raw);
+        if (!Number.isFinite(num)) continue;
+        totals.set(dk, round2Local(num));
+      }
+    }
+    for (const p of simulatedTestIntervals) {
       const dk = dateKeyInTimezone(p.timestamp, timezone);
       if (!boundedTestDateKeysLocal.has(dk)) continue;
+      if ((useCanonicalFromSelectedDays || useCanonicalFromFullWindow) && totals.has(dk)) continue;
       totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
     }
     return totals;
@@ -5062,7 +5047,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
     includeSimulatedDayResults = true,
     correlationId,
   } = args;
-  const normalizedBuildPathKind = buildPathKind === "cold_build" ? "recalc" : buildPathKind;
+  const normalizedBuildPathKind = normalizePastProducerBuildPathKind(buildPathKind);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { dataset: null, error: "Invalid startDate or endDate (expect YYYY-MM-DD)." };
   }
@@ -5272,10 +5257,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | {
       ok: false;
-      code: "NO_BUILD" | "SCENARIO_NOT_FOUND" | "HOUSE_NOT_FOUND" | "INTERNAL_ERROR" | "ARTIFACT_MISSING";
+      code:
+        | "NO_BUILD"
+        | "SCENARIO_NOT_FOUND"
+        | "HOUSE_NOT_FOUND"
+        | "INTERNAL_ERROR"
+        | "ARTIFACT_MISSING"
+        | "COMPARE_TRUTH_INCOMPLETE";
       message: string;
       inputHash?: string;
       engineVersion?: string;
+      missingCanonicalDateKeysLocal?: string[];
     }
 > {
   // Canonical simulated read family for user/admin consumers.
@@ -5332,25 +5324,40 @@ export async function getSimulatedUsageForHouseScenario(args: {
       const scenarioIdForCache = scenarioId ?? "BASELINE";
       // Backward-compatible artifact-only support for gapfill_lab, which does not have a usageSimulatorBuild row.
       if (scenarioIdForCache === "gapfill_lab") {
-        const latestCached = await getLatestCachedPastDatasetByScenario({
-          houseId: args.houseId,
-          scenarioId: scenarioIdForCache,
-        });
-        if (!latestCached || latestCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+        const requestedHash =
+          typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
+            ? args.exactArtifactInputHash.trim()
+            : null;
+        if (!requestedHash) {
           return {
             ok: false,
             code: "ARTIFACT_MISSING",
-            message: "Persisted artifact not found for this house/scenario. Run explicit rebuild first.",
+            message:
+              "gapfill_lab artifact_only reads require exactArtifactInputHash (provable Past cache identity).",
             engineVersion: PAST_ENGINE_VERSION,
           };
         }
-        const decoded = decodeIntervalsV1(latestCached.intervalsCompressed);
+        const exactCached = await getCachedPastDataset({
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+          inputHash: requestedHash,
+        });
+        if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+          return {
+            ok: false,
+            code: "ARTIFACT_MISSING",
+            message: "Persisted artifact not found for this house/scenario/input hash.",
+            inputHash: requestedHash,
+            engineVersion: PAST_ENGINE_VERSION,
+          };
+        }
+        const decoded = decodeIntervalsV1(exactCached.intervalsCompressed);
         const restored = {
-          ...latestCached.datasetJson,
+          ...exactCached.datasetJson,
           series: {
-            ...(typeof (latestCached.datasetJson as any).series === "object" &&
-            (latestCached.datasetJson as any).series !== null
-              ? (latestCached.datasetJson as any).series
+            ...(typeof (exactCached.datasetJson as any).series === "object" &&
+            (exactCached.datasetJson as any).series !== null
+              ? (exactCached.datasetJson as any).series
               : {}),
             intervals15: decoded,
           },
@@ -5358,25 +5365,22 @@ export async function getSimulatedUsageForHouseScenario(args: {
         reconcileRestoredDatasetFromDecodedIntervals({
           dataset: restored,
           decodedIntervals: decoded,
-          fallbackEndDate: String((latestCached.datasetJson as any)?.summary?.end ?? "").slice(0, 10),
+          fallbackEndDate: String((exactCached.datasetJson as any)?.summary?.end ?? "").slice(0, 10),
         });
         const restoredAny = restored as any;
         if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
         restoredAny.meta.artifactReadMode = "artifact_only";
         restoredAny.meta.artifactSource = "past_cache";
-        restoredAny.meta.artifactInputHash = latestCached.inputHash;
-        restoredAny.meta.artifactUpdatedAt = latestCached.updatedAt
-          ? latestCached.updatedAt.toISOString()
-          : null;
+        restoredAny.meta.artifactInputHash = exactCached.inputHash;
+        restoredAny.meta.artifactUpdatedAt = exactCached.updatedAt ? exactCached.updatedAt.toISOString() : null;
         restoredAny.meta.artifactRecomputed = false;
         restoredAny.meta.artifactScenarioId = scenarioIdForCache;
-        restoredAny.meta.requestedInputHash = null;
-        restoredAny.meta.artifactInputHashUsed = latestCached.inputHash;
-        restoredAny.meta.artifactHashMatch = false;
-        restoredAny.meta.artifactSourceMode = "latest_by_scenario_fallback";
+        restoredAny.meta.requestedInputHash = requestedHash;
+        restoredAny.meta.artifactInputHashUsed = exactCached.inputHash;
+        restoredAny.meta.artifactHashMatch = String(exactCached.inputHash ?? "") === String(requestedHash);
+        restoredAny.meta.artifactSourceMode = "exact_hash_match";
         restoredAny.meta.artifactCreatedAt = null;
-        restoredAny.meta.artifactSourceNote =
-          "Artifact source: latest cached Past scenario artifact for gapfill_lab (no build identity row).";
+        restoredAny.meta.artifactSourceNote = "Artifact source: exact identity match on Past input hash (gapfill_lab).";
         applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey);
         const quality = validateSharedSimQuality(restored);
         if (!quality.ok) {
@@ -5441,14 +5445,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
         requestHouseEsiid: house.esiid ?? null,
         buildInputs,
       });
-      const expectedExcludedFingerprintForFallback = Array.from(
-        boundDateKeysToCoverageWindow(
-          new Set<string>(travelRangesToExcludeDateKeys(travelRanges)),
-          sharedCoverageWindow
-        )
-      )
-        .sort()
-        .join(",");
       const requestedExactArtifactInputHash =
         typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
           ? args.exactArtifactInputHash.trim()
@@ -5517,35 +5513,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           engineVersion: PAST_ENGINE_VERSION,
         };
       }
-      // Shared artifact: Sim Past and gapfill-lab both use the same Past scenario (CUID) and same cache.
-      // If exact inputHash miss (e.g. fingerprint drifted), use latest cached artifact for this scenario
-      // so gapfill can see what Sim Past (or rebuild) produced.
-      let artifactSourceMode: "exact_hash_match" | "latest_by_scenario_fallback" = "exact_hash_match";
-      if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
-        const latestCached = await getLatestCachedPastDatasetByScenario({
-          houseId: args.houseId,
-          scenarioId: scenarioIdForCache,
-        });
-        const latestMeta = ((latestCached as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>;
-        const latestExcludedFingerprint = String(latestMeta?.excludedDateKeysFingerprint ?? "");
-        const latestIsFallbackCompatible =
-          latestCached != null &&
-          latestCached.intervalsCodec === INTERVAL_CODEC_V1 &&
-          latestExcludedFingerprint === expectedExcludedFingerprintForFallback;
-        if (latestIsFallbackCompatible) {
-          exactCached = latestCached;
-          artifactSourceMode = "latest_by_scenario_fallback";
-          logSimPipelineEvent("artifact_stale_detected", {
-            correlationId,
-            houseId: args.houseId,
-            scenarioId: scenarioIdForCache,
-            requestedInputHash: resolvedInputHash,
-            artifactInputHashUsed: String((latestCached as any)?.inputHash ?? ""),
-            artifactSourceMode: "latest_by_scenario_fallback",
-            source: "getSimulatedUsageForHouseScenario",
-          });
-        }
-      }
+      const artifactSourceMode: "exact_hash_match" = "exact_hash_match";
       if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
         return {
           ok: false,
@@ -5588,10 +5556,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       if ((exactCached as any).updatedAt instanceof Date) {
         restoredAny.meta.artifactUpdatedAt = (exactCached as any).updatedAt.toISOString();
       }
-      restoredAny.meta.artifactSourceNote =
-        artifactSourceMode === "exact_hash_match"
-          ? "Artifact source: exact identity match on Past input hash."
-          : "Artifact source: latest cached Past scenario artifact (fallback from exact hash miss).";
+      restoredAny.meta.artifactSourceNote = "Artifact source: exact identity match on Past input hash.";
       applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, {
         buildInputs,
         coverageWindow: sharedCoverageWindow,
@@ -6177,6 +6142,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const projected = attachCompareWithObservability(projectedBaselineAware);
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
   } catch (e) {
+    if (e instanceof CompareTruthIncompleteError) {
+      return {
+        ok: false,
+        code: "COMPARE_TRUTH_INCOMPLETE",
+        message: e.message,
+        missingCanonicalDateKeysLocal: e.missingDateKeysLocal,
+      };
+    }
     console.error("[usageSimulator/service] getSimulatedUsageForHouseScenario failed", e);
     return { ok: false, code: "INTERNAL_ERROR", message: "Internal error" };
   }
