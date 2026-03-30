@@ -239,28 +239,30 @@ function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
       if (!gridTs.length) continue;
       const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-
-      let intersectsForcedLocalDay = false;
-      let intersectsRetainedLocalDay = false;
-      let intersectsKeepRefLocalDay = false;
+      // Map each UTC day to one dominant local day key (majority of 15-min slots) so
+      // local-day selections do not spill into adjacent UTC days.
+      const localDateKeyCounts = new Map<string, number>();
       for (const ts of gridTs) {
         const localDateKey = dateKeyInTimezone(ts, args.timezoneResolved);
-        if (!intersectsForcedLocalDay && args.forcedSimulateDateKeysLocal.has(localDateKey)) {
-          intersectsForcedLocalDay = true;
-        }
-        if (!intersectsRetainedLocalDay && args.retainedSimulatedDayResultDateKeysLocal.has(localDateKey)) {
-          intersectsRetainedLocalDay = true;
-        }
-        if (!intersectsKeepRefLocalDay && args.mergedKeepRefLocalDateKeys.has(localDateKey)) {
-          intersectsKeepRefLocalDay = true;
-        }
-        if (intersectsForcedLocalDay && intersectsRetainedLocalDay && intersectsKeepRefLocalDay) {
-          break;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(localDateKey)) continue;
+        localDateKeyCounts.set(localDateKey, (localDateKeyCounts.get(localDateKey) ?? 0) + 1);
+      }
+      if (localDateKeyCounts.size === 0) continue;
+      let dominantLocalDateKey: string | null = null;
+      let dominantLocalDateCount = -1;
+      for (const [localDateKey, count] of Array.from(localDateKeyCounts.entries())) {
+        if (
+          count > dominantLocalDateCount ||
+          (count === dominantLocalDateCount && (dominantLocalDateKey == null || localDateKey < dominantLocalDateKey))
+        ) {
+          dominantLocalDateKey = localDateKey;
+          dominantLocalDateCount = count;
         }
       }
-      if (intersectsForcedLocalDay) forcedUtcDateKeys.add(utcDateKey);
-      if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
-      if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
+      if (!dominantLocalDateKey) continue;
+      if (args.forcedSimulateDateKeysLocal.has(dominantLocalDateKey)) forcedUtcDateKeys.add(utcDateKey);
+      if (args.retainedSimulatedDayResultDateKeysLocal.has(dominantLocalDateKey)) retainedResultUtcDateKeys.add(utcDateKey);
+      if (args.mergedKeepRefLocalDateKeys.has(dominantLocalDateKey)) keepRefUtcDateKeys.add(utcDateKey);
     }
   } else {
     // No IANA timezone: local date keys are treated as canonical UTC calendar keys.

@@ -192,6 +192,42 @@ describe("shared sim usage-shape ensure path", () => {
     expect(dateKeyInTimezoneMock.mock.calls.length).toBeLessThanOrEqual(120);
   });
 
+  it("does not spill keep-ref test-day mapping into adjacent UTC day buckets", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+    dateKeyInTimezoneMock.mockImplementation((iso: string) => {
+      const ms = new Date(iso).getTime();
+      return new Date(ms - 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    });
+    try {
+      await simulatePastUsageDataset({
+        userId: "u1",
+        houseId: "h1",
+        esiid: "1044",
+        startDate: "2026-01-01",
+        endDate: "2026-01-02",
+        timezone: "America/Chicago",
+        travelRanges: [],
+        buildInputs: {
+          canonicalMonths: ["2026-01"],
+          mode: "SMT_BASELINE",
+          snapshots: {},
+        } as any,
+        buildPathKind: "lab_validation",
+        includeSimulatedDayResults: false,
+        forceModeledOutputKeepReferencePoolDateKeysLocal: new Set(["2026-01-01"]),
+      });
+
+      const baselineCallArgs = buildPastSimulatedBaselineV1.mock.calls[0]?.[0] as
+        | { forceModeledOutputKeepReferencePoolDateKeys?: Set<string> }
+        | undefined;
+      const keepRefUtc = baselineCallArgs?.forceModeledOutputKeepReferencePoolDateKeys;
+      expect(keepRefUtc instanceof Set).toBe(true);
+      expect(Array.from(keepRefUtc ?? [])).toEqual(["2026-01-01"]);
+    } finally {
+      dateKeyInTimezoneMock.mockImplementation((iso: string, _timezone?: string) => String(iso).slice(0, 10));
+    }
+  });
+
   it("ensures missing usage shape in full-window shared sim before simulation runs", async () => {
     getLatestUsageShapeProfile.mockResolvedValueOnce(null).mockResolvedValueOnce(validUsageShapeRow());
     ensureUsageShapeProfileForUserHouse.mockResolvedValue({
