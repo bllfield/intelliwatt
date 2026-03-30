@@ -849,8 +849,29 @@ export async function simulatePastUsageDataset(
       throw new Error("weather_load_unavailable");
     }
     const { actualWxByDateKey, normalWxByDateKey, provenance } = weatherLoaded;
+    const postWeatherPrepStartedAt = Date.now();
+    logSimPipelineEvent("day_simulation_post_weather_prep_start", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
     const smtBaselineStrictWeather = buildInputs.mode === "SMT_BASELINE";
     if (smtBaselineStrictWeather && provenance.weatherSourceSummary !== "actual_only") {
+      logSimPipelineEvent("day_simulation_post_weather_prep_failure", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        failureMessage: `actual_weather_required:${provenance.weatherSourceSummary}`,
+        durationMs: Date.now() - postWeatherPrepStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
       logSimPipelineEvent("day_simulation_failure", {
         correlationId,
         houseId,
@@ -900,6 +921,17 @@ export async function simulatePastUsageDataset(
       lowDataShapeAdapterUsed = true;
     }
     if (!usageShapeProfileSnap) {
+      logSimPipelineEvent("day_simulation_post_weather_prep_failure", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        failureMessage: ensuredUsageShape.error ?? "usage_shape_profile_required:missing",
+        durationMs: Date.now() - postWeatherPrepStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
       logSimPipelineEvent("day_simulation_failure", {
         correlationId,
         houseId,
@@ -968,6 +1000,19 @@ export async function simulatePastUsageDataset(
     for (const utcKey of Array.from(keepRefUtcDateKeys)) {
       if (forcedUtcDateKeys.has(utcKey)) keepRefUtcDateKeys.delete(utcKey);
     }
+    logSimPipelineEvent("day_simulation_post_weather_prep_success", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      forcedUtcDateKeyCount: forcedUtcDateKeys.size,
+      keepRefUtcDateKeyCount: keepRefUtcDateKeys.size,
+      retainedResultUtcDateKeyCount: retainedResultUtcDateKeys.size,
+      durationMs: Date.now() - postWeatherPrepStartedAt,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
 
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
     // memory pressure for large windows. Only collect when explicitly requested.
@@ -981,6 +1026,16 @@ export async function simulatePastUsageDataset(
     logSimPipelineEvent("day_simulation_baseline_build_start", {
       correlationId,
       houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    logSimPipelineEvent("buildPastSimulatedBaselineV1_start", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
       userId,
       buildPathKind,
       source: "simulatePastUsageDataset",
@@ -1015,6 +1070,19 @@ export async function simulatePastUsageDataset(
       logSimPipelineEvent("day_simulation_baseline_build_success", {
         correlationId,
         houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        intervalCount: patchedIntervals.length,
+        simulatedDayResultsCount: dayResults.length,
+        durationMs: Date.now() - baselinePhaseStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      logSimPipelineEvent("buildPastSimulatedBaselineV1_success", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
         userId,
         buildPathKind,
         intervalCount: patchedIntervals.length,
@@ -1028,6 +1096,18 @@ export async function simulatePastUsageDataset(
       logSimPipelineEvent("day_simulation_baseline_build_failure", {
         correlationId,
         houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        failureMessage: baselineErr.message,
+        durationMs: Date.now() - baselinePhaseStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      logSimPipelineEvent("buildPastSimulatedBaselineV1_failure", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
         userId,
         buildPathKind,
         failureMessage: baselineErr.message,
@@ -1063,6 +1143,15 @@ export async function simulatePastUsageDataset(
       memoryRssMb: getMemoryRssMb(),
     });
     let stitchedCurve: ReturnType<typeof buildCurveFromPatchedIntervals>;
+    logSimPipelineEvent("buildCurveFromPatchedIntervals_start", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
     try {
       stitchedCurve = buildCurveFromPatchedIntervals({
         startDate,
@@ -1073,6 +1162,18 @@ export async function simulatePastUsageDataset(
       logSimPipelineEvent("day_simulation_stitch_curve_success", {
         correlationId,
         houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        intervalCount: Array.isArray(stitchedCurve.intervals) ? stitchedCurve.intervals.length : 0,
+        durationMs: Date.now() - stitchCurveStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      logSimPipelineEvent("buildCurveFromPatchedIntervals_success", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
         userId,
         buildPathKind,
         intervalCount: Array.isArray(stitchedCurve.intervals) ? stitchedCurve.intervals.length : 0,
@@ -1085,6 +1186,18 @@ export async function simulatePastUsageDataset(
       logSimPipelineEvent("day_simulation_stitch_curve_failure", {
         correlationId,
         houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        failureMessage: stitchErr.message,
+        durationMs: Date.now() - stitchCurveStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      logSimPipelineEvent("buildCurveFromPatchedIntervals_failure", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
         userId,
         buildPathKind,
         failureMessage: stitchErr.message,
@@ -1110,6 +1223,15 @@ export async function simulatePastUsageDataset(
       memoryRssMb: getMemoryRssMb(),
     });
     let dataset: ReturnType<typeof buildSimulatedUsageDatasetFromCurve>;
+    logSimPipelineEvent("buildSimulatedUsageDatasetFromCurve_start", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
     try {
       dataset = buildSimulatedUsageDatasetFromCurve(
         stitchedCurve,
@@ -1131,6 +1253,19 @@ export async function simulatePastUsageDataset(
       logSimPipelineEvent("day_simulation_stitch_dataset_success", {
         correlationId,
         houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
+        intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+        durationMs: Date.now() - stitchDatasetStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      logSimPipelineEvent("buildSimulatedUsageDatasetFromCurve_success", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
         userId,
         buildPathKind,
         dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
@@ -1145,6 +1280,18 @@ export async function simulatePastUsageDataset(
       logSimPipelineEvent("day_simulation_stitch_dataset_failure", {
         correlationId,
         houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        failureMessage: stitchDatasetErr.message,
+        durationMs: Date.now() - stitchDatasetStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      logSimPipelineEvent("buildSimulatedUsageDatasetFromCurve_failure", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
         userId,
         buildPathKind,
         failureMessage: stitchDatasetErr.message,
