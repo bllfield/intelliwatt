@@ -579,6 +579,46 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect((out as any)?.dataset?.meta?.artifactSourceMode).toBe("latest_by_scenario_fallback");
   });
 
+  it("artifact_only exact hash mode does not fallback when exact match is required", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+      },
+    });
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce({
+      inputHash: "hash-latest",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {},
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+      exactArtifactInputHash: "hash-exact-required",
+      requireExactArtifactMatch: true,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.code).toBe("ARTIFACT_MISSING");
+      expect(out.inputHash).toBe("hash-exact-required");
+    }
+    expect(getLatestCachedPastDatasetByScenario).not.toHaveBeenCalled();
+    expect(computePastInputHash).not.toHaveBeenCalled();
+  });
+
   it("artifact_only computes input hash using build actualContextHouseId identity", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {

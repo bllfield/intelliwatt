@@ -280,6 +280,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       houseId: "h1",
       buildInputsHash: "hash-1",
       dataset: {},
+      canonicalArtifactInputHash: "canonical-hash-1",
     });
     getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
       if (args.projectionMode === "baseline") {
@@ -481,6 +482,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(projectionModes).toEqual(["baseline"]);
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
     expect(readModes).toEqual(["artifact_only"]);
+    const exactHashes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.exactArtifactInputHash);
+    expect(exactHashes).toEqual(["canonical-hash-1"]);
+    const exactRequired = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.requireExactArtifactMatch);
+    expect(exactRequired).toEqual([true]);
     expect(body.sourceHouseId).toBe("h1");
     expect(body.scenarioId).toBe("past-s1");
     expect(body.testHomeId).toBe("test-home-1");

@@ -3722,6 +3722,8 @@ export type SimulatorRecalcOk = {
   houseId: string;
   buildInputsHash: string;
   dataset: any;
+  /** Exact canonical artifact hash persisted for this recalc run when available. */
+  canonicalArtifactInputHash?: string | null;
   /** Effective shared-chain mode after admin-lab upgrades (e.g. MANUAL_TOTALS for manual constraint treatments). */
   effectiveSimulatorMode?: SimulatorMode;
 };
@@ -4753,6 +4755,7 @@ async function recalcSimulatorBuildImpl(args: {
         : undefined,
   });
 
+  let canonicalArtifactInputHash: string | null = null;
   const shouldPersistCanonicalPastArtifact =
     args.persistPastSimBaseline === true &&
     scenario?.name === WORKSPACE_PAST_NAME &&
@@ -4819,6 +4822,7 @@ async function recalcSimulatorBuildImpl(args: {
         usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
         weatherIdentity,
       });
+      canonicalArtifactInputHash = artifactInputHash;
       applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
       const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
       const { bytes } = encodeIntervalsV1(intervals15);
@@ -4929,7 +4933,14 @@ async function recalcSimulatorBuildImpl(args: {
     }
   }
 
-  return { ok: true, houseId, buildInputsHash, dataset, effectiveSimulatorMode: simMode };
+  return {
+    ok: true,
+    houseId,
+    buildInputsHash,
+    dataset,
+    canonicalArtifactInputHash,
+    effectiveSimulatorMode: simMode,
+  };
 }
 
 export type RecalcSimulatorBuildArgs = {
@@ -5276,6 +5287,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
   houseId: string;
   scenarioId?: string | null;
   readMode?: "artifact_only" | "allow_rebuild";
+  /** Optional exact artifact identity hash to read (skip recomputing request hash). */
+  exactArtifactInputHash?: string | null;
+  /** If true with exactArtifactInputHash, do not fallback to latest-by-scenario on miss. */
+  requireExactArtifactMatch?: boolean;
   forceRebuildArtifact?: boolean;
   projectionMode?: "baseline" | "raw";
   /** Observability: plan §6 (Slice 2). */
@@ -5461,44 +5476,52 @@ export async function getSimulatedUsageForHouseScenario(args: {
       )
         .sort()
         .join(",");
-      const intervalDataFingerprint = await getIntervalDataFingerprint({
-        houseId: canonicalActualIdentity.houseId,
-        esiid: canonicalActualIdentity.esiid,
-        startDate: window.startDate,
-        endDate: window.endDate,
-      });
-      const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
-      const weatherIdentity = await computePastWeatherIdentity({
-        houseId: args.houseId,
-        startDate: window.startDate,
-        endDate: window.endDate,
-      });
-      const inputHash = computePastInputHash({
-        engineVersion: PAST_ENGINE_VERSION,
-        windowStartUtc: window.startDate,
-        windowEndUtc: window.endDate,
-        timezone,
-        travelRanges,
-        buildInputs: buildInputs as Record<string, unknown>,
-        intervalDataFingerprint,
-        usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
-        usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
-        usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
-        usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
-        weatherIdentity,
-      });
+      const requestedExactArtifactInputHash =
+        typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
+          ? args.exactArtifactInputHash.trim()
+          : null;
+      const requireExactArtifactMatch = args.requireExactArtifactMatch === true;
+      let resolvedInputHash = requestedExactArtifactInputHash ?? "";
+      if (!resolvedInputHash) {
+        const intervalDataFingerprint = await getIntervalDataFingerprint({
+          houseId: canonicalActualIdentity.houseId,
+          esiid: canonicalActualIdentity.esiid,
+          startDate: window.startDate,
+          endDate: window.endDate,
+        });
+        const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
+        const weatherIdentity = await computePastWeatherIdentity({
+          houseId: args.houseId,
+          startDate: window.startDate,
+          endDate: window.endDate,
+        });
+        resolvedInputHash = computePastInputHash({
+          engineVersion: PAST_ENGINE_VERSION,
+          windowStartUtc: window.startDate,
+          windowEndUtc: window.endDate,
+          timezone,
+          travelRanges,
+          buildInputs: buildInputs as Record<string, unknown>,
+          intervalDataFingerprint,
+          usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+          usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+          usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+          usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+          weatherIdentity,
+        });
+      }
 
       let exactCached = await getCachedPastDataset({
         houseId: args.houseId,
         scenarioId: scenarioIdForCache,
-        inputHash,
+        inputHash: resolvedInputHash,
       });
       if (exactCached && exactCached.intervalsCodec === INTERVAL_CODEC_V1) {
         logSimPipelineEvent("artifact_cache_hit", {
           correlationId,
           houseId: args.houseId,
           scenarioId: scenarioIdForCache,
-          inputHash,
+          inputHash: resolvedInputHash,
           artifactInputHash: String((exactCached as any).inputHash ?? ""),
           source: "getSimulatedUsageForHouseScenario",
         });
@@ -5507,9 +5530,19 @@ export async function getSimulatedUsageForHouseScenario(args: {
           correlationId,
           houseId: args.houseId,
           scenarioId: scenarioIdForCache,
-          inputHash,
+          inputHash: resolvedInputHash,
           source: "getSimulatedUsageForHouseScenario",
         });
+      }
+      if ((!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) && requestedExactArtifactInputHash && requireExactArtifactMatch) {
+        return {
+          ok: false,
+          code: "ARTIFACT_MISSING",
+          message:
+            "Exact persisted artifact not found for this house/scenario/input hash. Re-run canonical recalc.",
+          inputHash: resolvedInputHash,
+          engineVersion: PAST_ENGINE_VERSION,
+        };
       }
       // Shared artifact: Sim Past and gapfill-lab both use the same Past scenario (CUID) and same cache.
       // If exact inputHash miss (e.g. fingerprint drifted), use latest cached artifact for this scenario
@@ -5533,7 +5566,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             correlationId,
             houseId: args.houseId,
             scenarioId: scenarioIdForCache,
-            requestedInputHash: inputHash,
+            requestedInputHash: resolvedInputHash,
             artifactInputHashUsed: String((latestCached as any)?.inputHash ?? ""),
             artifactSourceMode: "latest_by_scenario_fallback",
             source: "getSimulatedUsageForHouseScenario",
@@ -5545,7 +5578,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ok: false,
           code: "ARTIFACT_MISSING",
           message: "Persisted artifact not found for this house/scenario identity. Run explicit rebuild first.",
-          inputHash,
+          inputHash: resolvedInputHash,
           engineVersion: PAST_ENGINE_VERSION,
         };
       }
@@ -5569,13 +5602,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
       if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
       restoredAny.meta.artifactReadMode = "artifact_only";
       restoredAny.meta.artifactSource = "past_cache";
-      restoredAny.meta.artifactInputHash = (exactCached as any).inputHash ?? inputHash;
+      restoredAny.meta.artifactInputHash = (exactCached as any).inputHash ?? resolvedInputHash;
       restoredAny.meta.artifactRecomputed = false;
       restoredAny.meta.artifactScenarioId = scenarioIdForCache;
-      restoredAny.meta.requestedInputHash = inputHash;
-      restoredAny.meta.artifactInputHashUsed = (exactCached as any).inputHash ?? inputHash;
+      restoredAny.meta.requestedInputHash = resolvedInputHash;
+      restoredAny.meta.artifactInputHashUsed = (exactCached as any).inputHash ?? resolvedInputHash;
       restoredAny.meta.artifactHashMatch =
-        String(restoredAny.meta.artifactInputHashUsed ?? "") === String(inputHash ?? "");
+        String(restoredAny.meta.artifactInputHashUsed ?? "") === String(resolvedInputHash ?? "");
       restoredAny.meta.artifactSourceMode = artifactSourceMode;
       restoredAny.meta.artifactCreatedAt = null;
       // best-effort propagation; present when coming from latest-by-scenario helper

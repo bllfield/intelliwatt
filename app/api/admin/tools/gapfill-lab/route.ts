@@ -1123,6 +1123,15 @@ export async function POST(req: NextRequest) {
           // Recalc just persisted the canonical artifact; read it directly so this route
           // does not trigger another heavy rebuild leg after a successful recalc.
           readMode: "artifact_only",
+          exactArtifactInputHash:
+            typeof recalcOut.canonicalArtifactInputHash === "string" &&
+            recalcOut.canonicalArtifactInputHash.trim()
+              ? recalcOut.canonicalArtifactInputHash
+              : undefined,
+          requireExactArtifactMatch: Boolean(
+            typeof recalcOut.canonicalArtifactInputHash === "string" &&
+              recalcOut.canonicalArtifactInputHash.trim()
+          ),
           projectionMode: "baseline",
           correlationId: labCorrelationId,
         }),
