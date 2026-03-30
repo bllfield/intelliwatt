@@ -237,11 +237,36 @@ describe("shared sim usage-shape ensure path", () => {
     const startEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_start");
     const successEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_success");
     const baselineEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_baseline_phase");
+    const weatherStartEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_weather_load_start");
+    const weatherSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_weather_load_success");
+    const inputPrepStartEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_input_prep_start");
+    const inputPrepSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_input_prep_success");
+    const baselineBuildStartEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_baseline_build_start");
+    const baselineBuildSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_baseline_build_success");
+    const stitchCurveStartEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_stitch_curve_start");
+    const stitchCurveSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_stitch_curve_success");
+    const stitchDatasetStartEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_stitch_dataset_start");
+    const stitchDatasetSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_stitch_dataset_success");
     expect(startEv?.[1]).toMatchObject({ correlationId: cid, houseId: "h1" });
     expect(successEv?.[1]).toMatchObject({ correlationId: cid });
     expect(typeof (successEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
     expect(baselineEv?.[1]).toMatchObject({ correlationId: cid });
     expect(typeof (baselineEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(weatherStartEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(weatherSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (weatherSuccessEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(inputPrepStartEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(inputPrepSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (inputPrepSuccessEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(baselineBuildStartEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(baselineBuildSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (baselineBuildSuccessEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(stitchCurveStartEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(stitchCurveSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (stitchCurveSuccessEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(stitchDatasetStartEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(stitchDatasetSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(typeof (stitchDatasetSuccessEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
     expect(successEv?.[1]).toHaveProperty("memoryRssMb");
   });
 
@@ -541,7 +566,7 @@ describe("shared sim usage-shape ensure path", () => {
     });
 
     expect(out.dataset).not.toBeNull();
-    expect(out.stitchedCurve).toBeUndefined();
+    expect((out as any).stitchedCurve).toBeUndefined();
     expect((out.dataset?.meta as any)?.canonicalArtifactSimulatedDayTotalsByDate).toEqual({
       "2026-01-01": 0.5,
     });

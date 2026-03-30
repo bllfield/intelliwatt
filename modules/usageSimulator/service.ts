@@ -3523,6 +3523,22 @@ export function resolveSharedPastRecalcWindow(args: {
   };
 }
 
+export function shouldWarmValidationSelectionPreload(args: {
+  mode: "SMT_BASELINE" | "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE";
+  scenarioName: string | null | undefined;
+  hasPreloadContext: boolean;
+  hasValidationDateKeys: boolean;
+  alreadyUsedSelectionPreload: boolean;
+}): boolean {
+  return (
+    args.hasPreloadContext &&
+    args.mode === "SMT_BASELINE" &&
+    args.scenarioName === WORKSPACE_PAST_NAME &&
+    args.hasValidationDateKeys &&
+    !args.alreadyUsedSelectionPreload
+  );
+}
+
 function monthsIntersectingTravelRanges(
   canonicalMonths: string[],
   travelRanges: Array<{ startDate: string; endDate: string }>
@@ -4149,6 +4165,44 @@ async function recalcSimulatorBuildImpl(args: {
   }
   if (!effectiveValidationSelectionMode && effectiveValidationOnlyDateKeysLocal.size > 0) {
     effectiveValidationSelectionMode = "manual";
+  }
+  if (
+    shouldWarmValidationSelectionPreload({
+      mode: simMode,
+      scenarioName: scenario?.name,
+      hasPreloadContext: Boolean(recalcIntervalPreload),
+      hasValidationDateKeys: effectiveValidationOnlyDateKeysLocal.size > 0,
+      alreadyUsedSelectionPreload: validationSelectionUsedSharedPreloadWindow,
+    })
+  ) {
+    const warmupWindowStart = sharedPastRecalcWindow?.startDate ?? resolveCanonicalUsage365CoverageWindow().startDate;
+    const warmupWindowEnd = sharedPastRecalcWindow?.endDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
+    const warmupStartedAt = Date.now();
+    const preloaded = await recalcIntervalPreload!.getIntervals({
+      startDate: warmupWindowStart,
+      endDate: warmupWindowEnd,
+    });
+    validationSelectionUsedSharedPreloadWindow = true;
+    validationSelectionPreloadWindowStart = warmupWindowStart;
+    validationSelectionPreloadWindowEnd = warmupWindowEnd;
+    const preloadStats = recalcIntervalPreload!.getStats();
+    logSimPipelineEvent("recalc_validation_selection_preload_warmup", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      preloadWindowStart: warmupWindowStart,
+      preloadWindowEnd: warmupWindowEnd,
+      preloadWindowSource: sharedPastRecalcWindow?.source ?? "canonical_coverage_fallback",
+      reason: "provided_validation_keys",
+      cacheHit: preloaded.cacheHit,
+      intervalRowCount: preloaded.intervals.length,
+      preloadFetchCount: preloadStats.fetchCount,
+      preloadReuseCount: preloadStats.reuseCount,
+      preloadCachedWindowCount: preloadStats.cachedWindowCount,
+      durationMs: Date.now() - warmupStartedAt,
+      memoryRssMb: getMemoryRssMb(),
+      source: "recalcSimulatorBuildImpl",
+    });
   }
   const boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
     effectiveValidationOnlyDateKeysLocal,

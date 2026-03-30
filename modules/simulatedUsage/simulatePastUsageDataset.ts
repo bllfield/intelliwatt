@@ -716,6 +716,15 @@ export async function simulatePastUsageDataset(
   }
 
   try {
+    const inputPrepStartedAt = Date.now();
+    logSimPipelineEvent("day_simulation_input_prep_start", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
     const isLowDataSharedPastMode =
       buildInputs.mode === "MANUAL_TOTALS" || buildInputs.mode === "NEW_BUILD_ESTIMATE";
     const actualIntervals =
@@ -779,13 +788,67 @@ export async function simulatePastUsageDataset(
         }
       }
     }
-
-    const { actualWxByDateKey, normalWxByDateKey, provenance } = await loadWeatherForPastWindow({
-      houseId: actualHouseId,
-      startDate,
-      endDate,
-      canonicalDateKeys,
+    logSimPipelineEvent("day_simulation_input_prep_success", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      actualIntervalsCount: actualIntervals.length,
+      canonicalDateKeyCount: canonicalDateKeys.length,
+      excludedDateKeyCount: excludedDateKeys.size,
+      durationMs: Date.now() - inputPrepStartedAt,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
     });
+
+    const weatherLoadStartedAt = Date.now();
+    logSimPipelineEvent("day_simulation_weather_load_start", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    let weatherLoaded: Awaited<ReturnType<typeof loadWeatherForPastWindow>> | null = null;
+    try {
+      weatherLoaded = await loadWeatherForPastWindow({
+        houseId: actualHouseId,
+        startDate,
+        endDate,
+        canonicalDateKeys,
+      });
+      const { provenance } = weatherLoaded;
+      logSimPipelineEvent("day_simulation_weather_load_success", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        weatherSourceSummary: provenance.weatherSourceSummary,
+        weatherActualRowCount: provenance.weatherActualRowCount,
+        weatherStubRowCount: provenance.weatherStubRowCount,
+        durationMs: Date.now() - weatherLoadStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+    } catch (weatherError) {
+      const weatherErr = weatherError instanceof Error ? weatherError : new Error(String(weatherError));
+      logSimPipelineEvent("day_simulation_weather_load_failure", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        failureMessage: weatherErr.message,
+        durationMs: Date.now() - weatherLoadStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      throw weatherErr;
+    }
+    if (!weatherLoaded) {
+      throw new Error("weather_load_unavailable");
+    }
+    const { actualWxByDateKey, normalWxByDateKey, provenance } = weatherLoaded;
     const smtBaselineStrictWeather = buildInputs.mode === "SMT_BASELINE";
     if (smtBaselineStrictWeather && provenance.weatherSourceSummary !== "actual_only") {
       logSimPipelineEvent("day_simulation_failure", {
@@ -915,27 +978,65 @@ export async function simulatePastUsageDataset(
     // Single shared day-level model (Section 21 / Phase 1): travel/vacant and Gap-Fill keep-ref modeled days
     // both flow through buildPastSimulatedBaselineV1 → simulatePastDay; stitch/compare remain downstream consumers only.
     const baselinePhaseStartedAt = Date.now();
-    const { intervals: patchedIntervals, dayResults } = buildPastSimulatedBaselineV1({
-      actualIntervals,
-      canonicalDayStartsMs,
-      excludedDateKeys,
-      dateKeyFromTimestamp,
-      getDayGridTimestamps,
-      homeProfile: homeProfileForPast,
-      applianceProfile: applianceProfileForPast,
-      usageShapeProfile: usageShapeProfileSnap ?? undefined,
-      timezoneForProfile: timezone ?? undefined,
-      actualWxByDateKey: mergedActualWxByDateKey,
-      _normalWxByDateKey: normalWxByDateKey,
-      collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
-      collectSimulatedDayResultsDateKeys,
-      forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
-      forceModeledOutputKeepReferencePoolDateKeys:
-        keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
-      emitAllIntervals,
-      debug: { out: pastDayCounts as any },
-      resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
+    logSimPipelineEvent("day_simulation_baseline_build_start", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
     });
+    let patchedIntervals: Array<{ timestamp: string; kwh: number }>;
+    let dayResults: SimulatedDayResult[];
+    try {
+      const baselineBuild = buildPastSimulatedBaselineV1({
+        actualIntervals,
+        canonicalDayStartsMs,
+        excludedDateKeys,
+        dateKeyFromTimestamp,
+        getDayGridTimestamps,
+        homeProfile: homeProfileForPast,
+        applianceProfile: applianceProfileForPast,
+        usageShapeProfile: usageShapeProfileSnap ?? undefined,
+        timezoneForProfile: timezone ?? undefined,
+        actualWxByDateKey: mergedActualWxByDateKey,
+        _normalWxByDateKey: normalWxByDateKey,
+        collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
+        collectSimulatedDayResultsDateKeys,
+        forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
+        forceModeledOutputKeepReferencePoolDateKeys:
+          keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
+        emitAllIntervals,
+        debug: { out: pastDayCounts as any },
+        resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
+      });
+      patchedIntervals = baselineBuild.intervals;
+      dayResults = baselineBuild.dayResults;
+      logSimPipelineEvent("day_simulation_baseline_build_success", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        intervalCount: patchedIntervals.length,
+        simulatedDayResultsCount: dayResults.length,
+        durationMs: Date.now() - baselinePhaseStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+    } catch (baselineBuildError) {
+      const baselineErr = baselineBuildError instanceof Error ? baselineBuildError : new Error(String(baselineBuildError));
+      logSimPipelineEvent("day_simulation_baseline_build_failure", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        failureMessage: baselineErr.message,
+        durationMs: Date.now() - baselinePhaseStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      throw baselineErr;
+    }
     logSimPipelineEvent("day_simulation_baseline_phase", {
       correlationId,
       houseId,
@@ -952,35 +1053,107 @@ export async function simulatePastUsageDataset(
         : undefined;
     const shapeMonthsPresent = canonicalMonths;
 
-    const stitchedCurve = buildCurveFromPatchedIntervals({
-      startDate,
-      endDate,
-      intervals: patchedIntervals,
+    const stitchCurveStartedAt = Date.now();
+    logSimPipelineEvent("day_simulation_stitch_curve_start", {
       correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
     });
+    let stitchedCurve: ReturnType<typeof buildCurveFromPatchedIntervals>;
+    try {
+      stitchedCurve = buildCurveFromPatchedIntervals({
+        startDate,
+        endDate,
+        intervals: patchedIntervals,
+        correlationId,
+      });
+      logSimPipelineEvent("day_simulation_stitch_curve_success", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        intervalCount: Array.isArray(stitchedCurve.intervals) ? stitchedCurve.intervals.length : 0,
+        durationMs: Date.now() - stitchCurveStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+    } catch (stitchCurveError) {
+      const stitchErr = stitchCurveError instanceof Error ? stitchCurveError : new Error(String(stitchCurveError));
+      logSimPipelineEvent("day_simulation_stitch_curve_failure", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        failureMessage: stitchErr.message,
+        durationMs: Date.now() - stitchCurveStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      throw stitchErr;
+    }
     // `buildCurveFromPatchedIntervals` copies into `stitchedCurve.intervals`; release the engine
     // output array before dataset construction to lower peak heap on full-window runs.
     patchedIntervals.length = 0;
 
     const skipHeavyDatasetInsights = emitAllIntervals === false && buildPathKind === "lab_validation";
 
-    const dataset = buildSimulatedUsageDatasetFromCurve(
-      stitchedCurve,
-      {
-        baseKind: buildInputs.baseKind,
-        mode: buildInputs.mode,
-        canonicalEndMonth: buildInputs.canonicalEndMonth,
-        notes: buildInputs.notes ?? [],
-        filledMonths: buildInputs.filledMonths ?? [],
-      },
-      {
-        timezone: timezone ?? undefined,
-        useUtcMonth: true,
-        simulatedDayResults: dayResults,
-        skipHeavyInsights: skipHeavyDatasetInsights,
+    const stitchDatasetStartedAt = Date.now();
+    logSimPipelineEvent("day_simulation_stitch_dataset_start", {
+      correlationId,
+      houseId,
+      userId,
+      buildPathKind,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    let dataset: ReturnType<typeof buildSimulatedUsageDatasetFromCurve>;
+    try {
+      dataset = buildSimulatedUsageDatasetFromCurve(
+        stitchedCurve,
+        {
+          baseKind: buildInputs.baseKind,
+          mode: buildInputs.mode,
+          canonicalEndMonth: buildInputs.canonicalEndMonth,
+          notes: buildInputs.notes ?? [],
+          filledMonths: buildInputs.filledMonths ?? [],
+        },
+        {
+          timezone: timezone ?? undefined,
+          useUtcMonth: true,
+          simulatedDayResults: dayResults,
+          skipHeavyInsights: skipHeavyDatasetInsights,
+          correlationId,
+        }
+      );
+      logSimPipelineEvent("day_simulation_stitch_dataset_success", {
         correlationId,
-      }
-    );
+        houseId,
+        userId,
+        buildPathKind,
+        dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
+        intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+        durationMs: Date.now() - stitchDatasetStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+    } catch (stitchDatasetError) {
+      const stitchDatasetErr =
+        stitchDatasetError instanceof Error ? stitchDatasetError : new Error(String(stitchDatasetError));
+      logSimPipelineEvent("day_simulation_stitch_dataset_failure", {
+        correlationId,
+        houseId,
+        userId,
+        buildPathKind,
+        failureMessage: stitchDatasetErr.message,
+        durationMs: Date.now() - stitchDatasetStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      throw stitchDatasetErr;
+    }
 
     if (dataset && typeof dataset.meta === "object") {
       const simulatedDayDiagnosticsSample = dayResults.slice(0, 40).map((r) => ({

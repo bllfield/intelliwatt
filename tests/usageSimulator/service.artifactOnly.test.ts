@@ -93,6 +93,7 @@ import {
   getSimulatedUsageForHouseScenario,
   resolveSharedPastRecalcWindow,
   rebuildGapfillSharedPastArtifact,
+  shouldWarmValidationSelectionPreload,
   type GapfillCompareBuildPhase,
 } from "@/modules/usageSimulator/service";
 
@@ -149,6 +150,32 @@ describe("resolveSharedPastRecalcWindow", () => {
       endDate: canonicalCoverage.endDate,
       source: "canonical_coverage_fallback",
     });
+  });
+});
+
+describe("shouldWarmValidationSelectionPreload", () => {
+  it("warms preload for Past SMT_BASELINE when validation keys are provided", () => {
+    expect(
+      shouldWarmValidationSelectionPreload({
+        mode: "SMT_BASELINE",
+        scenarioName: "Past (Corrected)",
+        hasPreloadContext: true,
+        hasValidationDateKeys: true,
+        alreadyUsedSelectionPreload: false,
+      })
+    ).toBe(true);
+  });
+
+  it("does not warm preload when selection preload was already used", () => {
+    expect(
+      shouldWarmValidationSelectionPreload({
+        mode: "SMT_BASELINE",
+        scenarioName: "Past (Corrected)",
+        hasPreloadContext: true,
+        hasValidationDateKeys: true,
+        alreadyUsedSelectionPreload: true,
+      })
+    ).toBe(false);
   });
 });
 
