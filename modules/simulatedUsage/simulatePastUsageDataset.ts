@@ -362,7 +362,6 @@ export async function loadWeatherForPastWindow(args: {
       houseId,
       startDate,
       endDate,
-      ...(timezone ? { timezone } : {}),
     });
     const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
     if (missingWxKeys.length > 0) {
