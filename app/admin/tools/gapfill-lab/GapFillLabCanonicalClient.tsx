@@ -22,7 +22,17 @@ type UsagePayload = {
   coverageStart: string | null;
   coverageEnd: string | null;
   intervalCount: number;
-  daily: Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE" }>;
+  daily: Array<{
+    date: string;
+    kwh: number;
+    source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
+    sourceDetail?:
+      | "SIMULATED_TRAVEL_VACANT"
+      | "SIMULATED_TEST_DAY"
+      | "SIMULATED_OTHER"
+      | "ACTUAL_VALIDATION_TEST_DAY"
+      | "ACTUAL";
+  }>;
   monthly: Array<{ month: string; kwh: number }>;
   weekdayKwh: number;
   weekendKwh: number;
@@ -162,6 +172,16 @@ function toPayloadFromBaseline(dataset: any, timezone: string): UsagePayload | n
               : String(d?.source ?? "").toUpperCase() === "MISSING_REFERENCE"
                 ? ("MISSING_REFERENCE" as const)
                 : ("ACTUAL" as const),
+          sourceDetail:
+            String(d?.sourceDetail ?? "").toUpperCase() === "SIMULATED_TRAVEL_VACANT"
+              ? ("SIMULATED_TRAVEL_VACANT" as const)
+              : String(d?.sourceDetail ?? "").toUpperCase() === "SIMULATED_TEST_DAY"
+                ? ("SIMULATED_TEST_DAY" as const)
+                : String(d?.sourceDetail ?? "").toUpperCase() === "SIMULATED_OTHER"
+                  ? ("SIMULATED_OTHER" as const)
+                  : String(d?.sourceDetail ?? "").toUpperCase() === "ACTUAL_VALIDATION_TEST_DAY"
+                    ? ("ACTUAL_VALIDATION_TEST_DAY" as const)
+                    : ("ACTUAL" as const),
         }))
         .filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
     : [];

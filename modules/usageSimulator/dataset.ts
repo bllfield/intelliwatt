@@ -646,6 +646,12 @@ export type SimulatedUsageDatasetMeta = {
   }>;
   /** Canonical shared-sim daily totals keyed by simulated local date. */
   canonicalArtifactSimulatedDayTotalsByDate?: Record<string, number>;
+  /** Shared post-sim separation: travel/vacant simulated days (baseline should remain SIMULATED). */
+  simulatedTravelVacantDateKeysLocal?: string[];
+  /** Shared post-sim separation: modeled test/validation days (baseline projection flips to ACTUAL). */
+  simulatedTestModeledDateKeysLocal?: string[];
+  /** Optional per-day source detail map for downstream chart/table notation. */
+  simulatedSourceDetailByDate?: Record<string, "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER">;
   /**
    * Gap-Fill validation-only scored day keys.
    * These keys stay actual in baseline display/totals and are used by compare projection surfaces.
@@ -696,11 +702,21 @@ export type SimulatedUsageDataset = {
   series: {
     intervals15: Array<{ timestamp: string; kwh: number }>;
     hourly: Array<{ timestamp: string; kwh: number }>;
-    daily: Array<{ timestamp: string; kwh: number }>;
+    daily: Array<{
+      timestamp: string;
+      kwh: number;
+      source?: "ACTUAL" | "SIMULATED";
+      sourceDetail?: "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER" | "ACTUAL";
+    }>;
     monthly: Array<{ timestamp: string; kwh: number }>;
     annual: Array<{ timestamp: string; kwh: number }>;
   };
-  daily: Array<{ date: string; kwh: number }>;
+  daily: Array<{
+    date: string;
+    kwh: number;
+    source?: "ACTUAL" | "SIMULATED";
+    sourceDetail?: "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER" | "ACTUAL";
+  }>;
   monthly: Array<{ month: string; kwh: number }>;
   insights: {
     fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
@@ -936,6 +952,10 @@ export function buildSimulatedUsageDatasetFromCurve(
   }
   const simulatedDisplayByDate = new Map<string, number>();
   const simulatedSourceByDate = new Set<string>();
+  const simulatedSourceDetailByDate = new Map<
+    string,
+    "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER"
+  >();
   for (const row of options?.simulatedDayResults ?? []) {
     const dk = String(row?.localDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
@@ -944,6 +964,14 @@ export function buildSimulatedUsageDatasetFromCurve(
       Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0
     );
     simulatedSourceByDate.add(dk);
+    const reason = String((row as any)?.simulatedReasonCode ?? "");
+    const detail =
+      reason === "TRAVEL_VACANT"
+        ? "SIMULATED_TRAVEL_VACANT"
+        : reason === "TEST_MODELED_KEEP_REF"
+          ? "SIMULATED_TEST_DAY"
+          : "SIMULATED_OTHER";
+    simulatedSourceDetailByDate.set(dk, detail);
   }
   // Daily display values for simulated days come from shared core SimulatedDayResult.
   const daily = Array.from(dailyMap.entries())
@@ -951,6 +979,9 @@ export function buildSimulatedUsageDatasetFromCurve(
       date,
       kwh: round2(simulatedDisplayByDate.has(date) ? simulatedDisplayByDate.get(date)! : kwh),
       source: simulatedSourceByDate.has(date) ? ("SIMULATED" as const) : ("ACTUAL" as const),
+      sourceDetail: simulatedSourceByDate.has(date)
+        ? simulatedSourceDetailByDate.get(date) ?? "SIMULATED_OTHER"
+        : ("ACTUAL" as const),
     }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
   const canonicalArtifactSimulatedDayTotalsByDate = Object.fromEntries(
@@ -969,7 +1000,12 @@ export function buildSimulatedUsageDatasetFromCurve(
   const monthly = monthlyBuild.monthly;
   const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
-  const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
+  const seriesDaily: SimulatedUsageDataset["series"]["daily"] = daily.map((d) => ({
+    timestamp: `${d.date}T00:00:00.000Z`,
+    kwh: d.kwh,
+    source: d.source,
+    sourceDetail: d.sourceDetail,
+  }));
   const seriesMonthly: UsageSeriesPoint[] = monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: m.kwh }));
   const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: totalFromMonthly }];
   const seriesIntervals15: UsageSeriesPoint[] = curve.intervals.map((i) => ({
@@ -1070,6 +1106,17 @@ export function buildSimulatedUsageDatasetFromCurve(
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
       canonicalArtifactSimulatedDayTotalsByDate,
+      simulatedTravelVacantDateKeysLocal: daily
+        .filter((row) => row.sourceDetail === "SIMULATED_TRAVEL_VACANT")
+        .map((row) => row.date),
+      simulatedTestModeledDateKeysLocal: daily
+        .filter((row) => row.sourceDetail === "SIMULATED_TEST_DAY")
+        .map((row) => row.date),
+      simulatedSourceDetailByDate: Object.fromEntries(
+        daily
+          .filter((row) => row.source === "SIMULATED")
+          .map((row) => [row.date, row.sourceDetail ?? "SIMULATED_OTHER"] as const)
+      ),
     },
     usageBucketsByMonth,
   };

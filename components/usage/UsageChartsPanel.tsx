@@ -17,7 +17,17 @@ import { formatDateShort, formatDateShortWithYear, formatMonthLabel, formatTimeL
 import { pct, sumKwh } from "@/components/usage/usageMath";
 
 type MonthlyRow = { month: string; kwh: number };
-type DailyRow = { date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE" };
+type DailyRow = {
+  date: string;
+  kwh: number;
+  source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
+  sourceDetail?:
+    | "SIMULATED_TRAVEL_VACANT"
+    | "SIMULATED_TEST_DAY"
+    | "SIMULATED_OTHER"
+    | "ACTUAL_VALIDATION_TEST_DAY"
+    | "ACTUAL";
+};
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
 type StitchedMonth =
   | {
@@ -78,6 +88,18 @@ export function UsageChartsPanel(props: {
       return a === b && daily[0]!.date.slice(0, 4) !== daily[daily.length - 1]!.date.slice(0, 4);
     })();
   const dailyLabelFormat = spansTwoYears || firstLastSameMonthDay ? formatDateShortWithYear : formatDateShort;
+  const sourceLabelForRow = (row: DailyRow): string => {
+    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_TRAVEL_VACANT") {
+      return "SIMULATED (TRAVEL/VACANT)";
+    }
+    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_TEST_DAY") {
+      return "SIMULATED (TEST DAY)";
+    }
+    if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_VALIDATION_TEST_DAY") {
+      return "ACTUAL (VALIDATION/TEST)";
+    }
+    return row.source ?? "ACTUAL";
+  };
 
   return (
     <>
@@ -338,7 +360,7 @@ export function UsageChartsPanel(props: {
                         <tr key={d.date} className="border-t border-neutral-100 hover:bg-neutral-50/50">
                           <td className="px-3 py-1.5">{d.date}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{d.kwh.toFixed(2)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{d.source ?? "ACTUAL"}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{sourceLabelForRow(d)}</td>
                           {dailyWeather && Object.keys(dailyWeather).length > 0 ? (
                             <>
                               <td className="px-3 py-1.5 text-right tabular-nums">{wx != null && Number.isFinite(wx.tAvgF) ? wx.tAvgF.toFixed(1) : "—"}</td>

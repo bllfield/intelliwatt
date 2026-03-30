@@ -104,6 +104,16 @@ export type PastDaySimulationRequest = {
 export type SimulatedDayResult = {
   localDate: string;
   source: "simulated_vacant_day";
+  /**
+   * Shared post-sim reason tag used by downstream consumers to separate
+   * travel/vacant simulation from test-day modeled output.
+   */
+  simulatedReasonCode?:
+    | "TRAVEL_VACANT"
+    | "TEST_MODELED_KEEP_REF"
+    | "FORCED_SELECTED_DAY"
+    | "INCOMPLETE_METER_DAY"
+    | "LEADING_MISSING_DAY";
   intervals: Array<{ timestamp: string; kwh: number }>;
   intervals15: number[];
   intervalSumKwh: number;

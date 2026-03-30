@@ -36,7 +36,17 @@ type IntervalRow = {
   rawSourceId: string;
 };
 
-type DailyRow = { date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" };
+type DailyRow = {
+  date: string;
+  kwh: number;
+  source?: "ACTUAL" | "SIMULATED";
+  sourceDetail?:
+    | "SIMULATED_TRAVEL_VACANT"
+    | "SIMULATED_TEST_DAY"
+    | "SIMULATED_OTHER"
+    | "ACTUAL_VALIDATION_TEST_DAY"
+    | "ACTUAL";
+};
 type MonthlyRow = { month: string; kwh: number };
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
 
@@ -537,6 +547,7 @@ export const UsageDashboard: React.FC<Props> = ({
         date: String(row.date).slice(0, 10),
         kwh: Number(row.kwh) || 0,
         ...(String((row as any)?.source ?? "").toUpperCase() === "SIMULATED" ? { source: "SIMULATED" as const } : {}),
+        ...(typeof (row as any)?.sourceDetail === "string" ? { sourceDetail: String((row as any).sourceDetail) as DailyRow["sourceDetail"] } : {}),
       }))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 

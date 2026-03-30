@@ -57,11 +57,12 @@ export function projectBaselineFromCanonicalDataset(
     projected.daily = projected.daily.map((row: any) => {
       const dk = String(row?.date ?? "").slice(0, 10);
       if (!validationSet.has(dk)) return row;
-      if (!actualDaily.has(dk)) return { ...row, source: "ACTUAL" };
+      if (!actualDaily.has(dk)) return { ...row, source: "ACTUAL", sourceDetail: "ACTUAL_VALIDATION_TEST_DAY" };
       return {
         ...row,
         kwh: round2(actualDaily.get(dk)!),
         source: "ACTUAL",
+        sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
       };
     });
     const projectedDailyByDate = new Map<string, number>(
@@ -76,6 +77,7 @@ export function projectBaselineFromCanonicalDataset(
           ...row,
           kwh: round2(projectedDailyByDate.get(dk)!),
           source: "ACTUAL",
+          sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
         };
       });
     }

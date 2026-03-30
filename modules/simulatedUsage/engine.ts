@@ -1694,6 +1694,21 @@ export function buildPastSimulatedBaselineV1(args: {
               : day.dayIsLeadingMissing
                 ? "LEADING_MISSING"
                 : "INCOMPLETE";
+      const simulatedReasonCode:
+        | "TRAVEL_VACANT"
+        | "TEST_MODELED_KEEP_REF"
+        | "FORCED_SELECTED_DAY"
+        | "INCOMPLETE_METER_DAY"
+        | "LEADING_MISSING_DAY" =
+        simulatedReason === "EXCLUDED"
+          ? "TRAVEL_VACANT"
+          : simulatedReason === "GAPFILL_MODELED_KEEP_REF"
+            ? "TEST_MODELED_KEEP_REF"
+            : simulatedReason === "FORCED_SELECTED_DAY"
+              ? "FORCED_SELECTED_DAY"
+              : simulatedReason === "LEADING_MISSING"
+                ? "LEADING_MISSING_DAY"
+                : "INCOMPLETE_METER_DAY";
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       // One shared core for all modeled-day reasons (travel, incomplete, forced, keep-ref modeled).
@@ -1733,11 +1748,15 @@ export function buildPastSimulatedBaselineV1(args: {
       const retainDayResult =
         !collectSimulatedDayResultsDateKeys ||
         collectSimulatedDayResultsDateKeys.has(dateKey);
+      const classifiedResult: SimulatedDayResult = {
+        ...blendedResult,
+        simulatedReasonCode,
+      };
       if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
-        dayResults.push(blendedResult);
+        dayResults.push(classifiedResult);
       }
-      for (const iv of blendedResult.intervals) out.push(iv);
-      const mappedFallback = pastDayFallbackToEngineLevel(result.fallbackLevel);
+      for (const iv of classifiedResult.intervals) out.push(iv);
+      const mappedFallback = pastDayFallbackToEngineLevel(classifiedResult.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
           dateKey,
@@ -1760,20 +1779,20 @@ export function buildPastSimulatedBaselineV1(args: {
           referenceCandidateCount: 0,
           referencePickedCount: 0,
           weatherDistanceAvg: null,
-          poolApplied: result.poolFreezeProtectKwhAdder > 0,
-          poolKwh: result.poolFreezeProtectKwhAdder > 0 ? result.poolFreezeProtectKwhAdder : 0,
-          baseNonHvacKwh: result.profileSelectedDayKwh,
-          hvacKwh: result.auxHeatKwhAdder,
-          targetTotalKwh: result.finalDayKwh,
+          poolApplied: classifiedResult.poolFreezeProtectKwhAdder > 0,
+          poolKwh: classifiedResult.poolFreezeProtectKwhAdder > 0 ? classifiedResult.poolFreezeProtectKwhAdder : 0,
+          baseNonHvacKwh: classifiedResult.profileSelectedDayKwh,
+          hvacKwh: classifiedResult.auxHeatKwhAdder,
+          targetTotalKwh: classifiedResult.finalDayKwh,
           sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-          rawDayKwh: result.rawDayKwh,
-          targetDayKwhBeforeWeather: result.targetDayKwhBeforeWeather ?? result.rawDayKwh,
-          weatherAdjustedDayKwh: result.weatherAdjustedDayKwh,
-          dayTypeUsed: result.dayTypeUsed ?? (dow === 0 || dow === 6 ? "weekend" : "weekday"),
-          shapeVariantUsed: result.shapeVariantUsed ?? null,
-          finalDayKwh: result.finalDayKwh,
-          displayDayKwh: result.displayDayKwh,
-          intervalSumKwh: result.intervalSumKwh,
+          rawDayKwh: classifiedResult.rawDayKwh,
+          targetDayKwhBeforeWeather: classifiedResult.targetDayKwhBeforeWeather ?? classifiedResult.rawDayKwh,
+          weatherAdjustedDayKwh: classifiedResult.weatherAdjustedDayKwh,
+          dayTypeUsed: classifiedResult.dayTypeUsed ?? (dow === 0 || dow === 6 ? "weekend" : "weekday"),
+          shapeVariantUsed: classifiedResult.shapeVariantUsed ?? null,
+          finalDayKwh: classifiedResult.finalDayKwh,
+          displayDayKwh: classifiedResult.displayDayKwh,
+          intervalSumKwh: classifiedResult.intervalSumKwh,
         });
       }
     } else {
