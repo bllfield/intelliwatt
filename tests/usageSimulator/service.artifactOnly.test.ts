@@ -2751,8 +2751,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       intervalsCompressed: Buffer.from("00", "hex"),
     });
     simulatePastFullWindowShared.mockResolvedValue({
-      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 24 / 96),
-      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 24 },
+      simulatedIntervals: oneChicagoLocalDayIntervals96("2026-01-01", 30 / 96),
+      canonicalSimulatedDayTotalsByDate: { "2026-01-01": 30 },
       actualWxByDateKey: new Map(),
       weatherSourceSummary: "actual_only",
       weatherKindUsed: "ACTUAL_LAST_YEAR",
@@ -2786,6 +2786,8 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.compareSharedCalcPath).toBe("artifact_cache_only");
       expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(1);
+      expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-01": 30 });
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
       expect(out.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");
