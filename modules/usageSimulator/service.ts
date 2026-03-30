@@ -4208,25 +4208,10 @@ async function recalcSimulatorBuildImpl(args: {
   if (simMode === "SMT_BASELINE") {
     try {
       const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null);
-      const anchorPeriods = buildSmtAnchorPeriodsFromActualSummary({
-        summaryStart: actualResult?.dataset?.summary?.start,
-        summaryEnd: actualResult?.dataset?.summary?.end,
-      });
-      if (anchorPeriods) {
-        smtAnchorPeriods = anchorPeriods;
-      } else {
-        validationSetupFailed = true;
-        emitRecalcPreIntervalStageEvent({
-          event: "recalc_pre_interval_validation_setup_failure",
-          correlationId: args.correlationId,
-          houseId,
-          actualContextHouseId,
-          scenarioId,
-          mode: simMode,
-          durationMs: Date.now() - validationSetupStartedAt,
-          failureCode: "smt_anchor_invalid_dates",
-          failureMessage: "SMT anchor summary start/end missing or invalid",
-        });
+      const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
+      const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
+      if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
+        smtAnchorPeriods = [{ id: "anchor", startDate: start, endDate: end }];
       }
     } catch (e) {
       smtAnchorPeriods = undefined;
@@ -4244,12 +4229,7 @@ async function recalcSimulatorBuildImpl(args: {
       });
     }
   }
-  if (
-    shouldEmitRecalcValidationSetupSuccess({
-      mode: simMode,
-      validationSetupFailed,
-    })
-  ) {
+  if (shouldEmitRecalcValidationSetupSuccess({ mode: simMode, validationSetupFailed })) {
     emitRecalcPreIntervalStageEvent({
       event: "recalc_pre_interval_validation_setup_success",
       correlationId: args.correlationId,
