@@ -4725,6 +4725,111 @@ async function recalcSimulatorBuildImpl(args: {
         : undefined,
   });
 
+  const shouldPersistCanonicalPastArtifact =
+    args.persistPastSimBaseline === true &&
+    scenario?.name === WORKSPACE_PAST_NAME &&
+    (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS");
+  if (shouldPersistCanonicalPastArtifact) {
+    const intervals15 = (
+      Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15 : []
+    )
+      .map((row: { timestamp?: string; kwh?: number }) => ({
+        timestamp: String(row?.timestamp ?? ""),
+        kwh: Number(row?.kwh) || 0,
+      }))
+      .filter((row: { timestamp: string; kwh: number }) => row.timestamp.length > 0);
+    if (intervals15.length === 0) {
+      return {
+        ok: false,
+        error: "artifact_persist_failed",
+        missingItems: ["Canonical artifact persistence requires non-empty intervals15 output."],
+      };
+    }
+
+    const identityWindow = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
+    if (!identityWindow) {
+      return {
+        ok: false,
+        error: "artifact_persist_failed",
+        missingItems: ["Canonical artifact persistence could not resolve identity window from recalc build inputs."],
+      };
+    }
+
+    try {
+      const intervalDataFingerprint = await getIntervalDataFingerprint({
+        houseId,
+        esiid: esiid ?? null,
+        startDate: identityWindow.startDate,
+        endDate: identityWindow.endDate,
+      });
+      const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+      const weatherIdentity = await computePastWeatherIdentity({
+        houseId,
+        startDate: identityWindow.startDate,
+        endDate: identityWindow.endDate,
+      });
+      const artifactInputHash = computePastInputHash({
+        engineVersion: PAST_ENGINE_VERSION,
+        windowStartUtc: identityWindow.startDate,
+        windowEndUtc: identityWindow.endDate,
+        timezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
+        travelRanges: (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{
+          startDate: string;
+          endDate: string;
+        }>,
+        buildInputs: buildInputs as Record<string, unknown>,
+        intervalDataFingerprint,
+        usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
+        usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+        usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
+        usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
+        weatherIdentity,
+      });
+      applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+      const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+      const { bytes } = encodeIntervalsV1(intervals15);
+      const datasetJsonForStorage = {
+        ...dataset,
+        canonicalArtifactSimulatedDayTotalsByDate,
+        meta: {
+          ...((dataset as any)?.meta ?? {}),
+          canonicalArtifactSimulatedDayTotalsByDate,
+        },
+        series: { ...((dataset as any)?.series ?? {}), intervals15: [] },
+      };
+      const scenarioIdForCache = scenarioId ?? "BASELINE";
+      await saveCachedPastDataset({
+        houseId,
+        scenarioId: scenarioIdForCache,
+        inputHash: artifactInputHash,
+        engineVersion: PAST_ENGINE_VERSION,
+        windowStartUtc: identityWindow.startDate,
+        windowEndUtc: identityWindow.endDate,
+        datasetJson: datasetJsonForStorage as Record<string, unknown>,
+        intervalsCodec: INTERVAL_CODEC_V1,
+        intervalsCompressed: bytes,
+      });
+      const persisted = await getCachedPastDataset({
+        houseId,
+        scenarioId: scenarioIdForCache,
+        inputHash: artifactInputHash,
+      });
+      if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) {
+        return {
+          ok: false,
+          error: "artifact_persist_failed",
+          missingItems: ["Canonical artifact persistence readback verification failed after recalc."],
+        };
+      }
+    } catch (e) {
+      return {
+        ok: false,
+        error: "artifact_persist_failed",
+        missingItems: [e instanceof Error ? e.message : String(e)],
+      };
+    }
+  }
+
   // Persist usage buckets for Past/Future so plan costing can use simulated usage.
   if (
     scenarioKey !== "BASELINE" &&
