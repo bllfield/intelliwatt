@@ -6,7 +6,7 @@ import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProf
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
-import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
+import { hasActualIntervals, resolveActualUsageSourceAnchor } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import {
   getActualDailyKwhForLocalDateKeys,
@@ -3801,7 +3801,12 @@ async function recalcSimulatorBuildImpl(args: {
     esiid: esiid ?? null,
     canonicalMonths: canonical.months,
   });
-  const actualSource = await chooseActualSource({ houseId: actualContextHouseId, esiid: esiid ?? null });
+  const actualSourceAnchor = await resolveActualUsageSourceAnchor({
+    houseId: actualContextHouseId,
+    esiid: esiid ?? null,
+    timezone: "America/Chicago",
+  });
+  const actualSource = actualSourceAnchor.source;
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
   if (mode === "SMT_BASELINE" && !actualOk) {
@@ -4634,6 +4639,9 @@ async function recalcSimulatorBuildImpl(args: {
       baselineHomeProfile: homeProfile,
       baselineApplianceProfile: applianceProfile,
       actualSource: built.source?.actualSource ?? actualSource ?? undefined,
+      actualSourceAnchorEndDate: actualSourceAnchor.anchorEndDate ?? undefined,
+      smtAnchorEndDate: actualSourceAnchor.smtAnchorEndDate ?? undefined,
+      greenButtonAnchorEndDate: actualSourceAnchor.greenButtonAnchorEndDate ?? undefined,
       actualMonthlyAnchorsByMonth: built.source?.actualMonthlyAnchorsByMonth ?? undefined,
       actualIntradayShape96: built.source?.actualIntradayShape96 ?? undefined,
       smtMonthlyAnchorsByMonth: built.source?.smtMonthlyAnchorsByMonth ?? undefined,
@@ -5765,6 +5773,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
     }
     const mode = (buildInputs as any).mode;
+    const timezone = String((buildInputs as any)?.timezone ?? "").trim();
     const actualSource = (buildInputs as any)?.snapshots?.actualSource ?? null;
     const snapshotScenarioName = String((buildInputs as any)?.snapshots?.scenario?.name ?? "");
     const isSmtBaselineMode = mode === "SMT_BASELINE";
@@ -5785,6 +5794,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         houseId: args.houseId,
         startDate: windowForWx.start,
         endDate: windowForWx.end,
+        timezone: timezone ?? undefined,
       }).catch(() => {});
     }
 
@@ -6492,7 +6502,12 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
   const homeProfile = homeRec ? { ...homeRec } : null;
 
   const hasActual = await hasActualIntervals({ houseId: args.houseId, esiid: house.esiid ?? null, canonicalMonths: canonical.months });
-  const actualSource = await chooseActualSource({ houseId: args.houseId, esiid: house.esiid ?? null });
+  const actualSourceAnchor = await resolveActualUsageSourceAnchor({
+    houseId: args.houseId,
+    esiid: house.esiid ?? null,
+    timezone: "America/Chicago",
+  });
+  const actualSource = actualSourceAnchor.source;
   const req = computeRequirements(
     { manualUsagePayload: manualUsagePayload as any, homeProfile: homeProfile as any, applianceProfile: applianceProfile as any, hasActualIntervals: hasActual },
     args.mode,
@@ -6504,6 +6519,9 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
     missingItems: req.missingItems,
     hasActualIntervals: hasActual,
     actualSource,
+    actualSourceAnchorEndDate: actualSourceAnchor.anchorEndDate,
+    smtAnchorEndDate: actualSourceAnchor.smtAnchorEndDate,
+    greenButtonAnchorEndDate: actualSourceAnchor.greenButtonAnchorEndDate,
     canonicalEndMonth: canonical.endMonth,
   };
 }

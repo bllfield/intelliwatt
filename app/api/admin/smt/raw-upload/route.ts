@@ -8,6 +8,7 @@ import { replaceNormalizedSmtIntervals } from '@/lib/usage/normalizeSmtIntervals
 import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 import { requireAdmin } from '@/lib/auth/admin';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
+import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // allow large SMT raw uploads
@@ -455,8 +456,10 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        const windowStart = tsMax ? new Date(tsMax.getTime() - 365 * 24 * 60 * 60 * 1000) : null;
-        const bounded = windowStart ? intervals.filter((i) => i.ts >= windowStart && i.ts <= tsMax) : intervals;
+        const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+        const windowStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
+        const windowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+        const bounded = intervals.filter((i) => i.ts >= windowStart && i.ts <= windowEnd);
 
         const distinctEsiids = Array.from(new Set(bounded.map((i) => i.esiid))).filter(Boolean);
 
@@ -495,8 +498,8 @@ export async function POST(req: NextRequest) {
                 select: { id: true, esiid: true },
               });
 
-              const rangeEnd = tsMax ?? new Date();
-              const rangeStart = windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+              const rangeEnd = windowEnd;
+              const rangeStart = windowStart;
 
               for (const h of houses) {
                 if (!h?.id) continue;
@@ -547,8 +550,8 @@ export async function POST(req: NextRequest) {
           }
           let deferredTasksEnqueued = 0;
           if (distinctEsiids.length > 0 && postIngest && !runInlinePostIngest) {
-            const rangeEnd = tsMax ?? new Date();
-            const rangeStart = windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+            const rangeEnd = windowEnd;
+            const rangeStart = windowStart;
             deferredTasksEnqueued = await enqueueDeferredPostIngestTasks({
               distinctEsiids,
               rangeStart,

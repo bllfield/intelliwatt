@@ -14,6 +14,7 @@ import {
 } from "@/modules/weather/repo";
 import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -43,9 +44,13 @@ export async function ensureHouseWeatherBackfill(args: {
   houseId: string;
   startDate: string;
   endDate: string;
+  timezone?: string;
 }): Promise<{ fetched: number; stubbed: number; skippedLatLng?: boolean }> {
-  const { houseId, startDate, endDate } = args;
-  const dateKeys = enumerateDateKeysUtc(startDate, endDate);
+  const { houseId, startDate, endDate, timezone } = args;
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const boundedStartDate = String(startDate).slice(0, 10) < canonicalCoverage.startDate ? canonicalCoverage.startDate : String(startDate).slice(0, 10);
+  const boundedEndDate = String(endDate).slice(0, 10) > canonicalCoverage.endDate ? canonicalCoverage.endDate : String(endDate).slice(0, 10);
+  const dateKeys = enumerateDateKeysUtc(boundedStartDate, boundedEndDate);
   if (dateKeys.length === 0) return { fetched: 0, stubbed: 0 };
 
   // Fetch for dates that have no row or only a STUB_V1 row (so we can replace stale stubs with actual).
@@ -74,7 +79,7 @@ export async function ensureHouseWeatherBackfill(args: {
   const minDate = missingOrStub[0]!;
   const maxDate = missingOrStub[missingOrStub.length - 1]!;
   try {
-    const weatherResult = await getWeatherForRange(lat, lon, minDate, maxDate);
+    const weatherResult = await getWeatherForRange(lat, lon, minDate, maxDate, timezone);
     if (!weatherResult.fromStub && weatherResult.rows.length > 0) {
       const dayWxMap = hourlyRowsToDayWxMap(weatherResult.rows, houseId);
       const dateKeysWithActual = missingOrStub.filter((dk) => dayWxMap.has(dk));
@@ -104,10 +109,6 @@ export async function ensureHouseWeatherBackfill(args: {
 
 const YYYY_MM_DD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function toUtcDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 /**
  * Repair stale ACTUAL_LAST_YEAR STUB_V1 rows: delete them and rerun backfill for the range.
  * Safe to rerun. Never deletes or overwrites real weather rows.
@@ -122,10 +123,9 @@ export async function repairStaleStubWeather(args: {
   let startDate = (args.startDate?.trim() ?? "").slice(0, 10);
   let endDate = (args.endDate?.trim() ?? "").slice(0, 10);
   if (!startDate || !endDate || !YYYY_MM_DD_RE.test(startDate) || !YYYY_MM_DD_RE.test(endDate)) {
-    const end = new Date();
-    const start = new Date(end.getTime() - 366 * 24 * 60 * 60 * 1000);
-    startDate = toUtcDateKey(start);
-    endDate = toUtcDateKey(end);
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    startDate = canonicalCoverage.startDate;
+    endDate = canonicalCoverage.endDate;
   }
   if (startDate > endDate) {
     const t = startDate;

@@ -11,8 +11,10 @@ import {
   insertWeatherBatch,
   type WeatherHourlyRow,
 } from "./weatherCacheRepo";
+import { canonicalUsageWindowForTimezone } from "@/lib/time/chicago";
 
 export type HistoricalWeatherRow = WeatherHourlyRow;
+const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Normalize coordinates to 0.1° buckets so nearby homes share cache.
@@ -70,12 +72,23 @@ export async function getHistoricalWeather(
   lat: number,
   lon: number,
   startDate: string,
-  endDate: string
+  endDate: string,
+  timezone?: string
 ): Promise<HistoricalWeatherRow[]> {
   const latBucket = bucketCoordinate(lat);
   const lonBucket = bucketCoordinate(lon);
-  const start = toStartOfDayUtc(startDate);
-  const end = toEndOfDayUtc(endDate);
+  const startDateKey = String(startDate).trim().slice(0, 10);
+  const endDateKeyRaw = String(endDate).trim().slice(0, 10);
+  const maxArchiveDateKey = canonicalUsageWindowForTimezone({
+    timezone: String(timezone ?? "America/Chicago").trim() || "America/Chicago",
+  }).endDate;
+  const endDateKey =
+    YYYY_MM_DD.test(endDateKeyRaw) && endDateKeyRaw > maxArchiveDateKey ? maxArchiveDateKey : endDateKeyRaw;
+  if (YYYY_MM_DD.test(startDateKey) && YYYY_MM_DD.test(endDateKey) && startDateKey > endDateKey) {
+    return [];
+  }
+  const start = toStartOfDayUtc(startDateKey);
+  const end = toEndOfDayUtc(endDateKey);
 
   const cached = await getWeatherRange(latBucket, lonBucket, start, end);
   const full = await hasFullCoverage(latBucket, lonBucket, start, end);
@@ -83,8 +96,8 @@ export async function getHistoricalWeather(
     return cached;
   }
 
-  const startStr = startDate.slice(0, 10);
-  const endStr = endDate.slice(0, 10);
+  const startStr = startDateKey;
+  const endStr = endDateKey;
   const rows = await fetchHistoricalWeather(lat, lon, startStr, endStr);
   if (rows.length > 0) {
     await insertWeatherBatch(latBucket, lonBucket, rows);

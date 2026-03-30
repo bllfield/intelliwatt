@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseGreenButtonBuffer } from '@/lib/usage/greenButtonParser';
 import { normalizeGreenButtonReadingsTo15Min } from '@/lib/usage/greenButtonNormalize';
+import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
 
 function fmtDate(d: Date | null) {
   return d ? d.toISOString() : 'n/a';
@@ -36,9 +37,10 @@ async function main() {
   const totalKwh = normalized.reduce((sum, r) => sum + r.consumptionKwh, 0);
   const maxInterval = normalized.reduce((m, r) => Math.max(m, r.consumptionKwh), 0);
 
-  // Trim to last 365 days from maxTs
-  const cutoff = new Date(maxTs.getTime() - 365 * 24 * 60 * 60 * 1000);
-  const trimmed = normalized.filter((r) => r.timestamp >= cutoff && r.timestamp <= maxTs);
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const cutoff = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
+  const cutoffEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+  const trimmed = normalized.filter((r) => r.timestamp >= cutoff && r.timestamp <= cutoffEnd);
   const trimmedTotal = trimmed.reduce((sum, r) => sum + r.consumptionKwh, 0);
 
   console.log({

@@ -7,6 +7,7 @@ import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { normalizeEmail } from "@/lib/utils/email";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -539,8 +540,9 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          const usageWindowEnd = new Date();
-          const usageCutoff = new Date(usageWindowEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+          const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+          const usageWindowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+          const usageCutoff = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
           const bucketBuild = await buildUsageBucketsForEstimate({
             homeId,
             usageSource: "SMT",

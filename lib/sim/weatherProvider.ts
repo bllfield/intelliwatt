@@ -106,10 +106,11 @@ export async function getWeatherForRange(
   lat: number,
   lon: number,
   startDate: string,
-  endDate: string
+  endDate: string,
+  timezone?: string
 ): Promise<WeatherForRangeResult> {
   try {
-    const rows = await getHistoricalWeather(lat, lon, startDate, endDate);
+    const rows = await getHistoricalWeather(lat, lon, startDate, endDate, timezone);
     if (rows.length > 0) {
       return { rows, fromStub: false };
     }

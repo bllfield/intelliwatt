@@ -22,6 +22,7 @@ import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
 import { pickTouPeriodForMonth } from "@/lib/plan-engine/touBreakdown";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,8 +185,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no_usage_window" }, { status: 400 });
     }
 
-    // Canonical cutoff for stitched usage window: windowEnd - 365d (not "now - 365d").
-    const cutoff = new Date(windowEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    const usageWindowStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
+    const usageWindowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
 
     // Load the offer (for enroll link + RatePlan mapping).
     // IMPORTANT: renter status is a persisted house attribute; do not accept it via query params.
@@ -387,8 +389,8 @@ export async function GET(req: NextRequest) {
       usageSource,
       esiid: usageSource === "SMT" ? esiid : null,
       rawId: usageSource === "GREEN_BUTTON" ? gbRawId : null,
-      windowEnd,
-      cutoff,
+      windowEnd: usageWindowEnd,
+      cutoff: usageWindowStart,
       requiredBucketKeys: requiredKeys,
       monthsCount: 12,
       maxStepDays: 2,
@@ -414,8 +416,8 @@ export async function GET(req: NextRequest) {
       source: usageSource,
       annualKwh,
       avgMonthlyKwh,
-      windowEnd: windowEnd.toISOString(),
-      cutoff: cutoff.toISOString(),
+      windowEnd: usageWindowEnd.toISOString(),
+      cutoff: usageWindowStart.toISOString(),
       yearMonths,
       requiredBucketKeys: requiredKeys,
       bucketDefs,

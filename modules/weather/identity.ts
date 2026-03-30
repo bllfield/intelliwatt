@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 function enumerateDateKeysInclusive(startDate: string, endDate: string): string[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return [];
@@ -48,7 +49,13 @@ export async function computePastWeatherIdentity(args: {
   startDate: string;
   endDate: string;
 }): Promise<string> {
-  const dateKeys = enumerateDateKeysInclusive(args.startDate, args.endDate);
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const requestedStart = String(args.startDate ?? "").slice(0, 10);
+  const requestedEnd = String(args.endDate ?? "").slice(0, 10);
+  const boundedStartDate =
+    requestedStart < canonicalCoverage.startDate ? canonicalCoverage.startDate : requestedStart;
+  const boundedEndDate = requestedEnd > canonicalCoverage.endDate ? canonicalCoverage.endDate : requestedEnd;
+  const dateKeys = enumerateDateKeysInclusive(boundedStartDate, boundedEndDate);
   if (!args.houseId || dateKeys.length === 0) return "weather:none";
 
   const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
@@ -57,8 +64,8 @@ export async function computePastWeatherIdentity(args: {
   ]);
 
   const canonical = {
-    windowStartUtc: args.startDate,
-    windowEndUtc: args.endDate,
+    windowStartUtc: boundedStartDate,
+    windowEndUtc: boundedEndDate,
     dateKeyCount: dateKeys.length,
     actual: toStableRows(actualWxByDateKey),
     normal: toStableRows(normalWxByDateKey),

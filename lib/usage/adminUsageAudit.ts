@@ -5,6 +5,7 @@ import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 function normalizeEmailLoose(s: string | null | undefined): string {
   return String(s ?? "").trim().toLowerCase();
@@ -141,9 +142,9 @@ export async function adminUsageAuditForHome(args: {
     }
 
     const bucketDefs = bucketDefsFromBucketKeys(cappedKeys);
-    const now = new Date();
-    const rangeEnd = now;
-    const rangeStart = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    const rangeEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+    const rangeStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
 
     const computed = await ensureCoreMonthlyBuckets({
       homeId: usageContext.homeId,

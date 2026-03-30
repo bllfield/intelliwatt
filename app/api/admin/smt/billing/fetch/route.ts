@@ -3,23 +3,17 @@ import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { getSmtAccessToken } from '@/lib/smt/token';
 import { resolveSmtEsiid } from '@/lib/smt/esiid';
+import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
 import crypto from 'crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function defaultDateRange(): { start: string; end: string } {
-  const today = new Date();
-  const end = today;
-  const start = new Date(today);
-  // Pull a full 365-day window ending today to ensure 12 months of intervals.
-  start.setDate(start.getDate() - 365);
-
-  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   return {
-    start: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
-    end: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
+    start: canonicalCoverage.startDate,
+    end: canonicalCoverage.endDate,
   };
 }
 

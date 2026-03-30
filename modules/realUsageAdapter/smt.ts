@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 
 export const SMT_SHAPE_DERIVATION_VERSION = "v1";
 
@@ -112,11 +113,8 @@ function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string; endDat
   const re = /^\d{4}-\d{2}-\d{2}$/;
   for (const r of ranges) {
     if (!re.test(String(r.startDate).trim()) || !re.test(String(r.endDate).trim())) continue;
-    const start = new Date(String(r.startDate).trim() + "T12:00:00.000Z");
-    const end = new Date(String(r.endDate).trim() + "T12:00:00.000Z");
-    for (let d = new Date(start); d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
-      set.add(d.toISOString().slice(0, 10));
-    }
+    const dateKeys = enumerateDateKeysInclusive(String(r.startDate).trim(), String(r.endDate).trim());
+    for (let i = 0; i < dateKeys.length; i += 1) set.add(dateKeys[i]!);
   }
   return Array.from(set);
 }

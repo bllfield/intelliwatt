@@ -7,6 +7,7 @@ import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
 import { replaceNormalizedSmtIntervals } from '@/lib/usage/normalizeSmtIntervals';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
+import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -210,11 +211,10 @@ export async function POST(req: NextRequest) {
     const tsMinDateAll = timestamps.length ? new Date(Math.min(...timestamps)) : undefined;
     const tsMaxDate = timestamps.length ? new Date(Math.max(...timestamps)) : undefined;
 
-    // New behavior: always replace the last 365 days using the newest data
-    const windowStart = tsMaxDate ? new Date(tsMaxDate.getTime() - 365 * 24 * 60 * 60 * 1000) : undefined;
-    const boundedIntervals = windowStart
-      ? intervals.filter((i) => i.ts >= windowStart && i.ts <= tsMaxDate!)
-      : intervals;
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    const windowStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
+    const windowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+    const boundedIntervals = intervals.filter((i) => i.ts >= windowStart && i.ts <= windowEnd);
 
     if (boundedIntervals.length === 0) {
       summary.files.push({
@@ -323,9 +323,8 @@ export async function POST(req: NextRequest) {
         // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this ingest.
         // Must never fail SMT normalization.
         try {
-          const rangeEnd = tsMaxDate ?? new Date();
-          const rangeStart =
-            tsMinDate ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+          const rangeEnd = windowEnd;
+          const rangeStart = windowStart;
 
           for (const h of houses) {
             if (!h?.id) continue;

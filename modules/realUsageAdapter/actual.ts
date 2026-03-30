@@ -6,21 +6,60 @@ import {
   getLatestGreenButtonIntervalTimestamp,
   hasGreenButtonIntervals,
 } from "@/modules/realUsageAdapter/greenButton";
+import { dateTimePartsInTimezone } from "@/lib/time/chicago";
 
 export type ActualUsageSource = "SMT" | "GREEN_BUTTON";
 
-export async function chooseActualSource(args: { houseId: string; esiid: string | null }): Promise<ActualUsageSource | null> {
-  const smtLatest = args.esiid
-    ? await prisma.smtInterval.findFirst({ where: { esiid: args.esiid }, orderBy: { ts: "desc" }, select: { ts: true } }).catch(() => null)
-    : null;
-  const gbLatest = await getLatestGreenButtonIntervalTimestamp({ houseId: args.houseId });
+export type ActualUsageSourceAnchor = {
+  source: ActualUsageSource | null;
+  anchorEndDate: string | null;
+  smtAnchorEndDate: string | null;
+  greenButtonAnchorEndDate: string | null;
+};
 
-  const smtMs = smtLatest?.ts ? smtLatest.ts.getTime() : 0;
+async function getLatestSmtIntervalTimestamp(esiid: string | null): Promise<Date | null> {
+  if (!esiid) return null;
+  const row = await prisma.smtInterval
+    .findFirst({ where: { esiid }, orderBy: { ts: "desc" }, select: { ts: true } })
+    .catch(() => null);
+  return row?.ts ?? null;
+}
+
+function toAnchorDateKey(ts: Date | null, timezone: string): string | null {
+  if (!ts) return null;
+  return dateTimePartsInTimezone(ts, timezone)?.dateKey ?? ts.toISOString().slice(0, 10);
+}
+
+export async function resolveActualUsageSourceAnchor(args: {
+  houseId: string;
+  esiid: string | null;
+  timezone?: string | null;
+}): Promise<ActualUsageSourceAnchor> {
+  const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const [smtLatest, gbLatest] = await Promise.all([
+    getLatestSmtIntervalTimestamp(args.esiid),
+    getLatestGreenButtonIntervalTimestamp({ houseId: args.houseId }),
+  ]);
+  const smtMs = smtLatest ? smtLatest.getTime() : 0;
   const gbMs = gbLatest ? gbLatest.getTime() : 0;
+  let source: ActualUsageSource | null = null;
+  if (smtMs === 0 && gbMs === 0) source = null;
+  else if (smtMs === gbMs) source = smtMs ? "SMT" : "GREEN_BUTTON";
+  else source = smtMs > gbMs ? "SMT" : "GREEN_BUTTON";
 
-  if (smtMs === 0 && gbMs === 0) return null;
-  if (smtMs === gbMs) return smtMs ? "SMT" : "GREEN_BUTTON";
-  return smtMs > gbMs ? "SMT" : "GREEN_BUTTON";
+  const smtAnchorEndDate = toAnchorDateKey(smtLatest, timezone);
+  const greenButtonAnchorEndDate = toAnchorDateKey(gbLatest, timezone);
+  const anchorEndDate = source === "SMT" ? smtAnchorEndDate : source === "GREEN_BUTTON" ? greenButtonAnchorEndDate : null;
+  return { source, anchorEndDate, smtAnchorEndDate, greenButtonAnchorEndDate };
+}
+
+export async function chooseActualSource(args: { houseId: string; esiid: string | null }): Promise<ActualUsageSource | null> {
+  const resolved = await resolveActualUsageSourceAnchor({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    timezone: "America/Chicago",
+  });
+  return resolved.source;
 }
 
 export async function hasActualIntervals(args: { houseId: string; esiid: string | null; canonicalMonths: string[] }): Promise<boolean> {

@@ -147,6 +147,20 @@ export function prevCalendarDayDateKey(ymd: string, daysBack: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+export function enumerateDateKeysInclusive(startDate: string, endDate: string): string[] {
+  const start = String(startDate ?? "").slice(0, 10);
+  const end = String(endDate ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return [];
+  const out: string[] = [];
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const startMs = new Date(`${start}T00:00:00.000Z`).getTime();
+  const endMs = new Date(`${end}T00:00:00.000Z`).getTime();
+  for (let t = startMs; t <= endMs; t += DAY_MS) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 export function canonicalUsageWindowChicago(args?: {
   now?: Date;
   reliableLagDays?: number;

@@ -15,6 +15,7 @@ import { validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -853,8 +854,9 @@ export async function POST(req: NextRequest) {
 
           // This call checks bucket coverage and triggers computation only when missing.
           // (Implemented in buildUsageBucketsForEstimate so it also applies to offer estimate endpoints.)
-          const now = new Date();
-          const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+          const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+          const now = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+          const cutoff = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
           const bucketBuild = await buildUsageBucketsForEstimate({
             homeId: houseId,
             usageSource: "SMT",

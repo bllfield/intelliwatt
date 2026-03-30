@@ -6,6 +6,7 @@ import type { ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/valid
 import { getGenericWeekdayShape96, getGenericWeekendShape96, normalizeShape96, type Shape96 } from "@/modules/simulatedUsage/intradayTemplates";
 import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96 } from "@/modules/realUsageAdapter/actual";
 import { reshapeMonthlyTotalsFromBaseline } from "@/modules/usageSimulator/reshape";
+import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 
 export type BuildMode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 export type BaseKind = "MANUAL" | "ESTIMATED" | "SMT_ACTUAL_BASELINE";
@@ -33,11 +34,8 @@ export function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string;
   const re = /^\d{4}-\d{2}-\d{2}$/;
   for (const r of ranges) {
     if (!re.test(String(r.startDate).trim()) || !re.test(String(r.endDate).trim())) continue;
-    const start = new Date(String(r.startDate).trim() + "T12:00:00.000Z");
-    const end = new Date(String(r.endDate).trim() + "T12:00:00.000Z");
-    for (let d = new Date(start); d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
-      set.add(d.toISOString().slice(0, 10));
-    }
+    const dateKeys = enumerateDateKeysInclusive(String(r.startDate).trim(), String(r.endDate).trim());
+    for (let i = 0; i < dateKeys.length; i += 1) set.add(dateKeys[i]!);
   }
   return Array.from(set);
 }

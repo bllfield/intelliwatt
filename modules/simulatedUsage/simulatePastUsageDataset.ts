@@ -358,7 +358,12 @@ export async function loadWeatherForPastWindow(args: {
   const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
 
   if (lat != null && lon != null) {
-    const backfillResult = await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
+    const backfillResult = await ensureHouseWeatherBackfill({
+      houseId,
+      startDate,
+      endDate,
+      ...(timezone ? { timezone } : {}),
+    });
     const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
     if (missingWxKeys.length > 0) {
       await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
