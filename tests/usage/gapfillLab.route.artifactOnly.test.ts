@@ -450,6 +450,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual(["raw", "baseline"]);
     expect(body.parity?.userPipelineParity?.status).toBe("not_requested");
+    expect(body.parity?.userPipelineParity?.comparedDateCount).toBeNull();
+    expect(body.parity?.userPipelineParity?.mismatchDateCount).toBeNull();
+    expect(body.parity?.userPipelineParity?.maxAbsKwhDiff).toBeNull();
+    expect(body.parity?.userPipelineParity?.totalAbsKwhDiff).toBeNull();
+    expect(body.parity?.userPipelineParity?.mismatchSample).toBeNull();
     expect(body.baselineDatasetProjection?.meta?.validationProjectionApplied).toBe(true);
   });
 
@@ -618,6 +623,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.parity?.userPipelineParity?.maxAbsKwhDiff).toBe(0);
     expect(body.parity?.userPipelineParity?.totalAbsKwhDiff).toBe(0);
     expect(body.parity?.userPipelineParity?.comparedDateCount).toBe(travelBlockDates.length);
+    const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
+    expect(projectionModes).toEqual(["raw", "baseline", undefined]);
     expect(body.baselineDatasetProjection?.summary?.start).toBe("2025-03-01");
     expect(body.baselineDatasetProjection?.summary?.end).toBe("2026-02-28");
     expect(body.baselineDatasetProjection?.summary?.intervalsCount).toBe(35232);
@@ -629,6 +636,30 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("runs standalone source-home past-sim snapshot action separately from gapfill recalc flow", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    (helpers as any).getTravelRangesFromDb.mockResolvedValue([
+      { startDate: "2025-02-27", endDate: "2025-03-02" },
+      { startDate: "2026-03-01", endDate: "2026-03-01" },
+    ]);
+    getSharedPastCoverageWindowForHouse.mockResolvedValue({
+      startDate: "2025-03-01",
+      endDate: "2026-02-28",
+    });
+    getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 120, intervalsCount: 3, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
+        daily: [{ date: "2025-03-01", kwh: 9.5 }],
+        monthly: [{ month: "2025-03", kwh: 9.5 }],
+        meta: {
+          excludedDateKeysCount: 999,
+          excludedDateKeysFingerprint: "bogus_not_canonical",
+        },
+      },
+    }));
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
       action: "run_source_home_past_sim_snapshot",
@@ -653,6 +684,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.reads?.rawProjection?.ok).toBe(true);
+    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
+    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
+      "2025-03-01,2025-03-02"
+    );
   });
 
   it("runs canonical test-home recalc with generic actual-context source", async () => {

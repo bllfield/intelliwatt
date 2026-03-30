@@ -77,6 +77,8 @@ import {
 } from "@/modules/usageSimulator/simulationDataAlerts";
 import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
+import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { buildGapfillCompareQueuedPayloadV1 } from "@/modules/usageSimulator/gapfillCompareQueuedPayload";
 import {
   getGapfillCompareEnqueueDiagnostics,
@@ -1576,6 +1578,19 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    const canonicalWindow = await getSharedPastCoverageWindowForHouse({
+      userId: user.id,
+      houseId: selectedSourceHouse.id,
+    });
+    const sourceTravelRangesFromDb = await getTravelRangesFromDb(user.id, selectedSourceHouse.id);
+    const boundedExcludedDateKeysSorted = Array.from(
+      boundDateKeysToCoverageWindow(
+        new Set<string>(travelRangesToExcludeDateKeys(sourceTravelRangesFromDb)),
+        canonicalWindow
+      )
+    ).sort();
+    const boundedExcludedDateKeysCount = boundedExcludedDateKeysSorted.length;
+    const boundedExcludedDateKeysFingerprint = boundedExcludedDateKeysSorted.join(",");
     const [defaultRead, baselineRead, rawRead] = await Promise.all([
       getSimulatedUsageForHouseScenario({
         userId: user.id,
@@ -1607,13 +1622,14 @@ export async function POST(req: NextRequest) {
         meta:
           dataset.meta && typeof dataset.meta === "object"
             ? {
-                excludedDateKeysCount: (dataset.meta as any).excludedDateKeysCount ?? null,
-                excludedDateKeysFingerprint: (dataset.meta as any).excludedDateKeysFingerprint ?? null,
                 canonicalArtifactSimulatedDayTotalsByDate:
                   (dataset.meta as any).canonicalArtifactSimulatedDayTotalsByDate ??
                   (dataset as any).canonicalArtifactSimulatedDayTotalsByDate ??
                   null,
                 validationOnlyDateKeysLocal: (dataset.meta as any).validationOnlyDateKeysLocal ?? null,
+                // Shared-window lock: ownership exclusions must be canonical-window bounded travel/vacant ranges.
+                excludedDateKeysCount: boundedExcludedDateKeysCount,
+                excludedDateKeysFingerprint: boundedExcludedDateKeysFingerprint,
               }
             : null,
       };
@@ -2375,45 +2391,48 @@ export async function POST(req: NextRequest) {
       })
     : null;
   const userPipelineDataset = userPipelineRead?.ok ? (userPipelineRead.dataset as any) : null;
-  const gapfillBaselineDaily = new Map<string, number>();
-  for (const row of Array.isArray(baselineDataset?.daily) ? baselineDataset.daily : []) {
-    const dk = String(row?.date ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    gapfillBaselineDaily.set(dk, round2(Number(row?.kwh) || 0));
-  }
-  const userPipelineDaily = new Map<string, number>();
-  for (const row of Array.isArray(userPipelineDataset?.daily) ? userPipelineDataset.daily : []) {
-    const dk = String(row?.date ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    userPipelineDaily.set(dk, round2(Number(row?.kwh) || 0));
-  }
-  const dailyParityDateKeys = Array.from(
-    new Set<string>([...Array.from(gapfillBaselineDaily.keys()), ...Array.from(userPipelineDaily.keys())])
-  ).sort();
-  let dailyParityMismatchCount = 0;
-  let dailyParityMaxAbsKwhDiff = 0;
-  let dailyParityTotalAbsKwhDiff = 0;
   const dailyParityMismatchSample: Array<{
     localDate: string;
     gapfillBaselineKwh: number;
     userPipelineKwh: number;
     absKwhDiff: number;
   }> = [];
-  for (const dk of dailyParityDateKeys) {
-    const gapfillKwh = round2(gapfillBaselineDaily.get(dk) ?? 0);
-    const userKwh = round2(userPipelineDaily.get(dk) ?? 0);
-    const absDiff = round2(Math.abs(gapfillKwh - userKwh));
-    dailyParityMaxAbsKwhDiff = Math.max(dailyParityMaxAbsKwhDiff, absDiff);
-    dailyParityTotalAbsKwhDiff = round2(dailyParityTotalAbsKwhDiff + absDiff);
-    if (absDiff > 0) {
-      dailyParityMismatchCount += 1;
-      if (dailyParityMismatchSample.length < 25) {
-        dailyParityMismatchSample.push({
-          localDate: dk,
-          gapfillBaselineKwh: gapfillKwh,
-          userPipelineKwh: userKwh,
-          absKwhDiff: absDiff,
-        });
+  let dailyParityDateKeys: string[] = [];
+  let dailyParityMismatchCount = 0;
+  let dailyParityMaxAbsKwhDiff = 0;
+  let dailyParityTotalAbsKwhDiff = 0;
+  if (includeUserPipelineParity) {
+    const gapfillBaselineDaily = new Map<string, number>();
+    for (const row of Array.isArray(baselineDataset?.daily) ? baselineDataset.daily : []) {
+      const dk = String(row?.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+      gapfillBaselineDaily.set(dk, round2(Number(row?.kwh) || 0));
+    }
+    const userPipelineDaily = new Map<string, number>();
+    for (const row of Array.isArray(userPipelineDataset?.daily) ? userPipelineDataset.daily : []) {
+      const dk = String(row?.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+      userPipelineDaily.set(dk, round2(Number(row?.kwh) || 0));
+    }
+    dailyParityDateKeys = Array.from(
+      new Set<string>([...Array.from(gapfillBaselineDaily.keys()), ...Array.from(userPipelineDaily.keys())])
+    ).sort();
+    for (const dk of dailyParityDateKeys) {
+      const gapfillKwh = round2(gapfillBaselineDaily.get(dk) ?? 0);
+      const userKwh = round2(userPipelineDaily.get(dk) ?? 0);
+      const absDiff = round2(Math.abs(gapfillKwh - userKwh));
+      dailyParityMaxAbsKwhDiff = Math.max(dailyParityMaxAbsKwhDiff, absDiff);
+      dailyParityTotalAbsKwhDiff = round2(dailyParityTotalAbsKwhDiff + absDiff);
+      if (absDiff > 0) {
+        dailyParityMismatchCount += 1;
+        if (dailyParityMismatchSample.length < 25) {
+          dailyParityMismatchSample.push({
+            localDate: dk,
+            gapfillBaselineKwh: gapfillKwh,
+            userPipelineKwh: userKwh,
+            absKwhDiff: absDiff,
+          });
+        }
       }
     }
   }
@@ -2439,11 +2458,11 @@ export async function POST(req: NextRequest) {
       : String(baselineRead.message ?? "baseline_projection_read_failed"),
     userPipelineProjectionUsed: "default",
     includeUserPipelineParity,
-    comparedDateCount: dailyParityDateKeys.length,
-    mismatchDateCount: dailyParityMismatchCount,
-    maxAbsKwhDiff: round2(dailyParityMaxAbsKwhDiff),
-    totalAbsKwhDiff: round2(dailyParityTotalAbsKwhDiff),
-    mismatchSample: dailyParityMismatchSample,
+    comparedDateCount: includeUserPipelineParity ? dailyParityDateKeys.length : null,
+    mismatchDateCount: includeUserPipelineParity ? dailyParityMismatchCount : null,
+    maxAbsKwhDiff: includeUserPipelineParity ? round2(dailyParityMaxAbsKwhDiff) : null,
+    totalAbsKwhDiff: includeUserPipelineParity ? round2(dailyParityTotalAbsKwhDiff) : null,
+    mismatchSample: includeUserPipelineParity ? dailyParityMismatchSample : null,
     userPipelineReadError:
       !includeUserPipelineParity
         ? null
