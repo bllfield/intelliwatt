@@ -5445,6 +5445,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const travelRanges = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
       const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
+      const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
       const canonicalActualIdentity = await resolveCanonicalActualIdentityForBuild({
         userId: args.userId,
         requestHouseId: args.houseId,
@@ -5454,7 +5455,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       const expectedExcludedFingerprintForFallback = Array.from(
         boundDateKeysToCoverageWindow(
           new Set<string>(travelRangesToExcludeDateKeys(travelRanges)),
-          { startDate: window.startDate, endDate: window.endDate }
+          sharedCoverageWindow
         )
       )
         .sort()

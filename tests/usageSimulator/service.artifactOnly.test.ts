@@ -541,6 +541,44 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
+  it("artifact_only fallback compatibility uses canonical coverage fingerprint window", async () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: canonicalCoverage.startDate, endDate: canonicalCoverage.startDate }],
+      },
+    });
+    computePastInputHash.mockReturnValueOnce("hash-exact-miss");
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    getLatestCachedPastDatasetByScenario.mockResolvedValueOnce({
+      inputHash: "hash-latest",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          excludedDateKeysFingerprint: canonicalCoverage.startDate,
+        },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    expect((out as any)?.dataset?.meta?.artifactSourceMode).toBe("latest_by_scenario_fallback");
+  });
+
   it("artifact_only computes input hash using build actualContextHouseId identity", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
