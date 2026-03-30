@@ -7,17 +7,17 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 ## Implemented wiring (verification checklist still open)
 
 - **Shared module** `modules/simulatedUsage/simulatePastUsageDataset.ts`
-  - `simulatePastUsageDataset(args)`: single entrypoint; accepts houseId, userId, esiid, startDate, endDate, timezone, travelRanges, buildInputs, buildPathKind (`cold_build` | `recalc` | `lab_validation`), optional preloaded actualIntervals.
+  - `simulatePastUsageDataset(args)`: single producer entrypoint; accepts houseId, userId, esiid, startDate, endDate, timezone, travelRanges, buildInputs, buildPathKind, optional preloaded actualIntervals.
   - `loadWeatherForPastWindow(args)`: single weather loader; reads persisted daily weather first and short-circuits when canonical dates are fully covered by non-stub `ACTUAL_LAST_YEAR` rows, otherwise backfills/repairs only missing or `STUB_V1` dates before returning actualWxByDateKey, normalWxByDateKey, and provenance (weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount).
   - Weather fallback reasons: `missing_lat_lng`, `api_failure_or_no_data`, `partial_coverage`, `unknown` (or null when full actual).
 - **service.ts**
-  - `getPastSimulatedDatasetForHouse`: delegates to `simulatePastUsageDataset(..., buildPathKind: 'cold_build' | 'lab_validation')`; preserves overlay and dailyWeather; optional `buildPathKind` parameter.
-  - Recalc Past block: uses `simulatePastUsageDataset(..., buildPathKind: 'recalc')`; sets pastPatchedCurve and monthlyTotalsKwhByMonth from returned stitchedCurve.
+  - `getPastSimulatedDatasetForHouse`: delegates to `simulatePastUsageDataset(..., buildPathKind: 'recalc')`; preserves overlay and dailyWeather.
+  - Recalc Past block: also uses `simulatePastUsageDataset(..., buildPathKind: 'recalc')`; sets pastPatchedCurve and monthlyTotalsKwhByMonth from returned stitchedCurve.
   - Cache restore: sets `buildPathKind: 'cache_restore'`; when cached weather provenance missing, sets `weatherSourceSummary` and `weatherFallbackReason` to `'unknown'`.
 - **modules/weather/backfill.ts**
   - `ensureHouseWeatherBackfill` returns `{ fetched, stubbed, skippedLatLng?: boolean }`; `skippedLatLng: true` when house has no lat/lng (no API call).
 - **GapFill Lab**
-  - `lib/admin/gapfillLabPrime.ts` calls `getPastSimulatedDatasetForHouse` with `buildPathKind: 'lab_validation'`; production Past path inherits shared core.
+  - Artifact-producing rebuilds normalize inputs then call the same shared recalc producer path before persistence; GapFill diagnostics may differ only after stored outputs exist.
 - **Metadata**
   - dataset.meta includes: buildPathKind, sourceOfDaySimulationCore, simVersion, derivationVersion, weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount, dailyRowCount, intervalCount, coverageStart/End, actualDayCount, simulatedDayCount, stitchedDayCount, actualIntervalsCount, referenceDaysCount, shapeMonthsPresent, excludedDateKeysCount, leadingMissingDaysCount, usageShapeProfileDiag, etc.
 - **UsageDashboard**
@@ -95,9 +95,9 @@ Modeling guidance alignment:
 ```mermaid
 flowchart LR
   subgraph entry [Entrypoints]
-    cold[getPastSimulatedDatasetForHouse cold_build]
-    recalc[recalcSimulatorBuild Past block]
-    lab[gapfillLabPrime lab_validation]
+    user[user Past normalize inputs]
+    recalc[recalcSimulatorBuild normalize inputs]
+    lab[GapFill normalize inputs]
   end
   subgraph shared [Shared core]
     sim[simulatePastUsageDataset]
@@ -106,10 +106,9 @@ flowchart LR
     curve[buildCurveFromPatchedIntervals]
     dataset[buildSimulatedUsageDatasetFromCurve]
   end
-  cold --> sim
+  user --> sim
   recalc --> sim
-  lab --> getPast[getPastSimulatedDatasetForHouse]
-  getPast --> sim
+  lab --> sim
   sim --> wx
   sim --> engine
   sim --> curve
@@ -118,7 +117,7 @@ flowchart LR
 
 ## Post-implementation verification checklist
 
-- [ ] **Cold build vs recalc parity**: Same house/window/travel produces same intervals and monthly totals whether built via cold (house fetch) or via recalc; both use `simulatePastUsageDataset` with `useUtcMonth: true`.
+- [ ] **Single producer parity**: Same normalized house/window/travel/test-day inputs produce the same labeled simulated-day outputs regardless of user vs admin entrypoint; both must execute the same shared pre-DB producer chain.
 - [ ] **Cache restore parity**: Restored dataset has same daily/monthly as when first built; `buildPathKind: 'cache_restore'`; no re-run of weather backfill on restore.
 - [ ] **Truthful missing_lat_lng stub labeling**: When house has no lat/lng, UI shows stub weather and fallback reason (e.g. "no coordinates"); `weatherSourceSummary` = stub_only, `weatherFallbackReason` = missing_lat_lng.
 - [ ] **Truthful partial coverage labeling**: When some days have actual weather and some stub, UI shows mixed and fallback reason (e.g. "partial coverage") where applicable.

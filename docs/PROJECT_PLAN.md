@@ -6458,13 +6458,13 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - Docs updated with “Remediation Rule: Pattern-driven fixes (no label hardcoding)” + end-to-end checklist.
 ## Past shared-core unification (2026-03-06)
 
-- **Shared Past simulation core** implemented for production cold build and recalc: single entrypoint `modules/simulatedUsage/simulatePastUsageDataset.ts`; cold build and recalc both use it with `useUtcMonth: true`.
+- **Shared Past simulation core** implemented as one pre-DB producer path: user Past and GapFill normalize inputs, then execute the same shared producer entrypoint `modules/simulatedUsage/simulatePastUsageDataset.ts` with shared recalc producer settings.
 - **Cache restore** preserves truthful provenance metadata; `buildPathKind: cache_restore`; weather defaults to unknown when missing.
-- **GapFill Lab** uses the same shared Past artifact, the same shared fingerprint, and the same shared simulator output via `getPastSimulatedDatasetForHouse` with `buildPathKind: lab_validation`; GapFill remains scoring/reporting only.
+- **GapFill Lab** uses the same shared Past artifact, fingerprint, and simulator output family; admin-specific diagnostics may differ only after stored outputs exist.
 - **LEGACY / NON-AUTHORITATIVE:** `gapfill_test_days_profile` may still appear as a historical label in older notes or diagnostics. It does not represent a separate simulation engine, separate artifact, or separate fingerprint.
 - **Weather backfill** replaces stale STUB_V1 rows when actual Open-Meteo data is available; repair script and procedure for existing bad data: see `docs/PAST_WEATHER_STUB_REPAIR.md`.
-- **Admin simulation diagnostics:** Tool on `/admin/simulation-engines` (Past pipeline diagnostics section) validates the shared production simulator/weather pipeline for a selected house without shell/droplet: Past path meta, weather provenance, stub audit, cold/cache/recalc parity, weather repair action, and shared GapFill scoring parity.
-- **Parity fix:** When "Include parity" is checked, cold build uses the stored build's `travelRanges` (not UI override) so cold, production, and recalc are compared on the same inputs; parity cards now show per-side `scenarioId`, `buildInputsHash`, `travelRangesUsed`, `coverageStart`/`coverageEnd`, `buildPathKind`, `source`, `lastBuiltAt`. Cache restore sets `weatherFallbackReason` to `null` when `weatherSourceSummary === "actual_only"` so parity weather metadata matches cold.
+- **Admin simulation diagnostics:** Tool on `/admin/simulation-engines` (Past pipeline diagnostics section) validates the shared production simulator/weather pipeline for a selected house without shell/droplet: Past path meta, weather provenance, stub audit, cache/recalc parity, weather repair action, and shared GapFill scoring parity.
+- **Parity fix:** When "Include parity" is checked, producer comparisons use the same shared recalc producer settings and stored `travelRanges` (not UI override), so differences are input-driven instead of path-driven; parity cards show per-side `scenarioId`, `buildInputsHash`, `travelRangesUsed`, `coverageStart`/`coverageEnd`, `buildPathKind`, `source`, `lastBuiltAt`.
 
 ## Canonical Test-Day Selection Update (2026-03-28)
 

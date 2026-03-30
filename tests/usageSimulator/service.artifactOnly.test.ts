@@ -731,6 +731,15 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(savedCanonicalDayTotals).toEqual({
       "2026-01-01": 0.75,
     });
+    expect(simulatePastUsageDataset).toHaveBeenCalledTimes(1);
+    const producerArgs = simulatePastUsageDataset.mock.calls[0]?.[0] as {
+      buildPathKind?: string;
+      forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+    };
+    expect(producerArgs?.buildPathKind).toBe("recalc");
+    expect(
+      Array.from(producerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
+    ).toEqual(["2026-01-01"]);
   });
 });
 
@@ -856,6 +865,101 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
       scenarioId: "past-s1",
       inputHash: "hash-rebuilt-exact",
     });
+  });
+
+  it("runs user allow_rebuild and gapfill artifact ensure through the same pre-DB recalc producer settings", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-03" }],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+      },
+    });
+    const rebuiltDataset = {
+      summary: {
+        source: "SIMULATED",
+        intervalsCount: 2,
+        totalKwh: 0.75,
+        start: "2026-01-01",
+        end: "2026-01-31",
+      },
+      meta: {
+        curveShapingVersion: "shared_curve_v2",
+        coverageStart: "2026-01-01",
+        coverageEnd: "2026-01-31",
+        simulatedTravelVacantDateKeysLocal: ["2026-01-03"],
+        simulatedTestModeledDateKeysLocal: ["2026-01-01"],
+        canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75, "2026-01-03": 0.5 },
+      },
+      daily: [{ date: "2026-01-01", kwh: 0.75, source: "SIMULATED_TEST_DAY" }],
+      monthly: [{ month: "2026-01", kwh: 0.75 }],
+      series: {
+        intervals15: [
+          { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+          { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+        ],
+      },
+    };
+    getCachedPastDataset
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        inputHash: "hash-rebuilt-exact",
+        updatedAt: new Date("2026-03-18T00:00:00.000Z"),
+        datasetJson: { ...rebuiltDataset, series: {} },
+        intervalsCodec: "v1_delta_varint",
+        intervalsCompressed: Buffer.from("00", "hex"),
+      });
+    simulatePastUsageDataset.mockResolvedValue({
+      dataset: rebuiltDataset,
+      meta: { curveShapingVersion: "shared_curve_v2" },
+      pastDayCounts: {},
+      shapeMonthsPresent: ["2026-01"],
+      actualWxByDateKey: new Map(),
+      stitchedCurve: null,
+      simulatedDayResults: [],
+    });
+
+    const userOut = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+    });
+    const gapfillOut = await rebuildGapfillSharedPastArtifact({
+      userId: "u1",
+      houseId: "h1",
+    });
+
+    expect(userOut.ok).toBe(true);
+    expect(gapfillOut.ok).toBe(true);
+    expect(simulatePastUsageDataset).toHaveBeenCalledTimes(2);
+    const userProducerArgs = simulatePastUsageDataset.mock.calls[0]?.[0] as {
+      buildPathKind?: string;
+      forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+    };
+    const gapfillProducerArgs = simulatePastUsageDataset.mock.calls[1]?.[0] as {
+      buildPathKind?: string;
+      forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+    };
+    expect(userProducerArgs?.buildPathKind).toBe("recalc");
+    expect(gapfillProducerArgs?.buildPathKind).toBe("recalc");
+    expect(
+      Array.from(userProducerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
+    ).toEqual(["2026-01-01"]);
+    expect(
+      Array.from(gapfillProducerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
+    ).toEqual(["2026-01-01"]);
+
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(2);
+    const userSavedMeta = ((saveCachedPastDataset.mock.calls[0]?.[0] as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>;
+    const gapfillSavedMeta = ((saveCachedPastDataset.mock.calls[1]?.[0] as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>;
+    expect(userSavedMeta.simulatedTravelVacantDateKeysLocal).toEqual(["2026-01-03"]);
+    expect(gapfillSavedMeta.simulatedTravelVacantDateKeysLocal).toEqual(["2026-01-03"]);
+    expect(userSavedMeta.simulatedTestModeledDateKeysLocal).toEqual(["2026-01-01"]);
+    expect(gapfillSavedMeta.simulatedTestModeledDateKeysLocal).toEqual(["2026-01-01"]);
   });
 
   it("returns the exact rebuilt artifact identity instead of latest fallback identity", async () => {
@@ -2787,7 +2891,7 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.displayVsFreshParityForScoredDays?.matches).toBe(false);
       expect(out.displayVsFreshParityForScoredDays?.mismatchCount).toBe(1);
       expect(out.displayVsFreshParityForScoredDays?.mismatchSampleDates).toEqual(["2026-01-01"]);
-      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-01": 30 });
+      expect(out.freshCompareScoredDaySimTotalsByDate).toEqual({ "2026-01-01": 18 });
       expect(out.displayVsFreshParityForScoredDays?.missingDisplaySimCount).toBe(0);
       expect(out.displayVsFreshParityForScoredDays?.complete).toBe(false);
       expect(out.displayVsFreshParityForScoredDays?.scope).toBe("scored_test_days_local");

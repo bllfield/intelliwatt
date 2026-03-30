@@ -1,6 +1,6 @@
 /**
  * Shared Past simulation entrypoint.
- * Single internal entrypoint for user-facing Past (cold build + recalc) and GapFill Lab production path.
+ * Single internal entrypoint for user-facing Past and GapFill Lab production path.
  * Owns: canonical window, weather loading with provenance, reference-day derivation, curve and dataset build.
  */
 
@@ -358,11 +358,7 @@ export async function loadWeatherForPastWindow(args: {
   const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
 
   if (lat != null && lon != null) {
-    const backfillResult = await ensureHouseWeatherBackfill({
-      houseId,
-      startDate,
-      endDate,
-    });
+    const backfillResult = await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
     const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
     if (missingWxKeys.length > 0) {
       await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
@@ -743,7 +739,7 @@ export function buildUsageShapeProfileSnapFromMonthContract(args: {
 
 /**
  * Single shared Past simulation entrypoint.
- * Used by getPastSimulatedDatasetForHouse (cold build), recalcSimulatorBuild (recalc), and GapFill Lab production path.
+ * Used by getPastSimulatedDatasetForHouse, recalcSimulatorBuild, and GapFill Lab production path.
  */
 export async function simulatePastUsageDataset(
   args: SimulatePastUsageDatasetArgs
