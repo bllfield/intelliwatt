@@ -9,6 +9,7 @@ const getApplianceProfileSimulatedByUserHouse = vi.fn();
 const getLatestUsageShapeProfile = vi.fn();
 const ensureUsageShapeProfileForUserHouse = vi.fn();
 const buildPastSimulatedBaselineV1 = vi.fn();
+const dateKeyInTimezoneMock = vi.fn((iso: string, _timezone?: string) => String(iso).slice(0, 10));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualIntervalsForRange: (...args: any[]) => getActualIntervalsForRange(...args),
@@ -69,7 +70,7 @@ vi.mock("@/lib/admin/gapfillLab", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
     ...actual,
-    dateKeyInTimezone: (iso: string) => String(iso).slice(0, 10),
+    dateKeyInTimezone: (iso: string, timezone?: string) => dateKeyInTimezoneMock(iso, timezone),
   };
 });
 
@@ -133,6 +134,7 @@ describe("shared sim usage-shape ensure path", () => {
     getLatestUsageShapeProfile.mockReset();
     ensureUsageShapeProfileForUserHouse.mockReset();
     buildPastSimulatedBaselineV1.mockReset();
+    dateKeyInTimezoneMock.mockClear();
 
     getHomeProfileSimulatedByUserHouse.mockResolvedValue(null);
     getApplianceProfileSimulatedByUserHouse.mockResolvedValue(null);
@@ -160,6 +162,34 @@ describe("shared sim usage-shape ensure path", () => {
         },
       ],
     }));
+  });
+
+  it("uses one-pass timezone key mapping when deriving forced/retained/keep-ref UTC sets", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+    const out = await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        mode: "SMT_BASELINE",
+        snapshots: {},
+      } as any,
+      buildPathKind: "lab_validation",
+      includeSimulatedDayResults: false,
+      forceSimulateDateKeysLocal: new Set(["2026-01-01"]),
+      retainSimulatedDayResultDateKeysLocal: new Set(["2026-01-01"]),
+      forceModeledOutputKeepReferencePoolDateKeysLocal: new Set(["2026-01-01"]),
+    });
+
+    expect(out).toHaveProperty("dataset");
+    expect(dateKeyInTimezoneMock).toHaveBeenCalled();
+    // One canonical day has 96 quarter-hour timestamps; one-pass mapping should stay near that order.
+    expect(dateKeyInTimezoneMock.mock.calls.length).toBeLessThanOrEqual(120);
   });
 
   it("ensures missing usage shape in full-window shared sim before simulation runs", async () => {

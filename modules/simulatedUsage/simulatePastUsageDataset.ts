@@ -209,6 +209,76 @@ function mergeActualWxWithNormalForLowDataModes(args: {
   return { mergedActualWxByDateKey: merged, normalFilledDateKeyCount };
 }
 
+function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
+  canonicalDayStartsMs: number[];
+  canonicalDateKeys: string[];
+  timezoneResolved: string;
+  forcedSimulateDateKeysLocal: Set<string>;
+  retainedSimulatedDayResultDateKeysLocal: Set<string>;
+  mergedKeepRefLocalDateKeys: Set<string>;
+}): {
+  forcedUtcDateKeys: Set<string>;
+  retainedResultUtcDateKeys: Set<string>;
+  keepRefUtcDateKeys: Set<string>;
+} {
+  const forcedUtcDateKeys = new Set<string>();
+  const retainedResultUtcDateKeys = new Set<string>();
+  const keepRefUtcDateKeys = new Set<string>();
+
+  if (
+    args.forcedSimulateDateKeysLocal.size === 0 &&
+    args.retainedSimulatedDayResultDateKeysLocal.size === 0 &&
+    args.mergedKeepRefLocalDateKeys.size === 0
+  ) {
+    return { forcedUtcDateKeys, retainedResultUtcDateKeys, keepRefUtcDateKeys };
+  }
+
+  if (args.timezoneResolved) {
+    for (const dayStartMs of args.canonicalDayStartsMs) {
+      const gridTs = getDayGridTimestamps(dayStartMs);
+      if (!gridTs.length) continue;
+      const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
+
+      let intersectsForcedLocalDay = false;
+      let intersectsRetainedLocalDay = false;
+      let intersectsKeepRefLocalDay = false;
+      for (const ts of gridTs) {
+        const localDateKey = dateKeyInTimezone(ts, args.timezoneResolved);
+        if (!intersectsForcedLocalDay && args.forcedSimulateDateKeysLocal.has(localDateKey)) {
+          intersectsForcedLocalDay = true;
+        }
+        if (!intersectsRetainedLocalDay && args.retainedSimulatedDayResultDateKeysLocal.has(localDateKey)) {
+          intersectsRetainedLocalDay = true;
+        }
+        if (!intersectsKeepRefLocalDay && args.mergedKeepRefLocalDateKeys.has(localDateKey)) {
+          intersectsKeepRefLocalDay = true;
+        }
+        if (intersectsForcedLocalDay && intersectsRetainedLocalDay && intersectsKeepRefLocalDay) {
+          break;
+        }
+      }
+      if (intersectsForcedLocalDay) forcedUtcDateKeys.add(utcDateKey);
+      if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
+      if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
+    }
+  } else {
+    // No IANA timezone: local date keys are treated as canonical UTC calendar keys.
+    for (const utcDateKey of args.canonicalDateKeys) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
+      if (args.forcedSimulateDateKeysLocal.has(utcDateKey)) forcedUtcDateKeys.add(utcDateKey);
+      if (args.retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) retainedResultUtcDateKeys.add(utcDateKey);
+      if (args.mergedKeepRefLocalDateKeys.has(utcDateKey)) keepRefUtcDateKeys.add(utcDateKey);
+    }
+  }
+
+  for (const utcKey of Array.from(keepRefUtcDateKeys)) {
+    if (forcedUtcDateKeys.has(utcKey)) keepRefUtcDateKeys.delete(utcKey);
+  }
+
+  return { forcedUtcDateKeys, retainedResultUtcDateKeys, keepRefUtcDateKeys };
+}
+
 function summarizePastWindowWeatherProvenance(args: {
   actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherFallbackReason: WeatherFallbackReason;
@@ -894,23 +964,22 @@ export async function simulatePastUsageDataset(
           canonicalDateKeys,
         });
 
-    const [homeRecForPast, applianceRecForPast] = await Promise.all([
+    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
+    const [homeRecForPast, applianceRecForPast, ensuredUsageShape] = await Promise.all([
       getHomeProfileSimulatedByUserHouse({ userId, houseId }),
       getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
+      ensureUsageShapeProfileForSharedSimulation({
+        userId,
+        houseId: actualHouseId,
+        timezone,
+        canonicalMonths,
+      }),
     ]);
     const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
-    const applianceProfileForPast =
-      normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
-        ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
-        : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
-
-    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
-    const ensuredUsageShape = await ensureUsageShapeProfileForSharedSimulation({
-      userId,
-      houseId: actualHouseId,
-      timezone,
-      canonicalMonths,
-    });
+    const applianceProfileFromDb = normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null);
+    const applianceProfileForPast = applianceProfileFromDb?.fuelConfiguration
+      ? applianceProfileFromDb
+      : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
     let usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     let lowDataShapeAdapterUsed = false;
     if (!usageShapeProfileSnap && isLowDataSharedPastMode) {
@@ -956,50 +1025,15 @@ export async function simulatePastUsageDataset(
         : {}),
     };
     const timezoneResolved = String(timezone ?? "").trim();
-    const forcedUtcDateKeys = new Set<string>();
-    const retainedResultUtcDateKeys = new Set<string>();
-    const keepRefUtcDateKeys = new Set<string>();
-    const needsUtcKeyWalk =
-      Boolean(timezoneResolved) &&
-      (forcedSimulateDateKeysLocal.size > 0 ||
-        retainedSimulatedDayResultDateKeysLocal.size > 0 ||
-        mergedKeepRefLocalDateKeys.size > 0);
-    if (needsUtcKeyWalk && timezoneResolved) {
-      for (const dayStartMs of canonicalDayStartsMs) {
-        const gridTs = getDayGridTimestamps(dayStartMs);
-        if (!gridTs.length) continue;
-        const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-        const intersectsForcedLocalDay = gridTs.some((ts) =>
-          forcedSimulateDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
-        );
-        if (intersectsForcedLocalDay) forcedUtcDateKeys.add(utcDateKey);
-        const intersectsRetainedLocalDay = gridTs.some((ts) =>
-          retainedSimulatedDayResultDateKeysLocal.has(dateKeyInTimezone(ts, timezoneResolved))
-        );
-        if (intersectsRetainedLocalDay) retainedResultUtcDateKeys.add(utcDateKey);
-        const intersectsKeepRefLocalDay = gridTs.some((ts) =>
-          mergedKeepRefLocalDateKeys.has(dateKeyInTimezone(ts, timezoneResolved))
-        );
-        if (intersectsKeepRefLocalDay) keepRefUtcDateKeys.add(utcDateKey);
-      }
-    } else if (
-      !timezoneResolved &&
-      (forcedSimulateDateKeysLocal.size > 0 ||
-        retainedSimulatedDayResultDateKeysLocal.size > 0 ||
-        mergedKeepRefLocalDateKeys.size > 0)
-    ) {
-      // No IANA timezone: local date keys are treated as canonical UTC calendar keys (same as retained fallback).
-      for (const utcDateKey of canonicalDateKeys) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
-        if (forcedSimulateDateKeysLocal.has(utcDateKey)) forcedUtcDateKeys.add(utcDateKey);
-        if (retainedSimulatedDayResultDateKeysLocal.has(utcDateKey)) retainedResultUtcDateKeys.add(utcDateKey);
-        if (mergedKeepRefLocalDateKeys.has(utcDateKey)) keepRefUtcDateKeys.add(utcDateKey);
-      }
-    }
-    for (const utcKey of Array.from(keepRefUtcDateKeys)) {
-      if (forcedUtcDateKeys.has(utcKey)) keepRefUtcDateKeys.delete(utcKey);
-    }
+    const { forcedUtcDateKeys, retainedResultUtcDateKeys, keepRefUtcDateKeys } =
+      resolveUtcDateKeySelectionsFromLocalDateSets({
+        canonicalDayStartsMs,
+        canonicalDateKeys,
+        timezoneResolved,
+        forcedSimulateDateKeysLocal,
+        retainedSimulatedDayResultDateKeysLocal,
+        mergedKeepRefLocalDateKeys,
+      });
     logSimPipelineEvent("day_simulation_post_weather_prep_success", {
       correlationId,
       houseId,
