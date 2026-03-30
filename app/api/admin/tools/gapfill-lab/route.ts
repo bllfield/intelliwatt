@@ -1209,11 +1209,14 @@ export async function POST(req: NextRequest) {
       return source === "SIMULATED" ? count + 1 : count;
     }, 0);
     const compareRowsCount = Array.isArray(compareProjection.rows) ? compareProjection.rows.length : 0;
-    const validationOnlyDateKeysLocal = Array.isArray((baselineDataset as any)?.meta?.validationOnlyDateKeysLocal)
+    const metadataValidationOnlyDateKeysLocal = Array.isArray((baselineDataset as any)?.meta?.validationOnlyDateKeysLocal)
       ? ((baselineDataset as any).meta.validationOnlyDateKeysLocal as unknown[])
           .map((v) => String(v ?? "").slice(0, 10))
           .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-      : selectedDateKeysSorted;
+      : [];
+    // Single source of truth for this response: scored rows and summaries must use the same effective date set.
+    const effectiveValidationOnlyDateKeysLocal =
+      selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
     const canonicalReadResultSummary = {
       ok: true,
       readMode: "artifact_only",
@@ -1227,6 +1230,7 @@ export async function POST(req: NextRequest) {
       artifactRecomputed:
         typeof metaRaw?.artifactRecomputed === "boolean" ? metaRaw.artifactRecomputed : null,
       artifactSourceNote: typeof metaRaw?.artifactSourceNote === "string" ? metaRaw.artifactSourceNote : null,
+      metadataValidationOnlyDateKeysLocal,
       canonicalReadFailureCode: null as string | null,
       canonicalReadFailureMessage: null as string | null,
     };
@@ -1235,8 +1239,8 @@ export async function POST(req: NextRequest) {
       projectionType:
         typeof metaRaw?.validationProjectionType === "string" ? metaRaw.validationProjectionType : null,
       validationCompareAvailable: Boolean(metaRaw?.validationCompareAvailable),
-      validationOnlyDateKeysLocal,
-      validationOnlyDateKeyCount: validationOnlyDateKeysLocal.length,
+      validationOnlyDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+      validationOnlyDateKeyCount: effectiveValidationOnlyDateKeysLocal.length,
       actualDayCount: baselineActualDayCount,
       simulatedDayCount: baselineSimulatedDayCount,
       baselineDailyRowCount: baselineDailyRows.length,
@@ -1253,7 +1257,7 @@ export async function POST(req: NextRequest) {
       metaKeys: metaRaw ? Object.keys(metaRaw).sort() : [],
       coverageStart: String((baselineDataset?.summary?.start as string | undefined) ?? canonicalWindow.startDate).slice(0, 10),
       coverageEnd: String((baselineDataset?.summary?.end as string | undefined) ?? canonicalWindow.endDate).slice(0, 10),
-      validationOnlyDateKeysLocal,
+      validationOnlyDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
       compareRowsCount,
       baselineActualDayCount,
       baselineSimulatedDayCount,
@@ -1267,13 +1271,13 @@ export async function POST(req: NextRequest) {
       artifactUpdatedAt: artifactRow?.updatedAt instanceof Date ? artifactRow.updatedAt.toISOString() : null,
       artifactEngineVersion: artifactRow?.engineVersion ?? null,
       testSelectionMode,
-      validationOnlyDateKeysLocal,
-      validationOnlyDateKeyCount: validationOnlyDateKeysLocal.length,
+      validationOnlyDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+      validationOnlyDateKeyCount: effectiveValidationOnlyDateKeysLocal.length,
       compareRowsCount,
       baselineActualDayCount,
       baselineSimulatedDayCount,
     };
-    const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
+    const scoredDayTruthRows = effectiveValidationOnlyDateKeysLocal.map((dk) => {
       const row = Array.isArray(compareProjection.rows)
         ? compareProjection.rows.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk)
         : null;
@@ -1385,7 +1389,7 @@ export async function POST(req: NextRequest) {
       modelAssumptions: {
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
         projectionMode: "baseline_vs_accuracy",
-        validationOnlyDateKeysLocal: selectedDateKeysSorted,
+        validationOnlyDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
         actualContextHouseId: sourceHouse.id,
         userDefaultValidationSelectionMode,
         adminLabValidationSelectionMode: testSelectionMode,

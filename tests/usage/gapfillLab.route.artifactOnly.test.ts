@@ -496,9 +496,21 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
     expect(body.canonicalReadResultSummary?.ok).toBe(true);
     expect(body.canonicalReadResultSummary?.readMode).toBe("artifact_only");
+    expect(body.canonicalReadResultSummary?.metadataValidationOnlyDateKeysLocal).toEqual([
+      "2025-04-10",
+      "2025-05-02",
+    ]);
     expect(body.baselineProjectionSummary?.applied).toBe(true);
+    expect(body.baselineProjectionSummary?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
+    expect(body.sharedResultPayloadSummary?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
+    expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
+    expect(body.modelAssumptions?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
+    const scoredDates = Array.isArray(body.scoredDayTruthRows)
+      ? (body.scoredDayTruthRows as Array<{ localDate?: string }>).map((row) => String(row.localDate ?? "")).sort()
+      : [];
+    expect(scoredDates).toEqual(["2025-04-10"]);
     expect(body.compareProjectionSummary?.rowCount).toBe(body.compareProjection?.rows?.length ?? 0);
-    expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeyCount).toBeGreaterThanOrEqual(1);
+    expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeyCount).toBe(scoredDates.length);
     expect(body.failureCode).toBeUndefined();
     expect(buildValidationCompareProjectionSidecarCalls.length).toBeGreaterThanOrEqual(1);
     const compareInput = buildValidationCompareProjectionSidecarCalls[buildValidationCompareProjectionSidecarCalls.length - 1] as {
