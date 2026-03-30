@@ -3600,6 +3600,33 @@ export function buildSmtAnchorPeriodsFromActualSummary(args: {
   return [{ id: "anchor", startDate: start, endDate: end }];
 }
 
+async function resolveCanonicalActualIdentityForBuild(args: {
+  userId: string;
+  requestHouseId: string;
+  requestHouseEsiid: string | null;
+  buildInputs: Record<string, unknown>;
+}): Promise<{ houseId: string; esiid: string | null }> {
+  const buildActualContextHouseId =
+    typeof (args.buildInputs as any)?.actualContextHouseId === "string" &&
+    String((args.buildInputs as any).actualContextHouseId).trim()
+      ? String((args.buildInputs as any).actualContextHouseId).trim()
+      : args.requestHouseId;
+  if (buildActualContextHouseId === args.requestHouseId) {
+    return { houseId: args.requestHouseId, esiid: args.requestHouseEsiid ?? null };
+  }
+  const actualHouse = await getHouseAddressForUserHouse({
+    userId: args.userId,
+    houseId: buildActualContextHouseId,
+  });
+  return {
+    houseId: buildActualContextHouseId,
+    esiid:
+      actualHouse && typeof (actualHouse as any).esiid === "string" && String((actualHouse as any).esiid).trim()
+        ? String((actualHouse as any).esiid)
+        : args.requestHouseEsiid ?? null,
+  };
+}
+
 function monthsIntersectingTravelRanges(
   canonicalMonths: string[],
   travelRanges: Array<{ startDate: string; endDate: string }>
@@ -4756,9 +4783,15 @@ async function recalcSimulatorBuildImpl(args: {
     }
 
     try {
+      const canonicalActualIdentity = await resolveCanonicalActualIdentityForBuild({
+        userId,
+        requestHouseId: houseId,
+        requestHouseEsiid: esiid ?? null,
+        buildInputs: buildInputs as Record<string, unknown>,
+      });
       const intervalDataFingerprint = await getIntervalDataFingerprint({
-        houseId,
-        esiid: esiid ?? null,
+        houseId: canonicalActualIdentity.houseId,
+        esiid: canonicalActualIdentity.esiid,
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
       });
@@ -5412,6 +5445,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const travelRanges = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
       const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
+      const canonicalActualIdentity = await resolveCanonicalActualIdentityForBuild({
+        userId: args.userId,
+        requestHouseId: args.houseId,
+        requestHouseEsiid: house.esiid ?? null,
+        buildInputs,
+      });
       const expectedExcludedFingerprintForFallback = Array.from(
         boundDateKeysToCoverageWindow(
           new Set<string>(travelRangesToExcludeDateKeys(travelRanges)),
@@ -5421,8 +5460,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
         .sort()
         .join(",");
       const intervalDataFingerprint = await getIntervalDataFingerprint({
-        houseId: args.houseId,
-        esiid: house.esiid ?? null,
+        houseId: canonicalActualIdentity.houseId,
+        esiid: canonicalActualIdentity.esiid,
         startDate: window.startDate,
         endDate: window.endDate,
       });

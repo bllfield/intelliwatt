@@ -541,6 +541,55 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
+  it("artifact_only computes input hash using build actualContextHouseId identity", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+        actualContextHouseId: "source-home-1",
+      },
+    });
+    getHouseAddressForUserHouse.mockImplementation(async ({ houseId }: { houseId: string }) => {
+      if (houseId === "source-home-1") return { id: "source-home-1", esiid: "SRC-ESIID-1" };
+      return { id: "h1", esiid: null };
+    });
+    computePastInputHash.mockReturnValueOnce("hash-from-source-identity");
+    getCachedPastDataset.mockResolvedValueOnce({
+      inputHash: "hash-from-source-identity",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: { excludedDateKeysFingerprint: "" },
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+      projectionMode: "raw",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(getIntervalDataFingerprint).toHaveBeenCalledWith({
+      houseId: "source-home-1",
+      esiid: "SRC-ESIID-1",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+    });
+    expect(getCachedPastDataset).toHaveBeenCalledWith({
+      houseId: "h1",
+      scenarioId: "past-s1",
+      inputHash: "hash-from-source-identity",
+    });
+  });
+
   it("allow_rebuild persists canonical excluded fingerprint metadata on saved shared artifact", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
