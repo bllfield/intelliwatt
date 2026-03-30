@@ -2140,6 +2140,8 @@ export async function buildGapfillCompareSimShared(args: {
     ? new Set<string>(Array.from(boundedTestDateKeysLocal))
     : chartDateKeysLocal;
   let simulatedTestIntervals = artifactSimulatedTestIntervals;
+  // Keep fresh parity diagnostics separate from artifact-backed compare ownership.
+  let freshParityScoredTestIntervals: IntervalPoint[] | null = null;
   let scoringSimulatedSource:
     | "shared_artifact_simulated_intervals15"
     | "shared_fresh_simulated_intervals15"
@@ -2417,6 +2419,11 @@ export async function buildGapfillCompareSimShared(args: {
           freshParityCanonicalSimulatedDayTotalsByDate = {};
           freshParityIntervals = [];
         }
+        freshParityScoredTestIntervals = filterIntervalsToLocalDateKeys(
+          sharedSelectedDaysResult.simulatedIntervals,
+          timezone,
+          boundedTestDateKeysLocal
+        );
         // Compare truth ownership stays artifact-backed; selected-days fresh output is parity analytics only.
         lastFreshGapfillKeepRefLocalDateKeys = sharedSelectedDaysResult.gapfillForceModeledKeepRefLocalDateKeys;
         lastFreshGapfillKeepRefUtcKeyCount = sharedSelectedDaysResult.gapfillForceModeledKeepRefUtcKeyCount;
@@ -2501,6 +2508,11 @@ export async function buildGapfillCompareSimShared(args: {
       }
       freshParityIntervals = freshResult.simulatedIntervals;
       freshParityCanonicalSimulatedDayTotalsByDate = freshResult.canonicalSimulatedDayTotalsByDate ?? {};
+      freshParityScoredTestIntervals = filterIntervalsToLocalDateKeys(
+        freshResult.simulatedIntervals,
+        timezone,
+        boundedTestDateKeysLocal
+      );
       // Compare truth ownership stays artifact-backed; full-window fresh output is parity analytics only.
       weatherBasisUsed = freshResult.weatherSourceSummary;
       lastFreshGapfillKeepRefLocalDateKeys = freshResult.gapfillForceModeledKeepRefLocalDateKeys;
@@ -2789,10 +2801,11 @@ export async function buildGapfillCompareSimShared(args: {
     simulatedChartDailyCount: simulatedChartDaily.length,
     artifactReferenceRowCount: artifactSimulatedDayReferenceRows.length,
   });
+  const scoredParityIntervals = includeFreshCompareCalc ? (freshParityScoredTestIntervals ?? []) : [];
 
   const freshDailyTotalsByDate = (() => {
     const totals = new Map<string, number>();
-    for (const p of simulatedTestIntervals) {
+    for (const p of scoredParityIntervals) {
       const dk = dateKeyInTimezone(p.timestamp, timezone);
       if (!boundedTestDateKeysLocal.has(dk)) continue;
       totals.set(dk, (totals.get(dk) ?? 0) + (Number(p.kwh) || 0));
