@@ -3539,6 +3539,32 @@ export function shouldWarmValidationSelectionPreload(args: {
   );
 }
 
+export function emitRecalcPreIntervalStageEvent(args: {
+  event: string;
+  correlationId?: string;
+  houseId: string;
+  actualContextHouseId: string;
+  scenarioId: string | null;
+  mode: SimulatorMode;
+  durationMs?: number;
+  failureCode?: string;
+  failureMessage?: string;
+}): void {
+  logSimPipelineEvent(args.event, {
+    correlationId: args.correlationId,
+    houseId: args.houseId,
+    sourceHouseId: args.actualContextHouseId !== args.houseId ? args.actualContextHouseId : undefined,
+    testHomeId: args.actualContextHouseId !== args.houseId ? args.houseId : undefined,
+    scenarioId: args.scenarioId,
+    mode: args.mode,
+    durationMs: args.durationMs,
+    failureCode: args.failureCode,
+    failureMessage: args.failureMessage,
+    source: "recalcSimulatorBuildImpl",
+    memoryRssMb: getMemoryRssMb(),
+  });
+}
+
 function monthsIntersectingTravelRanges(
   canonicalMonths: string[],
   travelRanges: Array<{ startDate: string; endDate: string }>
@@ -3680,6 +3706,16 @@ async function recalcSimulatorBuildImpl(args: {
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
 
+  const coreContextStartedAt = Date.now();
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_core_context_start",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode,
+  });
+
   // Load persisted baseline inputs
   const [manualRec, homeRec, applianceRec] = await Promise.all([
     (prisma as any).manualUsageInput
@@ -3799,11 +3835,29 @@ async function recalcSimulatorBuildImpl(args: {
   }
 
   const travelRangesForBuild = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : undefined;
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_core_context_success",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode,
+    durationMs: Date.now() - coreContextStartedAt,
+  });
 
   const adminLabManualConstraint =
     Boolean(args.adminLabTreatmentMode) && isAdminLabManualConstraintTreatmentMode(args.adminLabTreatmentMode);
   let simMode: SimulatorMode = mode;
   if (adminLabManualConstraint) {
+    const adminAdaptationStartedAt = Date.now();
+    emitRecalcPreIntervalStageEvent({
+      event: "recalc_pre_interval_admin_treatment_adaptation_start",
+      correlationId: args.correlationId,
+      houseId,
+      actualContextHouseId,
+      scenarioId,
+      mode,
+    });
     try {
       manualUsagePayload = await buildAdminLabSyntheticManualUsagePayload({
         treatmentMode: args.adminLabTreatmentMode as "manual_monthly_constrained" | "manual_annual_constrained",
@@ -3813,6 +3867,17 @@ async function recalcSimulatorBuildImpl(args: {
         travelRanges: travelRangesForBuild,
       });
     } catch (e) {
+      emitRecalcPreIntervalStageEvent({
+        event: "recalc_pre_interval_admin_treatment_adaptation_failure",
+        correlationId: args.correlationId,
+        houseId,
+        actualContextHouseId,
+        scenarioId,
+        mode,
+        durationMs: Date.now() - adminAdaptationStartedAt,
+        failureCode: "admin_manual_payload_build_failed",
+        failureMessage: e instanceof Error ? e.message : String(e),
+      });
       return {
         ok: false,
         error: "requirements_unmet",
@@ -3832,31 +3897,95 @@ async function recalcSimulatorBuildImpl(args: {
       "MANUAL_TOTALS",
     );
     if (!reqManual.canRecalc) {
+      emitRecalcPreIntervalStageEvent({
+        event: "recalc_pre_interval_admin_treatment_adaptation_failure",
+        correlationId: args.correlationId,
+        houseId,
+        actualContextHouseId,
+        scenarioId,
+        mode,
+        durationMs: Date.now() - adminAdaptationStartedAt,
+        failureCode: "requirements_unmet",
+        failureMessage: "admin_lab_manual_constraints_requirements_unmet",
+      });
       return { ok: false, error: "requirements_unmet", missingItems: reqManual.missingItems };
     }
+    emitRecalcPreIntervalStageEvent({
+      event: "recalc_pre_interval_admin_treatment_adaptation_success",
+      correlationId: args.correlationId,
+      houseId,
+      actualContextHouseId,
+      scenarioId,
+      mode: simMode,
+      durationMs: Date.now() - adminAdaptationStartedAt,
+    });
   }
 
   // Enforce simMode->baseKind mapping (no mismatches). `simMode` may upgrade to MANUAL_TOTALS for admin lab manual treatments.
   const baseKind = baseKindFromMode(simMode);
 
-  const built = await buildSimulatorInputs({
-    mode: simMode as BuildMode,
-    manualUsagePayload: manualUsagePayload as any,
-    homeProfile: homeProfile as any,
-    applianceProfile: applianceProfile as any,
-    esiidForSmt: esiid,
-    houseIdForActual: actualContextHouseId,
-    baselineHomeProfile: homeProfile,
-    baselineApplianceProfile: applianceProfile,
-    canonicalMonths: canonicalForBuild.months,
-    travelRanges: travelRangesForBuild,
-    now: args.now,
+  const buildInputsStartedAt = Date.now();
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_build_inputs_start",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode: simMode,
+  });
+  let built: Awaited<ReturnType<typeof buildSimulatorInputs>>;
+  try {
+    built = await buildSimulatorInputs({
+      mode: simMode as BuildMode,
+      manualUsagePayload: manualUsagePayload as any,
+      homeProfile: homeProfile as any,
+      applianceProfile: applianceProfile as any,
+      esiidForSmt: esiid,
+      houseIdForActual: actualContextHouseId,
+      baselineHomeProfile: homeProfile,
+      baselineApplianceProfile: applianceProfile,
+      canonicalMonths: canonicalForBuild.months,
+      travelRanges: travelRangesForBuild,
+      now: args.now,
+    });
+  } catch (e) {
+    emitRecalcPreIntervalStageEvent({
+      event: "recalc_pre_interval_build_inputs_failure",
+      correlationId: args.correlationId,
+      houseId,
+      actualContextHouseId,
+      scenarioId,
+      mode: simMode,
+      durationMs: Date.now() - buildInputsStartedAt,
+      failureCode: "build_simulator_inputs_failed",
+      failureMessage: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_build_inputs_success",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode: simMode,
+    durationMs: Date.now() - buildInputsStartedAt,
   });
 
   // Safety: built.baseKind must match mode mapping in V1
   if (built.baseKind !== baseKind) {
     return { ok: false, error: "baseKind_mismatch" };
   }
+
+  const monthlyPreparationStartedAt = Date.now();
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_monthly_preparation_start",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode: simMode,
+  });
 
   // Overlay: source of truth = UpgradeLedger (status ACTIVE); timeline order = scenario events. V1 = delta kWh only (additive).
   let overlay: ReturnType<typeof computeMonthlyOverlay> | null = null;
@@ -4019,7 +4148,25 @@ async function recalcSimulatorBuildImpl(args: {
     smtShapeDerivationVersion: SMT_SHAPE_DERIVATION_VERSION,
     weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
   };
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_monthly_preparation_success",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode: simMode,
+    durationMs: Date.now() - monthlyPreparationStartedAt,
+  });
 
+  const validationSetupStartedAt = Date.now();
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_validation_setup_start",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode: simMode,
+  });
   const manualCanonicalPeriods =
     simMode === "MANUAL_TOTALS" && manualUsagePayload
       ? (() => {
@@ -4046,10 +4193,30 @@ async function recalcSimulatorBuildImpl(args: {
       if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
         smtAnchorPeriods = [{ id: "anchor", startDate: start, endDate: end }];
       }
-    } catch {
+    } catch (e) {
       smtAnchorPeriods = undefined;
+      emitRecalcPreIntervalStageEvent({
+        event: "recalc_pre_interval_validation_setup_failure",
+        correlationId: args.correlationId,
+        houseId,
+        actualContextHouseId,
+        scenarioId,
+        mode: simMode,
+        durationMs: Date.now() - validationSetupStartedAt,
+        failureCode: "smt_anchor_load_failed",
+        failureMessage: e instanceof Error ? e.message : String(e),
+      });
     }
   }
+  emitRecalcPreIntervalStageEvent({
+    event: "recalc_pre_interval_validation_setup_success",
+    correlationId: args.correlationId,
+    houseId,
+    actualContextHouseId,
+    scenarioId,
+    mode: simMode,
+    durationMs: Date.now() - validationSetupStartedAt,
+  });
 
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */

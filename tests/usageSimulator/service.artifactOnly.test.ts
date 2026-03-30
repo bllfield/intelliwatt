@@ -90,6 +90,7 @@ vi.mock("@/modules/weather/identity", () => ({
 
 import {
   buildGapfillCompareSimShared,
+  emitRecalcPreIntervalStageEvent,
   getSimulatedUsageForHouseScenario,
   resolveSharedPastRecalcWindow,
   rebuildGapfillSharedPastArtifact,
@@ -176,6 +177,31 @@ describe("shouldWarmValidationSelectionPreload", () => {
         alreadyUsedSelectionPreload: true,
       })
     ).toBe(false);
+  });
+});
+
+describe("emitRecalcPreIntervalStageEvent", () => {
+  it("emits structured pre-interval stage payload with admin source/test-home context", () => {
+    emitRecalcPreIntervalStageEvent({
+      event: "recalc_pre_interval_core_context_start",
+      correlationId: "cid-1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      scenarioId: "s1",
+      mode: "SMT_BASELINE",
+      durationMs: 12,
+    });
+    const stage = logPipeline.mock.calls.find((c) => c[0] === "recalc_pre_interval_core_context_start");
+    expect(stage?.[1]).toMatchObject({
+      correlationId: "cid-1",
+      houseId: "test-home-1",
+      sourceHouseId: "source-home-1",
+      testHomeId: "test-home-1",
+      scenarioId: "s1",
+      mode: "SMT_BASELINE",
+      durationMs: 12,
+      source: "recalcSimulatorBuildImpl",
+    });
   });
 });
 
