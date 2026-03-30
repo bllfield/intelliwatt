@@ -3577,10 +3577,26 @@ export function buildSmtAnchorPeriodsFromActualSummary(args: {
   summaryStart: unknown;
   summaryEnd: unknown;
 }): Array<{ id: string; startDate: string; endDate: string }> | null {
+  const isRealDateKey = (value: string): boolean => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [yRaw, mRaw, dRaw] = value.split("-");
+    const y = Number(yRaw);
+    const m = Number(mRaw);
+    const d = Number(dRaw);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return false;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+    const parsed = new Date(Date.UTC(y, m - 1, d, 12, 0, 0, 0));
+    if (!Number.isFinite(parsed.getTime())) return false;
+    return (
+      parsed.getUTCFullYear() === y &&
+      parsed.getUTCMonth() === m - 1 &&
+      parsed.getUTCDate() === d
+    );
+  };
   const start = args.summaryStart ? String(args.summaryStart).slice(0, 10) : null;
   const end = args.summaryEnd ? String(args.summaryEnd).slice(0, 10) : null;
   if (!start || !end) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
+  if (!isRealDateKey(start) || !isRealDateKey(end)) return null;
   return [{ id: "anchor", startDate: start, endDate: end }];
 }
 

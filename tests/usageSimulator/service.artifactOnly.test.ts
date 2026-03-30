@@ -222,6 +222,22 @@ describe("buildSmtAnchorPeriodsFromActualSummary", () => {
     ).toBe(false);
   });
 
+  it("rejects impossible calendar dates (invalid month/day combinations)", () => {
+    const out = buildSmtAnchorPeriodsFromActualSummary({
+      summaryStart: "2026-13-45",
+      summaryEnd: "2026-03-13",
+    });
+    expect(out).toBeNull();
+  });
+
+  it("rejects impossible day-of-month values", () => {
+    const out = buildSmtAnchorPeriodsFromActualSummary({
+      summaryStart: "2026-02-30",
+      summaryEnd: "2026-03-13",
+    });
+    expect(out).toBeNull();
+  });
+
   it("returns anchor periods for valid summary dates", () => {
     const out = buildSmtAnchorPeriodsFromActualSummary({
       summaryStart: "2025-03-14",
