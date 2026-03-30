@@ -496,11 +496,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
     expect(body.canonicalReadResultSummary?.ok).toBe(true);
     expect(body.canonicalReadResultSummary?.readMode).toBe("artifact_only");
+    expect(body.canonicalReadResultSummary?.fallbackAllowed).toBe(true);
+    expect(body.canonicalReadResultSummary?.exactCanonicalReadSucceeded).toBe(true);
     expect(body.canonicalReadResultSummary?.metadataValidationOnlyDateKeysLocal).toEqual([
       "2025-04-10",
       "2025-05-02",
     ]);
     expect(body.baselineProjectionSummary?.applied).toBe(true);
+    expect(body.baselineProjectionSummary?.expected).toBe(true);
+    expect(body.baselineProjectionSummary?.correct).toBe(true);
     expect(body.baselineProjectionSummary?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
     expect(body.sharedResultPayloadSummary?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
     expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
@@ -517,6 +521,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     }
     expect(compareDates).not.toContain("2025-05-02");
     expect(body.compareProjectionSummary?.rowCount).toBe(body.compareProjection?.rows?.length ?? 0);
+    expect(body.diagnosticsVerdict?.selectedValidationDateCount).toBe(1);
+    expect(body.diagnosticsVerdict?.compareRowCount).toBe(body.compareProjectionSummary?.rowCount ?? 0);
+    expect(typeof body.diagnosticsVerdict?.compareRowsMatchSelectedDates).toBe("boolean");
+    expect(body.diagnosticsVerdict?.validationLeakCountInBaseline).toBe(0);
+    expect(body.diagnosticsVerdict?.usedFallbackArtifact).toBe(false);
     expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeyCount).toBe(scoredDates.length);
     expect(body.failureCode).toBeUndefined();
     expect(buildValidationCompareProjectionSidecarCalls.length).toBeGreaterThanOrEqual(1);
@@ -649,6 +658,57 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.metrics?.totalSimKwhMasked).toBe(9.5);
     expect(body.metrics?.deltaKwhMasked).toBe(7.5);
     expect(body.metrics?.mapeFilteredCount).toBe(1);
+    expect(body.diagnosticsVerdict?.compareRowsMatchSelectedDates).toBe(true);
+  });
+
+  it("surfaces fallback and baseline validation leak diagnostics when present", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+        daily: [{ date: "2025-04-10", kwh: 8, source: "SIMULATED" }],
+        monthly: [{ month: "2025-04", kwh: 8 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 2 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10"],
+          validationProjectionApplied: false,
+          artifactHashMatch: false,
+          artifactSourceMode: "latest_by_scenario_fallback",
+          requestedInputHash: "req-hash",
+          artifactInputHashUsed: "artifact-hash",
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.canonicalReadResultSummary?.usedFallbackArtifact).toBe(true);
+    expect(body.canonicalReadResultSummary?.exactCanonicalReadSucceeded).toBe(false);
+    expect(body.canonicalReadResultSummary?.requestedInputHash).toBe("req-hash");
+    expect(body.canonicalReadResultSummary?.artifactInputHashUsed).toBe("artifact-hash");
+    expect(body.baselineProjectionSummary?.applied).toBe(false);
+    expect(body.baselineProjectionSummary?.validationLeakCountInBaseline).toBe(1);
+    expect(body.diagnosticsVerdict?.usedFallbackArtifact).toBe(true);
+    expect(body.diagnosticsVerdict?.artifactHashMatch).toBe(false);
+    expect(body.diagnosticsVerdict?.baselineProjectionCorrect).toBe(false);
+    expect(body.diagnosticsVerdict?.validationLeakDatesInBaseline).toEqual(["2025-04-10"]);
+    expect(body.diagnosticsVerdict?.validationDatesRenderedAsSimulatedCount).toBe(1);
   });
 
   it("echoes effectiveSimulatorMode from recalc (e.g. MANUAL_TOTALS for manual constraint treatments)", async () => {

@@ -1258,25 +1258,85 @@ export async function POST(req: NextRequest) {
       metrics: compareProjectionMetricsFiltered,
     };
     const compareRowsCount = compareProjectionRowsFiltered.length;
+    const artifactSourceMode =
+      typeof metaRaw?.artifactSourceMode === "string" ? String(metaRaw.artifactSourceMode) : null;
+    const artifactHashMatch =
+      typeof metaRaw?.artifactHashMatch === "boolean" ? metaRaw.artifactHashMatch : null;
+    const requestedInputHash =
+      typeof metaRaw?.requestedInputHash === "string" ? String(metaRaw.requestedInputHash) : null;
+    const readArtifactInputHash =
+      typeof metaRaw?.artifactInputHashUsed === "string"
+        ? String(metaRaw.artifactInputHashUsed)
+        : typeof metaRaw?.artifactInputHash === "string"
+          ? String(metaRaw.artifactInputHash)
+          : null;
+    const usedFallbackArtifact = artifactSourceMode === "latest_by_scenario_fallback";
+    const exactCanonicalReadSucceeded = artifactHashMatch === true && !usedFallbackArtifact;
+    const baselineProjectionExpected = effectiveValidationOnlyDateKeysLocal.length > 0;
+    const validationLeakDatesInBaseline = baselineDailyRows
+      .filter((row) => {
+        const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+        const source = String((row as any)?.source ?? "").toUpperCase();
+        return effectiveValidationDateKeySet.has(dateKey) && source === "SIMULATED";
+      })
+      .map((row) => String((row as any)?.date ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      .sort();
+    const validationLeakCountInBaseline = validationLeakDatesInBaseline.length;
+    const validationDatesRenderedAsActualCount = baselineDailyRows.reduce((count, row) => {
+      const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+      const source = String((row as any)?.source ?? "").toUpperCase();
+      return effectiveValidationDateKeySet.has(dateKey) && source === "ACTUAL" ? count + 1 : count;
+    }, 0);
+    const validationDatesRenderedAsSimulatedCount = baselineDailyRows.reduce((count, row) => {
+      const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+      const source = String((row as any)?.source ?? "").toUpperCase();
+      return effectiveValidationDateKeySet.has(dateKey) && source === "SIMULATED" ? count + 1 : count;
+    }, 0);
+    const travelVacantSimulatedDatesInBaselineCount = baselineDailyRows.reduce((count, row) => {
+      const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+      const source = String((row as any)?.source ?? "").toUpperCase();
+      return !effectiveValidationDateKeySet.has(dateKey) && source === "SIMULATED" ? count + 1 : count;
+    }, 0);
+    const compareRowDateSet = new Set(
+      compareProjectionRowsFiltered
+        .map((row) => String((row as any)?.localDate ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    );
+    const selectedValidationDateSet = new Set(effectiveValidationOnlyDateKeysLocal);
+    const compareRowsMatchSelectedDates =
+      compareRowDateSet.size === selectedValidationDateSet.size &&
+      Array.from(compareRowDateSet).every((dk) => selectedValidationDateSet.has(dk));
+    const baselineProjectionApplied = Boolean(metaRaw?.validationProjectionApplied);
+    const baselineProjectionCorrect = baselineProjectionExpected
+      ? baselineProjectionApplied &&
+        validationLeakCountInBaseline === 0 &&
+        validationDatesRenderedAsSimulatedCount === 0
+      : validationLeakCountInBaseline === 0 && validationDatesRenderedAsSimulatedCount === 0;
     const canonicalReadResultSummary = {
       ok: true,
       readMode: "artifact_only",
       projectionMode: "baseline",
       readLayer: "getSimulatedUsageForHouseScenario",
       readFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
-      fallbackAllowed: false,
-      artifactSourceMode: typeof metaRaw?.artifactSourceMode === "string" ? metaRaw.artifactSourceMode : null,
-      artifactHashMatch:
-        typeof metaRaw?.artifactHashMatch === "boolean" ? metaRaw.artifactHashMatch : null,
+      fallbackAllowed: true,
+      exactCanonicalReadSucceeded,
+      usedFallbackArtifact,
+      artifactSourceMode,
+      artifactHashMatch,
       artifactRecomputed:
         typeof metaRaw?.artifactRecomputed === "boolean" ? metaRaw.artifactRecomputed : null,
       artifactSourceNote: typeof metaRaw?.artifactSourceNote === "string" ? metaRaw.artifactSourceNote : null,
+      requestedInputHash,
+      artifactInputHashUsed: readArtifactInputHash,
       metadataValidationOnlyDateKeysLocal,
       canonicalReadFailureCode: null as string | null,
       canonicalReadFailureMessage: null as string | null,
     };
     const baselineProjectionSummary = {
-      applied: Boolean(metaRaw?.validationProjectionApplied),
+      applied: baselineProjectionApplied,
+      expected: baselineProjectionExpected,
+      correct: baselineProjectionCorrect,
       projectionType:
         typeof metaRaw?.validationProjectionType === "string" ? metaRaw.validationProjectionType : null,
       validationCompareAvailable: Boolean(metaRaw?.validationCompareAvailable),
@@ -1284,6 +1344,10 @@ export async function POST(req: NextRequest) {
       validationOnlyDateKeyCount: effectiveValidationOnlyDateKeysLocal.length,
       actualDayCount: baselineActualDayCount,
       simulatedDayCount: baselineSimulatedDayCount,
+      validationLeakDatesInBaseline,
+      validationLeakCountInBaseline,
+      validationDatesRenderedAsActualCount,
+      validationDatesRenderedAsSimulatedCount,
       baselineDailyRowCount: baselineDailyRows.length,
       baselineMonthlyRowCount: Array.isArray(baselineDataset?.monthly) ? baselineDataset.monthly.length : 0,
       baselineIntervalCount: Array.isArray(baselineDataset?.series?.intervals15) ? baselineDataset.series.intervals15.length : 0,
@@ -1317,6 +1381,37 @@ export async function POST(req: NextRequest) {
       compareRowsCount,
       baselineActualDayCount,
       baselineSimulatedDayCount,
+      exactCanonicalReadSucceeded,
+      usedFallbackArtifact,
+      requestedInputHash,
+      artifactInputHashUsed: readArtifactInputHash,
+      artifactHashMatch,
+      baselineProjectionExpected,
+      baselineProjectionApplied,
+      baselineProjectionCorrect,
+      compareRowsMatchSelectedDates,
+      validationLeakDatesInBaseline,
+      validationLeakCountInBaseline,
+    };
+    const diagnosticsVerdict = {
+      exactCanonicalReadSucceeded,
+      usedFallbackArtifact,
+      fallbackArtifactReason: usedFallbackArtifact ? artifactSourceMode : null,
+      savedArtifactInputHash: artifactRow?.inputHash ?? null,
+      requestedInputHash,
+      readArtifactInputHash,
+      artifactHashMatch,
+      baselineProjectionExpected,
+      baselineProjectionApplied,
+      baselineProjectionCorrect,
+      selectedValidationDateCount: effectiveValidationOnlyDateKeysLocal.length,
+      compareRowCount: compareRowsCount,
+      compareRowsMatchSelectedDates,
+      validationLeakDatesInBaseline,
+      validationLeakCountInBaseline,
+      travelVacantSimulatedDatesInBaselineCount,
+      validationDatesRenderedAsActualCount,
+      validationDatesRenderedAsSimulatedCount,
     };
     const scoredDayTruthRows = effectiveValidationOnlyDateKeysLocal.map((dk) => {
       const row = compareProjectionRowsFiltered.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk) ?? null;
@@ -1425,6 +1520,7 @@ export async function POST(req: NextRequest) {
       compareProjectionSummary,
       sharedResultPayloadSummary,
       pipelineDiagnosticsSummary,
+      diagnosticsVerdict,
       modelAssumptions: {
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
         projectionMode: "baseline_vs_accuracy",

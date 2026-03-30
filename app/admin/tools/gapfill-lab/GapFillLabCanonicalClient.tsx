@@ -98,6 +98,7 @@ type RunResult = {
   compareProjectionSummary?: Record<string, unknown>;
   sharedResultPayloadSummary?: Record<string, unknown>;
   pipelineDiagnosticsSummary?: Record<string, unknown>;
+  diagnosticsVerdict?: Record<string, unknown>;
 } | {
   ok: false;
   error: string;
@@ -494,8 +495,9 @@ export default function GapFillLabCanonicalClient() {
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
-  const exportPayloadBase = useMemo(
+  const exportPayload = useMemo(
     () => ({
+      exportedAt: new Date().toISOString(),
       workspace: "gapfill-lab-canonical-client",
       formState: {
         email,
@@ -574,15 +576,8 @@ export default function GapFillLabCanonicalClient() {
     ]
   );
 
-  function buildExportPayload() {
-    return {
-      ...exportPayloadBase,
-      exportedAt: new Date().toISOString(),
-    };
-  }
-
   async function onCopyAllData() {
-    const payloadText = JSON.stringify(buildExportPayload(), null, 2);
+    const payloadText = JSON.stringify(exportPayload, null, 2);
     try {
       await navigator.clipboard.writeText(payloadText);
       setExportNotice("Copied full Gapfill data bundle to clipboard.");
@@ -605,7 +600,7 @@ export default function GapFillLabCanonicalClient() {
   }
 
   function onSaveAllToFile() {
-    const payloadText = JSON.stringify(buildExportPayload(), null, 2);
+    const payloadText = JSON.stringify(exportPayload, null, 2);
     const nowIso = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `gapfill-lab-export-${nowIso}.json`;
     const blob = new Blob([payloadText], { type: "application/json;charset=utf-8" });
@@ -1148,6 +1143,41 @@ export default function GapFillLabCanonicalClient() {
       {result?.ok ? (
         <div className="border rounded p-4 space-y-3">
           <div className="font-semibold text-sm">Canonical Calculation Variables / Diagnostics</div>
+          <div className="rounded border bg-brand-navy/5 p-3">
+            <div className="font-semibold text-xs mb-2">Top-level Diagnostics Verdict</div>
+            <div className="grid gap-1 text-xs font-mono md:grid-cols-2">
+              <div>exactCanonicalReadSucceeded: {String((result.diagnosticsVerdict as any)?.exactCanonicalReadSucceeded ?? false)}</div>
+              <div>usedFallbackArtifact: {String((result.diagnosticsVerdict as any)?.usedFallbackArtifact ?? false)}</div>
+              <div>fallbackArtifactReason: {String((result.diagnosticsVerdict as any)?.fallbackArtifactReason ?? "—")}</div>
+              <div>savedArtifactInputHash: {String((result.diagnosticsVerdict as any)?.savedArtifactInputHash ?? "—")}</div>
+              <div>requestedInputHash: {String((result.diagnosticsVerdict as any)?.requestedInputHash ?? "—")}</div>
+              <div>readArtifactInputHash: {String((result.diagnosticsVerdict as any)?.readArtifactInputHash ?? "—")}</div>
+              <div>artifactHashMatch: {String((result.diagnosticsVerdict as any)?.artifactHashMatch ?? false)}</div>
+              <div>baselineProjectionExpected: {String((result.diagnosticsVerdict as any)?.baselineProjectionExpected ?? false)}</div>
+              <div>baselineProjectionApplied: {String((result.diagnosticsVerdict as any)?.baselineProjectionApplied ?? false)}</div>
+              <div>baselineProjectionCorrect: {String((result.diagnosticsVerdict as any)?.baselineProjectionCorrect ?? false)}</div>
+              <div>selectedValidationDateCount: {String((result.diagnosticsVerdict as any)?.selectedValidationDateCount ?? 0)}</div>
+              <div>compareRowCount: {String((result.diagnosticsVerdict as any)?.compareRowCount ?? 0)}</div>
+              <div>compareRowsMatchSelectedDates: {String((result.diagnosticsVerdict as any)?.compareRowsMatchSelectedDates ?? false)}</div>
+              <div>validationLeakCountInBaseline: {String((result.diagnosticsVerdict as any)?.validationLeakCountInBaseline ?? 0)}</div>
+              <div>
+                travelVacantSimulatedDatesInBaselineCount:{" "}
+                {String((result.diagnosticsVerdict as any)?.travelVacantSimulatedDatesInBaselineCount ?? 0)}
+              </div>
+              <div>
+                validationDatesRenderedAsActualCount:{" "}
+                {String((result.diagnosticsVerdict as any)?.validationDatesRenderedAsActualCount ?? 0)}
+              </div>
+              <div>
+                validationDatesRenderedAsSimulatedCount:{" "}
+                {String((result.diagnosticsVerdict as any)?.validationDatesRenderedAsSimulatedCount ?? 0)}
+              </div>
+            </div>
+            <div className="mt-2 text-xs font-mono break-all">
+              validationLeakDatesInBaseline:{" "}
+              {JSON.stringify((result.diagnosticsVerdict as any)?.validationLeakDatesInBaseline ?? [], null, 0)}
+            </div>
+          </div>
           <div className="grid gap-2 text-xs md:grid-cols-2">
             <div className="rounded border bg-brand-navy/5 p-2">
               <div className="font-semibold mb-1">Read / projection truth</div>
@@ -1322,4 +1352,3 @@ export default function GapFillLabCanonicalClient() {
     </div>
   );
 }
-
