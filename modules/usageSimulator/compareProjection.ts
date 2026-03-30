@@ -28,6 +28,7 @@ function cloneDatasetForProjection(dataset: any): any {
       dataset.series && typeof dataset.series === "object"
         ? {
             ...dataset.series,
+            daily: Array.isArray(dataset.series.daily) ? [...dataset.series.daily] : dataset.series.daily,
             intervals15: Array.isArray(dataset.series.intervals15)
               ? [...dataset.series.intervals15]
               : dataset.series.intervals15,
@@ -52,7 +53,7 @@ export function projectBaselineFromCanonicalDataset(
   const actualDaily = actualDailyByDate ?? new Map<string, number>();
   const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
-  if (Array.isArray(projected.daily) && validationSet.size > 0 && actualDaily.size > 0) {
+  if (Array.isArray(projected.daily) && validationSet.size > 0) {
     projected.daily = projected.daily.map((row: any) => {
       const dk = String(row?.date ?? "").slice(0, 10);
       if (!validationSet.has(dk)) return row;
@@ -63,6 +64,21 @@ export function projectBaselineFromCanonicalDataset(
         source: "ACTUAL",
       };
     });
+    const projectedDailyByDate = new Map<string, number>(
+      projected.daily.map((row: any) => [String(row?.date ?? "").slice(0, 10), Number(row?.kwh ?? 0) || 0])
+    );
+    if (Array.isArray((projected as any)?.series?.daily)) {
+      (projected as any).series.daily = (projected as any).series.daily.map((row: any) => {
+        const dk = String(row?.timestamp ?? "").slice(0, 10);
+        if (!validationSet.has(dk)) return row;
+        if (!projectedDailyByDate.has(dk)) return row;
+        return {
+          ...row,
+          kwh: round2(projectedDailyByDate.get(dk)!),
+          source: "ACTUAL",
+        };
+      });
+    }
 
     const monthlyMap = new Map<string, number>();
     for (const day of projected.daily as Array<{ date?: string; kwh?: number }>) {
@@ -98,7 +114,7 @@ export function projectBaselineFromCanonicalDataset(
   projected.meta = {
     ...(projected.meta ?? {}),
     validationOnlyDateKeysLocal,
-    validationProjectionApplied: false,
+    validationProjectionApplied: validationSet.size > 0,
     validationProjectionType: "baseline_keeps_validation_days_actual",
     validationCompareAvailable: validationOnlyDateKeysLocal.length > 0,
     timezoneHintUsed: String(timezoneHint ?? (dataset as any)?.meta?.timezone ?? "America/Chicago"),

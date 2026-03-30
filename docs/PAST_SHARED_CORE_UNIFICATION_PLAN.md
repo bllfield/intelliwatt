@@ -33,7 +33,7 @@ Summary:
 - **Travel/vacant** days are **not** in the pool; they are **filled** by the same shared sim using the **rest** of the good window.
 - **One** shared execution: union of scored test dates and travel/vacant parity dates (selected-days mode) or full-window proof; then **slice** for parity vs scoring—not two engines.
 - **Target for test rows:** “Fresh sim” in Gap-Fill grading is **modeled** by that same day-level logic as travel fills via **`forceModeledOutputKeepReferencePoolDateKeys`** (see `USAGE_SIMULATION_PLAN.md` § Gap-Fill Lab target architecture §6).
-
+0
 ## What changed to match the target (engineering checklist)
 
 - **Gap-Fill compare path:** `buildGapfillCompareSimShared` passes bounded scored test dates as **`forceModeledOutputKeepReferencePoolDateKeysLocal`** into **`simulatePastSelectedDaysShared` / `simulatePastFullWindowShared`** → **`simulatePastUsageDataset`** → **`buildPastSimulatedBaselineV1`**. Test-day actuals **remain** in the reference pool; stitched **compare** output for those days is **modeled** (`GAPFILL_MODELED_KEEP_REF`), not meter-as-sim.

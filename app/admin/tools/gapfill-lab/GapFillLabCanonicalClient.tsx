@@ -11,6 +11,7 @@ import {
   type GapfillFailureFields,
 } from "@/components/admin/gapfillLabAdminUi";
 import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdminSerialization";
+import { buildGapfillExportPayload } from "./exportPayload";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
 type DateRange = { startDate: string; endDate: string };
@@ -576,10 +577,7 @@ export default function GapFillLabCanonicalClient() {
   );
 
   function buildExportPayload() {
-    return {
-      ...exportPayloadBase,
-      exportedAt: new Date().toISOString(),
-    };
+    return buildGapfillExportPayload(exportPayloadBase);
   }
 
   async function onCopyAllData() {
