@@ -22,7 +22,7 @@ type UsagePayload = {
   coverageStart: string | null;
   coverageEnd: string | null;
   intervalCount: number;
-  daily: Array<{ date: string; kwh: number }>;
+  daily: Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE" }>;
   monthly: Array<{ month: string; kwh: number }>;
   weekdayKwh: number;
   weekendKwh: number;
@@ -153,7 +153,16 @@ function toPayloadFromBaseline(dataset: any, timezone: string): UsagePayload | n
   if (!dataset || typeof dataset !== "object") return null;
   const daily = Array.isArray(dataset.daily)
     ? dataset.daily
-        .map((d: any) => ({ date: String(d?.date ?? "").slice(0, 10), kwh: Number(d?.kwh ?? 0) || 0 }))
+        .map((d: any) => ({
+          date: String(d?.date ?? "").slice(0, 10),
+          kwh: Number(d?.kwh ?? 0) || 0,
+          source:
+            String(d?.source ?? "").toUpperCase() === "SIMULATED"
+              ? ("SIMULATED" as const)
+              : String(d?.source ?? "").toUpperCase() === "MISSING_REFERENCE"
+                ? ("MISSING_REFERENCE" as const)
+                : ("ACTUAL" as const),
+        }))
         .filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
     : [];
   const monthly = Array.isArray(dataset.monthly)
