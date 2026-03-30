@@ -2263,6 +2263,68 @@ export async function POST(req: NextRequest) {
   });
   const canonicalDataset = canonicalRead.dataset as any;
   const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
+  const userPipelineRead = await getSimulatedUsageForHouseScenario({
+    userId: user.id,
+    houseId: house.id,
+    scenarioId: String(pastScenario.id),
+    readMode: "allow_rebuild",
+  });
+  const userPipelineDataset = userPipelineRead.ok ? (userPipelineRead.dataset as any) : null;
+  const gapfillBaselineDaily = new Map<string, number>();
+  for (const row of Array.isArray(baselineDataset?.daily) ? baselineDataset.daily : []) {
+    const dk = String(row?.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    gapfillBaselineDaily.set(dk, round2(Number(row?.kwh) || 0));
+  }
+  const userPipelineDaily = new Map<string, number>();
+  for (const row of Array.isArray(userPipelineDataset?.daily) ? userPipelineDataset.daily : []) {
+    const dk = String(row?.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    userPipelineDaily.set(dk, round2(Number(row?.kwh) || 0));
+  }
+  const dailyParityDateKeys = Array.from(
+    new Set<string>([...Array.from(gapfillBaselineDaily.keys()), ...Array.from(userPipelineDaily.keys())])
+  ).sort();
+  let dailyParityMismatchCount = 0;
+  let dailyParityMaxAbsKwhDiff = 0;
+  let dailyParityTotalAbsKwhDiff = 0;
+  const dailyParityMismatchSample: Array<{
+    localDate: string;
+    gapfillBaselineKwh: number;
+    userPipelineKwh: number;
+    absKwhDiff: number;
+  }> = [];
+  for (const dk of dailyParityDateKeys) {
+    const gapfillKwh = round2(gapfillBaselineDaily.get(dk) ?? 0);
+    const userKwh = round2(userPipelineDaily.get(dk) ?? 0);
+    const absDiff = round2(Math.abs(gapfillKwh - userKwh));
+    dailyParityMaxAbsKwhDiff = Math.max(dailyParityMaxAbsKwhDiff, absDiff);
+    dailyParityTotalAbsKwhDiff = round2(dailyParityTotalAbsKwhDiff + absDiff);
+    if (absDiff > 0) {
+      dailyParityMismatchCount += 1;
+      if (dailyParityMismatchSample.length < 25) {
+        dailyParityMismatchSample.push({
+          localDate: dk,
+          gapfillBaselineKwh: gapfillKwh,
+          userPipelineKwh: userKwh,
+          absKwhDiff: absDiff,
+        });
+      }
+    }
+  }
+  const userPipelineParity = {
+    status: userPipelineRead.ok ? "available" : "read_failed",
+    source: "getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar",
+    comparedDateCount: dailyParityDateKeys.length,
+    mismatchDateCount: dailyParityMismatchCount,
+    maxAbsKwhDiff: round2(dailyParityMaxAbsKwhDiff),
+    totalAbsKwhDiff: round2(dailyParityTotalAbsKwhDiff),
+    mismatchSample: dailyParityMismatchSample,
+    userPipelineReadError: userPipelineRead.ok ? null : String(userPipelineRead.message ?? "user_pipeline_read_failed"),
+  };
+  const userPipelineCompareProjection = userPipelineRead.ok
+    ? buildValidationCompareProjectionSidecar(userPipelineDataset)
+    : null;
 
   const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
   const testDateKeySet = new Set<string>(selectedDateKeysSorted);
@@ -2377,6 +2439,8 @@ export async function POST(req: NextRequest) {
       "dispatchPastSimRecalc->recalcSimulatorBuild->simulatePastUsageDataset(recalc)->getSimulatedUsageForHouseScenario(/api/user/usage/simulated/house family)->admin_accuracy_projection",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
     validationDaysTruthSource: "canonical_saved_artifact_family",
+    userPipelineParitySource:
+      "getSimulatedUsageForHouseScenario(default_projection)->buildValidationCompareProjectionSidecar(/api/user/usage/simulated/house family)",
   };
   const snapshotPayload: Record<string, unknown> = {
     selectedScoredDateKeys: selectedDateKeysSorted,
@@ -2415,6 +2479,8 @@ export async function POST(req: NextRequest) {
       parityRowCount: 0,
     },
     compareTruth,
+    userPipelineParity,
+    userPipelineCompareProjection,
     compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
     identityTruth: {
       scenarioId: String(pastScenario.id),
@@ -2519,6 +2585,7 @@ export async function POST(req: NextRequest) {
     parity: {
       travelVacantParityRows: [],
       travelVacantParityTruth: snapshotPayload.travelVacantParityTruth,
+      userPipelineParity,
       compareTruth,
       identityTruth: snapshotPayload.identityTruth,
       compareCoreTiming: snapshotPayload.compareCoreTiming,

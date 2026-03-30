@@ -62,3 +62,8 @@ coverage/
 docs/*.pdf
 tmp-*.pdf
 deploy/droplet/__pycache__/
+
+# GapFill parity local diagnostics (can include PII/test customer usage data)
+tmp/parity/*.json
+tmp/parity/*.csv
+tmp/parity/*.txt

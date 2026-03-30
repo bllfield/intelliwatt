@@ -448,7 +448,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(res.status).toBe(200);
 
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
-    expect(projectionModes).toEqual(["raw", "baseline"]);
+    expect(projectionModes).toEqual(["raw", "baseline", undefined]);
+    expect(body.parity?.userPipelineParity?.status).toBe("available");
     expect(body.baselineDatasetProjection?.meta?.validationProjectionApplied).toBe(true);
   });
 
