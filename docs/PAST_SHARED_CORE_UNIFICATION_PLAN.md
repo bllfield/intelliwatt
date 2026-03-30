@@ -36,6 +36,7 @@ Summary:
 ## What changed to match the target (engineering checklist)
 
 - **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
+- **GapFill admin canonical recalc route (`run_test_home_canonical_recalc`) with custom `testRanges`:** For that request, compare projection is scoped to the **user-selected validation date keys** from `testRanges`. Fail-closed compare attachment (`attachValidationCompareProjection`) and emitted compare rows/metrics use that **effective** date set only, not a stale superset that may still appear in artifact `meta.validationOnlyDateKeysLocal`. This narrows **which dates are scored in the HTTP response**; it does not introduce a separate simulator producer or change producer ownership.
 - **Engine / flags:** Complements **`forceSimulateDateKeys`** (which **excludes** days from the reference pool). Keep-ref keys must stay **disjoint** from forced-sim keys for the same calendar day.
 - **UI / API truth:** Route payload may include **`gapfillScoringDiagnostics`**, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`), not an admin-only recomputed simulated truth path.
 - **Docs/tests:** Service artifact tests assert keep-ref args and diagnostics; shared-window ownership rules unchanged.

@@ -571,6 +571,8 @@ This section overrides any older contradictory guidance in this file.
 
 Project documentation alignment is mandatory whenever a Cursor block changes project scope, architecture, ownership, truth source, fallback behavior, storage behavior, route behavior, simulator behavior, compare behavior, stitch behavior, fingerprint behavior, execution-mode behavior, or any other implementation contract.
 
+This includes behavior-narrowing contract changes that do not alter the shared simulator producer (for example, admin GapFill lab compare projection scoped to user-selected testRanges validation dates on a single request).
+
 This is not optional follow-up work.
 
 If a block changes any of the above, that same block must also include:
