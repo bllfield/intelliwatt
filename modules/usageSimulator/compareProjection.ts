@@ -1,4 +1,13 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { DateTime } from "luxon";
+
+/** Weekday vs weekend in `zone` for a local `YYYY-MM-DD` key (matches usage daily semantics, not UTC calendar). */
+function isWeekendLocalDateKeyInZone(dateKeyLocal: string, zone: string): boolean {
+  const dt = DateTime.fromISO(dateKeyLocal, { zone });
+  if (!dt.isValid) return false;
+  const wd = dt.weekday;
+  return wd === 6 || wd === 7;
+}
 
 /** Thrown when validation compare rows cannot be built without substituting missing simulated-day truth. */
 export class CompareTruthIncompleteError extends Error {
@@ -117,7 +126,7 @@ export function projectBaselineFromCanonicalDataset(
         byDate.get(dk)!.push(i);
       }
       const next = intervals.map((r) => ({ ...r, kwh: Number(r.kwh) || 0 }));
-      for (const dk of validationSet) {
+      for (const dk of Array.from(validationSet)) {
         if (!actualDaily.has(dk)) continue;
         const idxs = byDate.get(dk);
         if (!idxs?.length) continue;
@@ -168,10 +177,8 @@ export function projectBaselineFromCanonicalDataset(
       for (const day of projected.daily as Array<{ date?: string; kwh?: number }>) {
         const dk = String(day?.date ?? "").slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-        const d = new Date(`${dk}T12:00:00.000Z`);
-        const dow = d.getUTCDay();
         const k = Number(day?.kwh) || 0;
-        if (dow === 0 || dow === 6) weekendSum += k;
+        if (isWeekendLocalDateKeyInZone(dk, tz)) weekendSum += k;
         else weekdaySum += k;
       }
       (projected as any).insights = {

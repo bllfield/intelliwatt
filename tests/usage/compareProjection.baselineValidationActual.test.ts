@@ -137,5 +137,7 @@ describe("projectBaselineFromCanonicalDataset", () => {
     const sum = (projected.series.intervals15 as Array<{ kwh: number }>).reduce((s, r) => s + (Number(r.kwh) || 0), 0);
     expect(sum).toBeCloseTo(36, 5);
     expect(projected.daily[0].sourceDetail).toBe("ACTUAL_VALIDATION_TEST_DAY");
+    // 2025-08-11 is Monday in America/Chicago — insights must use house TZ, not UTC calendar on the date string
+    expect(projected.insights.weekdayVsWeekend).toEqual({ weekday: 36, weekend: 0 });
   });
 });
