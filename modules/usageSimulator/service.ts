@@ -3485,37 +3485,10 @@ export function resolveSharedPastRecalcWindow(args: {
   endDate: string;
   source: "smt_anchor" | "canonical_month_range" | "canonical_coverage_fallback";
 } {
-  if (args.mode !== "SMT_BASELINE") {
-    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    return {
-      startDate: canonicalCoverage.startDate,
-      endDate: canonicalCoverage.endDate,
-      source: "canonical_coverage_fallback",
-    };
-  }
-  const anchorPeriods = Array.isArray(args.smtAnchorPeriods) ? args.smtAnchorPeriods : [];
-  const anchorStart = anchorPeriods[0]?.startDate;
-  const anchorEnd = anchorPeriods[anchorPeriods.length - 1]?.endDate;
-  if (
-    typeof anchorStart === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(anchorStart) &&
-    typeof anchorEnd === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(anchorEnd)
-  ) {
-    return {
-      startDate: anchorStart,
-      endDate: anchorEnd,
-      source: "smt_anchor",
-    };
-  }
-  const canonicalWindow = canonicalWindowDateRange(args.canonicalMonths);
-  if (canonicalWindow) {
-    return {
-      startDate: canonicalWindow.start,
-      endDate: canonicalWindow.end,
-      source: "canonical_month_range",
-    };
-  }
+  // Shared producer parity lock:
+  // Past simulation window ownership is canonical usage coverage across cold_build/recalc/lab_validation.
+  // SMT anchors remain metadata for actual/source context, not producer coverage ownership.
+  void args;
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   return {
     startDate: canonicalCoverage.startDate,
@@ -4509,7 +4482,13 @@ async function recalcSimulatorBuildImpl(args: {
         baseKind: built.baseKind,
         canonicalEndMonth: built.canonicalMonths[built.canonicalMonths.length - 1] ?? "",
         canonicalMonths: built.canonicalMonths,
-        canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : smtAnchorPeriods ?? undefined,
+        canonicalPeriods: [
+          {
+            id: "canonical_usage_365_coverage",
+            startDate: startDate,
+            endDate: endDate,
+          },
+        ],
         weatherPreference,
         monthlyTotalsKwhByMonth,
         intradayShape96: built.intradayShape96,
@@ -4617,7 +4596,18 @@ async function recalcSimulatorBuildImpl(args: {
     baseKind,
     canonicalEndMonth: canonicalForBuild.endMonth,
     canonicalMonths: built.canonicalMonths,
-    canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : smtAnchorPeriods ?? undefined,
+    canonicalPeriods:
+      scenario?.name === WORKSPACE_PAST_NAME
+        ? [
+            {
+              id: "canonical_usage_365_coverage",
+              startDate: sharedPastRecalcWindow?.startDate ?? resolveCanonicalUsage365CoverageWindow().startDate,
+              endDate: sharedPastRecalcWindow?.endDate ?? resolveCanonicalUsage365CoverageWindow().endDate,
+            },
+          ]
+        : manualCanonicalPeriods.length
+          ? manualCanonicalPeriods
+          : smtAnchorPeriods ?? undefined,
     weatherPreference,
     weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
     monthlyTotalsKwhByMonth,
@@ -5895,7 +5885,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
         // getActualIntervalsForRange) before the cache check. One full-year fetch in getPastSimulatedDatasetForHouse is enough.
         let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
         let canonicalEndMonthForMeta = buildInputs.canonicalEndMonth;
-        let sourceOfWindow: "buildInputs" | "baselineBuild" | "actualSummaryFallback" = "buildInputs";
         let periodsForStitch: Array<{ id: string; startDate: string; endDate: string }> | undefined =
           Array.isArray((buildInputs as any).canonicalPeriods) &&
           (buildInputs as any).canonicalPeriods.length > 0
@@ -5920,7 +5909,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
             if (typeof baselineInputs.canonicalEndMonth === "string") {
               canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
             }
-            sourceOfWindow = "baselineBuild";
           }
         }
         if (canonicalMonths.length === 0) {
@@ -5939,40 +5927,26 @@ export async function getSimulatedUsageForHouseScenario(args: {
             if (actualMonths.length > 0) {
               canonicalMonths = Array.from(new Set(actualMonths)).sort((a, b) => (a < b ? -1 : 1));
               canonicalEndMonthForMeta = canonicalMonths[canonicalMonths.length - 1] ?? canonicalEndMonthForMeta;
-              sourceOfWindow = "actualSummaryFallback";
             }
           } catch {
             /* keep canonicalMonths from build or baseline */
           }
         }
         const window = canonicalWindowDateRange(canonicalMonths);
-        let startDate = periodsForStitch?.[0]?.startDate ?? window?.start;
-        let endDate = periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
-        // Align 12-month display to end with actual data (e.g. March 2026) so chart/table show Apr..Mar, not Mar..Feb.
-        if (startDate && endDate && window?.end) {
-          try {
-            const actualForWindow = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, { skipFullYearIntervalFetch: true });
-            const actualEnd = actualForWindow?.dataset?.summary?.end;
-            const actualStart = actualForWindow?.dataset?.summary?.start;
-            if (typeof actualEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(actualEnd.slice(0, 10))) {
-              const actualEndDate = actualEnd.slice(0, 10);
-              if (actualEndDate > endDate) endDate = actualEndDate;
-            }
-            if (typeof actualStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(actualStart.slice(0, 10))) {
-              const actualStartDate = actualStart.slice(0, 10);
-              if (actualStartDate < startDate) startDate = actualStartDate;
-            }
-          } catch {
-            /* keep window-based start/end */
-          }
-        }
+        const parityWindow = resolveSharedPastRecalcWindow({
+          mode: "SMT_BASELINE",
+          canonicalMonths,
+          smtAnchorPeriods: periodsForStitch,
+        });
+        const startDate = parityWindow.startDate ?? periodsForStitch?.[0]?.startDate ?? window?.start;
+        const endDate = parityWindow.endDate ?? periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
         const pastWindowDiag = {
           canonicalMonthsLen: canonicalMonths.length,
           firstMonth: canonicalMonths[0] ?? null,
           lastMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
           windowStartUtc: startDate ?? null,
           windowEndUtc: endDate ?? null,
-          sourceOfWindow,
+          sourceOfWindow: parityWindow.source,
         };
         if (startDate && endDate) {
           const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;

@@ -453,6 +453,179 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.baselineDatasetProjection?.meta?.validationProjectionApplied).toBe(true);
   });
 
+  it("reports parity source truthfully when baseline projection read falls back to raw", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
+      if (args.projectionMode === "raw") {
+        return {
+          ok: true,
+          houseId: "h1",
+          scenarioKey: "past-s1",
+          scenarioId: "past-s1",
+          dataset: {
+            summary: {
+              source: "SIMULATED",
+              totalKwh: 140,
+              intervalsCount: 3,
+              start: "2025-03-01",
+              end: "2026-02-28",
+              latest: "2026-02-28T23:45:00Z",
+            },
+            daily: [
+              { date: "2025-04-10", kwh: 16.5 },
+              { date: "2025-05-02", kwh: 11.25 },
+            ],
+            monthly: [
+              { month: "2025-04", kwh: 16.5 },
+              { month: "2025-05", kwh: 11.25 },
+            ],
+            series: {
+              intervals15: [
+                { timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 },
+                { timestamp: "2025-04-10T00:15:00.000Z", kwh: 1 },
+                { timestamp: "2025-05-02T00:00:00.000Z", kwh: 2 },
+              ],
+            },
+            meta: {
+              canonicalArtifactSimulatedDayTotalsByDate: {
+                "2025-04-10": 16.5,
+                "2025-05-02": 11.25,
+              },
+            },
+          },
+        };
+      }
+      if (args.projectionMode === "baseline") {
+        return {
+          ok: false,
+          code: "INTERNAL_ERROR",
+          message: "baseline projection read failed",
+        };
+      }
+      return {
+        ok: true,
+        houseId: "h1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: { source: "SIMULATED", totalKwh: 125, intervalsCount: 3, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
+          daily: [
+            { date: "2025-04-10", kwh: 12.5 },
+            { date: "2025-05-02", kwh: 9.75 },
+          ],
+          monthly: [{ month: "2025-04", kwh: 12.5 }, { month: "2025-05", kwh: 9.75 }],
+          series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 }] },
+          meta: {
+            validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+          },
+        },
+      };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      houseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.parity?.userPipelineParity?.status).toBe("available_with_baseline_fallback_raw_projection");
+    expect(body.parity?.userPipelineParity?.baselineProjectionUsed).toBe("raw_fallback");
+    expect(body.parity?.userPipelineParity?.baselineReadOk).toBe(false);
+    expect(body.parity?.userPipelineParity?.baselineReadError).toBe("baseline projection read failed");
+    expect(String(body.parity?.userPipelineParity?.source ?? "")).toContain("raw_projection_fallback_from_failed_baseline_read");
+    expect(String(body.compareTruth?.userPipelineParitySource ?? "")).toContain("raw_projection_fallback_from_failed_baseline_read");
+  });
+
+  it("proves canonical compare producer parity on failing edge dates and first travel block", async () => {
+    const travelBlockDates = [
+      "2025-03-28",
+      "2025-03-29",
+      "2025-03-30",
+      "2025-03-31",
+      "2025-04-01",
+    ];
+    const travelBlockTotals: Record<string, number> = {
+      "2025-03-28": 18.12,
+      "2025-03-29": 27.78,
+      "2025-03-30": 22.64,
+      "2025-03-31": 19.05,
+      "2025-04-01": 20.11,
+    };
+    getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
+      const commonDataset = {
+        summary: {
+          source: "SIMULATED",
+          totalKwh: 15123.55,
+          intervalsCount: 35232,
+          start: "2025-03-01",
+          end: "2026-02-28",
+          latest: "2026-02-28T23:45:00Z",
+        },
+        daily: travelBlockDates.map((date) => ({
+          date,
+          kwh: travelBlockTotals[date],
+          source: "SIMULATED",
+        })),
+        monthly: [{ month: "2025-03", kwh: 300.5 }, { month: "2025-04", kwh: 412.1 }],
+        series: {
+          intervals15: travelBlockDates.flatMap((date) => [
+            { timestamp: `${date}T00:00:00.000Z`, kwh: 1.0 },
+            { timestamp: `${date}T00:15:00.000Z`, kwh: 1.0 },
+          ]),
+        },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10"],
+          validationProjectionApplied: args?.projectionMode === "baseline",
+          excludedDateKeysCount: 5,
+          excludedDateKeysFingerprint: travelBlockDates.join(","),
+          canonicalArtifactSimulatedDayTotalsByDate: travelBlockTotals,
+        },
+      };
+      return {
+        ok: true,
+        houseId: "h1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: commonDataset,
+      };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      houseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.parity?.userPipelineParity?.status).toBe("available");
+    expect(body.parity?.userPipelineParity?.mismatchDateCount).toBe(0);
+    expect(body.parity?.userPipelineParity?.maxAbsKwhDiff).toBe(0);
+    expect(body.parity?.userPipelineParity?.totalAbsKwhDiff).toBe(0);
+    expect(body.parity?.userPipelineParity?.comparedDateCount).toBe(travelBlockDates.length);
+    expect(body.baselineDatasetProjection?.summary?.start).toBe("2025-03-01");
+    expect(body.baselineDatasetProjection?.summary?.end).toBe("2026-02-28");
+    expect(body.baselineDatasetProjection?.summary?.intervalsCount).toBe(35232);
+    expect(body.baselineDatasetProjection?.meta?.excludedDateKeysCount).toBe(5);
+    expect(body.baselineDatasetProjection?.meta?.excludedDateKeysFingerprint).toBe(travelBlockDates.join(","));
+    expect(body.baselineDatasetProjection?.meta?.canonicalArtifactSimulatedDayTotalsByDate).toMatchObject(
+      travelBlockTotals
+    );
+  });
+
   it("runs canonical test-home recalc with generic actual-context source", async () => {
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
@@ -478,7 +651,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const arg = recalcSimulatorBuild.mock.calls[0]?.[0];
     expect(arg.houseId).toBe("test-home-1");
     expect(arg.actualContextHouseId).toBe("h1");
+    expect(arg.esiid).toBe("E1");
     expect(arg.scenarioId).toBe("past-s1");
+    expect(Array.from(arg.validationOnlyDateKeysLocal as Set<string>).sort()).toEqual(["2025-04-10"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual(["baseline"]);
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
@@ -539,6 +714,154 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       meta?: { validationOnlyDateKeysLocal?: string[] };
     };
     expect(Array.isArray(compareInput?.meta?.validationOnlyDateKeysLocal)).toBe(true);
+  });
+
+  it("keeps source-faithful calibration baseline travel/vacant totals stable for edge dates", async () => {
+    const edgeDates = ["2025-03-28", "2025-03-29", "2025-03-30", "2025-03-31"];
+    const edgeTotals: Record<string, number> = {
+      "2025-03-28": 18.12,
+      "2025-03-29": 27.78,
+      "2025-03-30": 22.64,
+      "2025-03-31": 19.05,
+    };
+    getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
+      if (args?.projectionMode !== "baseline") {
+        return { ok: false, code: "INTERNAL_ERROR", message: "unexpected projection in test" };
+      }
+      return {
+        ok: true,
+        houseId: "test-home-1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: {
+            source: "SIMULATED",
+            totalKwh: 15123.55,
+            intervalsCount: 35232,
+            start: "2025-03-01",
+            end: "2026-02-28",
+            latest: "2026-02-28T23:45:00Z",
+          },
+          daily: edgeDates.map((date) => ({
+            date,
+            kwh: edgeTotals[date],
+            source: "SIMULATED",
+          })),
+          monthly: [{ month: "2025-03", kwh: 300.5 }],
+          series: { intervals15: [{ timestamp: "2025-03-29T00:00:00.000Z", kwh: 1 }] },
+          meta: {
+            validationOnlyDateKeysLocal: ["2025-04-10"],
+            validationProjectionApplied: true,
+            excludedDateKeysCount: 4,
+            excludedDateKeysFingerprint: edgeDates.join(","),
+            canonicalArtifactSimulatedDayTotalsByDate: edgeTotals,
+          },
+        },
+      };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    const arg = recalcSimulatorBuild.mock.calls[0]?.[0];
+    expect(arg.actualContextHouseId).toBe("h1");
+    expect(arg.houseId).toBe("test-home-1");
+    const baselineRows = Array.isArray(body.baselineDatasetProjection?.daily)
+      ? (body.baselineDatasetProjection.daily as Array<{ date: string; kwh: number }>)
+      : [];
+    const byDate = Object.fromEntries(baselineRows.map((row) => [String(row.date).slice(0, 10), Number(row.kwh)]));
+    expect(byDate["2025-03-28"]).toBe(18.12);
+    expect(byDate["2025-03-29"]).toBe(27.78);
+    expect(byDate["2025-03-30"]).toBe(22.64);
+    expect(byDate["2025-03-31"]).toBe(19.05);
+  });
+
+  it("does not change excluded ownership metadata when only validation selection changes", async () => {
+    const excludedFingerprint = "2025-03-28,2025-03-29,2025-03-30,2025-03-31";
+    getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
+      if (args?.projectionMode !== "baseline") {
+        return { ok: false, code: "INTERNAL_ERROR", message: "unexpected projection in guard test" };
+      }
+      return {
+        ok: true,
+        houseId: "test-home-1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: {
+            source: "SIMULATED",
+            totalKwh: 15123.55,
+            intervalsCount: 35232,
+            start: "2025-03-01",
+            end: "2026-02-28",
+            latest: "2026-02-28T23:45:00Z",
+          },
+          daily: [{ date: "2025-03-29", kwh: 27.78, source: "SIMULATED" }],
+          monthly: [{ month: "2025-03", kwh: 27.78 }],
+          series: { intervals15: [{ timestamp: "2025-03-29T00:00:00.000Z", kwh: 1 }] },
+          meta: {
+            validationOnlyDateKeysLocal: ["2025-04-10"],
+            validationProjectionApplied: true,
+            excludedDateKeysCount: 4,
+            excludedDateKeysFingerprint: excludedFingerprint,
+            canonicalArtifactSimulatedDayTotalsByDate: {
+              "2025-03-29": 27.78,
+            },
+          },
+        },
+      };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const reqA = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const reqB = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-05-02", endDate: "2025-05-02" }],
+    });
+
+    const resA = await POST(reqA);
+    const bodyA = await resA.json();
+    const resB = await POST(reqB);
+    const bodyB = await resB.json();
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+    expect(bodyA.baselineDatasetProjection?.meta?.excludedDateKeysCount).toBe(4);
+    expect(bodyB.baselineDatasetProjection?.meta?.excludedDateKeysCount).toBe(4);
+    expect(bodyA.baselineDatasetProjection?.meta?.excludedDateKeysFingerprint).toBe(excludedFingerprint);
+    expect(bodyB.baselineDatasetProjection?.meta?.excludedDateKeysFingerprint).toBe(excludedFingerprint);
+    expect(recalcSimulatorBuild).toHaveBeenCalledTimes(2);
+    const keysA = Array.from(recalcSimulatorBuild.mock.calls[0]?.[0]?.validationOnlyDateKeysLocal as Set<string>).sort();
+    const keysB = Array.from(recalcSimulatorBuild.mock.calls[1]?.[0]?.validationOnlyDateKeysLocal as Set<string>).sort();
+    expect(keysA).toEqual(["2025-04-10"]);
+    expect(keysB).toEqual(["2025-05-02"]);
   });
 
   it("rejects invalid adminLabTreatmentMode on canonical recalc", async () => {

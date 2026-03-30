@@ -101,30 +101,44 @@ import {
 } from "@/modules/usageSimulator/service";
 
 describe("resolveSharedPastRecalcWindow", () => {
-  it("uses SMT anchor window when available so selection and simulation can align", () => {
+  it("uses shared canonical coverage for SMT_BASELINE even when anchor periods exist", () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
     const out = resolveSharedPastRecalcWindow({
       mode: "SMT_BASELINE",
       canonicalMonths: ["2025-03", "2026-02"],
       smtAnchorPeriods: [{ startDate: "2025-03-14", endDate: "2026-03-13" }],
     });
     expect(out).toMatchObject({
-      startDate: "2025-03-14",
-      endDate: "2026-03-13",
-      source: "smt_anchor",
+      startDate: canonicalCoverage.startDate,
+      endDate: canonicalCoverage.endDate,
+      source: "canonical_coverage_fallback",
     });
   });
 
-  it("falls back to canonical month range when no SMT anchor exists", () => {
+  it("uses shared canonical coverage for SMT_BASELINE when anchor periods are missing", () => {
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
     const out = resolveSharedPastRecalcWindow({
       mode: "SMT_BASELINE",
       canonicalMonths: ["2025-03", "2026-02"],
       smtAnchorPeriods: undefined,
     });
     expect(out).toMatchObject({
-      startDate: "2025-03-01",
-      endDate: "2026-02-28",
-      source: "canonical_month_range",
+      startDate: canonicalCoverage.startDate,
+      endDate: canonicalCoverage.endDate,
+      source: "canonical_coverage_fallback",
     });
+  });
+
+  it("keeps canonical producer coverage to exactly 365 days", () => {
+    const out = resolveSharedPastRecalcWindow({
+      mode: "SMT_BASELINE",
+      canonicalMonths: ["2025-03", "2026-02"],
+      smtAnchorPeriods: [{ startDate: "2025-03-01", endDate: "2026-03-01" }],
+    });
+    const startMs = new Date(`${out.startDate}T12:00:00.000Z`).getTime();
+    const endMs = new Date(`${out.endDate}T12:00:00.000Z`).getTime();
+    const inclusiveDays = Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
+    expect(inclusiveDays).toBe(365);
   });
 
   it("uses canonical coverage window for MANUAL_TOTALS (regression guard for window-lock rule)", () => {

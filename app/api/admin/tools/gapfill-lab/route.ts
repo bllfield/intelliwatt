@@ -2262,6 +2262,7 @@ export async function POST(req: NextRequest) {
     projectionMode: "baseline",
   });
   const canonicalDataset = canonicalRead.dataset as any;
+  const baselineReadUsedCanonicalRawFallback = !baselineRead.ok;
   const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
   const userPipelineRead = await getSimulatedUsageForHouseScenario({
     userId: user.id,
@@ -2312,9 +2313,23 @@ export async function POST(req: NextRequest) {
       }
     }
   }
+  const userPipelineParitySource = baselineReadUsedCanonicalRawFallback
+    ? "getSimulatedUsageForHouseScenario(raw_projection_fallback_from_failed_baseline_read)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar"
+    : "getSimulatedUsageForHouseScenario(baseline_projection)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar";
   const userPipelineParity = {
-    status: userPipelineRead.ok ? "available" : "read_failed",
-    source: "getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar",
+    status: userPipelineRead.ok
+      ? baselineReadUsedCanonicalRawFallback
+        ? "available_with_baseline_fallback_raw_projection"
+        : "available"
+      : "read_failed",
+    source: userPipelineParitySource,
+    baselineProjectionRequested: "baseline",
+    baselineProjectionUsed: baselineReadUsedCanonicalRawFallback ? "raw_fallback" : "baseline",
+    baselineReadOk: baselineRead.ok,
+    baselineReadError: baselineRead.ok
+      ? null
+      : String(baselineRead.message ?? "baseline_projection_read_failed"),
+    userPipelineProjectionUsed: "default",
     comparedDateCount: dailyParityDateKeys.length,
     mismatchDateCount: dailyParityMismatchCount,
     maxAbsKwhDiff: round2(dailyParityMaxAbsKwhDiff),
@@ -2439,8 +2454,7 @@ export async function POST(req: NextRequest) {
       "dispatchPastSimRecalc->recalcSimulatorBuild->simulatePastUsageDataset(recalc)->getSimulatedUsageForHouseScenario(/api/user/usage/simulated/house family)->admin_accuracy_projection",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
     validationDaysTruthSource: "canonical_saved_artifact_family",
-    userPipelineParitySource:
-      "getSimulatedUsageForHouseScenario(default_projection)->buildValidationCompareProjectionSidecar(/api/user/usage/simulated/house family)",
+    userPipelineParitySource,
   };
   const snapshotPayload: Record<string, unknown> = {
     selectedScoredDateKeys: selectedDateKeysSorted,
