@@ -122,6 +122,7 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 
 - **Target data pool & scoring semantics (authoritative):** `docs/USAGE_SIMULATION_PLAN.md` → *Gap-Fill Lab: Target architecture (data pool, single run, scoring)*. The good-data pool for the shared sim **excludes only** travel/vacant (bad at-home signal); **test compare** days’ actuals **are** in the pool. **Implemented:** Gap-Fill grades **modeled** sim vs actual on test days via **`forceModeledOutputKeepReferencePoolDateKeys`** / **`gapfillScoringDiagnostics`** (same day-level sim as travel fills). Engineering notes: `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md` → *What changed to match the target*.
 - Past Sim and GapFill compare use the same shared artifact identity/fingerprint and shared simulator logic path.
+- User Past stitch display: `projectBaselineFromCanonicalDataset` + optional `rehydrateValidationCompareMetaFromBuildInputsForRead` ensure validation days show **actual** usage in the main Past table/chart series while **TRAVEL_VACANT** stays simulated in stitch; compare rows come from **`attachValidationCompareProjection`** (artifact-backed canonical simulated-day totals), not a duplicate engine.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - `excludedDateKeysCount` and `excludedDateKeysFingerprint` must describe only travel/vacant exclusions within the shared coverage window.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.

@@ -1,3 +1,5 @@
+import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+
 /** Thrown when validation compare rows cannot be built without substituting missing simulated-day truth. */
 export class CompareTruthIncompleteError extends Error {
   readonly code = "COMPARE_TRUTH_INCOMPLETE" as const;
@@ -68,6 +70,7 @@ export function projectBaselineFromCanonicalDataset(
   const validationSet = new Set(validationOnlyDateKeysLocal);
   const actualDaily = actualDailyByDate ?? new Map<string, number>();
   const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  const tz = String(timezoneHint ?? (dataset as any)?.meta?.timezone ?? "America/Chicago");
 
   if (Array.isArray(projected.daily) && validationSet.size > 0) {
     projected.daily = projected.daily.map((row: any) => {
@@ -85,8 +88,13 @@ export function projectBaselineFromCanonicalDataset(
       projected.daily.map((row: any) => [String(row?.date ?? "").slice(0, 10), Number(row?.kwh ?? 0) || 0])
     );
     if (Array.isArray((projected as any)?.series?.daily)) {
-      (projected as any).series.daily = (projected as any).series.daily.map((row: any) => {
-        const dk = String(row?.timestamp ?? "").slice(0, 10);
+      const dailyArr = projected.daily as Array<{ date?: string; kwh?: number }>;
+      (projected as any).series.daily = (projected as any).series.daily.map((row: any, idx: number) => {
+        const dkFromDaily = dailyArr[idx] ? String(dailyArr[idx]?.date ?? "").slice(0, 10) : "";
+        const dk =
+          /^\d{4}-\d{2}-\d{2}$/.test(dkFromDaily)
+            ? dkFromDaily
+            : dateKeyInTimezone(String(row?.timestamp ?? ""), tz);
         if (!validationSet.has(dk)) return row;
         if (!projectedDailyByDate.has(dk)) return row;
         return {
@@ -96,6 +104,32 @@ export function projectBaselineFromCanonicalDataset(
           sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
         };
       });
+    }
+
+    /** Stitch/chart must show meter-backed usage on validation days; scale modeled 15m rows to actual day total. */
+    if (Array.isArray((projected as any)?.series?.intervals15)) {
+      const intervals = (projected as any).series.intervals15 as Array<{ timestamp: string; kwh: number }>;
+      const byDate = new Map<string, number[]>();
+      for (let i = 0; i < intervals.length; i++) {
+        const dk = dateKeyInTimezone(String(intervals[i]?.timestamp ?? ""), tz);
+        if (!validationSet.has(dk) || !actualDaily.has(dk)) continue;
+        if (!byDate.has(dk)) byDate.set(dk, []);
+        byDate.get(dk)!.push(i);
+      }
+      const next = intervals.map((r) => ({ ...r, kwh: Number(r.kwh) || 0 }));
+      for (const dk of validationSet) {
+        if (!actualDaily.has(dk)) continue;
+        const idxs = byDate.get(dk);
+        if (!idxs?.length) continue;
+        const sumSim = idxs.reduce((s, i) => s + (Number(intervals[i]?.kwh) || 0), 0);
+        const target = Number(actualDaily.get(dk)) || 0;
+        if (sumSim <= 0 || !Number.isFinite(target)) continue;
+        const factor = target / sumSim;
+        for (const i of idxs) {
+          next[i] = { ...next[i], kwh: round2(next[i].kwh * factor) };
+        }
+      }
+      (projected as any).series.intervals15 = next;
     }
 
     const monthlyMap = new Map<string, number>();
@@ -125,6 +159,24 @@ export function projectBaselineFromCanonicalDataset(
         ...projected.totals,
         importKwh: round2(totalKwh + exportKwh),
         netKwh: round2(totalKwh),
+      };
+    }
+
+    if (projected.insights && typeof projected.insights === "object" && Array.isArray(projected.daily)) {
+      let weekdaySum = 0;
+      let weekendSum = 0;
+      for (const day of projected.daily as Array<{ date?: string; kwh?: number }>) {
+        const dk = String(day?.date ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+        const d = new Date(`${dk}T12:00:00.000Z`);
+        const dow = d.getUTCDay();
+        const k = Number(day?.kwh) || 0;
+        if (dow === 0 || dow === 6) weekendSum += k;
+        else weekdaySum += k;
+      }
+      (projected as any).insights = {
+        ...(projected.insights as object),
+        weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
       };
     }
   }

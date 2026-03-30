@@ -727,6 +727,60 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     });
   });
 
+  it("rehydrates validation compare from buildInputs when cached artifact omits validationOnlyDateKeysLocal", async () => {
+    scenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
+    usageSimulatorBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+      },
+    });
+    computePastInputHash.mockReturnValue("hash-rehydrate-compare");
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-rehydrate-compare",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: "2026-01-01",
+          end: "2026-01-01",
+          latest: "2026-01-01",
+        },
+        meta: {},
+        daily: [
+          {
+            date: "2026-01-01",
+            kwh: 0.75,
+            source: "SIMULATED",
+            sourceDetail: "SIMULATED_TEST_DAY",
+          },
+        ],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+      projectionMode: "raw",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(Array.isArray(out.dataset?.meta?.validationCompareRows)).toBe(true);
+      expect((out.dataset?.meta?.validationCompareRows as unknown[]).length).toBeGreaterThan(0);
+    }
+  });
+
   it("allow_rebuild persists canonical excluded fingerprint metadata on saved shared artifact", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {

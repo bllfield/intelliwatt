@@ -411,6 +411,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     return Boolean(futureBuild?.lastBuiltAt) || baselineReady;
   }, [futureBuild?.lastBuiltAt, futureScenario?.id, baselineReady]);
 
+  const pastScenarioHasConfiguredValidationDays = useMemo(() => {
+    const meta = scenarioSimHouseOverride?.[0]?.dataset?.meta;
+    const keys = meta?.validationOnlyDateKeysLocal;
+    return Array.isArray(keys) && keys.length > 0;
+  }, [scenarioSimHouseOverride]);
+
   useEffect(() => {
     autoBaselineAttemptedRef.current = false;
     scenarioRecalcTimersRef.current.forEach((t) => window.clearTimeout(t));
@@ -1380,7 +1386,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             />
           ) : scenarioCurveOutcome?.kind === "success" ? (
             <div className="mt-2 text-xs text-brand-navy/70">
-              No validation/test-day compare rows are available for this Past scenario yet.
+              {pastScenarioHasConfiguredValidationDays
+                ? "Validation test days are configured, but compare rows were not returned with this response. Recalculate Past usage or retry; if this persists, compare truth may be incomplete (server returns a specific error when that happens)."
+                : "No validation/test-day compare rows are available for this Past scenario yet."}
             </div>
           ) : scenarioCurveOutcome?.kind === "no_build" ? (
             <div className="mt-2 text-xs text-brand-navy/70">

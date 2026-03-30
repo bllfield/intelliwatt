@@ -530,6 +530,8 @@ After simulated day outputs are derived and stored:
 
 TEST simulated days do not go into the stitched Past chart.
 
+Implementation detail (must stay aligned with code): the shared producer may emit pre-projection `SIMULATED_TEST_DAY` tags on daily/intervals for canonical totals; **user-facing** Past applies **`projectBaselineFromCanonicalDataset`** so validation dates display as **ACTUAL (VALIDATION/TEST)** with meter kWh, and scales **15m intervals** on those dates to the meter day total. **`rehydrateValidationCompareMetaFromBuildInputsForRead`** restores `validationOnlyDateKeysLocal` when cache JSON dropped keys so projection + compare attach both run. TRAVEL_VACANT stays **SIMULATED (TRAVEL/VACANT)** in stitch.
+
 User Past Sim and GapFill must read the same stored simulator truth and the same stored compare truth. GapFill may add more analytics, but not a separate truth path.
 
 Fresh diagnostics are diagnostics only. They do not replace stored compare truth.

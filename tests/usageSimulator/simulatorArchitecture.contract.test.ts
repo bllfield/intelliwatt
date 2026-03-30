@@ -85,4 +85,23 @@ describe("simulator architecture contract (stitch vs compare, truth parity)", ()
     expect(row?.sourceDetail).toBe("ACTUAL_VALIDATION_TEST_DAY");
     expect(row?.kwh).toBe(40);
   });
+
+  it("stitched daily keeps TRAVEL_VACANT simulated when only TEST dates are listed in validationOnlyDateKeysLocal", () => {
+    const projected = projectBaselineFromCanonicalDataset(
+      {
+        meta: {
+          validationOnlyDateKeysLocal: ["2026-07-04"],
+          timezone: "America/Chicago",
+        },
+        daily: [
+          { date: "2026-07-04", kwh: 99, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+          { date: "2026-07-05", kwh: 12, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" },
+        ],
+      },
+      "America/Chicago",
+      new Map([["2026-07-04", 40]])
+    );
+    expect(projected.daily[0]?.sourceDetail).toBe("ACTUAL_VALIDATION_TEST_DAY");
+    expect(projected.daily[1]?.sourceDetail).toBe("SIMULATED_TRAVEL_VACANT");
+  });
 });

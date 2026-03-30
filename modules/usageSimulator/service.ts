@@ -1112,6 +1112,65 @@ function augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(
   return out;
 }
 
+/**
+ * Persisted Past cache rows may omit `meta.validationOnlyDateKeysLocal` while `usageSimulatorBuild.buildInputs`
+ * still holds the authoritative list. Without keys, `attachValidationCompareProjection` is a no-op (logs success
+ * but emits no rows) while daily rows can still show SIMULATED_TEST_DAY. Merge keys from build inputs before
+ * baseline projection + attach; back-fill sparse canonical per-day totals from SIMULATED daily rows for those keys only.
+ */
+function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
+  dataset: any;
+  buildInputs: Record<string, unknown> | null | undefined;
+}): void {
+  const { dataset, buildInputs } = args;
+  if (!dataset || typeof dataset !== "object") return;
+  const fromBuild =
+    buildInputs && typeof buildInputs === "object" && Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
+      ? ((buildInputs as any).validationOnlyDateKeysLocal as unknown[])
+          .map((v) => String(v ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      : [];
+  const prevMeta = dataset.meta && typeof dataset.meta === "object" ? { ...(dataset.meta as Record<string, unknown>) } : {};
+  const existing =
+    Array.isArray((prevMeta as any).validationOnlyDateKeysLocal) &&
+    (prevMeta as any).validationOnlyDateKeysLocal.length > 0
+      ? ((prevMeta as any).validationOnlyDateKeysLocal as unknown[])
+          .map((v) => String(v ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      : [];
+  if (existing.length === 0 && fromBuild.length > 0) {
+    (prevMeta as any).validationOnlyDateKeysLocal = fromBuild;
+    dataset.meta = prevMeta;
+  }
+
+  const rawKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
+    ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+    : [];
+  const validationOnlyDateKeysLocal = rawKeys
+    .map((v) => String(v ?? "").slice(0, 10))
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+  if (validationOnlyDateKeysLocal.length === 0) return;
+  const keySet = new Set(validationOnlyDateKeysLocal);
+  let base = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  base = augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(dataset, base, keySet);
+  const mergedMeta = dataset.meta && typeof dataset.meta === "object" ? { ...(dataset.meta as Record<string, unknown>) } : {};
+  const prevCanon =
+    typeof (mergedMeta as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] === "object" &&
+    (mergedMeta as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] !== null &&
+    !Array.isArray((mergedMeta as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY])
+      ? ((mergedMeta as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] as Record<string, number>)
+      : {};
+  (mergedMeta as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = { ...prevCanon, ...base };
+  dataset.meta = mergedMeta;
+  const rootPrev =
+    typeof (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] === "object" &&
+    (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] !== null &&
+    !Array.isArray((dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY])
+      ? ((dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] as Record<string, number>)
+      : {};
+  (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = { ...rootPrev, ...base };
+}
+
 function restoreCachedArtifactDataset(args: {
   cached: CachedPastDataset;
   useSelectedDaysLightweightArtifactRead: boolean;
@@ -5574,6 +5633,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         });
         return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
       }
+      rehydrateValidationCompareMetaFromBuildInputsForRead({ dataset: restored, buildInputs });
       const projectedBaselineAware =
         projectionMode === "baseline"
           ? projectBaselineFromCanonicalDataset(
@@ -6127,6 +6187,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       });
       return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
     }
+    rehydrateValidationCompareMetaFromBuildInputsForRead({ dataset, buildInputs });
     const projectedBaselineAware =
       projectionMode === "baseline"
         ? projectBaselineFromCanonicalDataset(

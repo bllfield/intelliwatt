@@ -486,26 +486,19 @@ export default function GapFillLabCanonicalClient() {
 
   const compareProjectionForDisplay = useMemo(() => {
     if (!result?.ok) return { rows: [], metrics: {} as Record<string, unknown> };
+    const baselineMeta = result.baselineDatasetProjection?.meta;
     const sidecarRows = Array.isArray(result.compareProjection?.rows) ? result.compareProjection.rows : [];
-    if (sidecarRows.length > 0) {
-      return {
-        rows: sidecarRows,
-        metrics: (result.compareProjection?.metrics ?? {}) as Record<string, unknown>,
-      };
-    }
-    const fallbackRows = Array.isArray(result.scoredDayTruthRows)
-      ? result.scoredDayTruthRows.map((row) => ({
-          localDate: String(row.localDate ?? "").slice(0, 10),
-          dayType: (row.dayType === "weekend" ? "weekend" : "weekday") as "weekday" | "weekend",
-          actualDayKwh: Number(row.actualDayKwh ?? 0) || 0,
-          simulatedDayKwh: Number(row.freshCompareSimDayKwh ?? 0) || 0,
-          errorKwh: Number(row.actualVsFreshErrorKwh ?? 0) || 0,
-          percentError: row.percentError == null ? null : Number(row.percentError),
-        }))
-      : [];
+    const metaRows = Array.isArray(baselineMeta?.validationCompareRows) ? baselineMeta.validationCompareRows : [];
+    const rows = sidecarRows.length > 0 ? sidecarRows : metaRows;
+    const metrics =
+      (sidecarRows.length > 0 ? result.compareProjection?.metrics : undefined) ??
+      (metaRows.length > 0 && baselineMeta?.validationCompareMetrics && typeof baselineMeta.validationCompareMetrics === "object"
+        ? baselineMeta.validationCompareMetrics
+        : undefined) ??
+      (result.compareProjection?.metrics ?? {});
     return {
-      rows: fallbackRows,
-      metrics: (result.metrics ?? {}) as Record<string, unknown>,
+      rows,
+      metrics: (metrics && typeof metrics === "object" ? metrics : {}) as Record<string, unknown>,
     };
   }, [result]);
 
@@ -1217,7 +1210,10 @@ export default function GapFillLabCanonicalClient() {
         </div>
       ) : result?.ok ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          No validation/test-day compare rows are available for this Past scenario yet.
+          {Array.isArray((result.baselineDatasetProjection as any)?.meta?.validationOnlyDateKeysLocal) &&
+          (result.baselineDatasetProjection as any).meta.validationOnlyDateKeysLocal.length > 0
+            ? "Validation test days are configured, but compare rows were not returned with this response. Re-run canonical recalc or inspect compare diagnostics below."
+            : "No validation/test-day compare rows are available for this Past scenario yet."}
         </div>
       ) : null}
 

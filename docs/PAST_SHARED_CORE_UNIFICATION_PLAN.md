@@ -33,6 +33,12 @@ Summary:
 - **Travel/vacant** days are **not** in the pool; they are **filled** by the same shared sim using the **rest** of the good window.
 - **One** shared execution: union of scored test dates and travel/vacant parity dates (selected-days mode) or full-window proof; then **slice** for parity vs scoring—not two engines.
 - **Target for test rows:** “Fresh sim” in Gap-Fill grading is **modeled** by that same day-level logic as travel fills via **`forceModeledOutputKeepReferencePoolDateKeys`** (see `USAGE_SIMULATION_PLAN.md` § Gap-Fill Lab target architecture §6).
+
+### Stitch UI vs compare UI (contract)
+
+- **Stitched Past chart/table (Usage dashboard):** After `getSimulatedUsageForHouseScenario`, **`projectBaselineFromCanonicalDataset`** replaces **validation-only** dates with **actual meter** daily totals and labels (`ACTUAL_VALIDATION_TEST_DAY`). **TRAVEL_VACANT** modeled days remain **`SIMULATED_TRAVEL_VACANT`** in stitch. If a cached artifact omitted `meta.validationOnlyDateKeysLocal`, **`rehydrateValidationCompareMetaFromBuildInputsForRead`** restores keys from `usageSimulatorBuild.buildInputs` before projection + **`attachValidationCompareProjection`** so compare rows exist and stitch labels are not stuck on `SIMULATED_TEST_DAY`.
+- **Compare panel:** Still uses **`validationCompareRows`** / **`validationCompareMetrics`** from **`attachValidationCompareProjection`** (canonical simulated-day totals in meta)—not stitched daily labels.
+
 ## What changed to match the target (engineering checklist)
 
 - **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
