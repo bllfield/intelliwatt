@@ -509,6 +509,13 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       ? (body.scoredDayTruthRows as Array<{ localDate?: string }>).map((row) => String(row.localDate ?? "")).sort()
       : [];
     expect(scoredDates).toEqual(["2025-04-10"]);
+    const compareDates = Array.isArray(body.compareProjection?.rows)
+      ? (body.compareProjection.rows as Array<{ localDate?: string }>).map((row) => String(row.localDate ?? "")).sort()
+      : [];
+    for (const dk of compareDates) {
+      expect(scoredDates).toContain(dk);
+    }
+    expect(compareDates).not.toContain("2025-05-02");
     expect(body.compareProjectionSummary?.rowCount).toBe(body.compareProjection?.rows?.length ?? 0);
     expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeyCount).toBe(scoredDates.length);
     expect(body.failureCode).toBeUndefined();

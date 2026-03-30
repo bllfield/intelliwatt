@@ -1208,7 +1208,6 @@ export async function POST(req: NextRequest) {
       const source = String((row as any)?.source ?? "").toUpperCase();
       return source === "SIMULATED" ? count + 1 : count;
     }, 0);
-    const compareRowsCount = Array.isArray(compareProjection.rows) ? compareProjection.rows.length : 0;
     const metadataValidationOnlyDateKeysLocal = Array.isArray((baselineDataset as any)?.meta?.validationOnlyDateKeysLocal)
       ? ((baselineDataset as any).meta.validationOnlyDateKeysLocal as unknown[])
           .map((v) => String(v ?? "").slice(0, 10))
@@ -1217,6 +1216,17 @@ export async function POST(req: NextRequest) {
     // Single source of truth for this response: scored rows and summaries must use the same effective date set.
     const effectiveValidationOnlyDateKeysLocal =
       selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
+    const effectiveValidationDateKeySet = new Set<string>(effectiveValidationOnlyDateKeysLocal);
+    const compareProjectionRowsFiltered = Array.isArray(compareProjection.rows)
+      ? compareProjection.rows.filter((row) =>
+          effectiveValidationDateKeySet.has(String((row as any)?.localDate ?? "").slice(0, 10))
+        )
+      : [];
+    const compareProjectionForResponse = {
+      rows: compareProjectionRowsFiltered,
+      metrics: compareProjection.metrics ?? {},
+    };
+    const compareRowsCount = compareProjectionRowsFiltered.length;
     const canonicalReadResultSummary = {
       ok: true,
       readMode: "artifact_only",
@@ -1250,7 +1260,7 @@ export async function POST(req: NextRequest) {
     const compareProjectionSummary = {
       attached: compareRowsCount > 0,
       rowCount: compareRowsCount,
-      metrics: compareProjection.metrics ?? {},
+      metrics: compareProjectionForResponse.metrics,
     };
     const sharedResultPayloadSummary = {
       summary: baselineDataset?.summary ?? null,
@@ -1278,9 +1288,7 @@ export async function POST(req: NextRequest) {
       baselineSimulatedDayCount,
     };
     const scoredDayTruthRows = effectiveValidationOnlyDateKeysLocal.map((dk) => {
-      const row = Array.isArray(compareProjection.rows)
-        ? compareProjection.rows.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk)
-        : null;
+      const row = compareProjectionRowsFiltered.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk) ?? null;
       const actualDayKwh = round2(Number(row?.actualDayKwh ?? 0) || 0);
       const freshCompareSimDayKwh = round2(Number(row?.simulatedDayKwh ?? 0) || 0);
       const percentError =
@@ -1354,7 +1362,7 @@ export async function POST(req: NextRequest) {
       validationSelectionDiagnostics: selectionDiagnostics,
       usage365,
       baselineDatasetProjection: baselineDataset,
-      compareProjection,
+      compareProjection: compareProjectionForResponse,
       buildId: buildRow?.id ?? null,
       buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,
       buildInputsHash: buildRow?.buildInputsHash ?? recalcOut.buildInputsHash,
