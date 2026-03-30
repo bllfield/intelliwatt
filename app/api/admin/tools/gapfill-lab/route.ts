@@ -1222,9 +1222,40 @@ export async function POST(req: NextRequest) {
           effectiveValidationDateKeySet.has(String((row as any)?.localDate ?? "").slice(0, 10))
         )
       : [];
+    const compareProjectionMetricsFiltered = (() => {
+      const rows = compareProjectionRowsFiltered;
+      const absErrors = rows.map((row) => Math.abs(Number((row as any)?.errorKwh ?? 0) || 0));
+      const absErrorTotal = absErrors.reduce((sum, value) => sum + value, 0);
+      const actualTotal = rows.reduce((sum, row) => sum + (Number((row as any)?.actualDayKwh ?? 0) || 0), 0);
+      const simTotal = rows.reduce((sum, row) => sum + (Number((row as any)?.simulatedDayKwh ?? 0) || 0), 0);
+      const mae = rows.length > 0 ? absErrorTotal / rows.length : 0;
+      const rmse =
+        rows.length > 0
+          ? Math.sqrt(
+              rows.reduce((sum, row) => {
+                const err = Number((row as any)?.errorKwh ?? 0) || 0;
+                return sum + err * err;
+              }, 0) / rows.length
+            )
+          : 0;
+      const maxAbs = absErrors.length > 0 ? Math.max(...absErrors) : 0;
+      const wape = Math.abs(actualTotal) > 1e-6 ? (absErrorTotal / Math.abs(actualTotal)) * 100 : 0;
+      return {
+        mae: round2(mae),
+        rmse: round2(rmse),
+        mape: round2(wape),
+        wape: round2(wape),
+        maxAbs: round2(maxAbs),
+        totalActualKwhMasked: round2(actualTotal),
+        totalSimKwhMasked: round2(simTotal),
+        deltaKwhMasked: round2(simTotal - actualTotal),
+        mapeFiltered: rows.length > 0 ? round2(wape) : null,
+        mapeFilteredCount: rows.length,
+      };
+    })();
     const compareProjectionForResponse = {
       rows: compareProjectionRowsFiltered,
-      metrics: compareProjection.metrics ?? {},
+      metrics: compareProjectionMetricsFiltered,
     };
     const compareRowsCount = compareProjectionRowsFiltered.length;
     const canonicalReadResultSummary = {
@@ -1308,8 +1339,8 @@ export async function POST(req: NextRequest) {
         percentError,
       };
     });
-    const compareMetrics = (compareProjection.metrics && typeof compareProjection.metrics === "object")
-      ? compareProjection.metrics as Record<string, unknown>
+    const compareMetrics = (compareProjectionForResponse.metrics && typeof compareProjectionForResponse.metrics === "object")
+      ? compareProjectionForResponse.metrics as Record<string, unknown>
       : {};
 
     return NextResponse.json({

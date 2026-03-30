@@ -567,6 +567,90 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("whole_home_prior_only");
   });
 
+  it("filters compareProjection metrics to the effective selected validation date set", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          totalKwh: 100,
+          intervalsCount: 2,
+          start: "2025-03-01",
+          end: "2026-02-28",
+          latest: "2026-02-28T23:45:00Z",
+        },
+        daily: [{ date: "2025-04-11", kwh: 8 }],
+        monthly: [{ month: "2025-04", kwh: 8 }],
+        series: { intervals15: [{ timestamp: "2025-04-11T00:00:00.000Z", kwh: 2 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+          validationProjectionApplied: true,
+          validationCompareRows: [
+            {
+              localDate: "2025-04-10",
+              dayType: "weekday",
+              actualDayKwh: 2,
+              simulatedDayKwh: 9.5,
+              errorKwh: 7.5,
+              percentError: 375,
+            },
+            {
+              localDate: "2025-05-02",
+              dayType: "weekday",
+              actualDayKwh: 2,
+              simulatedDayKwh: 12.25,
+              errorKwh: 10.25,
+              percentError: 512.5,
+            },
+          ],
+          validationCompareMetrics: {
+            mae: 8.88,
+            rmse: 9.99,
+            mape: 777,
+            wape: 777,
+            maxAbs: 10.25,
+            totalActualKwhMasked: 4,
+            totalSimKwhMasked: 21.75,
+            deltaKwhMasked: 17.75,
+            mapeFiltered: 777,
+            mapeFilteredCount: 2,
+          },
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    const compareRows = Array.isArray(body.compareProjection?.rows)
+      ? (body.compareProjection.rows as Array<{ localDate?: string; actualDayKwh?: number; simulatedDayKwh?: number }>)
+      : [];
+    expect(compareRows.map((r) => String(r.localDate ?? ""))).toEqual(["2025-04-10"]);
+    expect(body.compareProjectionSummary?.rowCount).toBe(1);
+    expect(body.metrics?.mae).toBe(7.5);
+    expect(body.metrics?.rmse).toBe(7.5);
+    expect(body.metrics?.wape).toBe(375);
+    expect(body.metrics?.totalActualKwhMasked).toBe(2);
+    expect(body.metrics?.totalSimKwhMasked).toBe(9.5);
+    expect(body.metrics?.deltaKwhMasked).toBe(7.5);
+    expect(body.metrics?.mapeFilteredCount).toBe(1);
+  });
+
   it("echoes effectiveSimulatorMode from recalc (e.g. MANUAL_TOTALS for manual constraint treatments)", async () => {
     recalcSimulatorBuild.mockResolvedValueOnce({
       ok: true,
