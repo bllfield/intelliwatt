@@ -3565,6 +3565,14 @@ export function emitRecalcPreIntervalStageEvent(args: {
   });
 }
 
+export function shouldEmitRecalcValidationSetupSuccess(args: {
+  mode: SimulatorMode;
+  validationSetupFailed: boolean;
+}): boolean {
+  if (args.mode !== "SMT_BASELINE") return true;
+  return !args.validationSetupFailed;
+}
+
 function monthsIntersectingTravelRanges(
   canonicalMonths: string[],
   travelRanges: Array<{ startDate: string; endDate: string }>
@@ -4185,6 +4193,7 @@ async function recalcSimulatorBuildImpl(args: {
 
   // SMT_BASELINE: use actual data's date range (anchor) so Baseline, Past, and Future all show the same dates (e.g. 02/18/2025 – 02/18/2026).
   let smtAnchorPeriods: Array<{ id: string; startDate: string; endDate: string }> | undefined;
+  let validationSetupFailed = false;
   if (simMode === "SMT_BASELINE") {
     try {
       const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null);
@@ -4195,6 +4204,7 @@ async function recalcSimulatorBuildImpl(args: {
       }
     } catch (e) {
       smtAnchorPeriods = undefined;
+      validationSetupFailed = true;
       emitRecalcPreIntervalStageEvent({
         event: "recalc_pre_interval_validation_setup_failure",
         correlationId: args.correlationId,
@@ -4208,15 +4218,17 @@ async function recalcSimulatorBuildImpl(args: {
       });
     }
   }
-  emitRecalcPreIntervalStageEvent({
-    event: "recalc_pre_interval_validation_setup_success",
-    correlationId: args.correlationId,
-    houseId,
-    actualContextHouseId,
-    scenarioId,
-    mode: simMode,
-    durationMs: Date.now() - validationSetupStartedAt,
-  });
+  if (shouldEmitRecalcValidationSetupSuccess({ mode: simMode, validationSetupFailed })) {
+    emitRecalcPreIntervalStageEvent({
+      event: "recalc_pre_interval_validation_setup_success",
+      correlationId: args.correlationId,
+      houseId,
+      actualContextHouseId,
+      scenarioId,
+      mode: simMode,
+      durationMs: Date.now() - validationSetupStartedAt,
+    });
+  }
 
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */

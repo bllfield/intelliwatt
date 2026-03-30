@@ -94,6 +94,7 @@ import {
   getSimulatedUsageForHouseScenario,
   resolveSharedPastRecalcWindow,
   rebuildGapfillSharedPastArtifact,
+  shouldEmitRecalcValidationSetupSuccess,
   shouldWarmValidationSelectionPreload,
   type GapfillCompareBuildPhase,
 } from "@/modules/usageSimulator/service";
@@ -202,6 +203,26 @@ describe("emitRecalcPreIntervalStageEvent", () => {
       durationMs: 12,
       source: "recalcSimulatorBuildImpl",
     });
+  });
+});
+
+describe("shouldEmitRecalcValidationSetupSuccess", () => {
+  it("does not emit validation setup success after SMT anchor-load failure", () => {
+    expect(
+      shouldEmitRecalcValidationSetupSuccess({
+        mode: "SMT_BASELINE",
+        validationSetupFailed: true,
+      })
+    ).toBe(false);
+  });
+
+  it("emits validation setup success when SMT anchor-load succeeds", () => {
+    expect(
+      shouldEmitRecalcValidationSetupSuccess({
+        mode: "SMT_BASELINE",
+        validationSetupFailed: false,
+      })
+    ).toBe(true);
   });
 });
 
