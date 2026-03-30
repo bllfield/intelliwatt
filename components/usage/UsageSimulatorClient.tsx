@@ -5,6 +5,7 @@ import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
+import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import {
   USAGE_SCENARIO_ADJUSTMENT_CATALOG,
   toMonthlyAdjustmentPayload,
@@ -1373,41 +1374,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               Loading compare data…
             </div>
           ) : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length ? (
-            <>
-              <div className="mt-2 text-xs text-brand-navy/80">
-                WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% ·
-                MAE {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} ·
-                RMSE {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
-              </div>
-              <div className="mt-3 overflow-auto">
-                <table className="min-w-full text-xs border border-brand-blue/10">
-                  <thead className="bg-brand-blue/5">
-                    <tr>
-                      <th className="border border-brand-blue/10 px-2 py-1 text-left">Date</th>
-                      <th className="border border-brand-blue/10 px-2 py-1 text-left">Day Type</th>
-                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual kWh</th>
-                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim kWh</th>
-                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Error</th>
-                      <th className="border border-brand-blue/10 px-2 py-1 text-right">% Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scenarioCompareProjection.rows.map((row) => (
-                      <tr key={row.localDate}>
-                        <td className="border border-brand-blue/10 px-2 py-1">{row.localDate}</td>
-                        <td className="border border-brand-blue/10 px-2 py-1">{row.dayType}</td>
-                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actualDayKwh.toFixed(2)}</td>
-                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedDayKwh.toFixed(2)}</td>
-                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.errorKwh.toFixed(2)}</td>
-                        <td className="border border-brand-blue/10 px-2 py-1 text-right">
-                          {row.percentError == null ? "—" : `${Number(row.percentError).toFixed(2)}%`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+            <ValidationComparePanel
+              rows={scenarioCompareProjection.rows}
+              metrics={scenarioCompareProjection.metrics}
+            />
           ) : scenarioCurveOutcome?.kind === "success" ? (
             <div className="mt-2 text-xs text-brand-navy/70">
               No validation/test-day compare rows are available for this Past scenario yet.

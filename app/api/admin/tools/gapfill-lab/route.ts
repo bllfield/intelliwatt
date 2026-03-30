@@ -1199,6 +1199,80 @@ export async function POST(req: NextRequest) {
     const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
     // Shared compare sidecar remains the canonical modeled-vs-actual projection family.
     const compareProjection = buildValidationCompareProjectionSidecar(baselineDataset);
+    const baselineDailyRows = Array.isArray(baselineDataset?.daily) ? (baselineDataset.daily as Array<Record<string, unknown>>) : [];
+    const baselineActualDayCount = baselineDailyRows.reduce((count, row) => {
+      const source = String((row as any)?.source ?? "").toUpperCase();
+      return source === "ACTUAL" ? count + 1 : count;
+    }, 0);
+    const baselineSimulatedDayCount = baselineDailyRows.reduce((count, row) => {
+      const source = String((row as any)?.source ?? "").toUpperCase();
+      return source === "SIMULATED" ? count + 1 : count;
+    }, 0);
+    const compareRowsCount = Array.isArray(compareProjection.rows) ? compareProjection.rows.length : 0;
+    const validationOnlyDateKeysLocal = Array.isArray((baselineDataset as any)?.meta?.validationOnlyDateKeysLocal)
+      ? ((baselineDataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+          .map((v) => String(v ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      : selectedDateKeysSorted;
+    const canonicalReadResultSummary = {
+      ok: true,
+      readMode: "artifact_only",
+      projectionMode: "baseline",
+      readLayer: "getSimulatedUsageForHouseScenario",
+      readFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
+      fallbackAllowed: false,
+      artifactSourceMode: typeof metaRaw?.artifactSourceMode === "string" ? metaRaw.artifactSourceMode : null,
+      artifactHashMatch:
+        typeof metaRaw?.artifactHashMatch === "boolean" ? metaRaw.artifactHashMatch : null,
+      artifactRecomputed:
+        typeof metaRaw?.artifactRecomputed === "boolean" ? metaRaw.artifactRecomputed : null,
+      artifactSourceNote: typeof metaRaw?.artifactSourceNote === "string" ? metaRaw.artifactSourceNote : null,
+      canonicalReadFailureCode: null as string | null,
+      canonicalReadFailureMessage: null as string | null,
+    };
+    const baselineProjectionSummary = {
+      applied: Boolean(metaRaw?.validationProjectionApplied),
+      projectionType:
+        typeof metaRaw?.validationProjectionType === "string" ? metaRaw.validationProjectionType : null,
+      validationCompareAvailable: Boolean(metaRaw?.validationCompareAvailable),
+      validationOnlyDateKeysLocal,
+      validationOnlyDateKeyCount: validationOnlyDateKeysLocal.length,
+      actualDayCount: baselineActualDayCount,
+      simulatedDayCount: baselineSimulatedDayCount,
+      baselineDailyRowCount: baselineDailyRows.length,
+      baselineMonthlyRowCount: Array.isArray(baselineDataset?.monthly) ? baselineDataset.monthly.length : 0,
+      baselineIntervalCount: Array.isArray(baselineDataset?.series?.intervals15) ? baselineDataset.series.intervals15.length : 0,
+    };
+    const compareProjectionSummary = {
+      attached: compareRowsCount > 0,
+      rowCount: compareRowsCount,
+      metrics: compareProjection.metrics ?? {},
+    };
+    const sharedResultPayloadSummary = {
+      summary: baselineDataset?.summary ?? null,
+      metaKeys: metaRaw ? Object.keys(metaRaw).sort() : [],
+      coverageStart: String((baselineDataset?.summary?.start as string | undefined) ?? canonicalWindow.startDate).slice(0, 10),
+      coverageEnd: String((baselineDataset?.summary?.end as string | undefined) ?? canonicalWindow.endDate).slice(0, 10),
+      validationOnlyDateKeysLocal,
+      compareRowsCount,
+      baselineActualDayCount,
+      baselineSimulatedDayCount,
+    };
+    const pipelineDiagnosticsSummary = {
+      correlationId: labCorrelationId,
+      buildId: buildRow?.id ?? null,
+      buildInputsHash: buildRow?.buildInputsHash ?? recalcOut.buildInputsHash,
+      artifactId: artifactRow?.id ?? null,
+      artifactInputHash: artifactRow?.inputHash ?? null,
+      artifactUpdatedAt: artifactRow?.updatedAt instanceof Date ? artifactRow.updatedAt.toISOString() : null,
+      artifactEngineVersion: artifactRow?.engineVersion ?? null,
+      testSelectionMode,
+      validationOnlyDateKeysLocal,
+      validationOnlyDateKeyCount: validationOnlyDateKeysLocal.length,
+      compareRowsCount,
+      baselineActualDayCount,
+      baselineSimulatedDayCount,
+    };
     const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
       const row = Array.isArray(compareProjection.rows)
         ? compareProjection.rows.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk)
@@ -1276,6 +1350,7 @@ export async function POST(req: NextRequest) {
       validationSelectionDiagnostics: selectionDiagnostics,
       usage365,
       baselineDatasetProjection: baselineDataset,
+      compareProjection,
       buildId: buildRow?.id ?? null,
       buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,
       buildInputsHash: buildRow?.buildInputsHash ?? recalcOut.buildInputsHash,
@@ -1302,6 +1377,11 @@ export async function POST(req: NextRequest) {
         canonicalReadRoute: "/api/user/usage/simulated/house",
         validationDaysTruthSource: "canonical_saved_artifact_family",
       },
+      canonicalReadResultSummary,
+      baselineProjectionSummary,
+      compareProjectionSummary,
+      sharedResultPayloadSummary,
+      pipelineDiagnosticsSummary,
       modelAssumptions: {
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
         projectionMode: "baseline_vs_accuracy",

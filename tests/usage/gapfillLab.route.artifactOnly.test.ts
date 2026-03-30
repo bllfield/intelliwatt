@@ -493,6 +493,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.artifactId).toBe("artifact-1");
     expect(body.fingerprintBuildFreshness?.state).toBe("ready");
     expect(body.fingerprintBuildFreshness?.builtAt).toBe("2026-01-02T00:00:00.000Z");
+    expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
+    expect(body.canonicalReadResultSummary?.ok).toBe(true);
+    expect(body.canonicalReadResultSummary?.readMode).toBe("artifact_only");
+    expect(body.baselineProjectionSummary?.applied).toBe(true);
+    expect(body.compareProjectionSummary?.rowCount).toBe(body.compareProjection?.rows?.length ?? 0);
+    expect(body.pipelineDiagnosticsSummary?.validationOnlyDateKeyCount).toBeGreaterThanOrEqual(1);
     expect(body.failureCode).toBeUndefined();
     expect(buildValidationCompareProjectionSidecarCalls.length).toBeGreaterThanOrEqual(1);
     const compareInput = buildValidationCompareProjectionSidecarCalls[buildValidationCompareProjectionSidecarCalls.length - 1] as {

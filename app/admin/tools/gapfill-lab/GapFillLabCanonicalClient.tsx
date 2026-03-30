@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import {
@@ -81,6 +82,22 @@ type RunResult = {
   artifactInputHash?: string | null;
   buildLastBuiltAt?: string | null;
   buildInputsHash?: string | null;
+  compareProjection?: {
+    rows?: Array<{
+      localDate: string;
+      dayType: "weekday" | "weekend";
+      actualDayKwh: number;
+      simulatedDayKwh: number;
+      errorKwh: number;
+      percentError: number | null;
+    }>;
+    metrics?: Record<string, unknown>;
+  };
+  canonicalReadResultSummary?: Record<string, unknown>;
+  baselineProjectionSummary?: Record<string, unknown>;
+  compareProjectionSummary?: Record<string, unknown>;
+  sharedResultPayloadSummary?: Record<string, unknown>;
+  pipelineDiagnosticsSummary?: Record<string, unknown>;
 } | {
   ok: false;
   error: string;
@@ -406,6 +423,31 @@ export default function GapFillLabCanonicalClient() {
     if (!result?.ok) return null;
     return toPayloadFromBaseline(result.baselineDatasetProjection, timezone);
   }, [result, timezone]);
+
+  const compareProjectionForDisplay = useMemo(() => {
+    if (!result?.ok) return { rows: [], metrics: {} as Record<string, unknown> };
+    const sidecarRows = Array.isArray(result.compareProjection?.rows) ? result.compareProjection.rows : [];
+    if (sidecarRows.length > 0) {
+      return {
+        rows: sidecarRows,
+        metrics: (result.compareProjection?.metrics ?? {}) as Record<string, unknown>,
+      };
+    }
+    const fallbackRows = Array.isArray(result.scoredDayTruthRows)
+      ? result.scoredDayTruthRows.map((row) => ({
+          localDate: String(row.localDate ?? "").slice(0, 10),
+          dayType: (row.dayType === "weekend" ? "weekend" : "weekday") as "weekday" | "weekend",
+          actualDayKwh: Number(row.actualDayKwh ?? 0) || 0,
+          simulatedDayKwh: Number(row.freshCompareSimDayKwh ?? 0) || 0,
+          errorKwh: Number(row.actualVsFreshErrorKwh ?? 0) || 0,
+          percentError: row.percentError == null ? null : Number(row.percentError),
+        }))
+      : [];
+    return {
+      rows: fallbackRows,
+      metrics: (result.metrics ?? {}) as Record<string, unknown>,
+    };
+  }, [result]);
 
   const hasCurveData = Boolean(
     (usageChart?.daily && usageChart.daily.length > 0) || (baselineChart?.daily && baselineChart.daily.length > 0)
@@ -898,6 +940,14 @@ export default function GapFillLabCanonicalClient() {
       {baselineChart?.daily?.length ? (
         <div className="border rounded p-4">
           <div className="font-semibold text-sm mb-2">Normal Baseline Display (validation days remain actual)</div>
+          <div className="text-xs text-brand-navy/70 mb-2">
+            Source notation: ACTUAL or SIMULATED. Validation/test days remain ACTUAL in baseline; modeled values for those
+            days appear only in compare.
+          </div>
+          <div className="text-xs font-mono text-brand-navy/70 mb-2">
+            baselineActualDayCount: {String((result as any)?.baselineProjectionSummary?.actualDayCount ?? 0)} · baselineSimulatedDayCount:{" "}
+            {String((result as any)?.baselineProjectionSummary?.simulatedDayCount ?? 0)}
+          </div>
           <UsageChartsPanel
             monthly={baselineChart.monthly}
             stitchedMonth={baselineChart.stitchedMonth ?? null}
@@ -935,66 +985,138 @@ export default function GapFillLabCanonicalClient() {
         </div>
       ) : null}
 
-      {result?.ok && Array.isArray(result.scoredDayTruthRows) && result.scoredDayTruthRows.length > 0 ? (
+      {result?.ok && compareProjectionForDisplay.rows.length > 0 ? (
         <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Accuracy / Test Day Compare</div>
-          <div className="text-xs text-brand-navy/80 mb-2">
-            WAPE {Number(result.metrics?.wape ?? 0).toFixed(2)}% · MAE {Number(result.metrics?.mae ?? 0).toFixed(2)} · RMSE {Number(result.metrics?.rmse ?? 0).toFixed(2)}
+          <div className="font-semibold text-sm">Validation / Test Day Compare</div>
+          <div className="mt-1 text-xs text-brand-navy/70">
+            This section compares modeled vs actual on validation days for simulator accuracy transparency.
           </div>
-          <div className="overflow-auto">
-            <table className="min-w-full text-xs border">
-              <thead className="bg-brand-blue/5">
-                <tr>
-                  <th className="text-left p-2 border">Date</th>
-                  <th className="text-left p-2 border">Day Type</th>
-                  <th className="text-right p-2 border">Actual kWh</th>
-                  <th className="text-right p-2 border">Sim kWh</th>
-                  <th className="text-right p-2 border">Error kWh</th>
-                  <th className="text-right p-2 border">Percent Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.scoredDayTruthRows.map((row) => (
-                  <tr key={row.localDate}>
-                    <td className="p-2 border">{row.localDate}</td>
-                    <td className="p-2 border">{row.dayType}</td>
-                    <td className="p-2 border text-right">{row.actualDayKwh.toFixed(2)}</td>
-                    <td className="p-2 border text-right">{row.freshCompareSimDayKwh.toFixed(2)}</td>
-                    <td className="p-2 border text-right">{row.actualVsFreshErrorKwh.toFixed(2)}</td>
-                    <td className="p-2 border text-right">
-                      {row.percentError != null && Number.isFinite(row.percentError)
-                        ? `${Number(row.percentError).toFixed(2)}%`
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ValidationComparePanel
+            rows={compareProjectionForDisplay.rows}
+            metrics={compareProjectionForDisplay.metrics}
+          />
         </div>
-      ) : result?.ok && Array.isArray(result.scoredDayTruthRows) && result.scoredDayTruthRows.length === 0 ? (
+      ) : result?.ok ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          No validation compare rows in this response (empty selection or compare sidecar). Not showing a compare table.
+          No validation/test-day compare rows are available for this Past scenario yet.
         </div>
       ) : null}
 
       {result?.ok ? (
-        <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Canonical Calculation Variables / Diagnostics</div>
-          <pre className="text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
-            {JSON.stringify({
-              canonicalWindow: result.canonicalWindow ?? null,
-              modelAssumptions: result.modelAssumptions ?? null,
-              compareTruth: result.compareTruth ?? null,
-              selectionDiagnostics: result.selectionDiagnostics ?? null,
-              visibilityEcho: visibilityFromResult,
-              fingerprintBuildFreshness: result.fingerprintBuildFreshness ?? null,
-              userDefaultValidationSelectionMode,
-              adminLabValidationSelectionMode,
-              testHomeLink,
-            }, null, 2)}
-          </pre>
+        <div className="border rounded p-4 space-y-3">
+          <div className="font-semibold text-sm">Canonical Calculation Variables / Diagnostics</div>
+          <div className="grid gap-2 text-xs md:grid-cols-2">
+            <div className="rounded border bg-brand-navy/5 p-2">
+              <div className="font-semibold mb-1">Read / projection truth</div>
+              <div className="font-mono">readLayer: {String((result.canonicalReadResultSummary as any)?.readLayer ?? "—")}</div>
+              <div className="font-mono">readMode: {String((result.canonicalReadResultSummary as any)?.readMode ?? "—")}</div>
+              <div className="font-mono">projectionMode: {String((result.canonicalReadResultSummary as any)?.projectionMode ?? "—")}</div>
+              <div className="font-mono">
+                artifactSourceMode: {String((result.canonicalReadResultSummary as any)?.artifactSourceMode ?? "—")}
+              </div>
+              <div className="font-mono">
+                validationProjectionApplied: {String((result.baselineProjectionSummary as any)?.applied ?? false)}
+              </div>
+              <div className="font-mono">
+                compareProjectionAttached: {String((result.compareProjectionSummary as any)?.attached ?? false)}
+              </div>
+            </div>
+            <div className="rounded border bg-brand-navy/5 p-2">
+              <div className="font-semibold mb-1">Count summary</div>
+              <div className="font-mono">
+                validationOnlyDateKeyCount: {String((result.baselineProjectionSummary as any)?.validationOnlyDateKeyCount ?? 0)}
+              </div>
+              <div className="font-mono">
+                compareRowsCount: {String((result.compareProjectionSummary as any)?.rowCount ?? 0)}
+              </div>
+              <div className="font-mono">
+                baselineActualDayCount: {String((result.baselineProjectionSummary as any)?.actualDayCount ?? 0)}
+              </div>
+              <div className="font-mono">
+                baselineSimulatedDayCount: {String((result.baselineProjectionSummary as any)?.simulatedDayCount ?? 0)}
+              </div>
+            </div>
+          </div>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-semibold text-xs">Canonical Read Result Summary</summary>
+            <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+              {JSON.stringify(result.canonicalReadResultSummary ?? null, null, 2)}
+            </pre>
+          </details>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-semibold text-xs">Shared Result Payload Summary</summary>
+            <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+              {JSON.stringify(result.sharedResultPayloadSummary ?? null, null, 2)}
+            </pre>
+          </details>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-semibold text-xs">Baseline Projection Summary</summary>
+            <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+              {JSON.stringify(result.baselineProjectionSummary ?? null, null, 2)}
+            </pre>
+          </details>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-semibold text-xs">Compare Projection Summary</summary>
+            <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+              {JSON.stringify(result.compareProjectionSummary ?? null, null, 2)}
+            </pre>
+          </details>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-semibold text-xs">Pipeline Diagnostics Summary</summary>
+            <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+              {JSON.stringify(result.pipelineDiagnosticsSummary ?? null, null, 2)}
+            </pre>
+          </details>
         </div>
+      ) : null}
+
+      {result?.ok ? (
+        <details className="border rounded p-4">
+          <summary className="cursor-pointer font-semibold text-sm">Raw Shared Payload Details (summarized)</summary>
+          <pre className="mt-3 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+            {JSON.stringify(
+              {
+                baselineDatasetSummary: {
+                  summary: result.baselineDatasetProjection?.summary ?? null,
+                  dailyCount: Array.isArray(result.baselineDatasetProjection?.daily)
+                    ? result.baselineDatasetProjection.daily.length
+                    : 0,
+                  monthlyCount: Array.isArray(result.baselineDatasetProjection?.monthly)
+                    ? result.baselineDatasetProjection.monthly.length
+                    : 0,
+                  intervalCount: Array.isArray(result.baselineDatasetProjection?.series?.intervals15)
+                    ? result.baselineDatasetProjection.series.intervals15.length
+                    : 0,
+                  metaKeys:
+                    result.baselineDatasetProjection?.meta &&
+                    typeof result.baselineDatasetProjection.meta === "object"
+                      ? Object.keys(result.baselineDatasetProjection.meta).sort()
+                      : [],
+                },
+                compareProjectionSummary: {
+                  rowCount: Array.isArray(result.compareProjection?.rows) ? result.compareProjection.rows.length : 0,
+                  metrics: result.compareProjection?.metrics ?? {},
+                },
+              },
+              null,
+              2
+            )}
+          </pre>
+        </details>
+      ) : null}
+
+      {result?.ok ? (
+        <details className="border rounded p-4">
+          <summary className="cursor-pointer font-semibold text-sm">Raw Compare Projection Payload</summary>
+          <pre className="mt-3 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+            {JSON.stringify(result.compareProjection ?? null, null, 2)}
+          </pre>
+        </details>
       ) : null}
 
       <details className="border rounded p-4">
