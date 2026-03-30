@@ -564,3 +564,29 @@ Fresh diagnostics are diagnostics only. They must not replace compare truth. If 
 Whenever a new simulator run produces new simulated outputs for the same scope and identity, prior simulated outputs must be cleared, replaced, or fully overwritten so stale outputs are not mixed into the current result set.
 
 If a fallback preserves the same truth, it is allowed. If it can produce bad data or misleading data, it is forbidden.
+
+AUTHORITATIVE DOC-ALIGNMENT PROCESS OVERRIDE
+
+This section overrides any older contradictory guidance in this file.
+
+Project documentation alignment is mandatory whenever a Cursor block changes project scope, architecture, ownership, truth source, fallback behavior, storage behavior, route behavior, simulator behavior, compare behavior, stitch behavior, fingerprint behavior, execution-mode behavior, or any other implementation contract.
+
+This is not optional follow-up work.
+
+If a block changes any of the above, that same block must also include:
+- the exact project docs that must be reviewed and updated
+- an explicit instruction to align docs in the same pass
+- an explicit instruction that contradictory older doc language must be overridden or updated
+- tests or verification steps that match the new documented contract when applicable
+
+At minimum, scope-changing or architecture-changing blocks must review and update as needed:
+- docs/USAGE_SIMULATION_PLAN.md
+- docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md
+- docs/PROJECT_PLAN.md
+- docs/CHAT_BOOTSTRAP.txt
+
+If a block changes implementation contract but does not include doc alignment, that block is incomplete and off-plan.
+
+Future chats must treat doc alignment as part of the implementation work, not as a separate optional cleanup step.
+
+The reason for this rule is to prevent Cursor and future chats from drifting away from the agreed project plan.

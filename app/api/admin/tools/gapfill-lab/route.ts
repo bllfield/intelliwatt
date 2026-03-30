@@ -1240,7 +1240,17 @@ export async function POST(req: NextRequest) {
         );
       }
       try {
-        datasetForCompare = attachValidationCompareProjection(JSON.parse(JSON.stringify(baselineDataset)) as Record<string, unknown>);
+        const compareInput = JSON.parse(JSON.stringify(baselineDataset)) as Record<string, unknown>;
+        // Custom testRanges select a subset of build validation days: attach must score only those dates,
+        // not the full artifact metadata list (shared attachValidationCompareProjection keys off meta.validationOnlyDateKeysLocal).
+        if (selectedDateKeysSorted.length > 0 && compareInput && typeof compareInput === "object") {
+          const prevMeta = (compareInput as any).meta;
+          (compareInput as any).meta =
+            prevMeta && typeof prevMeta === "object"
+              ? { ...prevMeta, validationOnlyDateKeysLocal: [...effectiveValidationOnlyDateKeysLocal] }
+              : { validationOnlyDateKeysLocal: [...effectiveValidationOnlyDateKeysLocal] };
+        }
+        datasetForCompare = attachValidationCompareProjection(compareInput);
       } catch (e: unknown) {
         if (e instanceof CompareTruthIncompleteError) {
           return NextResponse.json(

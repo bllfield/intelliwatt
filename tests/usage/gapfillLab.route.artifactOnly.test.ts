@@ -1253,6 +1253,149 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.failureCode).toBeUndefined();
   });
 
+  it("custom testRanges compare uses selected validation dates only (not full artifact metadata list)", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+        daily: [
+          { date: "2025-04-10", kwh: 2, source: "ACTUAL" },
+          { date: "2025-05-02", kwh: 2, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2025-04", kwh: 4 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+          validationProjectionApplied: true,
+          artifactHashMatch: true,
+          artifactSourceMode: "exact_hash_match",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2025-04-10": 9.5,
+            "2025-05-02": 20,
+          },
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    const rows = Array.isArray(body.compareProjection?.rows) ? body.compareProjection.rows : [];
+    expect(rows.map((r: { localDate?: string }) => String(r.localDate ?? ""))).toEqual(["2025-04-10"]);
+    expect(body.metrics?.mae).toBe(7.5);
+    expect(body.metrics?.mapeFilteredCount).toBe(1);
+    expect(body.diagnosticsVerdict?.compareRowsMatchSelectedDates).toBe(true);
+  });
+
+  it("custom testRanges fail closed (409) when canonical simulated-day total is missing for a selected date", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+        daily: [
+          { date: "2025-04-10", kwh: 2, source: "ACTUAL" },
+          { date: "2025-05-02", kwh: 2, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2025-04", kwh: 4 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+          validationProjectionApplied: true,
+          artifactHashMatch: true,
+          artifactSourceMode: "exact_hash_match",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2025-05-02": 12.25,
+          },
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("compare_truth_incomplete");
+    expect(body.reasonCode).toBe("COMPARE_TRUTH_INCOMPLETE");
+    expect((body.missingDateKeysLocal as string[]).sort()).toEqual(["2025-04-10"]);
+  });
+
+  it("custom testRanges do not require canonical totals for non-selected metadata validation days", async () => {
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+        daily: [
+          { date: "2025-04-10", kwh: 2, source: "ACTUAL" },
+          { date: "2025-05-02", kwh: 2, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2025-04", kwh: 4 }],
+        series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 1 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10", "2025-05-02"],
+          validationProjectionApplied: true,
+          artifactHashMatch: true,
+          artifactSourceMode: "exact_hash_match",
+          canonicalArtifactSimulatedDayTotalsByDate: {
+            "2025-04-10": 9.5,
+          },
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect((body.compareProjection?.rows as Array<{ localDate?: string }> | undefined)?.map((r) => r.localDate)).toEqual([
+      "2025-04-10",
+    ]);
+  });
+
   it("surfaces baseline validation leak diagnostics when hash match fails (no latest-by-scenario substitution)", async () => {
     getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
       ok: true,
