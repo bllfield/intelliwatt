@@ -1112,11 +1112,17 @@ export function buildSimulatedUsageDatasetFromCurve(
       simulatedTestModeledDateKeysLocal: daily
         .filter((row) => row.sourceDetail === "SIMULATED_TEST_DAY")
         .map((row) => row.date),
-      simulatedSourceDetailByDate: Object.fromEntries(
-        daily
-          .filter((row) => row.source === "SIMULATED")
-          .map((row) => [row.date, row.sourceDetail ?? "SIMULATED_OTHER"] as const)
-      ),
+      simulatedSourceDetailByDate: daily.reduce<
+        Record<string, "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER">
+      >((acc, row) => {
+        if (row.source !== "SIMULATED") return acc;
+        const detail =
+          row.sourceDetail === "SIMULATED_TRAVEL_VACANT" || row.sourceDetail === "SIMULATED_TEST_DAY"
+            ? row.sourceDetail
+            : "SIMULATED_OTHER";
+        acc[row.date] = detail;
+        return acc;
+      }, {}),
     },
     usageBucketsByMonth,
   };
