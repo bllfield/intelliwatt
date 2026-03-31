@@ -130,6 +130,11 @@ export async function POST(request: NextRequest) {
       persistPastSimBaseline: true,
       validationDaySelectionMode: userDefaultValidationSelectionMode,
       validationDayCount: 21,
+      runContext: {
+        callerLabel: "user_recalc",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
     });
     if (dispatched.executionMode === "droplet_async") {
       return NextResponse.json(

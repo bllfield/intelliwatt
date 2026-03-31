@@ -77,6 +77,19 @@ import {
   CompareTruthIncompleteError,
   projectBaselineFromCanonicalDataset,
 } from "@/modules/usageSimulator/compareProjection";
+import {
+  buildInitialPastSimLockboxInput,
+  buildPastSimPerDayTrace,
+  buildPastSimReadContext,
+  buildPastSimRunContext,
+  computePastSimFullChainHash,
+  digestEncodedIntervalsBuffer,
+  finalizePastSimLockboxInput,
+  type PastSimLockboxInput,
+  type PastSimPerRunTrace,
+  type PastSimReadContext,
+  type PastSimRunContext,
+} from "@/modules/usageSimulator/pastSimLockbox";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
@@ -542,8 +555,9 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     endDate: identityWindowResolved.endDate,
   });
   const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
+  const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? args.houseId);
   const weatherIdentity = await computePastWeatherIdentity({
-    houseId: args.houseId,
+    houseId: sourceHouseIdForWeather,
     startDate: identityWindowResolved.startDate,
     endDate: identityWindowResolved.endDate,
   });
@@ -1471,8 +1485,9 @@ export async function buildGapfillCompareSimShared(args: {
       endDate: identityWindowResolved.endDate,
     });
     const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+    const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? houseId);
     const weatherIdentity = await computePastWeatherIdentity({
-      houseId,
+      houseId: sourceHouseIdForWeather,
       startDate: identityWindowResolved.startDate,
       endDate: identityWindowResolved.endDate,
     });
@@ -3642,6 +3657,7 @@ async function recalcSimulatorBuildImpl(args: {
   now?: Date;
   /** Admin calibration lab only (plan §24): applied after `resolveSimFingerprint`, same shared chain. */
   adminLabTreatmentMode?: import("@/modules/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
+  runContext?: Partial<PastSimRunContext>;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
   const actualContextHouseId = String(args.actualContextHouseId ?? houseId);
@@ -3654,6 +3670,25 @@ async function recalcSimulatorBuildImpl(args: {
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
+  const runContext = buildPastSimRunContext({
+    correlationId: String(args.correlationId ?? ""),
+    callerLabel: args.runContext?.callerLabel ?? "user_recalc",
+    buildPathKind: args.runContext?.buildPathKind ?? "recalc",
+    persistRequested: args.runContext?.persistRequested ?? (args.persistPastSimBaseline === true),
+    adminLabTreatmentMode: args.runContext?.adminLabTreatmentMode ?? args.adminLabTreatmentMode ?? undefined,
+    asyncMetadata: args.runContext?.asyncMetadata ?? undefined,
+  });
+  const initialLockboxInput = buildInitialPastSimLockboxInput({
+    houseId,
+    actualContextHouseId,
+    sourceEsiid: esiid ?? null,
+    simulatorMode: mode,
+    travelRanges: [],
+    validationOnlyDateKeysLocal: requestedValidationOnlyDateKeysLocal,
+    validationSelectionMode: effectiveValidationSelectionMode,
+    adminLabTreatmentMode: args.adminLabTreatmentMode ?? null,
+    weatherPreference: args.weatherPreference ?? null,
+  });
 
   const coreContextStartedAt = Date.now();
   emitRecalcPreIntervalStageEvent({
@@ -4378,6 +4413,8 @@ async function recalcSimulatorBuildImpl(args: {
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
+  const producerBuildPathKind =
+    runContext.buildPathKind === "cache_restore" ? "recalc" : runContext.buildPathKind;
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
   if (scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode)) {
     try {
@@ -4459,7 +4496,7 @@ async function recalcSimulatorBuildImpl(args: {
         timezone: timezoneForStoredBuild,
         travelRanges: allTravelRanges,
         buildInputs: recalcBuildInputs,
-        buildPathKind: "recalc",
+        buildPathKind: producerBuildPathKind,
         forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedValidationOnlyDateKeysLocal.size > 0 ? boundedValidationOnlyDateKeysLocal : undefined,
         correlationId: args.correlationId,
@@ -4614,13 +4651,46 @@ async function recalcSimulatorBuildImpl(args: {
           simulatedDayResults: pastSimulatedDayResults,
         })
       : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+  const sourceDerivedMonthlyTotalsKwhByMonth =
+    built.source?.actualMonthlyAnchorsByMonth && typeof built.source.actualMonthlyAnchorsByMonth === "object"
+      ? (built.source.actualMonthlyAnchorsByMonth as Record<string, number>)
+      : simMode === "MANUAL_TOTALS"
+        ? monthlyTotalsKwhByMonth
+        : null;
+  const sourceDerivedAnnualTotalKwh =
+    sourceDerivedMonthlyTotalsKwhByMonth != null
+      ? Object.values(sourceDerivedMonthlyTotalsKwhByMonth).reduce((sum, value) => sum + (Number(value) || 0), 0)
+      : null;
+  const normalizedLockboxInput = finalizePastSimLockboxInput({
+    base: {
+      ...initialLockboxInput,
+      travelRanges: { ranges: allTravelRanges },
+      validationKeys: {
+        ...initialLockboxInput.validationKeys,
+        localDateKeys: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
+        selectionMode: effectiveValidationSelectionMode ?? initialLockboxInput.validationKeys.selectionMode,
+      },
+    },
+    window: resolveWindowFromBuildInputsForPastIdentity(buildInputs),
+    timezone: timezoneForStoredBuild,
+    intervalFingerprint: null,
+    weatherIdentity: null,
+    sourceDerivedMonthlyTotalsKwhByMonth,
+    sourceDerivedAnnualTotalKwh,
+    homeProfileSnapshotRef: homeProfile ? `home_profile:${initialLockboxInput.profileContext.profileHouseId}` : null,
+    applianceProfileSnapshotRef: applianceProfile ? `appliance_profile:${initialLockboxInput.profileContext.profileHouseId}` : null,
+    usageShapeProfileIdentity: resolvedSimFingerprint?.usageSourceHash ?? null,
+    validationSelectionMode: effectiveValidationSelectionMode ?? null,
+    validationDiagnosticsRef: null,
+  });
+  const perDayTrace = buildPastSimPerDayTrace(pastSimulatedDayResults);
   const filledSet = new Set<string>((buildInputs.filledMonths ?? []).map(String));
   const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
   for (const ym of buildInputs.canonicalMonths ?? []) {
     monthProvenanceByMonth[String(ym)] =
       simMode === "SMT_BASELINE" && !scenarioId && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
   }
-  dataset.meta = {
+  (dataset as any).meta = {
     ...(dataset.meta ?? {}),
     buildInputsHash,
     lastBuiltAt: new Date().toISOString(),
@@ -4632,6 +4702,9 @@ async function recalcSimulatorBuildImpl(args: {
     validationOnlyDateKeysLocal: Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
       ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
       : [],
+    lockboxInput: normalizedLockboxInput,
+    lockboxRunContext: runContext,
+    lockboxPerDayTrace: perDayTrace,
   };
 
   await upsertSimulatorBuild({
@@ -4710,7 +4783,7 @@ async function recalcSimulatorBuildImpl(args: {
       });
       const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
       const weatherIdentity = await computePastWeatherIdentity({
-        houseId,
+        houseId: canonicalActualIdentity.houseId,
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
       });
@@ -4735,12 +4808,74 @@ async function recalcSimulatorBuildImpl(args: {
       applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
       const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
       const { bytes } = encodeIntervalsV1(intervals15);
+      const finalizedLockboxInput = finalizePastSimLockboxInput({
+        base: normalizedLockboxInput,
+        window: identityWindow,
+        timezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
+        intervalFingerprint: intervalDataFingerprint,
+        weatherIdentity,
+        sourceDerivedMonthlyTotalsKwhByMonth,
+        sourceDerivedAnnualTotalKwh,
+        homeProfileSnapshotRef:
+          normalizedLockboxInput.profileContext.homeProfileSnapshotRef ??
+          `home_profile:${normalizedLockboxInput.profileContext.profileHouseId}`,
+        applianceProfileSnapshotRef:
+          normalizedLockboxInput.profileContext.applianceProfileSnapshotRef ??
+          `appliance_profile:${normalizedLockboxInput.profileContext.profileHouseId}`,
+        usageShapeProfileIdentity: [
+          usageShapeProfileIdentity.usageShapeProfileId,
+          usageShapeProfileIdentity.usageShapeProfileVersion,
+          usageShapeProfileIdentity.usageShapeProfileSimHash,
+        ]
+          .filter((value) => typeof value === "string" && value.length > 0)
+          .join(":"),
+        validationSelectionMode: effectiveValidationSelectionMode ?? null,
+        validationDiagnosticsRef: null,
+      });
+      const fullChainHash = computePastSimFullChainHash({
+        lockboxInput: finalizedLockboxInput,
+        inputHash: artifactInputHash,
+        encodedIntervalsDigest: digestEncodedIntervalsBuffer(bytes),
+        engineVersion: PAST_ENGINE_VERSION,
+      });
+      const perRunTrace: PastSimPerRunTrace = {
+        lockboxInput: finalizedLockboxInput,
+        runContext,
+        stageTimingsMs: {
+          normalizeLockboxInput: 0,
+          requirementsGate: 0,
+          fingerprintResolution: 0,
+          sourceIntervalLoadOrPreload: 0,
+          sourceWeatherLoad: 0,
+          postWeatherPrep: 0,
+          referencePoolConstructionAndDaySimulation: 0,
+          stitchCurveBuild: 0,
+          datasetBuild: 0,
+          persistencePayloadBuildAndDbCacheWrite: 0,
+        },
+        inputHash: artifactInputHash,
+        fullChainHash,
+        sourceHouseId: finalizedLockboxInput.sourceContext.sourceHouseId,
+        profileHouseId: finalizedLockboxInput.profileContext.profileHouseId,
+        testHomeId: finalizedLockboxInput.profileContext.testHomeId,
+      };
+      if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+      (dataset.meta as any).lockboxInput = finalizedLockboxInput;
+      (dataset.meta as any).lockboxRunContext = runContext;
+      (dataset.meta as any).lockboxPerRunTrace = perRunTrace;
+      (dataset.meta as any).lockboxPerDayTrace = perDayTrace;
+      (dataset.meta as any).fullChainHash = fullChainHash;
       const datasetJsonForStorage = {
         ...dataset,
         canonicalArtifactSimulatedDayTotalsByDate,
         meta: {
           ...((dataset as any)?.meta ?? {}),
           canonicalArtifactSimulatedDayTotalsByDate,
+          lockboxInput: finalizedLockboxInput,
+          lockboxRunContext: runContext,
+          lockboxPerRunTrace: perRunTrace,
+          lockboxPerDayTrace: perDayTrace,
+          fullChainHash,
         },
         series: { ...((dataset as any)?.series ?? {}), intervals15: [] },
       };
@@ -4869,6 +5004,7 @@ export type RecalcSimulatorBuildArgs = {
   now?: Date;
   /** Admin calibration lab only (plan §24). */
   adminLabTreatmentMode?: import("@/modules/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
+  runContext?: Partial<PastSimRunContext>;
 };
 
 /**
@@ -5234,6 +5370,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
   projectionMode?: "baseline" | "raw";
   /** Observability: plan §6 (Slice 2). */
   correlationId?: string;
+  readContext?: Partial<PastSimReadContext>;
 }): Promise<
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | {
@@ -5297,11 +5434,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const readMode = args.readMode ?? "allow_rebuild";
     const forceRebuildArtifact = args.forceRebuildArtifact === true;
     const projectionMode = args.projectionMode ?? "baseline";
+    const readContext = buildPastSimReadContext({
+      artifactReadMode: args.readContext?.artifactReadMode ?? readMode,
+      projectionMode: args.readContext?.projectionMode ?? projectionMode,
+      compareSidecarRequest: args.readContext?.compareSidecarRequest ?? true,
+      displayFormattingFlags: args.readContext?.displayFormattingFlags,
+    });
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
 
-    if (readMode === "artifact_only") {
+    if (readContext.artifactReadMode === "artifact_only") {
       const scenarioIdForCache = scenarioId ?? "BASELINE";
       // Backward-compatible artifact-only support for gapfill_lab, which does not have a usageSimulatorBuild row.
       if (scenarioIdForCache === "gapfill_lab") {
@@ -5374,10 +5517,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
             message: quality.message,
             context: { readMode: "artifact_only" },
           });
-          return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
+              return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
         }
         const projectedBaselineAware =
-          projectionMode === "baseline"
+          readContext.projectionMode === "baseline"
             ? projectBaselineFromCanonicalDataset(
                 restored,
                 String((restored as any)?.meta?.timezone ?? "America/Chicago"),
@@ -5388,7 +5531,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 })
               )
             : restored;
-        const projected = attachCompareWithObservability(projectedBaselineAware);
+        if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
+        (restoredAny.meta as any).lockboxReadContext = readContext;
+        const projected = readContext.compareSidecarRequest
+          ? attachCompareWithObservability(projectedBaselineAware)
+          : projectedBaselineAware;
         return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
       }
 
@@ -5441,7 +5588,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         });
         const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
         const weatherIdentity = await computePastWeatherIdentity({
-          houseId: args.houseId,
+          houseId: canonicalActualIdentity.houseId,
           startDate: window.startDate,
           endDate: window.endDate,
         });
@@ -5551,13 +5698,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
           scenarioId,
           code: "INTERNAL_ERROR",
           message: quality.message,
-          context: { readMode: "artifact_only" },
+          context: { readMode: readContext.artifactReadMode },
         });
         return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
       }
       rehydrateValidationCompareMetaFromBuildInputsForRead({ dataset: restored, buildInputs });
       const projectedBaselineAware =
-        projectionMode === "baseline"
+        readContext.projectionMode === "baseline"
           ? projectBaselineFromCanonicalDataset(
               restored,
               String((buildInputs as any)?.timezone ?? "America/Chicago"),
@@ -5568,7 +5715,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
               })
             )
           : restored;
-      const projected = attachCompareWithObservability(projectedBaselineAware);
+      (restoredAny.meta as any).lockboxReadContext = readContext;
+      const projected = readContext.compareSidecarRequest
+        ? attachCompareWithObservability(projectedBaselineAware)
+        : projectedBaselineAware;
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
     }
 
@@ -5612,6 +5762,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
           mode,
           scenarioId,
           weatherPreference,
+          runContext: {
+            callerLabel: "user_future_refresh",
+            buildPathKind: "recalc",
+            persistRequested: false,
+          },
         });
         if (!recalcResult.ok) {
           return {
@@ -5665,6 +5820,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
         persistPastSimBaseline: true,
         validationDaySelectionMode: defaultValidationMode,
         validationDayCount: 21,
+        runContext: {
+          callerLabel: "validation_backfill",
+          buildPathKind: "recalc",
+          persistRequested: true,
+        },
       });
       if (!backfillRecalc.ok) {
         return {
@@ -5874,8 +6034,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
           const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
           const timezone = (buildInputs as any).timezone ?? "America/Chicago";
           const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
+          const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? args.houseId);
           const weatherIdentity = await computePastWeatherIdentity({
-            houseId: args.houseId,
+            houseId: sourceHouseIdForWeather,
             startDate,
             endDate,
           });
@@ -6106,13 +6267,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
         scenarioId,
         code: "INTERNAL_ERROR",
         message: quality.message,
-        context: { readMode: "allow_rebuild" },
+          context: { readMode: readContext.artifactReadMode },
       });
       return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
     }
     rehydrateValidationCompareMetaFromBuildInputsForRead({ dataset, buildInputs });
     const projectedBaselineAware =
-      projectionMode === "baseline"
+      readContext.projectionMode === "baseline"
         ? projectBaselineFromCanonicalDataset(
             dataset,
             String((buildInputs as any)?.timezone ?? "America/Chicago"),
@@ -6123,7 +6284,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
             })
           )
         : dataset;
-    const projected = attachCompareWithObservability(projectedBaselineAware);
+    if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+    (dataset.meta as any).lockboxReadContext = readContext;
+    const projected = readContext.compareSidecarRequest
+      ? attachCompareWithObservability(projectedBaselineAware)
+      : projectedBaselineAware;
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
   } catch (e) {
     if (e instanceof CompareTruthIncompleteError) {

@@ -44,6 +44,7 @@ export async function runPastSimRecalcQueuedWorker(jobId: string): Promise<void>
     validationDaySelectionMode: payload.validationDaySelectionMode,
     validationDayCount: payload.validationDayCount,
     correlationId: payload.correlationId,
+    runContext: payload.runContext,
   });
   if (!out.ok) {
     await markPastSimRecalcJobFailed(

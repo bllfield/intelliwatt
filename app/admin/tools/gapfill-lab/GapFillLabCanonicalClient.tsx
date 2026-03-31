@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { type ReactNode, useMemo, useState } from "react";
+import UsageDashboard, { type HouseUsage } from "@/components/usage/UsageDashboard";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
+import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import {
@@ -15,30 +16,6 @@ import { buildGapfillExportPayload } from "./exportPayload";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
 type DateRange = { startDate: string; endDate: string };
-
-type UsagePayload = {
-  source: string;
-  timezone: string;
-  coverageStart: string | null;
-  coverageEnd: string | null;
-  intervalCount: number;
-  daily: Array<{
-    date: string;
-    kwh: number;
-    source?: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
-    sourceDetail?:
-      | "SIMULATED_TRAVEL_VACANT"
-      | "SIMULATED_TEST_DAY"
-      | "SIMULATED_OTHER"
-      | "ACTUAL_VALIDATION_TEST_DAY"
-      | "ACTUAL";
-  }>;
-  monthly: Array<{ month: string; kwh: number }>;
-  weekdayKwh: number;
-  weekendKwh: number;
-  fifteenCurve: Array<{ hhmm: string; avgKw: number }>;
-  stitchedMonth?: any;
-};
 
 type RunResult = {
   ok: true;
@@ -54,7 +31,7 @@ type RunResult = {
   applianceProfile?: any;
   travelRangesFromDb?: DateRange[];
   testHomeLink?: any;
-  usage365?: UsagePayload;
+  usage365?: any;
   baselineDatasetProjection?: any;
   scoredDayTruthRows?: Array<{
     localDate: string;
@@ -140,7 +117,7 @@ function parseJsonSafe(s: string): { ok: true; value: any } | { ok: false; error
   }
 }
 
-function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal(props: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
   if (!props.open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
@@ -161,62 +138,271 @@ function Modal(props: { open: boolean; title: string; onClose: () => void; child
   );
 }
 
-function toPayloadFromBaseline(dataset: any, timezone: string): UsagePayload | null {
-  if (!dataset || typeof dataset !== "object") return null;
-  const daily = Array.isArray(dataset.daily)
-    ? dataset.daily
-        .map((d: any) => ({
-          date: String(d?.date ?? "").slice(0, 10),
-          kwh: Number(d?.kwh ?? 0) || 0,
-          source:
-            String(d?.source ?? "").toUpperCase() === "SIMULATED"
-              ? ("SIMULATED" as const)
-              : String(d?.source ?? "").toUpperCase() === "MISSING_REFERENCE"
-                ? ("MISSING_REFERENCE" as const)
-                : ("ACTUAL" as const),
-          sourceDetail:
-            String(d?.sourceDetail ?? "").toUpperCase() === "SIMULATED_TRAVEL_VACANT"
-              ? ("SIMULATED_TRAVEL_VACANT" as const)
-              : String(d?.sourceDetail ?? "").toUpperCase() === "SIMULATED_TEST_DAY"
-                ? ("SIMULATED_TEST_DAY" as const)
-                : String(d?.sourceDetail ?? "").toUpperCase() === "SIMULATED_OTHER"
-                  ? ("SIMULATED_OTHER" as const)
-                  : String(d?.sourceDetail ?? "").toUpperCase() === "ACTUAL_VALIDATION_TEST_DAY"
-                    ? ("ACTUAL_VALIDATION_TEST_DAY" as const)
-                    : ("ACTUAL" as const),
-        }))
-        .filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
-    : [];
-  const monthly = Array.isArray(dataset.monthly)
-    ? dataset.monthly
-        .map((m: any) => ({ month: String(m?.month ?? "").slice(0, 7), kwh: Number(m?.kwh ?? 0) || 0 }))
-        .filter((m: any) => /^\d{4}-\d{2}$/.test(m.month))
-    : [];
-  const source = String(dataset?.summary?.source ?? "SIMULATED");
-  const coverageStart = typeof dataset?.summary?.start === "string" ? dataset.summary.start.slice(0, 10) : null;
-  const coverageEnd = typeof dataset?.summary?.end === "string" ? dataset.summary.end.slice(0, 10) : null;
-  const intervalCount = Number(dataset?.summary?.intervalsCount ?? dataset?.series?.intervals15?.length ?? 0) || 0;
-  const fifteenCurve = Array.isArray(dataset?.insights?.fifteenMinuteAverages)
-    ? dataset.insights.fifteenMinuteAverages
-        .map((row: any) => ({
-          hhmm: String(row?.hhmm ?? ""),
-          avgKw: Number(row?.avgKw ?? 0) || 0,
-        }))
-        .filter((row: any) => /^\d{2}:\d{2}$/.test(row.hhmm))
-    : [];
+function summarizeRanges(ranges: unknown): string {
+  const list = Array.isArray(ranges) ? ranges : [];
+  if (list.length === 0) return "none";
+  return list
+    .slice(0, 4)
+    .map((range) => {
+      const start = String((range as any)?.startDate ?? "").slice(0, 10);
+      const end = String((range as any)?.endDate ?? "").slice(0, 10);
+      return start && end ? `${start} -> ${end}` : "invalid_range";
+    })
+    .join(" | ") + (list.length > 4 ? ` | +${list.length - 4} more` : "");
+}
+
+function summarizeValidationKeys(keys: unknown): string {
+  const list = Array.isArray(keys) ? keys.map((value) => String(value).slice(0, 10)).filter(Boolean) : [];
+  if (list.length === 0) return "none";
+  return `${list.length} key(s): ${list.slice(0, 6).join(", ")}${list.length > 6 ? ", ..." : ""}`;
+}
+
+function formatNumberMaybe(value: unknown, digits = 2): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+}
+
+function getModeExplanation(mode: unknown): string {
+  switch (String(mode ?? "")) {
+    case "ACTUAL_INTERVAL_BASELINE":
+      return "Uses persisted source interval truth as the baseline input; travel/vacant and validation selections constrain display and scoring only.";
+    case "MANUAL_MONTHLY":
+      return "Uses the shared monthly-constrained lockbox branch, with source-derived monthly totals kept fixed inside the persisted run.";
+    case "MANUAL_ANNUAL":
+      return "Uses the shared annual-constrained lockbox branch, with source-derived annual truth kept fixed inside the persisted run.";
+    case "PROFILE_ONLY_NEW_BUILD":
+      return "Uses the shared profile-only new-build branch, with source/profile identities captured in the persisted lockbox trace.";
+    default:
+      return "Reads persisted shared Past Sim truth only; no GapFill-owned simulator branch is active.";
+  }
+}
+
+function buildDashboardHouse(args: {
+  houseId: string;
+  label: string;
+  dataset: any;
+  esiid?: string | null;
+}): HouseUsage {
   return {
-    source,
-    timezone,
-    coverageStart,
-    coverageEnd,
-    intervalCount,
-    daily,
-    monthly,
-    weekdayKwh: Number(dataset?.insights?.weekdayVsWeekend?.weekday ?? 0) || 0,
-    weekendKwh: Number(dataset?.insights?.weekdayVsWeekend?.weekend ?? 0) || 0,
-    fifteenCurve,
-    stitchedMonth: dataset?.insights?.stitchedMonth ?? null,
+    houseId: args.houseId,
+    label: args.label,
+    address: {
+      line1: args.label,
+      city: null,
+      state: null,
+    },
+    esiid: args.esiid ?? null,
+    dataset: args.dataset,
+    alternatives: {
+      smt: null,
+      greenButton: null,
+    },
   };
+}
+
+function readLockboxPresentation(dataset: any) {
+  const meta = dataset?.meta && typeof dataset.meta === "object" ? dataset.meta : {};
+  const lockboxInput =
+    meta.lockboxInput && typeof meta.lockboxInput === "object" ? meta.lockboxInput : null;
+  const perRunTrace =
+    meta.lockboxPerRunTrace && typeof meta.lockboxPerRunTrace === "object"
+      ? meta.lockboxPerRunTrace
+      : null;
+  const perDayTrace = Array.isArray(meta.lockboxPerDayTrace) ? meta.lockboxPerDayTrace : [];
+  const sourceContext =
+    lockboxInput?.sourceContext && typeof lockboxInput.sourceContext === "object"
+      ? lockboxInput.sourceContext
+      : null;
+  const profileContext =
+    lockboxInput?.profileContext && typeof lockboxInput.profileContext === "object"
+      ? lockboxInput.profileContext
+      : null;
+  const validationKeys =
+    lockboxInput?.validationKeys && typeof lockboxInput.validationKeys === "object"
+      ? lockboxInput.validationKeys
+      : null;
+  const travelRanges =
+    lockboxInput?.travelRanges && typeof lockboxInput.travelRanges === "object"
+      ? lockboxInput.travelRanges
+      : null;
+  const stageTimings =
+    perRunTrace?.stageTimingsMs && typeof perRunTrace.stageTimingsMs === "object"
+      ? Object.entries(perRunTrace.stageTimingsMs as Record<string, unknown>)
+      : [];
+  return {
+    meta,
+    lockboxInput,
+    perRunTrace,
+    perDayTrace,
+    sourceContext,
+    profileContext,
+    validationKeys,
+    travelRanges,
+    stageTimings,
+    mode: lockboxInput?.mode ?? null,
+    inputHash: perRunTrace?.inputHash ?? null,
+    fullChainHash: meta.fullChainHash ?? perRunTrace?.fullChainHash ?? null,
+  };
+}
+
+function MetadataGrid(props: { items: Array<{ label: string; value: ReactNode }> }) {
+  return (
+    <dl className="grid gap-2 text-xs md:grid-cols-2">
+      {props.items.map((item) => (
+        <div key={item.label} className="rounded border border-brand-blue/10 bg-brand-navy/5 p-2">
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-brand-navy/50">{item.label}</dt>
+          <dd className="mt-1 font-mono break-all text-brand-navy/85">{item.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function LockboxFlowPanel(props: {
+  title: string;
+  dataset: any;
+  fallbackTravelRanges?: unknown;
+  fallbackValidationKeys?: unknown;
+}) {
+  const presentation = readLockboxPresentation(props.dataset);
+  const sourceContext = presentation.sourceContext as Record<string, unknown> | null;
+  const profileContext = presentation.profileContext as Record<string, unknown> | null;
+  const validationKeys = presentation.validationKeys as Record<string, unknown> | null;
+  const travelRanges = presentation.travelRanges as Record<string, unknown> | null;
+  return (
+    <div className="space-y-3 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div>
+        <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
+        <div className="mt-1 text-xs text-brand-navy/70">
+          Read-only trace of the persisted lockbox run, identity chain, and stage timings.
+        </div>
+      </div>
+      <MetadataGrid
+        items={[
+          { label: "sourceHouseId", value: String(sourceContext?.sourceHouseId ?? presentation.perRunTrace?.sourceHouseId ?? "—") },
+          { label: "profileHouseId", value: String(profileContext?.profileHouseId ?? presentation.perRunTrace?.profileHouseId ?? "—") },
+          { label: "mode", value: String(presentation.mode ?? "—") },
+          { label: "travelRanges", value: summarizeRanges(travelRanges?.ranges ?? props.fallbackTravelRanges) },
+          { label: "validationKeys", value: summarizeValidationKeys(validationKeys?.localDateKeys ?? props.fallbackValidationKeys) },
+          {
+            label: "sourceDerivedMonthlyTotalsKwhByMonth",
+            value: JSON.stringify(sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null),
+          },
+          {
+            label: "sourceDerivedAnnualTotalKwh",
+            value: formatNumberMaybe(sourceContext?.sourceDerivedAnnualTotalKwh),
+          },
+          { label: "intervalFingerprint", value: String(sourceContext?.intervalFingerprint ?? "—") },
+          { label: "weatherIdentity", value: String(sourceContext?.weatherIdentity ?? "—") },
+          { label: "usageShapeProfileIdentity", value: String(profileContext?.usageShapeProfileIdentity ?? "—") },
+          { label: "inputHash", value: String(presentation.inputHash ?? "—") },
+          { label: "fullChainHash", value: String(presentation.fullChainHash ?? "—") },
+        ]}
+      />
+      <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Mode flow</div>
+        <div className="mt-1 text-xs text-brand-navy/80">{getModeExplanation(presentation.mode)}</div>
+      </div>
+      <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Stage timings</div>
+        {presentation.stageTimings.length > 0 ? (
+          <div className="mt-2 grid gap-1 text-xs font-mono md:grid-cols-2">
+            {presentation.stageTimings.map(([key, value]) => (
+              <div key={key}>
+                {key}: {String(value)} ms
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-1 text-xs text-brand-navy/60">No stage timings were attached to this persisted read.</div>
+        )}
+      </div>
+      <details className="rounded border border-brand-blue/10 p-3">
+        <summary className="cursor-pointer text-xs font-semibold text-brand-navy">Per-run trace summary</summary>
+        <pre className="mt-2 overflow-x-auto rounded bg-brand-navy/5 p-3 text-xs">
+          {JSON.stringify(presentation.perRunTrace ?? presentation.lockboxInput ?? null, null, 2)}
+        </pre>
+      </details>
+      <details className="rounded border border-brand-blue/10 p-3">
+        <summary className="cursor-pointer text-xs font-semibold text-brand-navy">
+          Per-day trace access ({presentation.perDayTrace.length})
+        </summary>
+        {presentation.perDayTrace.length > 0 ? (
+          <div className="mt-2 max-h-80 overflow-auto">
+            <table className="min-w-full text-xs border border-brand-blue/10">
+              <thead className="bg-brand-blue/5">
+                <tr>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Date</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Reason</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-left">Classification</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Final kWh</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Display kWh</th>
+                  <th className="border border-brand-blue/10 px-2 py-1 text-right">Interval kWh</th>
+                </tr>
+              </thead>
+              <tbody>
+                {presentation.perDayTrace.map((row: any, idx: number) => (
+                  <tr key={`${String(row?.localDate ?? "row")}-${idx}`}>
+                    <td className="border border-brand-blue/10 px-2 py-1">{String(row?.localDate ?? "—")}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1">{String(row?.simulatedReasonCode ?? "—")}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1">{String(row?.dayClassification ?? "—")}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row?.finalDayKwh)}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row?.displayDayKwh)}</td>
+                    <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row?.intervalSumKwh)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-brand-navy/60">Per-day trace data is not attached to this artifact.</div>
+        )}
+      </details>
+    </div>
+  );
+}
+
+function LeverVisibilityPanel(props: {
+  title: string;
+  dataset: any;
+  isTestHouse: boolean;
+  adminValidationMode?: string | null;
+  treatmentMode?: string | null;
+}) {
+  const presentation = readLockboxPresentation(props.dataset);
+  const sourceContext = presentation.sourceContext as Record<string, unknown> | null;
+  const profileContext = presentation.profileContext as Record<string, unknown> | null;
+  return (
+    <div className="space-y-3 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div>
+        <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
+        <div className="mt-1 text-xs text-brand-navy/70">
+          Explanatory only: shows what stays fixed, what this mode derives, and what admins may adjust through the existing controls.
+        </div>
+      </div>
+      <MetadataGrid
+        items={[
+          { label: "Fixed source truth", value: `sourceHouseId=${String(sourceContext?.sourceHouseId ?? "—")} | intervalFingerprint=${String(sourceContext?.intervalFingerprint ?? "—")} | weatherIdentity=${String(sourceContext?.weatherIdentity ?? "—")}` },
+          { label: "Fixed profile truth", value: `profileHouseId=${String(profileContext?.profileHouseId ?? "—")} | usageShapeProfileIdentity=${String(profileContext?.usageShapeProfileIdentity ?? "—")}` },
+          { label: "Mode-selected constraints", value: `mode=${String(presentation.mode ?? "—")} | validationMode=${String(props.adminValidationMode ?? "—")} | travelRanges=${summarizeRanges(presentation.travelRanges?.ranges ?? [])}` },
+          {
+            label: "Derived inputs",
+            value: `monthlyTotals=${JSON.stringify(sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null)} | annual=${formatNumberMaybe(sourceContext?.sourceDerivedAnnualTotalKwh)}`,
+          },
+          {
+            label: "Adjustable controls in normal graded flow",
+            value: props.isTestHouse
+              ? `Test-home home details, test-home appliance details, travel/vacant ranges, validation-day mode/ranges, admin lab treatment (${props.treatmentMode ?? "pending"})`
+              : "None from this read-only actual-house panel. Source-house persisted truth is displayed as-is.",
+          },
+          {
+            label: "Forbidden controls in normal graded flow",
+            value:
+              "Source intervals, source-derived totals, interval fingerprint, weather identity, usage shape profile identity, input hash, full chain hash, and persisted compare truth are not editable here.",
+          },
+        ]}
+      />
+    </div>
+  );
 }
 
 export default function GapFillLabCanonicalClient() {
@@ -250,8 +436,6 @@ export default function GapFillLabCanonicalClient() {
   const [lastFailureFields, setLastFailureFields] = useState<GapfillFailureFields | null>(null);
   const [lastHttpStatus, setLastHttpStatus] = useState<number | null>(null);
   const [requestDebug, setRequestDebug] = useState<any[]>([]);
-  const [usageMonthlyView, setUsageMonthlyView] = useState<"chart" | "table">("chart");
-  const [usageDailyView, setUsageDailyView] = useState<"chart" | "table">("chart");
   const [openFullHomeEditor, setOpenFullHomeEditor] = useState(false);
   const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
@@ -277,7 +461,12 @@ export default function GapFillLabCanonicalClient() {
     setApplianceProfileJson(prettyJson(next));
   }
 
-  async function runAction(action: string, extra: Record<string, unknown> = {}) {
+  async function runAction(
+    action: string,
+    extra: Record<string, unknown> = {},
+    options?: { setAsPrimaryResult?: boolean }
+  ) {
+    const setAsPrimaryResult = options?.setAsPrimaryResult !== false;
     setLoading(true);
     setError(null);
     setLastFailureFields(null);
@@ -340,7 +529,7 @@ export default function GapFillLabCanonicalClient() {
         },
         ...prev,
       ].slice(0, 12));
-      setResult(fallback);
+      if (setAsPrimaryResult) setResult(fallback);
       setError(gapfillPrimaryErrorLine(ff));
       setLoading(false);
       return fallback;
@@ -356,7 +545,7 @@ export default function GapFillLabCanonicalClient() {
       },
       ...prev,
     ].slice(0, 12));
-    setResult(json);
+    if (setAsPrimaryResult) setResult(json);
     if (!json.ok) {
       const ff = gapfillFailureFieldsFromJson(json as Record<string, unknown>);
       setLastFailureFields(ff);
@@ -409,7 +598,14 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onLookup() {
-    await runAction("lookup_source_houses");
+    const json = await runAction("lookup_source_houses");
+    if (json.ok) {
+      await runAction(
+        "run_source_home_past_sim_snapshot",
+        { includeUsage365: false, includeUserPipelineParity: false },
+        { setAsPrimaryResult: false }
+      );
+    }
   }
 
   async function onSaveUserDefaultValidationMode() {
@@ -428,7 +624,14 @@ export default function GapFillLabCanonicalClient() {
         return;
       }
     }
-    await runAction("replace_test_home_from_source");
+    const json = await runAction("replace_test_home_from_source");
+    if (json.ok) {
+      await runAction(
+        "run_source_home_past_sim_snapshot",
+        { includeUsage365: false, includeUserPipelineParity: false },
+        { setAsPrimaryResult: false }
+      );
+    }
   }
 
   async function onSaveInputs() {
@@ -450,14 +653,25 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onRunRecalc() {
-    await runAction("run_test_home_canonical_recalc", { adminLabTreatmentMode });
+    const json = await runAction("run_test_home_canonical_recalc", { adminLabTreatmentMode });
+    if (json.ok) {
+      await runAction(
+        "run_source_home_past_sim_snapshot",
+        { includeUsage365: false, includeUserPipelineParity: false },
+        { setAsPrimaryResult: false }
+      );
+    }
   }
 
   async function onRunPastSimSnapshot() {
-    await runAction("run_source_home_past_sim_snapshot", {
-      includeUsage365: false,
-      includeUserPipelineParity: false,
-    });
+    await runAction(
+      "run_source_home_past_sim_snapshot",
+      {
+        includeUsage365: false,
+        includeUserPipelineParity: false,
+      },
+      { setAsPrimaryResult: false }
+    );
   }
 
   async function onCopyPastSimSnapshot() {
@@ -471,40 +685,97 @@ export default function GapFillLabCanonicalClient() {
     }
   }
 
-  const usageChart = useMemo(() => {
-    if (!result?.ok) return null;
-    if (result.usage365 && Array.isArray(result.usage365.daily) && result.usage365.daily.length > 0) {
-      return result.usage365;
-    }
-    return toPayloadFromBaseline(result.baselineDatasetProjection, timezone);
-  }, [result, timezone]);
+  const actualPastSnapshotReads = useMemo(() => {
+    if (!pastSimSnapshot || typeof pastSimSnapshot !== "object") return null;
+    return ((pastSimSnapshot as any).reads ?? null) as Record<string, any> | null;
+  }, [pastSimSnapshot]);
 
-  const baselineChart = useMemo(() => {
-    if (!result?.ok) return null;
-    return toPayloadFromBaseline(result.baselineDatasetProjection, timezone);
-  }, [result, timezone]);
-
-  const compareProjectionForDisplay = useMemo(() => {
-    if (!result?.ok) return { rows: [], metrics: {} as Record<string, unknown> };
-    const baselineMeta = result.baselineDatasetProjection?.meta;
-    const sidecarRows = Array.isArray(result.compareProjection?.rows) ? result.compareProjection.rows : [];
-    const metaRows = Array.isArray(baselineMeta?.validationCompareRows) ? baselineMeta.validationCompareRows : [];
-    const rows = sidecarRows.length > 0 ? sidecarRows : metaRows;
-    const metrics =
-      (sidecarRows.length > 0 ? result.compareProjection?.metrics : undefined) ??
-      (metaRows.length > 0 && baselineMeta?.validationCompareMetrics && typeof baselineMeta.validationCompareMetrics === "object"
-        ? baselineMeta.validationCompareMetrics
-        : undefined) ??
-      (result.compareProjection?.metrics ?? {});
-    return {
-      rows,
-      metrics: (metrics && typeof metrics === "object" ? metrics : {}) as Record<string, unknown>,
-    };
-  }, [result]);
-
-  const hasCurveData = Boolean(
-    (usageChart?.daily && usageChart.daily.length > 0) || (baselineChart?.daily && baselineChart.daily.length > 0)
+  const actualHouseBaselineDataset = actualPastSnapshotReads?.baselineProjection?.ok
+    ? actualPastSnapshotReads.baselineProjection.dataset
+    : null;
+  const actualHouseCompareProjection = useMemo(
+    () =>
+      buildValidationCompareDisplay({
+        compareProjection: actualPastSnapshotReads?.baselineProjection?.compareProjection ?? null,
+        dataset: actualHouseBaselineDataset,
+      }),
+    [actualHouseBaselineDataset, actualPastSnapshotReads]
   );
+  const testHouseBaselineDataset = result?.ok ? result.baselineDatasetProjection ?? null : null;
+  const testHouseCompareProjection = useMemo(
+    () =>
+      result?.ok
+        ? buildValidationCompareDisplay({
+            compareProjection: result.compareProjection,
+            dataset: result.baselineDatasetProjection,
+          })
+        : { rows: [], metrics: {} as Record<string, unknown> },
+    [result]
+  );
+  const actualHouseOverride = useMemo(
+    () =>
+      actualHouseBaselineDataset
+        ? [
+            buildDashboardHouse({
+              houseId:
+                String(
+                  (pastSimSnapshot as any)?.sourceHouseId ??
+                    sourceHouse?.id ??
+                    sourceHouseId ??
+                    "actual-house"
+                ),
+              label: "Actual House",
+              dataset: actualHouseBaselineDataset,
+              esiid: sourceHouse?.esiid ?? null,
+            }),
+          ]
+        : null,
+    [actualHouseBaselineDataset, pastSimSnapshot, sourceHouse?.esiid, sourceHouse?.id, sourceHouseId]
+  );
+  const testHouseOverride = useMemo(
+    () =>
+      testHouseBaselineDataset
+        ? [
+            buildDashboardHouse({
+              houseId: String((result as any)?.testHomeId ?? effectiveTestHomeId ?? "test-house"),
+              label: "Test House",
+              dataset: testHouseBaselineDataset,
+            }),
+          ]
+        : null,
+    [effectiveTestHomeId, result, testHouseBaselineDataset]
+  );
+  const actualVsTestMonthlyRows = useMemo(() => {
+    const actualMonthly = Array.isArray(actualHouseBaselineDataset?.monthly)
+      ? actualHouseBaselineDataset.monthly
+      : [];
+    const testMonthly = Array.isArray(testHouseBaselineDataset?.monthly)
+      ? testHouseBaselineDataset.monthly
+      : [];
+    const allMonths = Array.from(
+      new Set([
+        ...actualMonthly.map((row: any) => String(row?.month ?? "").slice(0, 7)),
+        ...testMonthly.map((row: any) => String(row?.month ?? "").slice(0, 7)),
+      ])
+    )
+      .filter((value) => /^\d{4}-\d{2}$/.test(value))
+      .sort();
+    return allMonths.map((month) => {
+      const actual = Number(
+        actualMonthly.find((row: any) => String(row?.month ?? "").slice(0, 7) === month)?.kwh ?? 0
+      ) || 0;
+      const test = Number(
+        testMonthly.find((row: any) => String(row?.month ?? "").slice(0, 7) === month)?.kwh ?? 0
+      ) || 0;
+      return {
+        month,
+        actual,
+        test,
+        delta: Number((test - actual).toFixed(2)),
+      };
+    });
+  }, [actualHouseBaselineDataset, testHouseBaselineDataset]);
+  const hasCurveData = Boolean(actualHouseOverride?.length || testHouseOverride?.length);
 
   const visibilityFromResult = useMemo(() => {
     if (!result?.ok) return null;
@@ -570,8 +841,6 @@ export default function GapFillLabCanonicalClient() {
         error,
         lastHttpStatus,
         lastFailureFields,
-        usageMonthlyView,
-        usageDailyView,
         effectiveTestHomeId,
       },
       linkedIdentity: {
@@ -582,11 +851,13 @@ export default function GapFillLabCanonicalClient() {
         apiTestHomeId,
       },
       result: result ?? null,
+      pastSimSnapshot: pastSimSnapshot ?? null,
       derived: {
         visibilityFromResult: visibilityFromResult ?? null,
-        usageChart: usageChart ?? null,
-        baselineChart: baselineChart ?? null,
-        compareProjectionForDisplay: compareProjectionForDisplay ?? null,
+        actualHouseOverride: actualHouseOverride ?? null,
+        testHouseOverride: testHouseOverride ?? null,
+        actualHouseCompareProjection: actualHouseCompareProjection ?? null,
+        testHouseCompareProjection: testHouseCompareProjection ?? null,
       },
       requestDebug,
     }),
@@ -596,8 +867,8 @@ export default function GapFillLabCanonicalClient() {
       apiSourceHouseId,
       apiTestHomeId,
       applianceProfileJson,
-      baselineChart,
-      compareProjectionForDisplay,
+      actualHouseCompareProjection,
+      actualHouseOverride,
       effectiveTestHomeId,
       email,
       error,
@@ -605,6 +876,7 @@ export default function GapFillLabCanonicalClient() {
       lastFailureFields,
       lastHttpStatus,
       loading,
+      pastSimSnapshot,
       randomMode,
       requestDebug,
       result,
@@ -612,14 +884,13 @@ export default function GapFillLabCanonicalClient() {
       sourceHouseId,
       supportedValidationSelectionModes,
       testDays,
+      testHouseCompareProjection,
+      testHouseOverride,
       testHome,
       testHomeLink,
       testRanges,
       timezone,
       travelRanges,
-      usageChart,
-      usageDailyView,
-      usageMonthlyView,
       userDefaultValidationSelectionMode,
       visibilityFromResult,
       weatherKind,
@@ -772,19 +1043,18 @@ export default function GapFillLabCanonicalClient() {
               >
                 <option value="actual_data_fingerprint">actual_data_fingerprint</option>
                 <option value="whole_home_prior_only">whole_home_prior_only</option>
-                <option value="manual_monthly_constrained">manual_monthly_constrained (MANUAL_TOTALS from source actuals)</option>
-                <option value="manual_annual_constrained">manual_annual_constrained (MANUAL_TOTALS annual sum from source actuals)</option>
+                <option value="manual_monthly_constrained">MANUAL_MONTHLY (monthly-constrained branch from source actuals)</option>
+                <option value="manual_annual_constrained">MANUAL_ANNUAL (annual-constrained branch from source actuals)</option>
               </select>
             </div>
             <div className="mt-0.5 font-mono text-xs">
               Last recalc echo: {visibilityFromResult?.treatmentMode ?? "—"}
             </div>
             <div className="text-xs text-brand-navy/60 mt-1">
-              Sent on &quot;Run canonical recalc&quot; only. Manual constraint modes upgrade the shared chain to{" "}
-              <code className="font-mono">MANUAL_TOTALS</code> using monthly/annual totals from the source home&apos;s actual usage for the
-              canonical window (same <code className="font-mono">fetchActualCanonicalMonthlyTotals</code> as baseline). Fingerprint treatment
-              still applies after <code className="font-mono">resolveSimFingerprint</code>. Requires a ready whole-home fingerprint on the test
-              home for constrained resolver surfaces. Echo: <span className="font-mono">simulatorMode</span> from the API after recalc.
+              Sent on &quot;Run canonical recalc&quot; only. `MANUAL_MONTHLY` and `MANUAL_ANNUAL` stay backward-compatible with persisted{" "}
+              <code className="font-mono">MANUAL_TOTALS</code>, but they now represent distinct monthly- and annual-constrained internal lockbox
+              branches built from the source home&apos;s actual usage over the canonical window. Fingerprint treatment still applies after{" "}
+              <code className="font-mono">resolveSimFingerprint</code>.
             </div>
           </div>
           <div>
@@ -1097,15 +1367,6 @@ export default function GapFillLabCanonicalClient() {
         {exportNotice ? <div className="text-xs text-brand-navy/70">{exportNotice}</div> : null}
       </div>
 
-      {pastSimSnapshot ? (
-        <details className="border rounded p-4">
-          <summary className="cursor-pointer font-semibold text-sm">Source-home Past Sim Snapshot (separate run)</summary>
-          <pre className="mt-3 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
-            {JSON.stringify(pastSimSnapshot, null, 2)}
-          </pre>
-        </details>
-      ) : null}
-
       {loading ? (
         <div
           className="p-3 rounded border border-brand-blue/20 bg-brand-blue/5 text-sm text-brand-navy"
@@ -1145,77 +1406,238 @@ export default function GapFillLabCanonicalClient() {
 
       {result?.ok && !loading && !hasCurveData ? (
         <div className="p-3 rounded border border-amber-200 bg-amber-50 text-sm text-amber-950">
-          No curve data in this response (empty usage / baseline daily series). This is not a success state for visualization — run lookup or recalc when inputs are ready.
+          Persisted Past Sim panels are not ready yet. Run lookup or canonical recalc to refresh the actual-house and test-house artifact reads.
         </div>
       ) : null}
 
-      {baselineChart?.daily?.length ? (
-        <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Normal Baseline Display (validation days remain actual)</div>
-          <div className="text-xs text-brand-navy/70 mb-2">
-            Source notation: ACTUAL or SIMULATED. Validation/test days remain ACTUAL in baseline; modeled values for those
-            days appear only in compare.
-          </div>
-          <div className="text-xs font-mono text-brand-navy/70 mb-2">
-            baselineActualDayCount: {String((result as any)?.baselineProjectionSummary?.actualDayCount ?? 0)} · baselineSimulatedDayCount:{" "}
-            {String((result as any)?.baselineProjectionSummary?.simulatedDayCount ?? 0)}
-          </div>
-          <UsageChartsPanel
-            monthly={baselineChart.monthly}
-            stitchedMonth={baselineChart.stitchedMonth ?? null}
-            weekdayKwh={baselineChart.weekdayKwh}
-            weekendKwh={baselineChart.weekendKwh}
-            monthlyView={usageMonthlyView}
-            onMonthlyViewChange={setUsageMonthlyView}
-            dailyView={usageDailyView}
-            onDailyViewChange={setUsageDailyView}
-            daily={baselineChart.daily}
-            fifteenCurve={baselineChart.fifteenCurve}
-            coverageStart={baselineChart.coverageStart}
-            coverageEnd={baselineChart.coverageEnd}
-          />
+      <section className="space-y-4 rounded-xl border border-brand-blue/10 bg-brand-blue/5 p-4">
+        <div>
+          <h2 className="text-lg font-semibold text-brand-navy">Actual House</h2>
+          <p className="mt-1 text-sm text-brand-navy/70">
+            Shared Past presentation path for the source house, driven from persisted Past artifact reads only.
+          </p>
         </div>
-      ) : null}
+        {actualHouseOverride ? (
+          <>
+            <UsageDashboard
+              forcedMode="SIMULATED"
+              allowModeToggle={false}
+              initialMode="SIMULATED"
+              refreshToken={0}
+              simulatedHousesOverride={actualHouseOverride}
+              fetchModeOverride="SIMULATED"
+              dashboardVariant="PAST_SIMULATED_USAGE"
+              showHouseSelector={false}
+            />
+            {actualHouseCompareProjection.rows.length > 0 ? (
+              <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+                <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+                <div className="mt-1 text-xs text-brand-navy/70">
+                  Persisted compare rows from the actual house Past artifact family.
+                </div>
+                <ValidationComparePanel
+                  rows={actualHouseCompareProjection.rows}
+                  metrics={actualHouseCompareProjection.metrics}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                No persisted actual-house compare rows are currently attached to the source Past artifact.
+              </div>
+            )}
+            <div className="grid gap-4 xl:grid-cols-2">
+              <LockboxFlowPanel
+                title="Actual House lockbox flow"
+                dataset={actualHouseBaselineDataset}
+                fallbackTravelRanges={(pastSimSnapshot as any)?.travelRangesFromDb ?? []}
+              />
+              <LeverVisibilityPanel
+                title="Actual House fixed inputs and constraints"
+                dataset={actualHouseBaselineDataset}
+                isTestHouse={false}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            Source-house Past artifact snapshot is not available yet. Use lookup or the snapshot action to load persisted source-house truth.
+          </div>
+        )}
+      </section>
 
-      {usageChart?.daily?.length ? (
-        <div className="border rounded p-4">
-          <div className="font-semibold text-sm mb-2">Usage 365 (source actual context)</div>
-          <UsageChartsPanel
-            monthly={usageChart.monthly}
-            stitchedMonth={usageChart.stitchedMonth ?? null}
-            weekdayKwh={usageChart.weekdayKwh}
-            weekendKwh={usageChart.weekendKwh}
-            monthlyView={usageMonthlyView}
-            onMonthlyViewChange={setUsageMonthlyView}
-            dailyView={usageDailyView}
-            onDailyViewChange={setUsageDailyView}
-            daily={usageChart.daily}
-            fifteenCurve={usageChart.fifteenCurve}
-            coverageStart={usageChart.coverageStart}
-            coverageEnd={usageChart.coverageEnd}
-          />
+      <section className="space-y-4 rounded-xl border border-brand-blue/10 bg-brand-blue/5 p-4">
+        <div>
+          <h2 className="text-lg font-semibold text-brand-navy">Test House</h2>
+          <p className="mt-1 text-sm text-brand-navy/70">
+            Shared Past presentation path for the canonical test-home build, using persisted baseline projection truth only.
+          </p>
         </div>
-      ) : null}
-
-      {result?.ok && compareProjectionForDisplay.rows.length > 0 ? (
-        <div className="border rounded p-4">
-          <div className="font-semibold text-sm">Validation / Test Day Compare</div>
-          <div className="mt-1 text-xs text-brand-navy/70">
-            This section compares modeled vs actual on validation days for simulator accuracy transparency.
+        {testHouseOverride ? (
+          <>
+            <div className="rounded-xl border border-brand-blue/10 bg-white p-4 text-xs text-brand-navy/80 shadow-sm">
+              <div className="font-semibold text-brand-navy">Mode and allowed controls</div>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                <div>Selected simulator mode: <span className="font-mono">{visibilityFromResult?.simulatorMode ?? "—"}</span></div>
+                <div>Admin lab treatment: <span className="font-mono">{visibilityFromResult?.treatmentMode ?? "—"}</span></div>
+                <div>Validation mode: <span className="font-mono">{visibilityFromResult?.adminLabValidationSelectionMode ?? adminLabValidationSelectionMode}</span></div>
+                <div>Effective validation mode: <span className="font-mono">{visibilityFromResult?.effectiveValidationSelectionMode ?? "—"}</span></div>
+              </div>
+              <div className="mt-2">
+                This section is explanatory and read-only. Existing admin controls above remain the only normal editing path for the test home.
+              </div>
+            </div>
+            <UsageDashboard
+              forcedMode="SIMULATED"
+              allowModeToggle={false}
+              initialMode="SIMULATED"
+              refreshToken={0}
+              simulatedHousesOverride={testHouseOverride}
+              fetchModeOverride="SIMULATED"
+              dashboardVariant="PAST_SIMULATED_USAGE"
+              showHouseSelector={false}
+            />
+            {testHouseCompareProjection.rows.length > 0 ? (
+              <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+                <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+                <div className="mt-1 text-xs text-brand-navy/70">
+                  Persisted compare rows from the canonical test-house artifact family.
+                </div>
+                <ValidationComparePanel
+                  rows={testHouseCompareProjection.rows}
+                  metrics={testHouseCompareProjection.metrics}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                {Array.isArray((testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal) &&
+                (testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal.length > 0
+                  ? "Validation test days are configured, but compare rows were not returned with this persisted test-house response."
+                  : "No validation/test-day compare rows are available for this test-house artifact yet."}
+              </div>
+            )}
+            <div className="grid gap-4 xl:grid-cols-2">
+              <LockboxFlowPanel
+                title="Test House lockbox flow"
+                dataset={testHouseBaselineDataset}
+                fallbackTravelRanges={travelRanges}
+                fallbackValidationKeys={(result as any)?.modelAssumptions?.validationOnlyDateKeysLocal ?? []}
+              />
+              <LeverVisibilityPanel
+                title="Test House fixed inputs and adjustable controls"
+                dataset={testHouseBaselineDataset}
+                isTestHouse={true}
+                adminValidationMode={visibilityFromResult?.adminLabValidationSelectionMode ?? adminLabValidationSelectionMode}
+                treatmentMode={visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            Test-house persisted baseline projection is not available yet. Run canonical recalc to populate the shared test-house panel.
           </div>
-          <ValidationComparePanel
-            rows={compareProjectionForDisplay.rows}
-            metrics={compareProjectionForDisplay.metrics}
-          />
+        )}
+      </section>
+
+      <section className="space-y-4 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+        <div>
+          <h2 className="text-lg font-semibold text-brand-navy">Compare / Analysis</h2>
+          <p className="mt-1 text-sm text-brand-navy/70">
+            Read-only analysis of persisted outputs only. No route-local simulator or compare math is introduced here.
+          </p>
         </div>
-      ) : result?.ok ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          {Array.isArray((result.baselineDatasetProjection as any)?.meta?.validationOnlyDateKeysLocal) &&
-          (result.baselineDatasetProjection as any).meta.validationOnlyDateKeysLocal.length > 0
-            ? "Validation test days are configured, but compare rows were not returned with this response. Re-run canonical recalc or inspect compare diagnostics below."
-            : "No validation/test-day compare rows are available for this Past scenario yet."}
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Actual annual kWh</div>
+            <div className="mt-2 text-xl font-semibold text-brand-navy">
+              {formatNumberMaybe(Number(actualHouseBaselineDataset?.summary?.totalKwh ?? 0), 0)}
+            </div>
+          </div>
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test annual kWh</div>
+            <div className="mt-2 text-xl font-semibold text-brand-navy">
+              {formatNumberMaybe(Number(testHouseBaselineDataset?.summary?.totalKwh ?? 0), 0)}
+            </div>
+          </div>
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test vs actual delta</div>
+            <div className="mt-2 text-xl font-semibold text-brand-navy">
+              {formatNumberMaybe(
+                Number(testHouseBaselineDataset?.summary?.totalKwh ?? 0) -
+                  Number(actualHouseBaselineDataset?.summary?.totalKwh ?? 0),
+                0
+              )}
+            </div>
+          </div>
         </div>
-      ) : null}
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
+            <div className="text-sm font-semibold text-brand-navy">Actual vs Test monthly totals</div>
+            {actualVsTestMonthlyRows.length > 0 ? (
+              <div className="mt-3 max-h-80 overflow-auto">
+                <table className="min-w-full text-xs border border-brand-blue/10">
+                  <thead className="bg-brand-blue/5">
+                    <tr>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-left">Month</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Test</th>
+                      <th className="border border-brand-blue/10 px-2 py-1 text-right">Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {actualVsTestMonthlyRows.map((row) => (
+                      <tr key={row.month}>
+                        <td className="border border-brand-blue/10 px-2 py-1">{row.month}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actual.toFixed(2)}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.test.toFixed(2)}</td>
+                        <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.delta.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-brand-navy/60">Monthly persisted outputs are not available for both panels yet.</div>
+            )}
+          </div>
+          <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
+            <div className="text-sm font-semibold text-brand-navy">Persisted compare metrics</div>
+            <MetadataGrid
+              items={[
+                { label: "Actual house WAPE", value: `${formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.wape ?? null))}%` },
+                { label: "Test house WAPE", value: `${formatNumberMaybe(Number(testHouseCompareProjection.metrics?.wape ?? null))}%` },
+                { label: "Actual house MAE", value: formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.mae ?? null)) },
+                { label: "Test house MAE", value: formatNumberMaybe(Number(testHouseCompareProjection.metrics?.mae ?? null)) },
+                { label: "Actual compare rows", value: String(actualHouseCompareProjection.rows.length) },
+                { label: "Test compare rows", value: String(testHouseCompareProjection.rows.length) },
+              ]}
+            />
+          </div>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+            <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>
+            {actualHouseCompareProjection.rows.length > 0 ? (
+              <ValidationComparePanel
+                rows={actualHouseCompareProjection.rows}
+                metrics={actualHouseCompareProjection.metrics}
+              />
+            ) : (
+              <div className="mt-2 text-xs text-brand-navy/60">No persisted actual-house compare rows are attached.</div>
+            )}
+          </div>
+          <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+            <div className="text-sm font-semibold text-brand-navy">Test House compare rows</div>
+            {testHouseCompareProjection.rows.length > 0 ? (
+              <ValidationComparePanel
+                rows={testHouseCompareProjection.rows}
+                metrics={testHouseCompareProjection.metrics}
+              />
+            ) : (
+              <div className="mt-2 text-xs text-brand-navy/60">No persisted test-house compare rows are attached.</div>
+            )}
+          </div>
+        </div>
+      </section>
 
       {result?.ok ? (
         <div className="border rounded p-4 space-y-3">

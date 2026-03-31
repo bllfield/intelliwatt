@@ -3,7 +3,6 @@ import { GAPFILL_COMPARE_QUEUED_PAYLOAD_VERSION } from "@/modules/usageSimulator
 
 const mockGetSnapshot = vi.fn();
 const mockMarkFailed = vi.fn();
-const mockPipeline = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -22,18 +21,6 @@ vi.mock("@/modules/usageSimulator/compareRunSnapshot", () => ({
   markGapfillCompareRunFailed: (...args: unknown[]) => mockMarkFailed(...args),
 }));
 
-vi.mock("@/modules/usageSimulator/profileDisplay", () => ({
-  loadDisplayProfilesForHouse: vi.fn().mockResolvedValue({
-    homeProfile: {},
-    applianceProfile: {},
-  }),
-}));
-
-vi.mock("@/modules/usageSimulator/gapfillCompareCorePipeline", () => ({
-  runGapfillCompareCorePipeline: (...args: unknown[]) => mockPipeline(...args),
-}));
-
-import { prisma } from "@/lib/db";
 import { buildSnapshotReaderBase } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import {
   runGapfillCompareQueuedWorker,
@@ -90,64 +77,29 @@ describe("runGapfillCompareQueuedWorker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetSnapshot.mockResolvedValue({ ok: true, row: baseRow() });
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      id: "user-1",
-      email: "user@example.com",
-    } as any);
-    vi.mocked(prisma.houseAddress.findFirst).mockResolvedValue({
-      id: "house-1",
-      userId: "user-1",
-      archivedAt: null,
-    } as any);
-    vi.mocked(prisma.houseAddress.findMany).mockResolvedValue([
-      {
-        id: "house-1",
-        esiid: null,
-        addressLine1: "1 Main",
-        addressCity: "Austin",
-        addressState: "TX",
-        createdAt: new Date(),
-      },
-    ] as any);
     mockMarkFailed.mockResolvedValue(true);
   });
 
-  it("persists failure when pipeline returns JSON with ok:false (worker used to ignore this)", async () => {
-    mockPipeline.mockResolvedValue(
-      new Response(JSON.stringify({ ok: false, error: "shared_compare_failed", message: "boom" }), {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      })
-    );
+  it("fails any stale queued compare instead of reviving the retired pipeline", async () => {
     await expect(runGapfillCompareQueuedWorker("run-1")).rejects.toBeInstanceOf(WorkerFailurePersisted);
     expect(mockMarkFailed).toHaveBeenCalledTimes(1);
     expect(mockMarkFailed).toHaveBeenCalledWith(
       expect.objectContaining({
         compareRunId: "run-1",
-        phase: "compare_core_pipeline_error_response",
-        failureCode: "shared_compare_failed",
-        failureMessage: "boom",
+        phase: "compare_worker_queued_path_retired",
+        failureCode: "GAPFILL_COMPARE_QUEUED_PATH_RETIRED",
       })
     );
   });
 
-  it("does not double-mark when error is no_actual_data (pipeline already persisted)", async () => {
-    mockPipeline.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: false,
-          error: "no_actual_data",
-          message: "No actual interval data for the test date window.",
-        }),
-        { status: 400, headers: { "content-type": "application/json" } }
-      )
-    );
-    await expect(runGapfillCompareQueuedWorker("run-2")).rejects.toBeInstanceOf(WorkerFailurePersisted);
-    expect(mockMarkFailed).not.toHaveBeenCalled();
+  it("does not mark again when the queued compare is already failed", async () => {
+    mockGetSnapshot.mockResolvedValueOnce({ ok: true, row: baseRow({ status: "failed" }) });
+    await expect(runGapfillCompareQueuedWorker("run-2")).resolves.toBeUndefined();
+    expect(mockMarkFailed).toHaveBeenCalledTimes(0);
   });
 
   it("marks GAPFILL_COMPARE_WORKER_EXCEPTION on unexpected throw (not WorkerFailurePersisted)", async () => {
-    mockPipeline.mockRejectedValue(new Error("unexpected"));
+    mockGetSnapshot.mockResolvedValueOnce({ ok: false, message: "unexpected" });
     await expect(runGapfillCompareQueuedWorker("run-3")).rejects.toThrow("unexpected");
     expect(mockMarkFailed).toHaveBeenCalledWith(
       expect.objectContaining({

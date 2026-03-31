@@ -84,9 +84,11 @@ Shared simulation architecture authority:
 - Past Sim and GapFill compare use the same shared artifact identity/fingerprint and shared simulator logic path.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
-- GapFill is scoring/reporting only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally; it reads shared simulator output via cached artifact restore or fresh shared-build path.
-- GapFill core/default compare scoring now uses selected-day fresh shared execution (`compareFreshMode=selected_days`) while display data remains artifact-backed.
-- GapFill heavy diagnostics can opt into full-window shared fresh scoring (`compareFreshMode=full_window`); this proof path is non-default.
+- GapFill is launcher/scoring/reporting only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally; it launches shared recalc when needed, then reads persisted shared simulator output from the canonical artifact family.
+- GapFill compare truth now comes from the persisted shared Past artifact family only.
+- GapFill may launch shared recalc, then read persisted raw/baseline projections, compare sidecars, and trace metadata; it must not revive a GapFill-owned fresh selected-days/full-window compare path.
+- GapFill actual-house and test-house result panels must reuse the same shared Past presentation modules as the user page; do not duplicate Past chart/table/compare display logic inside GapFill.
+- GapFill lockbox flow, mode explanation, and levers visibility are read-only explanatory surfaces unless a control is already part of the allowed normal admin workflow.
 - Artifact fingerprint ownership and usage-shape profile identity behavior stay unchanged in this step; deferred identity/profile changes remain out of scope.
 - Shared weather truth is owned by `loadWeatherForPastWindow`.
 - `loadWeatherForPastWindow` must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily weather rows when the canonical date window is already covered; do not trigger redundant weather backfill/API work in that case.
@@ -596,3 +598,15 @@ If a block changes implementation contract but does not include doc alignment, t
 Future chats must treat doc alignment as part of the implementation work, not as a separate optional cleanup step.
 
 The reason for this rule is to prevent Cursor and future chats from drifting away from the agreed project plan.
+
+PAST LOCKBOX IDENTITY SNAPSHOT
+
+For Past lockbox work, keep identity ownership separated:
+- source truth identity: `sourceHouseId`, `sourceEsiid`, `intervalFingerprint`, `weatherIdentity`, source-derived monthly totals, source-derived annual total
+- profile identity: `profileHouseId`, home/appliance profile snapshot refs, usage-shape profile identity
+- mode identity: lockbox mode (`ACTUAL_INTERVAL_BASELINE`, `MANUAL_MONTHLY`, `MANUAL_ANNUAL`, `PROFILE_ONLY_NEW_BUILD`)
+- persistence identity: `inputHash`, `fullChainHash`, persisted codec/interval digest
+
+`fullChainHash` must include only normalized lockbox truth plus persistence digests. It must exclude `PastSimRunContext`, `PastSimReadContext`, timestamps, and volatile ids.
+
+Normal graded Past weather identity and weather loading are tied to `sourceHouseId`. Profile mapping is fixed by run type, not user-selected.

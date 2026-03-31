@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { shouldResetPastValidationCompareExpanded } from "@/modules/usageSimulator/pastCompareUiDefaults";
+import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 
 vi.mock("server-only", () => ({}));
 
@@ -150,5 +151,90 @@ describe("user simulated house compare projection", () => {
     expect(body.compareProjection.rows[0]?.weather?.weatherMissing).toBe(false);
     expect(body.compareProjection.metrics?.wape).toBe(10);
     expect(buildValidationCompareProjectionSidecar).toHaveBeenCalledTimes(1);
+  });
+
+  it("shared compare display builder reuses sidecar rows for user and gapfill presentation", () => {
+    const display = buildValidationCompareDisplay({
+      compareProjection: {
+        rows: [
+          {
+            localDate: "2025-04-10",
+            dayType: "weekday",
+            actualDayKwh: 10,
+            freshCompareSimDayKwh: 9,
+            actualVsFreshErrorKwh: -1,
+            percentError: 10,
+            weather: {
+              tAvgF: 62,
+              tMinF: 55,
+              tMaxF: 70,
+              hdd65: 3,
+              cdd65: 1,
+              source: "actual_cached",
+              weatherMissing: false,
+            },
+          },
+        ],
+        metrics: { wape: 10, mae: 1, rmse: 1 },
+      },
+      dataset: {
+        meta: {
+          validationCompareRows: [],
+          validationCompareMetrics: {},
+        },
+      },
+    });
+
+    expect(display.rows).toEqual([
+      {
+        localDate: "2025-04-10",
+        dayType: "weekday",
+        actualDayKwh: 10,
+        simulatedDayKwh: 9,
+        errorKwh: -1,
+        percentError: 10,
+        weather: {
+          tAvgF: 62,
+          tMinF: 55,
+          tMaxF: 70,
+          hdd65: 3,
+          cdd65: 1,
+          source: "actual_cached",
+          weatherMissing: false,
+        },
+      },
+    ]);
+    expect(display.metrics).toMatchObject({ wape: 10, mae: 1, rmse: 1 });
+  });
+
+  it("shared compare display builder falls back to persisted dataset compare truth", () => {
+    const display = buildValidationCompareDisplay({
+      compareProjection: null,
+      dataset: {
+        meta: {
+          validationCompareRows: [
+            {
+              localDate: "2025-04-11",
+              dayType: "weekend",
+              actualDayKwh: 11,
+              simulatedDayKwh: 10,
+              errorKwh: -1,
+              percentError: 9.09,
+            },
+          ],
+          validationCompareMetrics: { wape: 9.09, mae: 1, rmse: 1 },
+        },
+      },
+    });
+
+    expect(display.rows[0]).toMatchObject({
+      localDate: "2025-04-11",
+      dayType: "weekend",
+      actualDayKwh: 11,
+      simulatedDayKwh: 10,
+      errorKwh: -1,
+      percentError: 9.09,
+    });
+    expect(display.metrics).toMatchObject({ wape: 9.09, mae: 1, rmse: 1 });
   });
 });

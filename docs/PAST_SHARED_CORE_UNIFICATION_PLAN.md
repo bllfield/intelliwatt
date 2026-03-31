@@ -2,7 +2,7 @@
 
 ## Overview
 
-Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume output from the shared Past simulator path (cached artifact restore or fresh shared build), not a separate compare artifact.
+Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume output from the shared Past simulator path after persistence, not a separate compare artifact or compare-side fresh sim path.
 
 ## Implemented wiring (verification checklist still open)
 
@@ -33,8 +33,8 @@ Summary:
 
 - **Reference / good-data pool** for the shared Past sim includes **test compare** days’ **actual** intervals (they are trustworthy at-home usage). **Only** travel/vacant (and similar exclusions) are **withheld** from that pool as bad reference signal.
 - **Travel/vacant** days are **not** in the pool; they are **filled** by the same shared sim using the **rest** of the good window.
-- **One** shared execution: union of scored test dates and travel/vacant parity dates (selected-days mode) or full-window proof; then **slice** for parity vs scoring—not two engines.
-- **Target for test rows:** “Fresh sim” in Gap-Fill grading is **modeled** by that same day-level logic as travel fills via **`forceModeledOutputKeepReferencePoolDateKeys`** (see `USAGE_SIMULATION_PLAN.md` § Gap-Fill Lab target architecture §6).
+- **One** shared producer execution writes the canonical Past artifact. Gap-Fill may launch that shared recalc, but compare/parity consume the persisted artifact only.
+- **Target for test rows:** test-day simulated values in Gap-Fill grading come from persisted canonical artifact fields and compare sidecars produced by the shared lockbox run, not from a Gap-Fill-owned fresh compare path.
 
 ### Stitch UI vs compare UI (contract)
 
@@ -45,9 +45,8 @@ Summary:
 
 - **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
 - **GapFill admin canonical recalc route (`run_test_home_canonical_recalc`) with custom `testRanges`:** For that request, compare projection is scoped to the **user-selected validation date keys** from `testRanges`. Fail-closed compare attachment (`attachValidationCompareProjection`) and emitted compare rows/metrics use that **effective** date set only, not a stale superset that may still appear in artifact `meta.validationOnlyDateKeysLocal`. This narrows **which dates are scored in the HTTP response**; it does not introduce a separate simulator producer or change producer ownership.
-- **Engine / flags:** Complements **`forceSimulateDateKeys`** (which **excludes** days from the reference pool). Keep-ref keys must stay **disjoint** from forced-sim keys for the same calendar day.
-- **UI / API truth:** Route payload may include **`gapfillScoringDiagnostics`**, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`), not an admin-only recomputed simulated truth path.
-- **Docs/tests:** Service artifact tests assert keep-ref args and diagnostics; shared-window ownership rules unchanged.
+- **UI / API truth:** Route payload may include diagnostics and parity summaries, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`) and persisted canonical day totals, not an admin-only recomputed simulated truth path.
+- **Docs/tests:** Route and service artifact tests assert persisted-artifact ownership and shared-window rules; shared-window ownership rules unchanged.
 
 ## Active architecture authority
 
@@ -56,18 +55,17 @@ Summary:
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill must consume canonical stored sim outputs for compare truth and must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild a second compare truth path locally.
 - Optional fresh/parity diagnostics are additive analytics only and must never replace canonical stored compare truth rows.
-- Lightweight selected-days `compare_core` must reduce early: keep selected-day actual/simulated intervals, canonical artifact simulated-day totals, and compact truth metadata only; do not serialize full-window diagnostics/weather arrays in the core response.
-- DB travel/vacant dates are not guardrail-only metadata in compare-core: the shared/service layer must pull the bounded DB travel set, execute those dates through the same shared simulator family used by Past Sim, and validate canonical artifact simulated-day totals against fresh shared compare day totals. In Gap-Fill selected-days mode, travel/vacant parity-validation days must be simulated in the **same** shared selected-days execution as scored test days (union of local date keys), then sliced for parity vs compare—not a second Gap-Fill-only simulation path for travel/vacant alone.
-- Compare-core must also return compact scored-day weather truth from the shared compare/service execution for the scored local dates only; route/UI consumers must not reconstruct scored-day weather independently.
-- Scored-day compare/sim integrity: simulated-side fields come only from canonical shared simulated outputs (`simulatePastSelectedDaysShared` / `simulatePastFullWindowShared` and artifact canonical simulated-day totals). **ACTUAL must never substitute for simulated** on the simulated side; missing simulated references stay missing with explicit `missing_expected_reference` / reason codes, not silent recovery. If `SimulatedDayResult.localDate` disagrees with interval-timestamp-derived local date keys, shared paths fail with `simulated_day_local_date_interval_invariant_violation` (no fallback to `localDate`).
-- Full-window fresh diagnostics (when enabled) are additive proof/analytics only; compare truth ownership remains canonical stored output.
+- GapFill compare reads compact persisted truth only: selected-day actual intervals, canonical artifact simulated-day totals, compare sidecar rows/metrics, and compact trace metadata.
+- DB travel/vacant parity is a post-persist analysis concern: it may validate persisted canonical artifact totals, but it must not trigger a Gap-Fill-owned selected-days/full-window compare simulation path.
+- Compare-core must return compact scored-day weather truth from persisted read models only; route/UI consumers must not reconstruct scored-day weather independently.
+- Scored-day compare/sim integrity: simulated-side fields come only from persisted canonical shared simulated outputs and artifact canonical simulated-day totals. **ACTUAL must never substitute for simulated** on the simulated side; missing simulated references stay missing with explicit `missing_expected_reference` / reason codes, not silent recovery.
 - Heavy diagnostics/report retries should use compact merge-only response shaping so the heavy step returns diagnostics/report data without re-serializing the full core payload.
 - Heavy report expands the same compact scored-day weather truth into richer weather inspection/report output; no separate route-only weather path is allowed.
-- Compare success must not claim shared-path parity for DB travel/vacant validation unless both canonical artifact simulated-day totals and fresh shared compare day totals exist for those dates; exact-identity-sensitive runs must fail explicitly when that proof cannot be established.
-- When `artifactIdentitySource=same_run_artifact_ensure` and exact compare is requested, the handoff must stay on the exact rebuilt artifact identity: no latest-scenario fallback is allowed, and route/service must fail early with an artifact identity error before travel/vacant parity proof runs.
+- Compare success must not claim parity for DB travel/vacant validation unless the persisted artifact contains the canonical totals needed for that analysis; exact-identity-sensitive runs must fail explicitly when that proof cannot be established.
+- When `artifactIdentitySource=same_run_artifact_ensure` and exact compare is requested, the handoff must stay on the exact rebuilt artifact identity: no latest-scenario fallback is allowed.
 - Rebuilt shared artifacts must persist `canonicalArtifactSimulatedDayTotalsByDate` on the exact saved row, and exact compare/parity reads must source DB travel/vacant artifact references from that canonical field rather than display rows.
 - Artifact fingerprint ownership and usage-shape identity contracts are unchanged by this step; deferred profile/hash contract work remains separate.
-- Current branch caveat: `simulatePastSelectedDaysShared()` is a pure post-output slicer, canonical simulated-day totals are owned by `buildSimulatedUsageDatasetFromCurve()`, and selected-day compare now consumes the surfaced canonical selected-day day-total map directly. The remaining narrow caveat is historical artifact provenance, not an active selected-day authority split.
+- Current branch caveat: canonical simulated-day totals are owned by `buildSimulatedUsageDatasetFromCurve()` and consumed from persisted artifact fields. The remaining narrow caveat is historical artifact provenance/readback hardening, not an active Gap-Fill authority split.
 - Current branch caveat: shared window/date ownership is still correct and must stay locked. Compare identity uses `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage uses `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership or artifact identity.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
@@ -406,3 +404,13 @@ Future chats and edits must apply this distinction:
 
 If there is any real risk that a fallback can produce bad data, misleading data, stale data, mixed data, substitute data, or falsely successful data, that fallback must not be used.
 
+### 10) GapFill lockbox alignment
+
+GapFill is outside the lockbox engine.
+
+Producer writes for user Past and GapFill canonical lab flows must launch the same normalized recalc path, with truth captured in `PastSimLockboxInput` and operational metadata captured in `PastSimRunContext`.
+
+GapFill read paths consume persisted truth through `PastSimReadContext`.
+
+No new pre-DB truth ownership should be introduced in GapFill-specific routes or helpers. Phase4-gapfill-thin completes this by keeping the canonical lab path on shared recalc plus persisted-artifact reads only; any remaining fresh compare helper logic is legacy/non-canonical and must not fork the persistence identity contract.
+GapFill UI presentation must also stay shared: actual-house and test-house admin panels should reuse the same Past chart/table/compare presentation modules as the user page, with any extra lockbox trace or lever visibility added only as read-only wrappers around that shared display path.

@@ -626,9 +626,9 @@ export default function SimulationEnginesPage() {
                 value={mode}
                 onChange={(e) => setMode(e.target.value as "SMT_BASELINE" | "NEW_BUILD_ESTIMATE" | "MANUAL_TOTALS")}
               >
-                <option value="SMT_BASELINE">SMT_BASELINE (Past/vacant/travel patch path)</option>
-                <option value="NEW_BUILD_ESTIMATE">NEW_BUILD_ESTIMATE (new build engine)</option>
-                <option value="MANUAL_TOTALS">MANUAL_TOTALS</option>
+                <option value="SMT_BASELINE">ACTUAL_INTERVAL_BASELINE (stored as SMT_BASELINE)</option>
+                <option value="NEW_BUILD_ESTIMATE">PROFILE_ONLY_NEW_BUILD (stored as NEW_BUILD_ESTIMATE)</option>
+                <option value="MANUAL_TOTALS">MANUAL_MONTHLY / MANUAL_ANNUAL (stored as MANUAL_TOTALS)</option>
               </select>
             </label>
             <label className="text-sm">

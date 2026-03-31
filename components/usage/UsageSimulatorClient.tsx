@@ -6,7 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
-import type { ValidationCompareRowWeather } from "@/modules/usageSimulator/compareProjection";
+import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import {
   PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED,
   shouldResetPastValidationCompareExpanded,
@@ -205,9 +205,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       simulatedDayKwh: number;
       errorKwh: number;
       percentError: number | null;
-      weather?: ValidationCompareRowWeather;
+      weather?: import("@/modules/usageSimulator/compareProjection").ValidationCompareRowWeather;
     }>;
-    metrics: Record<string, number | null>;
+    metrics: Record<string, unknown>;
   } | null>(null);
   /** Past: Validation / Test Day Compare starts collapsed; expand for full table. */
   const [pastCompareExpanded, setPastCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
@@ -569,45 +569,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             alternatives: { smt: null, greenButton: null },
           },
         ]);
-        const compareRows = Array.isArray(okBody.compareProjection?.rows)
-          ? okBody.compareProjection.rows
-          : Array.isArray(okBody.dataset?.meta?.validationCompareRows)
-            ? okBody.dataset.meta.validationCompareRows
-            : [];
-        const compareMetrics =
-          okBody.compareProjection?.metrics ?? okBody.dataset?.meta?.validationCompareMetrics ?? {};
-        setScenarioCompareProjection({
-          rows: compareRows.map((row: Record<string, unknown> & { dayType?: string; weather?: unknown }) => {
-            const wxRaw = row?.weather;
-            let weather: ValidationCompareRowWeather | undefined;
-            if (wxRaw && typeof wxRaw === "object" && !Array.isArray(wxRaw)) {
-              const w = wxRaw as Record<string, unknown>;
-              const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-              weather = {
-                tAvgF: num(w.tAvgF),
-                tMinF: num(w.tMinF),
-                tMaxF: num(w.tMaxF),
-                hdd65: num(w.hdd65),
-                cdd65: num(w.cdd65),
-                source: typeof w.source === "string" && w.source.trim() ? w.source.trim() : null,
-                weatherMissing: w.weatherMissing === true,
-              };
-            }
-            return {
-              localDate: String(row?.localDate ?? "").slice(0, 10),
-              dayType: row?.dayType === "weekend" ? "weekend" : "weekday",
-              actualDayKwh: Number(row?.actualDayKwh ?? 0) || 0,
-              simulatedDayKwh: Number(row?.simulatedDayKwh ?? row?.freshCompareSimDayKwh ?? 0) || 0,
-              errorKwh: Number(row?.errorKwh ?? row?.actualVsFreshErrorKwh ?? 0) || 0,
-              percentError:
-                row?.percentError == null
-                  ? null
-                  : Number(row.percentError) || 0,
-              ...(weather ? { weather } : {}),
-            };
-          }),
-          metrics: (compareMetrics && typeof compareMetrics === "object") ? compareMetrics : {},
-        });
+        setScenarioCompareProjection(
+          buildValidationCompareDisplay({
+            compareProjection: okBody.compareProjection,
+            dataset: okBody.dataset,
+          })
+        );
       } catch (e: any) {
         if (!cancelled) {
           const aborted = e?.name === "AbortError";

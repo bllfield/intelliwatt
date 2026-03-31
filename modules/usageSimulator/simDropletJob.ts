@@ -2,6 +2,7 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
+import type { PastSimRunContext } from "@/modules/usageSimulator/pastSimLockbox";
 import {
   SIM_DROPLET_JOB_KIND_PAST_SIM_RECALC,
   triggerDropletSimWebhook,
@@ -22,6 +23,7 @@ export type PastSimRecalcQueuedPayloadV1 = {
   validationDayCount?: number;
   /** Observability: same id logged on enqueue and worker recalc (plan §6). */
   correlationId?: string;
+  runContext?: Partial<PastSimRunContext>;
 };
 
 function getSimDropletJobModel(): {

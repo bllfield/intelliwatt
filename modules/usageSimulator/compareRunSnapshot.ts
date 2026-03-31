@@ -25,7 +25,7 @@ function getCompareRunModel(): GapfillCompareRunModel | null {
 export async function createGapfillCompareRunStart(args: {
   houseId?: string | null;
   userId?: string | null;
-  compareFreshMode: "selected_days" | "full_window";
+  compareFreshMode: "selected_days" | "full_window" | "artifact_only";
   requestedInputHash?: string | null;
   artifactScenarioId?: string | null;
   requireExactArtifactMatch: boolean;

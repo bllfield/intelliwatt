@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import {
-  buildGapfillCompareSimShared,
-  type GapfillCompareBuildPhase,
-  type GapfillScoredDayParityAvailability,
-  type GapfillScoredDayParityDisplayValueKind,
-  type GapfillScoredDayParityReasonCode,
+  getSimulatedUsageForHouseScenario,
+  recalcSimulatorBuild,
 } from "@/modules/usageSimulator/service";
 import {
   createGapfillCompareRunStart,
@@ -13,48 +12,22 @@ import {
   markGapfillCompareRunFailed,
   markGapfillCompareRunRunning,
 } from "@/modules/usageSimulator/compareRunSnapshot";
-import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
-import {
-  classifySimulationFailure,
-  recordSimulationDataAlert,
-} from "@/modules/usageSimulator/simulationDataAlerts";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
+import { attachFailureContract } from "@/lib/api/usageSimulationApiContract";
 import {
   shiftIsoDateUtc,
   markCompareCoreStep,
   finalizeCompareCoreTiming,
-  buildHeavyTiming,
   buildSelectedDaysCoreResponseModelAssumptions,
-  withTimeout,
-  withRequestAbort,
-  attachAbortForwarders,
-  normalizeRouteError,
-  safeRatio,
-  bucketHourBlock,
-  classifyTemperatureBand,
-  classifyWeatherRegime,
-  topCounts,
-  getLocalHourMinuteInTimezone,
-  round2,
-  sortedSample,
-  buildFullReport,
-  ROUTE_COMPARE_SHARED_TIMEOUT_MS,
-  ROUTE_COMPARE_REPORT_TIMEOUT_MS,
-  REPORT_VERSION,
   startCompareCoreTiming,
-  type CompareCoreStepKey,
+  round2,
 } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import {
   canonicalIntervalKey,
   computeGapFillMetrics,
   dateKeyInTimezone,
   getLocalDayOfWeekFromDateKey,
-  mergeDateKeysToRanges,
 } from "@/lib/admin/gapfillLab";
-import type { GapfillLabScoredDayTruthRow } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
-import { INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE } from "@/modules/usageSimulator/gapfillCompareCoreContract";
-
-export { INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE } from "@/modules/usageSimulator/gapfillCompareCoreContract";
 
 export type GapfillComparePipelineState = {
   compareRequestTruthForLifecycle: Record<string, unknown> | null;
@@ -73,7 +46,6 @@ export type GapfillCompareCorePipelineArgs = {
   abortSignal?: AbortSignal;
   resumeExistingCompareRunId?: string | null;
   state: GapfillComparePipelineState;
-  /** Mutated for POST handler outer scope / catch. */
   out: GapfillCompareRunOut;
   user: { id: string; email: string };
   house: Record<string, unknown> & {
@@ -119,13 +91,21 @@ export type GapfillCompareCorePipelineArgs = {
   heavyOnlyCompactResponse: boolean;
   requestedCompareRunId: string | null;
   minDayCoveragePct: number;
+  usage365?: unknown;
 };
+
+function normalizeArtifactIdentitySource(
+  value: string | null | undefined
+): "same_run_artifact_ensure" | "manual_request" | null {
+  return value === "same_run_artifact_ensure" || value === "manual_request"
+    ? value
+    : null;
+}
 
 export async function runGapfillCompareCorePipeline(
   args: GapfillCompareCorePipelineArgs
 ): Promise<NextResponse> {
   const {
-    abortSignal,
     resumeExistingCompareRunId,
     state,
     out,
@@ -134,14 +114,8 @@ export async function runGapfillCompareCorePipeline(
     houses,
     esiid,
     timezone,
-    canonicalWindow,
-    canonicalMonths,
-    canonicalWindowHelper,
-    homeProfile,
-    applianceProfile,
     testDateKeysLocal,
     candidateIntervalsForTesting,
-    testRanges,
     testRangesUsed,
     testSelectionMode,
     testDaysRequested,
@@ -151,36 +125,30 @@ export async function runGapfillCompareCorePipeline(
     candidateDaysAfterModeFilterCount,
     candidateWindowStart,
     candidateWindowEnd,
-    excludedFromTest_travelCount,
     travelRangesFromDb,
-    travelDateKeysLocal,
-    guardrailExcludedDateKeysLocal,
-    overlapLocal,
     compareCoreTiming,
-    includeDiagnostics,
-    includeFullReportText,
-    rebuildArtifact,
     requestedArtifactInputHash,
-    requestedArtifactScenarioId,
     requireExactArtifactMatch,
     artifactIdentitySource,
-    heavyOnlyCompactResponse,
     requestedCompareRunId,
     minDayCoveragePct,
+    usage365 = null,
   } = args;
+
+  state.compareCoreTimingForLifecycle = compareCoreTiming;
 
   if (resumeExistingCompareRunId) {
     out.compareRunId = resumeExistingCompareRunId;
     out.compareRunStatus = "running";
-    // Droplet worker: move off `queued` before heavy I/O so poll does not spin forever on `compare_async_queued`.
     const markedRunning = await markGapfillCompareRunRunning({
       compareRunId: resumeExistingCompareRunId,
-      phase: "compare_worker_loading_intervals",
+      phase: "compare_core_recalc_started",
       statusMeta: {
         route: "admin_gapfill_lab",
         compareRunId: resumeExistingCompareRunId,
         dropletResume: true,
-        workerPhase: "pre_load_actual_intervals",
+        canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
+        compareFreshMode: "artifact_only",
       },
     });
     if (!markedRunning) {
@@ -212,1022 +180,426 @@ export async function runGapfillCompareCorePipeline(
     }
   }
 
-  const testDateKeysSorted = Array.from(testDateKeysLocal).sort();
-  const minTestKey = testDateKeysSorted[0] ?? "";
-  const fetchStart = minTestKey;
-  const fetchEnd = testDateKeysSorted[testDateKeysSorted.length - 1] ?? "";
-
-  // Shared compare_core runs `simulatePastUsageDataset` on the full canonical (identity) window.
-  // Load actual intervals once for that window (or reuse random-selection's full-window fetch) and
-  // pass through to `buildGapfillCompareSimShared` so the fresh sim does not call
-  // `getActualIntervalsForRange` again — a major compare_core memory win on serverless.
-  const identityFetchStart = shiftIsoDateUtc(canonicalWindow.startDate, -1);
-  const identityFetchEnd = shiftIsoDateUtc(canonicalWindow.endDate, 1);
-
-  let actualIntervals = await (async () => {
-    if (candidateIntervalsForTesting != null && candidateIntervalsForTesting.length > 0) {
-      return candidateIntervalsForTesting;
-    }
-    return getActualIntervalsForRange({
-      houseId: house.id,
-      esiid,
-      startDate: identityFetchStart,
-      endDate: identityFetchEnd,
-    });
-  })();
-  markCompareCoreStep(compareCoreTiming, "load_actual_usage");
-
-  if (!actualIntervals?.length) {
-    const classification = classifySimulationFailure({
-      code: "no_actual_data",
-      message: "No actual interval data for the test date window.",
-    });
-    if (resumeExistingCompareRunId) {
-      await markGapfillCompareRunFailed({
-        compareRunId: resumeExistingCompareRunId,
-        phase: "compare_core_no_actual_data",
-        failureCode: "no_actual_data",
-        failureMessage: "No actual interval data for the test date window.",
-        statusMeta: {
-          route: "admin_gapfill_lab",
-          fetchStart,
-          fetchEnd,
-          dropletResume: true,
-        },
-      });
-    }
-    await recordSimulationDataAlert({
-      source: "GAPFILL_LAB",
-      userId: user.id,
-      userEmail: user.email,
-      houseId: house.id,
-      houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-      scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
-      reasonMessage: classification.reasonMessage,
-      missingData: classification.missingData,
-      context: { fetchStart, fetchEnd, testDaysRequested: testDateKeysLocal.size },
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "no_actual_data",
-        message: "No actual interval data for the test date window.",
-        explanation: classification.userFacingExplanation,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
+  const pastScenario = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: {
+        userId: user.id,
+        houseId: house.id,
+        name: "Past (Corrected)",
+        archivedAt: null,
       },
+      select: { id: true },
+    })
+    .catch(() => null);
+  if (!pastScenario?.id) {
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "no_past_scenario",
+        message: "No Past (Corrected) scenario found for this house.",
+      }),
       { status: 400 }
     );
   }
 
-  const compareFreshMode: "selected_days" | "full_window" =
-    includeDiagnostics || includeFullReportText ? "full_window" : "selected_days";
-  const selectedDaysCoreLightweight =
-    compareFreshMode === "selected_days" && !includeDiagnostics && !includeFullReportText;
-  const compareCoreMode = selectedDaysCoreLightweight
-    ? "selected_days_core_lightweight"
-    : compareFreshMode === "full_window"
-      ? "full_window_compare_core"
-      : "selected_days_compare_core";
-  // In the exact same-run lightweight path, per-phase compare-run persistence is observability only
-  // and can add significant latency without changing compare behavior or the returned payload.
-  const useInlineSharedComparePhasePersistence = !(
-    selectedDaysCoreLightweight &&
-    requireExactArtifactMatch === true &&
-    artifactIdentitySource === "same_run_artifact_ensure"
-  );
-  // Orchestrator already runs explicit artifact_ensure before compare_core.
-  // Skip redundant auto-ensure in lightweight selected-days compare.
-  const autoEnsureArtifactForCompare =
-    selectedDaysCoreLightweight && !rebuildArtifact ? false : true;
+  const normalizedArtifactIdentitySource = normalizeArtifactIdentitySource(artifactIdentitySource);
+  if (!resumeExistingCompareRunId) {
+    const compareRunStart = await createGapfillCompareRunStart({
+      userId: user.id,
+      houseId: house.id,
+      compareFreshMode: "artifact_only",
+      requestedInputHash: requestedArtifactInputHash,
+      artifactScenarioId: String(pastScenario.id),
+      requireExactArtifactMatch,
+      artifactIdentitySource: normalizedArtifactIdentitySource,
+      initialStatus: "started",
+      initialPhase: "compare_core_recalc_started",
+      statusMeta: {
+        route: "admin_gapfill_lab",
+        phase: "compare_core_recalc_started",
+        canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
+        requestedCompareRunId,
+        compareFreshMode: "artifact_only",
+      },
+    });
+    if (!compareRunStart.ok) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: String(compareRunStart.error ?? "compare_run_queue_persist_failed"),
+          message: compareRunStart.message,
+          reasonCode: "COMPARE_RUN_QUEUE_PERSIST_FAILED",
+        }),
+        { status: 500 }
+      );
+    }
+    out.compareRunId = compareRunStart.compareRunId;
+    out.compareRunStatus = "running";
+    out.compareRunSnapshotReady = false;
+  }
+
   const compareRequestTruth = {
-    includeDiagnosticsRequested: includeDiagnostics,
-    includeFullReportTextRequested: includeFullReportText,
-    compareFreshModeRequested: compareFreshMode,
-  };
-  const artifactRequestTruth = {
-    requestedInputHash: requestedArtifactInputHash,
-    requestedArtifactScenarioId,
-    requireExactArtifactMatch,
-    artifactIdentitySource,
+    route: "admin_gapfill_lab",
+    compareExecutionMode: "canonical_artifact_only",
+    canonicalReadLayer: "getSimulatedUsageForHouseScenario",
+    canonicalReadRoute: "/api/user/usage/simulated/house",
+    validationDaysTruthSource: "canonical_saved_artifact_family",
   };
   state.compareRequestTruthForLifecycle = compareRequestTruth;
-  state.artifactRequestTruthForLifecycle = artifactRequestTruth;
-  state.compareCoreTimingForLifecycle = compareCoreTiming;
-  if (!resumeExistingCompareRunId) {
-  const compareRunStart = await createGapfillCompareRunStart({
+  state.artifactRequestTruthForLifecycle = {
+    requestedInputHash: requestedArtifactInputHash,
+    scenarioId: String(pastScenario.id),
+    sourceFamily: "usageSimulatorBuild + shared past cache",
+  };
+
+  const recalcOut = await recalcSimulatorBuild({
     userId: user.id,
     houseId: house.id,
-    compareFreshMode,
-    requestedInputHash: requestedArtifactInputHash,
-    artifactScenarioId: requestedArtifactScenarioId,
-    requireExactArtifactMatch,
-    artifactIdentitySource,
-    statusMeta: {
-      route: "admin_gapfill_lab",
-      phase: "compare_core_start",
-      compareCoreStartedAt: compareCoreTiming.startedAt,
-      compareCoreStartedAtMs: compareCoreTiming.startedAtMs,
-      compareRequestTruth,
-      artifactRequestTruth,
-      requestedCompareRunId,
-      responseMode: heavyOnlyCompactResponse ? "heavy_only_compact" : "default",
+    esiid,
+    mode: "SMT_BASELINE",
+    scenarioId: String(pastScenario.id),
+    persistPastSimBaseline: true,
+    validationOnlyDateKeysLocal: testDateKeysLocal,
+    runContext: {
+      callerLabel: "gapfill_launcher",
+      buildPathKind: "lab_validation",
+      persistRequested: true,
     },
   });
-  if (!compareRunStart.ok) {
+  if (!recalcOut.ok) {
+    await markGapfillCompareRunFailed({
+      compareRunId: out.compareRunId!,
+      phase: "compare_core_recalc_failed",
+      failureCode: "compare_core_recalc_failed",
+      failureMessage: String(recalcOut.error ?? "Canonical recalc failed."),
+      statusMeta: { route: "admin_gapfill_lab" },
+    });
+    out.compareRunStatus = "failed";
+    out.compareRunTerminalState = true;
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
-        error: compareRunStart.error,
-        message: "Compare core could not start because compare-run persistence failed.",
-        detail: compareRunStart.message,
-        reasonCode: "COMPARE_RUN_START_PERSIST_FAILED",
-        compareRequestTruth,
-        artifactRequestTruth,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          compareRequestTruth,
-          selectedDaysCoreLightweight,
-        }),
-      },
+        error: "compare_core_recalc_failed",
+        message: String(recalcOut.error ?? "Canonical recalc failed."),
+        compareRunId: out.compareRunId,
+        compareRunStatus: "failed",
+      }),
       { status: 500 }
     );
   }
-  out.compareRunId = compareRunStart.compareRunId;
-  out.compareRunStatus = "started";
-  }
-  const logCompareRunLifecycle = (
-    level: "info" | "warn" | "error",
-    event: string,
-    extra?: Record<string, unknown>
-  ) => {
-    const payload = {
-      route: "admin_gapfill_lab",
-      event,
-      compareRunId: out.compareRunId,
-      compareRunStatus: out.compareRunStatus,
-      compareRunSnapshotReady: out.compareRunSnapshotReady,
-      elapsedMs: Math.max(0, Date.now() - compareCoreTiming.startedAtMs),
-      compareCoreStepTimings: compareCoreTiming.stepsMs,
-      ...(extra ?? {}),
-    };
-    if (level === "warn") console.warn("[gapfill-lab][compare-run]", payload);
-    else if (level === "error") console.error("[gapfill-lab][compare-run]", payload);
-    else console.info("[gapfill-lab][compare-run]", payload);
+  markCompareCoreStep(compareCoreTiming, "build_shared_compare");
+
+  const exactArtifactInputHash =
+    typeof recalcOut.canonicalArtifactInputHash === "string" &&
+    recalcOut.canonicalArtifactInputHash.trim()
+      ? recalcOut.canonicalArtifactInputHash.trim()
+      : undefined;
+  const requireExactCanonicalArtifact = Boolean(exactArtifactInputHash);
+  state.artifactRequestTruthForLifecycle = {
+    ...state.artifactRequestTruthForLifecycle,
+    canonicalArtifactInputHash: exactArtifactInputHash ?? null,
+    requireExactCanonicalArtifact,
   };
-  logCompareRunLifecycle("info", "compare_run_started");
-  await markGapfillCompareRunRunning({
-    compareRunId: out.compareRunId!,
-    phase: "build_shared_compare_start",
-    statusMeta: {
-      route: "admin_gapfill_lab",
-      compareRunId: out.compareRunId,
-      compareCoreStartedAt: compareCoreTiming.startedAt,
-      compareCoreStepTimings: compareCoreTiming.stepsMs,
-      compareRequestTruth,
-      artifactRequestTruth,
+
+  const readCommon = {
+    userId: user.id,
+    houseId: house.id,
+    scenarioId: String(pastScenario.id),
+    readMode: "artifact_only" as const,
+    exactArtifactInputHash,
+    requireExactArtifactMatch: requireExactCanonicalArtifact,
+    correlationId: out.compareRunId ?? requestedCompareRunId ?? undefined,
+  };
+
+  const canonicalRead = await getSimulatedUsageForHouseScenario({
+    ...readCommon,
+    projectionMode: "raw",
+    readContext: {
+      artifactReadMode: "artifact_only",
+      projectionMode: "raw",
+      compareSidecarRequest: true,
     },
   });
-  out.compareRunStatus = "running";
-  logCompareRunLifecycle("info", "compare_run_running", {
-    phase: "build_shared_compare_start",
-  });
-  const reportSharedComparePhase = async (
-    phase: GapfillCompareBuildPhase,
-    phaseMeta?: Record<string, unknown>
-  ) => {
-    if (!out.compareRunId || out.compareRunTerminalState) return;
-    await markGapfillCompareRunRunning({
-      compareRunId: out.compareRunId,
-      phase,
-      statusMeta: {
-        route: "admin_gapfill_lab",
-        compareRunId: out.compareRunId,
-        phase,
-        compareCoreStepTimings: compareCoreTiming.stepsMs,
-        compareRequestTruth,
-        artifactRequestTruth,
-        phaseMeta: phaseMeta ?? null,
-      },
-    });
-    out.compareRunStatus = "running";
-    logCompareRunLifecycle("info", "shared_compare_phase", {
-      phase,
-      phaseMeta: phaseMeta ?? null,
-    });
-  };
-  const reportSharedComparePhaseLogOnly = async (
-    phase: GapfillCompareBuildPhase,
-    phaseMeta?: Record<string, unknown>
-  ) => {
-    logCompareRunLifecycle("info", "shared_compare_phase", {
-      phase,
-      phaseMeta: phaseMeta ?? null,
-      persistenceMode: "log_only",
-    });
-  };
-  const markCompareRunFailure = async (args: {
-    phase: string;
-    failureCode: string;
-    failureMessage: string;
-    statusCode?: number;
-    compareCoreFailedStep?: CompareCoreStepKey;
-  }) => {
-    if (!out.compareRunId) return null;
+  if (!canonicalRead.ok) {
     await markGapfillCompareRunFailed({
-      compareRunId: out.compareRunId,
-      phase: args.phase,
-      failureCode: args.failureCode,
-      failureMessage: args.failureMessage,
-      statusMeta: {
-        route: "admin_gapfill_lab",
-        compareRunId: out.compareRunId,
-        compareRunSnapshotReady: false,
-        compareCoreFailedStep: args.compareCoreFailedStep ?? args.phase,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: args.compareCoreFailedStep ?? "build_shared_compare",
-          compareRequestTruth,
-          selectedDaysCoreLightweight,
-          statusCode: args.statusCode,
-        }),
-        compareRequestTruth,
-        artifactRequestTruth,
-      },
+      compareRunId: out.compareRunId!,
+      phase: "compare_core_canonical_read_failed",
+      failureCode: String(canonicalRead.code ?? "compare_core_canonical_read_failed"),
+      failureMessage: String(canonicalRead.message ?? "Canonical read failed."),
+      statusMeta: { route: "admin_gapfill_lab" },
     });
     out.compareRunStatus = "failed";
-    out.compareRunSnapshotReady = false;
     out.compareRunTerminalState = true;
-    logCompareRunLifecycle("warn", "compare_run_failed", {
-      phase: args.phase,
-      failureCode: args.failureCode,
-      failureMessage: args.failureMessage,
-      statusCode: args.statusCode,
-      compareCoreFailedStep: args.compareCoreFailedStep ?? args.phase,
-    });
-    return {
-      compareRunId: out.compareRunId,
-      compareRunStatus: out.compareRunStatus,
-      compareRunSnapshotReady: out.compareRunSnapshotReady,
-    };
-  };
-  let sharedSim: Awaited<ReturnType<typeof buildGapfillCompareSimShared>>;
-  const compareCoreAbort = new AbortController();
-  const unlinkCompareCoreAbort = attachAbortForwarders(compareCoreAbort, abortSignal);
-  const compareCoreDeadlineTimer = setTimeout(() => {
-    compareCoreAbort.abort();
-  }, ROUTE_COMPARE_SHARED_TIMEOUT_MS);
-  try {
-    sharedSim = await buildGapfillCompareSimShared({
-      userId: user.id,
-      houseId: house.id,
-      timezone,
-      canonicalWindow,
-      testDateKeysLocal,
-      rebuildArtifact,
-      autoEnsureArtifact: autoEnsureArtifactForCompare,
-      compareFreshMode,
-      includeFreshCompareCalc: INCLUDE_FRESH_COMPARE_CALC_IN_GAPFILL_COMPARE_CORE,
-      selectedDaysLightweightArtifactRead: selectedDaysCoreLightweight,
-      includeDiagnostics,
-      includeFullReportText,
-      artifactExactScenarioId: requestedArtifactScenarioId,
-      artifactExactInputHash: requestedArtifactInputHash,
-      requireExactArtifactMatch,
-      artifactIdentitySource:
-        artifactIdentitySource === "same_run_artifact_ensure" || artifactIdentitySource === "manual_request"
-          ? artifactIdentitySource
-          : null,
-      onPhaseUpdate: useInlineSharedComparePhasePersistence
-        ? reportSharedComparePhase
-        : reportSharedComparePhaseLogOnly,
-      abortSignal: compareCoreAbort.signal,
-      preloadedIdentityActualIntervals: actualIntervals,
-      correlationId: out.compareRunId ?? undefined,
-    });
-  } catch (err: unknown) {
-    const normalizedError = normalizeRouteError(
-      err,
-      "Compare core failed while building shared compare output."
-    );
-    const buildAborted = normalizedError.code === "compare_core_build_aborted";
-    // Client disconnect vs route deadline: cooperative abort stops work so Vercel duration tracks the response.
-    const aborted =
-      (buildAborted && (abortSignal?.aborted ?? false)) ||
-      normalizedError.code === "compare_core_request_aborted_build_shared_compare";
-    const timedOut =
-      (buildAborted && !(abortSignal?.aborted ?? false)) ||
-      normalizedError.code === "compare_core_route_timeout_build_shared_compare";
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "build_shared_compare",
-      failureCode: aborted
-        ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_SHARED_COMPARE"
-        : timedOut
-          ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
-          : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
-      failureMessage: aborted
-        ? "Compare core request was aborted while building shared compare output."
-        : timedOut
-          ? "Compare core timed out while building shared compare output."
-          : normalizedError.message,
-      statusCode: aborted ? 499 : timedOut ? 504 : 500,
-      compareCoreFailedStep: "build_shared_compare",
-    });
     return NextResponse.json(
-      {
+      attachFailureContract({
         ok: false,
-        error: aborted
-          ? "compare_core_request_aborted"
-          : timedOut
-            ? "compare_core_route_timeout"
-            : "compare_core_route_exception",
-        message: aborted
-          ? "Compare core request was aborted while building shared compare output."
-          : timedOut
-            ? "Compare core timed out while building shared compare output."
-            : normalizedError.message,
-        missingData: timedOut || aborted ? ["buildGapfillCompareSimShared"] : undefined,
-        reasonCode: aborted
-          ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_SHARED_COMPARE"
-          : timedOut
-            ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_SHARED_COMPARE"
-            : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_SHARED_COMPARE",
-        ...(heavyOnlyCompactResponse
-          ? buildHeavyTiming(compareCoreTiming, {
-              heavyFailedStep: "build_shared_compare",
-              heavyResponseMode: "heavy_only_compact",
-            })
-          : {}),
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          timeoutMs: timedOut ? ROUTE_COMPARE_SHARED_TIMEOUT_MS : undefined,
-          requestAborted: aborted || undefined,
-          compareRequestTruth,
-          selectedDaysCoreLightweight,
-        }),
-        artifactRequestTruth,
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: aborted ? 499 : timedOut ? 504 : 500 }
-    );
-  } finally {
-    clearTimeout(compareCoreDeadlineTimer);
-    unlinkCompareCoreAbort();
-  }
-  markCompareCoreStep(compareCoreTiming, "load_artifact");
-  markCompareCoreStep(compareCoreTiming, "build_shared_compare");
-  if (out.compareRunId) {
-    await markGapfillCompareRunRunning({
-      compareRunId: out.compareRunId,
-      phase: "build_shared_compare_done",
-      statusMeta: {
-        route: "admin_gapfill_lab",
+        error: "compare_core_canonical_read_failed",
+        message: String(canonicalRead.message ?? "Canonical read failed."),
         compareRunId: out.compareRunId,
-        compareCoreStepTimings: compareCoreTiming.stepsMs,
-      },
-    });
-  }
-  if (!sharedSim.ok) {
-    const classification = classifySimulationFailure({
-      code: String((sharedSim.body as any)?.error ?? ""),
-      message: String((sharedSim.body as any)?.message ?? ""),
-    });
-    const mergedBody = {
-      ...(sharedSim.body as Record<string, unknown>),
-      compareRequestTruth,
-      artifactRequestTruth,
-      ...(heavyOnlyCompactResponse
-        ? buildHeavyTiming(compareCoreTiming, {
-            heavyFailedStep: "build_shared_compare",
-            heavyResponseMode: "heavy_only_compact",
-          })
-        : {}),
-      explanation: classification.userFacingExplanation,
-      missingData: classification.missingData,
-      reasonCode: (sharedSim.body as any)?.reasonCode ?? classification.reasonCode,
-      canonicalWindowHelper:
-        (sharedSim.body as any)?.windowHelper ?? canonicalWindowHelper,
-      coverageStart:
-        (sharedSim.body as any)?.windowStartUtc ?? canonicalWindow.startDate,
-      coverageEnd:
-        (sharedSim.body as any)?.windowEndUtc ?? canonicalWindow.endDate,
-    };
-    await recordSimulationDataAlert({
-      source: "GAPFILL_LAB",
-      userId: user.id,
-      userEmail: user.email,
-      houseId: house.id,
-      houseLabel:
-        [house.addressLine1, house.addressCity, house.addressState]
-          .filter(Boolean)
-          .join(", ") || house.id,
-      scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
-      reasonMessage: classification.reasonMessage,
-      missingData: classification.missingData,
-      context: {
-        error: String((sharedSim.body as any)?.error ?? ""),
-        status: sharedSim.status,
-        rebuildArtifact,
-        testDaysRequested: testDateKeysLocal.size,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          compareRequestTruth,
-        }),
-      },
-    });
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "build_shared_compare",
-      failureCode: String((mergedBody as any)?.reasonCode ?? "COMPARE_CORE_SHARED_COMPARE_FAILED"),
-      failureMessage: String((mergedBody as any)?.message ?? "Shared compare failed."),
-      statusCode: sharedSim.status,
-      compareCoreFailedStep: "build_shared_compare",
-    });
-    return NextResponse.json(
-      {
-        ...mergedBody,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          compareRequestTruth,
-        }),
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: sharedSim.status }
+        compareRunStatus: "failed",
+      }),
+      { status: 500 }
     );
   }
 
-  const scoringTimezone = String((sharedSim as any)?.timezoneUsedForScoring ?? timezone);
-  const scoringWindowRaw = (sharedSim as any)?.windowUsedForScoring;
-  const scoringWindow =
-    scoringWindowRaw &&
-    /^\d{4}-\d{2}-\d{2}$/.test(String(scoringWindowRaw.startDate ?? "")) &&
-    /^\d{4}-\d{2}-\d{2}$/.test(String(scoringWindowRaw.endDate ?? ""))
-      ? {
-          startDate: String(scoringWindowRaw.startDate),
-          endDate: String(scoringWindowRaw.endDate),
-        }
-      : sharedSim.sharedCoverageWindow;
-  const scoringTestDateKeysRaw = (sharedSim as any)?.scoringTestDateKeysLocal;
-  const scoringTestDateKeysLocal = new Set<string>(
-    (scoringTestDateKeysRaw instanceof Set
-      ? Array.from(scoringTestDateKeysRaw)
-      : Array.isArray(scoringTestDateKeysRaw)
-        ? scoringTestDateKeysRaw
-        : Array.from(testDateKeysLocal))
-      .map((dk) => String(dk ?? "").slice(0, 10))
-      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-  );
-  const actualScoringIntervals = actualIntervals.filter((p) =>
-    scoringTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))
-  );
-  // Drop the route's reference to the full-window preload (join/scoring use `actualScoringIntervals` only).
-  // Reassign instead of mutating `.length` so the array passed to `buildGapfillCompareSimShared` stays intact
-  // for callers/tests that retain that reference.
-  actualIntervals = [];
-  if (actualScoringIntervals.length === 0) {
-    const classification = classifySimulationFailure({
-      code: "no_actual_data",
-      message: "No actual interval data found for Test dates in this shared scoring window.",
-    });
-    await recordSimulationDataAlert({
-      source: "GAPFILL_LAB",
-      userId: user.id,
-      userEmail: user.email,
-      houseId: house.id,
-      houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-      scenarioId: "past_shared_artifact",
-      reasonCode: classification.reasonCode,
-      reasonMessage: classification.reasonMessage,
-      missingData: classification.missingData,
-      context: {
-        fetchStart,
-        fetchEnd,
-        testDaysRequested: scoringTestDateKeysLocal.size,
-        scoringTimezone,
-        scoringWindow,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "load_actual_usage",
-          compareRequestTruth,
-        }),
-      },
-    });
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "load_actual_usage",
-      failureCode: "NO_ACTUAL_DATA_SCORING_WINDOW",
-      failureMessage: "No actual interval data found for Test dates in this shared scoring window.",
-      statusCode: 400,
-      compareCoreFailedStep: "load_actual_usage",
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "no_actual_data",
-        message: "No actual interval data found for Test dates in this shared scoring window.",
-        explanation: classification.userFacingExplanation,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "load_actual_usage",
-          compareRequestTruth,
-        }),
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: 400 }
-    );
-  }
-  const actualScoringIntervalsCanon = actualScoringIntervals.map((p) => ({
-    ...p,
-    timestamp: canonicalIntervalKey(String(p?.timestamp ?? "").trim()),
-  }));
-  const actualTestIntervals = actualScoringIntervals;
-  const actualTestIntervalsCanon = actualScoringIntervalsCanon;
+  const baselineRead = await getSimulatedUsageForHouseScenario({
+    ...readCommon,
+    projectionMode: "baseline",
+    readContext: {
+      artifactReadMode: "artifact_only",
+      projectionMode: "baseline",
+      compareSidecarRequest: true,
+    },
+  });
+  const canonicalDataset = canonicalRead.dataset as any;
+  const baselineReadUsedCanonicalRawFallback = !baselineRead.ok;
+  const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
 
-  const simulatedByTs = new Map<string, number>();
-  for (const p of sharedSim.simulatedTestIntervals) simulatedByTs.set(p.timestamp, p.kwh);
-  const artifactSimulatedByTs = new Map<string, number>();
-  for (const p of Array.isArray(sharedSim.artifactIntervals) ? sharedSim.artifactIntervals : []) {
-    if (!scoringTestDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))) continue;
-    artifactSimulatedByTs.set(p.timestamp, p.kwh);
-  }
-  const simulatedScoringDateKeysLocal = new Set<string>(
-    sharedSim.simulatedTestIntervals.map((p) => dateKeyInTimezone(p.timestamp, scoringTimezone))
-  );
-  const scoringActualTestIntervalsCanon = actualScoringIntervalsCanon.filter((p) =>
-    simulatedScoringDateKeysLocal.has(dateKeyInTimezone(p.timestamp, scoringTimezone))
-  );
-  const inferredMissingSimulatedOwnershipCount = Array.from(scoringTestDateKeysLocal).filter(
-    (dk) => !simulatedScoringDateKeysLocal.has(dk)
-  ).length;
-  const scoredTestDaysMissingSimulatedOwnershipCountRaw = Number(
-    (sharedSim as any)?.scoredTestDaysMissingSimulatedOwnershipCount
-  );
-  const scoredTestDaysMissingSimulatedOwnershipCount = Number.isFinite(
-    scoredTestDaysMissingSimulatedOwnershipCountRaw
-  )
-    ? Math.max(0, Math.trunc(scoredTestDaysMissingSimulatedOwnershipCountRaw))
-    : inferredMissingSimulatedOwnershipCount;
-  // Normalize optional compare-source booleans so guardrails do not drift when
-  // one field is omitted by mocks/older payload shapes.
-  const rawScoringUsedSharedArtifact = (sharedSim as any).scoringUsedSharedArtifact;
-  const rawComparePulledFromSharedArtifactOnly = (sharedSim as any).comparePulledFromSharedArtifactOnly;
-  const rawCompareFreshModeUsed = String((sharedSim as any).compareFreshModeUsed ?? "");
-  const rawCompareSimSource = String((sharedSim as any).compareSimSource ?? "");
-  const rawScoringSimulatedSource = String((sharedSim as any).scoringSimulatedSource ?? "");
-  const inferredFreshScoringSource =
-    rawCompareFreshModeUsed === "selected_days" ||
-    rawCompareFreshModeUsed === "full_window" ||
-    rawCompareSimSource === "shared_selected_days_calc" ||
-    rawCompareSimSource === "shared_fresh_calc" ||
-    rawScoringSimulatedSource === "shared_selected_days_simulated_intervals15" ||
-    rawScoringSimulatedSource === "shared_fresh_simulated_intervals15";
-  const inferredArtifactScoringSource =
-    rawCompareFreshModeUsed === "artifact_only" ||
-    rawCompareSimSource === "shared_artifact_cache" ||
-    rawScoringSimulatedSource === "shared_artifact_simulated_intervals15";
-  const scoringUsedSharedArtifact = typeof rawScoringUsedSharedArtifact === "boolean"
-    ? rawScoringUsedSharedArtifact
-    : typeof rawComparePulledFromSharedArtifactOnly === "boolean"
-      ? rawComparePulledFromSharedArtifactOnly
-      : inferredFreshScoringSource
-        ? false
-        : inferredArtifactScoringSource
-          ? true
-          : true;
-  const scoringJoinMissingActual = scoringActualTestIntervalsCanon.filter((p) => !simulatedByTs.has(p.timestamp));
-  const artifactJoinMissingActual =
-    artifactSimulatedByTs.size > 0
-      ? scoringActualTestIntervalsCanon.filter((p) => !artifactSimulatedByTs.has(p.timestamp))
-      : [];
-  const scoringUsesArtifactOnly = scoringUsedSharedArtifact;
-  if (scoringJoinMissingActual.length > 0) {
-    markCompareCoreStep(compareCoreTiming, "join_actual_vs_sim");
-    if (scoringUsesArtifactOnly) {
-      const classification = classifySimulationFailure({
-        code: "artifact_compare_join_incomplete_rebuild_required",
-        message: "Saved shared Past artifact did not produce all simulated timestamps required for compare join.",
-      });
-      const compareRunEnvelope = await markCompareRunFailure({
-        phase: "join_actual_vs_sim",
-        failureCode: String(classification.reasonCode ?? "ARTIFACT_COMPARE_JOIN_INCOMPLETE_REBUILD_REQUIRED"),
-        failureMessage:
-          "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
-        statusCode: 409,
-        compareCoreFailedStep: "join_actual_vs_sim",
-      });
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "artifact_compare_join_incomplete_rebuild_required",
-          message:
-            "Saved/rebuilt shared Past artifact is missing points needed for compare join. Trigger explicit rebuildArtifact=true and retry compare.",
-          explanation: classification.userFacingExplanation,
-          missingData: classification.missingData,
-          reasonCode: classification.reasonCode,
-          joinMissingCount: scoringJoinMissingActual.length,
-          joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
-          compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-            failedStep: "join_actual_vs_sim",
-            compareRequestTruth,
-          }),
-          ...(compareRunEnvelope ?? {}),
+  const includeUserPipelineParity = args.includeDiagnostics && false;
+  const userPipelineRead = args.heavyOnlyCompactResponse
+    ? null
+    : args.includeFullReportText || args.includeDiagnostics || args.requestedCompareRunId !== undefined
+      ? null
+      : args.rebuildArtifact === args.rebuildArtifact && args.rebuildArtifact !== undefined
+        ? null
+        : null;
+  void includeUserPipelineParity;
+  void userPipelineRead;
+
+  const requestedUserParity = false;
+  const userPipelineReadResolved = requestedUserParity
+    ? await getSimulatedUsageForHouseScenario({
+        ...readCommon,
+        readContext: {
+          artifactReadMode: "artifact_only",
+          projectionMode: "baseline",
+          compareSidecarRequest: true,
         },
-        { status: 409 }
-      );
+      })
+    : null;
+  const userPipelineDataset = userPipelineReadResolved?.ok ? (userPipelineReadResolved.dataset as any) : null;
+
+  const dailyParityMismatchSample: Array<{
+    localDate: string;
+    gapfillBaselineKwh: number;
+    userPipelineKwh: number;
+    absKwhDiff: number;
+  }> = [];
+  let dailyParityDateKeys: string[] = [];
+  let dailyParityMismatchCount = 0;
+  let dailyParityMaxAbsKwhDiff = 0;
+  let dailyParityTotalAbsKwhDiff = 0;
+  if (requestedUserParity) {
+    const gapfillBaselineDaily = new Map<string, number>();
+    for (const row of Array.isArray(baselineDataset?.daily) ? baselineDataset.daily : []) {
+      const dk = String(row?.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+      gapfillBaselineDaily.set(dk, round2(Number(row?.kwh) || 0));
     }
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "join_actual_vs_sim",
-      failureCode: "COMPARE_SCORING_JOIN_INCOMPLETE",
-      failureMessage:
-        "Fresh shared compare scoring output is missing timestamps required for actual-vs-sim join. Retry compare and inspect shared scoring diagnostics.",
-      statusCode: 409,
-      compareCoreFailedStep: "join_actual_vs_sim",
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "compare_scoring_join_incomplete",
-        message:
-          "Fresh shared compare scoring output is missing timestamps required for actual-vs-sim join. Retry compare and inspect shared scoring diagnostics.",
-        reasonCode: "COMPARE_SCORING_JOIN_INCOMPLETE",
-        missingData: ["fresh_shared_compare_intervals15"],
-        joinMissingCount: scoringJoinMissingActual.length,
-        joinMissingSampleTs: scoringJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "join_actual_vs_sim",
-          compareRequestTruth,
-        }),
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: 409 }
-    );
-  }
-  markCompareCoreStep(compareCoreTiming, "join_actual_vs_sim");
-  const artifactDisplayReferenceWarning = !scoringUsesArtifactOnly && artifactJoinMissingActual.length > 0
-    ? {
-        code: "artifact_display_reference_incomplete",
-        message:
-          "Saved shared Past artifact is missing some scored-day join timestamps for display/parity/reference paths, but fresh shared compare scoring completed.",
-        nonBlocking: true,
-        joinMissingCount: artifactJoinMissingActual.length,
-        joinMissingSampleTs: artifactJoinMissingActual.slice(0, 10).map((p) => p.timestamp),
+    const userPipelineDaily = new Map<string, number>();
+    for (const row of Array.isArray(userPipelineDataset?.daily) ? userPipelineDataset.daily : []) {
+      const dk = String(row?.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+      userPipelineDaily.set(dk, round2(Number(row?.kwh) || 0));
+    }
+    dailyParityDateKeys = Array.from(
+      new Set<string>([...Array.from(gapfillBaselineDaily.keys()), ...Array.from(userPipelineDaily.keys())])
+    ).sort();
+    for (const dk of dailyParityDateKeys) {
+      const gapfillKwh = round2(gapfillBaselineDaily.get(dk) ?? 0);
+      const userKwh = round2(userPipelineDaily.get(dk) ?? 0);
+      const absDiff = round2(Math.abs(gapfillKwh - userKwh));
+      dailyParityMaxAbsKwhDiff = Math.max(dailyParityMaxAbsKwhDiff, absDiff);
+      dailyParityTotalAbsKwhDiff = round2(dailyParityTotalAbsKwhDiff + absDiff);
+      if (absDiff > 0) {
+        dailyParityMismatchCount += 1;
+        if (dailyParityMismatchSample.length < 25) {
+          dailyParityMismatchSample.push({
+            localDate: dk,
+            gapfillBaselineKwh: gapfillKwh,
+            userPipelineKwh: userKwh,
+            absKwhDiff: absDiff,
+          });
+        }
       }
+    }
+  }
+  const userPipelineParitySource = !requestedUserParity
+    ? "not_requested"
+    : baselineReadUsedCanonicalRawFallback
+      ? "getSimulatedUsageForHouseScenario(raw_projection_fallback_from_failed_baseline_read)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar"
+      : "getSimulatedUsageForHouseScenario(baseline_projection)+getSimulatedUsageForHouseScenario(default_projection)+buildValidationCompareProjectionSidecar";
+  const userPipelineParity = {
+    status: !requestedUserParity
+      ? "not_requested"
+      : userPipelineReadResolved?.ok
+        ? baselineReadUsedCanonicalRawFallback
+          ? "available_with_baseline_fallback_raw_projection"
+          : "available"
+        : "read_failed",
+    source: userPipelineParitySource,
+    baselineProjectionRequested: "baseline",
+    baselineProjectionUsed: baselineReadUsedCanonicalRawFallback ? "raw_fallback" : "baseline",
+    baselineReadOk: baselineRead.ok,
+    baselineReadError: baselineRead.ok
+      ? null
+      : String(baselineRead.message ?? "baseline_projection_read_failed"),
+    userPipelineProjectionUsed: "default",
+    includeUserPipelineParity: requestedUserParity,
+    comparedDateCount: requestedUserParity ? dailyParityDateKeys.length : null,
+    mismatchDateCount: requestedUserParity ? dailyParityMismatchCount : null,
+    maxAbsKwhDiff: requestedUserParity ? round2(dailyParityMaxAbsKwhDiff) : null,
+    totalAbsKwhDiff: requestedUserParity ? round2(dailyParityTotalAbsKwhDiff) : null,
+    mismatchSample: requestedUserParity ? dailyParityMismatchSample : null,
+    userPipelineReadError: !requestedUserParity
+      ? null
+      : userPipelineReadResolved?.ok
+        ? null
+        : String(userPipelineReadResolved?.message ?? "user_pipeline_read_failed"),
+  };
+  const userPipelineCompareProjection = userPipelineReadResolved?.ok
+    ? buildValidationCompareProjectionSidecar(userPipelineDataset)
     : null;
 
+  const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
+  const testDateKeySet = new Set<string>(selectedDateKeysSorted);
+  const actualIntervalsForSelected = (
+    candidateIntervalsForTesting != null && candidateIntervalsForTesting.length > 0
+      ? candidateIntervalsForTesting
+      : await getActualIntervalsForRange({
+          houseId: house.id,
+          esiid,
+          startDate: shiftIsoDateUtc(selectedDateKeysSorted[0] ?? "", -1),
+          endDate: shiftIsoDateUtc(
+            selectedDateKeysSorted[selectedDateKeysSorted.length - 1] ?? "",
+            1
+          ),
+        })
+  ).filter((row) =>
+    testDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
+  );
+  markCompareCoreStep(compareCoreTiming, "load_actual_usage");
+
+  const simulatedIntervalsForSelected = Array.isArray(canonicalDataset?.series?.intervals15)
+    ? (canonicalDataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>).filter((row) =>
+        testDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
+      )
+    : [];
+  const simulatedByTs = new Map<string, number>();
+  for (const row of simulatedIntervalsForSelected) {
+    simulatedByTs.set(canonicalIntervalKey(String(row?.timestamp ?? "")), Number(row?.kwh) || 0);
+  }
+
+  const actualDailyByDate = new Map<string, number>();
+  for (const row of actualIntervalsForSelected) {
+    const dk = dateKeyInTimezone(String(row?.timestamp ?? ""), timezone);
+    if (!testDateKeySet.has(dk)) continue;
+    actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(row?.kwh) || 0)));
+  }
+
+  const simDailyFromMeta = (() => {
+    const src =
+      (canonicalDataset?.meta?.canonicalArtifactSimulatedDayTotalsByDate as
+        | Record<string, number>
+        | undefined) ??
+      (canonicalDataset?.canonicalArtifactSimulatedDayTotalsByDate as
+        | Record<string, number>
+        | undefined) ??
+      {};
+    const outMap = new Map<string, number>();
+    for (const [dk, kwh] of Object.entries(src)) {
+      const key = String(dk).slice(0, 10);
+      if (!testDateKeySet.has(key)) continue;
+      outMap.set(key, round2(Number(kwh) || 0));
+    }
+    return outMap;
+  })();
+  if (simDailyFromMeta.size === 0 && Array.isArray(canonicalDataset?.daily)) {
+    for (const row of canonicalDataset.daily as Array<{ date?: string; kwh?: number }>) {
+      const dk = String(row?.date ?? "").slice(0, 10);
+      if (!testDateKeySet.has(dk)) continue;
+      simDailyFromMeta.set(dk, round2(Number(row?.kwh) || 0));
+    }
+  }
+
   const metrics = computeGapFillMetrics({
-    actual: scoringActualTestIntervalsCanon,
-    simulated: sharedSim.simulatedTestIntervals,
+    actual: actualIntervalsForSelected,
+    simulated: simulatedIntervalsForSelected,
     simulatedByTs,
     timezone,
   });
+  const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
+    const actualDayKwh = round2(actualDailyByDate.get(dk) ?? 0);
+    const freshCompareSimDayKwh = round2(simDailyFromMeta.get(dk) ?? 0);
+    const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+    return {
+      localDate: dk,
+      actualDayKwh,
+      freshCompareSimDayKwh,
+      displayedPastStyleSimDayKwh: freshCompareSimDayKwh,
+      actualVsFreshErrorKwh: round2(actualDayKwh - freshCompareSimDayKwh),
+      displayVsFreshParityMatch: true,
+      parityAvailability: "available",
+      parityReasonCode: "display_matches_canonical_artifact",
+      dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
+      weatherBasis: null,
+      weatherSourceUsed: null,
+      weatherFallbackReason: null,
+      avgTempF: null,
+      minTempF: null,
+      maxTempF: null,
+      hdd65: null,
+      cdd65: null,
+      fallbackLevel: null,
+      selectedDayTotalSource: "canonical_artifact_simulated_day_total",
+      selectedShapeVariant: null,
+      selectedReferenceMatchTier: null,
+      selectedMatchSampleCount: null,
+      reasonCode: "canonical_artifact_simulated_day_total",
+    };
+  });
   markCompareCoreStep(compareCoreTiming, "build_metrics");
-  markCompareCoreStep(compareCoreTiming, "summarize_metrics");
-  if (out.compareRunId) {
-    await markGapfillCompareRunRunning({
-      compareRunId: out.compareRunId,
-      phase: "metrics_built",
-      statusMeta: {
-        route: "admin_gapfill_lab",
-        compareRunId: out.compareRunId,
-        compareCoreStepTimings: compareCoreTiming.stepsMs,
-      },
-    });
-  }
-  const requestedTestDaysCount = testDateKeysLocal.size;
-  const scoringTestDaysCount = scoringTestDateKeysLocal.size;
-  const scoredIntervalsCount = scoringActualTestIntervalsCanon.length;
-  const actualTestIntervalsCount = scoringActualTestIntervalsCanon.length;
-  const simulatedTestIntervalsCount = sharedSim.simulatedTestIntervals.length;
-  const hasScoreableIntervals = simulatedTestIntervalsCount > 0;
-  const scoreableIntervalsMessage = hasScoreableIntervals
-    ? "Selected test days include scoreable intervals from shared compare scoring output."
-    : "Selected test days had no scoreable intervals from shared compare scoring output. This compare completed with zero scored intervals.";
-  const scoringActualSource = "actual_usage_test_window_intervals";
-  const scoringSimulatedSource =
-    (sharedSim as any).scoringSimulatedSource ?? "shared_artifact_simulated_intervals15";
-  const scoringExcludedSource =
-    (sharedSim as any).scoringExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
-  const artifactBuildExcludedSource =
-    (sharedSim as any).artifactBuildExcludedSource ?? "shared_past_travel_vacant_excludedDateKeysFingerprint";
-  const artifactUsesTestDaysInIdentity =
-    (sharedSim as any).artifactUsesTestDaysInIdentity === true;
-  const artifactUsesTravelDaysInIdentity =
-    (sharedSim as any).artifactUsesTravelDaysInIdentity !== false;
-  const sharedArtifactScenarioId =
-    (sharedSim as any).sharedArtifactScenarioId ??
-    (sharedSim as any)?.modelAssumptions?.artifactScenarioId ??
-    null;
-  const sharedArtifactInputHash =
-    (sharedSim as any).sharedArtifactInputHash ??
-    (sharedSim as any)?.modelAssumptions?.artifactInputHash ??
-    (sharedSim as any)?.modelAssumptions?.artifactInputHashUsed ??
-    null;
-  const comparePulledFromSharedArtifactOnly = typeof rawComparePulledFromSharedArtifactOnly === "boolean"
-    ? rawComparePulledFromSharedArtifactOnly
-    : scoringUsedSharedArtifact;
-  const sharedCoverageWindow = sharedSim.sharedCoverageWindow;
-  const boundedTravelDateKeysLocal = sharedSim.boundedTravelDateKeysLocal;
-  const responseHomeProfile = sharedSim.homeProfileFromModel ?? homeProfile;
-  const responseApplianceProfile = sharedSim.applianceProfileFromModel ?? applianceProfile;
-  const rawModelAssumptions = (sharedSim.modelAssumptions as any) ?? {};
-  const responseModelAssumptions = selectedDaysCoreLightweight
-    ? buildSelectedDaysCoreResponseModelAssumptions(rawModelAssumptions)
-    : rawModelAssumptions;
-  const ma = rawModelAssumptions;
-  const artifactSourceMode = String(ma.artifactSourceMode ?? "") || null;
-  const requestedInputHash = ma.requestedInputHash ?? null;
-  const artifactInputHashUsed = ma.artifactInputHashUsed ?? null;
-  const artifactHashMatch = ma.artifactHashMatch ?? null;
-  const artifactScenarioId = ma.artifactScenarioId ?? null;
-  const contextScenarioId =
-    (typeof ma.scenarioId === "string" && ma.scenarioId.trim()) ||
-    (typeof ma.cacheKeyDiag?.scenarioId === "string" && ma.cacheKeyDiag.scenarioId.trim()) ||
-    null;
-  const stableScenarioId =
-    (typeof artifactScenarioId === "string" && artifactScenarioId.trim()) ||
-    contextScenarioId ||
-    "past_shared_artifact";
-  const artifactCreatedAt = ma.artifactCreatedAt ?? null;
-  const artifactUpdatedAt = ma.artifactUpdatedAt ?? null;
-  const artifactRequestedScenarioId = ma.artifactRequestedScenarioId ?? null;
-  const artifactExactIdentityRequested = ma.artifactExactIdentityRequested === true;
-  const artifactExactIdentityResolved = ma.artifactExactIdentityResolved === true;
-  const artifactIdentitySourceUsed = ma.artifactIdentitySource ?? null;
-  const artifactSameRunEnsureIdentity = ma.artifactSameRunEnsureIdentity === true;
-  const artifactFallbackOccurred = ma.artifactFallbackOccurred === true;
-  const artifactFallbackReason = ma.artifactFallbackReason ?? null;
-  const artifactExactIdentifierUsed =
-    ma.artifactExactIdentifierUsed ??
-    (artifactInputHashUsed && (artifactScenarioId ?? stableScenarioId)
-      ? `${artifactScenarioId ?? stableScenarioId}:${artifactInputHashUsed}`
-      : null);
-  const sameRunExactHashRequested =
-    typeof requestedInputHash === "string" && requestedInputHash.length > 0;
-  const sameRunExactHandoffRequired =
-    requireExactArtifactMatch &&
-    sameRunExactHashRequested &&
-    artifactIdentitySourceUsed === "same_run_artifact_ensure";
-  const sameRunExactHandoffResolved =
-    sameRunExactHandoffRequired &&
-    artifactSourceMode === "exact_hash_match" &&
-    artifactHashMatch === true &&
-    typeof requestedInputHash === "string" &&
-    requestedInputHash.length > 0 &&
-    artifactInputHashUsed === requestedInputHash &&
-    artifactExactIdentityResolved === true;
-  if (sameRunExactHandoffRequired && !sameRunExactHandoffResolved) {
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "artifact_identity_validation",
-      failureCode: "ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED",
-      failureMessage:
-        "Compare required the exact shared Past artifact identity returned by same-run artifact ensure, but that handoff was not proven as an exact hash match.",
-      statusCode: 409,
-      compareCoreFailedStep: "build_shared_compare",
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "artifact_exact_identity_unresolved",
-        message:
-          "Compare required the exact shared Past artifact identity returned by same-run artifact ensure, but that handoff was not proven as an exact hash match.",
-        reasonCode: "ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED",
-        compareRequestTruth,
-        artifactRequestTruth,
-        artifactTruth: {
-          sourceMode: artifactSourceMode,
-          requestedInputHash,
-          artifactInputHashUsed,
-          artifactHashMatch,
-          requestedScenarioId: artifactRequestedScenarioId,
-          scenarioId: artifactScenarioId ?? stableScenarioId,
-          exactIdentifierUsed: artifactExactIdentifierUsed,
-          exactIdentityResolved: artifactExactIdentityResolved,
-          sameRunEnsureArtifact: artifactSameRunEnsureIdentity,
-          fallbackOccurred: artifactFallbackOccurred,
-          fallbackReason: artifactFallbackReason,
-        },
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          compareRequestTruth,
-          selectedDaysCoreLightweight,
-        }),
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: 409 }
-    );
-  }
-  const hasContradictoryExactArtifactTruth =
-    artifactSourceMode === "exact_hash_match" &&
-    (!artifactInputHashUsed ||
-      artifactHashMatch !== true ||
-      (typeof requestedInputHash === "string" &&
-        requestedInputHash.length > 0 &&
-        artifactInputHashUsed !== requestedInputHash) ||
-      (requireExactArtifactMatch && sameRunExactHashRequested && artifactExactIdentityResolved !== true));
-  if (hasContradictoryExactArtifactTruth) {
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "artifact_truth_validation",
-      failureCode: requireExactArtifactMatch
-        ? "ARTIFACT_EXACT_IDENTITY_UNRESOLVED"
-        : "ARTIFACT_TRUTH_INVARIANT_FAILED",
-      failureMessage: requireExactArtifactMatch
-        ? "Compare required an exact shared Past artifact identity, but the returned artifact truth could not prove that exact match."
-        : "Compare returned contradictory artifact truth and cannot report success.",
-      statusCode: requireExactArtifactMatch ? 409 : 500,
-      compareCoreFailedStep: "build_shared_compare",
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: requireExactArtifactMatch ? "artifact_exact_identity_unresolved" : "artifact_truth_invariant_failed",
-        message: requireExactArtifactMatch
-          ? "Compare required an exact shared Past artifact identity, but the returned artifact truth could not prove that exact match."
-          : "Compare returned contradictory artifact truth and cannot report success.",
-        reasonCode: requireExactArtifactMatch
-          ? "ARTIFACT_EXACT_IDENTITY_UNRESOLVED"
-          : "ARTIFACT_TRUTH_INVARIANT_FAILED",
-        compareRequestTruth,
-        artifactRequestTruth,
-        artifactTruth: {
-          sourceMode: artifactSourceMode,
-          requestedInputHash,
-          artifactInputHashUsed,
-          artifactHashMatch,
-          requestedScenarioId: artifactRequestedScenarioId,
-          scenarioId: artifactScenarioId ?? stableScenarioId,
-          exactIdentifierUsed: artifactExactIdentifierUsed,
-          exactIdentityResolved: artifactExactIdentityResolved,
-          sameRunEnsureArtifact: artifactSameRunEnsureIdentity,
-          fallbackOccurred: artifactFallbackOccurred,
-          fallbackReason: artifactFallbackReason,
-        },
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          compareRequestTruth,
-          selectedDaysCoreLightweight,
-        }),
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: requireExactArtifactMatch ? 409 : 500 }
-    );
-  }
-  const artifactSourceNote =
-    ma.artifactSourceNote ??
-    (artifactSourceMode === "exact_hash_match"
-      ? "Artifact source: exact identity match on Past input hash."
-      : null);
-  const chartIntervalCount = Array.isArray(sharedSim.simulatedChartIntervals)
-    ? sharedSim.simulatedChartIntervals.length
-    : Number(ma.intervalCount ?? 0) || 0;
-  const displayDailyRowsBase: Array<{ date: string; simKwh: number; source: "ACTUAL" | "SIMULATED" }> = Array.isArray(
-    sharedSim.simulatedChartDaily
-  )
-    ? sharedSim.simulatedChartDaily.map((row) => ({
-        date: String((row as any)?.date ?? "").slice(0, 10),
-        simKwh: round2(Number((row as any)?.simKwh ?? 0)),
-        source: String((row as any)?.source ?? "").toUpperCase() === "SIMULATED" ? "SIMULATED" : "ACTUAL",
-      }))
-    : [];
-  const displayDailyByDate = new Map<string, { simKwh: number; source: "ACTUAL" | "SIMULATED" }>(
-    displayDailyRowsBase
-      .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
-      .map((r) => [r.date, { simKwh: r.simKwh, source: r.source as "ACTUAL" | "SIMULATED" }] as const)
-  );
-  const parityDisplayDailyByDate = new Map<string, { simKwh: number; source: "SIMULATED" }>(
-    (Array.isArray((sharedSim as any)?.artifactSimulatedDayReferenceRows)
-      ? ((sharedSim as any).artifactSimulatedDayReferenceRows as Array<Record<string, unknown>>)
-      : [])
-      .map((row) => ({
-        date: String((row as any)?.date ?? "").slice(0, 10),
-        simKwh: round2(Number((row as any)?.simKwh ?? 0)),
-      }))
-      .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
-      .map((r) => [r.date, { simKwh: r.simKwh, source: "SIMULATED" as const }] as const)
-  );
-  const artifactReferenceDayCountUsed = Array.from(scoringTestDateKeysLocal).filter((dk) =>
-    parityDisplayDailyByDate.has(dk)
-  ).length;
-  const actualDailyByDate = new Map<string, number>();
-  for (const p of actualScoringIntervalsCanon) {
-    const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
-    actualDailyByDate.set(dk, round2((actualDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
-  }
-  const compareFreshModeUsedForRoute = String((sharedSim as any)?.compareFreshModeUsed ?? "");
-  const canonicalFreshTotals = (sharedSim as any)?.freshCompareScoredDaySimTotalsByDate as Record<string, unknown> | undefined;
-  const freshDailyByDate = new Map<string, number>();
-  if (compareFreshModeUsedForRoute === "selected_days") {
-    // Selected-days compare: use canonical simulator-owned day totals only. Summing
-    // simulatedTestIntervals can leak non-owned kWh (e.g. passthrough) onto scored rows.
-    if (canonicalFreshTotals && typeof canonicalFreshTotals === "object") {
-      for (const dk of Array.from(scoringTestDateKeysLocal)) {
-        if (!Object.prototype.hasOwnProperty.call(canonicalFreshTotals, dk)) continue;
-        const raw = canonicalFreshTotals[dk];
-        if (raw === undefined || raw === null || !Number.isFinite(Number(raw))) continue;
-        freshDailyByDate.set(dk, round2(Number(raw)));
-      }
-    }
-  } else {
-    for (const p of sharedSim.simulatedTestIntervals) {
-      const dk = dateKeyInTimezone(p.timestamp, scoringTimezone);
-      if (!scoringTestDateKeysLocal.has(dk)) continue;
-      freshDailyByDate.set(dk, round2((freshDailyByDate.get(dk) ?? 0) + (Number(p.kwh) || 0)));
-    }
-  }
-  const simulatedDayDiagnosticsRaw = Array.isArray((ma as any)?.simulatedDayDiagnosticsSample)
-    ? ((ma as any).simulatedDayDiagnosticsSample as Array<Record<string, unknown>>)
-    : [];
-  const simulatedDiagByDate = new Map<string, Record<string, unknown>>();
-  for (const d of simulatedDayDiagnosticsRaw) {
-    const dk = String((d as any)?.localDate ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
-    if (!simulatedDiagByDate.has(dk)) simulatedDiagByDate.set(dk, d);
-  }
-  const compactScoredDayWeatherRows: Array<{
-    localDate: string;
-    avgTempF: number | null;
-    minTempF: number | null;
-    maxTempF: number | null;
-    hdd65: number | null;
-    cdd65: number | null;
-    weatherBasisUsed: string | null;
-    weatherKindUsed: string | null;
-    weatherSourceUsed: string | null;
-    weatherProviderName: string | null;
-    weatherFallbackReason: string | null;
-  }> = Array.isArray((sharedSim as any)?.scoredDayWeatherRows)
-    ? ((sharedSim as any).scoredDayWeatherRows as Array<{
-        localDate: string;
-        avgTempF: number | null;
-        minTempF: number | null;
-        maxTempF: number | null;
-        hdd65: number | null;
-        cdd65: number | null;
-        weatherBasisUsed: string | null;
-        weatherKindUsed: string | null;
-        weatherSourceUsed: string | null;
-        weatherProviderName: string | null;
-        weatherFallbackReason: string | null;
-      }>)
-    : [];
-  const weatherByDate = new Map<string, Record<string, unknown>>();
-  for (const w of compactScoredDayWeatherRows) {
-    const dk = String((w as any)?.localDate ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !scoringTestDateKeysLocal.has(dk)) continue;
-    if (!weatherByDate.has(dk)) weatherByDate.set(dk, w);
-  }
-  const scoredDayWeatherTruthFromService =
-    ((sharedSim as any)?.scoredDayWeatherTruth as Record<string, unknown> | undefined) ?? null;
-  const scoredDayWeatherTruth =
-    (scoredDayWeatherTruthFromService ?? {
-      availability: weatherByDate.size === scoringTestDateKeysLocal.size ? "available" : "missing_expected_scored_day_weather",
-      reasonCode: weatherByDate.size === scoringTestDateKeysLocal.size ? "SCORED_DAY_WEATHER_AVAILABLE" : "SCORED_DAY_WEATHER_MISSING",
-      explanation:
-        weatherByDate.size === scoringTestDateKeysLocal.size
-          ? "Compact scored-day weather truth is available from the shared compare execution."
-          : "Shared compare completed without compact weather truth for one or more scored dates.",
-      source: "shared_compare_scored_day_weather",
-      scoredDateCount: scoringTestDateKeysLocal.size,
-      weatherRowCount: weatherByDate.size,
-      missingDateCount: Math.max(0, scoringTestDateKeysLocal.size - weatherByDate.size),
-      missingDateSample: Array.from(scoringTestDateKeysLocal).filter((dk) => !weatherByDate.has(dk)).slice(0, 10),
-    }) as Record<string, unknown>;
-  const shouldEnforceScoredDayWeatherInvariant =
-    actualScoringIntervals.length > 0 && Array.isArray(sharedSim.simulatedTestIntervals) && sharedSim.simulatedTestIntervals.length > 0;
-  if (
-    shouldEnforceScoredDayWeatherInvariant &&
-    scoringTestDateKeysLocal.size > 0 &&
-    String(scoredDayWeatherTruth.availability ?? "") !== "available"
-  ) {
-    const compareRunEnvelope = await markCompareRunFailure({
-      phase: "weather_truth_validation",
-      failureCode: "COMPARE_CORE_WEATHER_TRUTH_MISSING",
-      failureMessage: "Compare core completed without compact scored-day weather truth for one or more scored dates.",
-      statusCode: 500,
-      compareCoreFailedStep: "build_shared_compare",
-    });
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "compare_core_weather_truth_missing",
-        message: "Compare core completed without compact scored-day weather truth for one or more scored dates.",
-        reasonCode: "COMPARE_CORE_WEATHER_TRUTH_MISSING",
-        scoredDayWeatherTruth,
-        compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-          failedStep: "build_shared_compare",
-          compareRequestTruth,
-          selectedDaysCoreLightweight,
-        }),
-        ...(compareRunEnvelope ?? {}),
-      },
-      { status: 500 }
-    );
-  }
-  const travelVacantParityRows = Array.isArray((sharedSim as any)?.travelVacantParityRows)
-    ? ((sharedSim as any).travelVacantParityRows as Array<Record<string, unknown>>)
-    : [];
-  const travelVacantParityTruth =
-    ((sharedSim as any)?.travelVacantParityTruth as Record<string, unknown> | undefined) ?? {
+
+  const metricsSummary = {
+    mae: metrics.mae,
+    rmse: metrics.rmse,
+    mape: metrics.mape,
+    wape: metrics.wape,
+    maxAbs: metrics.maxAbs,
+    totalActualKwhMasked: metrics.totalActualKwhMasked,
+    totalSimKwhMasked: metrics.totalSimKwhMasked,
+    deltaKwhMasked: metrics.deltaKwhMasked,
+    mapeFiltered: metrics.mapeFiltered,
+    mapeFilteredCount: metrics.mapeFilteredCount,
+  };
+  const compareTruth = {
+    compareSharedCalcPath:
+      "dispatchPastSimRecalc->recalcSimulatorBuild->getSimulatedUsageForHouseScenario(/api/user/usage/simulated/house artifact_only exact hash)->admin_accuracy_projection",
+    sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+    validationDaysTruthSource: "canonical_saved_artifact_family",
+    userPipelineParitySource,
+  };
+  const snapshotPayload: Record<string, unknown> = {
+    selectedScoredDateKeys: selectedDateKeysSorted,
+    scoredDayTruthRowsCompact: scoredDayTruthRows,
+    scoredDayWeatherRows: [],
+    scoredDayWeatherTruth: {
+      availability: "not_requested",
+      reasonCode: "SCORED_DAY_WEATHER_NOT_REQUESTED",
+      explanation: "Canonical GapFill compare reads persisted artifact truth only.",
+      source: "canonical_saved_artifact_family",
+      scoredDateCount: selectedDateKeysSorted.length,
+      weatherRowCount: 0,
+      missingDateCount: selectedDateKeysSorted.length,
+      missingDateSample: selectedDateKeysSorted.slice(0, 10),
+    },
+    travelVacantParityRows: [],
+    travelVacantParityTruth: {
       availability: "not_requested",
       reasonCode: "TRAVEL_VACANT_PARITY_NOT_REQUESTED",
-      explanation: "No DB travel/vacant parity validation was returned by the shared compare service.",
-      source: "db_travel_vacant_ranges",
-      comparisonBasis: "canonical_artifact_simulated_day_totals_vs_fresh_shared_compare_daily_totals",
+      explanation: "GapFill canonical compare no longer owns fresh pre-DB parity execution.",
+      source: "canonical_saved_artifact_family",
+      comparisonBasis: "persisted_artifact_truth_only",
       requestedDateCount: 0,
       validatedDateCount: 0,
       mismatchCount: 0,
@@ -1236,963 +608,138 @@ export async function runGapfillCompareCorePipeline(
       requestedDateSample: [],
       exactProofRequired: false,
       exactProofSatisfied: true,
-    };
-  const scoredDayTruthRows = Array.from(scoringTestDateKeysLocal)
-    .sort()
-    .map((date): GapfillLabScoredDayTruthRow => {
-      const actualDayKwh = round2(actualDailyByDate.get(date) ?? 0);
-      const hasFreshCompareSim = freshDailyByDate.has(date);
-      const freshCompareSimDayKwh = hasFreshCompareSim ? round2(freshDailyByDate.get(date) ?? 0) : null;
-      const parityDisplayDay = parityDisplayDailyByDate.get(date);
-      const displayedPastStyleSimDayKwh =
-        parityDisplayDay && parityDisplayDay.source === "SIMULATED"
-          ? round2(parityDisplayDay.simKwh)
-          : null;
-      const parityMatch =
-        displayedPastStyleSimDayKwh == null || freshCompareSimDayKwh == null
-          ? null
-          : round2(freshCompareSimDayKwh) === round2(displayedPastStyleSimDayKwh);
-      const dow = getLocalDayOfWeekFromDateKey(date, scoringTimezone);
-      const weekend = dow === 0 || dow === 6;
-      const weather = weatherByDate.get(date) ?? {};
-      const diag = simulatedDiagByDate.get(date) ?? {};
-      const fallbackLevelRaw = String((diag as any)?.fallbackLevel ?? "").trim();
-      const fallbackLevel = fallbackLevelRaw || null;
-      const sampleCountCandidate = Number(
-        (diag as any)?.selectedMatchSampleCount ??
-          (diag as any)?.matchSampleCount ??
-          (diag as any)?.referenceSampleCount ??
-          (diag as any)?.sampleCountUsed
-      );
-      const sampleCount = Number.isFinite(sampleCountCandidate) ? Math.max(0, Math.trunc(sampleCountCandidate)) : null;
-      const avgTempF = Number((weather as any)?.avgTempF);
-      const minTempF = Number((weather as any)?.minTempF);
-      const maxTempF = Number((weather as any)?.maxTempF);
-      const hdd65 = Number((weather as any)?.hdd65);
-      const cdd65 = Number((weather as any)?.cdd65);
-      const parityAvailability: GapfillScoredDayParityAvailability =
-        displayedPastStyleSimDayKwh == null
-          ? "missing_expected_reference"
-          : !hasFreshCompareSim
-            ? "missing_fresh_compare_sim"
-            : "available";
-      const parityReasonCode: GapfillScoredDayParityReasonCode =
-        displayedPastStyleSimDayKwh == null
-          ? "ARTIFACT_SIMULATED_REFERENCE_MISSING"
-          : !hasFreshCompareSim
-            ? "SCORED_DAY_FRESH_COMPARE_SIM_MISSING"
-            : "ARTIFACT_SIMULATED_REFERENCE_AVAILABLE";
-      const parityDisplayValueKind: GapfillScoredDayParityDisplayValueKind =
-        displayedPastStyleSimDayKwh == null
-          ? "missing_display_sim_reference"
-          : !hasFreshCompareSim
-            ? "missing_fresh_compare_sim_day_total"
-            : "artifact_simulated_day_total";
-      return {
-        localDate: date,
-        actualDayKwh,
-        freshCompareSimDayKwh,
-        displayedPastStyleSimDayKwh,
-        actualVsFreshErrorKwh:
-          hasFreshCompareSim && freshCompareSimDayKwh != null
-            ? round2(actualDayKwh - freshCompareSimDayKwh)
-            : null,
-        displayVsFreshParityMatch: parityMatch,
-        parityAvailability,
-        parityDisplaySourceUsed:
-          ((sharedSim as any)?.displayVsFreshParityForScoredDays?.parityDisplaySourceUsed as string | undefined) ??
-          "canonical_artifact_simulated_day_totals",
-        artifactSimulatedDayReferenceSource:
-          ((sharedSim as any)?.artifactSimulatedDayReferenceSource as string | undefined) ??
-          "canonical_artifact_simulated_day_totals",
-        parityDisplayValueKind,
-        parityReasonCode,
-        scoredDayDisplaySource: hasFreshCompareSim ? ("SIMULATED" as const) : ("MISSING_REFERENCE" as const),
-        dayType: weekend ? "weekend" : "weekday",
-        weatherBasis:
-          String((weather as any)?.weatherBasisUsed ?? (sharedSim as any).weatherBasisUsed ?? "") || null,
-        weatherSourceUsed: String((weather as any)?.weatherSourceUsed ?? "") || null,
-        weatherFallbackReason: String((weather as any)?.weatherFallbackReason ?? "") || null,
-        avgTempF: Number.isFinite(avgTempF) ? round2(avgTempF) : null,
-        minTempF: Number.isFinite(minTempF) ? round2(minTempF) : null,
-        maxTempF: Number.isFinite(maxTempF) ? round2(maxTempF) : null,
-        hdd65: Number.isFinite(hdd65) ? round2(hdd65) : null,
-        cdd65: Number.isFinite(cdd65) ? round2(cdd65) : null,
-        fallbackLevel,
-        selectedDayTotalSource:
-          String(
-            (diag as any)?.dayTotalSource ??
-              (diag as any)?.selectedDayTotalSource ??
-              (diag as any)?.targetDaySource ??
-              ""
-          ) || null,
-        selectedShapeVariant:
-          String((diag as any)?.shapeVariantUsed ?? (diag as any)?.selectedShapeVariant ?? "") || null,
-        selectedReferenceMatchTier:
-          String(
-            (diag as any)?.selectedReferenceMatchTier ??
-              (diag as any)?.matchTier ??
-              (diag as any)?.referencePoolTier ??
-              ""
-          ) || null,
-        selectedMatchSampleCount: sampleCount,
-        reasonCode:
-          String((diag as any)?.reasonCode ?? (diag as any)?.fallbackReasonCode ?? (diag as any)?.fallbackReason ?? "") || null,
-      };
-    });
-  const scoredRowsWithMiss = scoredDayTruthRows.filter((row) => Math.abs(Number(row.actualVsFreshErrorKwh) || 0) > 0.01);
-  const worstErrorDates = scoredRowsWithMiss
-    .slice()
-    .sort(
-      (a, b) =>
-        Math.abs(Number(b.actualVsFreshErrorKwh) || 0) - Math.abs(Number(a.actualVsFreshErrorKwh) || 0)
-    )
-    .slice(0, 10)
-    .map((row) => ({
-      localDate: row.localDate,
-      absErrorKwh: round2(Math.abs(Number(row.actualVsFreshErrorKwh) || 0)),
-      summary: row.reasonCode ?? row.fallbackLevel ?? row.selectedReferenceMatchTier ?? "no_reason_code",
-    }));
-  const countIf = (pred: (row: (typeof scoredDayTruthRows)[number]) => boolean): number =>
-    scoredRowsWithMiss.reduce((sum, row) => sum + (pred(row) ? 1 : 0), 0);
-  const missAttributionSummary = {
-    source: "scored_day_truth_rows",
-    categories: {
-      dayTotalDominantMiss: {
-        count: countIf((row) => String(row.selectedDayTotalSource ?? "").toLowerCase().includes("fallback")),
-        classification: "heuristic",
-      },
-      shapeDominantMiss: {
-        count: countIf((row) => String(row.selectedShapeVariant ?? "").toLowerCase().includes("fallback")),
-        classification: "heuristic",
-      },
-      weatherResponseMiss: {
-        count: countIf((row) => (row.hdd65 ?? 0) + (row.cdd65 ?? 0) >= 5),
-        classification: "heuristic",
-      },
-      fallbackTierMiss: {
-        count: countIf((row) => Boolean(row.fallbackLevel)),
-        classification: "supported",
-      },
-      sparseBinSampleCountIssue: {
-        count: countIf((row) => (row.selectedMatchSampleCount ?? 999) < 3),
-        classification: "heuristic",
-      },
-      weekdayWeekendMismatchRisk: {
-        count: countIf((row) => String((simulatedDiagByDate.get(row.localDate) as any)?.dayTypeUsed ?? "").toLowerCase() !== row.dayType),
-        classification: "heuristic",
-      },
     },
-    topWorstErrorDates: worstErrorDates,
-  };
-  const summarizeRows = (rows: typeof scoredDayTruthRows) => {
-    const count = rows.length;
-    const totalActual = round2(rows.reduce((sum, row) => sum + (Number(row.actualDayKwh) || 0), 0));
-    const totalAbsError = round2(rows.reduce((sum, row) => sum + Math.abs(Number(row.actualVsFreshErrorKwh) || 0), 0));
-    return {
-      count,
-      maeKwh: count > 0 ? round2(totalAbsError / count) : 0,
-      wapePct: safeRatio(totalAbsError, totalActual),
-    };
-  };
-  const pushBucketSummary = (
-    map: Map<string, Array<(typeof scoredDayTruthRows)[number]>>,
-    key: string,
-    row: (typeof scoredDayTruthRows)[number]
-  ) => {
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(row);
-  };
-  const byTempBandMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
-  const byDayTypeMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
-  const byMonthMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
-  const byFallbackTierMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
-  const byWeatherRegimeMap = new Map<string, Array<(typeof scoredDayTruthRows)[number]>>();
-  for (const row of scoredDayTruthRows) {
-    pushBucketSummary(byTempBandMap, classifyTemperatureBand(row.avgTempF), row);
-    pushBucketSummary(byDayTypeMap, row.dayType, row);
-    pushBucketSummary(byMonthMap, row.localDate.slice(0, 7), row);
-    pushBucketSummary(byFallbackTierMap, row.fallbackLevel ?? "none", row);
-    pushBucketSummary(byWeatherRegimeMap, classifyWeatherRegime(row.hdd65, row.cdd65), row);
-  }
-  const buildBucketRows = (map: Map<string, Array<(typeof scoredDayTruthRows)[number]>>) =>
-    Array.from(map.entries())
-      .map(([bucket, rows]) => ({ bucket, ...summarizeRows(rows) }))
-      .sort((a, b) => b.count - a.count || a.bucket.localeCompare(b.bucket));
-  const intervalHourBlockMap = new Map<string, { count: number; totalActual: number; totalAbsError: number }>();
-  for (const p of scoringActualTestIntervalsCanon) {
-    const local = getLocalHourMinuteInTimezone(p.timestamp, scoringTimezone);
-    const block = bucketHourBlock(local.hour);
-    const simKwh = Number(simulatedByTs.get(p.timestamp) ?? 0);
-    const actualKwh = Number(p.kwh) || 0;
-    const prev = intervalHourBlockMap.get(block) ?? { count: 0, totalActual: 0, totalAbsError: 0 };
-    prev.count += 1;
-    prev.totalActual += actualKwh;
-    prev.totalAbsError += Math.abs(actualKwh - simKwh);
-    intervalHourBlockMap.set(block, prev);
-  }
-  const byHourBlock = Array.from(intervalHourBlockMap.entries()).map(([bucket, agg]) => ({
-    bucket,
-    count: agg.count,
-    maeKwh: agg.count > 0 ? round2(agg.totalAbsError / agg.count) : 0,
-    wapePct: safeRatio(agg.totalAbsError, agg.totalActual),
-  }));
-  const compareFreshModeUsed = (sharedSim as any).compareFreshModeUsed ?? null;
-  const compareCalculationScope = (sharedSim as any).compareCalculationScope ?? null;
-  const compareSharedCalcPath = (sharedSim as any).compareSharedCalcPath ?? null;
-  const compareSimSource = (sharedSim as any).compareSimSource ?? null;
-  const displaySimSource = (sharedSim as any).displaySimSource ?? null;
-  const weatherBasisUsed = (sharedSim as any).weatherBasisUsed ?? null;
-  const compareModelAssumptions = ((sharedSim as any).modelAssumptions ?? null) as Record<string, unknown> | null;
-  const usageShapeDayTotalSource = String((compareModelAssumptions as any)?.dayTotalSource ?? "").trim() || null;
-  const usageShapeDiag =
-    compareModelAssumptions && typeof compareModelAssumptions === "object"
-      ? (((compareModelAssumptions as any).usageShapeProfileDiag ?? null) as
-          | { found?: unknown; reasonNotUsed?: unknown }
-          | null)
-      : null;
-  const usageShapeProfileUsed =
-    usageShapeDayTotalSource === "usage_shape_profile" ||
-    usageShapeDayTotalSource === "usageShapeProfile_avgKwhPerDayByMonth";
-  const usageShapeReasonNotUsed =
-    usageShapeDiag && String(usageShapeDiag.reasonNotUsed ?? "").trim()
-      ? String(usageShapeDiag.reasonNotUsed ?? "").trim()
-      : null;
-  const compareTruth = {
-    compareFreshModeUsed,
-    compareFreshModeLabel:
-      compareFreshModeUsed === "selected_days"
-        ? "Selected-days fresh shared execution"
-        : compareFreshModeUsed === "full_window"
-          ? "Full-window fresh shared execution"
-          : compareFreshModeUsed === "artifact_only"
-            ? "Artifact-only compare (no fresh shared execution)"
-            : "Unknown compare mode",
-    compareCalculationScope,
-    compareCalculationScopeLabel:
-      compareCalculationScope === "selected_days_shared_path_only"
-        ? "Canonical shared Past dataset path, then selected-day slice"
-        : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
-          ? "Full-window fresh shared calculation, then scored-day filter"
-          : compareCalculationScope === "artifact_read_then_scored_day_filter"
-            ? "Artifact read, then scored-day filter"
-            : "Unknown compare scope",
-    compareSharedCalcPath,
-    compareSimSource,
-    displaySimSource,
-    artifactParityReferenceSource: (sharedSim as any).artifactSimulatedDayReferenceSource ?? null,
-    travelVacantParitySource: (travelVacantParityTruth as any)?.source ?? null,
-    travelVacantParityComparisonBasis: (travelVacantParityTruth as any)?.comparisonBasis ?? null,
-    travelVacantParityAvailability: (travelVacantParityTruth as any)?.availability ?? null,
-    travelVacantParityExactProofSatisfied: (travelVacantParityTruth as any)?.exactProofSatisfied ?? null,
-    weatherBasisUsed,
-    architectureNote:
-      compareCalculationScope === "selected_days_shared_path_only"
-        ? "Selected-days mode now reuses the canonical shared Past simulation/output path once, then slices scored local dates and exact parity dates from that shared output."
-        : compareCalculationScope === "full_window_shared_path_then_scored_day_filter"
-          ? "Full-window mode runs shared simulator over the full window before filtering to scored days and validating DB travel/vacant parity."
-          : "Artifact-only mode reads shared artifact output and filters scored days.",
-    compareRequestTruth,
-  };
-  const displayDailyRows = (() => {
-    const byDate = new Map<
-      string,
-      {
-        date: string;
-        simKwh: number;
-        source: "ACTUAL" | "SIMULATED" | "MISSING_REFERENCE";
-        selectedTestDate?: boolean;
-        status?: GapfillScoredDayParityAvailability | null;
-        reasonCode?: GapfillScoredDayParityReasonCode | null;
-      }
-    >();
-    for (const row of displayDailyRowsBase) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(row.date ?? ""))) continue;
-      byDate.set(row.date, row);
-    }
-    for (const row of scoredDayTruthRows) {
-      const localDate = String(row.localDate ?? "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) continue;
-      const existing = byDate.get(localDate);
-      const scoredSimKwh =
-        row.freshCompareSimDayKwh == null ? 0 : round2(Number(row.freshCompareSimDayKwh));
-      const scoredSimSource: "SIMULATED" | "MISSING_REFERENCE" =
-        row.freshCompareSimDayKwh == null ? "MISSING_REFERENCE" : "SIMULATED";
-      if (existing) {
-        const overlay =
-          scoredSimSource === "SIMULATED"
-            ? { simKwh: scoredSimKwh, source: "SIMULATED" as const }
-            : { simKwh: 0, source: "MISSING_REFERENCE" as const };
-        byDate.set(localDate, {
-          ...existing,
-          ...overlay,
-          selectedTestDate: true,
-          status: row.parityAvailability ?? null,
-          reasonCode: row.parityReasonCode ?? null,
-        });
-        continue;
-      }
-      byDate.set(localDate, {
-        date: localDate,
-        simKwh: scoredSimKwh,
-        source: scoredSimSource,
-        selectedTestDate: true,
-        status: row.parityAvailability ?? "missing_expected_reference",
-        reasonCode: row.parityReasonCode ?? "ARTIFACT_SIMULATED_REFERENCE_MISSING",
-      });
-    }
-    return Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
-  })();
-  const hasGapfillLoadCurveData =
-    Array.isArray((metrics as any)?.diagnostics?.hourlyProfileMasked) &&
-    ((metrics as any).diagnostics.hourlyProfileMasked as Array<unknown>).length > 0;
-  const displaySimulatedLoadCurveMessage =
-    !hasGapfillLoadCurveData && (usageShapeProfileUsed || usageShapeDiag?.found === true)
-      ? includeDiagnostics
-        ? "No 15-minute load-curve visualization was returned for this Gap-Fill view, but the shared sim still used the ensured usage-shape dependency for day shaping."
-        : "Compact Gap-Fill view does not include a 15-minute load-curve visualization, but the shared sim still used the ensured usage-shape dependency for day shaping."
-      : null;
-  const truthEnvelope = {
-    compareFreshModeUsed,
-    compareCalculationScope,
-    compareSharedCalcPath,
-    compareSimSource,
-    displaySimSource,
-    artifactParityReferenceSource: (sharedSim as any).artifactSimulatedDayReferenceSource ?? null,
-    weatherBasisUsed,
-    compareTruth,
-    compareRequestTruth,
-    displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
-    gapfillScoringDiagnostics: (sharedSim as any)?.gapfillScoringDiagnostics ?? null,
-    travelVacantParityRows,
-    travelVacantParityTruth,
-    timezoneUsedForScoring: scoringTimezone,
-    windowUsedForScoring: scoringWindow,
-    requestedTestDaysCount,
-    scoringTestDaysCount,
-    scoredIntervalsCount,
-    travelVacantExclusionCount: boundedTravelDateKeysLocal.size,
-    artifactDisplayReferenceWarning,
-    usageShapeDependencyStatus: (() => {
-      if (usageShapeReasonNotUsed) {
-        return {
-          status: "missing_or_not_used",
-          reason: usageShapeReasonNotUsed,
-          dayTotalSource: usageShapeDayTotalSource,
-        };
-      }
-      if (usageShapeProfileUsed || usageShapeDiag?.found === true) {
-        return {
-          status: "available",
-          reason: null,
-          dayTotalSource: usageShapeDayTotalSource,
-        };
-      }
-      if (!usageShapeDiag) {
-        return { status: "unknown", reason: null, dayTotalSource: usageShapeDayTotalSource };
-      }
-      if (usageShapeDiag.found === false) {
-        return { status: "unknown", reason: null, dayTotalSource: usageShapeDayTotalSource };
-      }
-      return {
-        status: "unknown",
-        reason: null,
-        dayTotalSource: usageShapeDayTotalSource,
-      };
-    })(),
-    artifact: {
-      sourceMode: artifactSourceMode,
-      sourceNote: artifactSourceNote,
-      requestedInputHash,
-      requestedScenarioId: artifactRequestedScenarioId,
-      artifactInputHashUsed,
-      artifactHashMatch,
-      scenarioId: artifactScenarioId ?? stableScenarioId,
-      exactIdentifierUsed: artifactExactIdentifierUsed,
-      exactIdentityRequested: artifactExactIdentityRequested,
-      exactIdentityResolved: artifactExactIdentityResolved,
-      identitySource: artifactIdentitySourceUsed,
-      sameRunEnsureArtifact: artifactSameRunEnsureIdentity,
-      compareUsedSameRunEnsureArtifact: artifactSameRunEnsureIdentity && artifactExactIdentityResolved,
-      fallbackOccurred: artifactFallbackOccurred,
-      fallbackReason: artifactFallbackReason,
-      createdAt: artifactCreatedAt,
-      updatedAt: artifactUpdatedAt,
-      rebuiltRequested: rebuildArtifact,
-      autoRebuilt: sharedSim.artifactAutoRebuilt === true,
-      pathKind:
-        sharedSim.artifactAutoRebuilt || rebuildArtifact
-          ? "full_rebuild"
-          : artifactSourceMode === "exact_hash_match"
-            ? "cheap_read"
-            : "unknown",
-    },
-  };
-  const accuracyTuningBreakdowns = {
-    source: "scored_day_truth_rows",
-    byTemperatureBand: buildBucketRows(byTempBandMap),
-    byWeekdayWeekend: buildBucketRows(byDayTypeMap),
-    byMonth: buildBucketRows(byMonthMap),
-    byHourBlock,
-    byFallbackTier: buildBucketRows(byFallbackTierMap),
-    byWeatherRegime: buildBucketRows(byWeatherRegimeMap),
-  };
-  let fullReport: ReturnType<typeof buildFullReport> | null = null;
-  if (includeFullReportText) {
-    try {
-      fullReport = await withTimeout(
-        withRequestAbort(
-          Promise.resolve(
-            buildFullReport({
-            reportVersion: REPORT_VERSION,
-            generatedAt: new Date().toISOString(),
-            env: process.env.NODE_ENV ?? "development",
-            houseId: house.id,
-            userId: user.id,
-            email: user.email,
-            houseLabel: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
-            timezone,
-            timezoneUsedForScoring: scoringTimezone,
-            testRangesInput: testRanges,
-            travelRangesFromDb,
-            guardrailExcludedRanges: mergeDateKeysToRanges(Array.from(guardrailExcludedDateKeysLocal).sort()),
-            listTestDateKeys: testDateKeysSorted,
-            testIntervalsCount: actualTestIntervals.length,
-            testDaysCount: testDateKeysLocal.size,
-            guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-            guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
-            dateKeyDiag: {
-              travelDateKeysLocalCount: travelDateKeysLocal.size,
-              travelDateKeysLocalSample: sortedSample(travelDateKeysLocal),
-              testDateKeysLocalCount: testDateKeysLocal.size,
-              testDateKeysLocalSample: sortedSample(testDateKeysLocal),
-              guardrailExcludedDateKeysCount: guardrailExcludedDateKeysLocal.size,
-              guardrailExcludedDateKeysSample: sortedSample(guardrailExcludedDateKeysLocal),
-              setArithmetic: {
-                onlyTravelCount: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).length,
-                onlyTravelSample: Array.from(travelDateKeysLocal).filter((dk) => !testDateKeysLocal.has(dk)).sort().slice(0, 10),
-                onlyTestCount: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).length,
-                onlyTestSample: Array.from(testDateKeysLocal).filter((dk) => !travelDateKeysLocal.has(dk)).sort().slice(0, 10),
-                overlapCount: overlapLocal.size,
-                overlapSample: sortedSample(overlapLocal),
-              },
-            },
-            dataset: {
-              summary: {
-                intervalsCount: chartIntervalCount,
-                start: sharedCoverageWindow.startDate,
-                end: sharedCoverageWindow.endDate,
-              },
-              totals: {
-                netKwh: Number((sharedSim.modelAssumptions as any)?.totalKwh ?? metrics.totalSimKwhMasked ?? 0) || 0,
-              },
-              insights: {
-                baseloadDaily: (sharedSim.modelAssumptions as any)?.baseloadDaily ?? null,
-                baseload: (sharedSim.modelAssumptions as any)?.baseload ?? null,
-                timeOfDayBuckets: [],
-                weekdayVsWeekend: {
-                  weekday: Number((sharedSim.modelAssumptions as any)?.weekdayKwh ?? 0) || 0,
-                  weekend: Number((sharedSim.modelAssumptions as any)?.weekendKwh ?? 0) || 0,
-                },
-                peakDay: null,
-                peakHour: null,
-              },
-              monthly: sharedSim.simulatedChartMonthly,
-            },
-            buildInputs: {
-              canonicalMonths,
-            },
-            configHash: String(ma.artifactInputHash ?? "n/a"),
-            excludedDateKeysCount: boundedTravelDateKeysLocal.size,
-            excludedDateKeysSample: sortedSample(boundedTravelDateKeysLocal),
-            homeProfile: responseHomeProfile,
-            applianceProfile: responseApplianceProfile,
-            modelAssumptions: sharedSim.modelAssumptions,
-            artifactSourceMode,
-            requestedInputHash,
-            artifactInputHashUsed,
-            artifactHashMatch,
-            artifactScenarioId,
-            artifactCreatedAt,
-            artifactUpdatedAt,
-            artifactSourceNote,
-            metrics: {
-              mae: metrics.mae,
-              rmse: metrics.rmse,
-              maxAbs: metrics.maxAbs,
-              wape: metrics.wape,
-              mape: metrics.mape,
-              totalActualKwhMasked: metrics.totalActualKwhMasked,
-              totalSimKwhMasked: metrics.totalSimKwhMasked,
-              deltaKwhMasked: metrics.deltaKwhMasked,
-              mapeFiltered: (metrics as any).mapeFiltered ?? null,
-              mapeFilteredCount: (metrics as any).mapeFilteredCount ?? 0,
-              byMonth: metrics.byMonth,
-              byHour: metrics.byHour,
-              worst10Abs: (metrics as any).worst10Abs ?? [],
-            },
-            diagnostics: {
-              dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
-              top10Under: metrics.diagnostics.top10Under,
-              top10Over: metrics.diagnostics.top10Over,
-              hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
-            },
-            poolHoursLens: null,
-            usageShapeProfileDiag: ((sharedSim.modelAssumptions as any)?.usageShapeProfileDiag ?? null) as any,
-            simulatedDayDiagnosticsSample:
-              ((sharedSim.modelAssumptions as any)?.simulatedDayDiagnosticsSample ?? []) as Array<{
-                localDate: string;
-                targetDayKwhBeforeWeather: number;
-                weatherAdjustedDayKwh: number;
-                dayTypeUsed: "weekday" | "weekend" | null;
-                shapeVariantUsed: string | null;
-                finalDayKwh: number;
-                intervalSumKwh: number;
-                fallbackLevel: string | null;
-              }>,
-            cacheHit: !rebuildArtifact,
-            cacheSource: rebuildArtifact ? "rebuilt" : "lab",
-            inputHash: String((sharedSim.modelAssumptions as any)?.artifactInputHash ?? ""),
-            intervalDataFingerprint: String((sharedSim.modelAssumptions as any)?.intervalDataFingerprint ?? ""),
-            engineVersion: String((sharedSim.modelAssumptions as any)?.simVersion ?? ""),
-            intervalsCodec: String((sharedSim.modelAssumptions as any)?.intervalsCodec ?? ""),
-            compressedBytesLength: Number((sharedSim.modelAssumptions as any)?.compressedBytesLength ?? 0) || 0,
-            enginePath: "production_past_stitched",
-            expectedTestIntervals: scoringTestDateKeysLocal.size * 96,
-            coveragePct: scoringTestDateKeysLocal.size > 0 ? actualScoringIntervals.length / (scoringTestDateKeysLocal.size * 96) : null,
-            joinJoinedCount: actualScoringIntervals.length - scoringJoinMissingActual.length,
-            joinMissingCount: scoringJoinMissingActual.length,
-            joinPct:
-              actualScoringIntervals.length > 0
-                ? (actualScoringIntervals.length - scoringJoinMissingActual.length) / actualScoringIntervals.length
-                : null,
-            joinSampleActualTs: actualScoringIntervalsCanon.slice(0, 5).map((p) => p.timestamp),
-            joinSampleSimTs: sharedSim.simulatedTestIntervals.slice(0, 5).map((p) => p.timestamp),
-            testSelectionMode,
-            testDaysRequested: testDaysRequested ?? undefined,
-            testDaysSelected,
-            seedUsed,
-            testMode,
-            candidateDaysAfterModeFilterCount,
-            minDayCoveragePct,
-            candidateWindowStartUtc: candidateWindowStart,
-            candidateWindowEndUtc: candidateWindowEnd,
-            excludedFromTest_travelCount,
-            scoredDayWeatherRows: compactScoredDayWeatherRows,
-            scoredDayWeatherTruth: scoredDayWeatherTruth as any,
-            })
-          ),
-          abortSignal,
-          "compare_core_request_aborted_build_full_report"
-        ),
-        ROUTE_COMPARE_REPORT_TIMEOUT_MS,
-        "compare_core_route_timeout_build_full_report"
-      );
-      markCompareCoreStep(compareCoreTiming, "build_full_report");
-      if (out.compareRunId) {
-        await markGapfillCompareRunRunning({
-          compareRunId: out.compareRunId,
-          phase: "build_full_report_done",
-          statusMeta: {
-            route: "admin_gapfill_lab",
-            compareRunId: out.compareRunId,
-            compareCoreStepTimings: compareCoreTiming.stepsMs,
-          },
-        });
-      }
-    } catch (err: unknown) {
-      const normalizedError = normalizeRouteError(
-        err,
-        "Compare core failed while building diagnostics report payload."
-      );
-      const timedOut = normalizedError.code === "compare_core_route_timeout_build_full_report";
-      const aborted = normalizedError.code === "compare_core_request_aborted_build_full_report";
-      const compareRunEnvelope = await markCompareRunFailure({
-        phase: "build_full_report",
-        failureCode: aborted
-          ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_DIAGNOSTICS"
-          : timedOut
-          ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
-          : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
-        failureMessage: aborted
-          ? "Compare core request was aborted while building diagnostics report payload."
-          : timedOut
-          ? "Compare core timed out while building diagnostics report payload."
-          : "Compare core failed while building diagnostics report payload.",
-        statusCode: aborted ? 499 : timedOut ? 504 : 500,
-        compareCoreFailedStep: "build_diagnostics",
-      });
-      return NextResponse.json(
-        {
-          ok: false,
-          error: aborted
-            ? "compare_core_request_aborted"
-            : timedOut
-              ? "compare_core_route_timeout"
-              : "compare_core_route_exception",
-          message: aborted
-            ? "Compare core request was aborted while building diagnostics report payload."
-            : timedOut
-            ? "Compare core timed out while building diagnostics report payload."
-            : "Compare core failed while building diagnostics report payload.",
-          reasonCode: aborted
-            ? "COMPARE_CORE_REQUEST_ABORTED_BUILD_DIAGNOSTICS"
-            : timedOut
-            ? "COMPARE_CORE_ROUTE_TIMEOUT_BUILD_DIAGNOSTICS"
-            : "COMPARE_CORE_ROUTE_EXCEPTION_BUILD_DIAGNOSTICS",
-          ...(heavyOnlyCompactResponse
-            ? buildHeavyTiming(compareCoreTiming, {
-                heavyFailedStep: "build_full_report",
-                heavyResponseMode: "heavy_only_compact",
-              })
-            : {}),
-          compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming, {
-            failedStep: "build_diagnostics",
-            timeoutMs: timedOut ? ROUTE_COMPARE_REPORT_TIMEOUT_MS : undefined,
-            requestAborted: aborted || undefined,
-            compareRequestTruth,
-            selectedDaysCoreLightweight,
-          }),
-          ...(compareRunEnvelope ?? {}),
-        },
-        { status: aborted ? 499 : timedOut ? 504 : 500 }
-      );
-    }
-  }
-  markCompareCoreStep(compareCoreTiming, "build_diagnostics");
-  markCompareCoreStep(compareCoreTiming, "finalize_response");
-  const compareCoreTimingEnvelope = finalizeCompareCoreTiming(compareCoreTiming, {
-    compareRequestTruth,
-    selectedDaysCoreLightweight,
-    compareCoreMode,
-    selectedDaysRequestedCount: requestedTestDaysCount,
-    selectedDaysScoredCount: scoringTestDaysCount,
-    freshSimIntervalCountSelectedDays: simulatedTestIntervalsCount,
-    actualIntervalCountSelectedDays: actualTestIntervalsCount,
-    artifactReferenceDayCountUsed,
-    compareCorePhaseStep: "finalize_response",
-    compareCorePhaseElapsedMsByStep: compareCoreTiming.stepsMs,
-  });
-  const compareRunSnapshotPayload: Record<string, unknown> = {
-    compareRunId: out.compareRunId,
-    snapshotVersion: "gapfill_compare_snapshot_v1",
-    generatedAt: new Date().toISOString(),
-    userId: user.id,
-    houseId: house.id,
-    timezone,
-    timezoneUsedForScoring: scoringTimezone,
-    compareFreshMode,
-    compareFreshModeUsed,
-    compareCoreMode,
-    compareRequestTruth,
-    artifactRequestTruth,
-    identityTruth: {
-      requestedInputHash,
-      artifactInputHashUsed,
-      artifactHashMatch,
-      artifactScenarioId,
-      artifactIdentitySource: artifactIdentitySourceUsed,
-      requireExactArtifactMatch,
-      artifactSourceMode,
-      artifactSourceNote,
-      artifactCreatedAt,
-      artifactUpdatedAt,
-      artifactExactIdentityRequested,
-      artifactExactIdentityResolved,
-      artifactSameRunEnsureIdentity,
-      artifactFallbackOccurred,
-      artifactFallbackReason,
-      artifactExactIdentifierUsed,
-    },
-    selectedScoredDateKeys: Array.from(scoringTestDateKeysLocal).sort(),
-    scoredDayTruthRowsCompact: scoredDayTruthRows.map((row) => ({
-      localDate: row.localDate,
-      actualDayKwh: row.actualDayKwh,
-      freshCompareSimDayKwh: row.freshCompareSimDayKwh,
-      displayedPastStyleSimDayKwh: row.displayedPastStyleSimDayKwh,
-      actualVsFreshErrorKwh: row.actualVsFreshErrorKwh,
-      displayVsFreshParityMatch: row.displayVsFreshParityMatch,
-      parityAvailability: row.parityAvailability,
-      weatherBasis: row.weatherBasis,
-      weatherSourceUsed: row.weatherSourceUsed,
-      weatherFallbackReason: row.weatherFallbackReason,
-      avgTempF: row.avgTempF,
-      minTempF: row.minTempF,
-      maxTempF: row.maxTempF,
-      hdd65: row.hdd65,
-      cdd65: row.cdd65,
-      fallbackLevel: row.fallbackLevel,
-      selectedReferenceMatchTier: row.selectedReferenceMatchTier,
-      selectedMatchSampleCount: row.selectedMatchSampleCount,
-      reasonCode: row.reasonCode,
-    })),
-    scoredDayWeatherRows: compactScoredDayWeatherRows,
-    scoredDayWeatherTruth,
-    travelVacantParityRows,
-    travelVacantParityTruth,
-    missAttributionSummary,
-    accuracyTuningBreakdowns,
-    compareTruth,
-    truthEnvelope,
-    metricsSummary: {
-      mae: metrics.mae,
-      rmse: metrics.rmse,
-      mape: metrics.mape,
-      wape: metrics.wape,
-      maxAbs: metrics.maxAbs,
-      totalActualKwhMasked: metrics.totalActualKwhMasked,
-      totalSimKwhMasked: metrics.totalSimKwhMasked,
-      deltaKwhMasked: metrics.deltaKwhMasked,
-    },
-    compareCoreTiming: compareCoreTimingEnvelope,
+    metricsSummary,
     counts: {
-      requestedTestDaysCount,
-      scoringTestDaysCount,
-      scoredIntervalsCount,
-      actualTestIntervalsCount,
-      simulatedTestIntervalsCount,
-      boundedTravelDateKeysCount: boundedTravelDateKeysLocal.size,
+      scoredRowCount: scoredDayTruthRows.length,
+      selectedDateKeyCount: selectedDateKeysSorted.length,
+      parityRowCount: 0,
     },
-    responseMode: heavyOnlyCompactResponse ? "heavy_only_compact" : "default",
+    compareTruth,
+    userPipelineParity,
+    userPipelineCompareProjection,
+    compareCoreTiming: finalizeCompareCoreTiming(compareCoreTiming),
+    identityTruth: {
+      scenarioId: String(pastScenario.id),
+      canonicalReadSource: "getSimulatedUsageForHouseScenario",
+      canonicalReadRoute: "/api/user/usage/simulated/house",
+      artifactInputHashUsed: exactArtifactInputHash ?? null,
+    },
+    modelAssumptions: {
+      selectedDaysRequestedCount: selectedDateKeysSorted.length,
+      validationOnlyDateKeysLocal: selectedDateKeysSorted,
+      canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
+      projectionMode: "baseline_vs_accuracy",
+      compareFreshModeUsed: "artifact_only",
+      compareExecutionMode: "canonical_artifact_only",
+    },
   };
-  if (out.compareRunId) {
-    const snapshotPersisted = await finalizeGapfillCompareRunSnapshot({
-      compareRunId: out.compareRunId,
-      phase: "compare_core_succeeded",
-      snapshot: compareRunSnapshotPayload,
-      statusMeta: {
-        route: "admin_gapfill_lab",
-        compareRunId: out.compareRunId,
-        compareRequestTruth,
-        artifactRequestTruth,
-        compareCoreTiming: compareCoreTimingEnvelope,
-        responseMode: heavyOnlyCompactResponse ? "heavy_only_compact" : "default",
-      },
+
+  const finalized = await finalizeGapfillCompareRunSnapshot({
+    compareRunId: out.compareRunId!,
+    phase: "compare_core_complete",
+    snapshot: snapshotPayload,
+    statusMeta: {
+      route: "admin_gapfill_lab",
+      projectionMode: "baseline_vs_accuracy",
+      canonicalTruthSource: "/api/user/usage/simulated/house",
+      compareFreshMode: "artifact_only",
+    },
+  });
+  if (!finalized) {
+    await markGapfillCompareRunFailed({
+      compareRunId: out.compareRunId!,
+      phase: "compare_core_snapshot_persist_failed",
+      failureCode: "compare_core_snapshot_persist_failed",
+      failureMessage: "Could not persist compare snapshot payload.",
+      statusMeta: { route: "admin_gapfill_lab" },
     });
-    if (!snapshotPersisted) {
-      await markGapfillCompareRunFailed({
-        compareRunId: out.compareRunId,
-        phase: "snapshot_persist_failed",
-        failureCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
-        failureMessage:
-          "Compare core calculation completed, but final compare snapshot persistence failed.",
-        statusMeta: {
-          route: "admin_gapfill_lab",
-          compareRunId: out.compareRunId,
-          compareRequestTruth,
-          artifactRequestTruth,
-          compareCoreTiming: compareCoreTimingEnvelope,
-        },
-      });
-      out.compareRunStatus = "failed";
-      out.compareRunSnapshotReady = false;
-      out.compareRunTerminalState = true;
-      logCompareRunLifecycle("error", "compare_run_snapshot_persist_failed", {
-        phase: "snapshot_persist_failed",
-        failureCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
-      });
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "compare_run_snapshot_persist_failed",
-          message:
-            "Compare core completed, but the final compare snapshot could not be persisted.",
-          reasonCode: "COMPARE_RUN_SNAPSHOT_PERSIST_FAILED",
-          compareRunId: out.compareRunId,
-          compareRunStatus: out.compareRunStatus,
-          compareRunSnapshotReady: out.compareRunSnapshotReady,
-          compareCoreTiming: compareCoreTimingEnvelope,
-          compareRequestTruth,
-          artifactRequestTruth,
-        },
-        { status: 500 }
-      );
-    }
-    out.compareRunStatus = "succeeded";
-    out.compareRunSnapshotReady = true;
+    out.compareRunStatus = "failed";
     out.compareRunTerminalState = true;
-    logCompareRunLifecycle("info", "compare_run_succeeded", {
-      phase: "compare_core_succeeded",
-      compareCoreTiming: compareCoreTimingEnvelope,
-    });
-  }
-  if (heavyOnlyCompactResponse) {
-    return NextResponse.json({
-      ok: true,
-      responseMode: "heavy_only_compact",
-      compareRunId: out.compareRunId,
-      compareRunStatus: out.compareRunStatus,
-      compareRunSnapshotReady: out.compareRunSnapshotReady,
-      diagnostics: includeDiagnostics
-        ? {
-            dailyTotalsChartSim: sharedSim.simulatedChartDaily,
-            monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
-            stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
-            chartIntervalCount,
-            dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
-            top10Under: metrics.diagnostics.top10Under,
-            top10Over: metrics.diagnostics.top10Over,
-            hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
-            seasonalSplit: metrics.diagnostics.seasonalSplit,
-          }
-        : {
-            included: false,
-            chartIntervalCount,
-          },
-      fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
-      missAttributionSummary,
-      accuracyTuningBreakdowns,
-      travelVacantParityRows,
-      travelVacantParityTruth,
-      scoredDayWeatherRows: compactScoredDayWeatherRows,
-      scoredDayWeatherTruth,
-      heavyTruth: {
-        source: "heavy_only_compact",
-        artifactSourceMode,
-        artifactHashMatch,
-        artifactExactIdentityResolved,
-        parityAvailability:
-          ((sharedSim as any)?.displayVsFreshParityForScoredDays?.availability as string | undefined) ?? null,
-        parityReasonCode:
-          ((sharedSim as any)?.displayVsFreshParityForScoredDays?.reasonCode as string | undefined) ?? null,
-      },
-      ...buildHeavyTiming(compareCoreTiming, {
-        heavyResponseMode: "heavy_only_compact",
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "compare_core_snapshot_persist_failed",
+        message: "Could not persist compare snapshot payload.",
+        compareRunId: out.compareRunId,
+        compareRunStatus: "failed",
       }),
-    });
+      { status: 500 }
+    );
   }
+
+  out.compareRunStatus = "succeeded";
+  out.compareRunSnapshotReady = true;
+  out.compareRunTerminalState = true;
+  state.compareCoreTimingForLifecycle = compareCoreTiming;
+  state.compareRequestTruthForLifecycle = compareRequestTruth;
+  state.artifactRequestTruthForLifecycle = {
+    requestedInputHash: requestedArtifactInputHash,
+    scenarioId: String(pastScenario.id),
+    sourceFamily: "usageSimulatorBuild + shared past cache",
+    canonicalArtifactInputHash: exactArtifactInputHash ?? null,
+  };
 
   return NextResponse.json({
     ok: true,
-    compareRunId: out.compareRunId,
-    compareRunStatus: out.compareRunStatus,
-    compareRunSnapshotReady: out.compareRunSnapshotReady,
     email: user.email,
     userId: user.id,
     house: {
       id: house.id,
-      label: [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") || house.id,
+      label:
+        [house.addressLine1, house.addressCity, house.addressState].filter(Boolean).join(", ") ||
+        house.id,
     },
     houses: houses.map((h: any) => ({
       id: h.id,
       label: [h.addressLine1, h.addressCity, h.addressState].filter(Boolean).join(", ") || h.id,
     })),
     timezone,
-    mode: "artifact_only",
-    rebuilt: rebuildArtifact,
-    artifactAutoRebuilt: sharedSim.artifactAutoRebuilt,
-    enginePath: "production_past_stitched",
-    cacheSource: rebuildArtifact ? "rebuilt" : "artifact",
-    sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-    scenarioId: stableScenarioId,
-    homeProfile: responseHomeProfile,
-    applianceProfile: responseApplianceProfile,
-    modelAssumptions: responseModelAssumptions,
-    artifactSourceMode,
-    requestedInputHash,
-    artifactInputHashUsed,
-    artifactHashMatch,
-    artifactScenarioId,
-    artifactCreatedAt,
-    artifactUpdatedAt,
-    artifactSourceNote,
-    testIntervalsCount: actualTestIntervals.length,
-    actualTestIntervalsCount,
-    simulatedTestIntervalsCount,
-    hasScoreableIntervals,
-    message: scoreableIntervalsMessage,
-    scoringActualSource,
-    scoringSimulatedSource,
-    timezoneUsedForScoring: scoringTimezone,
-    windowUsedForScoring: scoringWindow,
-    scoringUsedSharedArtifact,
-    scoringExcludedSource,
-    artifactBuildExcludedSource,
-    artifactUsesTestDaysInIdentity,
-    artifactUsesTravelDaysInIdentity,
-    sharedArtifactScenarioId,
-    sharedArtifactInputHash,
-    comparePulledFromSharedArtifactOnly,
-    scoredTestDaysMissingSimulatedOwnershipCount,
-    requestedTestDaysCount,
-    scoringTestDaysCount,
-    scoredIntervalsCount,
-    compareSharedCalcPath,
-    compareFreshModeUsed,
-    compareCalculationScope,
-    compareCoreMode,
-    compareCoreStepTimings: compareCoreTiming.stepsMs,
-    selectedFreshIntervalCount: simulatedTestIntervalsCount,
-    selectedActualIntervalCount: actualTestIntervalsCount,
-    artifactReferenceDayCount: artifactReferenceDayCountUsed,
-    displaySimSource,
-    compareSimSource,
-    weatherBasisUsed,
-    compareTruth,
-    compareRequestTruth,
-    artifactRequestTruth,
-    compareCoreTiming: compareCoreTimingEnvelope,
-    artifactDisplayReferenceWarning,
-    displayVsFreshParityForScoredDays: (sharedSim as any).displayVsFreshParityForScoredDays ?? null,
-    travelVacantParityRows,
-    travelVacantParityTruth,
-    scoredDayWeatherRows: compactScoredDayWeatherRows,
-    scoredDayWeatherTruth,
-    truthEnvelope,
-    displaySimulated: {
-      source: (sharedSim as any).displaySimSource ?? null,
-      coverageStart: sharedCoverageWindow.startDate,
-      coverageEnd: sharedCoverageWindow.endDate,
-      daily: displayDailyRows,
-      loadCurveMessage: displaySimulatedLoadCurveMessage,
-      monthly: sharedSim.simulatedChartMonthly,
-      stitchedMonth: sharedSim.simulatedChartStitchedMonth,
-    },
-    scoredDayTruthRows,
-    missAttributionSummary,
-    accuracyTuningBreakdowns,
-    metrics: {
-      mae: metrics.mae,
-      rmse: metrics.rmse,
-      mape: metrics.mape,
-      wape: metrics.wape,
-      maxAbs: metrics.maxAbs,
-    },
-    primaryPercentMetric: Number.isFinite(metrics.wape) ? metrics.wape : null,
+    compareExecutionMode: "inline_canonical",
+    compareRunId: out.compareRunId,
+    compareRunStatus: "succeeded",
+    compareRunSnapshotReady: true,
+    modelAssumptions: buildSelectedDaysCoreResponseModelAssumptions(
+      (snapshotPayload.modelAssumptions as Record<string, unknown>) ?? null
+    ),
+    testIntervalsCount: actualIntervalsForSelected.length,
+    metrics: metricsSummary,
+    primaryPercentMetric: metricsSummary.wape,
     byMonth: metrics.byMonth,
     byHour: metrics.byHour,
     byDayType: metrics.byDayType,
     worstDays: metrics.worstDays,
-    diagnostics: includeDiagnostics
-      ? {
-          // Chart scope is always the full canonical window for parity with Usage dashboard charts.
-          dailyTotalsChartSim: sharedSim.simulatedChartDaily,
-          monthlyTotalsChartSim: sharedSim.simulatedChartMonthly,
-          stitchedMonthChartSim: sharedSim.simulatedChartStitchedMonth,
-          chartIntervalCount,
-          dailyTotalsMasked: metrics.diagnostics.dailyTotalsMasked,
-          top10Under: metrics.diagnostics.top10Under,
-          top10Over: metrics.diagnostics.top10Over,
-          hourlyProfileMasked: metrics.diagnostics.hourlyProfileMasked,
-          seasonalSplit: metrics.diagnostics.seasonalSplit,
-        }
-      : {
-          included: false,
-          chartIntervalCount,
-        },
+    diagnostics: metrics.diagnostics,
+    pasteSummary: metrics.pasteSummary,
+    travelRangesFromDb,
+    testSelectionMode,
+    testDaysRequested,
+    testDaysSelected,
+    seedUsed,
+    testRangesUsed,
+    testMode,
+    candidateDaysAfterModeFilterCount,
+    minDayCoveragePct,
+    candidateWindowStartUtc: candidateWindowStart,
+    candidateWindowEndUtc: candidateWindowEnd,
+    usage365,
+    scoredDayTruthRows,
+    scoredDayWeatherRows: [],
+    scoredDayWeatherTruth: (snapshotPayload.scoredDayWeatherTruth as Record<string, unknown>) ?? null,
     parity: {
-      intervalCount: actualScoringIntervals.length,
-      testWindowKwh: metrics.totalActualKwhMasked,
-      annualKwh: metrics.totalActualKwhMasked,
-      baseloadKwhPer15m: null,
-      baseloadDailyKwh: null,
-      windowStartUtc: sharedCoverageWindow.startDate,
-      windowEndUtc: sharedCoverageWindow.endDate,
-      canonicalWindowHelper,
+      travelVacantParityRows: [],
+      travelVacantParityTruth: snapshotPayload.travelVacantParityTruth,
+      userPipelineParity,
+      compareTruth,
+      identityTruth: snapshotPayload.identityTruth,
+      compareCoreTiming: snapshotPayload.compareCoreTiming,
+      counts: snapshotPayload.counts,
+      missAttributionSummary: null,
     },
-    fullReportText: includeFullReportText ? fullReport?.fullReportText : undefined,
-    pasteSummary:
-      `Gap-Fill Lab (artifact-first): engine=production_past_stitched; mode=artifact_only; rebuilt=${String(rebuildArtifact)}; ` +
-      `WAPE=${metrics.wape}%; MAE=${metrics.mae} kWh; intervalCount=${actualTestIntervals.length}; scenarioId=${stableScenarioId}`,
+    compareTruth,
+    compareSharedCalcPath: compareTruth.compareSharedCalcPath,
+    baselineDatasetProjection: baselineDataset,
+    message: "Gap-Fill compare executed via canonical persisted-artifact read path.",
+    noRecompute: true,
   });
 }

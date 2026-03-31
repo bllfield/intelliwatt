@@ -111,7 +111,7 @@ function getWeatherBasisLabel(meta: Record<string, unknown>): string | null {
   return null;
 }
 
-type HouseUsage = {
+export type HouseUsage = {
   houseId: string;
   label: string | null;
   address: {

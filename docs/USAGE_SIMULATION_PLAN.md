@@ -15,7 +15,7 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 ## Core principles / guardrails
 - **Compare / sim integrity (GapFill & shared Past)**: No hidden fallbacks in compare or fresh shared simulation. Missing canonical simulated values stay missing (null / explicit reason codes). **Actual usage must never be copied into simulated-side fields** for scoring or parity. **Invariant violations** (e.g. simulated-day `localDate` vs interval-derived local dates) must surface explicitly; compare fails with `SIMULATED_DAY_LOCAL_DATE_INTERVAL_INVARIANT_VIOLATION` rather than preferring one authority silently.
 - **Serverless memory (diagnostics only)**: `simulatePastUsageDataset` clears the engine patched-interval buffer after `buildCurveFromPatchedIntervals` (the curve owns a copy). Any `lab_validation` tagging is diagnostics-only and must not create a separate pre-DB producer truth path.
-- **Async droplet execution (optional):** With webhook URL + secret, Vercel **enqueues** heavy work: Gap-Fill compare (`GapfillCompareRunSnapshot` + `reason: "gapfill_compare"`) and Past sim **recalc** (`SimDropletJob` + `reason: "past_sim_recalc"`). Workers run the **same** TS entrypoints as inline mode (`runGapfillCompareCorePipeline` / `recalcSimulatorBuild`). **`GAPFILL_COMPARE_INLINE`**, **`PAST_SIM_RECALC_INLINE`**, or **`SIM_DROPLET_EXECUTION_INLINE`** force synchronous execution on Vercel. Staged Gap-Fill readers (`compare_heavy_*`) stay snapshot-read-only by `compareRunId`. **Do not** fork a second simulator or compare engine outside `modules/usageSimulator/service.ts` and the shared Past pipeline.
+- **Async droplet execution (optional):** Past sim **recalc** may still enqueue through `SimDropletJob` (`reason: "past_sim_recalc"`). Gap-Fill compare is no longer a queued compare-core pipeline; it stays on the inline canonical launcher/read path and reads persisted lockbox truth only. Staged Gap-Fill readers (`compare_heavy_*`) stay snapshot-read-only by `compareRunId`. **Do not** fork a second simulator or compare engine outside `modules/usageSimulator/service.ts` and the shared Past pipeline.
 - **Gap-Fill target pool semantics (product intent)**: The **reference / good-data pool** for the shared Past sim **excludes only** travel/vacant (and similar “bad at-home” exclusions). **Test compare days are good data**: their **actual** intervals **do** contribute to that pool. Travel/vacant days **do not** contribute as reference; they are **filled** by simulation using the rest of the window. **Simulated output** used to **grade** test days must still come from the **same** sim module as travel fills—not meter presented as “sim.”
 - **Past stitch vs compare (user Past / shared artifact reads):** The producer (`buildSimulatedUsageDatasetFromCurve`) records **canonical simulated-day totals** for both TEST and TRAVEL_VACANT modeled days and may tag pre-projection daily rows with `SIMULATED_TEST_DAY` vs `SIMULATED_TRAVEL_VACANT`. **User-facing stitched Past** applies **`projectBaselineFromCanonicalDataset`** so **validation-only** dates show **meter-backed ACTUAL** in daily/series (`ACTUAL_VALIDATION_TEST_DAY`), while **TRAVEL_VACANT** days stay **simulated** in the stitch. **`rehydrateValidationCompareMetaFromBuildInputsForRead`** merges `validationOnlyDateKeysLocal` from persisted `buildInputs` when cached artifact JSON omitted keys (fixes empty compare + TEST labels). **`attachValidationCompareProjection`** still reads canonical simulated totals from meta for compare rows—no second simulator. For validation days with actual totals, **`series.intervals15`** is **scaled** to match meter daily total so 15‑minute stitch energy matches the displayed actual day.
 - **Past Sim compare UI (user page):** The **Validation / Test Day Compare** block is **collapsed by default**; users expand inline to see the scored-day table and per-day detail. **`attachValidationCompareProjection`** adds optional **day-level weather context** on each compare row by reading the same-date entry from **`dataset.dailyWeather`** (Avg/Min/Max °F, HDD65, CDD65) when present—**display-only**, same basis as the Past daily table; **not** used for scoring and **not** a second weather fetch path. Missing `dailyWeather` for a date is shown explicitly (no fabricated values).
@@ -310,29 +310,32 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - No second overlay pass on top of the saved Past baseline artifact.
 - No alternate rebuild path for the same Past baseline output.
 
-### Gap-Fill Lab: Target architecture (data pool, single run, scoring)
+### Gap-Fill Lab: Target architecture (launcher + persisted-truth analysis)
 
-**Purpose:** Tighten the **one** shared calculation module and build confidence that travel/vacant sim outputs are trustworthy—by scoring **modeled** sim vs **actual** on held-out test dates, using the **same** pipeline that produces travel/vacant fills.
+**Purpose:** Tighten the **one** shared Past producer path and validate it without giving Gap-Fill any compare-side simulator ownership.
 
 1. **Canonical window**  
-   One identity/coverage window (e.g. full Past year). All compare and parity logic refers to this frame.
+   One identity/coverage window (e.g. full Past year). Gap-Fill launches the same shared Past recalc for that window, then reads the persisted artifact family.
 
-2. **Good-data pool (what informs the sim)**  
-   - Includes **all** days that represent trustworthy at-home usage, **including** selected **test compare** dates (their **actual** intervals feed neighbors, shape, empirical matching, etc.).  
-   - **Excludes only** **travel/vacant** (and any other explicitly “bad occupancy” exclusions): those intervals are **not** used as reference-quality inputs.
+2. **Good-data pool (producer-owned)**  
+   - Includes **all** days that represent trustworthy at-home usage, including selected validation/test dates.
+   - **Excludes only** **travel/vacant** (and any other explicitly “bad occupancy” exclusions).
+   - Gap-Fill does not recompute or override this pool; it only chooses which persisted validation dates to inspect.
 
-3. **Bad-data days (travel/vacant)**  
-   Not in the reference pool. They are **simulated** using the **rest** of the good window. Parity checks validate artifact vs fresh **modeled** totals for those dates.
+3. **Shared producer ownership**  
+   Gap-Fill launches `recalcSimulatorBuild` for the canonical Past scenario with the selected validation date keys, then reads the same persisted artifact family through `getSimulatedUsageForHouseScenario`.
 
-4. **Single shared execution**  
-   One `simulatePast…` run over the window; **union** of scored test local dates and DB travel/vacant parity dates in selected-days mode (or full-window proof when required). **No** second simulator for “test only.” After the run, **slice**: travel/vacant → parity; test dates → grade sim vs actual.
+4. **Read-only compare truth**  
+   Test-day compare truth comes from persisted canonical fields (`canonicalArtifactSimulatedDayTotalsByDate`, `validationCompareRows`, `validationCompareMetrics`, lockbox trace metadata). Gap-Fill may add post-persist metrics/report formatting, but it must not run a Gap-Fill-only pre-DB compare sim. Phase4-gapfill-thin is complete only when the canonical lab path follows this rule.
 
-5. **What “sim” must mean for test scoring (target)**  
-   The **simulated** kWh (or intervals) used in the truth table for test days must be produced by the **same** day-level sim logic as travel/vacant **fills**—not **meter passthrough** labeled as sim. Actuals on test days **inform** the pool; they **must not** substitute for the simulated series when measuring model error.
+5. **What “sim” means for test scoring**  
+   The simulated kWh shown for test days is the persisted output of the shared Past lockbox run. Actuals on test days are fetched only for scoring/reporting; they never replace the simulated side.
 
-6. **Implemented (Gap-Fill vs meter passthrough)**  
-   Gap-Fill lab compare passes `forceModeledOutputKeepReferencePoolDateKeysLocal` (bounded scored test local dates) into `simulatePastUsageDataset` → `buildPastSimulatedBaselineV1` as **`forceModeledOutputKeepReferencePoolDateKeys`** (UTC grid keys). Those days **keep** actual intervals in the **reference-day pool** while **stitched compare output** for that day is produced via the same **`simulatePastDay`** path as travel/vacant fills (`simulatedReason: GAPFILL_MODELED_KEEP_REF`). Scored compare totals are read from **`freshCompareScoredDaySimTotalsByDate`** (simulator-owned), not meter passthrough.  
-   **Machine-checkable diagnostics:** `buildGapfillCompareSimShared` returns **`gapfillScoringDiagnostics`** (run summary + per-scored-day rows). The Gap-Fill Lab admin page surfaces a **Gap-Fill scoring source diagnostics** panel; **no raw JSON guessing** is required to confirm source/ownership.
+6. **Diagnostics boundary**  
+   Gap-Fill trace/debug views are artifact readers. Heavy readers remain snapshot/read-only. There is no authoritative `compareFreshMode`, no Gap-Fill-owned fresh selected-days/full-window compare execution, and no second compare engine. Shared recalc may still be launched before the read, but compare truth itself remains persisted-artifact-only.
+
+7. **Shared presentation boundary**  
+   Gap-Fill actual-house and test-house result panels must reuse the same shared Past presentation module family as the user page for persisted chart/table/compare display. Gap-Fill may add read-only admin wrappers (trace, levers, diagnostics), but it must not fork a second display-truth path or a second chart logic path for Past results.
 
 ### GapFill Shared Scoring Rule
 
@@ -340,15 +343,15 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill is a holdout validation workflow, not an artifact-building workflow.
-- GapFill may select test days, fetch actual intervals for those days, read matching simulated intervals from shared simulator output for that artifact identity (cached artifact or fresh shared build), and compute metrics/reports.
+- GapFill may select test days, fetch actual intervals for those days, read matching simulated intervals from the persisted shared artifact identity, and compute metrics/reports.
 - GapFill compare truth is artifact-backed: compare rows are read from canonical stored simulated-day outputs (same stored family used by user-facing Past) via `validationCompareRows` / `validationCompareMetrics`.
 - **Admin canonical lab (`run_test_home_canonical_recalc`) with custom `testRanges`:** Compare projection for that request uses the **effective selected validation date keys** from `testRanges` (sorted), not the full `meta.validationOnlyDateKeysLocal` list on the read dataset when that list is broader. The route passes a compare input whose `meta.validationOnlyDateKeysLocal` is set to that effective set before `attachValidationCompareProjection`, so compare rows, metrics, and fail-closed compare-truth checks apply **only to the selected dates** on that run. This is **compare response scope** for one request; it does **not** change the shared simulator producer, artifact identity, or which days are modeled in the stored artifact.
 - GapFill may run additional parity analytics, but those analytics are not a second compare truth source and must not override artifact-backed compare rows.
+- GapFill actual-house and test-house panels are read-only consumers of persisted Past truth. They must surface lockbox flow, fixed inputs, adjustable-vs-forbidden controls, and mode explanations without expanding normal admin write power beyond the existing allowed controls.
 - Artifact identity/fingerprint ownership and usage-shape profile contracts remain unchanged in this step; any further identity changes are deferred.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally.
-- Current branch note: `simulatePastSelectedDaysShared()` is now post-output slicing only, so the older wrapper-level `forceSimulateDateKeysLocal` / `emitAllIntervals` divergence is no longer current runtime behavior.
-- Current branch note: canonical simulated-day totals are now finalized in `buildSimulatedUsageDatasetFromCurve()` and consumed by storage/parity through `readCanonicalArtifactSimulatedDayTotalsByDate*()`. Selected-day compare now also consumes surfaced `canonicalSimulatedDayTotalsByDate` from `simulatePastSelectedDaysShared()`, so active compare/parity paths no longer own a second finalized-output day-total authority.
-- Gap-Fill selected-days mode: one shared `simulatePastSelectedDaysShared` execution covers the **union** of scored test days and DB travel/vacant parity-validation days; scored-day compare vs travel/vacant parity are separate **consumers** (slices) of that single run, not separate simulation calculations.
+- Current branch note: canonical simulated-day totals are finalized in `buildSimulatedUsageDatasetFromCurve()` and consumed from persisted artifact fields (`readCanonicalArtifactSimulatedDayTotalsByDate*()`, compare sidecar meta, lockbox traces). Active Gap-Fill compare/parity paths do not own a second finalized-output day-total authority.
+- Gap-Fill analysis is launcher/read-only: it may trigger shared recalc, then consume persisted raw/baseline projections and compare sidecars. Any parity/report slicing happens **after persistence**.
 - Current branch note: shared window/date ownership remains locked; compare identity comes from `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage comes from `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not mutate artifact fingerprint or travel/vacant exclusion ownership.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
@@ -711,3 +714,15 @@ Future chats and edits must apply this distinction:
 
 If there is any real risk that a fallback can produce bad data, misleading data, stale data, mixed data, substitute data, or falsely successful data, that fallback must not be used.
 
+### 10) Past lockbox contract alignment
+
+Past simulation now runs through a lockbox split:
+- `PastSimLockboxInput` = truth-only engine input
+- `PastSimRunContext` = orchestration metadata
+- `PastSimReadContext` = post-persist consumer metadata
+
+Weather identity and weather loading for normal graded Past flows are tied to `sourceHouseId`.
+
+`MANUAL_MONTHLY` and `MANUAL_ANNUAL` are distinct internal curve-construction branches even though persistence remains backward-compatible with `SimulatorBuildInputsV1.mode = MANUAL_TOTALS`.
+
+Lockbox stages end at persistence. Artifact reads, baseline/raw projection, compare sidecars, and UI rendering are downstream consumer stages outside the lockbox engine.

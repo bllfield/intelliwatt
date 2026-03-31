@@ -97,6 +97,13 @@ export async function GET(request: NextRequest) {
       houseId,
       scenarioId,
       correlationId,
+      readMode: "allow_rebuild",
+      projectionMode: "baseline",
+      readContext: {
+        artifactReadMode: "allow_rebuild",
+        projectionMode: "baseline",
+        compareSidecarRequest: true,
+      },
     });
     const message = String((out as any)?.message ?? "");
     const shouldAutoBuildProfile =
@@ -110,7 +117,19 @@ export async function GET(request: NextRequest) {
         timezone: "America/Chicago",
       });
       if (rebuilt.ok) {
-        out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId, correlationId });
+        out = await getSimulatedUsageForHouseScenario({
+          userId: u.user.id,
+          houseId,
+          scenarioId,
+          correlationId,
+          readMode: "allow_rebuild",
+          projectionMode: "baseline",
+          readContext: {
+            artifactReadMode: "allow_rebuild",
+            projectionMode: "baseline",
+            compareSidecarRequest: true,
+          },
+        });
       }
     }
     // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).

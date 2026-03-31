@@ -391,6 +391,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.compareRunSnapshotReady).toBe(true);
     expect(body.compareSharedCalcPath).toContain("getSimulatedUsageForHouseScenario");
     expect(body.compareSharedCalcPath).toContain("/api/user/usage/simulated/house");
+    expect(rebuildGapfillSharedPastArtifact).not.toHaveBeenCalled();
   });
 
   it("passes validation-only selected days into canonical recalc inputs", async () => {
@@ -470,7 +471,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.baselineDatasetProjection?.meta?.validationProjectionApplied).toBe(true);
   });
 
-  it("reports parity source truthfully when baseline projection read falls back to raw", async () => {
+  it("keeps optional user-pipeline parity disabled even when baseline projection read falls back to raw", async () => {
     getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
       if (args.projectionMode === "raw") {
         return {
@@ -553,15 +554,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const res = await POST(req);
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body.parity?.userPipelineParity?.status).toBe("available_with_baseline_fallback_raw_projection");
+    expect(body.parity?.userPipelineParity?.status).toBe("not_requested");
     expect(body.parity?.userPipelineParity?.baselineProjectionUsed).toBe("raw_fallback");
     expect(body.parity?.userPipelineParity?.baselineReadOk).toBe(false);
     expect(body.parity?.userPipelineParity?.baselineReadError).toBe("baseline projection read failed");
-    expect(String(body.parity?.userPipelineParity?.source ?? "")).toContain("raw_projection_fallback_from_failed_baseline_read");
-    expect(String(body.compareTruth?.userPipelineParitySource ?? "")).toContain("raw_projection_fallback_from_failed_baseline_read");
+    expect(String(body.parity?.userPipelineParity?.source ?? "")).toBe("not_requested");
+    expect(String(body.compareTruth?.userPipelineParitySource ?? "")).toBe("not_requested");
   });
 
-  it("proves canonical compare producer parity on failing edge dates and first travel block", async () => {
+  it("keeps canonical compare artifact-only while preserving baseline travel metadata on edge dates", async () => {
     const travelBlockDates = [
       "2025-03-28",
       "2025-03-29",
@@ -630,13 +631,13 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.parity?.userPipelineParity?.status).toBe("available");
-    expect(body.parity?.userPipelineParity?.mismatchDateCount).toBe(0);
-    expect(body.parity?.userPipelineParity?.maxAbsKwhDiff).toBe(0);
-    expect(body.parity?.userPipelineParity?.totalAbsKwhDiff).toBe(0);
-    expect(body.parity?.userPipelineParity?.comparedDateCount).toBe(travelBlockDates.length);
+    expect(body.parity?.userPipelineParity?.status).toBe("not_requested");
+    expect(body.parity?.userPipelineParity?.mismatchDateCount).toBeNull();
+    expect(body.parity?.userPipelineParity?.maxAbsKwhDiff).toBeNull();
+    expect(body.parity?.userPipelineParity?.totalAbsKwhDiff).toBeNull();
+    expect(body.parity?.userPipelineParity?.comparedDateCount).toBeNull();
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
-    expect(projectionModes).toEqual(["raw", "baseline", undefined]);
+    expect(projectionModes).toEqual(["raw", "baseline"]);
     expect(body.baselineDatasetProjection?.summary?.start).toBe("2025-03-01");
     expect(body.baselineDatasetProjection?.summary?.end).toBe("2026-02-28");
     expect(body.baselineDatasetProjection?.summary?.intervalsCount).toBe(35232);
@@ -666,9 +667,40 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         summary: { source: "SIMULATED", totalKwh: 120, intervalsCount: 3, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
         daily: [{ date: "2025-03-01", kwh: 9.5 }],
         monthly: [{ month: "2025-03", kwh: 9.5 }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.25 }],
+          weekdayVsWeekend: { weekday: 9.5, weekend: 8.25 },
+        },
         meta: {
           excludedDateKeysCount: 999,
           excludedDateKeysFingerprint: "bogus_not_canonical",
+          validationCompareRows: [
+            {
+              localDate: "2025-03-01",
+              dayType: "weekday",
+              actualDayKwh: 10,
+              simulatedDayKwh: 9.5,
+              errorKwh: -0.5,
+              percentError: 5,
+            },
+          ],
+          validationCompareMetrics: { wape: 5, mae: 0.5, rmse: 0.5 },
+          lockboxInput: {
+            sourceContext: { sourceHouseId: "h1", intervalFingerprint: "ifp-1" },
+            profileContext: { profileHouseId: "h1", usageShapeProfileIdentity: "shape-1" },
+            mode: "ACTUAL_INTERVAL_BASELINE",
+            travelRanges: { ranges: [] },
+            validationKeys: { localDateKeys: ["2025-03-01"] },
+          },
+          lockboxPerRunTrace: {
+            stageTimingsMs: { restore: 12 },
+            inputHash: "input-1",
+            fullChainHash: "chain-1",
+            sourceHouseId: "h1",
+            profileHouseId: "h1",
+          },
+          lockboxPerDayTrace: [{ localDate: "2025-03-01", finalDayKwh: 9.5 }],
+          fullChainHash: "chain-1",
         },
       },
     }));
@@ -696,10 +728,17 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.reads?.rawProjection?.ok).toBe(true);
+    expect(body.pastSimSnapshot?.canonicalWindow?.startDate).toBe("2025-03-01");
+    expect(Array.isArray(body.pastSimSnapshot?.travelRangesFromDb)).toBe(true);
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
       "2025-03-01,2025-03-02"
     );
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.insights?.fifteenMinuteAverages?.[0]?.hhmm).toBe("00:00");
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxInput?.sourceContext?.sourceHouseId).toBe("h1");
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxPerRunTrace?.inputHash).toBe("input-1");
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.fullChainHash).toBe("chain-1");
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.metrics?.wape).toBe(5);
   });
 
   it("runs canonical test-home recalc with generic actual-context source", async () => {
