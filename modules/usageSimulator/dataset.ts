@@ -419,10 +419,41 @@ export function pastMetaHasExplicitSimulatedDayFields(meta: unknown): boolean {
   );
 }
 
+const CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY = "canonicalArtifactSimulatedDayTotalsByDate";
+
+/**
+ * Date keys for which the persisted artifact records simulated-day kWh totals (same authority as
+ * `readCanonicalArtifactSimulatedDayTotalsByDate` in service). When non-empty, this is the
+ * authoritative simulated-day membership set for restore — it cannot be expanded by stale keys left
+ * in `simulatedSourceDetailByDate` from an older save.
+ */
+export function readCanonicalSimulatedDateKeysFromDataset(dataset: unknown): Set<string> {
+  const out = new Set<string>();
+  const addFrom = (raw: unknown) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+    for (const k of Object.keys(raw as Record<string, unknown>)) {
+      const dk = String(k).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+    }
+  };
+  if (!dataset || typeof dataset !== "object") return out;
+  const d = dataset as Record<string, unknown>;
+  const meta = d.meta;
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    addFrom((meta as Record<string, unknown>)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY]);
+  }
+  addFrom(d[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY]);
+  return out;
+}
+
 /**
  * Simulated-day keys from persisted artifact meta (current-run truth). Prefer this over scanning
  * `dataset.daily` for SIMULATED rows so stale labels from an older save cannot leak into restore.
  * Returns an empty set when meta lists/maps are empty (no simulated days in this artifact).
+ *
+ * `reconcileRestoredPastDatasetFromDecodedIntervals` prefers `readCanonicalSimulatedDateKeysFromDataset`
+ * when that set is non-empty; this union (including keys from `simulatedSourceDetailByDate`) is used
+ * for legacy artifacts without canonical per-day totals.
  */
 export function simulatedDateKeysUnionFromPastDatasetMeta(meta: unknown): Set<string> {
   const out = new Set<string>();
@@ -532,9 +563,13 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     String((dataset as any)?.summary?.end ?? fallbackEndDate).slice(0, 10);
 
   const meta = (dataset as any)?.meta;
-  const simDateKeys = pastMetaHasExplicitSimulatedDayFields(meta)
-    ? simulatedDateKeysUnionFromPastDatasetMeta(meta)
-    : simulatedDateKeysFromPastDatasetDaily((dataset as any)?.daily);
+  const canonicalSimKeys = readCanonicalSimulatedDateKeysFromDataset(dataset);
+  const simDateKeys =
+    canonicalSimKeys.size > 0
+      ? canonicalSimKeys
+      : pastMetaHasExplicitSimulatedDayFields(meta)
+        ? simulatedDateKeysUnionFromPastDatasetMeta(meta)
+        : simulatedDateKeysFromPastDatasetDaily((dataset as any)?.daily);
 
   const recomputed = recomputePastAggregatesFromIntervals({
     intervals: decodedIntervals,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   enrichPastDailyRowsWithSourceDetailFromMeta,
   reconcileRestoredPastDatasetFromDecodedIntervals,
+  readCanonicalSimulatedDateKeysFromDataset,
   simulatedDateKeysFromPastDatasetDaily,
   simulatedDateKeysUnionFromPastDatasetMeta,
 } from "@/modules/usageSimulator/dataset";
@@ -75,6 +76,47 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     expect(dataset.daily[0].sourceDetail).toBe("ACTUAL");
   });
 
+  it("when canonical simulated-day totals exist, ignores stale simulatedSourceDetailByDate keys not in canonical map", () => {
+    const intervals = [
+      { timestamp: "2020-06-01T00:00:00.000Z", kwh: 10 },
+      { timestamp: "2020-06-02T00:00:00.000Z", kwh: 20 },
+    ];
+    const dataset: any = {
+      summary: { end: "2020-06-02" },
+      meta: {
+        simulatedTravelVacantDateKeysLocal: ["2020-06-01"],
+        simulatedTestModeledDateKeysLocal: [],
+        simulatedSourceDetailByDate: {
+          "2020-06-01": "SIMULATED_TRAVEL_VACANT",
+          "2020-06-02": "SIMULATED_OTHER",
+        },
+        canonicalArtifactSimulatedDayTotalsByDate: {
+          "2020-06-01": 10,
+        },
+      },
+      daily: [
+        { date: "2020-06-01", kwh: 10, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" },
+        { date: "2020-06-02", kwh: 20, source: "SIMULATED", sourceDetail: "SIMULATED_OTHER" },
+      ],
+      monthly: [],
+      series: { daily: [], monthly: [], annual: [] },
+      insights: {},
+      totals: {},
+    };
+
+    reconcileRestoredPastDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: intervals,
+      fallbackEndDate: "2020-06-02",
+    });
+
+    const byDate = Object.fromEntries(dataset.daily.map((d: any) => [d.date, d]));
+    expect(byDate["2020-06-01"].source).toBe("SIMULATED");
+    expect(byDate["2020-06-01"].sourceDetail).toBe("SIMULATED_TRAVEL_VACANT");
+    expect(byDate["2020-06-02"].source).toBe("ACTUAL");
+    expect(byDate["2020-06-02"].sourceDetail).toBe("ACTUAL");
+  });
+
   it("preserves TRAVEL_VACANT vs TEST sourceDetail from meta after replacement", () => {
     const intervals = [
       { timestamp: "2020-06-01T00:00:00.000Z", kwh: 1 },
@@ -106,6 +148,18 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     const byDate = Object.fromEntries(dataset.daily.map((d: any) => [d.date, d]));
     expect(byDate["2020-06-01"].sourceDetail).toBe("SIMULATED_TRAVEL_VACANT");
     expect(byDate["2020-06-02"].sourceDetail).toBe("SIMULATED_TEST_DAY");
+  });
+
+  it("readCanonicalSimulatedDateKeysFromDataset reads meta and root canonical maps", () => {
+    const onlyMeta = readCanonicalSimulatedDateKeysFromDataset({
+      meta: { canonicalArtifactSimulatedDayTotalsByDate: { "2020-01-01": 1, "2020-01-02": 2 } },
+    });
+    expect(Array.from(onlyMeta).sort()).toEqual(["2020-01-01", "2020-01-02"]);
+
+    const onlyRoot = readCanonicalSimulatedDateKeysFromDataset({
+      canonicalArtifactSimulatedDayTotalsByDate: { "2020-03-01": 3 },
+    });
+    expect(Array.from(onlyRoot)).toEqual(["2020-03-01"]);
   });
 
   it("legacy: when meta is absent, simulated keys still come from stored daily SIMULATED rows", () => {
