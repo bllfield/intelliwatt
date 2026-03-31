@@ -1579,6 +1579,16 @@ export async function POST(req: NextRequest) {
         { status: 404 }
       );
     }
+    const sourcePastCorrelationId = createSimCorrelationId();
+    logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_started", {
+      correlationId: sourcePastCorrelationId,
+      source: "gapfill_lab",
+      action: "run_source_home_past_sim_snapshot",
+      userId: user.id,
+      sourceHouseId: selectedSourceHouse.id,
+      timezone,
+      weatherKind,
+    });
     const pastScenario = await (prisma as any).usageSimulatorScenario
       .findFirst({
         where: {
@@ -1615,6 +1625,7 @@ export async function POST(req: NextRequest) {
         persistPastSimBaseline: true,
         validationDaySelectionMode: await getUserDefaultValidationSelectionMode(),
         validationDayCount: 21,
+        correlationId: sourcePastCorrelationId,
         runContext: {
           callerLabel: "user_recalc",
           buildPathKind: "recalc",
@@ -1626,6 +1637,15 @@ export async function POST(req: NextRequest) {
     );
     if (sourcePastRecalc.executionMode === "inline") {
       if (!sourcePastRecalc.result.ok) {
+        logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_failed", {
+          correlationId: sourcePastCorrelationId,
+          source: "gapfill_lab",
+          action: "run_source_home_past_sim_snapshot",
+          userId: user.id,
+          sourceHouseId: selectedSourceHouse.id,
+          phase: "recalc_inline_failed",
+          error: String(sourcePastRecalc.result.error ?? "source_home_past_sim_recalc_failed"),
+        });
         return NextResponse.json(
           attachFailureContract({
             ok: false,
@@ -1646,6 +1666,16 @@ export async function POST(req: NextRequest) {
         "source_home_past_sim_recalc_timeout"
       );
       if (!waited.ok) {
+        logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_failed", {
+          correlationId: sourcePastCorrelationId,
+          source: "gapfill_lab",
+          action: "run_source_home_past_sim_snapshot",
+          userId: user.id,
+          sourceHouseId: selectedSourceHouse.id,
+          phase: "recalc_droplet_failed",
+          error: String(waited.error ?? "source_home_past_sim_recalc_failed"),
+          message: waited.message,
+        });
         return NextResponse.json(
           attachFailureContract({
             ok: false,
@@ -1850,11 +1880,25 @@ export async function POST(req: NextRequest) {
       },
       engineContext: sourceEngineContext,
     };
+    logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_completed", {
+      correlationId: sourcePastCorrelationId,
+      source: "gapfill_lab",
+      action: "run_source_home_past_sim_snapshot",
+      userId: user.id,
+      sourceHouseId: selectedSourceHouse.id,
+      scenarioId: String(pastScenario.id),
+      readExecutionMode: sourcePastRecalc.executionMode,
+      defaultReadOk: defaultRead.ok,
+      baselineReadOk: baselineRead.ok,
+      rawReadOk: rawRead.ok,
+      buildInputsHash: (sourceBuildRow as any)?.buildInputsHash ?? null,
+    });
     return NextResponse.json({
       ok: true,
       action: "run_source_home_past_sim_snapshot",
       sourceHouseId: selectedSourceHouse.id,
       scenarioId: String(pastScenario.id),
+      correlationId: sourcePastCorrelationId,
       pastSimSnapshot: payload,
     });
   }
