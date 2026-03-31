@@ -3367,16 +3367,10 @@ function serializeTravelRangesForIdentity(
   ranges: Array<{ startDate: string; endDate: string }>
 ): string {
   return JSON.stringify(
-    normalizePreLockboxTravelRanges(ranges)
-      .map((range) => ({
-        startDate: range.startDate,
-        endDate: range.endDate,
-      }))
-      .sort((a, b) => {
-        if (a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
-        if (a.endDate !== b.endDate) return a.endDate < b.endDate ? -1 : 1;
-        return 0;
-      })
+    normalizePreLockboxTravelRanges(ranges).map((range) => ({
+      startDate: range.startDate,
+      endDate: range.endDate,
+    }))
   );
 }
 
@@ -6095,7 +6089,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
     if (isPastScenario) {
       const liveScenarioEvents = await (prisma as any).usageSimulatorScenarioEvent
         .findMany({
-          where: { scenarioId, archivedAt: null },
+          where: { scenarioId },
           select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
           orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
         })
