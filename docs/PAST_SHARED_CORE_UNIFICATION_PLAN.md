@@ -45,7 +45,7 @@ Summary:
 
 - **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
 - **GapFill admin canonical recalc route (`run_test_home_canonical_recalc`) with custom `testRanges`:** For that request, compare projection is scoped to the **user-selected validation date keys** from `testRanges`. Fail-closed compare attachment (`attachValidationCompareProjection`) and emitted compare rows/metrics use that **effective** date set only, not a stale superset that may still appear in artifact `meta.validationOnlyDateKeysLocal`. This narrows **which dates are scored in the HTTP response**; it does not introduce a separate simulator producer or change producer ownership.
-- **UI / API truth:** Route payload may include diagnostics and parity summaries, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`) and persisted canonical day totals, not an admin-only recomputed simulated truth path.
+- **UI / API truth:** Route payload may include diagnostics and optional user-pipeline parity summaries, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`) and persisted canonical day totals, not an admin-only recomputed simulated truth path.
 - **Docs/tests:** Route and service artifact tests assert persisted-artifact ownership and shared-window rules; shared-window ownership rules unchanged.
 
 ## Active architecture authority
@@ -54,7 +54,7 @@ Summary:
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
 - GapFill must consume canonical stored sim outputs for compare truth and must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild a second compare truth path locally.
-- Optional fresh/parity diagnostics are additive analytics only and must never replace canonical stored compare truth rows.
+- Optional fresh/parity diagnostics are additive analytics only and must never replace canonical stored compare truth rows. If user-pipeline parity is enabled, it remains read-only diagnostics over persisted reads.
 - GapFill compare reads compact persisted truth only: selected-day actual intervals, canonical artifact simulated-day totals, compare sidecar rows/metrics, and compact trace metadata.
 - DB travel/vacant parity is a post-persist analysis concern: it may validate persisted canonical artifact totals, but it must not trigger a Gap-Fill-owned selected-days/full-window compare simulation path.
 - Compare-core must return compact scored-day weather truth from persisted read models only; route/UI consumers must not reconstruct scored-day weather independently.

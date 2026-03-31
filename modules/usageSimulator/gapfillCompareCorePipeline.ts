@@ -82,6 +82,7 @@ export type GapfillCompareCorePipelineArgs = {
   overlapLocal: Set<string>;
   compareCoreTiming: ReturnType<typeof startCompareCoreTiming>;
   includeDiagnostics: boolean;
+  includeUserPipelineParity: boolean;
   includeFullReportText: boolean;
   rebuildArtifact: boolean;
   requestedArtifactInputHash: string | null;
@@ -355,18 +356,8 @@ export async function runGapfillCompareCorePipeline(
   const baselineReadUsedCanonicalRawFallback = !baselineRead.ok;
   const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
 
-  const includeUserPipelineParity = args.includeDiagnostics && false;
-  const userPipelineRead = args.heavyOnlyCompactResponse
-    ? null
-    : args.includeFullReportText || args.includeDiagnostics || args.requestedCompareRunId !== undefined
-      ? null
-      : args.rebuildArtifact === args.rebuildArtifact && args.rebuildArtifact !== undefined
-        ? null
-        : null;
-  void includeUserPipelineParity;
-  void userPipelineRead;
-
-  const requestedUserParity = false;
+  const requestedUserParity =
+    args.includeDiagnostics && args.includeUserPipelineParity;
   const userPipelineReadResolved = requestedUserParity
     ? await getSimulatedUsageForHouseScenario({
         ...readCommon,

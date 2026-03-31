@@ -375,6 +375,7 @@ export async function POST(req: NextRequest) {
   }
   const includeUsage365 = body?.includeUsage365 === true;
   const includeDiagnostics = body?.includeDiagnostics === true;
+  const includeUserPipelineParity = body?.includeUserPipelineParity === true;
   const includeFullReportText = body?.includeFullReportText === true;
   const rawAction = String(body?.action ?? "").trim();
   const action = toSnapshotReaderAction(rawAction);
@@ -2408,6 +2409,7 @@ export async function POST(req: NextRequest) {
     overlapLocal,
     compareCoreTiming,
     includeDiagnostics,
+    includeUserPipelineParity,
     includeFullReportText,
     rebuildArtifact,
     requestedArtifactInputHash,

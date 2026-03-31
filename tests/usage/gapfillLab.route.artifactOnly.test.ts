@@ -562,6 +562,38 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(String(body.compareTruth?.userPipelineParitySource ?? "")).toBe("not_requested");
   });
 
+  it("enables optional user-pipeline parity only when diagnostics and parity flag are both requested", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      houseId: "h1",
+      includeUsage365: false,
+      includeUserPipelineParity: true,
+      includeDiagnostics: true,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.parity?.userPipelineParity?.status).toBe("available");
+    expect(body.parity?.userPipelineParity?.includeUserPipelineParity).toBe(true);
+    expect(body.parity?.userPipelineParity?.baselineProjectionUsed).toBe("baseline");
+    expect(body.parity?.userPipelineParity?.comparedDateCount).toBe(2);
+    expect(body.parity?.userPipelineParity?.mismatchDateCount).toBe(0);
+    expect(body.parity?.userPipelineParity?.maxAbsKwhDiff).toBe(0);
+    expect(body.parity?.userPipelineParity?.totalAbsKwhDiff).toBe(0);
+    expect(String(body.parity?.userPipelineParity?.source ?? "")).toContain("default_projection");
+    expect(String(body.compareTruth?.userPipelineParitySource ?? "")).toContain("default_projection");
+    expect(body.compareTruth?.validationDaysTruthSource).toBe("canonical_saved_artifact_family");
+    expect(String(body.compareTruth?.compareSharedCalcPath ?? "")).toContain("artifact_only");
+    const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
+    expect(projectionModes).toEqual(["raw", "baseline", undefined]);
+  });
+
   it("keeps canonical compare artifact-only while preserving baseline travel metadata on edge dates", async () => {
     const travelBlockDates = [
       "2025-03-28",
