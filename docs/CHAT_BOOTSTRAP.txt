@@ -84,9 +84,8 @@ Shared simulation architecture authority:
 - Past Sim and GapFill compare use the same shared artifact identity/fingerprint and shared simulator logic path.
 - Travel/vacant days are the only excluded ownership days for the shared artifact fingerprint.
 - Test days remain included in the shared artifact population and are only selected by GapFill for scoring against actual usage.
-- GapFill is launcher/scoring/reporting only. It must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, or rebuild simulated intervals locally; it launches shared recalc when needed, then reads persisted shared simulator output from the canonical artifact family.
-- GapFill compare truth now comes from the persisted shared Past artifact family only.
-- GapFill may launch shared recalc, then read persisted raw/baseline projections, compare sidecars, and trace metadata; it must not revive a GapFill-owned fresh selected-days/full-window compare path.
+- GapFill is launcher/scoring/reporting only. After variable collection and normalization, both actual-house and test-house runs must enter the same shared Past Sim recalc/persist chain as the normal user flow.
+- GapFill compare truth now comes from persisted actual-house and test-house artifacts only; compare must not simulate or rebuild.
 - GapFill actual-house and test-house result panels must reuse the same shared Past presentation modules as the user page; do not duplicate Past chart/table/compare display logic inside GapFill.
 - GapFill lockbox flow, mode explanation, and levers visibility are read-only explanatory surfaces unless a control is already part of the allowed normal admin workflow.
 - Artifact fingerprint ownership and usage-shape profile identity behavior stay unchanged in this step; deferred identity/profile changes remain out of scope.
@@ -514,7 +513,7 @@ This section overrides any older contradictory guidance in this file.
 
 This override applies to every simulator execution mode and entrypoint, including initial run, cold start, cold build, cache miss rebuild, allow_rebuild, refresh, explicit recalc, admin canonical recalc, user-triggered rebuild, artifact refresh, artifact ensure, snapshot-producing rebuilds, and any future renamed equivalent. No execution mode is exempt.
 
-User Past Sim and GapFill may start with different inputs, but after input normalization they must enter the exact same shared simulator producer path.
+User Past Sim and GapFill may start with different inputs, but after input normalization actual-house and test-house GapFill runs must enter the exact same shared simulator producer path as the normal user flow.
 
 There is only one pre-DB simulator producer path.
 
@@ -536,7 +535,7 @@ Implementation detail (must stay aligned with code): the shared producer may emi
 - **Past Sim compare UX:** On the Usage Past tab, **Validation / Test Day Compare** is **collapsed by default**; use **Show details** to expand the metrics + table. Compare rows may include **day-level weather** (Avg/Min/Max °F, HDD65, CDD65) copied from **`dataset.dailyWeather`** for the same local date when the Past dataset has that map—**read-only context**, not a second simulator or scoring path; missing dates show as missing (no fake fill).
 - On cache restore, **`reconcileRestoredPastDatasetFromDecodedIntervals`** (see `modules/usageSimulator/dataset.ts`) recomputes `daily` and `series.daily` from decoded **`intervals15`** and applies simulated-day ownership from persisted **meta** when explicit fields exist, so old plain `SIMULATED` rows cannot survive as display truth for a current run. Legacy artifacts without those meta fields still use stored `daily` for membership and may copy TRAVEL/TEST `sourceDetail` from the pre-reconcile row when meta has no per-day map entry. **`meta.simulatedSourceDetailByDate`** may also record **`SIMULATED_INCOMPLETE_METER`** / **`SIMULATED_LEADING_MISSING`** for stitch fills. After **`projectBaselineFromCanonicalDataset`**, Past chart and daily table both read the same projected **`daily`/`series.daily`** (Usage fallback from **`series.daily`** preserves **`source`/`sourceDetail`**).
 
-User Past Sim and GapFill must read the same stored simulator truth and the same stored compare truth. GapFill may add more analytics, but not a separate truth path.
+User Past Sim and GapFill must read the same stored simulator truth and the same stored compare truth. GapFill may add read-only analysis, but not a separate truth path.
 
 Fresh diagnostics are diagnostics only. They do not replace stored compare truth.
 
@@ -577,7 +576,7 @@ This section overrides any older contradictory guidance in this file.
 
 Project documentation alignment is mandatory whenever a Cursor block changes project scope, architecture, ownership, truth source, fallback behavior, storage behavior, route behavior, simulator behavior, compare behavior, stitch behavior, fingerprint behavior, execution-mode behavior, or any other implementation contract.
 
-This includes behavior-narrowing contract changes that do not alter the shared simulator producer (for example, admin GapFill lab compare projection scoped to user-selected testRanges validation dates on a single request).
+This includes behavior-narrowing contract changes that do not alter the shared simulator producer; do not reintroduce route-local compare shaping or a separate GapFill truth path after lockbox entry.
 
 This is not optional follow-up work.
 

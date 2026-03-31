@@ -4,7 +4,6 @@ import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import {
   getSimulatedUsageForHouseScenario,
-  recalcSimulatorBuild,
 } from "@/modules/usageSimulator/service";
 import {
   createGapfillCompareRunStart,
@@ -143,7 +142,7 @@ export async function runGapfillCompareCorePipeline(
     out.compareRunStatus = "running";
     const markedRunning = await markGapfillCompareRunRunning({
       compareRunId: resumeExistingCompareRunId,
-      phase: "compare_core_recalc_started",
+      phase: "compare_core_artifact_read_started",
       statusMeta: {
         route: "admin_gapfill_lab",
         compareRunId: resumeExistingCompareRunId,
@@ -214,10 +213,10 @@ export async function runGapfillCompareCorePipeline(
       requireExactArtifactMatch,
       artifactIdentitySource: normalizedArtifactIdentitySource,
       initialStatus: "started",
-      initialPhase: "compare_core_recalc_started",
+      initialPhase: "compare_core_artifact_read_started",
       statusMeta: {
         route: "admin_gapfill_lab",
-        phase: "compare_core_recalc_started",
+        phase: "compare_core_artifact_read_started",
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
         requestedCompareRunId,
         compareFreshMode: "artifact_only",
@@ -252,50 +251,12 @@ export async function runGapfillCompareCorePipeline(
     scenarioId: String(pastScenario.id),
     sourceFamily: "usageSimulatorBuild + shared past cache",
   };
-
-  const recalcOut = await recalcSimulatorBuild({
-    userId: user.id,
-    houseId: house.id,
-    esiid,
-    mode: "SMT_BASELINE",
-    scenarioId: String(pastScenario.id),
-    persistPastSimBaseline: true,
-    validationOnlyDateKeysLocal: testDateKeysLocal,
-    runContext: {
-      callerLabel: "gapfill_launcher",
-      buildPathKind: "lab_validation",
-      persistRequested: true,
-    },
-  });
-  if (!recalcOut.ok) {
-    await markGapfillCompareRunFailed({
-      compareRunId: out.compareRunId!,
-      phase: "compare_core_recalc_failed",
-      failureCode: "compare_core_recalc_failed",
-      failureMessage: String(recalcOut.error ?? "Canonical recalc failed."),
-      statusMeta: { route: "admin_gapfill_lab" },
-    });
-    out.compareRunStatus = "failed";
-    out.compareRunTerminalState = true;
-    return NextResponse.json(
-      attachFailureContract({
-        ok: false,
-        error: "compare_core_recalc_failed",
-        message: String(recalcOut.error ?? "Canonical recalc failed."),
-        compareRunId: out.compareRunId,
-        compareRunStatus: "failed",
-      }),
-      { status: 500 }
-    );
-  }
   markCompareCoreStep(compareCoreTiming, "build_shared_compare");
-
   const exactArtifactInputHash =
-    typeof recalcOut.canonicalArtifactInputHash === "string" &&
-    recalcOut.canonicalArtifactInputHash.trim()
-      ? recalcOut.canonicalArtifactInputHash.trim()
+    typeof requestedArtifactInputHash === "string" && requestedArtifactInputHash.trim()
+      ? requestedArtifactInputHash.trim()
       : undefined;
-  const requireExactCanonicalArtifact = Boolean(exactArtifactInputHash);
+  const requireExactCanonicalArtifact = requireExactArtifactMatch || Boolean(exactArtifactInputHash);
   state.artifactRequestTruthForLifecycle = {
     ...state.artifactRequestTruthForLifecycle,
     canonicalArtifactInputHash: exactArtifactInputHash ?? null,
@@ -565,7 +526,7 @@ export async function runGapfillCompareCorePipeline(
   };
   const compareTruth = {
     compareSharedCalcPath:
-      "dispatchPastSimRecalc->recalcSimulatorBuild->getSimulatedUsageForHouseScenario(/api/user/usage/simulated/house artifact_only exact hash)->admin_accuracy_projection",
+      "getSimulatedUsageForHouseScenario(/api/user/usage/simulated/house artifact_only)->persisted_artifact_compare_read",
     sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
     validationDaysTruthSource: "canonical_saved_artifact_family",
     userPipelineParitySource,
@@ -730,7 +691,7 @@ export async function runGapfillCompareCorePipeline(
     compareTruth,
     compareSharedCalcPath: compareTruth.compareSharedCalcPath,
     baselineDatasetProjection: baselineDataset,
-    message: "Gap-Fill compare executed via canonical persisted-artifact read path.",
+    message: "Gap-Fill compare executed via persisted-artifact reads only.",
     noRecompute: true,
   });
 }

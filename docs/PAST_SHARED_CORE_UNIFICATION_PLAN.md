@@ -44,8 +44,8 @@ Summary:
 ## What changed to match the target (engineering checklist)
 
 - **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
-- **GapFill admin canonical recalc route (`run_test_home_canonical_recalc`) with custom `testRanges`:** For that request, compare projection is scoped to the **user-selected validation date keys** from `testRanges`. Fail-closed compare attachment (`attachValidationCompareProjection`) and emitted compare rows/metrics use that **effective** date set only, not a stale superset that may still appear in artifact `meta.validationOnlyDateKeysLocal`. This narrows **which dates are scored in the HTTP response**; it does not introduce a separate simulator producer or change producer ownership.
-- **UI / API truth:** Route payload may include diagnostics and optional user-pipeline parity summaries, but compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`) and persisted canonical day totals, not an admin-only recomputed simulated truth path.
+- **GapFill admin canonical recalc route (`run_test_home_canonical_recalc`):** After variable collection and normalization, the test house enters the same shared Past Sim recalc/persist chain as a normal user Past run. There is no special test-house simulator or artifact writer path after lockbox entry.
+- **UI / API truth:** GapFill actual-house and test-house panels read the same persisted Past artifact family and shared presentation modules used by the user page. Compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`) and persisted canonical day totals only.
 - **Docs/tests:** Route and service artifact tests assert persisted-artifact ownership and shared-window rules; shared-window ownership rules unchanged.
 
 ## Active architecture authority

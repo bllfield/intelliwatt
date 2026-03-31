@@ -25,9 +25,7 @@ import {
   type ValidationDaySelectionMode,
 } from "@/modules/usageSimulator/validationSelection";
 import {
-  attachValidationCompareProjection,
   buildValidationCompareProjectionSidecar,
-  CompareTruthIncompleteError,
 } from "@/modules/usageSimulator/compareProjection";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
@@ -1063,7 +1061,7 @@ export async function POST(req: NextRequest) {
           adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
           runContext: {
             callerLabel: "gapfill_launcher",
-            buildPathKind: "lab_validation",
+            buildPathKind: "recalc",
             persistRequested: true,
             adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
           },
@@ -1218,56 +1216,13 @@ export async function POST(req: NextRequest) {
       : [];
     const effectiveValidationOnlyDateKeysLocal =
       selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
-
-    let datasetForCompare: any = baselineDataset;
-    if (effectiveValidationOnlyDateKeysLocal.length > 0) {
-      const metaKeySet = new Set(metadataValidationOnlyDateKeysLocal);
-      const missingMetaKeys = effectiveValidationOnlyDateKeysLocal.filter((dk) => !metaKeySet.has(dk));
-      if (missingMetaKeys.length > 0) {
-        return NextResponse.json(
-          attachFailureContract({
-            ok: false,
-            error: "compare_truth_incomplete",
-            message: `Canonical GapFill compare requires validation-day metadata for: ${missingMetaKeys.join(", ")}.`,
-            reasonCode: "COMPARE_TRUTH_INCOMPLETE",
-            missingDateKeysLocal: missingMetaKeys,
-            correlationId: labCorrelationId,
-          }),
-          { status: 409 }
-        );
-      }
-      try {
-        const compareInput = JSON.parse(JSON.stringify(baselineDataset)) as Record<string, unknown>;
-        // Custom testRanges select a subset of build validation days: attach must score only those dates,
-        // not the full artifact metadata list (shared attachValidationCompareProjection keys off meta.validationOnlyDateKeysLocal).
-        if (selectedDateKeysSorted.length > 0 && compareInput && typeof compareInput === "object") {
-          const prevMeta = (compareInput as any).meta;
-          (compareInput as any).meta =
-            prevMeta && typeof prevMeta === "object"
-              ? { ...prevMeta, validationOnlyDateKeysLocal: [...effectiveValidationOnlyDateKeysLocal] }
-              : { validationOnlyDateKeysLocal: [...effectiveValidationOnlyDateKeysLocal] };
-        }
-        datasetForCompare = attachValidationCompareProjection(compareInput);
-      } catch (e: unknown) {
-        if (e instanceof CompareTruthIncompleteError) {
-          return NextResponse.json(
-            attachFailureContract({
-              ok: false,
-              error: "compare_truth_incomplete",
-              message: e.message,
-              reasonCode: "COMPARE_TRUTH_INCOMPLETE",
-              missingDateKeysLocal: e.missingDateKeysLocal,
-              correlationId: labCorrelationId,
-            }),
-            { status: 409 }
-          );
-        }
-        throw e;
-      }
-    }
-
-    // Shared compare sidecar reads rows produced by the same attachValidationCompareProjection path as user Past.
-    const compareProjection = buildValidationCompareProjectionSidecar(datasetForCompare);
+    const compareProjectionRead =
+      baselineRead &&
+      typeof baselineRead === "object" &&
+      (baselineRead as Record<string, unknown>).compareProjection &&
+      typeof (baselineRead as Record<string, unknown>).compareProjection === "object"
+        ? ((baselineRead as Record<string, unknown>).compareProjection as Record<string, unknown>)
+        : buildValidationCompareProjectionSidecar(baselineDataset);
     const baselineDailyRows = Array.isArray(baselineDataset?.daily) ? (baselineDataset.daily as Array<Record<string, unknown>>) : [];
     const baselineActualDayCount = baselineDailyRows.reduce((count, row) => {
       const source = String((row as any)?.source ?? "").toUpperCase();
@@ -1279,50 +1234,41 @@ export async function POST(req: NextRequest) {
     }, 0);
     // Single source of truth for this response: scored rows and summaries must use the same effective date set.
     const effectiveValidationDateKeySet = new Set<string>(effectiveValidationOnlyDateKeysLocal);
-    const compareProjectionRowsFiltered = Array.isArray(compareProjection.rows)
-      ? compareProjection.rows.filter((row) =>
-          effectiveValidationDateKeySet.has(String((row as any)?.localDate ?? "").slice(0, 10))
-        ).map((row) => {
-          const { weather: _weather, ...rest } = (row as Record<string, unknown>) ?? {};
-          return rest;
-        })
+    const compareProjectionRows = Array.isArray((compareProjectionRead as any)?.rows)
+      ? (((compareProjectionRead as any).rows as Array<Record<string, unknown>>) ?? []).map((row) => ({ ...row }))
       : [];
-    const compareProjectionMetricsFiltered = (() => {
-      const rows = compareProjectionRowsFiltered;
-      const absErrors = rows.map((row) => Math.abs(Number((row as any)?.errorKwh ?? 0) || 0));
-      const absErrorTotal = absErrors.reduce((sum, value) => sum + value, 0);
-      const actualTotal = rows.reduce((sum, row) => sum + (Number((row as any)?.actualDayKwh ?? 0) || 0), 0);
-      const simTotal = rows.reduce((sum, row) => sum + (Number((row as any)?.simulatedDayKwh ?? 0) || 0), 0);
-      const mae = rows.length > 0 ? absErrorTotal / rows.length : 0;
-      const rmse =
-        rows.length > 0
-          ? Math.sqrt(
-              rows.reduce((sum, row) => {
-                const err = Number((row as any)?.errorKwh ?? 0) || 0;
-                return sum + err * err;
-              }, 0) / rows.length
-            )
-          : 0;
-      const maxAbs = absErrors.length > 0 ? Math.max(...absErrors) : 0;
-      const wape = Math.abs(actualTotal) > 1e-6 ? (absErrorTotal / Math.abs(actualTotal)) * 100 : 0;
-      return {
-        mae: round2(mae),
-        rmse: round2(rmse),
-        mape: round2(wape),
-        wape: round2(wape),
-        maxAbs: round2(maxAbs),
-        totalActualKwhMasked: round2(actualTotal),
-        totalSimKwhMasked: round2(simTotal),
-        deltaKwhMasked: round2(simTotal - actualTotal),
-        mapeFiltered: rows.length > 0 ? round2(wape) : null,
-        mapeFilteredCount: rows.length,
-      };
-    })();
+    const compareProjectionMetrics =
+      (compareProjectionRead as any)?.metrics && typeof (compareProjectionRead as any).metrics === "object"
+        ? ((compareProjectionRead as any).metrics as Record<string, unknown>)
+        : {};
+    const compareProjectionRowDateSet = new Set(
+      compareProjectionRows
+        .map((row) => String((row as any)?.localDate ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    );
+    if (effectiveValidationOnlyDateKeysLocal.length > 0) {
+      const missingCompareDateKeys = effectiveValidationOnlyDateKeysLocal.filter(
+        (dk) => !compareProjectionRowDateSet.has(dk)
+      );
+      if (missingCompareDateKeys.length > 0) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "compare_truth_incomplete",
+            message: `Canonical GapFill compare requires persisted compare rows for: ${missingCompareDateKeys.join(", ")}.`,
+            reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+            missingDateKeysLocal: missingCompareDateKeys,
+            correlationId: labCorrelationId,
+          }),
+          { status: 409 }
+        );
+      }
+    }
     const compareProjectionForResponse = {
-      rows: compareProjectionRowsFiltered,
-      metrics: compareProjectionMetricsFiltered,
+      rows: compareProjectionRows,
+      metrics: compareProjectionMetrics,
     };
-    const compareRowsCount = compareProjectionRowsFiltered.length;
+    const compareRowsCount = compareProjectionRows.length;
     const artifactSourceMode =
       typeof metaRaw?.artifactSourceMode === "string" ? String(metaRaw.artifactSourceMode) : null;
     const artifactHashMatch =
@@ -1364,11 +1310,7 @@ export async function POST(req: NextRequest) {
       const source = String((row as any)?.source ?? "").toUpperCase();
       return !effectiveValidationDateKeySet.has(dateKey) && source === "SIMULATED" ? count + 1 : count;
     }, 0);
-    const compareRowDateSet = new Set(
-      compareProjectionRowsFiltered
-        .map((row) => String((row as any)?.localDate ?? "").slice(0, 10))
-        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-    );
+    const compareRowDateSet = compareProjectionRowDateSet;
     const selectedValidationDateSet = new Set(effectiveValidationOnlyDateKeysLocal);
     const compareRowsMatchSelectedDates =
       compareRowDateSet.size === selectedValidationDateSet.size &&
@@ -1480,7 +1422,7 @@ export async function POST(req: NextRequest) {
       validationDatesRenderedAsSimulatedCount,
     };
     const scoredDayTruthRows = effectiveValidationOnlyDateKeysLocal.map((dk) => {
-      const row = compareProjectionRowsFiltered.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk) ?? null;
+      const row = compareProjectionRows.find((r) => String(r?.localDate ?? "").slice(0, 10) === dk) ?? null;
       const actualDayKwh = round2(Number(row?.actualDayKwh ?? 0) || 0);
       const freshCompareSimDayKwh = round2(Number(row?.simulatedDayKwh ?? 0) || 0);
       const percentError =
