@@ -16,6 +16,7 @@ vi.mock("@/modules/usageSimulator/simObservability", async (importOriginal) => {
 });
 
 const scenarioFindFirst = vi.fn();
+const usageSimulatorScenarioEventFindMany = vi.fn();
 const usageSimulatorBuildFindUnique = vi.fn();
 const getHouseAddressForUserHouse = vi.fn();
 const computePastInputHash = vi.fn();
@@ -37,6 +38,9 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     usageSimulatorScenario: {
       findFirst: (...args: any[]) => scenarioFindFirst(...args),
+    },
+    usageSimulatorScenarioEvent: {
+      findMany: (...args: any[]) => usageSimulatorScenarioEventFindMany(...args),
     },
     usageSimulatorBuild: {
       findUnique: (...args: any[]) => usageSimulatorBuildFindUnique(...args),
@@ -345,6 +349,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
   beforeEach(() => {
     logPipeline.mockClear();
     scenarioFindFirst.mockReset();
+    usageSimulatorScenarioEventFindMany.mockReset();
     usageSimulatorBuildFindUnique.mockReset();
     getHouseAddressForUserHouse.mockReset();
     computePastInputHash.mockReset();
@@ -364,6 +369,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
 
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
     scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
+    usageSimulatorScenarioEventFindMany.mockResolvedValue([]);
     usageSimulatorBuildFindUnique.mockResolvedValue({
       buildInputs: {
         mode: "SMT_BASELINE",
@@ -950,6 +956,76 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(
       Array.from(producerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
     ).toEqual(["2026-01-01"]);
+  });
+
+  it("allow_rebuild drops deleted Past travel ranges from the rebuilt artifact input", async () => {
+    scenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
+    usageSimulatorScenarioEventFindMany.mockResolvedValueOnce([]);
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        baseKind: "HOUSE_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        weatherPreference: "LAST_YEAR_WEATHER",
+        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+        snapshots: {
+          scenario: { id: "past-s1", name: "Past (Corrected)" },
+          scenarioEvents: [
+            {
+              id: "travel-1",
+              effectiveMonth: "2026-01",
+              kind: "TRAVEL_RANGE",
+              payloadJson: { startDate: "2026-01-03", endDate: "2026-01-04" },
+            },
+          ],
+        },
+      },
+      buildInputsHash: "hash-stale-travel",
+      lastBuiltAt: new Date("2026-01-10T00:00:00.000Z"),
+    });
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    computePastInputHash.mockReturnValueOnce("hash-live-no-travel");
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-31" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          excludedDateKeysCount: 0,
+          canonicalArtifactSimulatedDayTotalsByDate: {},
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.75, source: "ACTUAL" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+    });
+
+    expect(computePastInputHash).toHaveBeenCalledWith(
+      expect.objectContaining({
+        travelRanges: [],
+      })
+    );
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        travelRanges: [],
+      })
+    );
+    if (out.ok) expect(out.dataset?.meta?.buildInputsHash).not.toBe("hash-stale-travel");
   });
 });
 

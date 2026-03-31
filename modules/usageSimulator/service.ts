@@ -3363,6 +3363,52 @@ function normalizeScenarioTravelRanges(
     .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
 }
 
+function serializeTravelRangesForIdentity(
+  ranges: Array<{ startDate: string; endDate: string }>
+): string {
+  return JSON.stringify(
+    normalizePreLockboxTravelRanges(ranges).map((range) => ({
+      startDate: range.startDate,
+      endDate: range.endDate,
+    }))
+  );
+}
+
+function buildScenarioEventsHashRows(
+  events: Array<{ id?: string; effectiveMonth?: string; kind?: string; payloadJson?: any }>
+): Array<{
+  id: string;
+  effectiveMonth: string;
+  kind: string;
+  multiplier: number | null;
+  adderKwh: number | null;
+  startDate: string | null;
+  endDate: string | null;
+}> {
+  return events
+    .map((e) => {
+      const p = (e as any)?.payloadJson ?? {};
+      const multiplier = typeof p?.multiplier === "number" && Number.isFinite(p.multiplier) ? p.multiplier : null;
+      const adderKwh = typeof p?.adderKwh === "number" && Number.isFinite(p.adderKwh) ? p.adderKwh : null;
+      const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : null;
+      const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : null;
+      return {
+        id: String(e?.id ?? ""),
+        effectiveMonth: String(e?.effectiveMonth ?? ""),
+        kind: String(e?.kind ?? ""),
+        multiplier,
+        adderKwh,
+        startDate,
+        endDate,
+      };
+    })
+    .sort((a, b) => {
+      if (a.effectiveMonth !== b.effectiveMonth) return a.effectiveMonth < b.effectiveMonth ? -1 : 1;
+      if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+}
+
 function applyMonthlyOverlay(args: { base: number; mult?: unknown; add?: unknown }): number {
   const base = Number(args.base) || 0;
   const multNum = args.mult == null ? NaN : Number(args.mult);
@@ -4627,28 +4673,9 @@ async function recalcSimulatorBuildImpl(args: {
   };
 
   // V1 hash: stable JSON of a deterministic object.
-  const eventsForHash = (pastOverlay ? [...pastEventsForOverlay, ...(scenarioEvents ?? [])] : (scenarioEvents ?? []))
-    .map((e) => {
-      const p = (e as any)?.payloadJson ?? {};
-      const multiplier = typeof p?.multiplier === "number" && Number.isFinite(p.multiplier) ? p.multiplier : null;
-      const adderKwh = typeof p?.adderKwh === "number" && Number.isFinite(p.adderKwh) ? p.adderKwh : null;
-      const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : null;
-      const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : null;
-      return {
-        id: String(e?.id ?? ""),
-        effectiveMonth: String(e?.effectiveMonth ?? ""),
-        kind: String(e?.kind ?? ""),
-        multiplier,
-        adderKwh,
-        startDate,
-        endDate,
-      };
-    })
-    .sort((a, b) => {
-      if (a.effectiveMonth !== b.effectiveMonth) return a.effectiveMonth < b.effectiveMonth ? -1 : 1;
-      if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    });
+  const eventsForHash = buildScenarioEventsHashRows(
+    pastOverlay ? [...pastEventsForOverlay, ...(scenarioEvents ?? [])] : (scenarioEvents ?? [])
+  );
 
   const buildInputsHash = computeBuildInputsHash({
     canonicalMonths: buildInputs.canonicalMonths,
@@ -4731,35 +4758,73 @@ async function recalcSimulatorBuildImpl(args: {
     lockboxPerDayTrace: perDayTrace,
   };
 
-  await upsertSimulatorBuild({
-    userId,
+  const persistBuildStartedAt = Date.now();
+  logSimPipelineEvent("recalc_persist_build_start", {
+    correlationId: args.correlationId,
     houseId,
-    scenarioKey,
+    sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+    scenarioId,
     mode: simMode,
-    baseKind,
-    canonicalEndMonth: buildInputs.canonicalEndMonth,
-    canonicalMonths: buildInputs.canonicalMonths,
-    buildInputs,
     buildInputsHash,
-    versions,
-    fingerprintRefs:
-      resolvedSimFingerprint != null
-        ? {
-            wholeHomeFingerprintArtifactId: resolvedSimFingerprint.wholeHomeFingerprintArtifactId,
-            usageFingerprintArtifactId: resolvedSimFingerprint.usageFingerprintArtifactId,
-            fingerprintProvenanceJson: {
-              resolverVersion: resolvedSimFingerprint.resolverVersion,
-              resolvedHash: resolvedSimFingerprint.resolvedHash,
-              blendMode: resolvedSimFingerprint.blendMode,
-              wholeHomeSourceHash: resolvedSimFingerprint.wholeHomeSourceHash,
-              usageSourceHash: resolvedSimFingerprint.usageSourceHash,
-              usageBlendWeight: resolvedSimFingerprint.usageBlendWeight,
-              wholeHomeHouseId: resolvedSimFingerprint.wholeHomeHouseId,
-              usageFingerprintHouseId: resolvedSimFingerprint.usageFingerprintHouseId,
-            },
-          }
-        : undefined,
+    source: "recalcSimulatorBuildImpl",
+    memoryRssMb: getMemoryRssMb(),
   });
+  try {
+    await upsertSimulatorBuild({
+      userId,
+      houseId,
+      scenarioKey,
+      mode: simMode,
+      baseKind,
+      canonicalEndMonth: buildInputs.canonicalEndMonth,
+      canonicalMonths: buildInputs.canonicalMonths,
+      buildInputs,
+      buildInputsHash,
+      versions,
+      fingerprintRefs:
+        resolvedSimFingerprint != null
+          ? {
+              wholeHomeFingerprintArtifactId: resolvedSimFingerprint.wholeHomeFingerprintArtifactId,
+              usageFingerprintArtifactId: resolvedSimFingerprint.usageFingerprintArtifactId,
+              fingerprintProvenanceJson: {
+                resolverVersion: resolvedSimFingerprint.resolverVersion,
+                resolvedHash: resolvedSimFingerprint.resolvedHash,
+                blendMode: resolvedSimFingerprint.blendMode,
+                wholeHomeSourceHash: resolvedSimFingerprint.wholeHomeSourceHash,
+                usageSourceHash: resolvedSimFingerprint.usageSourceHash,
+                usageBlendWeight: resolvedSimFingerprint.usageBlendWeight,
+                wholeHomeHouseId: resolvedSimFingerprint.wholeHomeHouseId,
+                usageFingerprintHouseId: resolvedSimFingerprint.usageFingerprintHouseId,
+              },
+            }
+          : undefined,
+    });
+    logSimPipelineEvent("recalc_persist_build_success", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      buildInputsHash,
+      durationMs: Date.now() - persistBuildStartedAt,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+  } catch (e) {
+    logSimPipelineEvent("recalc_persist_build_failure", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      buildInputsHash,
+      durationMs: Date.now() - persistBuildStartedAt,
+      failureMessage: e instanceof Error ? e.message : String(e),
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    throw e;
+  }
 
   let canonicalArtifactInputHash: string | null = null;
   const shouldPersistCanonicalPastArtifact =
@@ -4776,6 +4841,16 @@ async function recalcSimulatorBuildImpl(args: {
       }))
       .filter((row: { timestamp: string; kwh: number }) => row.timestamp.length > 0);
     if (intervals15.length === 0) {
+      logSimPipelineEvent("recalc_artifact_persist_failure", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        failureMessage: "Canonical artifact persistence requires non-empty intervals15 output.",
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
       return {
         ok: false,
         error: "artifact_persist_failed",
@@ -4785,6 +4860,16 @@ async function recalcSimulatorBuildImpl(args: {
 
     const identityWindow = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
     if (!identityWindow) {
+      logSimPipelineEvent("recalc_artifact_persist_failure", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        failureMessage: "Canonical artifact persistence could not resolve identity window from recalc build inputs.",
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
       return {
         ok: false,
         error: "artifact_persist_failed",
@@ -4792,6 +4877,19 @@ async function recalcSimulatorBuildImpl(args: {
       };
     }
 
+    const artifactPersistStartedAt = Date.now();
+    logSimPipelineEvent("recalc_artifact_persist_start", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      windowStartUtc: identityWindow.startDate,
+      windowEndUtc: identityWindow.endDate,
+      intervalCount: intervals15.length,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
     try {
       const canonicalActualIdentity = await resolveCanonicalActualIdentityForBuild({
         userId,
@@ -4922,13 +5020,49 @@ async function recalcSimulatorBuildImpl(args: {
         inputHash: artifactInputHash,
       });
       if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) {
+        logSimPipelineEvent("recalc_artifact_persist_failure", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          scenarioId,
+          mode: simMode,
+          artifactInputHash,
+          durationMs: Date.now() - artifactPersistStartedAt,
+          failureMessage: "Canonical artifact persistence readback verification failed after recalc.",
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
         return {
           ok: false,
           error: "artifact_persist_failed",
           missingItems: ["Canonical artifact persistence readback verification failed after recalc."],
         };
       }
+      logSimPipelineEvent("recalc_artifact_persist_success", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash,
+        durationMs: Date.now() - artifactPersistStartedAt,
+        intervalCount: intervals15.length,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
     } catch (e) {
+      logSimPipelineEvent("recalc_artifact_persist_failure", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash: canonicalArtifactInputHash,
+        durationMs: Date.now() - artifactPersistStartedAt,
+        failureMessage: e instanceof Error ? e.message : String(e),
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
       return {
         ok: false,
         error: "artifact_persist_failed",
@@ -4943,12 +5077,47 @@ async function recalcSimulatorBuildImpl(args: {
     dataset?.usageBucketsByMonth &&
     Object.keys(dataset.usageBucketsByMonth).length > 0
   ) {
+    const usageBucketsStartedAt = Date.now();
+    logSimPipelineEvent("recalc_usage_buckets_persist_start", {
+      correlationId: args.correlationId,
+      houseId,
+      scenarioId,
+      mode: simMode,
+      bucketMonthCount: Object.keys(dataset.usageBucketsByMonth).length,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
     await upsertSimulatedUsageBuckets({
       homeId: houseId,
       scenarioKey,
       scenarioId: scenarioId ?? null,
       usageBucketsByMonth: dataset.usageBucketsByMonth,
-    }).catch(() => {});
+    })
+      .then(() => {
+        logSimPipelineEvent("recalc_usage_buckets_persist_success", {
+          correlationId: args.correlationId,
+          houseId,
+          scenarioId,
+          mode: simMode,
+          bucketMonthCount: Object.keys(dataset.usageBucketsByMonth).length,
+          durationMs: Date.now() - usageBucketsStartedAt,
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
+      })
+      .catch((e) => {
+        logSimPipelineEvent("recalc_usage_buckets_persist_failure", {
+          correlationId: args.correlationId,
+          houseId,
+          scenarioId,
+          mode: simMode,
+          bucketMonthCount: Object.keys(dataset.usageBucketsByMonth).length,
+          durationMs: Date.now() - usageBucketsStartedAt,
+          failureMessage: e instanceof Error ? e.message : String(e),
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
+      });
   }
 
   const shouldPersistPastSeries =
@@ -4977,6 +5146,18 @@ async function recalcSimulatorBuildImpl(args: {
             (buildInputs as any)?.versions?.intradayTemplateVersion ??
             "v1"
         );
+        const intervalSeriesStartedAt = Date.now();
+        logSimPipelineEvent("recalc_interval_series_persist_start", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          scenarioId,
+          mode: simMode,
+          buildInputsHash,
+          intervalCount: validIntervals.length,
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
         try {
           await saveIntervalSeries15m({
             userId,
@@ -4989,7 +5170,32 @@ async function recalcSimulatorBuildImpl(args: {
             buildInputsHash,
             intervals15: validIntervals.map((row) => ({ tsUtc: row.tsUtc, kwh: row.kwh })),
           });
+          logSimPipelineEvent("recalc_interval_series_persist_success", {
+            correlationId: args.correlationId,
+            houseId,
+            sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+            scenarioId,
+            mode: simMode,
+            buildInputsHash,
+            intervalCount: validIntervals.length,
+            durationMs: Date.now() - intervalSeriesStartedAt,
+            source: "recalcSimulatorBuildImpl",
+            memoryRssMb: getMemoryRssMb(),
+          });
         } catch (e) {
+          logSimPipelineEvent("recalc_interval_series_persist_failure", {
+            correlationId: args.correlationId,
+            houseId,
+            sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+            scenarioId,
+            mode: simMode,
+            buildInputsHash,
+            intervalCount: validIntervals.length,
+            durationMs: Date.now() - intervalSeriesStartedAt,
+            failureMessage: e instanceof Error ? e.message : String(e),
+            source: "recalcSimulatorBuildImpl",
+            memoryRssMb: getMemoryRssMb(),
+          });
           // Persistence of derived interval artifacts must not block recalc responses.
           console.error("[usageSimulator/service] failed to persist PAST_SIM_BASELINE interval series", {
             userId,
@@ -5814,6 +6020,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
     }
 
     let buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+    let effectiveBuildInputsHash = String(buildRec.buildInputsHash ?? "");
     // Backfill validation-day compare support on first read for older Past builds
     // that predate validation-key persistence.
     const buildValidationKeys = Array.isArray((buildInputs as any)?.validationOnlyDateKeysLocal)
@@ -5879,6 +6086,44 @@ export async function getSimulatedUsageForHouseScenario(args: {
       (scenarioRow?.name === WORKSPACE_FUTURE_NAME || snapshotScenarioName === WORKSPACE_FUTURE_NAME);
     // Treat any non-baseline, non-future scenario as Past to avoid brittle name-only gating.
     const isPastScenario = Boolean(scenarioId) && !isFutureWorkspaceScenario;
+    if (isPastScenario) {
+      const liveScenarioEvents = await (prisma as any).usageSimulatorScenarioEvent
+        .findMany({
+          where: { scenarioId, archivedAt: null },
+          select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
+          orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        })
+        .catch(() => []);
+      const liveTravelRanges = normalizeScenarioTravelRanges(liveScenarioEvents as any);
+      const storedTravelRanges = normalizePreLockboxTravelRanges((buildInputs as any)?.travelRanges);
+      if (serializeTravelRangesForIdentity(storedTravelRanges) !== serializeTravelRangesForIdentity(liveTravelRanges)) {
+        const existingSnapshots =
+          (buildInputs as any)?.snapshots && typeof (buildInputs as any).snapshots === "object"
+            ? ((buildInputs as any).snapshots as Record<string, unknown>)
+            : {};
+        buildInputs = {
+          ...buildInputs,
+          travelRanges: liveTravelRanges,
+          snapshots: {
+            ...existingSnapshots,
+            scenario: scenarioRow ? { id: scenarioRow.id, name: scenarioRow.name } : existingSnapshots.scenario ?? null,
+            scenarioEvents: liveScenarioEvents,
+          },
+        } as SimulatorBuildInputsV1;
+        effectiveBuildInputsHash = computeBuildInputsHash({
+          canonicalMonths: Array.isArray((buildInputs as any)?.canonicalMonths)
+            ? ((buildInputs as any).canonicalMonths as string[])
+            : [],
+          mode: String((buildInputs as any)?.mode ?? ""),
+          baseKind: String((buildInputs as any)?.baseKind ?? ""),
+          scenarioKey,
+          baseScenarioKey: null,
+          scenarioEvents: buildScenarioEventsHashRows(liveScenarioEvents as any),
+          weatherPreference: String((buildInputs as any)?.weatherPreference ?? ""),
+          versions: (buildInputs as any)?.versions,
+        });
+      }
+    }
     const useActualBaseline =
       scenarioKey === "BASELINE" &&
       isSmtBaselineMode;
@@ -5914,7 +6159,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             source: summarySource as "SMT" | "GREEN_BUTTON" | "SIMULATED",
           },
           meta: {
-            buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+            buildInputsHash: effectiveBuildInputsHash,
             lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
             datasetKind: summarySource === "SIMULATED" ? ("SIMULATED" as const) : ("ACTUAL" as const),
             scenarioKey,
@@ -5936,7 +6181,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         }
         dataset.meta = {
           ...(dataset.meta ?? {}),
-          buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+          buildInputsHash: effectiveBuildInputsHash,
           lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
           scenarioKey,
           scenarioId,
@@ -6263,7 +6508,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       dataset.meta = {
         ...(dataset.meta ?? {}),
-        buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+        buildInputsHash: effectiveBuildInputsHash,
         lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
         scenarioKey,
         scenarioId,
