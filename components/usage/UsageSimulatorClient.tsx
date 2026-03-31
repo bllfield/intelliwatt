@@ -181,8 +181,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [workspace, setWorkspace] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
   const [curveView, setCurveView] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
 
+  // Reset whenever the user lands on the Past curve tab (including returning from BASELINE/FUTURE).
   useEffect(() => {
-    if (curveView !== "PAST") {
+    if (curveView === "PAST") {
       setPastCompareExpanded(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
     }
   }, [curveView]);
