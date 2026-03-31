@@ -53,6 +53,7 @@ vi.mock("@/modules/usageSimulator/repo", () => ({
 
 vi.mock("@/modules/usageSimulator/pastCache", () => ({
   computePastInputHash: (...args: any[]) => computePastInputHash(...args),
+  deleteCachedPastDatasetsForScenario: vi.fn().mockResolvedValue(0),
   getCachedPastDataset: (...args: any[]) => getCachedPastDataset(...args),
   getLatestCachedPastDatasetByScenario: (...args: any[]) => getLatestCachedPastDatasetByScenario(...args),
   saveCachedPastDataset: (...args: any[]) => saveCachedPastDataset(...args),

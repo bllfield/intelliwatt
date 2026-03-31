@@ -34,6 +34,7 @@ import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import {
   computePastInputHash,
+  deleteCachedPastDatasetsForScenario,
   getCachedPastDataset,
   saveCachedPastDataset,
   PAST_ENGINE_VERSION,
@@ -4744,6 +4745,7 @@ async function recalcSimulatorBuildImpl(args: {
         series: { ...((dataset as any)?.series ?? {}), intervals15: [] },
       };
       const scenarioIdForCache = scenarioId ?? "BASELINE";
+      await deleteCachedPastDatasetsForScenario({ houseId, scenarioId: scenarioIdForCache });
       await saveCachedPastDataset({
         houseId,
         scenarioId: scenarioIdForCache,
@@ -6025,6 +6027,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
               series: { ...(dataset.series ?? {}), intervals15: [] },
             };
+            await deleteCachedPastDatasetsForScenario({ houseId: args.houseId, scenarioId: scenarioIdForCache });
             await saveCachedPastDataset({
               houseId: args.houseId,
               scenarioId: scenarioIdForCache,
