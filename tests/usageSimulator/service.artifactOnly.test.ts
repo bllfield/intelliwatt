@@ -1027,6 +1027,96 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     );
     if (out.ok) expect(out.dataset?.meta?.buildInputsHash).not.toBe("hash-stale-travel");
   });
+
+  it("allow_rebuild ignores reordered Past travel ranges when identity is otherwise unchanged", async () => {
+    scenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
+    usageSimulatorScenarioEventFindMany.mockResolvedValueOnce([
+      {
+        id: "travel-2",
+        effectiveMonth: "2026-01",
+        kind: "TRAVEL_RANGE",
+        payloadJson: { startDate: "2026-01-05", endDate: "2026-01-06" },
+      },
+      {
+        id: "travel-1",
+        effectiveMonth: "2026-01",
+        kind: "TRAVEL_RANGE",
+        payloadJson: { startDate: "2026-01-03", endDate: "2026-01-04" },
+      },
+    ]);
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        baseKind: "HOUSE_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        weatherPreference: "LAST_YEAR_WEATHER",
+        travelRanges: [
+          { startDate: "2026-01-03", endDate: "2026-01-04" },
+          { startDate: "2026-01-05", endDate: "2026-01-06" },
+        ],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+        snapshots: {
+          scenario: { id: "past-s1", name: "Past (Corrected)" },
+          scenarioEvents: [
+            {
+              id: "travel-1",
+              effectiveMonth: "2026-01",
+              kind: "TRAVEL_RANGE",
+              payloadJson: { startDate: "2026-01-03", endDate: "2026-01-04" },
+            },
+            {
+              id: "travel-2",
+              effectiveMonth: "2026-01",
+              kind: "TRAVEL_RANGE",
+              payloadJson: { startDate: "2026-01-05", endDate: "2026-01-06" },
+            },
+          ],
+        },
+      },
+      buildInputsHash: "hash-stable-travel",
+      lastBuiltAt: new Date("2026-01-10T00:00:00.000Z"),
+    });
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    computePastInputHash.mockReturnValueOnce("hash-same-travel-reordered");
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-31" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "2026-01-03,2026-01-04,2026-01-05,2026-01-06",
+          excludedDateKeysCount: 4,
+          canonicalArtifactSimulatedDayTotalsByDate: {},
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.75, source: "ACTUAL" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+    });
+
+    expect(computePastInputHash).toHaveBeenCalledWith(
+      expect.objectContaining({
+        travelRanges: [
+          { startDate: "2026-01-03", endDate: "2026-01-04" },
+          { startDate: "2026-01-05", endDate: "2026-01-06" },
+        ],
+      })
+    );
+    if (out.ok) expect(out.dataset?.meta?.buildInputsHash).toBe("hash-stable-travel");
+  });
 });
 
 describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
