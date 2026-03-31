@@ -91,6 +91,11 @@ import {
   type PastSimRunContext,
 } from "@/modules/usageSimulator/pastSimLockbox";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
+import {
+  resolveWeatherKindForLogicMode,
+  resolveWeatherLogicModeFromBuildInputs,
+  type WeatherLogicMode,
+} from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
@@ -120,6 +125,58 @@ import {
   applyAdminLabTreatmentToResolvedFingerprint,
   isAdminLabManualConstraintTreatmentMode,
 } from "@/modules/usageSimulator/adminLabTreatment";
+
+async function attachSelectedDailyWeatherForDataset(args: {
+  dataset: any;
+  buildInputs: Record<string, unknown>;
+  fallbackHouseId: string;
+  fallbackTimezone?: string | null;
+}) {
+  const dataset = args.dataset;
+  if (!dataset || !Array.isArray(dataset.daily) || dataset.daily.length === 0) return;
+  if ((dataset as any).dailyWeather) return;
+  const dateKeys = dataset.daily
+    .map((row: any) => String(row?.date ?? "").slice(0, 10))
+    .filter((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+  if (dateKeys.length === 0) return;
+  const weatherLogicMode = resolveWeatherLogicModeFromBuildInputs(args.buildInputs);
+  const weatherHouseId = String(args.buildInputs.actualContextHouseId ?? args.fallbackHouseId);
+  const timezone =
+    String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
+    "America/Chicago";
+  if (weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER") {
+    await ensureHouseWeatherBackfill({
+      houseId: weatherHouseId,
+      startDate: dateKeys[0]!,
+      endDate: dateKeys[dateKeys.length - 1]!,
+      timezone,
+    }).catch(() => null);
+  }
+  await ensureHouseWeatherStubbed({ houseId: weatherHouseId, dateKeys }).catch(() => null);
+  const wxMap = await getHouseWeatherDays({
+    houseId: weatherHouseId,
+    dateKeys,
+    kind: resolveWeatherKindForLogicMode(weatherLogicMode),
+  }).catch(() => new Map());
+  if (!(wxMap instanceof Map) || wxMap.size === 0) return;
+  (dataset as any).dailyWeather = Object.fromEntries(
+    Array.from(wxMap.entries()).map(([dateKey, w]: [string, any]) => [
+      dateKey,
+      {
+        tAvgF: Number(w?.tAvgF) || 0,
+        tMinF: Number(w?.tMinF) || 0,
+        tMaxF: Number(w?.tMaxF) || 0,
+        hdd65: Number(w?.hdd65) || 0,
+        cdd65: Number(w?.cdd65) || 0,
+        source: String(w?.source ?? "").trim() || null,
+      },
+    ])
+  );
+  if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") {
+    (dataset as any).meta = {};
+  }
+  (dataset as any).meta.weatherLogicMode = weatherLogicMode;
+}
 import { buildAdminLabSyntheticManualUsagePayload } from "@/modules/usageSimulator/adminLabManualFromActuals";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
@@ -393,6 +450,43 @@ function buildScoredDayWeatherPayload(args: {
   };
 }
 
+function buildScoredDayWeatherPayloadFromWeatherApiData(args: {
+  scoredDateKeysLocal: Set<string>;
+  weatherApiData?: unknown;
+  weatherBasisUsed: string | null;
+  weatherKindUsed?: string | null;
+  weatherProviderName?: string | null;
+  weatherFallbackReason?: string | null;
+}): { rows: ScoredDayWeatherRow[]; truth: ScoredDayWeatherTruth } {
+  const weatherByDateKey = new Map<
+    string,
+    { tAvgF?: number; tMinF?: number; tMaxF?: number; hdd65?: number; cdd65?: number; source?: string }
+  >();
+  if (Array.isArray(args.weatherApiData)) {
+    for (const row of args.weatherApiData) {
+      const rec = row as Record<string, unknown>;
+      const dateKey = String(rec?.dateKey ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+      weatherByDateKey.set(dateKey, {
+        tAvgF: typeof rec.tAvgF === "number" ? rec.tAvgF : undefined,
+        tMinF: typeof rec.tMinF === "number" ? rec.tMinF : undefined,
+        tMaxF: typeof rec.tMaxF === "number" ? rec.tMaxF : undefined,
+        hdd65: typeof rec.hdd65 === "number" ? rec.hdd65 : undefined,
+        cdd65: typeof rec.cdd65 === "number" ? rec.cdd65 : undefined,
+        source: typeof rec.source === "string" ? rec.source : undefined,
+      });
+    }
+  }
+  return buildScoredDayWeatherPayload({
+    scoredDateKeysLocal: args.scoredDateKeysLocal,
+    weatherByDateKey,
+    weatherBasisUsed: args.weatherBasisUsed,
+    weatherKindUsed: args.weatherKindUsed,
+    weatherProviderName: args.weatherProviderName,
+    weatherFallbackReason: args.weatherFallbackReason,
+  });
+}
+
 async function resolvePastScenarioIdForHouse(args: {
   userId: string;
   houseId: string;
@@ -560,6 +654,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     houseId: sourceHouseIdForWeather,
     startDate: identityWindowResolved.startDate,
     endDate: identityWindowResolved.endDate,
+    weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
   });
   const exactInputHash = computePastInputHash({
     engineVersion: PAST_ENGINE_VERSION,
@@ -1490,6 +1585,7 @@ export async function buildGapfillCompareSimShared(args: {
       houseId: sourceHouseIdForWeather,
       startDate: identityWindowResolved.startDate,
       endDate: identityWindowResolved.endDate,
+      weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
     });
     sharedInputHash = computePastInputHash({
       engineVersion: PAST_ENGINE_VERSION,
@@ -2178,7 +2274,7 @@ export async function buildGapfillCompareSimShared(args: {
         weatherKindUsed: freshResult.weatherKindUsed,
         weatherProviderName: freshResult.weatherProviderName,
         weatherFallbackReason: freshResult.weatherFallbackReason,
-        actualWxByDateKey: freshResult.actualWxByDateKey ?? null,
+          actualWxByDateKey: freshResult.selectedWeatherByDateKey ?? freshResult.actualWxByDateKey ?? null,
         simulatedIntervals: freshIntervals,
         canonicalSimulatedDayTotalsByDate:
           freshResult.canonicalSimulatedDayTotalsByDate ?? {},
@@ -2280,7 +2376,10 @@ export async function buildGapfillCompareSimShared(args: {
           simulatedIntervals: simulatorOwnedIntervals,
           dailyTotalsByDate,
           canonicalSimulatedDayTotalsByDate,
-          actualWxByDateKey: selectedDaysResult.actualWxByDateKey ?? null,
+          actualWxByDateKey:
+            selectedDaysResult.selectedWeatherByDateKey ??
+            selectedDaysResult.actualWxByDateKey ??
+            null,
           weatherKindUsed: String(selectedDaysResult.weatherKindUsed ?? "") || null,
           weatherSourceSummary: String(selectedDaysResult.weatherSourceSummary ?? weatherBasisUsed) || "unknown",
           gapfillForceModeledKeepRefLocalDateKeys: selectedDaysResult.gapfillForceModeledKeepRefLocalDateKeys,
@@ -2384,8 +2483,13 @@ export async function buildGapfillCompareSimShared(args: {
               startDate: selectedWeatherRange[0]!,
               endDate: selectedWeatherRange[selectedWeatherRange.length - 1]!,
               canonicalDateKeys: selectedWeatherRange,
+              weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(
+                buildInputs as Record<string, unknown>
+              ),
             });
-            selectedDaysWeatherByDate = selectedDaysWeather.actualWxByDateKey;
+            selectedDaysWeatherByDate =
+              selectedDaysWeather.selectedWeatherByDateKey ??
+              selectedDaysWeather.actualWxByDateKey;
             selectedDaysWeatherBasisUsed =
               String(selectedDaysWeather.provenance.weatherSourceSummary ?? weatherBasisUsed) || weatherBasisUsed;
             weatherBasisUsed = selectedDaysWeatherBasisUsed;
@@ -3218,7 +3322,36 @@ export async function buildGapfillCompareSimShared(args: {
           return out;
         })()
       : modelAssumptions;
-  const sharedProfiles = displayProfilesFromModelMeta(modelAssumptions);
+  if (
+    boundedTestDateKeysLocal.size > 0 &&
+    scoredDayWeatherRows.length === 0 &&
+    Array.isArray((responseModelAssumptions as any)?.weatherApiData)
+  ) {
+    const weatherPayloadFromMeta = buildScoredDayWeatherPayloadFromWeatherApiData({
+      scoredDateKeysLocal: boundedTestDateKeysLocal,
+      weatherApiData: (responseModelAssumptions as any).weatherApiData,
+      weatherBasisUsed:
+        weatherBasisUsed ??
+        (typeof (responseModelAssumptions as any)?.weatherSourceSummary === "string"
+          ? String((responseModelAssumptions as any).weatherSourceSummary)
+          : null),
+      weatherKindUsed:
+        typeof (responseModelAssumptions as any)?.weatherKindUsed === "string"
+          ? String((responseModelAssumptions as any).weatherKindUsed)
+          : null,
+      weatherProviderName:
+        typeof (responseModelAssumptions as any)?.weatherProviderName === "string"
+          ? String((responseModelAssumptions as any).weatherProviderName)
+          : null,
+      weatherFallbackReason:
+        typeof (responseModelAssumptions as any)?.weatherFallbackReason === "string"
+          ? String((responseModelAssumptions as any).weatherFallbackReason)
+          : null,
+    });
+    scoredDayWeatherRows = weatherPayloadFromMeta.rows;
+    scoredDayWeatherTruth = weatherPayloadFromMeta.truth;
+  }
+  const sharedProfiles = displayProfilesFromModelMeta(responseModelAssumptions);
   await reportPhase("build_shared_compare_response_ready", {
     compareFreshModeUsed,
     compareCalculationScope,
@@ -3367,16 +3500,10 @@ function serializeTravelRangesForIdentity(
   ranges: Array<{ startDate: string; endDate: string }>
 ): string {
   return JSON.stringify(
-    normalizePreLockboxTravelRanges(ranges)
-      .map((range) => ({
-        startDate: range.startDate,
-        endDate: range.endDate,
-      }))
-      .sort((a, b) => {
-        if (a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
-        if (a.endDate !== b.endDate) return a.endDate < b.endDate ? -1 : 1;
-        return 0;
-      })
+    normalizePreLockboxTravelRanges(ranges).map((range) => ({
+      startDate: range.startDate,
+      endDate: range.endDate,
+    }))
   );
 }
 
@@ -3625,7 +3752,11 @@ function travelRangesFromBuildInputs(
   const merged = [...collect((b as any).travelRanges)];
   const uniq = new Map<string, { startDate: string; endDate: string }>();
   for (const r of merged) uniq.set(`${r.startDate}__${r.endDate}`, r);
-  return Array.from(uniq.values());
+  return Array.from(uniq.values()).sort((a, b) => {
+    const left = `${a.startDate}__${a.endDate}`;
+    const right = `${b.startDate}__${b.endDate}`;
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
 }
 
 function normalizePreLockboxTravelRanges(
@@ -3756,6 +3887,9 @@ async function recalcSimulatorBuildImpl(args: {
     validationSelectionMode: effectiveValidationSelectionMode,
     adminLabTreatmentMode: args.adminLabTreatmentMode ?? null,
     weatherPreference: args.weatherPreference ?? null,
+    weatherLogicMode: resolveWeatherLogicModeFromBuildInputs({
+      weatherPreference: args.weatherPreference ?? "LAST_YEAR_WEATHER",
+    }),
   });
 
   const coreContextStartedAt = Date.now();
@@ -4514,6 +4648,7 @@ async function recalcSimulatorBuildImpl(args: {
           },
         ],
         weatherPreference,
+        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs({ weatherPreference }),
         monthlyTotalsKwhByMonth,
         intradayShape96: built.intradayShape96,
         weekdayWeekendShape96: built.weekdayWeekendShape96,
@@ -4633,6 +4768,7 @@ async function recalcSimulatorBuildImpl(args: {
           ? manualCanonicalPeriods
           : smtAnchorPeriods ?? undefined,
     weatherPreference,
+    weatherLogicMode: resolveWeatherLogicModeFromBuildInputs({ weatherPreference }),
     weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
     monthlyTotalsKwhByMonth,
     intradayShape96: built.intradayShape96,
@@ -4731,6 +4867,7 @@ async function recalcSimulatorBuildImpl(args: {
     window: resolveWindowFromBuildInputsForPastIdentity(buildInputs),
     timezone: timezoneForStoredBuild,
     intervalFingerprint: null,
+    weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
     weatherIdentity: null,
     sourceDerivedMonthlyTotalsKwhByMonth,
     sourceDerivedAnnualTotalKwh,
@@ -4914,6 +5051,7 @@ async function recalcSimulatorBuildImpl(args: {
         houseId: canonicalActualIdentity.houseId,
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
+        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
       });
       const artifactInputHash = computePastInputHash({
         engineVersion: PAST_ENGINE_VERSION,
@@ -5426,10 +5564,10 @@ export async function getPastSimulatedDatasetForHouse(args: {
     }
     const dataset = result.dataset;
     // Keep cold build on the stitched saved artifact only; no second overlay pass.
-    const actualWxByDateKey = result.actualWxByDateKey;
-    if (dataset && actualWxByDateKey && actualWxByDateKey.size > 0) {
+    const selectedWeatherByDateKey = result.selectedWeatherByDateKey ?? result.actualWxByDateKey;
+    if (dataset && selectedWeatherByDateKey && selectedWeatherByDateKey.size > 0) {
       (dataset as any).dailyWeather = Object.fromEntries(
-        Array.from(actualWxByDateKey.entries()).map(([dateKey, w]) => [
+        Array.from(selectedWeatherByDateKey.entries()).map(([dateKey, w]) => [
           dateKey,
           {
             tAvgF: w.tAvgF,
@@ -5442,7 +5580,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
         ])
       );
     }
-    return { dataset, simulatedDayResults: result.simulatedDayResults, actualWxByDateKey };
+    return { dataset, simulatedDayResults: result.simulatedDayResults, actualWxByDateKey: selectedWeatherByDateKey };
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.warn("[usageSimulator/service] getPastSimulatedDatasetForHouse failed", { houseId, err: e });
@@ -5828,6 +5966,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           houseId: canonicalActualIdentity.houseId,
           startDate: window.startDate,
           endDate: window.endDate,
+          weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
         });
         resolvedInputHash = computePastInputHash({
           engineVersion: PAST_ENGINE_VERSION,
@@ -6315,6 +6454,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             houseId: sourceHouseIdForWeather,
             startDate,
             endDate,
+            weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
           });
           const intervalDataFingerprint = await getIntervalDataFingerprint({
             houseId: args.houseId,
@@ -6530,6 +6670,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
         resolveCanonicalUsage365CoverageWindow();
       void canonicalCoverage;
     }
+
+    await attachSelectedDailyWeatherForDataset({
+      dataset,
+      buildInputs: buildInputs as Record<string, unknown>,
+      fallbackHouseId: args.houseId,
+      fallbackTimezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
+    });
 
     // Past and Future baseload come from the built curve (buildSimulatedUsageDatasetFromBuildInputs), which already
     // computes baseload from curve.intervals after overlay/upgrades/vacant fill; no overwrite from actual usage.

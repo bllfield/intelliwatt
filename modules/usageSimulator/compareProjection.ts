@@ -50,7 +50,7 @@ export type ValidationCompareProjectionSidecar = {
   metrics: Record<string, unknown>;
 };
 
-function compareWeatherFromDailyWeather(dailyWeather: unknown, dateKey: string): ValidationCompareRowWeather {
+export function compareWeatherFromDailyWeather(dailyWeather: unknown, dateKey: string): ValidationCompareRowWeather {
   if (!dailyWeather || typeof dailyWeather !== "object" || Array.isArray(dailyWeather)) {
     return {
       tAvgF: null,

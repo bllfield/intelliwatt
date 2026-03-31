@@ -48,6 +48,7 @@ export async function computePastWeatherIdentity(args: {
   houseId: string;
   startDate: string;
   endDate: string;
+  weatherLogicMode?: string | null;
 }): Promise<string> {
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   const requestedStart = String(args.startDate ?? "").slice(0, 10);
@@ -64,6 +65,7 @@ export async function computePastWeatherIdentity(args: {
   ]);
 
   const canonical = {
+    weatherLogicMode: String(args.weatherLogicMode ?? "LAST_YEAR_ACTUAL_WEATHER"),
     windowStartUtc: boundedStartDate,
     windowEndUtc: boundedEndDate,
     dateKeyCount: dateKeys.length,

@@ -29,6 +29,11 @@ import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } f
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
 import {
+  resolveWeatherKindForLogicMode,
+  resolveWeatherLogicModeFromBuildInputs,
+  type WeatherLogicMode,
+} from "@/modules/usageSimulator/pastSimWeatherPolicy";
+import {
   createSimCorrelationId,
   getMemoryRssMb,
   logSimPipelineEvent,
@@ -56,6 +61,7 @@ export type WeatherFallbackReason =
   | null;
 
 export type WeatherProvenance = {
+  weatherLogicMode?: WeatherLogicMode;
   weatherKindUsed: string | undefined;
   /** When provenance is missing (e.g. cache restore from older cache), use "unknown" so UI never implies actual weather. */
   weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" | "unknown";
@@ -287,10 +293,11 @@ function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
 }
 
 function summarizePastWindowWeatherProvenance(args: {
-  actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  selectedWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  weatherLogicMode: WeatherLogicMode;
   weatherFallbackReason: WeatherFallbackReason;
 }): WeatherProvenance {
-  const wxEntries = Array.from(args.actualWxByDateKey.entries());
+  const wxEntries = Array.from(args.selectedWxByDateKey.entries());
   const dateKeysSorted = wxEntries.map(([dk]) => dk).sort();
   let weatherStubRowCount = 0;
   const sourcesSeen = new Set<string>();
@@ -310,6 +317,7 @@ function summarizePastWindowWeatherProvenance(args: {
     else weatherSourceSummary = "mixed_actual_and_stub";
   }
   return {
+    weatherLogicMode: args.weatherLogicMode,
     weatherKindUsed,
     weatherSourceSummary,
     weatherFallbackReason: args.weatherFallbackReason,
@@ -330,12 +338,14 @@ export async function loadWeatherForPastWindow(args: {
   startDate: string;
   endDate: string;
   canonicalDateKeys: string[];
+  weatherLogicMode: WeatherLogicMode;
 }): Promise<{
   actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  selectedWeatherByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   provenance: WeatherProvenance;
 }> {
-  const { houseId, startDate, endDate, canonicalDateKeys } = args;
+  const { houseId, startDate, endDate, canonicalDateKeys, weatherLogicMode } = args;
   const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
@@ -349,8 +359,16 @@ export async function loadWeatherForPastWindow(args: {
     return {
       actualWxByDateKey,
       normalWxByDateKey,
+      selectedWeatherByDateKey:
+        weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+          ? normalWxByDateKey
+          : actualWxByDateKey,
       provenance: summarizePastWindowWeatherProvenance({
-        actualWxByDateKey,
+        selectedWxByDateKey:
+          weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+            ? normalWxByDateKey
+            : actualWxByDateKey,
+        weatherLogicMode,
         weatherFallbackReason: null,
       }),
     };
@@ -383,8 +401,16 @@ export async function loadWeatherForPastWindow(args: {
     return {
       actualWxByDateKey: actualWx2,
       normalWxByDateKey: normalWx2,
+      selectedWeatherByDateKey:
+        weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+          ? normalWx2
+          : actualWx2,
       provenance: summarizePastWindowWeatherProvenance({
-        actualWxByDateKey: actualWx2,
+        selectedWxByDateKey:
+          weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+            ? normalWx2
+            : actualWx2,
+        weatherLogicMode,
         weatherFallbackReason,
       }),
     };
@@ -398,8 +424,16 @@ export async function loadWeatherForPastWindow(args: {
   return {
     actualWxByDateKey: actualWx3,
     normalWxByDateKey: normalWx3,
+    selectedWeatherByDateKey:
+      weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+        ? normalWx3
+        : actualWx3,
     provenance: summarizePastWindowWeatherProvenance({
-      actualWxByDateKey: actualWx3,
+      selectedWxByDateKey:
+        weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+          ? normalWx3
+          : actualWx3,
+      weatherLogicMode,
       weatherFallbackReason: "missing_lat_lng",
     }),
   };
@@ -444,6 +478,7 @@ export type SimulatePastUsageDatasetResult = {
   shapeMonthsPresent: string[];
   /** For callers that attach dailyWeather or need weather for overlay. */
   actualWxByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  selectedWeatherByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   /** For recalc path to set pastPatchedCurve and monthlyTotalsKwhByMonth. */
   stitchedCurve?: SimulatedCurve;
   /** Supplemental metadata for simulated dates only. */
@@ -460,6 +495,7 @@ export type SimulatePastSelectedDaysResult = {
   canonicalSimulatedDayTotalsByDate?: Record<string, number>;
   pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
   actualWxByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  selectedWeatherByDateKey?: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
   weatherKindUsed: string | undefined;
   usageShapeProfileDiag?: SharedSimUsageShapeProfileDiag;
@@ -481,6 +517,7 @@ export type SimulatePastFullWindowSharedResult = {
   canonicalSimulatedDayTotalsByDate?: Record<string, number>;
   pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number };
   actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  selectedWeatherByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   weatherSourceSummary: WeatherProvenance["weatherSourceSummary"];
   weatherKindUsed: string | undefined;
   weatherProviderName: string | null;
@@ -890,11 +927,15 @@ export async function simulatePastUsageDataset(
     });
     let weatherLoaded: Awaited<ReturnType<typeof loadWeatherForPastWindow>> | null = null;
     try {
+      const weatherLogicMode = resolveWeatherLogicModeFromBuildInputs(
+        (args.buildInputs ?? {}) as Record<string, unknown>
+      );
       weatherLoaded = await loadWeatherForPastWindow({
         houseId: actualHouseId,
         startDate,
         endDate,
         canonicalDateKeys,
+        weatherLogicMode,
       });
       const { provenance } = weatherLoaded;
       logSimPipelineEvent("day_simulation_weather_load_success", {
@@ -926,7 +967,7 @@ export async function simulatePastUsageDataset(
     if (!weatherLoaded) {
       throw new Error("weather_load_unavailable");
     }
-    const { actualWxByDateKey, normalWxByDateKey, provenance } = weatherLoaded;
+    const { actualWxByDateKey, normalWxByDateKey, selectedWeatherByDateKey, provenance } = weatherLoaded;
     const postWeatherPrepStartedAt = Date.now();
     logSimPipelineEvent("day_simulation_post_weather_prep_start", {
       correlationId,
@@ -937,7 +978,9 @@ export async function simulatePastUsageDataset(
       source: "simulatePastUsageDataset",
       memoryRssMb: getMemoryRssMb(),
     });
-    const smtBaselineStrictWeather = buildInputs.mode === "SMT_BASELINE";
+    const smtBaselineStrictWeather =
+      buildInputs.mode === "SMT_BASELINE" &&
+      provenance.weatherLogicMode !== "LONG_TERM_AVERAGE_WEATHER";
     if (smtBaselineStrictWeather && provenance.weatherSourceSummary !== "actual_only") {
       logSimPipelineEvent("day_simulation_post_weather_prep_failure", {
         correlationId,
@@ -971,6 +1014,10 @@ export async function simulatePastUsageDataset(
           normalWxByDateKey,
           canonicalDateKeys,
         });
+    const weatherByDateKeyForSimulation =
+      provenance.weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+        ? selectedWeatherByDateKey
+        : mergedActualWxByDateKey;
 
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     const [homeRecForPast, applianceRecForPast, ensuredUsageShape] = await Promise.all([
@@ -1096,7 +1143,7 @@ export async function simulatePastUsageDataset(
         applianceProfile: applianceProfileForPast,
         usageShapeProfile: usageShapeProfileSnap ?? undefined,
         timezoneForProfile: timezone ?? undefined,
-        actualWxByDateKey: mergedActualWxByDateKey,
+        actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
         collectSimulatedDayResultsDateKeys,
@@ -1395,6 +1442,7 @@ export async function simulatePastUsageDataset(
         excludedDateKeysCount: excludedDateKeys.size,
         excludedDateKeysFingerprint,
         leadingMissingDaysCount: pastDayCounts.leadingMissingDays ?? undefined,
+        weatherLogicMode: provenance.weatherLogicMode,
         weatherKindUsed: provenance.weatherKindUsed,
         weatherSourceSummary: provenance.weatherSourceSummary,
         weatherFallbackReason: provenance.weatherFallbackReason,
@@ -1437,7 +1485,8 @@ export async function simulatePastUsageDataset(
       meta: (dataset?.meta as Record<string, unknown>) ?? {},
       pastDayCounts,
       shapeMonthsPresent,
-      actualWxByDateKey: mergedActualWxByDateKey,
+      actualWxByDateKey: weatherByDateKeyForSimulation,
+      selectedWeatherByDateKey: weatherByDateKeyForSimulation,
       // lab_validation (Gap-Fill / shared compare): dataset already carries `series.intervals15`;
       // omitting duplicate `SimulatedCurve` cuts peak heap. cold_build/recalc still return it.
       stitchedCurve: buildPathKind === "lab_validation" ? undefined : stitchedCurve,
@@ -1519,6 +1568,7 @@ export async function simulatePastFullWindowShared(
           | undefined),
       pastDayCounts: sharedResult.pastDayCounts,
       actualWxByDateKey: sharedResult.actualWxByDateKey ?? new Map(),
+      selectedWeatherByDateKey: sharedResult.selectedWeatherByDateKey ?? new Map(),
       weatherSourceSummary: String((sharedResult.meta as any)?.weatherSourceSummary ?? "unknown") as WeatherProvenance["weatherSourceSummary"],
       weatherKindUsed: (sharedResult.meta as any)?.weatherKindUsed as string | undefined,
       weatherProviderName: String((sharedResult.meta as any)?.weatherProviderName ?? "") || null,
@@ -1649,6 +1699,7 @@ export async function simulatePastSelectedDaysShared(
       canonicalSimulatedDayTotalsByDate,
       pastDayCounts: sharedResult.pastDayCounts,
       actualWxByDateKey: sharedResult.actualWxByDateKey,
+      selectedWeatherByDateKey: sharedResult.selectedWeatherByDateKey,
       weatherSourceSummary: sharedResult.weatherSourceSummary,
       weatherKindUsed: sharedResult.weatherKindUsed,
       usageShapeProfileDiag: sharedResult.usageShapeProfileDiag,

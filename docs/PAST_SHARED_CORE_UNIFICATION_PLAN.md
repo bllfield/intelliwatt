@@ -22,8 +22,10 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Artifact-producing rebuilds normalize inputs then call the same shared recalc producer path before persistence; GapFill diagnostics may differ only after stored outputs exist.
   - GapFill Actual Home is the exact same user Past Sim flow with a different trigger/view surface only; it stays on `userValidationPolicy` and the shared persisted read/display path.
   - GapFill Test Home may fork only before lockbox entry: admin-owned validation policy plus usage input mode (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). After normalization it must use the same lockbox producer chain and artifact writer.
+  - Weather logic is pre-lockbox only: user Past owns `userWeatherLogicSetting`; GapFill Actual/Test share `gapfillWeatherLogicSetting` for a run; the shared resolver and lockbox chain stay the same after normalization.
 - **Metadata**
   - dataset.meta includes: buildPathKind, sourceOfDaySimulationCore, simVersion, derivationVersion, weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount, dailyRowCount, intervalCount, coverageStart/End, actualDayCount, simulatedDayCount, stitchedDayCount, actualIntervalsCount, referenceDaysCount, shapeMonthsPresent, excludedDateKeysCount, leadingMissingDaysCount, usageShapeProfileDiag, etc.
+  - Shared parity/tuning diagnostics now normalize to one contract: `identityContext`, `sourceTruthContext`, `lockboxExecutionSummary`, `projectionReadSummary`, and `tuningSummary`.
 - **UsageDashboard**
   - `getWeatherBasisLabel(meta)` surfaces weatherFallbackReason for stub/mixed (e.g. "no coordinates", "partial coverage", "API unavailable"); does not imply actual weather when summary is stub_only, mixed, or unknown.
 
@@ -60,6 +62,7 @@ Summary:
 - GapFill compare reads compact persisted truth only: selected-day actual intervals, canonical artifact simulated-day totals, compare sidecar rows/metrics, and compact trace metadata.
 - DB travel/vacant parity is a post-persist analysis concern: it may validate persisted canonical artifact totals, but it must not trigger a Gap-Fill-owned selected-days/full-window compare simulation path.
 - Compare-core must return compact scored-day weather truth from persisted read models only; route/UI consumers must not reconstruct scored-day weather independently.
+- Compare-core weather enrichment must reuse the same compare-row weather helper used by user Past display rows when matching daily weather already exists on the persisted read model.
 - Scored-day compare/sim integrity: simulated-side fields come only from persisted canonical shared simulated outputs and artifact canonical simulated-day totals. **ACTUAL must never substitute for simulated** on the simulated side; missing simulated references stay missing with explicit `missing_expected_reference` / reason codes, not silent recovery.
 - Heavy diagnostics/report retries should use compact merge-only response shaping so the heavy step returns diagnostics/report data without re-serializing the full core payload.
 - Heavy report expands the same compact scored-day weather truth into richer weather inspection/report output; no separate route-only weather path is allowed.

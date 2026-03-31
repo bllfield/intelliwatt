@@ -150,6 +150,8 @@ describe("user simulated house compare projection", () => {
     expect(body.compareProjection.rows[0]?.weather?.tAvgF).toBe(62);
     expect(body.compareProjection.rows[0]?.weather?.weatherMissing).toBe(false);
     expect(body.compareProjection.metrics?.wape).toBe(10);
+    expect(body.sharedDiagnostics?.identityContext?.callerType).toBe("user_past");
+    expect(body.sharedDiagnostics?.projectionReadSummary?.validationRowsCount).toBe(1);
     expect(buildValidationCompareProjectionSidecar).toHaveBeenCalledTimes(1);
   });
 

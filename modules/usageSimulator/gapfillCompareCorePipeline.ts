@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+import {
+  buildValidationCompareProjectionSidecar,
+  compareWeatherFromDailyWeather,
+} from "@/modules/usageSimulator/compareProjection";
+import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import {
   getSimulatedUsageForHouseScenario,
 } from "@/modules/usageSimulator/service";
@@ -484,6 +488,10 @@ export async function runGapfillCompareCorePipeline(
     const actualDayKwh = round2(actualDailyByDate.get(dk) ?? 0);
     const freshCompareSimDayKwh = round2(simDailyFromMeta.get(dk) ?? 0);
     const dow = getLocalDayOfWeekFromDateKey(dk, timezone);
+    const weather = compareWeatherFromDailyWeather(
+      (canonicalDataset as any)?.dailyWeather,
+      dk
+    );
     return {
       localDate: dk,
       actualDayKwh,
@@ -494,14 +502,14 @@ export async function runGapfillCompareCorePipeline(
       parityAvailability: "available",
       parityReasonCode: "display_matches_canonical_artifact",
       dayType: dow === 0 || dow === 6 ? "weekend" : "weekday",
-      weatherBasis: null,
-      weatherSourceUsed: null,
-      weatherFallbackReason: null,
-      avgTempF: null,
-      minTempF: null,
-      maxTempF: null,
-      hdd65: null,
-      cdd65: null,
+      weatherBasis: weather.weatherMissing ? null : "daily_weather",
+      weatherSourceUsed: weather.source ?? null,
+      weatherFallbackReason: weather.weatherMissing ? "weather_missing_for_selected_date" : null,
+      avgTempF: weather.tAvgF,
+      minTempF: weather.tMinF,
+      maxTempF: weather.tMaxF,
+      hdd65: weather.hdd65,
+      cdd65: weather.cdd65,
       fallbackLevel: null,
       selectedDayTotalSource: "canonical_artifact_simulated_day_total",
       selectedShapeVariant: null,
@@ -585,6 +593,18 @@ export async function runGapfillCompareCorePipeline(
       compareFreshModeUsed: "artifact_only",
       compareExecutionMode: "canonical_artifact_only",
     },
+    sharedDiagnostics: buildSharedPastSimDiagnostics({
+      callerType: "gapfill_test",
+      dataset: canonicalDataset,
+      scenarioId: String(pastScenario.id),
+      usageInputMode: String((canonicalDataset as any)?.meta?.lockboxInput?.mode ?? "ACTUAL_INTERVAL_BASELINE"),
+      weatherLogicMode: String((canonicalDataset as any)?.meta?.weatherLogicMode ?? ""),
+      compareProjection: userPipelineCompareProjection ?? undefined,
+      readMode: "artifact_only",
+      projectionMode: "baseline",
+      artifactInputHash: exactArtifactInputHash ?? null,
+      artifactPersistenceOutcome: "persisted_artifact_compare_read",
+    }),
   };
 
   const finalized = await finalizeGapfillCompareRunSnapshot({

@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
+import type { WeatherLogicMode } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
@@ -16,6 +17,7 @@ export type PastSimSourceContext = {
   window: { startDate: string; endDate: string } | null;
   timezone: string | null;
   intervalFingerprint: string | null;
+  weatherLogicMode: WeatherLogicMode | null;
   weatherIdentity: string | null;
   sourceDerivedMonthlyTotalsKwhByMonth: Record<string, number> | null;
   sourceDerivedAnnualTotalKwh: number | null;
@@ -170,6 +172,7 @@ export function buildInitialPastSimLockboxInput(args: {
   validationSelectionMode?: ValidationDaySelectionMode | "manual" | null;
   testHomeId?: string | null;
   weatherPreference?: WeatherPreference | null;
+  weatherLogicMode?: WeatherLogicMode | null;
 }): PastSimLockboxInput {
   const sourceHouseId = String(args.actualContextHouseId ?? args.houseId);
   const testHomeId = String(args.testHomeId ?? args.houseId);
@@ -189,6 +192,7 @@ export function buildInitialPastSimLockboxInput(args: {
       window: null,
       timezone: null,
       intervalFingerprint: null,
+      weatherLogicMode: args.weatherLogicMode ?? null,
       weatherIdentity: null,
       sourceDerivedMonthlyTotalsKwhByMonth: null,
       sourceDerivedAnnualTotalKwh: null,
@@ -226,6 +230,7 @@ export function finalizePastSimLockboxInput(args: {
   window: { startDate: string; endDate: string } | null;
   timezone: string | null;
   intervalFingerprint: string | null;
+  weatherLogicMode?: WeatherLogicMode | null;
   weatherIdentity: string | null;
   sourceDerivedMonthlyTotalsKwhByMonth: Record<string, number> | null;
   sourceDerivedAnnualTotalKwh: number | null;
@@ -242,6 +247,7 @@ export function finalizePastSimLockboxInput(args: {
       window: args.window,
       timezone: args.timezone,
       intervalFingerprint: args.intervalFingerprint,
+      weatherLogicMode: args.weatherLogicMode ?? args.base.sourceContext.weatherLogicMode,
       weatherIdentity: args.weatherIdentity,
       sourceDerivedMonthlyTotalsKwhByMonth: args.sourceDerivedMonthlyTotalsKwhByMonth,
       sourceDerivedAnnualTotalKwh: args.sourceDerivedAnnualTotalKwh,

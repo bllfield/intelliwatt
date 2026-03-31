@@ -10,6 +10,8 @@
 - **localDate vs intervals**: interval timestamps determine local-date membership; if `SimulatedDayResult.localDate` disagrees, the shared path fails loudly (`simulated_day_local_date_interval_invariant_violation`).
 - **GapFill Actual Home** must remain identical to the normal user Past flow: same user-owned validation policy, same source truth, same sealed lockbox chain, same artifact family, same shared display path.
 - **GapFill Test Home** may diverge only before lockbox entry via admin-owned validation policy and the four usage input modes (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). No post-entry branch is allowed.
+- **Shared diagnostics contract** must drive parity/tuning surfaces for user Past, GapFill Actual Home, GapFill Test Home, and compare read-side views. Thin UI wrappers are fine; separate truth-bearing diagnostics shapes are not.
+- **Shared weather selector rule**: user Past owns `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home share `gapfillWeatherLogicSetting` within a run. The selector difference is pre-lockbox only; the resolver/path/display remain shared.
 - **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
 
 - No duplicate functional logic is allowed across files.
@@ -147,6 +149,7 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - Shared window/date ownership remains locked: compare identity comes from `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage comes from `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership.
 - Shared weather truth is owned by `loadWeatherForPastWindow`; it must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily rows when the requested canonical window is already covered, instead of re-pulling weather.
 - Shared weather backfill/stub repair is only for missing or `STUB_V1` dates, and the resulting provenance must truthfully report whether coverage is `actual_only`, `mixed_actual_and_stub`, or `stub_only`.
+- Weather logic mode must participate in artifact identity/fingerprint inputs so weather-mode changes rerun cleanly instead of silently reusing stale artifact truth.
 - GapFill must not create a compare artifact, create a compare-mask fingerprint, change artifact identity, rebuild simulated intervals locally, or perform simulation math in routes/tools outside the shared modules.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

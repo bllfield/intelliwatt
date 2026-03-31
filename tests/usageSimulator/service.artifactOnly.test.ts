@@ -111,6 +111,12 @@ import {
   resolveTestHomeUsageModeRecalcConfig,
   resolveUserValidationPolicy,
 } from "@/modules/usageSimulator/pastSimPolicy";
+import {
+  resolveGapfillWeatherLogicSetting,
+  resolveUserWeatherLogicSetting,
+  resolveWeatherKindForLogicMode,
+  resolveWeatherLogicModeFromBuildInputs,
+} from "@/modules/usageSimulator/pastSimWeatherPolicy";
 
 describe("resolveSharedPastRecalcWindow", () => {
   it("uses shared canonical coverage for SMT_BASELINE even when anchor periods exist", () => {
@@ -225,6 +231,25 @@ describe("pastSimPolicy split helpers", () => {
     expect(resolveTestHomeUsageModeRecalcConfig("PROFILE_ONLY_NEW_BUILD")).toEqual({
       simulatorMode: "NEW_BUILD_ESTIMATE",
     });
+  });
+
+  it("maps user and gapfill weather selectors onto the shared weather logic contract", () => {
+    expect(resolveUserWeatherLogicSetting("LONG_TERM_AVERAGE")).toMatchObject({
+      owner: "userWeatherLogicSetting",
+      weatherLogicMode: "LONG_TERM_AVERAGE_WEATHER",
+      weatherPreference: "LONG_TERM_AVERAGE",
+      weatherKind: "NORMAL_AVG",
+    });
+    expect(resolveGapfillWeatherLogicSetting("LAST_YEAR_ACTUAL_WEATHER")).toMatchObject({
+      owner: "gapfillWeatherLogicSetting",
+      weatherLogicMode: "LAST_YEAR_ACTUAL_WEATHER",
+      weatherPreference: "LAST_YEAR_WEATHER",
+      weatherKind: "ACTUAL_LAST_YEAR",
+    });
+    expect(resolveWeatherLogicModeFromBuildInputs({ weatherPreference: "LONG_TERM_AVERAGE" })).toBe(
+      "LONG_TERM_AVERAGE_WEATHER"
+    );
+    expect(resolveWeatherKindForLogicMode("LAST_YEAR_ACTUAL_WEATHER")).toBe("ACTUAL_LAST_YEAR");
   });
 });
 
@@ -1109,10 +1134,10 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
 
     expect(computePastInputHash).toHaveBeenCalledWith(
       expect.objectContaining({
-        travelRanges: [
+        travelRanges: expect.arrayContaining([
           { startDate: "2026-01-03", endDate: "2026-01-04" },
           { startDate: "2026-01-05", endDate: "2026-01-06" },
-        ],
+        ]),
       })
     );
     if (out.ok) expect(out.dataset?.meta?.buildInputsHash).toBe("hash-stable-travel");

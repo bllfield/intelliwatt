@@ -377,6 +377,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
                   simulatedDayKwh: 9.5,
                   errorKwh: 7.5,
                   percentError: 375,
+                  weather: {
+                    tAvgF: 62,
+                    tMinF: 55,
+                    tMaxF: 70,
+                    hdd65: 3,
+                    cdd65: 1,
+                    source: "actual_cached",
+                    weatherMissing: false,
+                  },
                 },
               ],
               validationCompareMetrics: {
@@ -888,6 +897,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.profiles?.homeProfileLive).toEqual({ hvac: {} });
     expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
     expect(body.pastSimSnapshot?.engineContext?.rawActualIntervalsMeta?.intervalCount).toBe(96);
+    expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_actual");
+    expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.weatherLogicMode).toBe("LAST_YEAR_ACTUAL_WEATHER");
   });
 
   it("logs a source-home failure event when pre-dispatch Actual Home setup throws", async () => {
@@ -994,6 +1005,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     }
     expect(compareDates).not.toContain("2025-05-02");
     expect(body.compareProjectionSummary?.rowCount).toBe(body.compareProjection?.rows?.length ?? 0);
+    expect(body.compareProjection?.rows?.[0]?.weather?.tAvgF).toBe(62);
+    expect(body.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_test");
+    expect(body.sharedDiagnostics?.identityContext?.weatherLogicMode).toBe("LAST_YEAR_ACTUAL_WEATHER");
+    expect(body.sharedDiagnostics?.projectionReadSummary?.validationRowsCount).toBe(1);
     expect(body.diagnosticsVerdict?.selectedValidationDateCount).toBe(1);
     expect(body.diagnosticsVerdict?.compareRowCount).toBe(body.compareProjectionSummary?.rowCount ?? 0);
     expect(typeof body.diagnosticsVerdict?.compareRowsMatchSelectedDates).toBe("boolean");
@@ -1006,6 +1021,42 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       meta?: { validationOnlyDateKeysLocal?: string[] };
     };
     expect(Array.isArray(compareInput?.meta?.validationOnlyDateKeysLocal)).toBe(true);
+  });
+
+  it("uses the same selected gapfill weather mode for Actual Home and Test Home runs", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+
+    const actualReq = buildRequest({
+      action: "run_source_home_past_sim_snapshot",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      weatherKind: "LONG_TERM_AVERAGE_WEATHER",
+      includeUsage365: false,
+    });
+    const actualRes = await POST(actualReq);
+    const actualBody = await actualRes.json();
+
+    const testReq = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      weatherKind: "LONG_TERM_AVERAGE_WEATHER",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const testRes = await POST(testReq);
+    const testBody = await testRes.json();
+
+    expect(actualRes.status).toBe(200);
+    expect(testRes.status).toBe(200);
+    expect(dispatchPastSimRecalc.mock.calls[0]?.[0]?.weatherPreference).toBe("LONG_TERM_AVERAGE");
+    expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.weatherPreference).toBe("LONG_TERM_AVERAGE");
+    expect(actualBody.pastSimSnapshot?.weatherLogicMode).toBe("LONG_TERM_AVERAGE_WEATHER");
+    expect(testBody.weatherLogicMode).toBe("LONG_TERM_AVERAGE_WEATHER");
   });
 
   it("reuses canonical source travel and validation state for exact-interval source-copy runs", async () => {

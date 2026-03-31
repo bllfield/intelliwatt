@@ -760,6 +760,7 @@ export type SimulatorBuildInputsV1 = {
   // For manual billing-period semantics (V1): optional explicit periods overriding calendar-month bucketing.
   canonicalPeriods?: Array<{ id: string; startDate: string; endDate: string }>;
   weatherPreference?: "NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE";
+  weatherLogicMode?: "LAST_YEAR_ACTUAL_WEATHER" | "LONG_TERM_AVERAGE_WEATHER";
   weatherNormalizerVersion?: string;
   monthlyTotalsKwhByMonth: Record<string, number>;
   intradayShape96: number[];
@@ -875,6 +876,7 @@ export type SimulatedUsageDatasetMeta = {
   excludedDateKeysCount?: number;
   excludedDateKeysFingerprint?: string;
   leadingMissingDaysCount?: number;
+  weatherLogicMode?: "LAST_YEAR_ACTUAL_WEATHER" | "LONG_TERM_AVERAGE_WEATHER";
   /** Past: weather provenance — kind used (e.g. ACTUAL_LAST_YEAR, STUB_V1, MIXED). */
   weatherKindUsed?: string;
   /** Past: stub_only | actual_only | mixed_actual_and_stub | none | unknown (unknown when provenance missing, e.g. cache restore). */

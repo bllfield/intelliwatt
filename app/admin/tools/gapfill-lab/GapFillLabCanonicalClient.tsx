@@ -51,6 +51,7 @@ type RunResult = {
   selectionDiagnostics?: Record<string, unknown>;
   validationSelectionDiagnostics?: Record<string, unknown>;
   weatherKind?: string;
+  weatherLogicMode?: string;
   testSelectionMode?: string;
   sourceHouseId?: string;
   /** Past sim scenario id for the test-home build when returned by the API. */
@@ -417,7 +418,7 @@ export default function GapFillLabCanonicalClient() {
   const [testRanges, setTestRanges] = useState<DateRange[]>([{ ...EMPTY_RANGE }]);
   const [randomMode, setRandomMode] = useState(false);
   const [testDays, setTestDays] = useState(21);
-  const [weatherKind, setWeatherKind] = useState<"ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo">("open_meteo");
+  const [weatherKind, setWeatherKind] = useState<"LAST_YEAR_ACTUAL_WEATHER" | "LONG_TERM_AVERAGE_WEATHER">("LAST_YEAR_ACTUAL_WEATHER");
   const [userDefaultValidationSelectionMode, setUserDefaultValidationSelectionMode] = useState("random_simple");
   const [adminLabValidationSelectionMode, setAdminLabValidationSelectionMode] = useState("stratified_weather_balanced");
   /** Test-home usage input split; sent on recalc only before the shared lockbox entry. */
@@ -1246,11 +1247,10 @@ export default function GapFillLabCanonicalClient() {
             </select>
           </label>
           <label className="text-xs">
-            <span className="block mb-1">Weather Source</span>
+            <span className="block mb-1">Weather Logic</span>
             <select className="w-full border rounded px-2 py-2 text-sm" value={weatherKind} onChange={(e) => setWeatherKind(e.target.value as any)}>
-              <option value="open_meteo">Live (Open-Meteo)</option>
-              <option value="ACTUAL_LAST_YEAR">Last year temps</option>
-              <option value="NORMAL_AVG">Average temps</option>
+              <option value="LAST_YEAR_ACTUAL_WEATHER">Last year actual weather</option>
+              <option value="LONG_TERM_AVERAGE_WEATHER">Long-term average weather</option>
             </select>
           </label>
           <label className="text-xs flex items-center gap-2 mt-5">
@@ -1468,6 +1468,12 @@ export default function GapFillLabCanonicalClient() {
                     },
                   ]}
                 />
+                <details className="rounded border p-3">
+                  <summary className="cursor-pointer font-semibold text-xs">Actual House shared diagnostics</summary>
+                  <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+                    {JSON.stringify((pastSimSnapshot as any)?.sharedDiagnostics ?? null, null, 2)}
+                  </pre>
+                </details>
                 <details className="rounded border p-3">
                   <summary className="cursor-pointer font-semibold text-xs">Actual House build diagnostics</summary>
                   <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
@@ -1740,6 +1746,13 @@ export default function GapFillLabCanonicalClient() {
               </div>
             </div>
           </div>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-semibold text-xs">Shared Diagnostics Contract</summary>
+            <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+              {JSON.stringify((result as any)?.sharedDiagnostics ?? null, null, 2)}
+            </pre>
+          </details>
 
           <details className="rounded border p-3">
             <summary className="cursor-pointer font-semibold text-xs">Canonical Read Result Summary</summary>

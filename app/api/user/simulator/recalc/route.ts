@@ -6,6 +6,7 @@ import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDis
 import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
 import { getUserDefaultValidationSelectionMode } from "@/modules/usageSimulator/service";
 import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
+import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import {
@@ -96,6 +97,7 @@ export async function POST(request: NextRequest) {
       weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
         ? (weatherPreferenceRaw as WeatherPreference)
         : undefined;
+    const userWeatherLogic = resolveUserWeatherLogicSetting(weatherPreference ?? "LAST_YEAR_WEATHER");
     const userValidationPolicy = resolveUserValidationPolicy({
       defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
       validationDayCount: 21,
@@ -130,7 +132,7 @@ export async function POST(request: NextRequest) {
       esiid: house.esiid ?? null,
       mode,
       scenarioId,
-      weatherPreference,
+      weatherPreference: userWeatherLogic.weatherPreference,
       persistPastSimBaseline: true,
       validationDaySelectionMode: userValidationPolicy.selectionMode,
       validationDayCount: userValidationPolicy.validationDayCount,

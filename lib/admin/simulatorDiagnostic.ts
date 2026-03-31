@@ -12,6 +12,7 @@ import { recomputePastAggregatesFromIntervals } from "@/modules/usageSimulator/d
 import { classifyPastCacheIntegrity, type CacheIntegrityReason } from "@/modules/usageSimulator/parityIntegrity";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { computePastInputHash, PAST_ENGINE_VERSION } from "@/modules/usageSimulator/pastCache";
+import { resolveWeatherLogicModeFromBuildInputs } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
@@ -372,6 +373,9 @@ export async function runSimulatorDiagnostic(
     houseId,
     startDate,
     endDate,
+    weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(
+      (buildInputs ?? {}) as Record<string, unknown>
+    ),
   });
   const inputHash = computePastInputHash({
     engineVersion: PAST_ENGINE_VERSION,

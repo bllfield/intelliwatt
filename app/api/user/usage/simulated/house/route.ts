@@ -8,6 +8,7 @@ import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
+import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
 
 export const dynamic = "force-dynamic";
@@ -137,12 +138,22 @@ export async function GET(request: NextRequest) {
     if (out.ok) {
       const datasetAny = (out as any)?.dataset ?? {};
       const compareProjection = buildValidationCompareProjectionSidecar(datasetAny);
+      const sharedDiagnostics = buildSharedPastSimDiagnostics({
+        callerType: "user_past",
+        dataset: datasetAny,
+        scenarioId,
+        correlationId,
+        compareProjection,
+        readMode: "allow_rebuild",
+        projectionMode: "baseline",
+      });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
       return NextResponse.json(
         {
           ...out,
           compareProjection,
+          sharedDiagnostics,
           correlationId,
         },
         { headers: okHeaders }

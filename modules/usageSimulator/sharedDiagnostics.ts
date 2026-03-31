@@ -1,0 +1,179 @@
+import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+
+export type SharedDiagnosticsCallerType =
+  | "user_past"
+  | "gapfill_actual"
+  | "gapfill_test";
+
+export type SharedPastSimDiagnostics = {
+  identityContext: Record<string, unknown>;
+  sourceTruthContext: Record<string, unknown>;
+  lockboxExecutionSummary: Record<string, unknown>;
+  projectionReadSummary: Record<string, unknown>;
+  tuningSummary: Record<string, unknown>;
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function normalizeRows(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((row) => row && typeof row === "object" && !Array.isArray(row)) as Array<Record<string, unknown>>
+    : [];
+}
+
+function summarizeDailySources(dataset: any): Record<string, number> {
+  const counts: Record<string, number> = {};
+  const dailyRows = Array.isArray(dataset?.daily) ? dataset.daily : [];
+  for (const row of dailyRows) {
+    const source = String((row as any)?.sourceDetail ?? (row as any)?.source ?? "unknown").trim() || "unknown";
+    counts[source] = (counts[source] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function summarizeTuningRows(compareProjection: { rows?: unknown; metrics?: unknown } | null | undefined) {
+  const rows = normalizeRows(compareProjection?.rows).map((row) => ({
+    localDate: String(row.localDate ?? "").slice(0, 10),
+    dayType: row.dayType === "weekend" ? "weekend" : "weekday",
+    actualDayKwh: typeof row.actualDayKwh === "number" ? row.actualDayKwh : null,
+    simulatedDayKwh: typeof row.simulatedDayKwh === "number" ? row.simulatedDayKwh : null,
+    errorKwh: typeof row.errorKwh === "number" ? row.errorKwh : null,
+    percentError: typeof row.percentError === "number" ? row.percentError : null,
+    weather: asRecord(row.weather),
+  }));
+  return {
+    selectedValidationRows: rows,
+    validationMetricsSummary: asRecord(compareProjection?.metrics),
+  };
+}
+
+export function buildSharedPastSimDiagnostics(args: {
+  callerType: SharedDiagnosticsCallerType;
+  dataset: any;
+  scenarioId: string | null;
+  correlationId?: string | null;
+  usageInputMode?: string | null;
+  validationPolicyOwner?: string | null;
+  weatherLogicMode?: string | null;
+  simulatorDiagnostic?: Record<string, unknown> | null;
+  readMode?: string | null;
+  projectionMode?: string | null;
+  artifactId?: string | null;
+  artifactInputHash?: string | null;
+  artifactEngineVersion?: string | null;
+  artifactPersistenceOutcome?: string | null;
+  compareProjection?: { rows?: unknown; metrics?: unknown } | null;
+}): SharedPastSimDiagnostics {
+  const dataset = args.dataset ?? {};
+  const meta = asRecord(dataset?.meta);
+  const lockboxInput = asRecord(meta.lockboxInput);
+  const sourceContext = asRecord(lockboxInput.sourceContext);
+  const profileContext = asRecord(lockboxInput.profileContext);
+  const validationKeys = asRecord(lockboxInput.validationKeys);
+  const lockboxTrace = asRecord(meta.lockboxPerRunTrace);
+  const stageTimings = asRecord(lockboxTrace.stageTimingsMs);
+  const compareProjection =
+    args.compareProjection ??
+    buildValidationCompareProjectionSidecar(dataset);
+  const simulatorDiagnostic = asRecord(args.simulatorDiagnostic);
+
+  return {
+    identityContext: {
+      callerType: args.callerType,
+      sourceHouseId: lockboxTrace.sourceHouseId ?? sourceContext.sourceHouseId ?? null,
+      profileHouseId: lockboxTrace.profileHouseId ?? profileContext.profileHouseId ?? null,
+      scenarioId: args.scenarioId,
+      simulatorMode: meta.mode ?? lockboxInput.mode ?? null,
+      usageInputMode: args.usageInputMode ?? lockboxInput.mode ?? null,
+      validationPolicyOwner: args.validationPolicyOwner ?? null,
+      weatherLogicMode:
+        args.weatherLogicMode ??
+        sourceContext.weatherLogicMode ??
+        meta.weatherLogicMode ??
+        null,
+      correlationId: args.correlationId ?? asRecord(meta.lockboxRunContext).correlationId ?? null,
+      buildPathKind:
+        asRecord(meta.lockboxRunContext).buildPathKind ??
+        (lockboxTrace.runContext
+          ? asRecord(lockboxTrace.runContext).buildPathKind
+          : null) ??
+        meta.buildPathKind ??
+        null,
+      inputHash: lockboxTrace.inputHash ?? null,
+      fullChainHash: lockboxTrace.fullChainHash ?? meta.fullChainHash ?? null,
+    },
+    sourceTruthContext: {
+      canonicalCoverageWindow: sourceContext.window ?? {
+        startDate: meta.coverageStart ?? dataset?.summary?.start ?? null,
+        endDate: meta.coverageEnd ?? dataset?.summary?.end ?? null,
+      },
+      intervalSourceIdentity: sourceContext.intervalFingerprint ?? null,
+      weatherSourceIdentity: meta.weatherSourceSummary ?? null,
+      weatherDatasetIdentity:
+        sourceContext.weatherIdentity ?? meta.weatherDatasetIdentity ?? null,
+      sourceDerivedMonthlyTotalsKwhByMonth:
+        sourceContext.sourceDerivedMonthlyTotalsKwhByMonth ?? null,
+      sourceDerivedAnnualTotalKwh:
+        sourceContext.sourceDerivedAnnualTotalKwh ?? null,
+      travelRangesUsed: asRecord(lockboxInput.travelRanges).ranges ?? [],
+      validationTestKeysUsed: validationKeys.localDateKeys ?? [],
+      exclusionDrivingCanonicalInputsSummary: {
+        excludedDateKeysCount: meta.excludedDateKeysCount ?? null,
+        excludedDateKeysFingerprint: meta.excludedDateKeysFingerprint ?? null,
+        actualContextHouseId: meta.actualContextHouseId ?? null,
+      },
+    },
+    lockboxExecutionSummary: {
+      exactStageListUsed: Object.keys(stageTimings).sort(),
+      stageTimings,
+      excludedDateKeyCount: meta.excludedDateKeysCount ?? null,
+      simulatedDayResultsCount: meta.simulatedDayCount ?? null,
+      keepRefUtcDateKeyCount: meta.gapfillForceModeledKeepRefUtcKeyCount ?? null,
+      intervalCount: meta.intervalCount ?? null,
+      dailyRowCount: meta.dailyRowCount ?? null,
+      artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
+      artifactId: args.artifactId ?? null,
+      artifactInputHash:
+        args.artifactInputHash ??
+        meta.artifactInputHashUsed ??
+        meta.artifactInputHash ??
+        null,
+      artifactEngineVersion:
+        args.artifactEngineVersion ??
+        meta.artifactEngineVersion ??
+        meta.simVersion ??
+        null,
+    },
+    projectionReadSummary: {
+      readMode: args.readMode ?? meta.artifactReadMode ?? null,
+      projectionMode: args.projectionMode ?? asRecord(meta.lockboxReadContext).projectionMode ?? null,
+      baselineProjectionSummary: {
+        validationOnlyDateKeyCount: Array.isArray(meta.validationOnlyDateKeysLocal)
+          ? meta.validationOnlyDateKeysLocal.length
+          : 0,
+        validationProjectionType: meta.validationProjectionType ?? null,
+      },
+      compareProjectionSummary: {
+        validationRowsCount: normalizeRows(compareProjection?.rows).length,
+        validationMetricsSummary: asRecord(compareProjection?.metrics),
+      },
+      validationRowsCount: normalizeRows(compareProjection?.rows).length,
+      validationMetricsSummary: asRecord(compareProjection?.metrics),
+    },
+    tuningSummary: {
+      ...summarizeTuningRows(compareProjection),
+      sourceDetailCountsByCategory: summarizeDailySources(dataset),
+      dailySourceClassificationsSummary: summarizeDailySources(dataset),
+      firstActualOnlyDayComparison:
+        simulatorDiagnostic.firstActualOnlyDayComparison ?? null,
+      stitchedVsRawIntervalSummary: {
+        rawActualIntervalsMeta: simulatorDiagnostic.rawActualIntervalsMeta ?? null,
+        stitchedPastIntervalsMeta: simulatorDiagnostic.stitchedPastIntervalsMeta ?? null,
+      },
+    },
+  };
+}

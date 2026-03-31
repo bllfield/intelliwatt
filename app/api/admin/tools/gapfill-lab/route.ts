@@ -75,6 +75,11 @@ import {
   type TestHomeUsageInputMode,
   type ValidationPolicyOwner,
 } from "@/modules/usageSimulator/pastSimPolicy";
+import {
+  resolveGapfillWeatherLogicSetting,
+  resolveUserWeatherLogicSetting,
+} from "@/modules/usageSimulator/pastSimWeatherPolicy";
+import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
@@ -477,10 +482,20 @@ export async function POST(req: NextRequest) {
   const trainMaxDays = Math.max(7, Math.min(365, Math.floor(Number(body?.trainMaxDays) || 365)));
   const trainGapDays = Math.max(0, Math.min(30, Math.floor(Number(body?.trainGapDays) || 2)));
 
-  const VALID_WEATHER_KINDS = ["ACTUAL_LAST_YEAR", "NORMAL_AVG", "open_meteo"] as const;
+  const VALID_WEATHER_KINDS = [
+    "ACTUAL_LAST_YEAR",
+    "NORMAL_AVG",
+    "open_meteo",
+    "LAST_YEAR_ACTUAL_WEATHER",
+    "LONG_TERM_AVERAGE_WEATHER",
+  ] as const;
   type WeatherKindParam = (typeof VALID_WEATHER_KINDS)[number];
-  const rawWeatherKind = String(body?.weatherKind ?? "open_meteo").trim();
-  const weatherKind: WeatherKindParam = VALID_WEATHER_KINDS.includes(rawWeatherKind as WeatherKindParam) ? (rawWeatherKind as WeatherKindParam) : "open_meteo";
+  const rawWeatherKind = String(body?.weatherKind ?? "LAST_YEAR_ACTUAL_WEATHER").trim();
+  const normalizedWeatherKind: WeatherKindParam = VALID_WEATHER_KINDS.includes(rawWeatherKind as WeatherKindParam)
+    ? (rawWeatherKind as WeatherKindParam)
+    : "LAST_YEAR_ACTUAL_WEATHER";
+  const gapfillWeatherLogic = resolveGapfillWeatherLogicSetting(normalizedWeatherKind);
+  const weatherKind: WeatherKindParam = normalizedWeatherKind;
 
   const rawAdminLabTreatment = typeof body?.adminLabTreatmentMode === "string" ? body.adminLabTreatmentMode.trim() : "";
   const rawTestUsageInputMode = typeof body?.testUsageInputMode === "string" ? body.testUsageInputMode.trim() : "";
@@ -1218,6 +1233,7 @@ export async function POST(req: NextRequest) {
           actualContextHouseId: sourceHouse.id,
           mode: testHomeSimulatorMode,
           scenarioId: String(pastScenario.id),
+          weatherPreference: gapfillWeatherLogic.weatherPreference,
           persistPastSimBaseline: true,
           validationOnlyDateKeysLocal: testDateKeysLocal,
           preLockboxTravelRanges: travelRangesForRecalc,
@@ -1611,6 +1627,24 @@ export async function POST(req: NextRequest) {
     const compareMetrics = (compareProjectionForResponse.metrics && typeof compareProjectionForResponse.metrics === "object")
       ? compareProjectionForResponse.metrics as Record<string, unknown>
       : {};
+    const sharedDiagnostics = baselineDataset
+      ? buildSharedPastSimDiagnostics({
+          callerType: "gapfill_test",
+          dataset: baselineDataset,
+          scenarioId: String(pastScenario.id),
+          correlationId: labCorrelationId,
+          usageInputMode: testUsageInputMode,
+          validationPolicyOwner,
+          weatherLogicMode: gapfillWeatherLogic.weatherLogicMode,
+          compareProjection: compareProjectionForResponse,
+          readMode: "artifact_only",
+          projectionMode: "baseline",
+          artifactId: artifactRow?.id ?? null,
+          artifactInputHash: artifactRow?.inputHash ?? null,
+          artifactEngineVersion: artifactRow?.engineVersion ?? null,
+          artifactPersistenceOutcome: exactCanonicalReadSucceeded ? "persisted_artifact_exact_read" : "persisted_artifact_fallback",
+        })
+      : null;
 
     return NextResponse.json({
       ok: true,
@@ -1644,6 +1678,8 @@ export async function POST(req: NextRequest) {
       homeProfile,
       applianceProfile,
       weatherKind,
+      weatherLogicMode: gapfillWeatherLogic.weatherLogicMode,
+      weatherLogicOwner: gapfillWeatherLogic.owner,
       canonicalWindow: {
         startDate: canonicalWindow.startDate,
         endDate: canonicalWindow.endDate,
@@ -1697,6 +1733,7 @@ export async function POST(req: NextRequest) {
       sharedResultPayloadSummary,
       pipelineDiagnosticsSummary,
       diagnosticsVerdict,
+      sharedDiagnostics,
       modelAssumptions: {
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
         projectionMode: "baseline_vs_accuracy",
@@ -1779,7 +1816,7 @@ export async function POST(req: NextRequest) {
           esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
           mode: "SMT_BASELINE",
           scenarioId: String(pastScenario.id),
-          weatherPreference: "LAST_YEAR_WEATHER",
+          weatherPreference: gapfillWeatherLogic.weatherPreference,
           persistPastSimBaseline: true,
           validationDaySelectionMode: userValidationPolicy.selectionMode,
           validationDayCount: userValidationPolicy.validationDayCount,
@@ -2052,9 +2089,31 @@ export async function POST(req: NextRequest) {
             diagnosticError: diagnostic.error,
           };
     }
+    const actualSharedDiagnostics = baselineDataset
+      ? buildSharedPastSimDiagnostics({
+          callerType: "gapfill_actual",
+          dataset: baselineDataset,
+          scenarioId: String(pastScenario.id),
+          correlationId: sourcePastCorrelationId,
+          validationPolicyOwner: userValidationPolicy.owner,
+          weatherLogicMode: gapfillWeatherLogic.weatherLogicMode,
+          compareProjection: baselineCompareProjection,
+          readMode: "artifact_only",
+          projectionMode: "baseline",
+          artifactInputHash:
+            (baselineDataset as any)?.meta?.artifactInputHashUsed ??
+            (baselineDataset as any)?.meta?.artifactInputHash ??
+            null,
+          artifactEngineVersion: (baselineDataset as any)?.meta?.simVersion ?? null,
+          artifactPersistenceOutcome: "persisted_artifact_read",
+          simulatorDiagnostic: sourceEngineContext,
+        })
+      : null;
     const payload = {
       sourceHouseId: selectedSourceHouse.id,
       scenarioId: String(pastScenario.id),
+      weatherLogicMode: gapfillWeatherLogic.weatherLogicMode,
+      weatherLogicOwner: gapfillWeatherLogic.owner,
       recalc: {
         executionMode: sourcePastRecalc.executionMode,
         correlationId: sourcePastRecalc.correlationId,
@@ -2118,6 +2177,7 @@ export async function POST(req: NextRequest) {
         applianceProfileBuildSnapshot: (sourceBuildInputs as any)?.snapshots?.applianceProfile ?? null,
       },
       engineContext: sourceEngineContext,
+      sharedDiagnostics: actualSharedDiagnostics,
     };
     logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_completed", {
       correlationId: sourcePastCorrelationId,
