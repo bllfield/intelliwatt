@@ -1829,6 +1829,14 @@ export async function POST(req: NextRequest) {
       }
     }
     const sourceTravelRangesFromDb = await getTravelRangesFromDb(user.id, selectedSourceHouse.id);
+    const boundedExcludedDateKeysSorted = Array.from(
+      boundDateKeysToCoverageWindow(
+        new Set<string>(travelRangesToExcludeDateKeys(sourceTravelRangesFromDb)),
+        canonicalWindow
+      )
+    ).sort();
+    const boundedExcludedDateKeysCount = boundedExcludedDateKeysSorted.length;
+    const boundedExcludedDateKeysFingerprint = boundedExcludedDateKeysSorted.join(",");
     const [defaultRead, baselineRead, rawRead, sourceBuildRow, sourceProfiles] = await Promise.all([
       getSimulatedUsageForHouseScenario({
         userId: user.id,
@@ -1865,7 +1873,42 @@ export async function POST(req: NextRequest) {
         houseId: selectedSourceHouse.id,
       }).catch(() => ({ homeProfile: null, applianceProfile: null })),
     ]);
-    const baselineDataset = baselineRead.ok ? (baselineRead as any).dataset : null;
+    const withCanonicalExcludedOwnership = (dataset: any, compact: boolean) => {
+      if (!dataset || typeof dataset !== "object") return null;
+      const baseMeta =
+        dataset.meta && typeof dataset.meta === "object"
+          ? (dataset.meta as Record<string, unknown>)
+          : {};
+      const normalizedMeta: Record<string, unknown> = {
+        ...baseMeta,
+        excludedDateKeysCount: boundedExcludedDateKeysCount,
+        excludedDateKeysFingerprint: boundedExcludedDateKeysFingerprint,
+      };
+      if (compact) {
+        return {
+          summary: dataset.summary ?? null,
+          daily: Array.isArray(dataset.daily) ? dataset.daily : [],
+          monthly: Array.isArray(dataset.monthly) ? dataset.monthly : [],
+          meta: {
+            canonicalArtifactSimulatedDayTotalsByDate:
+              normalizedMeta.canonicalArtifactSimulatedDayTotalsByDate ??
+              (dataset as any).canonicalArtifactSimulatedDayTotalsByDate ??
+              null,
+            validationOnlyDateKeysLocal:
+              normalizedMeta.validationOnlyDateKeysLocal ?? null,
+            excludedDateKeysCount: boundedExcludedDateKeysCount,
+            excludedDateKeysFingerprint: boundedExcludedDateKeysFingerprint,
+          },
+        };
+      }
+      return {
+        ...dataset,
+        meta: normalizedMeta,
+      };
+    };
+    const baselineDataset = baselineRead.ok
+      ? withCanonicalExcludedOwnership((baselineRead as any).dataset, false)
+      : null;
     const baselineCompareProjection = baselineRead.ok
       ? buildValidationCompareProjectionSidecar(baselineDataset)
       : null;
@@ -1927,7 +1970,7 @@ export async function POST(req: NextRequest) {
       travelRangesFromDb: sourceTravelRangesFromDb,
       reads: {
         defaultProjection: defaultRead.ok
-          ? { ok: true, dataset: (defaultRead as any).dataset }
+          ? { ok: true, dataset: withCanonicalExcludedOwnership((defaultRead as any).dataset, true) }
           : { ok: false, code: defaultRead.code, message: defaultRead.message },
         baselineProjection: baselineRead.ok
           ? {
@@ -1937,7 +1980,7 @@ export async function POST(req: NextRequest) {
             }
           : { ok: false, code: baselineRead.code, message: baselineRead.message },
         rawProjection: rawRead.ok
-          ? { ok: true, dataset: (rawRead as any).dataset }
+          ? { ok: true, dataset: withCanonicalExcludedOwnership((rawRead as any).dataset, true) }
           : { ok: false, code: rawRead.code, message: rawRead.message },
       },
       validationPolicyOwner: userValidationPolicy.owner,

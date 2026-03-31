@@ -853,9 +853,13 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(body.pastSimSnapshot?.travelRangesFromDb)).toBe(true);
     expect(body.validationPolicyOwner).toBe("userValidationPolicy");
     expect(body.pastSimSnapshot?.validationPolicyOwner).toBe("userValidationPolicy");
-    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(999);
+    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
-      "bogus_not_canonical"
+      "2025-03-01,2025-03-02"
+    );
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
+      "2025-03-01,2025-03-02"
     );
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.insights?.fifteenMinuteAverages?.[0]?.hhmm).toBe("00:00");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxInput?.sourceContext?.sourceHouseId).toBe("h1");
