@@ -1742,6 +1742,15 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => null);
     if (!pastScenario?.id) {
+      logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_failed", {
+        correlationId: sourcePastCorrelationId,
+        source: "gapfill_lab",
+        action: "run_source_home_past_sim_snapshot",
+        userId: user.id,
+        sourceHouseId: selectedSourceHouse.id,
+        phase: "past_scenario_missing",
+        error: "no_past_scenario",
+      });
       return NextResponse.json(
         attachFailureContract({
           ok: false,
@@ -1751,35 +1760,69 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const canonicalWindow = await getSharedPastCoverageWindowForHouse({
-      userId: user.id,
-      houseId: selectedSourceHouse.id,
-    });
-    const userValidationPolicy = resolveUserValidationPolicy({
-      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
-      validationDayCount: 21,
-    });
-    const sourcePastRecalc = await withTimeout(
-      dispatchPastSimRecalc({
+    let canonicalWindow: Awaited<ReturnType<typeof getSharedPastCoverageWindowForHouse>>;
+    let userValidationPolicy: ReturnType<typeof resolveUserValidationPolicy>;
+    let sourcePastRecalc: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
+    try {
+      canonicalWindow = await getSharedPastCoverageWindowForHouse({
         userId: user.id,
         houseId: selectedSourceHouse.id,
-        esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
-        mode: "SMT_BASELINE",
-        scenarioId: String(pastScenario.id),
-        weatherPreference: "LAST_YEAR_WEATHER",
-        persistPastSimBaseline: true,
-        validationDaySelectionMode: userValidationPolicy.selectionMode,
-        validationDayCount: userValidationPolicy.validationDayCount,
+      });
+      userValidationPolicy = resolveUserValidationPolicy({
+        defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
+        validationDayCount: 21,
+      });
+      sourcePastRecalc = await withTimeout(
+        dispatchPastSimRecalc({
+          userId: user.id,
+          houseId: selectedSourceHouse.id,
+          esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
+          mode: "SMT_BASELINE",
+          scenarioId: String(pastScenario.id),
+          weatherPreference: "LAST_YEAR_WEATHER",
+          persistPastSimBaseline: true,
+          validationDaySelectionMode: userValidationPolicy.selectionMode,
+          validationDayCount: userValidationPolicy.validationDayCount,
+          correlationId: sourcePastCorrelationId,
+          runContext: {
+            callerLabel: "user_recalc",
+            buildPathKind: "recalc",
+            persistRequested: true,
+          },
+        }),
+        ROUTE_CANONICAL_RECALC_TIMEOUT_MS,
+        "source_home_past_sim_recalc_timeout"
+      );
+    } catch (sourcePastError: unknown) {
+      const timedOut =
+        sourcePastError instanceof Error &&
+        ((sourcePastError as any).code === "source_home_past_sim_recalc_timeout" ||
+          /source_home_past_sim_recalc_timeout/i.test(String(sourcePastError.message ?? "")));
+      logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_failed", {
         correlationId: sourcePastCorrelationId,
-        runContext: {
-          callerLabel: "user_recalc",
-          buildPathKind: "recalc",
-          persistRequested: true,
-        },
-      }),
-      ROUTE_CANONICAL_RECALC_TIMEOUT_MS,
-      "source_home_past_sim_recalc_timeout"
-    );
+        source: "gapfill_lab",
+        action: "run_source_home_past_sim_snapshot",
+        userId: user.id,
+        sourceHouseId: selectedSourceHouse.id,
+        phase: timedOut ? "recalc_dispatch_timeout" : "pre_dispatch_failed",
+        error: timedOut
+          ? "source_home_past_sim_recalc_timeout"
+          : String(sourcePastError instanceof Error ? sourcePastError.message : sourcePastError),
+      });
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: timedOut ? "source_home_past_sim_recalc_timeout" : "source_home_past_sim_snapshot_failed",
+          message: timedOut
+            ? "Source-home Past Sim recalc exceeded route timeout."
+            : sourcePastError instanceof Error
+              ? sourcePastError.message
+              : "Source-home Past Sim dispatch failed.",
+          correlationId: sourcePastCorrelationId,
+        }),
+        { status: timedOut ? 504 : 500 }
+      );
+    }
     if (sourcePastRecalc.executionMode === "inline") {
       if (!sourcePastRecalc.result.ok) {
         logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_failed", {

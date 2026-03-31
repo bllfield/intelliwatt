@@ -25,6 +25,8 @@ const getLabTestHomeLink = vi.fn();
 const replaceGlobalLabTestHomeFromSource = vi.fn();
 const ensureGlobalLabTestHomeHouse = vi.fn();
 const selectValidationDayKeys = vi.fn();
+const logSimPipelineEvent = vi.fn();
+const createSimCorrelationId = vi.fn();
 
 const homeDetailsPrisma: any = {
   homeProfileSimulated: { upsert: vi.fn() },
@@ -80,6 +82,10 @@ vi.mock("@/modules/usageSimulator/service", () => ({
 }));
 vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
   dispatchPastSimRecalc: (...args: any[]) => dispatchPastSimRecalc(...args),
+}));
+vi.mock("@/modules/usageSimulator/simObservability", () => ({
+  logSimPipelineEvent: (...args: any[]) => logSimPipelineEvent(...args),
+  createSimCorrelationId: (...args: any[]) => createSimCorrelationId(...args),
 }));
 vi.mock("@/modules/usageSimulator/simDropletJob", () => ({
   getPastSimRecalcJobForUser: (...args: any[]) => getPastSimRecalcJobForUser(...args),
@@ -166,6 +172,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     vi.resetModules();
     vi.clearAllMocks();
     buildValidationCompareProjectionSidecarCalls.length = 0;
+    createSimCorrelationId.mockReturnValue("corr-1");
     const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
     vi.mocked(helpers.getTravelRangesFromDb as any).mockResolvedValue([]);
 
@@ -871,6 +878,32 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.profiles?.homeProfileLive).toEqual({ hvac: {} });
     expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
     expect(body.pastSimSnapshot?.engineContext?.rawActualIntervalsMeta?.intervalCount).toBe(96);
+  });
+
+  it("logs a source-home failure event when pre-dispatch Actual Home setup throws", async () => {
+    getSharedPastCoverageWindowForHouse.mockRejectedValueOnce(new Error("coverage_window_failed"));
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_source_home_past_sim_snapshot",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("source_home_past_sim_snapshot_failed");
+    expect(logSimPipelineEvent).toHaveBeenCalledWith(
+      "admin_lab_run_source_home_past_sim_snapshot_failed",
+      expect.objectContaining({
+        correlationId: "corr-1",
+        action: "run_source_home_past_sim_snapshot",
+        phase: "pre_dispatch_failed",
+      })
+    );
   });
 
   it("runs canonical test-home recalc with generic actual-context source", async () => {
