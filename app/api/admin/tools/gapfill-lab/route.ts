@@ -491,7 +491,11 @@ export async function POST(req: NextRequest) {
     simulatorMode: testHomeSimulatorMode,
     adminLabTreatmentMode: adminLabTreatmentModeForRecalc,
   } = resolveTestHomeUsageModeRecalcConfig(testUsageInputMode);
-  if (rawAdminLabTreatment !== "" && !isAdminLabTreatmentMode(rawAdminLabTreatment)) {
+  if (
+    rawAdminLabTreatment !== "" &&
+    rawTestUsageInputMode === "" &&
+    !isAdminLabTreatmentMode(rawAdminLabTreatment)
+  ) {
     return NextResponse.json(
       attachFailureContract({
         ok: false,

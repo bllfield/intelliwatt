@@ -1366,6 +1366,29 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(body.supportedModes)).toBe(true);
   });
 
+  it("accepts new testUsageInputMode values even when the client mirrors them in adminLabTreatmentMode", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      adminLabTreatmentMode: "EXACT_INTERVALS",
+      testUsageInputMode: "EXACT_INTERVALS",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.treatmentMode).toBe("EXACT_INTERVALS");
+    expect(body.usageInputMode).toBe("EXACT_INTERVALS");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("SMT_BASELINE");
+  });
+
   it("maps legacy whole_home_prior_only requests onto profile-only pre-lockbox usage mode", async () => {
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
