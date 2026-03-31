@@ -1,6 +1,10 @@
 import { createHash } from "crypto";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import {
+  NORMALS_BASELINE_END_DATE,
+  NORMALS_BASELINE_START_DATE,
+} from "@/modules/weather/types";
 
 function enumerateDateKeysInclusive(startDate: string, endDate: string): string[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return [];
@@ -66,6 +70,14 @@ export async function computePastWeatherIdentity(args: {
 
   const canonical = {
     weatherLogicMode: String(args.weatherLogicMode ?? "LAST_YEAR_ACTUAL_WEATHER"),
+    normalsBaselineStart:
+      String(args.weatherLogicMode ?? "LAST_YEAR_ACTUAL_WEATHER") === "LONG_TERM_AVERAGE_WEATHER"
+        ? NORMALS_BASELINE_START_DATE
+        : null,
+    normalsBaselineEnd:
+      String(args.weatherLogicMode ?? "LAST_YEAR_ACTUAL_WEATHER") === "LONG_TERM_AVERAGE_WEATHER"
+        ? NORMALS_BASELINE_END_DATE
+        : null,
     windowStartUtc: boundedStartDate,
     windowEndUtc: boundedEndDate,
     dateKeyCount: dateKeys.length,

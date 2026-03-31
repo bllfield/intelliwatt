@@ -17,8 +17,10 @@ import {
 import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
-import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
-import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
+import {
+  ensureHouseWeatherBackfill,
+  ensureHouseWeatherNormalAvgBackfill,
+} from "@/modules/weather/backfill";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -67,6 +69,16 @@ export type WeatherProvenance = {
   weatherSourceSummary: "stub_only" | "actual_only" | "mixed_actual_and_stub" | "none" | "unknown";
   weatherFallbackReason: WeatherFallbackReason;
   weatherProviderName: string;
+  weatherFallbackUsed?: boolean;
+  weatherProviderCoverage?: Array<{
+    provider: string;
+    source: string;
+    count: number;
+    coverageStart: string | null;
+    coverageEnd: string | null;
+  }>;
+  weatherNormalsBaselineStart?: string | null;
+  weatherNormalsBaselineEnd?: string | null;
   weatherCoverageStart: string | null;
   weatherCoverageEnd: string | null;
   weatherStubRowCount: number;
@@ -220,6 +232,17 @@ function mergeActualWxWithNormalForLowDataModes(args: {
   return { mergedActualWxByDateKey: merged, normalFilledDateKeyCount };
 }
 
+function collectMissingOrStubWeatherDateKeys(args: {
+  weatherByDateKey: HouseWeatherDayMap;
+  canonicalDateKeys: string[];
+}): string[] {
+  return args.canonicalDateKeys.filter((dk) => {
+    const row = args.weatherByDateKey.get(dk);
+    if (!row) return true;
+    return String(row?.source ?? "").trim() === WEATHER_STUB_SOURCE;
+  });
+}
+
 function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
   canonicalDayStartsMs: number[];
   canonicalDateKeys: string[];
@@ -310,6 +333,47 @@ function summarizePastWindowWeatherProvenance(args: {
   const weatherActualRowCount = weatherRowsCount - weatherStubRowCount;
   const weatherKindUsed =
     sourcesSeen.size === 1 ? Array.from(sourcesSeen)[0]! : sourcesSeen.size > 1 ? "MIXED" : undefined;
+  const providerCoverage = Array.from(args.selectedWxByDateKey.entries()).reduce<
+    Array<{
+      provider: string;
+      source: string;
+      count: number;
+      coverageStart: string | null;
+      coverageEnd: string | null;
+    }>
+  >((acc, [dateKey, row]) => {
+    const source = String(row?.source ?? "").trim() || "unknown";
+    const provider =
+      source.includes("VISUAL_CROSSING")
+        ? "VISUAL_CROSSING"
+        : source.includes("OPEN_METEO")
+          ? "OPEN_METEO"
+          : source.includes("CACHE")
+            ? "CACHE"
+            : source.includes("STUB")
+              ? "STUB"
+              : "UNKNOWN";
+    const existing = acc.find((entry) => entry.source === source);
+    if (existing) {
+      existing.count += 1;
+      existing.coverageStart =
+        existing.coverageStart == null || dateKey < existing.coverageStart ? dateKey : existing.coverageStart;
+      existing.coverageEnd =
+        existing.coverageEnd == null || dateKey > existing.coverageEnd ? dateKey : existing.coverageEnd;
+    } else {
+      acc.push({
+        provider,
+        source,
+        count: 1,
+        coverageStart: dateKey,
+        coverageEnd: dateKey,
+      });
+    }
+    return acc;
+  }, []);
+  const providerNames = Array.from(new Set(providerCoverage.map((entry) => entry.provider))).filter(
+    (value) => value !== "UNKNOWN"
+  );
   let weatherSourceSummary: WeatherProvenance["weatherSourceSummary"] = "none";
   if (weatherRowsCount > 0) {
     if (weatherStubRowCount === weatherRowsCount) weatherSourceSummary = "stub_only";
@@ -321,7 +385,14 @@ function summarizePastWindowWeatherProvenance(args: {
     weatherKindUsed,
     weatherSourceSummary,
     weatherFallbackReason: args.weatherFallbackReason,
-    weatherProviderName: weatherActualRowCount > 0 ? "OPEN_METEO" : "STUB",
+    weatherProviderName:
+      providerNames.length > 0 ? providerNames.join("+") : weatherActualRowCount > 0 ? "OPEN_METEO" : "unknown",
+    weatherFallbackUsed: providerCoverage.some((entry) => entry.provider === "VISUAL_CROSSING"),
+    weatherProviderCoverage: providerCoverage,
+    weatherNormalsBaselineStart:
+      args.weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? "1991-01-01" : null,
+    weatherNormalsBaselineEnd:
+      args.weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? "2020-12-31" : null,
     weatherCoverageStart: dateKeysSorted[0] ?? null,
     weatherCoverageEnd: dateKeysSorted[dateKeysSorted.length - 1] ?? null,
     weatherStubRowCount,
@@ -350,12 +421,19 @@ export async function loadWeatherForPastWindow(args: {
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
   ]);
-  const missingOrStubWxKeys = canonicalDateKeys.filter((dk) => {
-    const row = actualWxByDateKey.get(dk);
-    if (!row) return true;
-    return String(row?.source ?? "").trim() === WEATHER_STUB_SOURCE;
+  const missingOrStubActualWxKeys = collectMissingOrStubWeatherDateKeys({
+    weatherByDateKey: actualWxByDateKey,
+    canonicalDateKeys,
   });
-  if (missingOrStubWxKeys.length === 0) {
+  const missingOrStubNormalWxKeys = collectMissingOrStubWeatherDateKeys({
+    weatherByDateKey: normalWxByDateKey,
+    canonicalDateKeys,
+  });
+  const selectedWeatherBeforeBackfill =
+    weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? normalWxByDateKey : actualWxByDateKey;
+  const missingSelectedWxKeys =
+    weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? missingOrStubNormalWxKeys : missingOrStubActualWxKeys;
+  if (missingSelectedWxKeys.length === 0) {
     return {
       actualWxByDateKey,
       normalWxByDateKey,
@@ -380,61 +458,41 @@ export async function loadWeatherForPastWindow(args: {
   const lat = house?.lat != null && Number.isFinite(house.lat) ? house.lat : null;
   const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
 
-  if (lat != null && lon != null) {
-    const backfillResult = await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
-    const missingWxKeys = canonicalDateKeys.filter((dk) => !actualWxByDateKey.has(dk));
-    if (missingWxKeys.length > 0) {
-      await ensureHouseWeatherStubbed({ houseId, dateKeys: missingWxKeys });
-    }
-    const [actualWx2, normalWx2] = await Promise.all([
-      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-      getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
-    ]);
-    const weatherFallbackReason: WeatherFallbackReason =
-      backfillResult.skippedLatLng === true
-        ? "missing_lat_lng"
-        : backfillResult.fetched === 0 && (backfillResult.stubbed ?? 0) > 0
-          ? "api_failure_or_no_data"
-          : (backfillResult.stubbed ?? 0) > 0
-            ? "partial_coverage"
-            : null;
-    return {
-      actualWxByDateKey: actualWx2,
-      normalWxByDateKey: normalWx2,
-      selectedWeatherByDateKey:
-        weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-          ? normalWx2
-          : actualWx2,
-      provenance: summarizePastWindowWeatherProvenance({
-        selectedWxByDateKey:
-          weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-            ? normalWx2
-            : actualWx2,
-        weatherLogicMode,
-        weatherFallbackReason,
-      }),
-    };
+  if (lat == null || lon == null) {
+    throw new Error(
+      "Shared weather load failed: house lat/lng is missing, so real weather backfill cannot run."
+    );
   }
-
-  await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
-  const [actualWx3, normalWx3] = await Promise.all([
+  if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
+    await ensureHouseWeatherNormalAvgBackfill({ houseId, dateKeys: canonicalDateKeys });
+  } else {
+    await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
+  }
+  const [actualWx2, normalWx2] = await Promise.all([
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
   ]);
-  return {
-    actualWxByDateKey: actualWx3,
-    normalWxByDateKey: normalWx3,
-    selectedWeatherByDateKey:
+  const selectedWeatherAfterBackfill =
+    weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? normalWx2 : actualWx2;
+  const missingSelectedAfterBackfill = collectMissingOrStubWeatherDateKeys({
+    weatherByDateKey: selectedWeatherAfterBackfill,
+    canonicalDateKeys,
+  });
+  if (missingSelectedAfterBackfill.length > 0) {
+    throw new Error(
       weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-        ? normalWx3
-        : actualWx3,
+        ? "Shared weather load failed: NORMAL_AVG rows are unavailable after real historical backfill."
+        : "Shared weather load failed: ACTUAL_LAST_YEAR coverage is still missing after real API backfill."
+    );
+  }
+  return {
+    actualWxByDateKey: actualWx2,
+    normalWxByDateKey: normalWx2,
+    selectedWeatherByDateKey: selectedWeatherAfterBackfill,
     provenance: summarizePastWindowWeatherProvenance({
-      selectedWxByDateKey:
-        weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-          ? normalWx3
-          : actualWx3,
+      selectedWxByDateKey: selectedWeatherAfterBackfill,
       weatherLogicMode,
-      weatherFallbackReason: "missing_lat_lng",
+      weatherFallbackReason: null,
     }),
   };
 }

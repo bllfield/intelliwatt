@@ -4,6 +4,7 @@
  */
 
 const ARCHIVE_BASE = "https://archive-api.open-meteo.com/v1/archive";
+const HISTORICAL_NORMALS_MODEL = "era5";
 
 export type OpenMeteoHourlyRow = {
   timestampUtc: Date;
@@ -12,12 +13,25 @@ export type OpenMeteoHourlyRow = {
   solarRadiation: number | null;
 };
 
+export type OpenMeteoDailyTemperatureRow = {
+  dateKey: string;
+  temperatureMeanC: number | null;
+  temperatureMinC: number | null;
+  temperatureMaxC: number | null;
+};
+
 type ArchiveResponse = {
   hourly?: {
     time?: string[];
     temperature_2m?: (number | null)[];
     cloudcover?: (number | null)[];
     shortwave_radiation?: (number | null)[];
+  };
+  daily?: {
+    time?: string[];
+    temperature_2m_mean?: (number | null)[];
+    temperature_2m_min?: (number | null)[];
+    temperature_2m_max?: (number | null)[];
   };
   error?: boolean;
   reason?: string;
@@ -34,24 +48,7 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Fetch historical hourly weather from Open-Meteo Archive API.
- * Returns normalized rows; handles API errors gracefully.
- */
-export async function fetchHistoricalWeather(
-  lat: number,
-  lon: number,
-  startDate: string,
-  endDate: string
-): Promise<OpenMeteoHourlyRow[]> {
-  const params = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lon),
-    start_date: startDate.slice(0, 10),
-    end_date: endDate.slice(0, 10),
-    hourly: "temperature_2m,cloudcover,shortwave_radiation",
-    timezone: "UTC",
-  });
+async function fetchArchiveJson(params: URLSearchParams): Promise<ArchiveResponse> {
   const url = `${ARCHIVE_BASE}?${params.toString()}`;
 
   let res: Response;
@@ -77,6 +74,29 @@ export async function fetchHistoricalWeather(
     throw new Error(`Open-Meteo API error: ${data.reason}`);
   }
 
+  return data;
+}
+
+/**
+ * Fetch historical hourly weather from Open-Meteo Archive API.
+ * Returns normalized rows; handles API errors gracefully.
+ */
+export async function fetchHistoricalWeather(
+  lat: number,
+  lon: number,
+  startDate: string,
+  endDate: string
+): Promise<OpenMeteoHourlyRow[]> {
+  const params = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    start_date: startDate.slice(0, 10),
+    end_date: endDate.slice(0, 10),
+    hourly: "temperature_2m,cloudcover,shortwave_radiation",
+    timezone: "UTC",
+  });
+  const data = await fetchArchiveJson(params);
+
   const hourly = data.hourly;
   if (!hourly?.time?.length) {
     return [];
@@ -94,6 +114,49 @@ export async function fetchHistoricalWeather(
       temperatureC: toNum(temp[i]),
       cloudcoverPct: toNum(cloud[i]),
       solarRadiation: toNum(solar[i]),
+    });
+  }
+  return rows;
+}
+
+/**
+ * Fetch historical daily temperatures from Open-Meteo Archive API.
+ * Used to build real long-term-average rows from prior actual years.
+ */
+export async function fetchHistoricalDailyTemperatures(
+  lat: number,
+  lon: number,
+  startDate: string,
+  endDate: string
+): Promise<OpenMeteoDailyTemperatureRow[]> {
+  const params = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    start_date: startDate.slice(0, 10),
+    end_date: endDate.slice(0, 10),
+    daily: "temperature_2m_mean,temperature_2m_min,temperature_2m_max",
+    timezone: "UTC",
+    models: HISTORICAL_NORMALS_MODEL,
+  });
+  const data = await fetchArchiveJson(params);
+  const daily = data.daily;
+  if (!daily?.time?.length) {
+    return [];
+  }
+
+  const rows: OpenMeteoDailyTemperatureRow[] = [];
+  const times = daily.time;
+  const mean = daily.temperature_2m_mean ?? [];
+  const min = daily.temperature_2m_min ?? [];
+  const max = daily.temperature_2m_max ?? [];
+
+  for (let i = 0; i < times.length; i++) {
+    const dateKey = String(times[i] ?? "").slice(0, 10);
+    rows.push({
+      dateKey,
+      temperatureMeanC: toNum(mean[i]),
+      temperatureMinC: toNum(min[i]),
+      temperatureMaxC: toNum(max[i]),
     });
   }
   return rows;

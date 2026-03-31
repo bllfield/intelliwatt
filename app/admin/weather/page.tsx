@@ -13,6 +13,16 @@ type DayWeather = {
   source: string;
 };
 
+type SharedWeatherSelectionSummary = {
+  weatherLogicMode: string;
+  weatherSourceSummary: string;
+  weatherFallbackReason: string | null;
+  sourceLabels: string[];
+  selectedRowCount: number;
+  stubRowCount: number;
+  nonStubRowCount: number;
+};
+
 type WeatherResponse = {
   ok: boolean;
   mode: WeatherSourceMode;
@@ -36,6 +46,12 @@ type WeatherResponse = {
   normalAvg: DayWeather[];
   houseActualLastYear: DayWeather[];
   houseNormalAvg: DayWeather[];
+  sharedHouseWeatherPath?: {
+    module: string;
+    consumers: string[];
+    actualSelection: SharedWeatherSelectionSummary;
+    normalSelection: SharedWeatherSelectionSummary;
+  };
   error?: string;
 };
 
@@ -222,7 +238,8 @@ export default function AdminWeatherPage() {
         <div className="mb-6 rounded-lg bg-brand-white p-6 shadow-lg">
           <h1 className="text-2xl font-bold text-brand-navy">Admin Weather</h1>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Inspect station-based weather rows by email and a fixed 365-day window ending on the selected date.
+            Inspect the weather data path used by shared Past Sim and GapFill, plus station-only reference rows for the
+            same 365-day window.
           </p>
         </div>
 
@@ -316,11 +333,30 @@ export default function AdminWeatherPage() {
                 </div>
               </div>
 
+              {data.sharedHouseWeatherPath ? (
+                <div className="rounded border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                  <div className="font-semibold">Shared weather path used by Past Sim and GapFill</div>
+                  <div>Module: {data.sharedHouseWeatherPath.module}</div>
+                  <div>Consumers: {data.sharedHouseWeatherPath.consumers.join(", ")}</div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <SharedWeatherSummaryCard
+                      title="Actual-weather selection"
+                      summary={data.sharedHouseWeatherPath.actualSelection}
+                    />
+                    <SharedWeatherSummaryCard
+                      title="Long-term-average selection"
+                      summary={data.sharedHouseWeatherPath.normalSelection}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-3">
                 <div>
                   <h3 className="text-lg font-semibold text-brand-navy">Station weather DB rows</h3>
                   <p className="text-sm text-brand-navy/70">
-                    Station-scoped inspector rows for the selected house and 365-day window.
+                    Station-table inspector rows only. These are for reference and are not the direct house-level rows
+                    selected by shared Past Sim and GapFill.
                   </p>
                 </div>
                 <WeatherTable title="ACTUAL_LAST_YEAR" rows={data.actualLastYear} />
@@ -331,7 +367,7 @@ export default function AdminWeatherPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-brand-navy">Shared house weather DB rows</h3>
                   <p className="text-sm text-brand-navy/70">
-                    House-scoped rows used by shared Past Sim and GapFill after the same weather pull/backfill path.
+                    House-scoped rows read through the shared weather loader used by Past Sim and GapFill.
                   </p>
                 </div>
                 <WeatherTable title="HOUSE ACTUAL_LAST_YEAR" rows={data.houseActualLastYear} />
@@ -344,7 +380,7 @@ export default function AdminWeatherPage() {
         <div className="mt-8 rounded-lg bg-brand-white p-6 shadow-lg">
           <h2 className="text-xl font-bold text-brand-navy">Open-Meteo hourly (simulator)</h2>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Test the simulator weather path: real Open-Meteo + DB cache with stub fallback. Run twice to confirm second run uses cache.
+            Test the simulator weather path: real Open-Meteo plus DB cache reuse only. If real weather is unavailable, this endpoint now errors instead of falling back to fake data.
           </p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm">
@@ -401,9 +437,7 @@ export default function AdminWeatherPage() {
           {omData ? (
             <div className="mt-6 space-y-4">
               <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
-                <div className="font-semibold">
-                  {omData.fromStub ? "Stub used" : "Real weather (Open-Meteo cache)"}
-                </div>
+                <div className="font-semibold">Real weather (Open-Meteo/cache-backed)</div>
                 <div>Rows: {omData.rowCount}</div>
                 <div>{omData.message}</div>
               </div>
@@ -455,6 +489,30 @@ export default function AdminWeatherPage() {
             </div>
           ) : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SharedWeatherSummaryCard({
+  title,
+  summary,
+}: {
+  title: string;
+  summary: SharedWeatherSelectionSummary;
+}) {
+  return (
+    <div className="rounded border border-emerald-200 bg-white p-3">
+      <div className="font-semibold text-emerald-950">{title}</div>
+      <div className="mt-1">Mode: {summary.weatherLogicMode}</div>
+      <div>Source summary: {summary.weatherSourceSummary}</div>
+      <div>Fallback reason: {summary.weatherFallbackReason ?? "none"}</div>
+      <div>
+        Source labels: {summary.sourceLabels.length ? summary.sourceLabels.join(", ") : "none"}
+      </div>
+      <div>
+        Row counts: selected {summary.selectedRowCount} | non-stub {summary.nonStubRowCount} | stub{" "}
+        {summary.stubRowCount}
       </div>
     </div>
   );

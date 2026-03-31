@@ -11,11 +11,10 @@ import { ensureStationWeatherStubbed } from "@/modules/stationWeather/stubs";
 import { STATION_WEATHER_DEFAULT_VERSION } from "@/modules/stationWeather/types";
 import {
   findMissingHouseWeatherDateKeys,
-  getHouseWeatherDays,
 } from "@/modules/weather/repo";
-import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
-import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import type { DayWeather } from "@/modules/weather/types";
+import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
+import { loadWeatherForPastWindow } from "@/modules/simulatedUsage/simulatePastUsageDataset";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +59,20 @@ function enumerateDateKeysUtc(start: string, end: string): string[] {
 
 function isDayWeather(value: DayWeather | undefined): value is DayWeather {
   return Boolean(value);
+}
+
+function summarizeSourceLabels(rows: DayWeather[]): string[] {
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => String(row.source ?? "").trim())
+        .filter(Boolean)
+    )
+  ).sort();
+}
+
+function countStubRows(rows: DayWeather[]): number {
+  return rows.filter((row) => String(row.source ?? "").trim() === WEATHER_STUB_SOURCE).length;
 }
 
 export async function GET(req: NextRequest) {
@@ -117,23 +130,28 @@ export async function GET(req: NextRequest) {
         version,
       });
     }
-    if (mode === "REAL_API") {
-      await ensureHouseWeatherBackfill({
+    const [sharedActualSelection, sharedNormalSelection] = await Promise.all([
+      loadWeatherForPastWindow({
         houseId,
         startDate: dateKeys[0]!,
         endDate: dateKeys[dateKeys.length - 1]!,
-      });
-    } else {
-      await ensureHouseWeatherStubbed({ houseId, dateKeys });
-    }
+        canonicalDateKeys: dateKeys,
+        weatherLogicMode: "LAST_YEAR_ACTUAL_WEATHER",
+      }),
+      loadWeatherForPastWindow({
+        houseId,
+        startDate: dateKeys[0]!,
+        endDate: dateKeys[dateKeys.length - 1]!,
+        canonicalDateKeys: dateKeys,
+        weatherLogicMode: "LONG_TERM_AVERAGE_WEATHER",
+      }),
+    ]);
 
     const [
       actualLastYearRows,
       normalAvgRows,
       missingActual,
       missingNormal,
-      houseActualRowsMap,
-      houseNormalRowsMap,
       houseMissingActual,
       houseMissingNormal,
     ] =
@@ -162,16 +180,6 @@ export async function GET(req: NextRequest) {
           kind: "NORMAL_AVG",
           version,
         }),
-        getHouseWeatherDays({
-          houseId,
-          dateKeys,
-          kind: "ACTUAL_LAST_YEAR",
-        }),
-        getHouseWeatherDays({
-          houseId,
-          dateKeys,
-          kind: "NORMAL_AVG",
-        }),
         findMissingHouseWeatherDateKeys({
           houseId,
           dateKeys,
@@ -183,6 +191,8 @@ export async function GET(req: NextRequest) {
           kind: "NORMAL_AVG",
         }),
       ]);
+    const houseActualRowsMap = sharedActualSelection.actualWxByDateKey;
+    const houseNormalRowsMap = sharedActualSelection.normalWxByDateKey;
     const houseActualRows = dateKeys
       .map((dateKey) => houseActualRowsMap.get(dateKey))
       .filter(isDayWeather);
@@ -216,6 +226,28 @@ export async function GET(req: NextRequest) {
       normalAvg: normalAvgRows,
       houseActualLastYear: houseActualRows,
       houseNormalAvg: houseNormalRows,
+      sharedHouseWeatherPath: {
+        module: "loadWeatherForPastWindow",
+        consumers: ["Past Sim", "GapFill"],
+        actualSelection: {
+          weatherLogicMode: sharedActualSelection.provenance.weatherLogicMode ?? "LAST_YEAR_ACTUAL_WEATHER",
+          weatherSourceSummary: sharedActualSelection.provenance.weatherSourceSummary,
+          weatherFallbackReason: sharedActualSelection.provenance.weatherFallbackReason,
+          sourceLabels: summarizeSourceLabels(houseActualRows),
+          selectedRowCount: houseActualRows.length,
+          stubRowCount: countStubRows(houseActualRows),
+          nonStubRowCount: houseActualRows.length - countStubRows(houseActualRows),
+        },
+        normalSelection: {
+          weatherLogicMode: sharedNormalSelection.provenance.weatherLogicMode ?? "LONG_TERM_AVERAGE_WEATHER",
+          weatherSourceSummary: sharedNormalSelection.provenance.weatherSourceSummary,
+          weatherFallbackReason: sharedNormalSelection.provenance.weatherFallbackReason,
+          sourceLabels: summarizeSourceLabels(houseNormalRows),
+          selectedRowCount: houseNormalRows.length,
+          stubRowCount: countStubRows(houseNormalRows),
+          nonStubRowCount: houseNormalRows.length - countStubRows(houseNormalRows),
+        },
+      },
     });
   } catch (e: any) {
     return NextResponse.json(

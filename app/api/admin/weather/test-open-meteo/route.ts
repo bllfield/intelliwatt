@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /**
  * Admin test for Open-Meteo hourly weather (simulator path).
  * GET ?lat=32.75&lon=-97.33&start=2025-01-01&end=2025-01-10
- * Returns fromStub, rowCount, sample rows. Run twice to verify second run uses cache.
+ * Returns real/cache-backed rows only. Run twice to verify second run uses cache.
  */
 export async function GET(req: NextRequest) {
   const gate = requireAdmin(req);
@@ -72,11 +72,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      fromStub: result.fromStub,
+      fromStub: false,
       rowCount: rows.length,
-      message: result.fromStub
-        ? "Weather service unavailable or returned no data; stub used."
-        : "Real weather (Open-Meteo cache) returned. Run again to confirm cache hit.",
+      message: "Real weather (Open-Meteo/cache-backed) returned. Run again to confirm cache reuse.",
       firstRow,
       lastRow,
       sample,
