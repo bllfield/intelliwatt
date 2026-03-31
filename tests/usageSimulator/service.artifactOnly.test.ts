@@ -101,6 +101,12 @@ import {
   shouldWarmValidationSelectionPreload,
   type GapfillCompareBuildPhase,
 } from "@/modules/usageSimulator/service";
+import {
+  resolveAdminValidationPolicy,
+  resolveTestHomeUsageInputMode,
+  resolveTestHomeUsageModeRecalcConfig,
+  resolveUserValidationPolicy,
+} from "@/modules/usageSimulator/pastSimPolicy";
 
 describe("resolveSharedPastRecalcWindow", () => {
   it("uses shared canonical coverage for SMT_BASELINE even when anchor periods exist", () => {
@@ -168,6 +174,52 @@ describe("resolveSharedPastRecalcWindow", () => {
       startDate: canonicalCoverage.startDate,
       endDate: canonicalCoverage.endDate,
       source: "canonical_coverage_fallback",
+    });
+  });
+});
+
+describe("pastSimPolicy split helpers", () => {
+  it("keeps user Past and GapFill Actual Home on userValidationPolicy", () => {
+    expect(
+      resolveUserValidationPolicy({
+        defaultSelectionMode: "random_simple",
+        validationDayCount: 21,
+      })
+    ).toEqual({
+      owner: "userValidationPolicy",
+      selectionMode: "random_simple",
+      validationDayCount: 21,
+    });
+  });
+
+  it("keeps GapFill Test Home on adminValidationPolicy", () => {
+    expect(
+      resolveAdminValidationPolicy({
+        selectionMode: "stratified_weather_balanced",
+        validationDayCount: 13,
+      })
+    ).toEqual({
+      owner: "adminValidationPolicy",
+      selectionMode: "stratified_weather_balanced",
+      validationDayCount: 13,
+    });
+  });
+
+  it("maps the four pre-lockbox usage input modes to the shared recalc entry", () => {
+    expect(resolveTestHomeUsageInputMode("EXACT_INTERVALS")).toBe("EXACT_INTERVALS");
+    expect(resolveTestHomeUsageModeRecalcConfig("EXACT_INTERVALS")).toEqual({
+      simulatorMode: "SMT_BASELINE",
+    });
+    expect(resolveTestHomeUsageModeRecalcConfig("MONTHLY_FROM_SOURCE_INTERVALS")).toEqual({
+      simulatorMode: "MANUAL_TOTALS",
+      adminLabTreatmentMode: "manual_monthly_constrained",
+    });
+    expect(resolveTestHomeUsageModeRecalcConfig("ANNUAL_FROM_SOURCE_INTERVALS")).toEqual({
+      simulatorMode: "MANUAL_TOTALS",
+      adminLabTreatmentMode: "manual_annual_constrained",
+    });
+    expect(resolveTestHomeUsageModeRecalcConfig("PROFILE_ONLY_NEW_BUILD")).toEqual({
+      simulatorMode: "NEW_BUILD_ESTIMATE",
     });
   });
 });

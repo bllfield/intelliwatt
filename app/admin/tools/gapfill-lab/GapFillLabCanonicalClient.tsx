@@ -420,8 +420,8 @@ export default function GapFillLabCanonicalClient() {
   const [weatherKind, setWeatherKind] = useState<"ACTUAL_LAST_YEAR" | "NORMAL_AVG" | "open_meteo">("open_meteo");
   const [userDefaultValidationSelectionMode, setUserDefaultValidationSelectionMode] = useState("random_simple");
   const [adminLabValidationSelectionMode, setAdminLabValidationSelectionMode] = useState("stratified_weather_balanced");
-  /** Section 24 admin-only treatment; sent on recalc only — server applies in shared `recalcSimulatorBuild`. */
-  const [adminLabTreatmentMode, setAdminLabTreatmentMode] = useState("actual_data_fingerprint");
+  /** Test-home usage input split; sent on recalc only before the shared lockbox entry. */
+  const [adminLabTreatmentMode, setAdminLabTreatmentMode] = useState("EXACT_INTERVALS");
   const [supportedValidationSelectionModes, setSupportedValidationSelectionModes] = useState<string[]>([
     "manual",
     "random_simple",
@@ -639,7 +639,10 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onRunRecalc() {
-    await runAction("run_test_home_canonical_recalc", { adminLabTreatmentMode });
+    await runAction("run_test_home_canonical_recalc", {
+      adminLabTreatmentMode,
+      testUsageInputMode: adminLabTreatmentMode,
+    });
   }
 
   async function onRunPastSimSnapshot() {
@@ -1008,7 +1011,7 @@ export default function GapFillLabCanonicalClient() {
             </div>
           </div>
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab treatment (Section 24)</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test Home usage input mode</div>
             <div className="mt-1">
               <label className="sr-only" htmlFor="admin-lab-treatment">
                 Admin simulation treatment mode
@@ -1020,20 +1023,18 @@ export default function GapFillLabCanonicalClient() {
                 onChange={(e) => setAdminLabTreatmentMode(e.target.value)}
                 disabled={loading}
               >
-                <option value="actual_data_fingerprint">actual_data_fingerprint</option>
-                <option value="whole_home_prior_only">whole_home_prior_only</option>
-                <option value="manual_monthly_constrained">MANUAL_MONTHLY (monthly-constrained branch from source actuals)</option>
-                <option value="manual_annual_constrained">MANUAL_ANNUAL (annual-constrained branch from source actuals)</option>
+                <option value="EXACT_INTERVALS">EXACT_INTERVALS</option>
+                <option value="MONTHLY_FROM_SOURCE_INTERVALS">MONTHLY_FROM_SOURCE_INTERVALS</option>
+                <option value="ANNUAL_FROM_SOURCE_INTERVALS">ANNUAL_FROM_SOURCE_INTERVALS</option>
+                <option value="PROFILE_ONLY_NEW_BUILD">PROFILE_ONLY_NEW_BUILD</option>
               </select>
             </div>
             <div className="mt-0.5 font-mono text-xs">
               Last recalc echo: {visibilityFromResult?.treatmentMode ?? "—"}
             </div>
             <div className="text-xs text-brand-navy/60 mt-1">
-              Sent on &quot;Run canonical recalc&quot; only. `MANUAL_MONTHLY` and `MANUAL_ANNUAL` stay backward-compatible with persisted{" "}
-              <code className="font-mono">MANUAL_TOTALS</code>, but they now represent distinct monthly- and annual-constrained internal lockbox
-              branches built from the source home&apos;s actual usage over the canonical window. Fingerprint treatment still applies after{" "}
-              <code className="font-mono">resolveSimFingerprint</code>.
+              Sent on &quot;Run canonical recalc&quot; only. This split happens before lockbox entry only; after normalization the Test Home
+              enters the same shared Past Sim chain the user flow and Actual Home use.
             </div>
           </div>
           <div>

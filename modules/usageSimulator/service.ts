@@ -3576,6 +3576,20 @@ function travelRangesFromBuildInputs(
   return Array.from(uniq.values());
 }
 
+function normalizePreLockboxTravelRanges(
+  value: unknown
+): Array<{ startDate: string; endDate: string }> {
+  if (!Array.isArray(value)) return [];
+  const uniq = new Map<string, { startDate: string; endDate: string }>();
+  for (const row of value) {
+    const startDate = String((row as any)?.startDate ?? "").slice(0, 10);
+    const endDate = String((row as any)?.endDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) continue;
+    uniq.set(`${startDate}__${endDate}`, { startDate, endDate });
+  }
+  return Array.from(uniq.values());
+}
+
 function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayload: ManualUsagePayloadAny | null; now?: Date }) {
   const now = args.now ?? new Date();
 
@@ -3648,6 +3662,7 @@ async function recalcSimulatorBuildImpl(args: {
    * These keys are simulated in the same shared recalc run and persisted on the same build/artifact family.
    */
   validationOnlyDateKeysLocal?: Set<string> | string[];
+  preLockboxTravelRanges?: Array<{ startDate: string; endDate: string }>;
   /** Optional selection mode for auto-picking validation days when explicit keys are not provided. */
   validationDaySelectionMode?: ValidationDaySelectionMode;
   /** Optional count target for auto-picked validation days. */
@@ -3666,6 +3681,7 @@ async function recalcSimulatorBuildImpl(args: {
   const requestedValidationOnlyDateKeysLocal = normalizeValidationOnlyDateKeysLocal(
     args.validationOnlyDateKeysLocal
   );
+  const requestedPreLockboxTravelRanges = normalizePreLockboxTravelRanges(args.preLockboxTravelRanges);
   let effectiveValidationSelectionMode =
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
@@ -3757,7 +3773,12 @@ async function recalcSimulatorBuildImpl(args: {
       .catch(() => []);
   }
 
-  const scenarioTravelRanges = scenarioId ? normalizeScenarioTravelRanges(scenarioEvents as any) : [];
+  const scenarioTravelRanges =
+    requestedPreLockboxTravelRanges.length > 0
+      ? requestedPreLockboxTravelRanges
+      : scenarioId
+        ? normalizeScenarioTravelRanges(scenarioEvents as any)
+        : [];
 
   const isFutureScenario = Boolean(scenarioId) && scenario?.name === WORKSPACE_FUTURE_NAME;
   let pastTravelRanges: Array<{ startDate: string; endDate: string }> = [];
@@ -3780,7 +3801,10 @@ async function recalcSimulatorBuildImpl(args: {
           orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
         })
         .catch(() => []);
-      pastTravelRanges = normalizeScenarioTravelRanges(pastEventsForOverlay as any);
+      pastTravelRanges =
+        requestedPreLockboxTravelRanges.length > 0
+          ? []
+          : normalizeScenarioTravelRanges(pastEventsForOverlay as any);
     }
   }
 
@@ -4998,6 +5022,7 @@ export type RecalcSimulatorBuildArgs = {
   weatherPreference?: WeatherPreference;
   persistPastSimBaseline?: boolean;
   validationOnlyDateKeysLocal?: Set<string> | string[];
+  preLockboxTravelRanges?: Array<{ startDate: string; endDate: string }>;
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;
   correlationId?: string;

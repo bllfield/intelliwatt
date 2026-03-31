@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { GAPFILL_CANONICAL_LAB_TREATMENT_MODE } from "@/lib/api/gapfillLabAdminSerialization";
 
 vi.mock("server-only", () => ({}));
 
@@ -163,10 +162,12 @@ function buildRequest(body: Record<string, unknown>): NextRequest {
 }
 
 describe("gapfill-lab route canonical artifact-only flow", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
     buildValidationCompareProjectionSidecarCalls.length = 0;
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    vi.mocked(helpers.getTravelRangesFromDb as any).mockResolvedValue([]);
 
     prisma.user.findUnique.mockResolvedValue({ id: "u1", email: "brian@intellipath-solutions.com" });
     prisma.user.findFirst.mockResolvedValue({ id: "u1", email: "brian@intellipath-solutions.com" });
@@ -850,9 +851,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.reads?.rawProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.canonicalWindow?.startDate).toBe("2025-03-01");
     expect(Array.isArray(body.pastSimSnapshot?.travelRangesFromDb)).toBe(true);
-    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
+    expect(body.validationPolicyOwner).toBe("userValidationPolicy");
+    expect(body.pastSimSnapshot?.validationPolicyOwner).toBe("userValidationPolicy");
+    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(999);
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
-      "2025-03-01,2025-03-02"
+      "bogus_not_canonical"
     );
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.insights?.fifteenMinuteAverages?.[0]?.hhmm).toBe("00:00");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxInput?.sourceContext?.sourceHouseId).toBe("h1");
@@ -893,6 +896,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(arg.actualContextHouseId).toBe("h1");
     expect(arg.esiid).toBe("E1");
     expect(arg.scenarioId).toBe("past-s1");
+    expect(arg.mode).toBe("SMT_BASELINE");
+    expect(arg.adminLabTreatmentMode).toBeUndefined();
+    expect(arg.preLockboxTravelRanges).toEqual([]);
     expect(Array.from(arg.validationOnlyDateKeysLocal as Set<string>).sort()).toEqual(["2025-04-10"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual(["baseline"]);
@@ -905,8 +911,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.sourceHouseId).toBe("h1");
     expect(body.scenarioId).toBe("past-s1");
     expect(body.testHomeId).toBe("test-home-1");
-    expect(body.treatmentMode).toBe(GAPFILL_CANONICAL_LAB_TREATMENT_MODE);
-    expect(arg.adminLabTreatmentMode).toBe(GAPFILL_CANONICAL_LAB_TREATMENT_MODE);
+    expect(body.treatmentMode).toBe("EXACT_INTERVALS");
+    expect(body.usageInputMode).toBe("EXACT_INTERVALS");
+    expect(body.validationPolicyOwner).toBe("adminValidationPolicy");
     expect(body.adminValidationMode).toBeTruthy();
     expect(body.effectiveValidationSelectionMode).toBe("manual");
     expect(body.effectiveValidationSelectionModeSource).toBe("usage_simulator_build");
@@ -952,6 +959,96 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       meta?: { validationOnlyDateKeysLocal?: string[] };
     };
     expect(Array.isArray(compareInput?.meta?.validationOnlyDateKeysLocal)).toBe(true);
+  });
+
+  it("reuses canonical source travel and validation state for exact-interval source-copy runs", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValue({
+      id: "source-build-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
+      buildInputsHash: "source-hash",
+      buildInputs: {
+        validationOnlyDateKeysLocal: ["2025-04-11", "2025-04-12"],
+        effectiveValidationSelectionMode: "random_simple",
+      },
+    });
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "test-home-1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          totalKwh: 100,
+          intervalsCount: 2,
+          start: "2025-03-01",
+          end: "2026-02-28",
+          latest: "2026-02-28T23:45:00Z",
+        },
+        daily: [
+          { date: "2025-04-11", kwh: 2, source: "ACTUAL" },
+          { date: "2025-04-12", kwh: 3, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2025-04", kwh: 5 }],
+        series: { intervals15: [{ timestamp: "2025-04-11T00:00:00.000Z", kwh: 1 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-11", "2025-04-12"],
+          validationProjectionApplied: true,
+          validationCompareRows: [
+            {
+              localDate: "2025-04-11",
+              dayType: "weekday",
+              actualDayKwh: 2,
+              simulatedDayKwh: 2,
+              errorKwh: 0,
+              percentError: 0,
+            },
+            {
+              localDate: "2025-04-12",
+              dayType: "weekend",
+              actualDayKwh: 3,
+              simulatedDayKwh: 3,
+              errorKwh: 0,
+              percentError: 0,
+            },
+          ],
+          validationCompareMetrics: { mae: 0, rmse: 0, wape: 0 },
+        },
+      },
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [],
+      testUsageInputMode: "EXACT_INTERVALS",
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.validationPolicyOwner).toBe("adminValidationPolicy");
+    expect(body.testSelectionMode).toBe("random_simple");
+    expect(body.travelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.testRangesUsed).toEqual([{ startDate: "2025-04-11", endDate: "2025-04-12" }]);
+    expect(Array.from(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal ?? []).sort()).toEqual([
+      "2025-04-11",
+      "2025-04-12",
+    ]);
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.preLockboxTravelRanges).toEqual([
+      { startDate: "2025-08-13", endDate: "2025-08-17" },
+    ]);
   });
 
   it("keeps gapfill compare on shared recalc->stored-artifact read path", async () => {
@@ -1265,7 +1362,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(body.supportedModes)).toBe(true);
   });
 
-  it("forwards whole_home_prior_only to recalcSimulatorBuild on canonical recalc", async () => {
+  it("maps legacy whole_home_prior_only requests onto profile-only pre-lockbox usage mode", async () => {
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
       action: "run_test_home_canonical_recalc",
@@ -1281,8 +1378,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const res = await POST(req);
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body.treatmentMode).toBe("whole_home_prior_only");
-    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("whole_home_prior_only");
+    expect(body.treatmentMode).toBe("PROFILE_ONLY_NEW_BUILD");
+    expect(body.usageInputMode).toBe("PROFILE_ONLY_NEW_BUILD");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("NEW_BUILD_ESTIMATE");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBeUndefined();
   });
 
   it("returns persisted compareProjection rows and metrics without route-local reshaping", async () => {
@@ -1774,8 +1873,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.simulatorMode).toBe("MANUAL_TOTALS");
-    expect(body.treatmentMode).toBe("manual_monthly_constrained");
+    expect(body.treatmentMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
+    expect(body.usageInputMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
     expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
   });
 
   it("returns explicit canonical recalc timeout without route hang", async () => {

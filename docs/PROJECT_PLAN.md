@@ -8,6 +8,9 @@
 - **Actual never stands in for simulated** on the simulated side of scored-day or parity comparisons.
 - **Single authority**: shared outputs come from `simulatePastUsageDataset` / `simulatePastFullWindowShared` / `simulatePastSelectedDaysShared` plus artifact canonical fields—not a second recomputed simulated total when the canonical path fails.
 - **localDate vs intervals**: interval timestamps determine local-date membership; if `SimulatedDayResult.localDate` disagrees, the shared path fails loudly (`simulated_day_local_date_interval_invariant_violation`).
+- **GapFill Actual Home** must remain identical to the normal user Past flow: same user-owned validation policy, same source truth, same sealed lockbox chain, same artifact family, same shared display path.
+- **GapFill Test Home** may diverge only before lockbox entry via admin-owned validation policy and the four usage input modes (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). No post-entry branch is allowed.
+- **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
 
 - No duplicate functional logic is allowed across files.
 - Shared behavior must be implemented once in a canonical module and imported everywhere else.

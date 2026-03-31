@@ -5,6 +5,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
 import { getUserDefaultValidationSelectionMode } from "@/modules/usageSimulator/service";
+import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import {
@@ -95,7 +96,10 @@ export async function POST(request: NextRequest) {
       weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
         ? (weatherPreferenceRaw as WeatherPreference)
         : undefined;
-    const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
+    const userValidationPolicy = resolveUserValidationPolicy({
+      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
+      validationDayCount: 21,
+    });
     if (!houseId) {
       return NextResponse.json(
         attachFailureContract({ ok: false, error: "houseId_required", message: "houseId is required." }),
@@ -128,8 +132,8 @@ export async function POST(request: NextRequest) {
       scenarioId,
       weatherPreference,
       persistPastSimBaseline: true,
-      validationDaySelectionMode: userDefaultValidationSelectionMode,
-      validationDayCount: 21,
+      validationDaySelectionMode: userValidationPolicy.selectionMode,
+      validationDayCount: userValidationPolicy.validationDayCount,
       runContext: {
         callerLabel: "user_recalc",
         buildPathKind: "recalc",

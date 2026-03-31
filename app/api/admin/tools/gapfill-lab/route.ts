@@ -67,6 +67,14 @@ import {
   ADMIN_LAB_TREATMENT_MODES,
   isAdminLabTreatmentMode,
 } from "@/modules/usageSimulator/adminLabTreatment";
+import {
+  resolveAdminValidationPolicy,
+  resolveTestHomeUsageInputMode,
+  resolveTestHomeUsageModeRecalcConfig,
+  resolveUserValidationPolicy,
+  type TestHomeUsageInputMode,
+  type ValidationPolicyOwner,
+} from "@/modules/usageSimulator/pastSimPolicy";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
@@ -141,6 +149,39 @@ const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"
 const VALIDATION_SELECTION_MODES = [
   ...VALIDATION_DAY_SELECTION_MODES,
 ] as const;
+
+function buildSourceCopySelectionDiagnostics(args: {
+  selectionMode: ValidationDaySelectionMode;
+  selectedDateKeys: string[];
+}) {
+  return {
+    modeUsed: args.selectionMode,
+    targetCount: args.selectedDateKeys.length,
+    selectedCount: args.selectedDateKeys.length,
+    fallbackSubstitutions: 0,
+    excludedTravelVacantCount: 0,
+    excludedWeakCoverageCount: 0,
+    weekdayWeekendSplit: null,
+    seasonalSplit: null,
+    bucketCounts: { source_copy: args.selectedDateKeys.length },
+    shortfallReason: null,
+    sourceCopy: true,
+  };
+}
+
+function shouldUseCanonicalSourceCopyPolicy(args: {
+  usageInputMode: TestHomeUsageInputMode;
+  explicitAdminValidationMode: ValidationDaySelectionMode | null;
+  testRanges: DateRange[];
+  testDaysRequested: number | null;
+}): boolean {
+  return (
+    args.usageInputMode === "EXACT_INTERVALS" &&
+    !args.explicitAdminValidationMode &&
+    args.testRanges.length === 0 &&
+    args.testDaysRequested == null
+  );
+}
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
   const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
@@ -366,6 +407,7 @@ export async function POST(req: NextRequest) {
     userDefaultValidationSelectionMode?: unknown;
     /** Section 24 admin-only simulation treatment (canonical lab recalc). */
     adminLabTreatmentMode?: unknown;
+    testUsageInputMode?: unknown;
   };
   try {
     body = await req.json();
@@ -441,13 +483,15 @@ export async function POST(req: NextRequest) {
   const weatherKind: WeatherKindParam = VALID_WEATHER_KINDS.includes(rawWeatherKind as WeatherKindParam) ? (rawWeatherKind as WeatherKindParam) : "open_meteo";
 
   const rawAdminLabTreatment = typeof body?.adminLabTreatmentMode === "string" ? body.adminLabTreatmentMode.trim() : "";
-  const adminLabTreatmentModeForRecalc =
-    rawAdminLabTreatment === ""
-      ? GAPFILL_CANONICAL_LAB_TREATMENT_MODE
-      : isAdminLabTreatmentMode(rawAdminLabTreatment)
-        ? rawAdminLabTreatment
-        : null;
-  if (rawAdminLabTreatment !== "" && adminLabTreatmentModeForRecalc === null) {
+  const rawTestUsageInputMode = typeof body?.testUsageInputMode === "string" ? body.testUsageInputMode.trim() : "";
+  const testUsageInputMode = resolveTestHomeUsageInputMode(
+    rawTestUsageInputMode || rawAdminLabTreatment || GAPFILL_CANONICAL_LAB_TREATMENT_MODE
+  );
+  const {
+    simulatorMode: testHomeSimulatorMode,
+    adminLabTreatmentMode: adminLabTreatmentModeForRecalc,
+  } = resolveTestHomeUsageModeRecalcConfig(testUsageInputMode);
+  if (rawAdminLabTreatment !== "" && !isAdminLabTreatmentMode(rawAdminLabTreatment)) {
     return NextResponse.json(
       attachFailureContract({
         ok: false,
@@ -962,7 +1006,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const userValidationPolicy = resolveUserValidationPolicy({
+      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
+      validationDayCount: testDaysRequested != null ? testDaysRequested : 21,
+    });
     const travelRangesFromDb = await getTravelRangesFromDb(labOwnerUser.id, testHomeHouse.id);
+    const sourceTravelRangesFromDb = await getTravelRangesFromDb(
+      String(sourceHouse.userId ?? link.sourceUserId),
+      sourceHouse.id
+    );
     const travelDateKeysLocal = new Set<string>(
       travelRangesFromDb.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
     );
@@ -970,23 +1022,6 @@ export async function POST(req: NextRequest) {
     const selectedTestRanges = testRanges;
     const targetValidationDayCount = testDaysRequested != null ? testDaysRequested : 21;
     const seedUsed = seed || `${sourceHouse.id}-${canonicalWindow.endDate}`;
-    const coverageSelection = await getCandidateDateCoverageForSelection({
-      houseId: sourceHouse.id,
-      scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
-      windowStart: canonicalWindow.startDate,
-      windowEnd: canonicalWindow.endDate,
-      timezone,
-      minDayCoveragePct,
-      stratifyByMonth,
-      stratifyByWeekend,
-      loadIntervalsForWindow: async () =>
-        await getActualIntervalsForRange({
-          houseId: sourceHouse.id,
-          esiid: sourceEsiid,
-          startDate: canonicalWindow.startDate,
-          endDate: canonicalWindow.endDate,
-        }),
-    });
     const manualDateKeys = selectedTestRanges.flatMap((r) =>
       localDateKeysInRange(r.startDate, r.endDate, timezone)
     );
@@ -999,20 +1034,116 @@ export async function POST(req: NextRequest) {
       requestedModeRaw === "manual" && manualDateKeys.length === 0
         ? ("customer_style_seasonal_mix" as ValidationDaySelectionMode)
         : requestedModeRaw;
-    const selectedValidation = selectValidationDayKeys({
-      mode: requestedMode,
-      targetCount: targetValidationDayCount,
-      candidateDateKeys: coverageSelection.candidateDateKeys,
-      travelDateKeysSet: travelDateKeysLocal,
-      timezone,
-      seed: seedUsed,
-      manualDateKeys,
+    let validationPolicyOwner: ValidationPolicyOwner = "adminValidationPolicy";
+    let validationPolicy = resolveAdminValidationPolicy({
+      selectionMode: requestedMode,
+      validationDayCount: targetValidationDayCount,
     });
-    const testDateKeysLocal = new Set(selectedValidation.selectedDateKeys);
-    const testRangesUsed = mergeDateKeysToRanges(selectedValidation.selectedDateKeys);
-    const testSelectionMode = requestedMode;
-    const testDaysSelected = selectedValidation.selectedDateKeys.length;
-    const selectionDiagnostics = selectedValidation.diagnostics;
+    let travelRangesForRecalc = travelRangesFromDb;
+    let testSelectionMode = validationPolicy.selectionMode;
+    let testDateKeysLocal = new Set<string>();
+    let testRangesUsed: Array<{ startDate: string; endDate: string }> = [];
+    let testDaysSelected = 0;
+    let selectionDiagnostics: Record<string, unknown> | null = null;
+    if (
+      shouldUseCanonicalSourceCopyPolicy({
+        usageInputMode: testUsageInputMode,
+        explicitAdminValidationMode: explicitAdminLabValidationMode,
+        testRanges: selectedTestRanges,
+        testDaysRequested,
+      })
+    ) {
+      const sourcePastScenario = await (prisma as any).usageSimulatorScenario
+        .findFirst({
+          where: {
+            userId: String(sourceHouse.userId ?? link.sourceUserId),
+            houseId: sourceHouse.id,
+            name: "Past (Corrected)",
+            archivedAt: null,
+          },
+          select: { id: true },
+        })
+        .catch(() => null);
+      const sourceBuildForPolicy = sourcePastScenario?.id
+        ? await (prisma as any).usageSimulatorBuild
+            .findUnique({
+              where: {
+                userId_houseId_scenarioKey: {
+                  userId: String(sourceHouse.userId ?? link.sourceUserId),
+                  houseId: sourceHouse.id,
+                  scenarioKey: String(sourcePastScenario.id),
+                },
+              },
+              select: { buildInputs: true },
+            })
+            .catch(() => null)
+        : null;
+      const sourceBuildInputs = (sourceBuildForPolicy as any)?.buildInputs as Record<string, unknown> | null | undefined;
+      const sourceValidationKeys = Array.isArray(sourceBuildInputs?.validationOnlyDateKeysLocal)
+        ? (sourceBuildInputs.validationOnlyDateKeysLocal as unknown[])
+            .map((value) => String(value ?? "").slice(0, 10))
+            .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+        : [];
+      if (!sourcePastScenario?.id || sourceValidationKeys.length === 0) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "canonical_parity_inputs_missing",
+            message:
+              "Canonical source-copy parity requires persisted source-house validation keys from the normal Past Sim run.",
+          }),
+          { status: 409 }
+        );
+      }
+      const sourceSelectionMode =
+        normalizeValidationSelectionMode(sourceBuildInputs?.effectiveValidationSelectionMode) ??
+        userValidationPolicy.selectionMode;
+      validationPolicy = resolveAdminValidationPolicy({
+        selectionMode: sourceSelectionMode,
+        validationDayCount: sourceValidationKeys.length,
+      });
+      travelRangesForRecalc = sourceTravelRangesFromDb;
+      testSelectionMode = validationPolicy.selectionMode;
+      testDateKeysLocal = new Set(sourceValidationKeys);
+      testRangesUsed = mergeDateKeysToRanges(sourceValidationKeys);
+      testDaysSelected = sourceValidationKeys.length;
+      selectionDiagnostics = buildSourceCopySelectionDiagnostics({
+        selectionMode: sourceSelectionMode,
+        selectedDateKeys: sourceValidationKeys,
+      });
+    } else {
+      const coverageSelection = await getCandidateDateCoverageForSelection({
+        houseId: sourceHouse.id,
+        scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
+        windowStart: canonicalWindow.startDate,
+        windowEnd: canonicalWindow.endDate,
+        timezone,
+        minDayCoveragePct,
+        stratifyByMonth,
+        stratifyByWeekend,
+        loadIntervalsForWindow: async () =>
+          await getActualIntervalsForRange({
+            houseId: sourceHouse.id,
+            esiid: sourceEsiid,
+            startDate: canonicalWindow.startDate,
+            endDate: canonicalWindow.endDate,
+          }),
+      });
+      const selectedValidation = selectValidationDayKeys({
+        mode: validationPolicy.selectionMode,
+        targetCount: validationPolicy.validationDayCount,
+        candidateDateKeys: coverageSelection.candidateDateKeys,
+        travelDateKeysSet: travelDateKeysLocal,
+        timezone,
+        seed: seedUsed,
+        manualDateKeys,
+      });
+      testDateKeysLocal = new Set(selectedValidation.selectedDateKeys);
+      testRangesUsed = mergeDateKeysToRanges(selectedValidation.selectedDateKeys);
+      testSelectionMode = validationPolicy.selectionMode;
+      testDaysSelected = selectedValidation.selectedDateKeys.length;
+      selectionDiagnostics = selectedValidation.diagnostics;
+    }
     if (testDateKeysLocal.size === 0) {
       return NextResponse.json(
         attachFailureContract({
@@ -1024,7 +1155,10 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const overlapLocal = setIntersect(travelDateKeysLocal, testDateKeysLocal);
+    const effectiveTravelDateKeysLocal = new Set<string>(
+      travelRangesForRecalc.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
+    );
+    const overlapLocal = setIntersect(effectiveTravelDateKeysLocal, testDateKeysLocal);
     if (overlapLocal.size > 0) {
       return NextResponse.json(
         attachFailureContract({
@@ -1078,12 +1212,13 @@ export async function POST(req: NextRequest) {
           houseId: testHomeHouse.id,
           esiid: sourceEsiid,
           actualContextHouseId: sourceHouse.id,
-          mode: "SMT_BASELINE",
+          mode: testHomeSimulatorMode,
           scenarioId: String(pastScenario.id),
           persistPastSimBaseline: true,
           validationOnlyDateKeysLocal: testDateKeysLocal,
+          preLockboxTravelRanges: travelRangesForRecalc,
           validationDaySelectionMode: testSelectionMode,
-          validationDayCount: targetValidationDayCount,
+          validationDayCount: validationPolicy.validationDayCount,
           correlationId: labCorrelationId,
           adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
           runContext: {
@@ -1484,8 +1619,9 @@ export async function POST(req: NextRequest) {
       sourceHouseId: sourceHouse.id,
       testHomeId: testHomeHouse.id,
       /** Requested Section 24 admin treatment; applied in shared `recalcSimulatorBuild` after `resolveSimFingerprint`. */
-      treatmentMode: adminLabTreatmentModeForRecalc,
+      treatmentMode: testUsageInputMode,
       supportedAdminTreatmentModes: [...ADMIN_LAB_TREATMENT_MODES],
+      usageInputMode: testUsageInputMode,
       simulatorMode:
         recalcOut.effectiveSimulatorMode ??
         (typeof (buildRow?.buildInputs as Record<string, unknown> | undefined)?.mode === "string"
@@ -1509,11 +1645,12 @@ export async function POST(req: NextRequest) {
         endDate: canonicalWindow.endDate,
         helper: canonicalWindowHelper,
       },
-      travelRangesFromDb,
+      travelRangesFromDb: travelRangesForRecalc,
       testRangesUsed,
       testSelectionMode,
       adminValidationMode: testSelectionMode,
-      userDefaultValidationSelectionMode,
+      validationPolicyOwner,
+      userDefaultValidationSelectionMode: userValidationPolicy.selectionMode,
       effectiveValidationSelectionMode,
       effectiveValidationSelectionModeSource: effectiveValidationFromBuild ? "usage_simulator_build" : "request_fallback",
       testDaysRequested,
@@ -1614,6 +1751,10 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       houseId: selectedSourceHouse.id,
     });
+    const userValidationPolicy = resolveUserValidationPolicy({
+      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
+      validationDayCount: 21,
+    });
     const sourcePastRecalc = await withTimeout(
       dispatchPastSimRecalc({
         userId: user.id,
@@ -1623,8 +1764,8 @@ export async function POST(req: NextRequest) {
         scenarioId: String(pastScenario.id),
         weatherPreference: "LAST_YEAR_WEATHER",
         persistPastSimBaseline: true,
-        validationDaySelectionMode: await getUserDefaultValidationSelectionMode(),
-        validationDayCount: 21,
+        validationDaySelectionMode: userValidationPolicy.selectionMode,
+        validationDayCount: userValidationPolicy.validationDayCount,
         correlationId: sourcePastCorrelationId,
         runContext: {
           callerLabel: "user_recalc",
@@ -1688,14 +1829,6 @@ export async function POST(req: NextRequest) {
       }
     }
     const sourceTravelRangesFromDb = await getTravelRangesFromDb(user.id, selectedSourceHouse.id);
-    const boundedExcludedDateKeysSorted = Array.from(
-      boundDateKeysToCoverageWindow(
-        new Set<string>(travelRangesToExcludeDateKeys(sourceTravelRangesFromDb)),
-        canonicalWindow
-      )
-    ).sort();
-    const boundedExcludedDateKeysCount = boundedExcludedDateKeysSorted.length;
-    const boundedExcludedDateKeysFingerprint = boundedExcludedDateKeysSorted.join(",");
     const [defaultRead, baselineRead, rawRead, sourceBuildRow, sourceProfiles] = await Promise.all([
       getSimulatedUsageForHouseScenario({
         userId: user.id,
@@ -1732,42 +1865,7 @@ export async function POST(req: NextRequest) {
         houseId: selectedSourceHouse.id,
       }).catch(() => ({ homeProfile: null, applianceProfile: null })),
     ]);
-    const withCanonicalExcludedOwnership = (dataset: any, compact: boolean) => {
-      if (!dataset || typeof dataset !== "object") return null;
-      const baseMeta =
-        dataset.meta && typeof dataset.meta === "object"
-          ? (dataset.meta as Record<string, unknown>)
-          : {};
-      const normalizedMeta: Record<string, unknown> = {
-        ...baseMeta,
-        excludedDateKeysCount: boundedExcludedDateKeysCount,
-        excludedDateKeysFingerprint: boundedExcludedDateKeysFingerprint,
-      };
-      if (compact) {
-        return {
-          summary: dataset.summary ?? null,
-          daily: Array.isArray(dataset.daily) ? dataset.daily : [],
-          monthly: Array.isArray(dataset.monthly) ? dataset.monthly : [],
-          meta: {
-            canonicalArtifactSimulatedDayTotalsByDate:
-              normalizedMeta.canonicalArtifactSimulatedDayTotalsByDate ??
-              (dataset as any).canonicalArtifactSimulatedDayTotalsByDate ??
-              null,
-            validationOnlyDateKeysLocal:
-              normalizedMeta.validationOnlyDateKeysLocal ?? null,
-            excludedDateKeysCount: boundedExcludedDateKeysCount,
-            excludedDateKeysFingerprint: boundedExcludedDateKeysFingerprint,
-          },
-        };
-      }
-      return {
-        ...dataset,
-        meta: normalizedMeta,
-      };
-    };
-    const baselineDataset = baselineRead.ok
-      ? withCanonicalExcludedOwnership((baselineRead as any).dataset, false)
-      : null;
+    const baselineDataset = baselineRead.ok ? (baselineRead as any).dataset : null;
     const baselineCompareProjection = baselineRead.ok
       ? buildValidationCompareProjectionSidecar(baselineDataset)
       : null;
@@ -1829,7 +1927,7 @@ export async function POST(req: NextRequest) {
       travelRangesFromDb: sourceTravelRangesFromDb,
       reads: {
         defaultProjection: defaultRead.ok
-          ? { ok: true, dataset: withCanonicalExcludedOwnership((defaultRead as any).dataset, true) }
+          ? { ok: true, dataset: (defaultRead as any).dataset }
           : { ok: false, code: defaultRead.code, message: defaultRead.message },
         baselineProjection: baselineRead.ok
           ? {
@@ -1839,9 +1937,11 @@ export async function POST(req: NextRequest) {
             }
           : { ok: false, code: baselineRead.code, message: baselineRead.message },
         rawProjection: rawRead.ok
-          ? { ok: true, dataset: withCanonicalExcludedOwnership((rawRead as any).dataset, true) }
+          ? { ok: true, dataset: (rawRead as any).dataset }
           : { ok: false, code: rawRead.code, message: rawRead.message },
       },
+      validationPolicyOwner: userValidationPolicy.owner,
+      validationPolicyMode: userValidationPolicy.selectionMode,
       build: {
         mode: (sourceBuildRow as any)?.mode ?? null,
         baseKind: (sourceBuildRow as any)?.baseKind ?? null,
@@ -1899,6 +1999,7 @@ export async function POST(req: NextRequest) {
       sourceHouseId: selectedSourceHouse.id,
       scenarioId: String(pastScenario.id),
       correlationId: sourcePastCorrelationId,
+      validationPolicyOwner: userValidationPolicy.owner,
       pastSimSnapshot: payload,
     });
   }
