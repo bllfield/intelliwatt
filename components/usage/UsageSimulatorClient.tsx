@@ -7,7 +7,10 @@ import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import type { ValidationCompareRowWeather } from "@/modules/usageSimulator/compareProjection";
-import { PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED } from "@/modules/usageSimulator/pastCompareUiDefaults";
+import {
+  PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED,
+  shouldResetPastValidationCompareExpanded,
+} from "@/modules/usageSimulator/pastCompareUiDefaults";
 import {
   USAGE_SCENARIO_ADJUSTMENT_CATALOG,
   toMonthlyAdjustmentPayload,
@@ -215,8 +218,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [workspace, setWorkspace] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
   const [curveView, setCurveView] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
 
+  // Reset whenever the user lands on the Past curve tab (including returning from BASELINE/FUTURE).
   useEffect(() => {
-    if (curveView !== "PAST") {
+    if (shouldResetPastValidationCompareExpanded(curveView)) {
       setPastCompareExpanded(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
     }
   }, [curveView]);

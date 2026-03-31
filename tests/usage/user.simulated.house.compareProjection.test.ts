@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
+import { shouldResetPastValidationCompareExpanded } from "@/modules/usageSimulator/pastCompareUiDefaults";
 
 vi.mock("server-only", () => ({}));
 
@@ -75,6 +77,60 @@ describe("user simulated house compare projection", () => {
           validationCompareMetrics: { wape: 10, mae: 1, rmse: 1 },
         },
       },
+    });
+  });
+
+  it("Past validation compare: reset predicate runs on entering Past tab, not when leaving", () => {
+    expect(shouldResetPastValidationCompareExpanded("PAST")).toBe(true);
+    expect(shouldResetPastValidationCompareExpanded("BASELINE")).toBe(false);
+    expect(shouldResetPastValidationCompareExpanded("FUTURE")).toBe(false);
+  });
+
+  it("derived daily fallback: preserves ACTUAL source and sourceDetail from series-shaped rows", () => {
+    expect(
+      dailyRowFieldsFromSourceRow({
+        date: "2026-01-02",
+        kwh: 12,
+        source: "ACTUAL",
+        sourceDetail: "ACTUAL",
+      })
+    ).toEqual({
+      date: "2026-01-02",
+      kwh: 12,
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL",
+    });
+  });
+
+  it("derived daily fallback: preserves SIMULATED source and sourceDetail from series-shaped rows", () => {
+    expect(
+      dailyRowFieldsFromSourceRow({
+        date: "2026-01-03",
+        kwh: 4,
+        source: "SIMULATED",
+        sourceDetail: "SIMULATED_TRAVEL_VACANT",
+      })
+    ).toEqual({
+      date: "2026-01-03",
+      kwh: 4,
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_TRAVEL_VACANT",
+    });
+  });
+
+  it("derived daily fallback: preserves projected validation ACTUAL_VALIDATION_TEST_DAY labeling", () => {
+    expect(
+      dailyRowFieldsFromSourceRow({
+        date: "2026-01-01",
+        kwh: 0.5,
+        source: "ACTUAL",
+        sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
+      })
+    ).toEqual({
+      date: "2026-01-01",
+      kwh: 0.5,
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
     });
   });
 

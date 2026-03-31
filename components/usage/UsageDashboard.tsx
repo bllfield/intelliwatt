@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
+import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 type UsageSeriesPoint = {
@@ -49,6 +50,7 @@ type DailyRow = {
     | "ACTUAL_VALIDATION_TEST_DAY"
     | "ACTUAL";
 };
+
 type MonthlyRow = { month: string; kwh: number };
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
 
@@ -530,19 +532,14 @@ export const UsageDashboard: React.FC<Props> = ({
     const daily = dataset?.daily ?? [];
     const fallbackDailyRaw = daily.length
       ? daily
-      : (dataset?.series?.daily ?? []).map((d) => ({
-          date: toDateKeyFromTimestamp(d.timestamp),
-          kwh: d.kwh,
-          ...(String((d as { source?: string }).source ?? "").toUpperCase() === "SIMULATED"
-            ? { source: "SIMULATED" as const }
-            : {}),
-          ...(String((d as { source?: string }).source ?? "").toUpperCase() === "ACTUAL"
-            ? { source: "ACTUAL" as const }
-            : {}),
-          ...(typeof (d as { sourceDetail?: string }).sourceDetail === "string"
-            ? { sourceDetail: (d as { sourceDetail: string }).sourceDetail as DailyRow["sourceDetail"] }
-            : {}),
-        }));
+      : (dataset?.series?.daily ?? []).map((d) =>
+          dailyRowFieldsFromSourceRow({
+            date: toDateKeyFromTimestamp(d.timestamp),
+            kwh: d.kwh,
+            source: (d as { source?: string }).source,
+            sourceDetail: (d as { sourceDetail?: string }).sourceDetail,
+          })
+        );
     const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const coverageStart = canonicalWindow.startDate;
     const coverageEnd = canonicalWindow.endDate;
@@ -557,12 +554,15 @@ export const UsageDashboard: React.FC<Props> = ({
         seen.add(d);
         return dateInRange(d);
       })
-      .map((row) => ({
-        date: String(row.date).slice(0, 10),
-        kwh: Number(row.kwh) || 0,
-        ...(String((row as any)?.source ?? "").toUpperCase() === "SIMULATED" ? { source: "SIMULATED" as const } : {}),
-        ...(typeof (row as any)?.sourceDetail === "string" ? { sourceDetail: String((row as any).sourceDetail) as DailyRow["sourceDetail"] } : {}),
-      }))
+      .map(
+        (row): DailyRow =>
+          dailyRowFieldsFromSourceRow({
+            date: String((row as { date: string }).date),
+            kwh: (row as { kwh: unknown }).kwh,
+            source: (row as { source?: string }).source,
+            sourceDetail: (row as { sourceDetail?: string }).sourceDetail,
+          })
+      )
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const intervals = dataset?.intervals ?? [];
