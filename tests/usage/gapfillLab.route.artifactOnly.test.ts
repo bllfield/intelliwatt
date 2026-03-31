@@ -788,6 +788,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         meta: {
           excludedDateKeysCount: 999,
           excludedDateKeysFingerprint: "bogus_not_canonical",
+          artifactInputHash: "artifact-input-hash",
+          artifactInputHashUsed: "artifact-input-hash",
           validationCompareRows: [
             {
               localDate: "2025-03-01",
@@ -850,9 +852,17 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     });
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
-    expect(readModes).toEqual(["allow_rebuild", "allow_rebuild", "allow_rebuild"]);
+    expect(readModes).toEqual(["allow_rebuild", "artifact_only", "artifact_only"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual([undefined, "baseline", "raw"]);
+    expect(getSimulatedUsageForHouseScenario.mock.calls[1]?.[0]).toMatchObject({
+      exactArtifactInputHash: "artifact-input-hash",
+      requireExactArtifactMatch: true,
+    });
+    expect(getSimulatedUsageForHouseScenario.mock.calls[2]?.[0]).toMatchObject({
+      exactArtifactInputHash: "artifact-input-hash",
+      requireExactArtifactMatch: true,
+    });
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.reads?.rawProjection?.ok).toBe(true);

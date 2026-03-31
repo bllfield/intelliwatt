@@ -1884,27 +1884,76 @@ export async function POST(req: NextRequest) {
     ).sort();
     const boundedExcludedDateKeysCount = boundedExcludedDateKeysSorted.length;
     const boundedExcludedDateKeysFingerprint = boundedExcludedDateKeysSorted.join(",");
-    const [defaultRead, baselineRead, rawRead, sourceBuildRow, sourceProfiles] = await Promise.all([
-      getSimulatedUsageForHouseScenario({
-        userId: user.id,
-        houseId: selectedSourceHouse.id,
-        scenarioId: String(pastScenario.id),
-        readMode: "allow_rebuild",
-      }),
-      getSimulatedUsageForHouseScenario({
-        userId: user.id,
-        houseId: selectedSourceHouse.id,
-        scenarioId: String(pastScenario.id),
-        readMode: "allow_rebuild",
+    const defaultRead = await getSimulatedUsageForHouseScenario({
+      userId: user.id,
+      houseId: selectedSourceHouse.id,
+      scenarioId: String(pastScenario.id),
+      readMode: "allow_rebuild",
+      correlationId: sourcePastCorrelationId,
+      readContext: {
+        artifactReadMode: "allow_rebuild",
         projectionMode: "baseline",
-      }),
-      getSimulatedUsageForHouseScenario({
-        userId: user.id,
-        houseId: selectedSourceHouse.id,
-        scenarioId: String(pastScenario.id),
-        readMode: "allow_rebuild",
-        projectionMode: "raw",
-      }),
+        compareSidecarRequest: true,
+      },
+    });
+    const sourceExactArtifactInputHash =
+      typeof (defaultRead as any)?.dataset?.meta?.artifactInputHashUsed === "string" &&
+      String((defaultRead as any).dataset.meta.artifactInputHashUsed).trim()
+        ? String((defaultRead as any).dataset.meta.artifactInputHashUsed).trim()
+        : typeof (defaultRead as any)?.dataset?.meta?.artifactInputHash === "string" &&
+            String((defaultRead as any).dataset.meta.artifactInputHash).trim()
+          ? String((defaultRead as any).dataset.meta.artifactInputHash).trim()
+          : typeof (defaultRead as any)?.dataset?.meta?.requestedInputHash === "string" &&
+              String((defaultRead as any).dataset.meta.requestedInputHash).trim()
+            ? String((defaultRead as any).dataset.meta.requestedInputHash).trim()
+            : null;
+    const [baselineRead, rawRead, sourceBuildRow, sourceProfiles] = await Promise.all([
+      sourceExactArtifactInputHash
+        ? getSimulatedUsageForHouseScenario({
+            userId: user.id,
+            houseId: selectedSourceHouse.id,
+            scenarioId: String(pastScenario.id),
+            readMode: "artifact_only",
+            exactArtifactInputHash: sourceExactArtifactInputHash,
+            requireExactArtifactMatch: true,
+            projectionMode: "baseline",
+            correlationId: sourcePastCorrelationId,
+            readContext: {
+              artifactReadMode: "artifact_only",
+              projectionMode: "baseline",
+              compareSidecarRequest: true,
+            },
+          })
+        : Promise.resolve(defaultRead),
+      sourceExactArtifactInputHash
+        ? getSimulatedUsageForHouseScenario({
+            userId: user.id,
+            houseId: selectedSourceHouse.id,
+            scenarioId: String(pastScenario.id),
+            readMode: "artifact_only",
+            exactArtifactInputHash: sourceExactArtifactInputHash,
+            requireExactArtifactMatch: true,
+            projectionMode: "raw",
+            correlationId: sourcePastCorrelationId,
+            readContext: {
+              artifactReadMode: "artifact_only",
+              projectionMode: "raw",
+              compareSidecarRequest: true,
+            },
+          })
+        : getSimulatedUsageForHouseScenario({
+            userId: user.id,
+            houseId: selectedSourceHouse.id,
+            scenarioId: String(pastScenario.id),
+            readMode: "allow_rebuild",
+            projectionMode: "raw",
+            correlationId: sourcePastCorrelationId,
+            readContext: {
+              artifactReadMode: "allow_rebuild",
+              projectionMode: "raw",
+              compareSidecarRequest: true,
+            },
+          }),
       (prisma as any).usageSimulatorBuild.findUnique({
         where: {
           userId_houseId_scenarioKey: {
