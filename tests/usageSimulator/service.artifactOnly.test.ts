@@ -605,6 +605,48 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
+  it("allows shared long-term-average weather artifacts through the same persisted read path", async () => {
+    getCachedPastDataset.mockResolvedValueOnce({
+      inputHash: "hash-long-term-avg",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96,
+          totalKwh: 12,
+          start: "2026-01-01",
+          end: "2026-01-01",
+          latest: "2026-01-01",
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherLogicMode: "LONG_TERM_AVERAGE_WEATHER",
+          weatherSourceSummary: "stub_only",
+        },
+        daily: [{ date: "2026-01-01", kwh: 12, source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+      exactArtifactInputHash: "hash-long-term-avg",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.dataset?.meta?.weatherLogicMode).toBe("LONG_TERM_AVERAGE_WEATHER");
+      expect(out.dataset?.meta?.weatherSourceSummary).toBe("stub_only");
+    }
+  });
+
   it("baseline projection flips validation/test keys to ACTUAL with meter kWh in daily and series.daily (chart/table parity)", async () => {
     decodeIntervalsV1.mockReturnValue(
       Array.from({ length: 96 }, (_, i) => ({

@@ -261,6 +261,11 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
   const dayTotalSource = String(meta?.dayTotalSource ?? "");
   const profileReason = String(meta?.usageShapeProfileDiag?.reasonNotUsed ?? "");
   const weatherSourceSummary = String(meta?.weatherSourceSummary ?? "");
+  const weatherLogicMode = String(
+    meta?.weatherLogicMode ??
+      meta?.lockboxInput?.sourceContext?.weatherLogicMode ??
+      ""
+  );
 
   if (dayTotalSource === "fallback_month_avg" || profileReason) {
     return {
@@ -268,6 +273,20 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
       message:
         "Shared simulation quality guard failed: usage-shape profile is missing/invalid (fallback_month_avg).",
     };
+  }
+  if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
+    if (
+      !weatherSourceSummary ||
+      weatherSourceSummary === "none" ||
+      weatherSourceSummary === "unknown"
+    ) {
+      return {
+        ok: false,
+        message:
+          "Shared simulation quality guard failed: long-term-average weather coverage is unavailable for the modeled window.",
+      };
+    }
+    return { ok: true };
   }
   if (weatherSourceSummary && weatherSourceSummary !== "actual_only") {
     return {
