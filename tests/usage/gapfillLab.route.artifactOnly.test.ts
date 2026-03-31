@@ -9,6 +9,9 @@ const finalizeGapfillCompareRunSnapshot = vi.fn();
 const markGapfillCompareRunFailed = vi.fn();
 const getSimulatedUsageForHouseScenario = vi.fn();
 const recalcSimulatorBuild = vi.fn();
+const dispatchPastSimRecalc = vi.fn();
+const getPastSimRecalcJobForUser = vi.fn();
+const runSimulatorDiagnostic = vi.fn();
 const getActualIntervalsForRange = vi.fn();
 const getActualUsageDatasetForHouse = vi.fn();
 const loadDisplayProfilesForHouse = vi.fn();
@@ -75,6 +78,15 @@ vi.mock("@/modules/usageSimulator/service", () => ({
   getUserDefaultValidationSelectionMode: (...args: any[]) => getUserDefaultValidationSelectionMode(...args),
   setUserDefaultValidationSelectionMode: (...args: any[]) => setUserDefaultValidationSelectionMode(...args),
   getAdminLabDefaultValidationSelectionMode: (...args: any[]) => getAdminLabDefaultValidationSelectionMode(...args),
+}));
+vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
+  dispatchPastSimRecalc: (...args: any[]) => dispatchPastSimRecalc(...args),
+}));
+vi.mock("@/modules/usageSimulator/simDropletJob", () => ({
+  getPastSimRecalcJobForUser: (...args: any[]) => getPastSimRecalcJobForUser(...args),
+}));
+vi.mock("@/lib/admin/simulatorDiagnostic", () => ({
+  runSimulatorDiagnostic: (...args: any[]) => runSimulatorDiagnostic(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/compareRunSnapshot", () => ({
@@ -281,6 +293,45 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       buildInputsHash: "hash-1",
       dataset: {},
       canonicalArtifactInputHash: "canonical-hash-1",
+    });
+    dispatchPastSimRecalc.mockResolvedValue({
+      executionMode: "inline",
+      correlationId: "source-cid-1",
+      result: {
+        ok: true,
+        houseId: "h1",
+        buildInputsHash: "source-hash-1",
+        dataset: {},
+      },
+    });
+    getPastSimRecalcJobForUser.mockResolvedValue({
+      ok: true,
+      status: "succeeded",
+      failureMessage: null,
+    });
+    runSimulatorDiagnostic.mockResolvedValue({
+      ok: true,
+      identity: {
+        windowStartUtc: "2025-03-01",
+        windowEndUtc: "2026-02-28",
+        timezone: "America/Chicago",
+        inputHash: "source-input-hash",
+        engineVersion: "production_past_stitched_v2",
+        intervalDataFingerprint: "ifp-1",
+        weatherIdentity: "wx-1",
+        usageShapeProfileIdentity: "shape-1",
+        buildInputsHash: "hash-from-build-row",
+      },
+      weatherProvenance: { weatherSourceSummary: "actual_only" },
+      stubAudit: { stubCount: 0 },
+      pastPath: { paritySummary: { matches: true } },
+      dayLevelParity: { sampleCount: 1 },
+      integrity: { classification: "ok" },
+      rawActualIntervalsMeta: { intervalCount: 96 },
+      rawActualIntervals: [{ timestamp: "2025-03-01T00:00:00.000Z", kwh: 1 }],
+      stitchedPastIntervalsMeta: { intervalCount: 96 },
+      stitchedPastIntervals: [{ timestamp: "2025-03-01T00:00:00.000Z", kwh: 0.9 }],
+      firstActualOnlyDayComparison: { localDate: "2025-03-01" },
     });
     getSimulatedUsageForHouseScenario.mockImplementation(async (args: any) => {
       if (args.projectionMode === "baseline") {
@@ -775,9 +826,23 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.action).toBe("run_source_home_past_sim_snapshot");
     expect(body.sourceHouseId).toBe("h1");
     expect(body.scenarioId).toBe("past-s1");
+    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
+    expect(dispatchPastSimRecalc.mock.calls[0]?.[0]).toMatchObject({
+      houseId: "h1",
+      scenarioId: "past-s1",
+      mode: "SMT_BASELINE",
+      weatherPreference: "LAST_YEAR_WEATHER",
+      persistPastSimBaseline: true,
+      validationDayCount: 21,
+      runContext: {
+        callerLabel: "user_recalc",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
-    expect(readModes).toEqual(["artifact_only", "artifact_only", "artifact_only"]);
+    expect(readModes).toEqual(["allow_rebuild", "allow_rebuild", "allow_rebuild"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual([undefined, "baseline", "raw"]);
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.ok).toBe(true);
@@ -794,6 +859,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxPerRunTrace?.inputHash).toBe("input-1");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.fullChainHash).toBe("chain-1");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.metrics?.wape).toBe(5);
+    expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
+    expect(body.pastSimSnapshot?.build?.buildInputsHash).toBe("hash-from-build-row");
+    expect(body.pastSimSnapshot?.profiles?.homeProfileLive).toEqual({ hvac: {} });
+    expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
+    expect(body.pastSimSnapshot?.engineContext?.rawActualIntervalsMeta?.intervalCount).toBe(96);
   });
 
   it("runs canonical test-home recalc with generic actual-context source", async () => {
