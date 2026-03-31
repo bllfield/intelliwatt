@@ -25,6 +25,18 @@ export class CompareTruthIncompleteError extends Error {
   }
 }
 
+/** Day-level weather aligned to `dataset.dailyWeather` for the same local date (display context only). */
+export type ValidationCompareRowWeather = {
+  tAvgF: number | null;
+  tMinF: number | null;
+  tMaxF: number | null;
+  hdd65: number | null;
+  cdd65: number | null;
+  source: string | null;
+  /** True when there is no `dailyWeather` entry for this date (do not substitute). */
+  weatherMissing: boolean;
+};
+
 export type ValidationCompareProjectionSidecar = {
   rows: Array<{
     localDate: string;
@@ -33,9 +45,49 @@ export type ValidationCompareProjectionSidecar = {
     simulatedDayKwh: number;
     errorKwh: number;
     percentError: number | null;
+    weather?: ValidationCompareRowWeather;
   }>;
   metrics: Record<string, unknown>;
 };
+
+function compareWeatherFromDailyWeather(dailyWeather: unknown, dateKey: string): ValidationCompareRowWeather {
+  if (!dailyWeather || typeof dailyWeather !== "object" || Array.isArray(dailyWeather)) {
+    return {
+      tAvgF: null,
+      tMinF: null,
+      tMaxF: null,
+      hdd65: null,
+      cdd65: null,
+      source: null,
+      weatherMissing: true,
+    };
+  }
+  const rec = (dailyWeather as Record<string, unknown>)[dateKey];
+  if (!rec || typeof rec !== "object" || Array.isArray(rec)) {
+    return {
+      tAvgF: null,
+      tMinF: null,
+      tMaxF: null,
+      hdd65: null,
+      cdd65: null,
+      source: null,
+      weatherMissing: true,
+    };
+  }
+  const w = rec as Record<string, unknown>;
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const src = w.source;
+  return {
+    tAvgF: num(w.tAvgF),
+    tMinF: num(w.tMinF),
+    tMaxF: num(w.tMaxF),
+    hdd65: num(w.hdd65),
+    cdd65: num(w.cdd65),
+    source: typeof src === "string" && src.trim() ? src.trim() : null,
+    weatherMissing: false,
+  };
+}
 
 function cloneDatasetForProjection(dataset: any): any {
   if (!dataset || typeof dataset !== "object") return dataset;
@@ -227,6 +279,7 @@ export function attachValidationCompareProjection(dataset: any): any {
   if (missingSimTotals.length > 0) {
     throw new CompareTruthIncompleteError(missingSimTotals);
   }
+  const dailyWeather = (projected as any)?.dailyWeather;
   const rows = validationOnlyDateKeysLocal
     .map((dk) => {
       const actualDayKwh = Number(actualByDate.get(dk) ?? 0) || 0;
@@ -242,6 +295,7 @@ export function attachValidationCompareProjection(dataset: any): any {
         simulatedDayKwh: Math.round(simulatedDayKwh * 100) / 100,
         errorKwh: Math.round(errorKwh * 100) / 100,
         percentError: percentError == null ? null : Math.round(percentError * 100) / 100,
+        weather: compareWeatherFromDailyWeather(dailyWeather, dk),
       };
     })
     .sort((a, b) => (a.localDate < b.localDate ? -1 : 1));

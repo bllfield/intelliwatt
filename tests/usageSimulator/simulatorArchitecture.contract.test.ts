@@ -25,10 +25,16 @@ describe("simulator architecture contract (stitch vs compare, truth parity)", ()
         { date: "2026-06-15", kwh: 10, source: "ACTUAL" },
         { date: "2026-08-01", kwh: 3, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" },
       ],
+      dailyWeather: {
+        "2026-06-15": { tAvgF: 72.3, tMinF: 65, tMaxF: 80, hdd65: 1.2, cdd65: 2.4, source: "actual_cached" },
+      },
     });
     const dates = (projected.meta.validationCompareRows ?? []).map((r: { localDate: string }) => r.localDate);
     expect(dates).toEqual(["2026-06-15"]);
     expect(dates).not.toContain("2026-08-01");
+    const row0 = projected.meta.validationCompareRows?.[0] as { weather?: { tAvgF: number | null; weatherMissing: boolean } };
+    expect(row0?.weather?.weatherMissing).toBe(false);
+    expect(row0?.weather?.tAvgF).toBe(72.3);
   });
 
   it("user-style compare sidecar matches repeated reads of the same stored dataset (additive analytics only)", () => {
@@ -41,12 +47,29 @@ describe("simulator architecture contract (stitch vs compare, truth parity)", ()
         { date: "2026-01-10", kwh: 11, source: "ACTUAL" },
         { date: "2026-01-11", kwh: 12, source: "ACTUAL" },
       ],
+      dailyWeather: {
+        "2026-01-10": { tAvgF: 40, tMinF: 32, tMaxF: 48, hdd65: 10, cdd65: 0, source: "stub" },
+        "2026-01-11": { tAvgF: 41, tMinF: 33, tMaxF: 49, hdd65: 9, cdd65: 0, source: "stub" },
+      },
     };
     const withCompare = attachValidationCompareProjection(base);
     const a = buildValidationCompareProjectionSidecar(withCompare);
     const b = buildValidationCompareProjectionSidecar(withCompare);
     expect(a.rows).toEqual(b.rows);
     expect(a.metrics).toEqual(b.metrics);
+  });
+
+  it("attachValidationCompareProjection marks weather missing when dailyWeather has no row for that date", () => {
+    const projected = attachValidationCompareProjection({
+      meta: {
+        validationOnlyDateKeysLocal: ["2026-06-20"],
+        canonicalArtifactSimulatedDayTotalsByDate: { "2026-06-20": 5 },
+      },
+      daily: [{ date: "2026-06-20", kwh: 4, source: "ACTUAL" }],
+      dailyWeather: {},
+    });
+    const w = (projected.meta.validationCompareRows?.[0] as { weather?: { weatherMissing: boolean } })?.weather;
+    expect(w?.weatherMissing).toBe(true);
   });
 
   it("attachValidationCompareProjection fails closed when canonical simulated-day totals are missing for a validation day", () => {

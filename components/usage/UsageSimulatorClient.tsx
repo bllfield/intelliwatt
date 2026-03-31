@@ -6,6 +6,8 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
+import type { ValidationCompareRowWeather } from "@/modules/usageSimulator/compareProjection";
+import { PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED } from "@/modules/usageSimulator/pastCompareUiDefaults";
 import {
   USAGE_SCENARIO_ADJUSTMENT_CATALOG,
   toMonthlyAdjustmentPayload,
@@ -166,15 +168,24 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       simulatedDayKwh: number;
       errorKwh: number;
       percentError: number | null;
+      weather?: ValidationCompareRowWeather;
     }>;
     metrics: Record<string, number | null>;
   } | null>(null);
+  /** Past: Validation / Test Day Compare starts collapsed; expand for full table. */
+  const [pastCompareExpanded, setPastCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
   const [scenarioLoading, setScenarioLoading] = useState(false);
 
   const WORKSPACE_PAST_NAME = "Past (Corrected)";
   const WORKSPACE_FUTURE_NAME = "Future (What-if)";
   const [workspace, setWorkspace] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
   const [curveView, setCurveView] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
+
+  useEffect(() => {
+    if (curveView !== "PAST") {
+      setPastCompareExpanded(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
+    }
+  }, [curveView]);
 
   const [openManual, setOpenManual] = useState(false);
   const [openHome, setOpenHome] = useState(false);
@@ -528,17 +539,35 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         const compareMetrics =
           okBody.compareProjection?.metrics ?? okBody.dataset?.meta?.validationCompareMetrics ?? {};
         setScenarioCompareProjection({
-          rows: compareRows.map((row: Record<string, unknown> & { dayType?: string }) => ({
-            localDate: String(row?.localDate ?? "").slice(0, 10),
-            dayType: row?.dayType === "weekend" ? "weekend" : "weekday",
-            actualDayKwh: Number(row?.actualDayKwh ?? 0) || 0,
-            simulatedDayKwh: Number(row?.simulatedDayKwh ?? row?.freshCompareSimDayKwh ?? 0) || 0,
-            errorKwh: Number(row?.errorKwh ?? row?.actualVsFreshErrorKwh ?? 0) || 0,
-            percentError:
-              row?.percentError == null
-                ? null
-                : Number(row.percentError) || 0,
-          })),
+          rows: compareRows.map((row: Record<string, unknown> & { dayType?: string; weather?: unknown }) => {
+            const wxRaw = row?.weather;
+            let weather: ValidationCompareRowWeather | undefined;
+            if (wxRaw && typeof wxRaw === "object" && !Array.isArray(wxRaw)) {
+              const w = wxRaw as Record<string, unknown>;
+              const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+              weather = {
+                tAvgF: num(w.tAvgF),
+                tMinF: num(w.tMinF),
+                tMaxF: num(w.tMaxF),
+                hdd65: num(w.hdd65),
+                cdd65: num(w.cdd65),
+                source: typeof w.source === "string" && w.source.trim() ? w.source.trim() : null,
+                weatherMissing: w.weatherMissing === true,
+              };
+            }
+            return {
+              localDate: String(row?.localDate ?? "").slice(0, 10),
+              dayType: row?.dayType === "weekend" ? "weekend" : "weekday",
+              actualDayKwh: Number(row?.actualDayKwh ?? 0) || 0,
+              simulatedDayKwh: Number(row?.simulatedDayKwh ?? row?.freshCompareSimDayKwh ?? 0) || 0,
+              errorKwh: Number(row?.errorKwh ?? row?.actualVsFreshErrorKwh ?? 0) || 0,
+              percentError:
+                row?.percentError == null
+                  ? null
+                  : Number(row.percentError) || 0,
+              ...(weather ? { weather } : {}),
+            };
+          }),
           metrics: (compareMetrics && typeof compareMetrics === "object") ? compareMetrics : {},
         });
       } catch (e: any) {
@@ -1371,19 +1400,51 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
       {curveView === "PAST" ? (
         <div className="mt-4 rounded-2xl border border-brand-blue/10 bg-white p-4">
-          <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
-          <div className="mt-1 text-xs text-brand-navy/70">
-            This section compares modeled vs actual on validation days for simulator accuracy transparency.
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+              <div className="mt-1 text-xs text-brand-navy/70">
+                {scenarioLoading
+                  ? ""
+                  : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length
+                    ? `${scenarioCompareProjection.rows.length} scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.`
+                    : "This section compares modeled vs actual on validation days for simulator accuracy transparency."}
+              </div>
+              {!scenarioLoading &&
+              scenarioCurveOutcome?.kind === "success" &&
+              scenarioCompareProjection?.rows?.length ? (
+                <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
+                  WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
+                  {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} · RMSE{" "}
+                  {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
+                </div>
+              ) : null}
+            </div>
+            {!scenarioLoading &&
+            scenarioCurveOutcome?.kind === "success" &&
+            scenarioCompareProjection?.rows?.length ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-lg border border-brand-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-brand-navy shadow-sm hover:bg-brand-navy/5"
+                onClick={() => setPastCompareExpanded((v) => !v)}
+                aria-expanded={pastCompareExpanded}
+              >
+                {pastCompareExpanded ? "Hide details" : "Show details"}
+              </button>
+            ) : null}
           </div>
           {scenarioLoading ? (
             <div className="mt-2 text-xs text-brand-navy/70" role="status" aria-live="polite">
               Loading compare data…
             </div>
           ) : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length ? (
-            <ValidationComparePanel
-              rows={scenarioCompareProjection.rows}
-              metrics={scenarioCompareProjection.metrics}
-            />
+            pastCompareExpanded ? (
+              <ValidationComparePanel
+                rows={scenarioCompareProjection.rows}
+                metrics={scenarioCompareProjection.metrics}
+                showMetricsSummary={false}
+              />
+            ) : null
           ) : scenarioCurveOutcome?.kind === "success" ? (
             <div className="mt-2 text-xs text-brand-navy/70">
               {pastScenarioHasConfiguredValidationDays

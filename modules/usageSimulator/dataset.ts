@@ -882,6 +882,16 @@ export type SimulatedUsageDatasetMeta = {
     simulatedDayKwh: number;
     errorKwh: number;
     percentError: number | null;
+    /** Same-date slice of `dailyWeather` when present (read/display only). */
+    weather?: {
+      tAvgF: number | null;
+      tMinF: number | null;
+      tMaxF: number | null;
+      hdd65: number | null;
+      cdd65: number | null;
+      source: string | null;
+      weatherMissing: boolean;
+    };
   }>;
   validationCompareMetrics?: {
     mae: number;

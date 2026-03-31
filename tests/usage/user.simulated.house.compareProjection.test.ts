@@ -61,6 +61,15 @@ describe("user simulated house compare projection", () => {
               simulatedDayKwh: 9,
               errorKwh: -1,
               percentError: 10,
+              weather: {
+                tAvgF: 62,
+                tMinF: 55,
+                tMaxF: 70,
+                hdd65: 3,
+                cdd65: 1,
+                source: "actual_cached",
+                weatherMissing: false,
+              },
             },
           ],
           validationCompareMetrics: { wape: 10, mae: 1, rmse: 1 },
@@ -81,6 +90,8 @@ describe("user simulated house compare projection", () => {
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
     expect(body.compareProjection.rows[0]?.localDate).toBe("2025-04-10");
+    expect(body.compareProjection.rows[0]?.weather?.tAvgF).toBe(62);
+    expect(body.compareProjection.rows[0]?.weather?.weatherMissing).toBe(false);
     expect(body.compareProjection.metrics?.wape).toBe(10);
     expect(buildValidationCompareProjectionSidecar).toHaveBeenCalledTimes(1);
   });
