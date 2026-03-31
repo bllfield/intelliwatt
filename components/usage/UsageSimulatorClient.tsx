@@ -26,6 +26,40 @@ import {
  */
 const SIMULATED_HOUSE_SCENARIO_FETCH_MS = 280_000;
 
+/** Past sim recalc may run on a droplet; POST returns immediately with jobId — wait before refetching curves. */
+const PAST_SIM_RECALC_JOB_POLL_MS = 2000;
+const PAST_SIM_RECALC_JOB_MAX_WAIT_MS = 14 * 60 * 1000;
+
+async function waitForPastSimRecalcDropletJob(jobId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const started = Date.now();
+  while (Date.now() - started < PAST_SIM_RECALC_JOB_MAX_WAIT_MS) {
+    const r = await fetch(`/api/user/simulator/recalc?jobId=${encodeURIComponent(jobId)}`, { cache: "no-store" });
+    const j = (await r.json().catch(() => null)) as {
+      ok?: boolean;
+      jobStatus?: string;
+      failureMessage?: string | null;
+      error?: string;
+    } | null;
+    if (!r.ok || !j || j.ok !== true) {
+      return {
+        ok: false,
+        message: typeof j?.error === "string" && j.error.trim() ? j.error : "Could not check recalc status.",
+      };
+    }
+    const status = String(j.jobStatus ?? "").toLowerCase();
+    if (status === "succeeded") return { ok: true };
+    if (status === "failed") {
+      const fm = typeof j.failureMessage === "string" && j.failureMessage.trim() ? j.failureMessage.trim() : "Recalculate failed.";
+      return { ok: false, message: fm };
+    }
+    await new Promise((res) => setTimeout(res, PAST_SIM_RECALC_JOB_POLL_MS));
+  }
+  return {
+    ok: false,
+    message: "Recalculate is still running. Wait a minute and refresh the page, or try Recalculate again.",
+  };
+}
+
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 
 type UsageApiResp =
@@ -181,9 +215,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [workspace, setWorkspace] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
   const [curveView, setCurveView] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
 
-  // Reset whenever the user lands on the Past curve tab (including returning from BASELINE/FUTURE).
   useEffect(() => {
-    if (curveView === "PAST") {
+    if (curveView !== "PAST") {
       setPastCompareExpanded(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
     }
   }, [curveView]);
@@ -878,6 +911,20 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         return;
       }
       setMissingRequirements([]);
+      if (j.executionMode === "droplet_async" && typeof j.jobId === "string" && j.jobId.trim()) {
+        setRecalcNote("Recalculate running on server…");
+        setRecalcBannerTone("neutral");
+        const wait = await waitForPastSimRecalcDropletJob(j.jobId.trim());
+        if (!wait.ok) {
+          setRecalcNote(wait.message);
+          setRecalcBannerTone("error");
+          return;
+        }
+        setRecalcNote("Updated.");
+        setRecalcBannerTone("success");
+        setRefreshToken((x) => x + 1);
+        return;
+      }
       const feedback = recalcUserMessageFromResponse({
         httpOk: true,
         httpStatus: r.status,

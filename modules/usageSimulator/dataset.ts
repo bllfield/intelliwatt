@@ -7,6 +7,14 @@ import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSi
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
 
+/** Per-day Past display: stitch/simulator-owned reasons (not GapFill compare). */
+export type PastSimulatedDaySourceDetail =
+  | "SIMULATED_TRAVEL_VACANT"
+  | "SIMULATED_TEST_DAY"
+  | "SIMULATED_INCOMPLETE_METER"
+  | "SIMULATED_LEADING_MISSING"
+  | "SIMULATED_OTHER";
+
 function round2(n: number): number {
   return roundDayKwhDisplay(n);
 }
@@ -502,12 +510,10 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
   date: string;
   kwh: number;
   source: "ACTUAL" | "SIMULATED";
-  sourceDetail: "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER" | "ACTUAL";
+  sourceDetail: PastSimulatedDaySourceDetail | "ACTUAL";
 }> {
   const m = meta && typeof meta === "object" ? (meta as Record<string, unknown>) : null;
-  const byDetail = m?.simulatedSourceDetailByDate as
-    | Record<string, "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER">
-    | undefined;
+  const byDetail = m?.simulatedSourceDetailByDate as Record<string, PastSimulatedDaySourceDetail> | undefined;
   const legacyMap = options?.legacyDailyByDate;
   return daily.map((row) => {
     const dk = String(row.date).slice(0, 10);
@@ -524,15 +530,22 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
       byDetail && typeof byDetail === "object" && Object.prototype.hasOwnProperty.call(byDetail, dk);
     if (hasMetaDetailKey) {
       const detail = (byDetail as Record<string, unknown>)[dk];
-      const sourceDetail =
+      const sourceDetail: PastSimulatedDaySourceDetail =
         detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_TEST_DAY"
           ? detail
-          : "SIMULATED_OTHER";
+          : detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING"
+            ? detail
+            : "SIMULATED_OTHER";
       return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail };
     }
     const legacyDetail = String(legacyMap?.get(dk)?.sourceDetail ?? "");
-    if (legacyDetail === "SIMULATED_TRAVEL_VACANT" || legacyDetail === "SIMULATED_TEST_DAY") {
-      return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail: legacyDetail };
+    if (
+      legacyDetail === "SIMULATED_TRAVEL_VACANT" ||
+      legacyDetail === "SIMULATED_TEST_DAY" ||
+      legacyDetail === "SIMULATED_INCOMPLETE_METER" ||
+      legacyDetail === "SIMULATED_LEADING_MISSING"
+    ) {
+      return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail: legacyDetail as PastSimulatedDaySourceDetail };
     }
     return {
       date: dk,
@@ -895,7 +908,7 @@ export type SimulatedUsageDatasetMeta = {
   /** Shared post-sim separation: modeled test/validation days (baseline projection flips to ACTUAL). */
   simulatedTestModeledDateKeysLocal?: string[];
   /** Optional per-day source detail map for downstream chart/table notation. */
-  simulatedSourceDetailByDate?: Record<string, "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER">;
+  simulatedSourceDetailByDate?: Record<string, PastSimulatedDaySourceDetail>;
   /**
    * Gap-Fill validation-only scored day keys.
    * These keys stay actual in baseline display/totals and are used by compare projection surfaces.
@@ -960,7 +973,7 @@ export type SimulatedUsageDataset = {
       timestamp: string;
       kwh: number;
       source?: "ACTUAL" | "SIMULATED";
-      sourceDetail?: "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER" | "ACTUAL";
+      sourceDetail?: PastSimulatedDaySourceDetail | "ACTUAL" | "ACTUAL_VALIDATION_TEST_DAY";
     }>;
     monthly: Array<{ timestamp: string; kwh: number }>;
     annual: Array<{ timestamp: string; kwh: number }>;
@@ -969,7 +982,7 @@ export type SimulatedUsageDataset = {
     date: string;
     kwh: number;
     source?: "ACTUAL" | "SIMULATED";
-    sourceDetail?: "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER" | "ACTUAL";
+    sourceDetail?: PastSimulatedDaySourceDetail | "ACTUAL" | "ACTUAL_VALIDATION_TEST_DAY";
   }>;
   monthly: Array<{ month: string; kwh: number }>;
   insights: {
@@ -1206,10 +1219,7 @@ export function buildSimulatedUsageDatasetFromCurve(
   }
   const simulatedDisplayByDate = new Map<string, number>();
   const simulatedSourceByDate = new Set<string>();
-  const simulatedSourceDetailByDate = new Map<
-    string,
-    "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER"
-  >();
+  const simulatedSourceDetailByDate = new Map<string, PastSimulatedDaySourceDetail>();
   for (const row of options?.simulatedDayResults ?? []) {
     const dk = String(row?.localDate ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
@@ -1219,13 +1229,17 @@ export function buildSimulatedUsageDatasetFromCurve(
     );
     simulatedSourceByDate.add(dk);
     const reason = String((row as any)?.simulatedReasonCode ?? "");
-    // Override contract: TRAVEL_VACANT vs TEST (compare) vs OTHER (incomplete/leading-missing stitch fills; not compare TEST).
-    const detail =
+    // TRAVEL_VACANT vs TEST (compare) vs incomplete/leading-missing vs generic OTHER.
+    const detail: PastSimulatedDaySourceDetail =
       reason === "TRAVEL_VACANT"
         ? "SIMULATED_TRAVEL_VACANT"
         : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
           ? "SIMULATED_TEST_DAY"
-          : "SIMULATED_OTHER";
+          : reason === "INCOMPLETE_METER_DAY"
+            ? "SIMULATED_INCOMPLETE_METER"
+            : reason === "LEADING_MISSING_DAY"
+              ? "SIMULATED_LEADING_MISSING"
+              : "SIMULATED_OTHER";
     simulatedSourceDetailByDate.set(dk, detail);
   }
   // Daily display values for simulated days come from shared core SimulatedDayResult.
@@ -1367,15 +1381,17 @@ export function buildSimulatedUsageDatasetFromCurve(
       simulatedTestModeledDateKeysLocal: daily
         .filter((row) => row.sourceDetail === "SIMULATED_TEST_DAY")
         .map((row) => row.date),
-      simulatedSourceDetailByDate: daily.reduce<
-        Record<string, "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER">
-      >((acc, row) => {
+      simulatedSourceDetailByDate: daily.reduce<Record<string, PastSimulatedDaySourceDetail>>((acc, row) => {
         if (row.source !== "SIMULATED") return acc;
-        const detail =
-          row.sourceDetail === "SIMULATED_TRAVEL_VACANT" || row.sourceDetail === "SIMULATED_TEST_DAY"
-            ? row.sourceDetail
+        const d = row.sourceDetail;
+        acc[row.date] =
+          d === "SIMULATED_TRAVEL_VACANT" ||
+          d === "SIMULATED_TEST_DAY" ||
+          d === "SIMULATED_INCOMPLETE_METER" ||
+          d === "SIMULATED_LEADING_MISSING" ||
+          d === "SIMULATED_OTHER"
+            ? d
             : "SIMULATED_OTHER";
-        acc[row.date] = detail;
         return acc;
       }, {}),
     },

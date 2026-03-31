@@ -92,7 +92,7 @@ describe("dataset simulated day separation", () => {
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
   });
 
-  it("maps INCOMPLETE_METER_DAY and LEADING_MISSING_DAY to SIMULATED_OTHER (not TEST or TRAVEL_VACANT)", () => {
+  it("maps INCOMPLETE_METER_DAY and LEADING_MISSING_DAY to explicit subtypes (not TEST or TRAVEL_VACANT)", () => {
     const intervals = [
       ...makeUtcDayIntervals("2025-10-01", 0.1),
       ...makeUtcDayIntervals("2025-10-02", 0.1),
@@ -117,8 +117,8 @@ describe("dataset simulated day separation", () => {
       }
     );
     const byDate = new Map(dataset.daily.map((row) => [row.date, row]));
-    expect(byDate.get("2025-10-02")?.sourceDetail).toBe("SIMULATED_OTHER");
-    expect(byDate.get("2025-10-03")?.sourceDetail).toBe("SIMULATED_OTHER");
+    expect(byDate.get("2025-10-02")?.sourceDetail).toBe("SIMULATED_INCOMPLETE_METER");
+    expect(byDate.get("2025-10-03")?.sourceDetail).toBe("SIMULATED_LEADING_MISSING");
     expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual([]);
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
   });

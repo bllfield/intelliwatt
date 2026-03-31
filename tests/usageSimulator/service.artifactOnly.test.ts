@@ -408,6 +408,32 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
           intervalsCompressed: Buffer.from("00", "hex"),
         };
       }
+      if (String(args?.scenarioId) === "gapfill_lab" && String(args?.inputHash) === "hash-projection-baseline") {
+        return {
+          inputHash: "hash-projection-baseline",
+          updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+          datasetJson: {
+            summary: {
+              source: "SIMULATED",
+              intervalsCount: 96,
+              totalKwh: 0.75,
+              start: "2026-01-01",
+              end: "2026-01-01",
+              latest: "2026-01-01",
+            },
+            meta: {
+              datasetKind: "SIMULATED",
+              validationOnlyDateKeysLocal: ["2026-01-01"],
+              canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
+              simulatedSourceDetailByDate: { "2026-01-01": "SIMULATED_TEST_DAY" },
+              weatherSourceSummary: "actual_only",
+            },
+            series: {},
+          },
+          intervalsCodec: "v1_delta_varint",
+          intervalsCompressed: Buffer.from("00", "hex"),
+        };
+      }
       return null;
     });
   });
@@ -494,6 +520,38 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       expect(Array.isArray(out.dataset?.series?.intervals15)).toBe(true);
     }
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
+
+  it("baseline projection flips validation/test keys to ACTUAL with meter kWh in daily and series.daily (chart/table parity)", async () => {
+    decodeIntervalsV1.mockReturnValue(
+      Array.from({ length: 96 }, (_, i) => ({
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, i * 15)).toISOString(),
+        kwh: 0.75 / 96,
+      }))
+    );
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "gapfill_lab",
+      readMode: "artifact_only",
+      exactArtifactInputHash: "hash-projection-baseline",
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const day = out.dataset?.daily?.find((r: { date?: string }) => r.date === "2026-01-01");
+    const seriesPt = out.dataset?.series?.daily?.find(
+      (r: { timestamp?: string }) => String(r.timestamp ?? "").slice(0, 10) === "2026-01-01"
+    );
+    expect(day).toMatchObject({
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
+      kwh: 0.5,
+    });
+    expect(seriesPt).toMatchObject({
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
+      kwh: 0.5,
+    });
   });
 
   it("emits compareProjection measurement events with correlationId, durationMs, and memoryRssMb (Slice 11)", async () => {

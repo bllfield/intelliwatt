@@ -43,6 +43,8 @@ type DailyRow = {
   sourceDetail?:
     | "SIMULATED_TRAVEL_VACANT"
     | "SIMULATED_TEST_DAY"
+    | "SIMULATED_INCOMPLETE_METER"
+    | "SIMULATED_LEADING_MISSING"
     | "SIMULATED_OTHER"
     | "ACTUAL_VALIDATION_TEST_DAY"
     | "ACTUAL";
@@ -528,7 +530,19 @@ export const UsageDashboard: React.FC<Props> = ({
     const daily = dataset?.daily ?? [];
     const fallbackDailyRaw = daily.length
       ? daily
-      : (dataset?.series?.daily ?? []).map((d) => ({ date: toDateKeyFromTimestamp(d.timestamp), kwh: d.kwh }));
+      : (dataset?.series?.daily ?? []).map((d) => ({
+          date: toDateKeyFromTimestamp(d.timestamp),
+          kwh: d.kwh,
+          ...(String((d as { source?: string }).source ?? "").toUpperCase() === "SIMULATED"
+            ? { source: "SIMULATED" as const }
+            : {}),
+          ...(String((d as { source?: string }).source ?? "").toUpperCase() === "ACTUAL"
+            ? { source: "ACTUAL" as const }
+            : {}),
+          ...(typeof (d as { sourceDetail?: string }).sourceDetail === "string"
+            ? { sourceDetail: (d as { sourceDetail: string }).sourceDetail as DailyRow["sourceDetail"] }
+            : {}),
+        }));
     const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const coverageStart = canonicalWindow.startDate;
     const coverageEnd = canonicalWindow.endDate;

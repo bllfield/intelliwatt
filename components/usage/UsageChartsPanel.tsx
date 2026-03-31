@@ -24,6 +24,8 @@ type DailyRow = {
   sourceDetail?:
     | "SIMULATED_TRAVEL_VACANT"
     | "SIMULATED_TEST_DAY"
+    | "SIMULATED_INCOMPLETE_METER"
+    | "SIMULATED_LEADING_MISSING"
     | "SIMULATED_OTHER"
     | "ACTUAL_VALIDATION_TEST_DAY"
     | "ACTUAL";
@@ -94,6 +96,15 @@ export function UsageChartsPanel(props: {
     }
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_TEST_DAY") {
       return "SIMULATED (TEST DAY)";
+    }
+    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_INCOMPLETE_METER") {
+      return "SIMULATED (INCOMPLETE METER)";
+    }
+    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_LEADING_MISSING") {
+      return "SIMULATED (LEADING MISSING)";
+    }
+    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_OTHER") {
+      return "SIMULATED (OTHER)";
     }
     if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_VALIDATION_TEST_DAY") {
       return "ACTUAL (VALIDATION/TEST)";
