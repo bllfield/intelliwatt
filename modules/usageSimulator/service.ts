@@ -3367,10 +3367,16 @@ function serializeTravelRangesForIdentity(
   ranges: Array<{ startDate: string; endDate: string }>
 ): string {
   return JSON.stringify(
-    normalizePreLockboxTravelRanges(ranges).map((range) => ({
-      startDate: range.startDate,
-      endDate: range.endDate,
-    }))
+    normalizePreLockboxTravelRanges(ranges)
+      .map((range) => ({
+        startDate: range.startDate,
+        endDate: range.endDate,
+      }))
+      .sort((a, b) => {
+        if (a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
+        if (a.endDate !== b.endDate) return a.endDate < b.endDate ? -1 : 1;
+        return 0;
+      })
   );
 }
 

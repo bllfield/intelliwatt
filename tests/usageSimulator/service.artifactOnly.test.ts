@@ -1107,7 +1107,14 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       readMode: "allow_rebuild",
     });
 
-    expect(computePastInputHash).toHaveBeenCalledTimes(1);
+    expect(computePastInputHash).toHaveBeenCalledWith(
+      expect.objectContaining({
+        travelRanges: [
+          { startDate: "2026-01-03", endDate: "2026-01-04" },
+          { startDate: "2026-01-05", endDate: "2026-01-06" },
+        ],
+      })
+    );
     if (out.ok) expect(out.dataset?.meta?.buildInputsHash).toBe("hash-stable-travel");
   });
 });
