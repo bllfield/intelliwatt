@@ -95,7 +95,7 @@ export default function ManualUploadForm() {
             <input
               type="text"
               name="esiid"
-              defaultValue="10443720000000001"
+              placeholder="Resolved from file if present"
               className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 text-sm"
             />
           </label>
@@ -104,7 +104,7 @@ export default function ManualUploadForm() {
             <input
               type="text"
               name="meter"
-              defaultValue="M1"
+              placeholder="Meter override"
               className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 text-sm"
             />
           </label>

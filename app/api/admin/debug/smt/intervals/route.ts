@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/admin';
+import { resolveAdminHouseSelection } from '@/lib/admin/adminHouseLookup';
 
 function parseDate(value: string | null): Date | null {
   if (!value) return null;
@@ -21,7 +22,21 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
 
-  const esiid = (searchParams.get('esiid') ?? '').trim() || undefined;
+  const selectedHouse = await resolveAdminHouseSelection({
+    esiid: searchParams.get('esiid'),
+    houseId: searchParams.get('houseId'),
+    email: searchParams.get('email'),
+  });
+  const requestedHouseId = (searchParams.get('houseId') ?? '').trim() || null;
+  const requestedEsiid = (searchParams.get('esiid') ?? '').trim() || null;
+  const requestedEmail = (searchParams.get('email') ?? '').trim() || null;
+  if ((requestedHouseId || requestedEmail) && !selectedHouse) {
+    return NextResponse.json(
+      { ok: false, error: 'HOUSE_NOT_FOUND', details: 'No active house found for the provided email/houseId.' },
+      { status: 404 },
+    );
+  }
+  const esiid = selectedHouse?.esiid ?? requestedEsiid ?? undefined;
   const meter = (searchParams.get('meter') ?? '').trim() || undefined;
 
   const dateStartRaw = searchParams.get('dateStart');
@@ -77,9 +92,17 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     rows: data,
+    resolvedHouse: selectedHouse
+      ? {
+          id: selectedHouse.id,
+          esiid: selectedHouse.esiid,
+          label: selectedHouse.label,
+        }
+      : null,
     meta: {
       filters: {
         esiid: esiid ?? null,
+        houseId: selectedHouse?.id ?? requestedHouseId,
         meter: meter ?? null,
         dateStart: dateStart ? dateStart.toISOString() : null,
         dateEnd: dateEnd ? dateEnd.toISOString() : null,
@@ -108,10 +131,23 @@ export async function POST(req: NextRequest) {
   const meterRaw = body?.meter;
   const dateStartRaw = body?.dateStart ?? null;
   const dateEndRaw = body?.dateEnd ?? null;
-
-  if (typeof esiidRaw !== 'string' || !esiidRaw.trim()) {
+  const selectedHouse = await resolveAdminHouseSelection({
+    esiid: typeof esiidRaw === 'string' ? esiidRaw : null,
+    houseId: typeof body?.houseId === 'string' ? body.houseId : null,
+    email: typeof body?.email === 'string' ? body.email : null,
+  });
+  if ((typeof body?.houseId === 'string' || typeof body?.email === 'string') && !selectedHouse) {
     return NextResponse.json(
-      { ok: false, error: 'INVALID_ESIID', details: 'esiid is required and must be a non-empty string.' },
+      { ok: false, error: 'HOUSE_NOT_FOUND', details: 'No active house found for the provided email/houseId.' },
+      { status: 404 },
+    );
+  }
+
+  const resolvedEsiid = selectedHouse?.esiid ?? (typeof esiidRaw === 'string' ? esiidRaw.trim() : '');
+
+  if (!resolvedEsiid) {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_ESIID', details: 'Provide esiid, houseId, or email for a resolvable ESIID.' },
       { status: 400 },
     );
   }
@@ -140,7 +176,7 @@ export async function POST(req: NextRequest) {
   }
 
   const where: Prisma.SmtIntervalWhereInput = {
-    esiid: esiidRaw.trim(),
+    esiid: resolvedEsiid,
   };
 
   if (meterRaw && meterRaw.trim()) {
@@ -160,7 +196,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       deletedCount: result.count,
       filters: {
-        esiid: esiidRaw.trim(),
+        esiid: resolvedEsiid,
+        houseId: selectedHouse?.id ?? (typeof body?.houseId === 'string' ? body.houseId.trim() : null),
         meter: meterRaw ? meterRaw.trim() : null,
         dateStart: dateStart ? dateStart.toISOString() : null,
         dateEnd: dateEnd ? dateEnd.toISOString() : null,

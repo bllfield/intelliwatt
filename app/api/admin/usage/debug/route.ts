@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { requireAdmin } from '@/lib/auth/admin';
+import { resolveAdminHouseSelection } from '@/lib/admin/adminHouseLookup';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,18 @@ export async function GET(request: NextRequest) {
   try {
     const usageClient = usagePrisma as any;
     const url = new URL(request.url);
-    const esiidFilter = url.searchParams.get('esiid') || undefined;
+    const requestedEsiid = url.searchParams.get('esiid') || undefined;
+    const requestedHouseId = url.searchParams.get('houseId') || undefined;
+    const requestedEmail = url.searchParams.get('email') || undefined;
+    const selectedHouse = await resolveAdminHouseSelection({
+      esiid: requestedEsiid,
+      houseId: requestedHouseId,
+      email: requestedEmail,
+    });
+    if ((requestedHouseId || requestedEmail) && !selectedHouse) {
+      return NextResponse.json({ ok: false, error: 'house_not_found' }, { status: 404 });
+    }
+    const esiidFilter = selectedHouse?.esiid ?? requestedEsiid;
     const daysParam = Number(url.searchParams.get('days') || DEFAULT_RECENT_USAGE_WINDOW_DAYS);
     const windowDays = Number.isFinite(daysParam) && daysParam > 0 ? daysParam : DEFAULT_RECENT_USAGE_WINDOW_DAYS;
     const recentCutoff = new Date(Date.now() - windowDays * DAY_MS);
@@ -202,6 +214,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      resolvedHouse: selectedHouse
+        ? {
+            id: selectedHouse.id,
+            esiid: selectedHouse.esiid,
+            label: selectedHouse.label,
+          }
+        : null,
       smt: {
         totals: smtTotals,
         topEsiids: smtTopEsiids,

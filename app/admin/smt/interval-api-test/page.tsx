@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import UsageDashboard from '@/components/usage/UsageDashboard';
+import { lookupSmtHousesByEmail, type AdminHouseOption } from '@/app/admin/smt/_lib/houseLookup';
 
 type Json = any;
 
@@ -12,8 +13,6 @@ type ApiResult = {
   message?: string;
   data?: Json;
 };
-
-const TEST_ESIID = '10443720004766435';
 
 function useLocalToken(key = 'iw_admin_token') {
   const [token, setToken] = useState('');
@@ -38,6 +37,11 @@ export default function SmtIntervalApiTestPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
   const [loading, setLoading] = useState(false);
+  const [houseLookupLoading, setHouseLookupLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [houseLookupError, setHouseLookupError] = useState<string | null>(null);
+  const [houses, setHouses] = useState<AdminHouseOption[]>([]);
+  const [selectedHouseId, setSelectedHouseId] = useState('');
 
   const [billingResult, setBillingResult] = useState<ApiResult | null>(null);
   // Full response we got back from our /api/admin/smt/billing/fetch wrapper.
@@ -47,10 +51,41 @@ export default function SmtIntervalApiTestPage() {
   const [billingRaw, setBillingRaw] = useState<Json | null>(null);
   const [usageRaw, setUsageRaw] = useState<Json | null>(null);
   const [intervalsRaw, setIntervalsRaw] = useState<Json | null>(null);
+  const selectedHouse = houses.find((house) => house.id === selectedHouseId) ?? null;
+
+  async function loadHouses() {
+    if (!token) {
+      alert('Set x-admin-token first');
+      return;
+    }
+    setHouseLookupLoading(true);
+    setHouseLookupError(null);
+    try {
+      const result = await lookupSmtHousesByEmail({ email, token });
+      if (!result.ok) {
+        setHouses([]);
+        setSelectedHouseId('');
+        setHouseLookupError(result.error ?? 'house_lookup_failed');
+        return;
+      }
+      const rows = result.houses ?? [];
+      setHouses(rows);
+      setSelectedHouseId(rows[0]?.id ?? '');
+      if (rows.length === 0) {
+        setHouseLookupError('No active houses found for that email.');
+      }
+    } finally {
+      setHouseLookupLoading(false);
+    }
+  }
 
   async function runTest() {
     if (!token) {
       alert('Set x-admin-token first');
+      return;
+    }
+    if (!selectedHouseId) {
+      alert('Load houses for an email and select a house first');
       return;
     }
     setLoading(true);
@@ -71,7 +106,7 @@ export default function SmtIntervalApiTestPage() {
           accept: 'application/json',
         },
         body: JSON.stringify({
-          esiid: TEST_ESIID,
+          houseId: selectedHouseId,
           includeInterval: true,
           includeDaily: false,
           includeMonthly: false,
@@ -89,9 +124,9 @@ export default function SmtIntervalApiTestPage() {
         data: billingJson,
       });
 
-      // 2) Call /api/admin/usage/debug for the same ESIID to see what landed in SmtInterval/usage module
+      // 2) Call /api/admin/usage/debug for the selected house to see what landed in SmtInterval/usage module
       const usageRes = await fetch(
-        `/api/admin/usage/debug?esiid=${encodeURIComponent(TEST_ESIID)}&days=365`,
+        `/api/admin/usage/debug?houseId=${encodeURIComponent(selectedHouseId)}&days=365`,
         {
           method: 'GET',
           headers: {
@@ -114,7 +149,7 @@ export default function SmtIntervalApiTestPage() {
 
       // 3) Call /api/admin/debug/smt/intervals for a sample of raw SmtInterval rows
       const intervalsRes = await fetch(
-        `/api/admin/debug/smt/intervals?esiid=${encodeURIComponent(TEST_ESIID)}&limit=25`,
+        `/api/admin/debug/smt/intervals?houseId=${encodeURIComponent(selectedHouseId)}&limit=25`,
         {
           method: 'GET',
           headers: {
@@ -177,10 +212,10 @@ export default function SmtIntervalApiTestPage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">SMT Interval API Test (JSON)</h1>
       <p className="text-sm text-gray-700">
-        This admin-only harness calls <code>/api/admin/smt/billing/fetch</code> for a hard-coded ESIID (
-        <code>{TEST_ESIID}</code>) over a 365-day window, then shows:
+        This admin-only harness resolves houses by user email, calls <code>/api/admin/smt/billing/fetch</code> for the
+        selected house over a 365-day window, then shows:
         <br />
-        1) The SMT API response; 2) Usage/interval debug for that ESIID; 3) The same usage dashboard output the customer
+        1) The SMT API response; 2) Usage/interval debug for that resolved house/ESIID; 3) The same usage dashboard output the customer
         would see.
       </p>
 
@@ -199,14 +234,54 @@ export default function SmtIntervalApiTestPage() {
         </div>
 
         <div className="p-4 rounded-2xl border flex flex-col gap-3">
-          <h2 className="font-medium">Test Controls</h2>
+          <h2 className="font-medium">House Lookup</h2>
           <p className="text-sm text-gray-700">
-            ESIID is hard-coded to <code>{TEST_ESIID}</code>. Date window is 365 days (same as live backfill logic).
+            Load houses by user email, then pick the house whose SMT intervals you want to inspect.
           </p>
+          <label className="block text-sm">
+            <span className="mb-1 block">User email</span>
+            <input
+              className="w-full rounded-lg border px-3 py-2"
+              type="email"
+              placeholder="user@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={loadHouses}
+              className="px-4 py-2 rounded-lg border bg-slate-50 font-semibold hover:bg-slate-100"
+              disabled={houseLookupLoading || !ready}
+            >
+              {houseLookupLoading ? 'Loading houses…' : 'Load Houses'}
+            </button>
+            {selectedHouse ? (
+              <span className="text-xs text-gray-600">
+                Selected: <code>{selectedHouse.label}</code>
+              </span>
+            ) : null}
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1 block">House</span>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={selectedHouseId}
+              onChange={(e) => setSelectedHouseId(e.target.value)}
+            >
+              <option value="">Select a house</option>
+              {houses.map((house) => (
+                <option key={house.id} value={house.id}>
+                  {house.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {houseLookupError ? <p className="text-sm text-red-600">{houseLookupError}</p> : null}
           <button
             onClick={runTest}
             className="px-4 py-2 rounded-lg border bg-blue-50 font-semibold hover:bg-blue-100"
-            disabled={loading || !ready}
+            disabled={loading || !ready || !selectedHouseId}
           >
             {loading ? 'Running test…' : 'Run SMT Interval API Test'}
           </button>

@@ -2,6 +2,7 @@
 
 import React, { useState, useTransition } from "react";
 import { runSmtAgreementTest, runSmtMeterPipelineTest } from "../actions";
+import { lookupSmtHousesByEmail, type AdminHouseOption } from "@/app/admin/smt/_lib/houseLookup";
 
 export default function AdminSmtTriggerPage() {
   const [baseUrl, setBaseUrl] = useState<string>(() =>
@@ -10,7 +11,12 @@ export default function AdminSmtTriggerPage() {
       : "https://intelliwatt.com",
   );
   const [adminToken, setAdminToken] = useState<string>("");
-  const [esiid, setEsiid] = useState<string>("10443720000000001");
+  const [email, setEmail] = useState<string>("");
+  const [houses, setHouses] = useState<AdminHouseOption[]>([]);
+  const [selectedHouseId, setSelectedHouseId] = useState<string>("");
+  const [houseLookupBusy, setHouseLookupBusy] = useState<boolean>(false);
+  const [houseLookupError, setHouseLookupError] = useState<string>("");
+  const [esiidOverride, setEsiidOverride] = useState<string>("");
   const [meter, setMeter] = useState<string>("M1");
   const [busy, setBusy] = useState<boolean>(false);
   const [out, setOut] = useState<string>("");
@@ -28,6 +34,7 @@ export default function AdminSmtTriggerPage() {
   const [pipelineResult, setPipelineResult] = useState<string>("Output will appear here…");
   const [isTesting, startTesting] = useTransition();
   const [isPipelineTesting, startPipelineTesting] = useTransition();
+  const selectedHouse = houses.find((house) => house.id === selectedHouseId) ?? null;
 
   function handleAgreementTest() {
     const pendingMessage = "Running SMT agreement test…";
@@ -72,10 +79,38 @@ export default function AdminSmtTriggerPage() {
     });
   }
 
+  async function loadHouses() {
+    if (!adminToken.trim()) {
+      setOut("❗ Admin token required before loading houses.");
+      return;
+    }
+    setHouseLookupBusy(true);
+    setHouseLookupError("");
+    try {
+      const result = await lookupSmtHousesByEmail({ email, token: adminToken });
+      if (!result.ok) {
+        setHouses([]);
+        setSelectedHouseId("");
+        setHouseLookupError(result.error ?? "house_lookup_failed");
+        return;
+      }
+      const rows = result.houses ?? [];
+      setHouses(rows);
+      setSelectedHouseId(rows[0]?.id ?? "");
+      if (rows.length === 0) {
+        setHouseLookupError("No active houses found for that email.");
+      }
+    } catch (error: any) {
+      setHouseLookupError(error?.message || "house_lookup_failed");
+    } finally {
+      setHouseLookupBusy(false);
+    }
+  }
+
   async function triggerPull() {
     setOut("");
-    if (!baseUrl || !adminToken || !esiid || !meter) {
-      setOut("❗ Required: Base URL, Admin Token, ESIID, Meter");
+    if (!baseUrl || !adminToken || (!selectedHouseId && !esiidOverride) || !meter) {
+      setOut("❗ Required: Base URL, Admin Token, selected house or ESIID override, Meter");
       return;
     }
     setBusy(true);
@@ -86,7 +121,11 @@ export default function AdminSmtTriggerPage() {
           "content-type": "application/json",
           "x-admin-token": adminToken,
         },
-        body: JSON.stringify({ esiid, meter }),
+        body: JSON.stringify({
+          houseId: selectedHouseId || undefined,
+          esiid: esiidOverride.trim() || undefined,
+          meter,
+        }),
       });
       const json = await res.json().catch(() => ({}));
       setOut([`HTTP ${res.status}`, JSON.stringify(json, null, 2)].join("\n"));
@@ -296,14 +335,52 @@ export default function AdminSmtTriggerPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-sm text-gray-600">ESIID</span>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="flex flex-col gap-1 md:col-span-2">
+            <span className="text-sm text-gray-600">User email</span>
             <input
               className="border rounded px-3 py-2"
-              value={esiid}
-              onChange={(e) => setEsiid(e.target.value)}
-              placeholder="1044…"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="user@example.com"
+            />
+          </label>
+          <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={loadHouses}
+              disabled={houseLookupBusy}
+              className="px-3 py-2 rounded bg-gray-100 border"
+            >
+              {houseLookupBusy ? "Loading..." : "Load Houses"}
+            </button>
+            {selectedHouse ? (
+              <span className="text-xs text-gray-600">Selected: {selectedHouse.label}</span>
+            ) : null}
+            {houseLookupError ? <span className="text-xs text-red-600">{houseLookupError}</span> : null}
+          </div>
+          <label className="flex flex-col gap-1 md:col-span-2">
+            <span className="text-sm text-gray-600">House</span>
+            <select
+              className="border rounded px-3 py-2"
+              value={selectedHouseId}
+              onChange={(e) => setSelectedHouseId(e.target.value)}
+            >
+              <option value="">Select a house</option>
+              {houses.map((house) => (
+                <option key={house.id} value={house.id}>
+                  {house.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">ESIID override (optional)</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={esiidOverride}
+              onChange={(e) => setEsiidOverride(e.target.value)}
+              placeholder="Leave blank to use selected house"
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -333,7 +410,7 @@ export default function AdminSmtTriggerPage() {
 
       <p className="text-xs text-gray-500">
         This helper POSTs <code>/api/admin/smt/pull</code> with body{" "}
-        <code>{"{ esiid, meter }"}</code> and header <code>x-admin-token</code>.
+        <code>{"{ houseId, esiid?, meter }"}</code> and header <code>x-admin-token</code>.
         Inline uploads and droplet webhook paths are unchanged.
       </p>
     </div>

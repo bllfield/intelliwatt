@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import UsageDashboard from '@/components/usage/UsageDashboard';
+import { lookupSmtHousesByEmail, type AdminHouseOption } from '@/app/admin/smt/_lib/houseLookup';
 
 type Json = any;
 
@@ -12,8 +13,6 @@ type ApiResult = {
   message?: string;
   data?: Json;
 };
-
-const TEST_ESIID = '10443720004766435';
 
 function useLocalToken(key = 'iw_admin_token') {
   const [token, setToken] = useState('');
@@ -38,6 +37,11 @@ export default function SmtSftpFlowTestPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
   const [loading, setLoading] = useState(false);
+  const [houseLookupLoading, setHouseLookupLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [houseLookupError, setHouseLookupError] = useState<string | null>(null);
+  const [houses, setHouses] = useState<AdminHouseOption[]>([]);
+  const [selectedHouseId, setSelectedHouseId] = useState('');
 
   const [pullResult, setPullResult] = useState<ApiResult | null>(null);
   const [pipelineResult, setPipelineResult] = useState<ApiResult | null>(null);
@@ -53,10 +57,41 @@ export default function SmtSftpFlowTestPage() {
   const [rawPayloadPreviews, setRawPayloadPreviews] = useState<
     Array<{ id: string; filename: string; createdAt: string; sizeBytes: number | null; textPreview: string | null }>
   >([]);
+  const selectedHouse = houses.find((house) => house.id === selectedHouseId) ?? null;
+
+  async function loadHouses() {
+    if (!token) {
+      alert('Set x-admin-token first');
+      return;
+    }
+    setHouseLookupLoading(true);
+    setHouseLookupError(null);
+    try {
+      const lookup = await lookupSmtHousesByEmail({ email, token });
+      if (!lookup.ok) {
+        setHouses([]);
+        setSelectedHouseId('');
+        setHouseLookupError(lookup.error ?? 'house_lookup_failed');
+        return;
+      }
+      const rows = lookup.houses ?? [];
+      setHouses(rows);
+      setSelectedHouseId(rows[0]?.id ?? '');
+      if (rows.length === 0) {
+        setHouseLookupError('No active houses found for that email.');
+      }
+    } finally {
+      setHouseLookupLoading(false);
+    }
+  }
 
   async function runTest() {
     if (!token) {
       alert('Set x-admin-token first');
+      return;
+    }
+    if (!selectedHouseId) {
+      alert('Load houses for an email and select a house first');
       return;
     }
     setLoading(true);
@@ -81,7 +116,7 @@ export default function SmtSftpFlowTestPage() {
           'content-type': 'application/json',
           accept: 'application/json',
         },
-        body: JSON.stringify({ esiid: TEST_ESIID }),
+        body: JSON.stringify({ houseId: selectedHouseId }),
       });
       const pullJson = (await pullRes
         .json()
@@ -180,7 +215,7 @@ export default function SmtSftpFlowTestPage() {
 
       // 4) Usage debug for this ESIID over 365 days
       const usageRes = await fetch(
-        `/api/admin/usage/debug?esiid=${encodeURIComponent(TEST_ESIID)}&days=365`,
+        `/api/admin/usage/debug?houseId=${encodeURIComponent(selectedHouseId)}&days=365`,
         {
           method: 'GET',
           headers: {
@@ -203,7 +238,7 @@ export default function SmtSftpFlowTestPage() {
 
       // 5) Sample of raw SmtInterval rows for this ESIID
       const intervalsRes = await fetch(
-        `/api/admin/debug/smt/intervals?esiid=${encodeURIComponent(TEST_ESIID)}&limit=50`,
+        `/api/admin/debug/smt/intervals?houseId=${encodeURIComponent(selectedHouseId)}&limit=50`,
         {
           method: 'GET',
           headers: {
@@ -235,9 +270,9 @@ export default function SmtSftpFlowTestPage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">SMT SFTP Flow Test (Droplet + Raw Files)</h1>
       <p className="text-sm text-gray-700">
-        This admin-only harness exercises the SFTP pipeline for a hard-coded ESIID (<code>{TEST_ESIID}</code>) by:
+        This admin-only harness exercises the SFTP pipeline for the selected house by:
         <br />
-        1) Triggering <code>/api/admin/smt/pull</code> (droplet webhook → SFTP) for that ESIID;
+        1) Triggering <code>/api/admin/smt/pull</code> (droplet webhook → SFTP) for that house;
         <br />
         2) Showing pipeline debug (raw files + recent intervals);
         <br />
@@ -263,14 +298,54 @@ export default function SmtSftpFlowTestPage() {
         </div>
 
         <div className="p-4 rounded-2xl border flex flex-col gap-3">
-          <h2 className="font-medium">Test Controls</h2>
+          <h2 className="font-medium">House Lookup</h2>
           <p className="text-sm text-gray-700">
-            ESIID is hard-coded to <code>{TEST_ESIID}</code>. SFTP ingest is triggered via <code>/api/admin/smt/pull</code>.
+            Load houses by user email, then trigger SFTP ingest for the selected house.
           </p>
+          <label className="block text-sm">
+            <span className="mb-1 block">User email</span>
+            <input
+              className="w-full rounded-lg border px-3 py-2"
+              type="email"
+              placeholder="user@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={loadHouses}
+              className="px-4 py-2 rounded-lg border bg-slate-50 font-semibold hover:bg-slate-100"
+              disabled={houseLookupLoading || !ready}
+            >
+              {houseLookupLoading ? 'Loading houses…' : 'Load Houses'}
+            </button>
+            {selectedHouse ? (
+              <span className="text-xs text-gray-600">
+                Selected: <code>{selectedHouse.label}</code>
+              </span>
+            ) : null}
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1 block">House</span>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={selectedHouseId}
+              onChange={(e) => setSelectedHouseId(e.target.value)}
+            >
+              <option value="">Select a house</option>
+              {houses.map((house) => (
+                <option key={house.id} value={house.id}>
+                  {house.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {houseLookupError ? <p className="text-sm text-red-600">{houseLookupError}</p> : null}
           <button
             onClick={runTest}
             className="px-4 py-2 rounded-lg border bg-green-50 font-semibold hover:bg-green-100"
-            disabled={loading || !ready}
+            disabled={loading || !ready || !selectedHouseId}
           >
             {loading ? 'Running SFTP flow…' : 'Run SFTP Flow Test'}
           </button>

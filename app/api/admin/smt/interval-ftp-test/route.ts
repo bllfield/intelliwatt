@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
 import { getRollingBackfillRange, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
+import { resolveSmtEsiid } from '@/lib/smt/esiid';
+import { prisma } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,11 +21,15 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json().catch(() => ({}))) as Record<string, any>;
-  const esiid = typeof body.esiid === 'string' && body.esiid.trim() ? body.esiid.trim() : null;
+  const esiid = await resolveSmtEsiid({
+    prismaClient: prisma,
+    explicitEsiid: typeof body.esiid === 'string' ? body.esiid : null,
+    houseId: typeof body.houseId === 'string' ? body.houseId : null,
+  });
 
   if (!esiid) {
     return NextResponse.json(
-      { ok: false, error: 'ESIID_REQUIRED', message: 'Provide esiid in JSON body.' },
+      { ok: false, error: 'ESIID_REQUIRED', message: 'Provide a resolvable esiid or houseId in JSON body.' },
       { status: 400 },
     );
   }

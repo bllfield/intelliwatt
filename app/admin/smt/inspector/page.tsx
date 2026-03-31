@@ -60,17 +60,17 @@ const SMT_TOOLS: Tool[] = [
   {
     href: '/admin/smt/interval-api-test',
     title: 'Interval API JSON Test',
-    desc: 'Admin harness: call /api/admin/smt/billing/fetch for a hard-coded ESIID and show SMT + usage debug + customer usage view.',
+    desc: 'Admin harness: load houses by user email, call /api/admin/smt/billing/fetch for the selected house, and show SMT + usage debug + customer usage view.',
   },
   {
     href: '/admin/smt/interval-ftp-test',
     title: 'Interval FTP 15-Min Test',
-    desc: 'Admin harness: trigger SMT 15-minute interval backfill via FTP (CSV) for a hard-coded ESIID and show the 15minintervalreads request body.',
+    desc: 'Admin harness: load houses by user email, trigger SMT 15-minute interval backfill via FTP (CSV) for the selected house, and show the 15minintervalreads request body.',
   },
   {
     href: '/admin/smt/sftp-flow-test',
     title: 'SFTP Flow Test (Raw Files + Usage)',
-    desc: 'Admin harness: trigger /api/admin/smt/pull for a hard-coded ESIID and show SFTP raw files, intervals, and the customer usage view.',
+    desc: 'Admin harness: load houses by user email, trigger /api/admin/smt/pull for the selected house, and show SFTP raw files, intervals, and the customer usage view.',
   },
 ];
 

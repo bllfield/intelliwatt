@@ -16,12 +16,26 @@ type DayWeather = {
 type WeatherResponse = {
   ok: boolean;
   mode: WeatherSourceMode;
+  house?: { id: string; label: string };
   station: { id: string; code: string };
   range: { start: string; end: string; version: number };
-  counts: { dateKeys: number; actual: number; normal: number };
-  missing: { ACTUAL_LAST_YEAR: string[]; NORMAL_AVG: string[] };
+  counts: {
+    dateKeys: number;
+    actual: number;
+    normal: number;
+    houseActual: number;
+    houseNormal: number;
+  };
+  missing: {
+    ACTUAL_LAST_YEAR: string[];
+    NORMAL_AVG: string[];
+    HOUSE_ACTUAL_LAST_YEAR: string[];
+    HOUSE_NORMAL_AVG: string[];
+  };
   actualLastYear: DayWeather[];
   normalAvg: DayWeather[];
+  houseActualLastYear: DayWeather[];
+  houseNormalAvg: DayWeather[];
   error?: string;
 };
 
@@ -284,6 +298,9 @@ export default function AdminWeatherPage() {
             <div className="mt-6 space-y-6">
               <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
                 <div className="font-semibold">
+                  House: {data.house?.label ?? data.house?.id ?? "Unknown house"}
+                </div>
+                <div className="font-semibold">
                   Station: {data.station.code} ({data.station.id})
                 </div>
                 <div>
@@ -293,10 +310,33 @@ export default function AdminWeatherPage() {
                   Missing ACTUAL_LAST_YEAR: {data.missing.ACTUAL_LAST_YEAR.length} | Missing NORMAL_AVG:{" "}
                   {data.missing.NORMAL_AVG.length}
                 </div>
+                <div>
+                  Missing shared house ACTUAL_LAST_YEAR: {data.missing.HOUSE_ACTUAL_LAST_YEAR.length} | Missing shared
+                  house NORMAL_AVG: {data.missing.HOUSE_NORMAL_AVG.length}
+                </div>
               </div>
 
-              <WeatherTable title="ACTUAL_LAST_YEAR" rows={data.actualLastYear} />
-              <WeatherTable title="NORMAL_AVG" rows={data.normalAvg} />
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-navy">Station weather DB rows</h3>
+                  <p className="text-sm text-brand-navy/70">
+                    Station-scoped inspector rows for the selected house and 365-day window.
+                  </p>
+                </div>
+                <WeatherTable title="ACTUAL_LAST_YEAR" rows={data.actualLastYear} />
+                <WeatherTable title="NORMAL_AVG" rows={data.normalAvg} />
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-navy">Shared house weather DB rows</h3>
+                  <p className="text-sm text-brand-navy/70">
+                    House-scoped rows used by shared Past Sim and GapFill after the same weather pull/backfill path.
+                  </p>
+                </div>
+                <WeatherTable title="HOUSE ACTUAL_LAST_YEAR" rows={data.houseActualLastYear} />
+                <WeatherTable title="HOUSE NORMAL_AVG" rows={data.houseNormalAvg} />
+              </div>
             </div>
           ) : null}
         </div>
