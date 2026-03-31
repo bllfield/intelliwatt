@@ -20,7 +20,7 @@ import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
   buildDisplayMonthlyFromIntervalsUtc,
-  recomputePastAggregatesFromIntervals,
+  reconcileRestoredPastDatasetFromDecodedIntervals,
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
@@ -1211,7 +1211,7 @@ function restoreCachedArtifactDataset(args: {
     },
   };
   if (!useSelectedDaysLightweightArtifactRead && !skipAggregateRecompute) {
-    reconcileRestoredDatasetFromDecodedIntervals({
+    reconcileRestoredPastDatasetFromDecodedIntervals({
       dataset,
       decodedIntervals: dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>,
       fallbackEndDate,
@@ -1222,86 +1222,6 @@ function restoreCachedArtifactDataset(args: {
     restoredCanonicalDailyRows,
     restoredCanonicalMonthlyRows,
   };
-}
-
-function reconcileRestoredDatasetFromDecodedIntervals(args: {
-  dataset: any;
-  decodedIntervals: Array<{ timestamp: string; kwh: number }>;
-  fallbackEndDate: string;
-}) {
-  const { dataset, decodedIntervals, fallbackEndDate } = args;
-  if (!dataset || typeof dataset !== "object" || !Array.isArray(decodedIntervals) || decodedIntervals.length === 0) {
-    return;
-  }
-  const lastDecodedTs = decodedIntervals[decodedIntervals.length - 1]?.timestamp;
-  const curveEnd =
-    (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) ||
-    String((dataset as any)?.summary?.end ?? fallbackEndDate).slice(0, 10);
-
-  const simDateKeys = new Set<string>(
-    (Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [])
-      .filter((d: any) => String(d?.source ?? "").toUpperCase() === "SIMULATED")
-      .map((d: any) => String(d?.date ?? "").slice(0, 10))
-      .filter((dk: string) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-  );
-  const recomputed = recomputePastAggregatesFromIntervals({
-    intervals: decodedIntervals,
-    curveEndDate: curveEnd,
-    simulatedDateKeys: simDateKeys,
-  });
-  const hasCanonicalDaily = Array.isArray((dataset as any).daily) && (dataset as any).daily.length > 0;
-  const hasCanonicalMonthly = Array.isArray((dataset as any).monthly) && (dataset as any).monthly.length > 0;
-  const hasCanonicalUsageBuckets =
-    (dataset as any).usageBucketsByMonth &&
-    typeof (dataset as any).usageBucketsByMonth === "object" &&
-    Object.keys((dataset as any).usageBucketsByMonth).length > 0;
-  if (!hasCanonicalDaily) {
-    (dataset as any).daily = recomputed.daily;
-  }
-  if (!hasCanonicalMonthly && recomputed.monthly.length > 0) {
-    (dataset as any).monthly = recomputed.monthly;
-  }
-  if (!hasCanonicalUsageBuckets && recomputed.monthly.length > 0) {
-    (dataset as any).usageBucketsByMonth = recomputed.usageBucketsByMonth;
-  }
-  if (!Array.isArray((dataset as any)?.series?.daily) || (dataset as any).series.daily.length === 0) {
-    (dataset as any).series.daily = recomputed.daily.map((d) => ({
-      timestamp: `${d.date}T00:00:00.000Z`,
-      kwh: Number(d.kwh) || 0,
-    }));
-  }
-  if (!Array.isArray((dataset as any)?.series?.monthly) || (dataset as any).series.monthly.length === 0) {
-    (dataset as any).series.monthly = recomputed.monthly.map((m) => ({
-      timestamp: `${m.month}-01T00:00:00.000Z`,
-      kwh: Number(m.kwh) || 0,
-    }));
-  }
-  if (!Array.isArray((dataset as any)?.series?.annual) || (dataset as any).series.annual.length === 0) {
-    (dataset as any).series.annual = [
-      {
-        timestamp: `${curveEnd.slice(0, 4)}-01-01T00:00:00.000Z`,
-        kwh: recomputed.monthlySumKwh,
-      },
-    ];
-  }
-
-  if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
-  if ((dataset.summary as any).totalKwh == null) {
-    (dataset.summary as any).totalKwh = recomputed.intervalSumKwh;
-  }
-  if ((dataset.summary as any).intervalsCount == null) {
-    (dataset.summary as any).intervalsCount = recomputed.intervalCount;
-  }
-  if (!dataset.totals || typeof dataset.totals !== "object") (dataset as any).totals = {};
-  if ((dataset.totals as any).importKwh == null) {
-    (dataset.totals as any).importKwh = recomputed.intervalSumKwh;
-  }
-  if ((dataset.totals as any).netKwh == null) {
-    (dataset.totals as any).netKwh = recomputed.intervalSumKwh;
-  }
-  if ((dataset.totals as any).exportKwh == null) {
-    (dataset.totals as any).exportKwh = 0;
-  }
 }
 
 function enumerateDateKeysInclusive(startDate: string, endDate: string): Set<string> {
@@ -5421,7 +5341,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             intervals15: decoded,
           },
         };
-        reconcileRestoredDatasetFromDecodedIntervals({
+        reconcileRestoredPastDatasetFromDecodedIntervals({
           dataset: restored,
           decodedIntervals: decoded,
           fallbackEndDate: String((exactCached.datasetJson as any)?.summary?.end ?? "").slice(0, 10),
@@ -5593,7 +5513,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           intervals15: decoded,
         },
       };
-      reconcileRestoredDatasetFromDecodedIntervals({
+      reconcileRestoredPastDatasetFromDecodedIntervals({
         dataset: restored,
         decodedIntervals: decoded,
         fallbackEndDate: window.endDate,
@@ -6005,7 +5925,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
             };
             dataset = restored;
-            reconcileRestoredDatasetFromDecodedIntervals({
+            reconcileRestoredPastDatasetFromDecodedIntervals({
               dataset,
               decodedIntervals: decoded,
               fallbackEndDate: endDate,

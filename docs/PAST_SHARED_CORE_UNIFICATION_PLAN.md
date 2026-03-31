@@ -14,6 +14,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - `getPastSimulatedDatasetForHouse`: delegates to `simulatePastUsageDataset(..., buildPathKind: 'recalc')`; preserves overlay and dailyWeather.
   - Recalc Past block: also uses `simulatePastUsageDataset(..., buildPathKind: 'recalc')`; sets pastPatchedCurve and monthlyTotalsKwhByMonth from returned stitchedCurve.
   - Cache restore: sets `buildPathKind: 'cache_restore'`; when cached weather provenance missing, sets `weatherSourceSummary` and `weatherFallbackReason` to `'unknown'`.
+  - **Stale daily prevention:** After decoding stored `intervals15`, `reconcileRestoredPastDatasetFromDecodedIntervals` overwrites display aggregates from interval truth and uses artifact **meta** (when explicit simulated-day fields exist) for which dates are simulated—so a new run’s persisted meta is not merged with leftover `SIMULATED` rows from an older save. Legacy artifacts without those meta fields still derive simulated membership from stored `daily` and, for `sourceDetail`, from meta keys when present else from the pre-reconcile daily row.
 - **modules/weather/backfill.ts**
   - `ensureHouseWeatherBackfill` returns `{ fetched, stubbed, skippedLatLng?: boolean }`; `skippedLatLng: true` when house has no lat/lng (no API call).
 - **GapFill Lab**

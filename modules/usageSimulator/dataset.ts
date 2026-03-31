@@ -405,6 +405,215 @@ export function recomputePastAggregatesFromIntervals(args: {
   };
 }
 
+/**
+ * True when persisted meta includes explicit simulated-day ownership fields (possibly empty).
+ * Plain `meta: {}` from older saves is treated as absent so legacy daily-row labeling still applies.
+ */
+export function pastMetaHasExplicitSimulatedDayFields(meta: unknown): boolean {
+  if (!meta || typeof meta !== "object") return false;
+  const m = meta as Record<string, unknown>;
+  return (
+    Object.prototype.hasOwnProperty.call(m, "simulatedTravelVacantDateKeysLocal") ||
+    Object.prototype.hasOwnProperty.call(m, "simulatedTestModeledDateKeysLocal") ||
+    Object.prototype.hasOwnProperty.call(m, "simulatedSourceDetailByDate")
+  );
+}
+
+/**
+ * Simulated-day keys from persisted artifact meta (current-run truth). Prefer this over scanning
+ * `dataset.daily` for SIMULATED rows so stale labels from an older save cannot leak into restore.
+ * Returns an empty set when meta lists/maps are empty (no simulated days in this artifact).
+ */
+export function simulatedDateKeysUnionFromPastDatasetMeta(meta: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!meta || typeof meta !== "object") return out;
+  const m = meta as Record<string, unknown>;
+  const addArr = (a: unknown) => {
+    if (!Array.isArray(a)) return;
+    for (const x of a) {
+      const dk = String(x ?? "").slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+    }
+  };
+  addArr(m.simulatedTravelVacantDateKeysLocal);
+  addArr(m.simulatedTestModeledDateKeysLocal);
+  const byDetail = m.simulatedSourceDetailByDate;
+  if (byDetail && typeof byDetail === "object" && !Array.isArray(byDetail)) {
+    for (const k of Object.keys(byDetail)) {
+      const dk = String(k).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+    }
+  }
+  return out;
+}
+
+/** Legacy: derive simulated keys from stored daily rows when meta has no simulated-day lists/maps. */
+export function simulatedDateKeysFromPastDatasetDaily(daily: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(daily)) return out;
+  for (const d of daily) {
+    const row = d as { source?: string; date?: string };
+    if (String(row?.source ?? "").toUpperCase() !== "SIMULATED") continue;
+    const dk = String(row?.date ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+  }
+  return out;
+}
+
+export function enrichPastDailyRowsWithSourceDetailFromMeta(
+  daily: Array<{ date: string; kwh: number; source?: string }>,
+  meta: unknown,
+  options?: {
+    /** When meta omits per-day detail, use labels from the pre-reconcile daily rows (legacy artifacts). */
+    legacyDailyByDate?: Map<string, { sourceDetail?: string }>;
+  }
+): Array<{
+  date: string;
+  kwh: number;
+  source: "ACTUAL" | "SIMULATED";
+  sourceDetail: "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER" | "ACTUAL";
+}> {
+  const m = meta && typeof meta === "object" ? (meta as Record<string, unknown>) : null;
+  const byDetail = m?.simulatedSourceDetailByDate as
+    | Record<string, "SIMULATED_TRAVEL_VACANT" | "SIMULATED_TEST_DAY" | "SIMULATED_OTHER">
+    | undefined;
+  const legacyMap = options?.legacyDailyByDate;
+  return daily.map((row) => {
+    const dk = String(row.date).slice(0, 10);
+    const isSim = String(row.source ?? "").toUpperCase() === "SIMULATED";
+    if (!isSim) {
+      return {
+        date: dk,
+        kwh: row.kwh,
+        source: "ACTUAL" as const,
+        sourceDetail: "ACTUAL" as const,
+      };
+    }
+    const hasMetaDetailKey =
+      byDetail && typeof byDetail === "object" && Object.prototype.hasOwnProperty.call(byDetail, dk);
+    if (hasMetaDetailKey) {
+      const detail = (byDetail as Record<string, unknown>)[dk];
+      const sourceDetail =
+        detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_TEST_DAY"
+          ? detail
+          : "SIMULATED_OTHER";
+      return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail };
+    }
+    const legacyDetail = String(legacyMap?.get(dk)?.sourceDetail ?? "");
+    if (legacyDetail === "SIMULATED_TRAVEL_VACANT" || legacyDetail === "SIMULATED_TEST_DAY") {
+      return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail: legacyDetail };
+    }
+    return {
+      date: dk,
+      kwh: row.kwh,
+      source: "SIMULATED" as const,
+      sourceDetail: "SIMULATED_OTHER",
+    };
+  });
+}
+
+/**
+ * After decoding `intervals15` from the blob, rebuild `daily` / aggregates from intervals so
+ * persisted `datasetJson.daily` cannot carry stale SIMULATED rows or labels from a prior run.
+ * Simulated-day membership and sourceDetail come from meta when present; otherwise legacy daily scan.
+ */
+export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
+  dataset: any;
+  decodedIntervals: Array<{ timestamp: string; kwh?: number; consumption_kwh?: number }>;
+  fallbackEndDate: string;
+}): void {
+  const { dataset, decodedIntervals, fallbackEndDate } = args;
+  if (!dataset || typeof dataset !== "object" || !Array.isArray(decodedIntervals) || decodedIntervals.length === 0) {
+    return;
+  }
+  const lastDecodedTs = decodedIntervals[decodedIntervals.length - 1]?.timestamp;
+  const curveEnd =
+    (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) ||
+    String((dataset as any)?.summary?.end ?? fallbackEndDate).slice(0, 10);
+
+  const meta = (dataset as any)?.meta;
+  const simDateKeys = pastMetaHasExplicitSimulatedDayFields(meta)
+    ? simulatedDateKeysUnionFromPastDatasetMeta(meta)
+    : simulatedDateKeysFromPastDatasetDaily((dataset as any)?.daily);
+
+  const recomputed = recomputePastAggregatesFromIntervals({
+    intervals: decodedIntervals,
+    curveEndDate: curveEnd,
+    simulatedDateKeys: simDateKeys,
+  });
+
+  const legacyDailyByDate = new Map<string, { sourceDetail?: string }>();
+  for (const d of Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : []) {
+    const dk = String((d as any)?.date ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) legacyDailyByDate.set(dk, { sourceDetail: (d as any)?.sourceDetail });
+  }
+  const enrichedDaily = enrichPastDailyRowsWithSourceDetailFromMeta(recomputed.daily, (dataset as any)?.meta, {
+    legacyDailyByDate,
+  });
+
+  (dataset as any).daily = enrichedDaily;
+  if (recomputed.monthly.length > 0) {
+    (dataset as any).monthly = recomputed.monthly;
+    (dataset as any).usageBucketsByMonth = recomputed.usageBucketsByMonth;
+  }
+
+  (dataset as any).series.daily = enrichedDaily.map((d) => ({
+    timestamp: `${d.date}T00:00:00.000Z`,
+    kwh: Number(d.kwh) || 0,
+    source: d.source,
+    sourceDetail: d.sourceDetail,
+  }));
+  if (recomputed.monthly.length > 0) {
+    (dataset as any).series.monthly = recomputed.monthly.map((m) => ({
+      timestamp: `${m.month}-01T00:00:00.000Z`,
+      kwh: Number(m.kwh) || 0,
+    }));
+    (dataset as any).series.annual = [
+      {
+        timestamp: `${curveEnd.slice(0, 4)}-01-01T00:00:00.000Z`,
+        kwh: recomputed.monthlySumKwh,
+      },
+    ];
+  }
+
+  if (dataset.insights && typeof dataset.insights === "object") {
+    let weekdaySum = 0;
+    let weekendSum = 0;
+    for (const row of enrichedDaily) {
+      const dow = dayOfWeekUtc(row.date);
+      const kwh = Number(row.kwh) || 0;
+      if (dow === 0 || dow === 6) weekendSum += kwh;
+      else weekdaySum += kwh;
+    }
+    (dataset.insights as any).weekdayVsWeekend = { weekday: round2(weekdaySum), weekend: round2(weekendSum) };
+    if (enrichedDaily.length > 0) {
+      const peakDay = enrichedDaily.reduce((a, b) => (b.kwh > a.kwh ? b : a));
+      (dataset.insights as any).peakDay = { date: peakDay.date, kwh: peakDay.kwh };
+    }
+    if (recomputed.stitchedMonth !== undefined) {
+      (dataset.insights as any).stitchedMonth = recomputed.stitchedMonth;
+    }
+  }
+
+  if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
+  if ((dataset.summary as any).totalKwh == null) {
+    (dataset.summary as any).totalKwh = recomputed.intervalSumKwh;
+  }
+  if ((dataset.summary as any).intervalsCount == null) {
+    (dataset.summary as any).intervalsCount = recomputed.intervalCount;
+  }
+  if (!dataset.totals || typeof dataset.totals !== "object") (dataset as any).totals = {};
+  if ((dataset.totals as any).importKwh == null) {
+    (dataset.totals as any).importKwh = recomputed.intervalSumKwh;
+  }
+  if ((dataset.totals as any).netKwh == null) {
+    (dataset.totals as any).netKwh = recomputed.intervalSumKwh;
+  }
+  if ((dataset.totals as any).exportKwh == null) {
+    (dataset.totals as any).exportKwh = 0;
+  }
+}
+
 function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
   const monthTotals = new Map<string, number>();
   for (const iv of intervals ?? []) {

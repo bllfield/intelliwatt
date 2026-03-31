@@ -303,6 +303,7 @@ We then extend the bucket builder to read from a canonical “interval usage” 
   - shared-core simulated replacement intervals for travel and vacant dates.
 - After Past Corrected Baseline is built, it must be saved in the existing Past baseline storage.
 - Past page, admin tools, cache restore, diagnostics, and all downstream systems must read that saved stitched artifact.
+- **Cache restore / decoded intervals:** On read, `reconcileRestoredPastDatasetFromDecodedIntervals` (in `modules/usageSimulator/dataset.ts`) rebuilds `daily`, `series.daily`, monthly aggregates, and related insights from **decoded `intervals15`** so persisted `datasetJson.daily` cannot retain stale plain `SIMULATED` rows or ghost dates from an older run. Simulated-day membership is taken from **meta** when `simulatedTravelVacantDateKeysLocal`, `simulatedTestModeledDateKeysLocal`, or `simulatedSourceDetailByDate` is present on the artifact; otherwise the prior legacy scan of stored `daily` rows applies. Per-day `sourceDetail` prefers meta; for legacy artifacts with empty `meta`, TRAVEL/TEST labels may still be recovered from the pre-reconcile daily row for that date.
 - No read-time re-stitching.
 - No second overlay pass on top of the saved Past baseline artifact.
 - No alternate rebuild path for the same Past baseline output.
