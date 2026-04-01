@@ -38,6 +38,7 @@ describe("buildAdminLabSyntheticManualUsagePayload", () => {
       })
     );
     expect(payload.mode).toBe("MONTHLY");
+    expect(payload.travelRanges).toEqual([]);
     expect(validateManualUsagePayload(payload).ok).toBe(true);
   });
 
@@ -55,6 +56,7 @@ describe("buildAdminLabSyntheticManualUsagePayload", () => {
     });
     expect(payload.mode).toBe("ANNUAL");
     expect((payload as { annualKwh: number }).annualKwh).toBe(300);
+    expect(payload.travelRanges).toEqual([]);
     expect(validateManualUsagePayload(payload).ok).toBe(true);
   });
 });

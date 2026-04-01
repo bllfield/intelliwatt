@@ -290,6 +290,89 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     });
   }, 15000);
 
+  it("does not fail source-derived manual modes when source travel ranges cover the canonical window", async () => {
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      adminLabTreatmentMode: "manual_monthly_constrained",
+      preLockboxTravelRanges: [{ startDate: "2025-03-01", endDate: "2026-02-28" }],
+      persistPastSimBaseline: true,
+      correlationId: "cid-1b",
+      runContext: {
+        callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: true,
+        adminLabTreatmentMode: "manual_monthly_constrained",
+      },
+    });
+
+    expect(buildAdminLabSyntheticManualUsagePayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        treatmentMode: "manual_monthly_constrained",
+        travelRanges: [{ startDate: "2025-03-01", endDate: "2026-02-28" }],
+      })
+    );
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.error).not.toBe("travel_exclusions_cover_full_range");
+    }
+  }, 15000);
+
+  it("treats PROFILE_ONLY_NEW_BUILD as profile-only and does not propagate travel exclusions", async () => {
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {},
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+      },
+      simulatedDayResults: [],
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "NEW_BUILD_ESTIMATE",
+      scenarioId: "past-s1",
+      preLockboxTravelRanges: [{ startDate: "2025-03-01", endDate: "2026-02-28" }],
+      persistPastSimBaseline: false,
+      correlationId: "cid-1c",
+      runContext: {
+        callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: false,
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        travelRanges: [],
+      })
+    );
+  }, 15000);
+
   it("reuses the stitched dataset returned by simulatePastUsageDataset", async () => {
     simulatePastUsageDataset.mockResolvedValueOnce({
       dataset: {

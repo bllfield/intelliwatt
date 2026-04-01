@@ -4326,9 +4326,15 @@ async function recalcSimulatorBuildImpl(args: {
     monthlyTotalsKwhByMonth[ym] = overlay ? applyMonthlyOverlay({ base: curveNum, mult: overlay.monthlyMultipliersByMonth?.[ym], add: overlay.monthlyAddersKwhByMonth?.[ym] }) : curveForMonth;
   }
 
+  const scenarioMergedTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
+  const allTravelRanges =
+    simMode === "MANUAL_TOTALS"
+      ? normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
+      : simMode === "NEW_BUILD_ESTIMATE"
+        ? []
+        : scenarioMergedTravelRanges;
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
   // Past SMT patch baseline mode uses day-level patching and must not use month-level travel uplift.
-  const allTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
   const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && simMode === "SMT_BASELINE";
   if (allTravelRanges.length > 0 && !isPastSmtPatchMode) {
     const excludeSet = new Set(travelRangesToExcludeDateKeys(allTravelRanges));

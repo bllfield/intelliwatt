@@ -12,6 +12,12 @@ import {
   type GapfillFailureFields,
 } from "@/components/admin/gapfillLabAdminUi";
 import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdminSerialization";
+import {
+  buildActualDiagnosticsHeaderReadout,
+  buildNonValidationSimulatedBaselineReadout,
+  buildStageTimingReadout,
+  formatIdentityReadout,
+} from "./readoutTruth";
 import { mergeActualHouseDiagnosticsSnapshot } from "./actualHouseDiagnosticsMerge";
 import { buildGapfillExportPayload } from "./exportPayload";
 
@@ -250,6 +256,11 @@ function readLockboxPresentation(dataset: any) {
     mode: lockboxInput?.mode ?? null,
     inputHash: perRunTrace?.inputHash ?? null,
     fullChainHash: meta.fullChainHash ?? perRunTrace?.fullChainHash ?? null,
+    artifactReadMode:
+      (typeof meta.artifactReadMode === "string" ? meta.artifactReadMode : null) ??
+      (meta.lockboxReadContext && typeof meta.lockboxReadContext === "object"
+        ? String((meta.lockboxReadContext as Record<string, unknown>)?.artifactReadMode ?? "")
+        : null),
   };
 }
 
@@ -277,6 +288,10 @@ function LockboxFlowPanel(props: {
   const profileContext = presentation.profileContext as Record<string, unknown> | null;
   const validationKeys = presentation.validationKeys as Record<string, unknown> | null;
   const travelRanges = presentation.travelRanges as Record<string, unknown> | null;
+  const stageTimingReadout = buildStageTimingReadout({
+    stageTimings: presentation.stageTimings,
+    artifactReadMode: presentation.artifactReadMode,
+  });
   return (
     <div className="space-y-3 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
       <div>
@@ -300,9 +315,9 @@ function LockboxFlowPanel(props: {
             label: "sourceDerivedAnnualTotalKwh",
             value: formatNumberMaybe(sourceContext?.sourceDerivedAnnualTotalKwh),
           },
-          { label: "intervalFingerprint", value: String(sourceContext?.intervalFingerprint ?? "—") },
-          { label: "weatherIdentity", value: String(sourceContext?.weatherIdentity ?? "—") },
-          { label: "usageShapeProfileIdentity", value: String(profileContext?.usageShapeProfileIdentity ?? "—") },
+          { label: "intervalFingerprint", value: formatIdentityReadout(sourceContext?.intervalFingerprint) },
+          { label: "weatherIdentity", value: formatIdentityReadout(sourceContext?.weatherIdentity) },
+          { label: "usageShapeProfileIdentity", value: formatIdentityReadout(profileContext?.usageShapeProfileIdentity) },
           { label: "inputHash", value: String(presentation.inputHash ?? "—") },
           { label: "fullChainHash", value: String(presentation.fullChainHash ?? "—") },
         ]}
@@ -313,16 +328,16 @@ function LockboxFlowPanel(props: {
       </div>
       <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
         <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Stage timings</div>
-        {presentation.stageTimings.length > 0 ? (
+        {stageTimingReadout.rows.length > 0 ? (
           <div className="mt-2 grid gap-1 text-xs font-mono md:grid-cols-2">
-            {presentation.stageTimings.map(([key, value]) => (
-              <div key={key}>
-                {key}: {String(value)} ms
+            {stageTimingReadout.rows.map((row) => (
+              <div key={row.key}>
+                {row.key}: {row.value}
               </div>
             ))}
           </div>
         ) : (
-          <div className="mt-1 text-xs text-brand-navy/60">No stage timings were attached to this persisted read.</div>
+          <div className="mt-1 text-xs text-brand-navy/60">{stageTimingReadout.emptyMessage}</div>
         )}
       </div>
       <details className="rounded border border-brand-blue/10 p-3">
@@ -390,8 +405,8 @@ function LeverVisibilityPanel(props: {
       </div>
       <MetadataGrid
         items={[
-          { label: "Fixed source truth", value: `sourceHouseId=${String(sourceContext?.sourceHouseId ?? "—")} | intervalFingerprint=${String(sourceContext?.intervalFingerprint ?? "—")} | weatherIdentity=${String(sourceContext?.weatherIdentity ?? "—")}` },
-          { label: "Fixed profile truth", value: `profileHouseId=${String(profileContext?.profileHouseId ?? "—")} | usageShapeProfileIdentity=${String(profileContext?.usageShapeProfileIdentity ?? "—")}` },
+          { label: "Fixed source truth", value: `sourceHouseId=${String(sourceContext?.sourceHouseId ?? "—")} | intervalFingerprint=${formatIdentityReadout(sourceContext?.intervalFingerprint)} | weatherIdentity=${formatIdentityReadout(sourceContext?.weatherIdentity)}` },
+          { label: "Fixed profile truth", value: `profileHouseId=${String(profileContext?.profileHouseId ?? "—")} | usageShapeProfileIdentity=${formatIdentityReadout(profileContext?.usageShapeProfileIdentity)}` },
           { label: "Mode-selected constraints", value: `mode=${String(presentation.mode ?? "—")} | validationMode=${String(props.adminValidationMode ?? "—")} | travelRanges=${summarizeRanges(presentation.travelRanges?.ranges ?? [])}` },
           {
             label: "Derived inputs",
@@ -707,10 +722,9 @@ export default function GapFillLabCanonicalClient() {
         return;
       }
       if (json.pastSimSnapshot && typeof json.pastSimSnapshot === "object") {
-        setPastSimSnapshot((prev) => ({
-          ...(prev ?? {}),
-          ...(json.pastSimSnapshot as Record<string, unknown>),
-        }));
+        setPastSimSnapshot((prev) =>
+          mergeActualHouseDiagnosticsSnapshot(prev, json.pastSimSnapshot as Record<string, unknown>)
+        );
       }
     } catch (err: unknown) {
       setActualEngineDiagnosticsError(
@@ -827,6 +841,26 @@ export default function GapFillLabCanonicalClient() {
     });
   }, [actualHouseBaselineDataset, testHouseBaselineDataset]);
   const hasCurveData = Boolean(actualHouseOverride?.length || testHouseOverride?.length);
+  const actualDiagnosticsHeader = useMemo(
+    () =>
+      buildActualDiagnosticsHeaderReadout({
+        pastSimSnapshot,
+        actualHouseBaselineDataset,
+      }),
+    [actualHouseBaselineDataset, pastSimSnapshot]
+  );
+  const actualSharedDiagnostics =
+    pastSimSnapshot && typeof pastSimSnapshot === "object" && (pastSimSnapshot as any).sharedDiagnostics
+      ? ((pastSimSnapshot as any).sharedDiagnostics as Record<string, unknown>)
+      : null;
+  const truthfulSimulatedBaselineReadout = useMemo(
+    () =>
+      buildNonValidationSimulatedBaselineReadout({
+        diagnosticsVerdict: result?.ok ? ((result as any).diagnosticsVerdict as Record<string, unknown> | null) : null,
+        sharedDiagnostics: result?.ok ? ((result as any).sharedDiagnostics as Record<string, unknown> | null) : null,
+      }),
+    [result]
+  );
 
   const visibilityFromResult = useMemo(() => {
     if (!result?.ok) return null;
@@ -1530,35 +1564,41 @@ export default function GapFillLabCanonicalClient() {
                   items={[
                     {
                       label: "Recalc execution mode",
-                      value: String((pastSimSnapshot as any)?.recalc?.executionMode ?? "—"),
+                      value: actualDiagnosticsHeader.recalcExecutionMode,
                     },
                     {
                       label: "Recalc correlationId",
-                      value: String((pastSimSnapshot as any)?.recalc?.correlationId ?? "—"),
+                      value: actualDiagnosticsHeader.recalcCorrelationId,
                     },
                     {
                       label: "Build mode",
-                      value: String((pastSimSnapshot as any)?.build?.mode ?? "—"),
+                      value: actualDiagnosticsHeader.buildMode,
                     },
                     {
                       label: "Build inputs hash",
-                      value: String((pastSimSnapshot as any)?.build?.buildInputsHash ?? "—"),
+                      value: actualDiagnosticsHeader.buildInputsHash,
                     },
                     {
                       label: "Weather identity",
-                      value: String((pastSimSnapshot as any)?.engineContext?.identity?.weatherIdentity ?? "—"),
+                      value: actualDiagnosticsHeader.weatherIdentity,
                     },
                     {
                       label: "Interval fingerprint",
-                      value: String((pastSimSnapshot as any)?.engineContext?.identity?.intervalDataFingerprint ?? "—"),
+                      value: actualDiagnosticsHeader.intervalFingerprint,
                     },
                   ]}
                 />
                 <details className="rounded border p-3">
                   <summary className="cursor-pointer font-semibold text-xs">Actual House shared diagnostics</summary>
-                  <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
-                    {JSON.stringify((pastSimSnapshot as any)?.sharedDiagnostics ?? null, null, 2)}
-                  </pre>
+                  {actualSharedDiagnostics ? (
+                    <pre className="mt-2 text-xs bg-brand-navy/5 p-3 rounded overflow-x-auto">
+                      {JSON.stringify(actualSharedDiagnostics, null, 2)}
+                    </pre>
+                  ) : (
+                    <div className="mt-2 text-xs text-brand-navy/60">
+                      No persisted shared diagnostics were attached to this actual-house read.
+                    </div>
+                  )}
                 </details>
                 <details className="rounded border p-3">
                   <summary className="cursor-pointer font-semibold text-xs">Actual House build diagnostics</summary>
@@ -1783,8 +1823,7 @@ export default function GapFillLabCanonicalClient() {
               <div>compareRowsMatchSelectedDates: {String((result.diagnosticsVerdict as any)?.compareRowsMatchSelectedDates ?? false)}</div>
               <div>validationLeakCountInBaseline: {String((result.diagnosticsVerdict as any)?.validationLeakCountInBaseline ?? 0)}</div>
               <div>
-                travelVacantSimulatedDatesInBaselineCount:{" "}
-                {String((result.diagnosticsVerdict as any)?.travelVacantSimulatedDatesInBaselineCount ?? 0)}
+                {truthfulSimulatedBaselineReadout.label}: {truthfulSimulatedBaselineReadout.value}
               </div>
               <div>
                 validationDatesRenderedAsActualCount:{" "}
@@ -1799,6 +1838,9 @@ export default function GapFillLabCanonicalClient() {
               validationLeakDatesInBaseline:{" "}
               {JSON.stringify((result.diagnosticsVerdict as any)?.validationLeakDatesInBaseline ?? [], null, 0)}
             </div>
+            {truthfulSimulatedBaselineReadout.detail ? (
+              <div className="mt-2 text-xs text-brand-navy/70">{truthfulSimulatedBaselineReadout.detail}</div>
+            ) : null}
           </div>
           <div className="grid gap-2 text-xs md:grid-cols-2">
             <div className="rounded border bg-brand-navy/5 p-2">

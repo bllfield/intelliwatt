@@ -377,6 +377,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
               artifactSourceNote: "exact",
               artifactRecomputed: false,
               artifactSourceMode: "exact_hash_match",
+              weatherDatasetIdentity: "wx-meta-1",
               validationCompareRows: [
                 {
                   localDate: "2025-04-10",
@@ -411,6 +412,27 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
               canonicalArtifactSimulatedDayTotalsByDate: {
                 "2025-04-10": 9.5,
                 "2025-05-02": 12.25,
+              },
+              lockboxInput: {
+                sourceContext: {
+                  sourceHouseId: "h1",
+                  intervalFingerprint: "ifp-lockbox-1",
+                  weatherIdentity: "wx-lockbox-1",
+                },
+                profileContext: {
+                  profileHouseId: "h1",
+                  usageShapeProfileIdentity: "shape-lockbox-1",
+                },
+                mode: "ACTUAL_INTERVAL_BASELINE",
+                travelRanges: { ranges: [] },
+                validationKeys: { localDateKeys: ["2025-04-10"] },
+              },
+              lockboxPerRunTrace: {
+                inputHash: "input-1",
+                fullChainHash: "chain-1",
+                sourceHouseId: "h1",
+                profileHouseId: "h1",
+                stageTimingsMs: { restore: 0 },
               },
             },
           },
@@ -962,6 +984,50 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
     expect(body.pastSimSnapshot?.recalc?.executionMode).toBe("not_run");
     expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
+  });
+
+  it("preserves untouched parity outputs while surfacing persisted actual-house diagnostics fields", async () => {
+    const { POST: postActual } = await import("@/app/api/admin/tools/gapfill-lab/source-home-past-sim/route");
+    const { POST: postTest } = await import("@/app/api/admin/tools/gapfill-lab/route");
+
+    const actualReq = buildRequest({
+      action: "run_source_home_past_sim_snapshot",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+    });
+    const testReq = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const actualRes = await postActual(actualReq);
+    const testRes = await postTest(testReq);
+    const actualBody = await actualRes.json();
+    const testBody = await testRes.json();
+
+    expect(actualRes.status).toBe(200);
+    expect(testRes.status).toBe(200);
+    expect(actualBody.pastSimSnapshot?.reads?.baselineProjection?.dataset?.summary?.totalKwh).toBe(100);
+    expect(testBody.baselineDatasetProjection?.summary?.totalKwh).toBe(100);
+    expect(actualBody.pastSimSnapshot?.reads?.baselineProjection?.dataset?.monthly).toEqual(
+      testBody.baselineDatasetProjection?.monthly
+    );
+    expect(actualBody.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.metrics).toEqual(
+      testBody.compareProjection?.metrics
+    );
+    expect(actualBody.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.rows?.length).toBe(
+      testBody.compareProjection?.rows?.length
+    );
+    expect(actualBody.pastSimSnapshot?.sharedDiagnostics?.sourceTruthContext?.weatherDatasetIdentity).toBe("wx-lockbox-1");
+    expect(actualBody.pastSimSnapshot?.sharedDiagnostics?.sourceTruthContext?.intervalSourceIdentity).toBe("ifp-lockbox-1");
   });
 
   it("logs a source-home failure event when pre-dispatch Actual Home setup throws", async () => {

@@ -38,14 +38,13 @@ export async function buildAdminLabSyntheticManualUsagePayload(args: {
     kwh: Math.round((Number(byMonth[ym] ?? 0) || 0) * 100) / 100,
   }));
   const anchorEndDate = canonicalWindowEndDate(args.canonicalMonths) ?? `${args.canonicalMonths[args.canonicalMonths.length - 1]}-28`;
-  const travelRanges = args.travelRanges ?? [];
-
   if (args.treatmentMode === "manual_monthly_constrained") {
     return {
       mode: "MONTHLY",
       anchorEndDate,
       monthlyKwh,
-      travelRanges,
+      // Source-derived totals already honored these exclusions during the shared actual-monthly read.
+      travelRanges: [],
     };
   }
 
@@ -54,6 +53,7 @@ export async function buildAdminLabSyntheticManualUsagePayload(args: {
     mode: "ANNUAL",
     anchorEndDate,
     annualKwh: Math.round(Math.max(0, annualKwh) * 100) / 100,
-    travelRanges,
+    // Source-derived totals already honored these exclusions during the shared actual-monthly read.
+    travelRanges: [],
   };
 }

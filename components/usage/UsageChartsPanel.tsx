@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
 import {
   Bar,
   BarChart,
@@ -60,6 +61,7 @@ export function UsageChartsPanel(props: {
   weatherBasisLabel?: string | null;
   fifteenCurve: FifteenMinuteAverage[];
   emptyFifteenCurveMessage?: string | null;
+  summaryTotalKwh?: number | null;
   /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
   coverageStart?: string | null;
   coverageEnd?: string | null;
@@ -79,6 +81,7 @@ export function UsageChartsPanel(props: {
     weatherBasisLabel,
     fifteenCurve,
     emptyFifteenCurveMessage,
+    summaryTotalKwh,
     coverageStart,
     coverageEnd,
   } = props;
@@ -90,6 +93,11 @@ export function UsageChartsPanel(props: {
       return a === b && daily[0]!.date.slice(0, 4) !== daily[daily.length - 1]!.date.slice(0, 4);
     })();
   const dailyLabelFormat = spansTwoYears || firstLastSameMonthDay ? formatDateShortWithYear : formatDateShort;
+  const weekdayWeekendBreakdownNote = buildWeekdayWeekendBreakdownNote({
+    weekdayKwh,
+    weekendKwh,
+    summaryTotalKwh,
+  });
   const sourceLabelForRow = (row: DailyRow): string => {
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_TRAVEL_VACANT") {
       return "SIMULATED (TRAVEL/VACANT)";
@@ -138,12 +146,15 @@ export function UsageChartsPanel(props: {
                   </div>
                   <div className="my-1 h-px w-full bg-neutral-200" />
                   <div className="flex items-center justify-between">
-                    <span>Total</span>
+                    <span>Breakdown total</span>
                     <span className="font-semibold">{total.toFixed(1)} kWh</span>
                   </div>
                 </>
               );
             })()}
+            {weekdayWeekendBreakdownNote ? (
+              <div className="mt-2 text-xs text-neutral-500">{weekdayWeekendBreakdownNote}</div>
+            ) : null}
 
             {timeOfDayBuckets?.length ? (
               <>

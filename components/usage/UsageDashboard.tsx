@@ -920,6 +920,7 @@ export const UsageDashboard: React.FC<Props> = ({
             dailyWeather={derived.dailyWeather ?? undefined}
             weatherBasisLabel={coverage?.weatherBasisLabel ?? undefined}
             fifteenCurve={derived.fifteenCurve}
+            summaryTotalKwh={derived.totalKwh}
             coverageStart={coverage?.start ?? null}
             coverageEnd={coverage?.end ?? null}
           />

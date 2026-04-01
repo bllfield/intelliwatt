@@ -3,6 +3,13 @@ import { NextRequest } from "next/server";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { shouldResetPastValidationCompareExpanded } from "@/modules/usageSimulator/pastCompareUiDefaults";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
+import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
+import {
+  buildActualDiagnosticsHeaderReadout,
+  buildNonValidationSimulatedBaselineReadout,
+  buildStageTimingReadout,
+  formatIdentityReadout,
+} from "@/app/admin/tools/gapfill-lab/readoutTruth";
 
 vi.mock("server-only", () => ({}));
 
@@ -238,5 +245,85 @@ describe("user simulated house compare projection", () => {
       percentError: 9.09,
     });
     expect(display.metrics).toMatchObject({ wape: 9.09, mae: 1, rmse: 1 });
+  });
+
+  it("actual-house diagnostics header falls back to persisted shared read fields", () => {
+    const readout = buildActualDiagnosticsHeaderReadout({
+      pastSimSnapshot: {
+        recalc: { executionMode: "inline", correlationId: "corr-1" },
+        build: { mode: "ACTUAL_INTERVAL_BASELINE", buildInputsHash: "build-hash-1" },
+        sharedDiagnostics: {
+          sourceTruthContext: {
+            weatherDatasetIdentity: "wx-shared",
+            intervalSourceIdentity: "ifp-shared",
+          },
+        },
+      },
+      actualHouseBaselineDataset: {
+        meta: {
+          lockboxInput: {
+            sourceContext: {
+              weatherIdentity: "wx-dataset",
+              intervalFingerprint: "ifp-dataset",
+            },
+          },
+        },
+      },
+    });
+
+    expect(readout.recalcExecutionMode).toBe("inline");
+    expect(readout.recalcCorrelationId).toBe("corr-1");
+    expect(readout.buildMode).toBe("ACTUAL_INTERVAL_BASELINE");
+    expect(readout.weatherIdentity).toBe("wx-shared");
+    expect(readout.intervalFingerprint).toBe("ifp-shared");
+  });
+
+  it("truthfully marks blank identities and zeroed artifact-only timings as unavailable", () => {
+    expect(formatIdentityReadout("")).toBe("unavailable");
+    expect(
+      buildStageTimingReadout({
+        stageTimings: [
+          ["loadIntervals", 0],
+          ["simulateDays", 0],
+        ],
+        artifactReadMode: "artifact_only",
+      })
+    ).toEqual({
+      rows: [],
+      emptyMessage: "Not available on artifact-only read.",
+    });
+  });
+
+  it("truthfully relabels non-validation simulated baseline counts", () => {
+    const readout = buildNonValidationSimulatedBaselineReadout({
+      diagnosticsVerdict: {
+        travelVacantSimulatedDatesInBaselineCount: 77,
+      },
+      sharedDiagnostics: {
+        tuningSummary: {
+          sourceDetailCountsByCategory: {
+            SIMULATED_TRAVEL_VACANT: 69,
+            SIMULATED_INCOMPLETE_METER: 8,
+          },
+        },
+      },
+    });
+
+    expect(readout.label).toBe("nonValidationSimulatedDatesInBaselineCount");
+    expect(readout.value).toBe("77");
+    expect(readout.detail).toContain("travel/vacant=69");
+    expect(readout.detail).toContain("incomplete meter=8");
+  });
+
+  it("clarifies when weekday/weekend breakdown totals differ from the summary total", () => {
+    expect(
+      buildWeekdayWeekendBreakdownNote({
+        weekdayKwh: 10000,
+        weekendKwh: 5259.3,
+        summaryTotalKwh: 15196,
+      })
+    ).toBe(
+      "Breakdown total 15259.3 kWh comes from the persisted weekday/weekend analytics buckets and may differ from the summary net-usage total 15196.0 kWh."
+    );
   });
 });
