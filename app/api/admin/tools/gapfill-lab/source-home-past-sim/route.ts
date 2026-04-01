@@ -142,6 +142,8 @@ export async function POST(request: NextRequest) {
   const sourceHouseId = typeof body?.sourceHouseId === "string" ? body.sourceHouseId.trim() : "";
   const timezone = typeof body?.timezone === "string" ? body.timezone.trim() : "America/Chicago";
   const weatherKind = typeof body?.weatherKind === "string" ? body.weatherKind.trim() : "LAST_YEAR_ACTUAL_WEATHER";
+  const includeDiagnostics = body?.includeDiagnostics === true;
+  const diagnosticsOnly = body?.diagnosticsOnly === true;
   const gapfillWeatherLogic = resolveGapfillWeatherLogicSetting(weatherKind);
 
   if (!email) {
@@ -239,7 +241,7 @@ export async function POST(request: NextRequest) {
 
   let canonicalWindow: Awaited<ReturnType<typeof getSharedPastCoverageWindowForHouse>>;
   let userValidationPolicy: ReturnType<typeof resolveUserValidationPolicy>;
-  let sourcePastRecalc: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
+  let sourcePastRecalc: Awaited<ReturnType<typeof dispatchPastSimRecalc>> | null = null;
   try {
     canonicalWindow = await getSharedPastCoverageWindowForHouse({
       userId: user.id,
@@ -249,27 +251,29 @@ export async function POST(request: NextRequest) {
       defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
       validationDayCount: 21,
     });
-    sourcePastRecalc = await withTimeout(
-      dispatchPastSimRecalc({
-        userId: user.id,
-        houseId: selectedSourceHouse.id,
-        esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
-        mode: "SMT_BASELINE",
-        scenarioId: String(pastScenario.id),
-        weatherPreference: gapfillWeatherLogic.weatherPreference,
-        persistPastSimBaseline: true,
-        validationDaySelectionMode: userValidationPolicy.selectionMode,
-        validationDayCount: userValidationPolicy.validationDayCount,
-        correlationId: sourcePastCorrelationId,
-        runContext: {
-          callerLabel: "user_recalc",
-          buildPathKind: "recalc",
-          persistRequested: true,
-        },
-      }),
-      ROUTE_CANONICAL_RECALC_TIMEOUT_MS,
-      "source_home_past_sim_recalc_timeout"
-    );
+    if (!diagnosticsOnly) {
+      sourcePastRecalc = await withTimeout(
+        dispatchPastSimRecalc({
+          userId: user.id,
+          houseId: selectedSourceHouse.id,
+          esiid: selectedSourceHouse.esiid ? String(selectedSourceHouse.esiid) : null,
+          mode: "SMT_BASELINE",
+          scenarioId: String(pastScenario.id),
+          weatherPreference: gapfillWeatherLogic.weatherPreference,
+          persistPastSimBaseline: true,
+          validationDaySelectionMode: userValidationPolicy.selectionMode,
+          validationDayCount: userValidationPolicy.validationDayCount,
+          correlationId: sourcePastCorrelationId,
+          runContext: {
+            callerLabel: "user_recalc",
+            buildPathKind: "recalc",
+            persistRequested: true,
+          },
+        }),
+        ROUTE_CANONICAL_RECALC_TIMEOUT_MS,
+        "source_home_past_sim_recalc_timeout"
+      );
+    }
   } catch (sourcePastError: unknown) {
     const timedOut =
       sourcePastError instanceof Error &&
@@ -301,7 +305,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (sourcePastRecalc.executionMode === "inline") {
+  if (sourcePastRecalc?.executionMode === "inline") {
     if (!sourcePastRecalc.result.ok) {
       logSimPipelineEvent("admin_lab_run_source_home_past_sim_snapshot_failed", {
         correlationId: sourcePastCorrelationId,
@@ -322,7 +326,7 @@ export async function POST(request: NextRequest) {
         { status: sourcePastRecalc.result.error === "recalc_timeout" ? 504 : 500 }
       );
     }
-  } else {
+  } else if (sourcePastRecalc?.executionMode === "droplet_async") {
     const waited = await withTimeout(
       waitForSourceHomePastSimJob({
         userId: user.id,
@@ -355,7 +359,7 @@ export async function POST(request: NextRequest) {
   }
 
   const sourcePastExactArtifactInputHash =
-    sourcePastRecalc.executionMode === "inline" &&
+    sourcePastRecalc?.executionMode === "inline" &&
     sourcePastRecalc.result.ok &&
     typeof sourcePastRecalc.result.canonicalArtifactInputHash === "string" &&
     sourcePastRecalc.result.canonicalArtifactInputHash.trim()
@@ -372,81 +376,7 @@ export async function POST(request: NextRequest) {
   const boundedExcludedDateKeysCount = boundedExcludedDateKeysSorted.length;
   const boundedExcludedDateKeysFingerprint = boundedExcludedDateKeysSorted.join(",");
 
-  const defaultRead = await getSimulatedUsageForHouseScenario({
-    userId: user.id,
-    houseId: selectedSourceHouse.id,
-    scenarioId: String(pastScenario.id),
-    readMode: sourcePastExactArtifactInputHash ? "artifact_only" : "allow_rebuild",
-    exactArtifactInputHash: sourcePastExactArtifactInputHash ?? undefined,
-    requireExactArtifactMatch: Boolean(sourcePastExactArtifactInputHash),
-    correlationId: sourcePastCorrelationId,
-    readContext: {
-      artifactReadMode: sourcePastExactArtifactInputHash ? "artifact_only" : "allow_rebuild",
-      projectionMode: "baseline",
-      compareSidecarRequest: true,
-    },
-  });
-
-  const sourceExactArtifactInputHash =
-    sourcePastExactArtifactInputHash ??
-    (typeof (defaultRead as any)?.dataset?.meta?.artifactInputHashUsed === "string" &&
-    String((defaultRead as any).dataset.meta.artifactInputHashUsed).trim()
-      ? String((defaultRead as any).dataset.meta.artifactInputHashUsed).trim()
-      : typeof (defaultRead as any)?.dataset?.meta?.artifactInputHash === "string" &&
-          String((defaultRead as any).dataset.meta.artifactInputHash).trim()
-        ? String((defaultRead as any).dataset.meta.artifactInputHash).trim()
-        : typeof (defaultRead as any)?.dataset?.meta?.requestedInputHash === "string" &&
-            String((defaultRead as any).dataset.meta.requestedInputHash).trim()
-          ? String((defaultRead as any).dataset.meta.requestedInputHash).trim()
-          : null);
-
-  const [baselineRead, rawRead, sourceBuildRow, sourceProfiles] = await Promise.all([
-    sourceExactArtifactInputHash
-      ? getSimulatedUsageForHouseScenario({
-          userId: user.id,
-          houseId: selectedSourceHouse.id,
-          scenarioId: String(pastScenario.id),
-          readMode: "artifact_only",
-          exactArtifactInputHash: sourceExactArtifactInputHash,
-          requireExactArtifactMatch: true,
-          projectionMode: "baseline",
-          correlationId: sourcePastCorrelationId,
-          readContext: {
-            artifactReadMode: "artifact_only",
-            projectionMode: "baseline",
-            compareSidecarRequest: true,
-          },
-        })
-      : Promise.resolve(defaultRead),
-    sourceExactArtifactInputHash
-      ? getSimulatedUsageForHouseScenario({
-          userId: user.id,
-          houseId: selectedSourceHouse.id,
-          scenarioId: String(pastScenario.id),
-          readMode: "artifact_only",
-          exactArtifactInputHash: sourceExactArtifactInputHash,
-          requireExactArtifactMatch: true,
-          projectionMode: "raw",
-          correlationId: sourcePastCorrelationId,
-          readContext: {
-            artifactReadMode: "artifact_only",
-            projectionMode: "raw",
-            compareSidecarRequest: true,
-          },
-        })
-      : getSimulatedUsageForHouseScenario({
-          userId: user.id,
-          houseId: selectedSourceHouse.id,
-          scenarioId: String(pastScenario.id),
-          readMode: "allow_rebuild",
-          projectionMode: "raw",
-          correlationId: sourcePastCorrelationId,
-          readContext: {
-            artifactReadMode: "allow_rebuild",
-            projectionMode: "raw",
-            compareSidecarRequest: true,
-          },
-        }),
+  const [sourceBuildRow, sourceProfiles] = await Promise.all([
     (prisma as any).usageSimulatorBuild.findUnique({
       where: {
         userId_houseId_scenarioKey: {
@@ -462,6 +392,25 @@ export async function POST(request: NextRequest) {
       houseId: selectedSourceHouse.id,
     }).catch(() => ({ homeProfile: null, applianceProfile: null })),
   ]);
+  const sourceBuildInputs = ((sourceBuildRow as any)?.buildInputs as Record<string, unknown> | null | undefined) ?? null;
+
+  const baselineRead = diagnosticsOnly
+    ? null
+    : await getSimulatedUsageForHouseScenario({
+        userId: user.id,
+        houseId: selectedSourceHouse.id,
+        scenarioId: String(pastScenario.id),
+        readMode: sourcePastExactArtifactInputHash ? "artifact_only" : "allow_rebuild",
+        exactArtifactInputHash: sourcePastExactArtifactInputHash ?? undefined,
+        requireExactArtifactMatch: Boolean(sourcePastExactArtifactInputHash),
+        projectionMode: "baseline",
+        correlationId: sourcePastCorrelationId,
+        readContext: {
+          artifactReadMode: sourcePastExactArtifactInputHash ? "artifact_only" : "allow_rebuild",
+          projectionMode: "baseline",
+          compareSidecarRequest: true,
+        },
+      });
 
   const withCanonicalExcludedOwnership = (dataset: any, compact: boolean) => {
     if (!dataset || typeof dataset !== "object") return null;
@@ -497,16 +446,15 @@ export async function POST(request: NextRequest) {
     };
   };
 
-  const baselineDataset = baselineRead.ok
+  const baselineDataset = baselineRead?.ok
     ? withCanonicalExcludedOwnership((baselineRead as any).dataset, false)
     : null;
-  const baselineCompareProjection = baselineRead.ok
+  const baselineCompareProjection = baselineRead?.ok
     ? buildValidationCompareProjectionSidecar(baselineDataset)
     : null;
-  const sourceBuildInputs = ((sourceBuildRow as any)?.buildInputs as Record<string, unknown> | null | undefined) ?? null;
 
   let sourceEngineContext: Record<string, unknown> | null = null;
-  if (sourceBuildInputs) {
+  if (includeDiagnostics && sourceBuildInputs) {
     const { runSimulatorDiagnostic } = await import("@/lib/admin/simulatorDiagnostic");
     const diagnostic = await runSimulatorDiagnostic({
       userId: user.id,
@@ -577,28 +525,26 @@ export async function POST(request: NextRequest) {
     weatherLogicMode: gapfillWeatherLogic.weatherLogicMode,
     weatherLogicOwner: gapfillWeatherLogic.owner,
     recalc: {
-      executionMode: sourcePastRecalc.executionMode,
-      correlationId: sourcePastRecalc.correlationId,
-      ...(sourcePastRecalc.executionMode === "droplet_async"
+      executionMode: sourcePastRecalc?.executionMode ?? "not_run",
+      correlationId: sourcePastCorrelationId,
+      ...(sourcePastRecalc?.executionMode === "droplet_async"
         ? { jobId: sourcePastRecalc.jobId }
         : {}),
     },
     canonicalWindow,
     travelRangesFromDb: sourceTravelRangesFromDb,
     reads: {
-      defaultProjection: defaultRead.ok
-        ? { ok: true, dataset: withCanonicalExcludedOwnership((defaultRead as any).dataset, true) }
-        : { ok: false, code: defaultRead.code, message: defaultRead.message },
-      baselineProjection: baselineRead.ok
+      baselineProjection: baselineRead?.ok
         ? {
             ok: true,
             dataset: baselineDataset,
             compareProjection: baselineCompareProjection,
           }
-        : { ok: false, code: baselineRead.code, message: baselineRead.message },
-      rawProjection: rawRead.ok
-        ? { ok: true, dataset: withCanonicalExcludedOwnership((rawRead as any).dataset, true) }
-        : { ok: false, code: rawRead.code, message: rawRead.message },
+        : diagnosticsOnly
+          ? null
+          : baselineRead
+            ? { ok: false, code: baselineRead.code, message: baselineRead.message }
+            : null,
     },
     validationPolicyOwner: userValidationPolicy.owner,
     validationPolicyMode: userValidationPolicy.selectionMode,
@@ -649,10 +595,10 @@ export async function POST(request: NextRequest) {
     userId: user.id,
     sourceHouseId: selectedSourceHouse.id,
     scenarioId: String(pastScenario.id),
-    readExecutionMode: sourcePastRecalc.executionMode,
-    defaultReadOk: defaultRead.ok,
-    baselineReadOk: baselineRead.ok,
-    rawReadOk: rawRead.ok,
+    readExecutionMode: sourcePastRecalc?.executionMode ?? "not_run",
+    baselineReadOk: baselineRead?.ok ?? null,
+    diagnosticsIncluded: includeDiagnostics,
+    diagnosticsOnly,
     buildInputsHash: (sourceBuildRow as any)?.buildInputsHash ?? null,
   });
 

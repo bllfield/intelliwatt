@@ -448,6 +448,8 @@ export default function GapFillLabCanonicalClient() {
   const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [pastSimSnapshot, setPastSimSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [actualEngineDiagnosticsLoading, setActualEngineDiagnosticsLoading] = useState(false);
+  const [actualEngineDiagnosticsError, setActualEngineDiagnosticsError] = useState<string | null>(null);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
@@ -659,9 +661,67 @@ export default function GapFillLabCanonicalClient() {
       {
         includeUsage365: false,
         includeUserPipelineParity: false,
+        includeDiagnostics: false,
       },
       { setAsPrimaryResult: false }
     );
+  }
+
+  async function onLoadActualHouseDiagnostics() {
+    if (!sourceHouseId) {
+      setActualEngineDiagnosticsError("Select a source house first.");
+      return;
+    }
+    setActualEngineDiagnosticsLoading(true);
+    setActualEngineDiagnosticsError(null);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), GAPFILL_LAB_HTTP_FETCH_MS);
+      let resp: Response;
+      try {
+        resp = await fetch(routeForAction("run_source_home_past_sim_snapshot"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "run_source_home_past_sim_snapshot",
+            email,
+            timezone,
+            sourceHouseId,
+            weatherKind,
+            includeUsage365: false,
+            includeDiagnostics: true,
+            diagnosticsOnly: true,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const json = (await resp.json().catch(() => null)) as RunResult | null;
+      if (!resp.ok || !json?.ok) {
+        setActualEngineDiagnosticsError(
+          gapfillPrimaryErrorLine(gapfillFailureFieldsFromJson((json ?? {}) as Record<string, unknown>)) ||
+            `Request failed (${resp.status}).`
+        );
+        return;
+      }
+      if (json.pastSimSnapshot && typeof json.pastSimSnapshot === "object") {
+        setPastSimSnapshot((prev) => ({
+          ...(prev ?? {}),
+          ...(json.pastSimSnapshot as Record<string, unknown>),
+        }));
+      }
+    } catch (err: unknown) {
+      setActualEngineDiagnosticsError(
+        err instanceof Error && err.name === "AbortError"
+          ? "Actual House diagnostics request timed out."
+          : err instanceof Error
+            ? err.message
+            : "Actual House diagnostics request failed."
+      );
+    } finally {
+      setActualEngineDiagnosticsLoading(false);
+    }
   }
 
   async function onCopyPastSimSnapshot() {
@@ -1446,7 +1506,25 @@ export default function GapFillLabCanonicalClient() {
             </div>
             {pastSimSnapshot ? (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm space-y-3">
-                <div className="text-sm font-semibold text-brand-navy">Actual House diagnostics</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-brand-navy">Actual House diagnostics</div>
+                  <button
+                    type="button"
+                    className="rounded border border-brand-blue/20 px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-blue/5 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={onLoadActualHouseDiagnostics}
+                    disabled={actualEngineDiagnosticsLoading || loading}
+                  >
+                    {actualEngineDiagnosticsLoading ? "Loading engine diagnostics..." : "Load full engine diagnostics"}
+                  </button>
+                </div>
+                <div className="text-xs text-brand-navy/70">
+                  The chart and lockbox flow load from persisted Past Sim truth first. Full engine diagnostics are fetched separately on demand so Actual House does not stall.
+                </div>
+                {actualEngineDiagnosticsError ? (
+                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                    {actualEngineDiagnosticsError}
+                  </div>
+                ) : null}
                 <MetadataGrid
                   items={[
                     {

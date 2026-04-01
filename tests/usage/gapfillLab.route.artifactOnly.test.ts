@@ -932,12 +932,36 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     expect(getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode)).toEqual([
       "artifact_only",
-      "artifact_only",
-      "artifact_only",
     ]);
-    expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
+    expect(runSimulatorDiagnostic).not.toHaveBeenCalled();
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_actual");
+    expect(body.pastSimSnapshot?.engineContext).toBeNull();
+    expect(body.pastSimSnapshot?.reads?.defaultProjection).toBeUndefined();
+    expect(body.pastSimSnapshot?.reads?.rawProjection).toBeUndefined();
+  });
+
+  it("loads actual-house engine diagnostics separately without rerunning recalc", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/source-home-past-sim/route");
+    const req = buildRequest({
+      action: "run_source_home_past_sim_snapshot",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+      includeDiagnostics: true,
+      diagnosticsOnly: true,
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
+    expect(getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
+    expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
+    expect(body.pastSimSnapshot?.recalc?.executionMode).toBe("not_run");
+    expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
   });
 
   it("logs a source-home failure event when pre-dispatch Actual Home setup throws", async () => {
