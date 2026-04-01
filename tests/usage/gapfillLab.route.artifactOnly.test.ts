@@ -409,6 +409,19 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
                 mapeFiltered: 375,
                 mapeFilteredCount: 1,
               },
+              monthlyTargetConstructionDiagnostics: [
+                {
+                  month: "2025-04",
+                  rawMonthKwhFromSource: 240,
+                  travelVacantDayCountInMonth: 2,
+                  eligibleNonTravelDayCount: 5,
+                  eligibleNonTravelKwhTotal: 70,
+                  nonTravelDailyAverage: 14,
+                  normalizedMonthTarget: 420,
+                  monthlyTargetBuildMethod: "normalized_from_non_travel_days",
+                  trustedMonthlyAnchorUsed: true,
+                },
+              ],
               canonicalArtifactSimulatedDayTotalsByDate: {
                 "2025-04-10": 9.5,
                 "2025-05-02": 12.25,
@@ -1138,6 +1151,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_test");
     expect(body.sharedDiagnostics?.identityContext?.weatherLogicMode).toBe("LAST_YEAR_ACTUAL_WEATHER");
     expect(body.sharedDiagnostics?.projectionReadSummary?.validationRowsCount).toBe(1);
+    expect(body.sharedDiagnostics?.sourceTruthContext?.monthlyTargetConstructionDiagnostics?.[0]?.month).toBe("2025-04");
     expect(body.diagnosticsVerdict?.selectedValidationDateCount).toBe(1);
     expect(body.diagnosticsVerdict?.compareRowCount).toBe(body.compareProjectionSummary?.rowCount ?? 0);
     expect(typeof body.diagnosticsVerdict?.compareRowsMatchSelectedDates).toBe("boolean");

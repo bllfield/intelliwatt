@@ -3,6 +3,11 @@ import { canonicalWindow12Months } from "@/modules/usageSimulator/canonicalWindo
 import { estimateUsageForCanonicalWindow } from "@/modules/usageEstimator/estimate";
 import type { HomeProfileInput } from "@/modules/homeProfile/validation";
 import type { ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/validation";
+import {
+  resolveManualMonthlyTargetDiagnostics,
+  type MonthlyTargetConstructionDiagnostic,
+  type SourceDerivedMonthlyTargetResolution,
+} from "@/modules/usageSimulator/monthlyTargetConstruction";
 import { getGenericWeekdayShape96, getGenericWeekendShape96, normalizeShape96, type Shape96 } from "@/modules/simulatedUsage/intradayTemplates";
 import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96 } from "@/modules/realUsageAdapter/actual";
 import { reshapeMonthlyTotalsFromBaseline } from "@/modules/usageSimulator/reshape";
@@ -19,6 +24,8 @@ export type BuildResult = {
   weekdayWeekendShape96?: { weekday: Shape96; weekend: Shape96 };
   notes: string[];
   filledMonths: string[];
+  monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
+  sourceDerivedTrustedMonthlyTotalsKwhByMonth?: Record<string, number> | null;
   source?: {
     actualSource?: "SMT" | "GREEN_BUTTON";
     actualMonthlyAnchorsByMonth?: Record<string, number>;
@@ -65,21 +72,20 @@ function annualToMonthlyByWeights(annualKwh: number, canonicalMonths: string[]):
   return out;
 }
 
-function manualMonthlyTotals(payload: ManualUsagePayload, canonicalMonths: string[]): { monthly: Record<string, number>; notes: string[] } {
+function manualMonthlyTotals(
+  payload: ManualUsagePayload,
+  canonicalMonths: string[],
+  sourceDerivedResolution?: SourceDerivedMonthlyTargetResolution | null
+): { monthly: Record<string, number>; notes: string[] } {
   const notes: string[] = [];
 
   if ((payload as any).mode === "MONTHLY") {
-    const map = new Map<string, number>();
-    for (const r of (payload as any).monthlyKwh || []) {
-      const ym = String((r as any)?.month ?? "").trim();
-      const kwh = typeof (r as any)?.kwh === "number" && Number.isFinite((r as any).kwh) ? (r as any).kwh : null;
-      if (!ym) continue;
-      if (kwh == null || kwh < 0) continue;
-      map.set(ym, kwh);
-    }
-    const monthly: Record<string, number> = {};
-    for (const ym of canonicalMonths) monthly[ym] = map.get(ym) ?? 0;
-    return { monthly, notes };
+    const resolved = resolveManualMonthlyTargetDiagnostics({
+      payload,
+      canonicalMonths,
+      sourceDerivedResolution,
+    });
+    return { monthly: resolved.monthlyKwhByMonth, notes: [...notes, ...resolved.notes] };
   }
 
   // ANNUAL: distribute across canonical months.
@@ -91,6 +97,7 @@ function manualMonthlyTotals(payload: ManualUsagePayload, canonicalMonths: strin
 export async function buildSimulatorInputs(args: {
   mode: BuildMode;
   manualUsagePayload: ManualUsagePayload | null;
+  manualMonthlySourceDerivedResolution?: SourceDerivedMonthlyTargetResolution | null;
   homeProfile: HomeProfileInput;
   applianceProfile: ApplianceProfilePayloadV1;
   esiidForSmt?: string | null;
@@ -111,7 +118,19 @@ export async function buildSimulatorInputs(args: {
     if (!args.manualUsagePayload) {
       throw new Error("manual_usage_required");
     }
-    const { monthly, notes } = manualMonthlyTotals(args.manualUsagePayload, canonicalMonths);
+    const monthlyResolution =
+      (args.manualUsagePayload as any)?.mode === "MONTHLY"
+        ? resolveManualMonthlyTargetDiagnostics({
+            payload: args.manualUsagePayload,
+            canonicalMonths,
+            sourceDerivedResolution: args.manualMonthlySourceDerivedResolution ?? null,
+          })
+        : null;
+    const { monthly, notes } = manualMonthlyTotals(
+      args.manualUsagePayload,
+      canonicalMonths,
+      args.manualMonthlySourceDerivedResolution ?? null
+    );
 
     return {
       baseKind: "MANUAL",
@@ -121,6 +140,11 @@ export async function buildSimulatorInputs(args: {
       weekdayWeekendShape96: { weekday: getGenericWeekdayShape96(), weekend: getGenericWeekendShape96() },
       notes,
       filledMonths: [],
+      monthlyTargetConstructionDiagnostics: monthlyResolution?.diagnostics ?? null,
+      sourceDerivedTrustedMonthlyTotalsKwhByMonth:
+        monthlyResolution && Object.keys(monthlyResolution.sourceDerivedTrustedMonthlyAnchorsByMonth ?? {}).length > 0
+          ? monthlyResolution.sourceDerivedTrustedMonthlyAnchorsByMonth
+          : null,
     };
   }
 

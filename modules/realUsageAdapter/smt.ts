@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
 
 export const SMT_SHAPE_DERIVATION_VERSION = "v1";
 
@@ -30,8 +30,11 @@ function utcRangeWithChicagoBuffer(months: string[]): { start: Date; endExclusiv
 }
 
 function chicagoYearMonthFromBucket(bucket: Date): string {
-  const iso = bucket.toISOString();
-  return iso.slice(0, 7);
+  return dateTimePartsInTimezone(bucket, "America/Chicago")?.yearMonth ?? bucket.toISOString().slice(0, 7);
+}
+
+function chicagoDateKeyFromBucket(bucket: Date): string {
+  return dateTimePartsInTimezone(bucket, "America/Chicago")?.dateKey ?? bucket.toISOString().slice(0, 10);
 }
 
 export async function hasSmtIntervals(args: { esiid: string; canonicalMonths: string[] }): Promise<boolean> {
@@ -105,6 +108,46 @@ export async function fetchSmtCanonicalMonthlyTotals(args: {
   }
 
   return { intervalsCount, monthlyKwhByMonth };
+}
+
+export async function fetchSmtCanonicalDailyTotals(args: {
+  esiid: string;
+  canonicalMonths: string[];
+}) {
+  const { esiid, canonicalMonths } = args;
+  if (!esiid) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
+  if (!canonicalMonths.length) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
+
+  const { start, endExclusive } = utcRangeWithChicagoBuffer(canonicalMonths);
+  const rows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number; intervalscount: number }>>(Prisma.sql`
+    WITH iv AS (
+      SELECT
+        "ts",
+        MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND "ts" >= ${start}
+        AND "ts" < ${endExclusive}
+      GROUP BY "ts"
+    )
+    SELECT
+      date_trunc('day', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
+      COALESCE(SUM("kwh"), 0)::float AS kwh,
+      COUNT(*)::int AS intervalscount
+    FROM iv
+    GROUP BY bucket
+    ORDER BY bucket ASC
+  `);
+
+  const dailyKwhByDateKey: Record<string, number> = {};
+  let intervalsCount = 0;
+  for (const row of rows) {
+    const dateKey = chicagoDateKeyFromBucket(row.bucket);
+    dailyKwhByDateKey[dateKey] = Number(row.kwh) || 0;
+    intervalsCount += Number(row.intervalscount) || 0;
+  }
+
+  return { intervalsCount, dailyKwhByDateKey };
 }
 
 function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string; endDate: string }> | undefined): string[] {

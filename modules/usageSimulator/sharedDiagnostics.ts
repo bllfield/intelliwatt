@@ -119,6 +119,9 @@ export function buildSharedPastSimDiagnostics(args: {
         sourceContext.sourceDerivedMonthlyTotalsKwhByMonth ?? null,
       sourceDerivedAnnualTotalKwh:
         sourceContext.sourceDerivedAnnualTotalKwh ?? null,
+      monthlyTargetConstructionDiagnostics: Array.isArray(meta.monthlyTargetConstructionDiagnostics)
+        ? meta.monthlyTargetConstructionDiagnostics
+        : null,
       travelRangesUsed: asRecord(lockboxInput.travelRanges).ranges ?? [],
       validationTestKeysUsed: validationKeys.localDateKeys ?? [],
       exclusionDrivingCanonicalInputsSummary: {

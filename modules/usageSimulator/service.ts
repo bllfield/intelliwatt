@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { anchorEndDateUtc, monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { monthsEndingAt } from "@/modules/manualUsage/anchor";
 import { canonicalWindow12Months } from "@/modules/usageSimulator/canonicalWindow";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -193,6 +193,10 @@ async function attachSelectedDailyWeatherForDataset(args: {
   }
 }
 import { buildAdminLabSyntheticManualUsagePayload } from "@/modules/usageSimulator/adminLabManualFromActuals";
+import {
+  resolveManualMonthlyAnchorEndDateKey,
+  type SourceDerivedMonthlyTargetResolution,
+} from "@/modules/usageSimulator/monthlyTargetConstruction";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type ManualUsagePayloadAny = any;
@@ -3824,11 +3828,10 @@ function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayloa
     if (p?.mode === "MONTHLY") {
       const anchorEndDateKey = typeof p.anchorEndDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.anchorEndDate) ? String(p.anchorEndDate) : null;
       const legacyEndMonth = typeof p.anchorEndMonth === "string" && /^\d{4}-\d{2}$/.test(p.anchorEndMonth) ? String(p.anchorEndMonth) : null;
-      const legacyBillEndDay = typeof p.billEndDay === "number" && Number.isFinite(p.billEndDay) ? Math.trunc(p.billEndDay) : 15;
       const endMonth = anchorEndDateKey
         ? anchorEndDateKey.slice(0, 7)
         : legacyEndMonth
-          ? (anchorEndDateUtc(legacyEndMonth, legacyBillEndDay)?.toISOString().slice(0, 7) ?? legacyEndMonth)
+          ? legacyEndMonth
           : null;
       if (endMonth) return { endMonth, months: monthsEndingAt(endMonth, 12) };
     }
@@ -4092,6 +4095,7 @@ async function recalcSimulatorBuildImpl(args: {
   });
 
   let simMode: SimulatorMode = mode;
+  let manualMonthlySourceDerivedResolution: SourceDerivedMonthlyTargetResolution | null = null;
   if (adminLabManualConstraint) {
     const adminAdaptationStartedAt = Date.now();
     emitRecalcPreIntervalStageEvent({
@@ -4103,13 +4107,18 @@ async function recalcSimulatorBuildImpl(args: {
       mode,
     });
     try {
-      manualUsagePayload = await buildAdminLabSyntheticManualUsagePayload({
+      const adminLabManualBuild = await buildAdminLabSyntheticManualUsagePayload({
         treatmentMode: args.adminLabTreatmentMode as "manual_monthly_constrained" | "manual_annual_constrained",
         canonicalMonths: canonicalForBuild.months,
         actualContextHouseId,
         esiid,
+        monthlyAnchorEndDate: actualSourceAnchor.anchorEndDate,
+        homeProfile: homeProfile as any,
+        applianceProfile: applianceProfile as any,
         travelRanges: travelRangesForBuild,
       });
+      manualUsagePayload = adminLabManualBuild.payload;
+      manualMonthlySourceDerivedResolution = adminLabManualBuild.monthlySourceDerivedResolution;
     } catch (e) {
       emitRecalcPreIntervalStageEvent({
         event: "recalc_pre_interval_admin_treatment_adaptation_failure",
@@ -4182,6 +4191,7 @@ async function recalcSimulatorBuildImpl(args: {
     built = await buildSimulatorInputs({
       mode: simMode as BuildMode,
       manualUsagePayload: manualUsagePayload as any,
+      manualMonthlySourceDerivedResolution,
       homeProfile: homeProfile as any,
       applianceProfile: applianceProfile as any,
       esiidForSmt: esiid,
@@ -4426,9 +4436,7 @@ async function recalcSimulatorBuildImpl(args: {
               ? String(p.anchorEndDate)
               : typeof p.endDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate)
                 ? String(p.endDate)
-                : typeof p.anchorEndMonth === "string" && /^\d{4}-\d{2}$/.test(p.anchorEndMonth)
-                  ? (anchorEndDateUtc(String(p.anchorEndMonth), Number(p.billEndDay) || 15)?.toISOString().slice(0, 10) ?? null)
-                  : null;
+                : resolveManualMonthlyAnchorEndDateKey(p);
           return endKey ? billingPeriodsEndingAt(endKey, 12) : [];
         })()
       : [];
@@ -4903,7 +4911,7 @@ async function recalcSimulatorBuildImpl(args: {
     built.source?.actualMonthlyAnchorsByMonth && typeof built.source.actualMonthlyAnchorsByMonth === "object"
       ? (built.source.actualMonthlyAnchorsByMonth as Record<string, number>)
       : simMode === "MANUAL_TOTALS"
-        ? monthlyTotalsKwhByMonth
+        ? built.sourceDerivedTrustedMonthlyTotalsKwhByMonth ?? null
         : null;
   const sourceDerivedAnnualTotalKwh =
     sourceDerivedMonthlyTotalsKwhByMonth != null
@@ -4951,6 +4959,7 @@ async function recalcSimulatorBuildImpl(args: {
     validationOnlyDateKeysLocal: Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
       ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
       : [],
+    monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     lockboxInput: normalizedLockboxInput,
     lockboxRunContext: runContext,
     lockboxPerDayTrace: perDayTrace,

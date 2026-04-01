@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/db";
-import { fetchSmtCanonicalMonthlyTotals, fetchSmtIntradayShape96, hasSmtIntervals } from "@/modules/realUsageAdapter/smt";
 import {
+  fetchSmtCanonicalDailyTotals,
+  fetchSmtCanonicalMonthlyTotals,
+  fetchSmtIntradayShape96,
+  hasSmtIntervals,
+} from "@/modules/realUsageAdapter/smt";
+import {
+  fetchGreenButtonCanonicalDailyTotals,
   fetchGreenButtonCanonicalMonthlyTotals,
   fetchGreenButtonIntradayShape96,
   getLatestGreenButtonIntervalTimestamp,
@@ -100,6 +106,28 @@ export async function fetchActualCanonicalMonthlyTotals(args: {
     travelRanges: args.travelRanges,
   });
   return { source: "GREEN_BUTTON", intervalsCount: out.intervalsCount, monthlyKwhByMonth: out.monthlyKwhByMonth };
+}
+
+export async function fetchActualCanonicalDailyTotals(args: {
+  houseId: string;
+  esiid: string | null;
+  canonicalMonths: string[];
+}): Promise<{ source: ActualUsageSource | null; intervalsCount: number; dailyKwhByDateKey: Record<string, number> }> {
+  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  if (!source) return { source: null, intervalsCount: 0, dailyKwhByDateKey: {} };
+  if (source === "SMT") {
+    if (!args.esiid) return { source: "SMT", intervalsCount: 0, dailyKwhByDateKey: {} };
+    const out = await fetchSmtCanonicalDailyTotals({
+      esiid: args.esiid,
+      canonicalMonths: args.canonicalMonths,
+    });
+    return { source: "SMT", intervalsCount: out.intervalsCount, dailyKwhByDateKey: out.dailyKwhByDateKey };
+  }
+  const out = await fetchGreenButtonCanonicalDailyTotals({
+    houseId: args.houseId,
+    canonicalMonths: args.canonicalMonths,
+  });
+  return { source: "GREEN_BUTTON", intervalsCount: out.intervalsCount, dailyKwhByDateKey: out.dailyKwhByDateKey };
 }
 
 export async function fetchActualIntradayShape96(args: {

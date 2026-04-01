@@ -10,20 +10,34 @@ import {
   buildStageTimingReadout,
   formatIdentityReadout,
 } from "@/app/admin/tools/gapfill-lab/readoutTruth";
+import { buildSimulatorInputs } from "@/modules/usageSimulator/build";
+import {
+  buildSourceDerivedMonthlyTargetResolution,
+  type MonthlyTargetConstructionDiagnostic,
+  resolveManualMonthlyAnchorEndDateKey,
+} from "@/modules/usageSimulator/monthlyTargetConstruction";
+import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 
 vi.mock("server-only", () => ({}));
 
-const cookiesMock = vi.fn();
-const prisma: any = {
-  user: { findUnique: vi.fn() },
-};
-const getSimulatedUsageForHouseScenario = vi.fn();
-const buildValidationCompareProjectionSidecar = vi.fn((dataset: any) => ({
-  rows: Array.isArray(dataset?.meta?.validationCompareRows) ? dataset.meta.validationCompareRows : [],
-  metrics:
-    dataset?.meta?.validationCompareMetrics && typeof dataset.meta.validationCompareMetrics === "object"
-      ? dataset.meta.validationCompareMetrics
-      : {},
+const {
+  cookiesMock,
+  prisma,
+  getSimulatedUsageForHouseScenario,
+  buildValidationCompareProjectionSidecar,
+} = vi.hoisted(() => ({
+  cookiesMock: vi.fn(),
+  prisma: {
+    user: { findUnique: vi.fn() },
+  } as any,
+  getSimulatedUsageForHouseScenario: vi.fn(),
+  buildValidationCompareProjectionSidecar: vi.fn((dataset: any) => ({
+    rows: Array.isArray(dataset?.meta?.validationCompareRows) ? dataset.meta.validationCompareRows : [],
+    metrics:
+      dataset?.meta?.validationCompareMetrics && typeof dataset.meta.validationCompareMetrics === "object"
+        ? dataset.meta.validationCompareMetrics
+        : {},
+  })),
 }));
 
 vi.mock("next/headers", () => ({
@@ -325,5 +339,217 @@ describe("user simulated house compare projection", () => {
     ).toBe(
       "Breakdown total 15259.3 kWh comes from the persisted weekday/weekend analytics buckets and may differ from the summary net-usage total 15196.0 kWh."
     );
+  });
+
+  it("builds travel-aware shared monthly anchors from non-travel source days", () => {
+    const resolution = buildSourceDerivedMonthlyTargetResolution({
+      canonicalMonths: ["2025-03"],
+      anchorEndDate: "2025-03-31",
+      dailyKwhByDateKey: {
+        "2025-03-01": 10,
+        "2025-03-02": 12,
+        "2025-03-03": 14,
+        "2025-03-04": 16,
+        "2025-03-05": 18,
+        "2025-03-10": 80,
+        "2025-03-11": 90,
+      },
+      travelRanges: [{ startDate: "2025-03-10", endDate: "2025-03-11" }],
+      fallbackMonthlyKwhByMonth: { "2025-03": 250 },
+    });
+
+    expect(resolution.monthlyKwhByMonth["2025-03"]).toBe(434);
+    expect(resolution.trustedMonthlyAnchorsByMonth["2025-03"]).toBe(434);
+    expect(resolution.diagnostics).toEqual([
+      {
+        month: "2025-03",
+        rawMonthKwhFromSource: 240,
+        travelVacantDayCountInMonth: 2,
+        eligibleNonTravelDayCount: 5,
+        eligibleNonTravelKwhTotal: 70,
+        nonTravelDailyAverage: 14,
+        normalizedMonthTarget: 434,
+        monthlyTargetBuildMethod: "normalized_from_non_travel_days",
+        trustedMonthlyAnchorUsed: true,
+      },
+    ]);
+  });
+
+  it("resolves legacy monthly manual billEndDay into the authoritative anchored end date", () => {
+    expect(
+      resolveManualMonthlyAnchorEndDateKey({
+        anchorEndMonth: "2025-04",
+        billEndDay: 15,
+      })
+    ).toBe("2025-04-15");
+  });
+
+  it("assigns month-edge source days to the anchored monthly manual period, not plain calendar months", () => {
+    const resolution = buildSourceDerivedMonthlyTargetResolution({
+      canonicalMonths: ["2025-03", "2025-04"],
+      anchorEndDate: "2025-04-15",
+      dailyKwhByDateKey: {
+        "2025-03-31": 10,
+        "2025-04-01": 20,
+        "2025-04-02": 30,
+        "2025-04-03": 40,
+        "2025-04-04": 50,
+      },
+      travelRanges: [],
+      fallbackMonthlyKwhByMonth: { "2025-03": 111, "2025-04": 222 },
+    });
+
+    expect(resolution.diagnostics[0]).toMatchObject({
+      month: "2025-03",
+      rawMonthKwhFromSource: null,
+      trustedMonthlyAnchorUsed: false,
+    });
+    expect(resolution.diagnostics[1]).toMatchObject({
+      month: "2025-04",
+      rawMonthKwhFromSource: 150,
+      eligibleNonTravelDayCount: 5,
+      monthlyTargetBuildMethod: "normalized_from_non_travel_days",
+      trustedMonthlyAnchorUsed: true,
+    });
+    expect(resolution.monthlyKwhByMonth["2025-04"]).toBe(930);
+  });
+
+  it("falls back to shared pool simulation when a source month lacks enough non-travel days", async () => {
+    const canonicalMonths = [
+      "2024-06",
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12",
+      "2025-01",
+      "2025-02",
+      "2025-03",
+      "2025-04",
+      "2025-05",
+    ];
+    const resolution = buildSourceDerivedMonthlyTargetResolution({
+      canonicalMonths: ["2025-04"],
+      anchorEndDate: "2025-04-30",
+      dailyKwhByDateKey: {
+        "2025-04-01": 10,
+        "2025-04-02": 11,
+        "2025-04-03": 12,
+        "2025-04-04": 13,
+      },
+      travelRanges: [{ startDate: "2025-04-03", endDate: "2025-04-04" }],
+      fallbackMonthlyKwhByMonth: { "2025-04": 321.45 },
+    });
+
+    const built = await buildSimulatorInputs({
+      mode: "MANUAL_TOTALS",
+      manualUsagePayload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-05-31",
+        monthlyKwh: [{ month: "2025-04", kwh: 999 }],
+        travelRanges: [],
+      },
+      manualMonthlySourceDerivedResolution: resolution,
+      homeProfile: {} as any,
+      applianceProfile: { fuelConfiguration: {} } as any,
+      canonicalMonths,
+    });
+
+    expect(built.monthlyTotalsKwhByMonth["2025-04"]).toBe(321.45);
+    expect(built.sourceDerivedTrustedMonthlyTotalsKwhByMonth).toBeNull();
+    expect((built.monthlyTargetConstructionDiagnostics as MonthlyTargetConstructionDiagnostic[])[0]).toEqual({
+      month: "2025-04",
+      rawMonthKwhFromSource: 46,
+      travelVacantDayCountInMonth: 2,
+      eligibleNonTravelDayCount: 2,
+      eligibleNonTravelKwhTotal: 21,
+      nonTravelDailyAverage: null,
+      normalizedMonthTarget: null,
+      monthlyTargetBuildMethod: "insufficient_non_travel_days_fallback_to_pool_sim",
+      trustedMonthlyAnchorUsed: false,
+    });
+    expect(built.notes.join(" ")).toContain("fewer than 5 eligible non-travel days");
+  });
+
+  it("keeps explicit user monthly MANUAL_TOTALS values as manual and surfaces truthful diagnostics", async () => {
+    const canonicalMonths = [
+      "2024-06",
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12",
+      "2025-01",
+      "2025-02",
+      "2025-03",
+      "2025-04",
+      "2025-05",
+    ];
+    const built = await buildSimulatorInputs({
+      mode: "MANUAL_TOTALS",
+      manualUsagePayload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-05-31",
+        monthlyKwh: [{ month: "2025-05", kwh: 456 }],
+        travelRanges: [],
+      },
+      homeProfile: {} as any,
+      applianceProfile: { fuelConfiguration: {} } as any,
+      canonicalMonths,
+    });
+
+    expect(built.monthlyTotalsKwhByMonth["2025-05"]).toBe(456);
+    const mayRow = (built.monthlyTargetConstructionDiagnostics as MonthlyTargetConstructionDiagnostic[]).find(
+      (row) => row.month === "2025-05"
+    );
+    expect(mayRow).toMatchObject({
+      month: "2025-05",
+      monthlyTargetBuildMethod: "user_manual_month_value",
+      trustedMonthlyAnchorUsed: true,
+    });
+    expect(built.sourceDerivedTrustedMonthlyTotalsKwhByMonth).toBeNull();
+  });
+
+  it("surfaces shared monthly target construction diagnostics on the read side", () => {
+    const sharedDiagnostics = buildSharedPastSimDiagnostics({
+      callerType: "user_past",
+      dataset: {
+        meta: {
+          monthlyTargetConstructionDiagnostics: [
+            {
+              month: "2025-03",
+              rawMonthKwhFromSource: 240,
+              travelVacantDayCountInMonth: 2,
+              eligibleNonTravelDayCount: 5,
+              eligibleNonTravelKwhTotal: 70,
+              nonTravelDailyAverage: 14,
+              normalizedMonthTarget: 434,
+              monthlyTargetBuildMethod: "normalized_from_non_travel_days",
+              trustedMonthlyAnchorUsed: true,
+            },
+          ],
+        },
+      },
+      scenarioId: "past-s1",
+      compareProjection: null,
+      readMode: "artifact_only",
+      projectionMode: "baseline",
+    });
+
+    expect(sharedDiagnostics.sourceTruthContext.monthlyTargetConstructionDiagnostics).toEqual([
+      {
+        month: "2025-03",
+        rawMonthKwhFromSource: 240,
+        travelVacantDayCountInMonth: 2,
+        eligibleNonTravelDayCount: 5,
+        eligibleNonTravelKwhTotal: 70,
+        nonTravelDailyAverage: 14,
+        normalizedMonthTarget: 434,
+        monthlyTargetBuildMethod: "normalized_from_non_travel_days",
+        trustedMonthlyAnchorUsed: true,
+      },
+    ]);
   });
 });

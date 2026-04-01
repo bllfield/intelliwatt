@@ -3,6 +3,7 @@ import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
+import type { MonthlyTargetConstructionDiagnostic } from "@/modules/usageSimulator/monthlyTargetConstruction";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
@@ -924,6 +925,8 @@ export type SimulatedUsageDatasetMeta = {
     | "stratified_weather_balanced";
   /** Optional diagnostics snapshot for explainability of selected validation days. */
   validationSelectionDiagnostics?: Record<string, unknown>;
+  /** Shared month-anchor diagnostics for manual monthly flows. */
+  monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   /** Compare-only projection rows for validation/test days from this same canonical family. */
   validationCompareRows?: Array<{
     localDate: string;

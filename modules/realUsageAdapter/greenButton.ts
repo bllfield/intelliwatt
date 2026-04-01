@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -29,7 +29,11 @@ function utcRangeWithChicagoBuffer(months: string[]): { start: Date; endExclusiv
 }
 
 function chicagoYearMonthFromBucket(bucket: Date): string {
-  return bucket.toISOString().slice(0, 7);
+  return dateTimePartsInTimezone(bucket, "America/Chicago")?.yearMonth ?? bucket.toISOString().slice(0, 7);
+}
+
+function chicagoDateKeyFromBucket(bucket: Date): string {
+  return dateTimePartsInTimezone(bucket, "America/Chicago")?.dateKey ?? bucket.toISOString().slice(0, 10);
 }
 
 function excludeDateKeysFragment(excludeDateKeys: string[] | undefined): Prisma.Sql {
@@ -152,6 +156,46 @@ export async function fetchGreenButtonCanonicalMonthlyTotals(args: {
     return { intervalsCount, monthlyKwhByMonth };
   } catch {
     return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
+  }
+}
+
+export async function fetchGreenButtonCanonicalDailyTotals(args: {
+  houseId: string;
+  canonicalMonths: string[];
+}) {
+  if (!USAGE_DB_ENABLED) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
+  const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
+  if (!rawId) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
+  if (!args.canonicalMonths.length) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
+
+  const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
+  try {
+    const usageClient = usagePrisma as any;
+    const rows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        date_trunc('day', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
+        COALESCE(SUM("consumptionKwh"), 0)::float AS kwh,
+        COUNT(*)::int AS intervalscount
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${args.houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${start}
+        AND "timestamp" < ${endExclusive}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+    `)) as Array<{ bucket: Date; kwh: number; intervalscount: number }>;
+
+    const dailyKwhByDateKey: Record<string, number> = {};
+    let intervalsCount = 0;
+    for (const row of rows) {
+      const dateKey = chicagoDateKeyFromBucket(row.bucket);
+      dailyKwhByDateKey[dateKey] = Number(row.kwh) || 0;
+      intervalsCount += Number(row.intervalscount) || 0;
+    }
+
+    return { intervalsCount, dailyKwhByDateKey };
+  } catch {
+    return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
   }
 }
 
