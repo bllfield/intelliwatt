@@ -106,6 +106,13 @@ const TEST_HOME_DISPLAY_LABEL = "Test Home";
 /** Client wait for gapfill-lab POST; keep under `maxDuration` in `app/api/admin/tools/gapfill-lab/route.ts` (300s). */
 const GAPFILL_LAB_HTTP_FETCH_MS = 295_000;
 
+function routeForAction(action: string): string {
+  if (action === "run_source_home_past_sim_snapshot") {
+    return "/api/admin/tools/gapfill-lab/source-home-past-sim";
+  }
+  return "/api/admin/tools/gapfill-lab";
+}
+
 function prettyJson(v: unknown): string {
   return JSON.stringify(v ?? {}, null, 2);
 }
@@ -490,7 +497,7 @@ export default function GapFillLabCanonicalClient() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), GAPFILL_LAB_HTTP_FETCH_MS);
       try {
-        resp = await fetch("/api/admin/tools/gapfill-lab", {
+        resp = await fetch(routeForAction(action), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),

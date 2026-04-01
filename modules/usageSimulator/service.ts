@@ -4028,6 +4028,9 @@ async function recalcSimulatorBuildImpl(args: {
     }
   }
 
+  const adminLabManualConstraint =
+    Boolean(args.adminLabTreatmentMode) && isAdminLabManualConstraintTreatmentMode(args.adminLabTreatmentMode);
+
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
     {
@@ -4038,7 +4041,9 @@ async function recalcSimulatorBuildImpl(args: {
     },
     mode,
   );
-  if (!req.canRecalc) return { ok: false, error: "requirements_unmet", missingItems: req.missingItems };
+  if (!req.canRecalc && !adminLabManualConstraint) {
+    return { ok: false, error: "requirements_unmet", missingItems: req.missingItems };
+  }
 
   if (!homeProfile) return { ok: false, error: "homeProfile_required" };
   if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
@@ -4078,8 +4083,6 @@ async function recalcSimulatorBuildImpl(args: {
     durationMs: Date.now() - coreContextStartedAt,
   });
 
-  const adminLabManualConstraint =
-    Boolean(args.adminLabTreatmentMode) && isAdminLabManualConstraintTreatmentMode(args.adminLabTreatmentMode);
   let simMode: SimulatorMode = mode;
   if (adminLabManualConstraint) {
     const adminAdaptationStartedAt = Date.now();

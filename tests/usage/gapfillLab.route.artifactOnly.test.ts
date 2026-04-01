@@ -38,7 +38,8 @@ const appliancesPrisma: any = {
 const prisma: any = {
   user: { findUnique: vi.fn(), findFirst: vi.fn() },
   houseAddress: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
-  usageSimulatorScenario: { findFirst: vi.fn() },
+  usageSimulatorScenario: { findFirst: vi.fn(), findMany: vi.fn() },
+  usageSimulatorScenarioEvent: { findMany: vi.fn() },
   usageSimulatorBuild: { findUnique: vi.fn() },
   $transaction: vi.fn(),
 };
@@ -200,6 +201,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       return null;
     });
     prisma.usageSimulatorScenario.findFirst.mockResolvedValue({ id: "past-s1" });
+    prisma.usageSimulatorScenario.findMany.mockResolvedValue([{ id: "past-s1" }]);
+    prisma.usageSimulatorScenarioEvent.findMany.mockResolvedValue([
+      {
+        payloadJson: { startDate: "2025-03-01", endDate: "2025-03-02" },
+      },
+    ]);
     prisma.usageSimulatorBuild.findUnique.mockResolvedValue({
       id: "build-1",
       lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
@@ -904,6 +911,33 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.engineContext?.rawActualIntervalsMeta?.intervalCount).toBe(96);
     expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_actual");
     expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.weatherLogicMode).toBe("LAST_YEAR_ACTUAL_WEATHER");
+  });
+
+  it("runs source-home Past Sim snapshot through the thin actual-home route", async () => {
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/source-home-past-sim/route");
+    const req = buildRequest({
+      action: "run_source_home_past_sim_snapshot",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      includeUsage365: false,
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("run_source_home_past_sim_snapshot");
+    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
+    expect(recalcSimulatorBuild).not.toHaveBeenCalled();
+    expect(getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode)).toEqual([
+      "artifact_only",
+      "artifact_only",
+      "artifact_only",
+    ]);
+    expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
+    expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_actual");
   });
 
   it("logs a source-home failure event when pre-dispatch Actual Home setup throws", async () => {
