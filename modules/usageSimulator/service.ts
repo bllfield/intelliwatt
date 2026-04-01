@@ -5028,7 +5028,7 @@ async function recalcSimulatorBuildImpl(args: {
   const shouldPersistCanonicalPastArtifact =
     args.persistPastSimBaseline === true &&
     scenario?.name === WORKSPACE_PAST_NAME &&
-    (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS");
+    (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS" || simMode === "NEW_BUILD_ESTIMATE");
   if (shouldPersistCanonicalPastArtifact) {
     const intervals15 = (
       Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15 : []

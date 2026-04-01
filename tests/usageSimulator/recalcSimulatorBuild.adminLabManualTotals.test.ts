@@ -21,6 +21,7 @@ const ensureSimulatorFingerprintsWithContext = vi.fn();
 const resolveSimFingerprintWithContext = vi.fn();
 const upsertSimulatorBuild = vi.fn();
 const saveCachedPastDataset = vi.fn();
+const getCachedPastDataset = vi.fn();
 const deleteCachedPastDatasetsForScenario = vi.fn();
 const saveIntervalSeries15m = vi.fn();
 const computePastInputHash = vi.fn();
@@ -105,7 +106,7 @@ vi.mock("@/modules/usageSimulator/pastCache", () => ({
   PAST_ENGINE_VERSION: "production_past_stitched_v2",
   computePastInputHash: (...args: any[]) => computePastInputHash(...args),
   deleteCachedPastDatasetsForScenario: (...args: any[]) => deleteCachedPastDatasetsForScenario(...args),
-  getCachedPastDataset: vi.fn(),
+  getCachedPastDataset: (...args: any[]) => getCachedPastDataset(...args),
   saveCachedPastDataset: (...args: any[]) => saveCachedPastDataset(...args),
 }));
 
@@ -216,6 +217,7 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     resolveSimFingerprintWithContext.mockResolvedValue(undefined);
     upsertSimulatorBuild.mockResolvedValue(undefined);
     saveCachedPastDataset.mockResolvedValue(undefined);
+    getCachedPastDataset.mockResolvedValue(null);
     deleteCachedPastDatasetsForScenario.mockResolvedValue(0);
     saveIntervalSeries15m.mockResolvedValue({ seriesId: "series-1" });
     computePastInputHash.mockReturnValue("input-hash-1");
@@ -371,6 +373,69 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
         travelRanges: [],
       })
     );
+  }, 15000);
+
+  it("persists canonical past artifacts for PROFILE_ONLY_NEW_BUILD so artifact-only reads can load it", async () => {
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {},
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+      },
+      simulatedDayResults: [],
+    });
+    getCachedPastDataset.mockResolvedValueOnce({
+      intervalsCodec: "v1_delta_varint",
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "NEW_BUILD_ESTIMATE",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "cid-1d",
+      runContext: {
+        callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.canonicalArtifactInputHash).toBe("input-hash-1");
+    }
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(saveCachedPastDataset.mock.calls[0]?.[0]).toMatchObject({
+      houseId: "test-home-1",
+      scenarioId: "past-s1",
+      inputHash: "input-hash-1",
+      engineVersion: "production_past_stitched_v2",
+    });
+    expect(getCachedPastDataset).toHaveBeenCalledWith({
+      houseId: "test-home-1",
+      scenarioId: "past-s1",
+      inputHash: "input-hash-1",
+    });
   }, 15000);
 
   it("reuses the stitched dataset returned by simulatePastUsageDataset", async () => {
