@@ -192,7 +192,7 @@ export async function GET(req: NextRequest) {
         }),
       ]);
     const houseActualRowsMap = sharedActualSelection.actualWxByDateKey;
-    const houseNormalRowsMap = sharedActualSelection.normalWxByDateKey;
+    const houseNormalRowsMap = sharedNormalSelection.normalWxByDateKey;
     const houseActualRows = dateKeys
       .map((dateKey) => houseActualRowsMap.get(dateKey))
       .filter(isDayWeather);
