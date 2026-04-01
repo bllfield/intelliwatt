@@ -4484,8 +4484,7 @@ async function recalcSimulatorBuildImpl(args: {
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
   const shouldUseSharedPastProducer =
-    simMode === "MANUAL_TOTALS" ||
-    (scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode));
+    scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
   const recalcIntervalPreload =
     simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
       ? createRecalcIntervalPreloadContext({

@@ -353,6 +353,39 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs?.sharedProducerPathUsed).toBe(true);
   }, 15000);
 
+  it("does not route non-Past MANUAL_TOTALS scenarios into the shared Past producer path", async () => {
+    usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "future-s1", name: "Future (What-if)" });
+    manualUsageInputFindUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-02-28",
+        monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+        travelRanges: [],
+      },
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "future-s1",
+      persistPastSimBaseline: true,
+      correlationId: "cid-future-manual",
+      runContext: {
+        callerLabel: "user_recalc",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+    expect(upsertSimulatorBuild).toHaveBeenCalledTimes(1);
+    expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs?.sharedProducerPathUsed).toBe(false);
+    expect(out).toBeTruthy();
+  }, 15000);
+
   it("does not fail source-derived manual modes when source travel ranges cover the canonical window", async () => {
     const out = await recalcSimulatorBuild({
       userId: "u1",

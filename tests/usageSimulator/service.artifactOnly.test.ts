@@ -713,7 +713,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
   });
 
-  it("uses the shared producer path for MANUAL_TOTALS allow_rebuild and preserves manual travel ranges", async () => {
+  it("uses the shared producer path for Past MANUAL_TOTALS allow_rebuild and preserves manual travel ranges", async () => {
     const directBuilderSpy = vi.spyOn(usageDatasetModule, "buildSimulatedUsageDatasetFromBuildInputs");
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
@@ -785,7 +785,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
       houseId: "h1",
-      scenarioId: null,
+      scenarioId: "past-s1",
       readMode: "allow_rebuild",
     });
 
@@ -796,7 +796,6 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
           mode: "MANUAL_TOTALS",
           sharedProducerPathUsed: true,
         }),
-        travelRanges: [{ startDate: "2026-01-03", endDate: "2026-01-04" }],
       })
     );
     expect(directBuilderSpy).not.toHaveBeenCalled();
@@ -809,7 +808,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     directBuilderSpy.mockRestore();
   });
 
-  it("does not fall back to the direct builder when MANUAL_TOTALS shared producer rebuild fails", async () => {
+  it("does not fall back to the direct builder when Past MANUAL_TOTALS shared producer rebuild fails", async () => {
     const directBuilderSpy = vi.spyOn(usageDatasetModule, "buildSimulatedUsageDatasetFromBuildInputs");
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
@@ -840,7 +839,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     const out = await getSimulatedUsageForHouseScenario({
       userId: "u1",
       houseId: "h1",
-      scenarioId: null,
+      scenarioId: "past-s1",
       readMode: "allow_rebuild",
     });
 

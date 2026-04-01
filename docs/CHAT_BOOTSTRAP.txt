@@ -87,7 +87,11 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `modules/usageShapeProfile/actualIntervals.ts`
 - `modules/usageShapeProfile/autoBuild.ts`
 
-6) Admin/shared tooling modules:
+6) Manual-usage shared helpers:
+- `modules/manualUsage/store.ts`
+- `modules/manualUsage/reconciliation.ts`
+
+7) Admin/shared tooling modules:
 - `lib/admin/gapfillLab.ts`
 - `lib/admin/gapfillLabPrime.ts`
 - `lib/admin/simulatorDiagnostic.ts`
