@@ -337,4 +337,66 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     expect(out.ok).toBe(true);
     expect(buildSimulatedUsageDatasetFromCurve).not.toHaveBeenCalled();
   }, 15000);
+
+  it("does not wait for stale scenario cache cleanup before finishing shared recalc persistence", async () => {
+    deleteCachedPastDatasetsForScenario.mockImplementationOnce(() => new Promise(() => {}));
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {},
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+      },
+      simulatedDayResults: [],
+    });
+
+    const out = await Promise.race([
+      recalcSimulatorBuild({
+        userId: "u1",
+        houseId: "test-home-1",
+        actualContextHouseId: "source-home-1",
+        esiid: "E1",
+        mode: "SMT_BASELINE",
+        scenarioId: "past-s1",
+        persistPastSimBaseline: true,
+        correlationId: "cid-3",
+        validationDaySelectionMode: "manual",
+        validationDayCount: 21,
+        runContext: {
+          callerLabel: "gapfill_launcher",
+          buildPathKind: "recalc",
+          persistRequested: true,
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("recalc waited on cache cleanup")), 100)
+      ),
+    ]);
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.error).toBe("artifact_persist_failed");
+    }
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(deleteCachedPastDatasetsForScenario).toHaveBeenCalledWith({
+      houseId: "test-home-1",
+      scenarioId: "past-s1",
+      excludeInputHash: "input-hash-1",
+    });
+  }, 15000);
 });

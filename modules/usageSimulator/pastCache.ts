@@ -254,17 +254,30 @@ export async function invalidatePastCachesForHouse(args: { houseId: string }): P
 }
 
 /**
- * Deletes every Past cache row for this house + scenario (all inputHash variants).
- * Call immediately before saveCachedPastDataset when persisting a full recalc/rebuild so stale
- * artifacts from prior travel/validation fingerprints cannot accumulate beside the new row.
+ * Deletes Past cache rows for this house + scenario.
+ * Exact-hash reads stay authoritative even if stale variants remain; this is hygiene cleanup.
  * Reads still key on exact inputHash; this is hygiene and avoids confusion when inspecting the DB.
  */
-export async function deleteCachedPastDatasetsForScenario(args: { houseId: string; scenarioId: string }): Promise<number> {
+export async function deleteCachedPastDatasetsForScenario(args: {
+  houseId: string;
+  scenarioId: string;
+  excludeInputHash?: string;
+}): Promise<number> {
   const model = getCacheModel();
   if (!model) return 0;
   try {
     const result = await model.deleteMany({
-      where: { houseId: args.houseId, scenarioId: args.scenarioId },
+      where: {
+        houseId: args.houseId,
+        scenarioId: args.scenarioId,
+        ...(args.excludeInputHash
+          ? {
+              NOT: {
+                inputHash: args.excludeInputHash,
+              },
+            }
+          : {}),
+      },
     });
     return typeof result?.count === "number" ? result.count : 0;
   } catch {

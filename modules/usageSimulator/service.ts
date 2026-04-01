@@ -197,6 +197,14 @@ import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSi
 
 type ManualUsagePayloadAny = any;
 
+function cleanupStalePastCacheVariants(args: { houseId: string; scenarioId: string; keepInputHash: string }) {
+  void deleteCachedPastDatasetsForScenario({
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    excludeInputHash: args.keepInputHash,
+  }).catch(() => undefined);
+}
+
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 const WORKSPACE_FUTURE_NAME = "Future (What-if)";
 const DEFAULT_SYSTEM_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode = "random_simple";
@@ -5187,7 +5195,17 @@ async function recalcSimulatorBuildImpl(args: {
         series: { ...((dataset as any)?.series ?? {}), intervals15: [] },
       };
       const scenarioIdForCache = scenarioId ?? "BASELINE";
-      await deleteCachedPastDatasetsForScenario({ houseId, scenarioId: scenarioIdForCache });
+      logSimPipelineEvent("recalc_artifact_cache_save_start", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash,
+        intervalCount: intervals15.length,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
       await saveCachedPastDataset({
         houseId,
         scenarioId: scenarioIdForCache,
@@ -5198,6 +5216,33 @@ async function recalcSimulatorBuildImpl(args: {
         datasetJson: datasetJsonForStorage as Record<string, unknown>,
         intervalsCodec: INTERVAL_CODEC_V1,
         intervalsCompressed: bytes,
+      });
+      logSimPipelineEvent("recalc_artifact_cache_save_success", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash,
+        durationMs: Date.now() - artifactPersistStartedAt,
+        intervalCount: intervals15.length,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      cleanupStalePastCacheVariants({
+        houseId,
+        scenarioId: scenarioIdForCache,
+        keepInputHash: artifactInputHash,
+      });
+      logSimPipelineEvent("recalc_artifact_readback_start", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
       });
       const persisted = await getCachedPastDataset({
         houseId,
@@ -6651,7 +6696,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
               series: { ...(dataset.series ?? {}), intervals15: [] },
             };
-            await deleteCachedPastDatasetsForScenario({ houseId: args.houseId, scenarioId: scenarioIdForCache });
+            logSimPipelineEvent("allow_rebuild_artifact_cache_save_start", {
+              correlationId: args.correlationId,
+              houseId: args.houseId,
+              scenarioId,
+              artifactInputHash: inputHash,
+              intervalCount: intervals15.length,
+              source: "getSimulatedUsageForHouseScenario",
+              memoryRssMb: getMemoryRssMb(),
+            });
             await saveCachedPastDataset({
               houseId: args.houseId,
               scenarioId: scenarioIdForCache,
@@ -6662,6 +6715,20 @@ export async function getSimulatedUsageForHouseScenario(args: {
               datasetJson: datasetJsonForStorage as Record<string, unknown>,
               intervalsCodec: INTERVAL_CODEC_V1,
               intervalsCompressed: bytes,
+            });
+            logSimPipelineEvent("allow_rebuild_artifact_cache_save_success", {
+              correlationId: args.correlationId,
+              houseId: args.houseId,
+              scenarioId,
+              artifactInputHash: inputHash,
+              intervalCount: intervals15.length,
+              source: "getSimulatedUsageForHouseScenario",
+              memoryRssMb: getMemoryRssMb(),
+            });
+            cleanupStalePastCacheVariants({
+              houseId: args.houseId,
+              scenarioId: scenarioIdForCache,
+              keepInputHash: inputHash,
             });
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).artifactReadMode = "allow_rebuild";

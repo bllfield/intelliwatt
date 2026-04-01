@@ -22,6 +22,7 @@ const getHouseAddressForUserHouse = vi.fn();
 const computePastInputHash = vi.fn();
 const getCachedPastDataset = vi.fn();
 const getLatestCachedPastDatasetByScenario = vi.fn();
+const deleteCachedPastDatasetsForScenario = vi.fn();
 const saveCachedPastDataset = vi.fn();
 const simulatePastFullWindowShared = vi.fn();
 const simulatePastUsageDataset = vi.fn();
@@ -60,7 +61,7 @@ vi.mock("@/modules/usageSimulator/repo", () => ({
 
 vi.mock("@/modules/usageSimulator/pastCache", () => ({
   computePastInputHash: (...args: any[]) => computePastInputHash(...args),
-  deleteCachedPastDatasetsForScenario: vi.fn().mockResolvedValue(0),
+  deleteCachedPastDatasetsForScenario: (...args: any[]) => deleteCachedPastDatasetsForScenario(...args),
   getCachedPastDataset: (...args: any[]) => getCachedPastDataset(...args),
   getLatestCachedPastDatasetByScenario: (...args: any[]) => getLatestCachedPastDatasetByScenario(...args),
   saveCachedPastDataset: (...args: any[]) => saveCachedPastDataset(...args),
@@ -392,6 +393,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     computePastInputHash.mockReset();
     getCachedPastDataset.mockReset();
     getLatestCachedPastDatasetByScenario.mockReset();
+    deleteCachedPastDatasetsForScenario.mockReset();
     saveCachedPastDataset.mockReset();
     simulatePastFullWindowShared.mockReset();
     simulatePastUsageDataset.mockReset();
@@ -420,6 +422,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       },
     });
     computePastInputHash.mockReturnValue("hash-past-expected");
+    deleteCachedPastDatasetsForScenario.mockResolvedValue(0);
     getIntervalDataFingerprint.mockResolvedValue("fp-a");
     computePastWeatherIdentity.mockResolvedValue("wx-a");
     getUsageShapeProfileIdentityForPast.mockResolvedValue({
@@ -1103,6 +1106,58 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(
       Array.from(producerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
     ).toEqual(["2026-01-01"]);
+  });
+
+  it("allow_rebuild does not wait for stale scenario cache cleanup before returning the rebuilt artifact", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+      },
+    });
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    deleteCachedPastDatasetsForScenario.mockImplementationOnce(() => new Promise(() => {}));
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.75, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    const out = await Promise.race([
+      getSimulatedUsageForHouseScenario({
+        userId: "u1",
+        houseId: "h1",
+        scenarioId: "past-s1",
+        readMode: "allow_rebuild",
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("allow_rebuild waited on cache cleanup")), 100)
+      ),
+    ]);
+
+    expect(out.ok).toBe(true);
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(deleteCachedPastDatasetsForScenario).toHaveBeenCalledWith({
+      houseId: "h1",
+      scenarioId: "past-s1",
+      excludeInputHash: "hash-past-expected",
+    });
   });
 
   it("allow_rebuild drops deleted Past travel ranges from the rebuilt artifact input", async () => {
