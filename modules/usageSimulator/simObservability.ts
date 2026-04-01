@@ -16,8 +16,8 @@ export function getMemoryRssMb(): number {
   }
 }
 
-/** Wall-clock ceiling for `dispatchPastSimRecalc` inline path (before droplet queue). Plan §6 (A) `recalc_timeout`. */
-export const USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS = 90_000;
+/** Wall-clock ceiling for inline shared Past Sim recalc before callers surface `recalc_timeout`. */
+export const USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS = 240_000;
 
 export type RecalcLifecycleStage = "recalc_start" | "recalc_success" | "recalc_failure";
 

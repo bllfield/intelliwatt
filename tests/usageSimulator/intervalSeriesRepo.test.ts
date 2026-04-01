@@ -99,7 +99,7 @@ const mockState = vi.hoisted(() => {
   };
 
   const prismaMock = {
-    $transaction: vi.fn(async (fn: any) => fn(txMock)),
+    $transaction: vi.fn(async (fn: any, _options?: any) => fn(txMock)),
     intervalSeries: {
       findFirst: vi.fn(async ({ where }: any) => {
         const row = seriesRows.find((r) => matchSeries(where, r)) ?? null;
@@ -251,5 +251,29 @@ describe("intervalSeriesRepo", () => {
         intervals15: intervals,
       })
     ).rejects.toThrow("off-grid");
+  });
+
+  it("uses an extended interactive transaction timeout for large interval writes", async () => {
+    const userId = "user-1";
+    const houseId = "house-1";
+    const intervals = makeIntervals("2026-01-01T00:00:00.000Z", 35040, 0.25);
+
+    await saveIntervalSeries15m({
+      userId,
+      houseId,
+      kind: IntervalSeriesKind.PAST_SIM_BASELINE,
+      scenarioId: "scenario-1",
+      anchorStartUtc: new Date(intervals[0].tsUtc),
+      anchorEndUtc: new Date(intervals[intervals.length - 1].tsUtc),
+      derivationVersion: "v1",
+      buildInputsHash: "hash-timeout",
+      intervals15: intervals,
+    });
+
+    expect(mockState.prismaMock.$transaction).toHaveBeenCalled();
+    expect(mockState.prismaMock.$transaction.mock.calls[0]?.[1]).toMatchObject({
+      maxWait: 10000,
+      timeout: 60000,
+    });
   });
 });

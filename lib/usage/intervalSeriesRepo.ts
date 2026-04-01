@@ -97,6 +97,9 @@ export async function saveIntervalSeries15m(params: {
     }
 
     return { seriesId: String(series.id) };
+  }, {
+    maxWait: 10_000,
+    timeout: 60_000,
   });
 }
 
