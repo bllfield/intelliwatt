@@ -84,6 +84,7 @@ export type PastSimPerDayTrace = {
   simulatedReasonCode:
     | "TRAVEL_VACANT"
     | "TEST_MODELED_KEEP_REF"
+    | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
     | "INCOMPLETE_METER_DAY"
     | "LEADING_MISSING_DAY"
@@ -98,6 +99,16 @@ export type PastSimPerDayTrace = {
   intervalSumKwh: number | null;
   shapeVariantUsed: string | null;
   shape96Hash: string | null;
+  templateSelectionKind: string | null;
+  selectedFingerprintBucketMonth: string | null;
+  selectedFingerprintBucketDayType: string | null;
+  selectedFingerprintWeatherBucket: string | null;
+  selectedFingerprintIdentity: string | null;
+  selectedReferencePoolCount: number | null;
+  weatherScalingCoefficientUsed: number | null;
+  dayTotalBeforeWeatherScale: number | null;
+  dayTotalAfterWeatherScale: number | null;
+  intervalShapeScalingMethod: string | null;
 };
 
 type InferLockboxModeArgs = {
@@ -321,5 +332,19 @@ export function buildPastSimPerDayTrace(results: SimulatedDayResult[] | undefine
           .digest("base64url")
           .slice(0, 24)
       : null,
+    templateSelectionKind: result.templateSelectionKind ?? null,
+    selectedFingerprintBucketMonth: result.selectedFingerprintBucketMonth ?? null,
+    selectedFingerprintBucketDayType: result.selectedFingerprintBucketDayType ?? null,
+    selectedFingerprintWeatherBucket: result.selectedFingerprintWeatherBucket ?? null,
+    selectedFingerprintIdentity: result.selectedFingerprintIdentity ?? null,
+    selectedReferencePoolCount:
+      typeof result.selectedReferencePoolCount === "number" ? result.selectedReferencePoolCount : null,
+    weatherScalingCoefficientUsed:
+      typeof result.weatherScalingCoefficientUsed === "number" ? result.weatherScalingCoefficientUsed : null,
+    dayTotalBeforeWeatherScale:
+      typeof result.dayTotalBeforeWeatherScale === "number" ? result.dayTotalBeforeWeatherScale : null,
+    dayTotalAfterWeatherScale:
+      typeof result.dayTotalAfterWeatherScale === "number" ? result.dayTotalAfterWeatherScale : null,
+    intervalShapeScalingMethod: result.intervalShapeScalingMethod ?? null,
   }));
 }

@@ -16,6 +16,7 @@ import {
   type MonthlyTargetConstructionDiagnostic,
   resolveManualMonthlyAnchorEndDateKey,
 } from "@/modules/usageSimulator/monthlyTargetConstruction";
+import { buildPastSimPerDayTrace } from "@/modules/usageSimulator/pastSimLockbox";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 
 vi.mock("server-only", () => ({}));
@@ -551,5 +552,105 @@ describe("user simulated house compare projection", () => {
         trustedMonthlyAnchorUsed: true,
       },
     ]);
+  });
+
+  it("surfaces monthly constrained interval fingerprint diagnostics on the read side", () => {
+    const sharedDiagnostics = buildSharedPastSimDiagnostics({
+      callerType: "gapfill_test",
+      dataset: {
+        meta: {
+          lockboxInput: {
+            sourceContext: {},
+            profileContext: {
+              usageShapeProfileIdentity: "fp_123",
+            },
+            travelRanges: { ranges: [{ startDate: "2025-06-10", endDate: "2025-06-12" }] },
+            validationKeys: { localDateKeys: [] },
+          },
+          trustedIntervalFingerprintDayCount: 22,
+          excludedTravelVacantFingerprintDayCount: 3,
+          excludedIncompleteMeterFingerprintDayCount: 1,
+          excludedLeadingMissingFingerprintDayCount: 2,
+          excludedOtherUntrustedFingerprintDayCount: 0,
+          fingerprintMonthBucketsUsed: ["2025-06"],
+          fingerprintWeekdayWeekendBucketsUsed: ["weekday", "weekend"],
+          fingerprintWeatherBucketsUsed: ["heating", "neutral"],
+          fingerprintShapeSummaryByMonthDayType: {
+            "2025-06": {
+              weekday: { overnight: 0.18, morning: 0.2, afternoon: 0.31, evening: 0.31 },
+            },
+          },
+        },
+      },
+      scenarioId: "past-s1",
+      compareProjection: null,
+      readMode: "artifact_only",
+      projectionMode: "baseline",
+    });
+
+    expect(sharedDiagnostics.sourceTruthContext.intervalUsageFingerprintIdentity).toBe("fp_123");
+    expect(sharedDiagnostics.sourceTruthContext.intervalUsageFingerprintDiagnostics).toMatchObject({
+      trustedIntervalFingerprintDayCount: 22,
+      excludedTravelVacantFingerprintDayCount: 3,
+      fingerprintMonthBucketsUsed: ["2025-06"],
+    });
+    expect(sharedDiagnostics.tuningSummary.fingerprintShapeSummaryByMonthDayType).toMatchObject({
+      "2025-06": {
+        weekday: { overnight: 0.18, morning: 0.2, afternoon: 0.31, evening: 0.31 },
+      },
+    });
+  });
+
+  it("preserves monthly constrained per-day template provenance in lockbox trace rows", () => {
+    const trace = buildPastSimPerDayTrace([
+      {
+        localDate: "2025-06-15",
+        source: "simulated_vacant_day",
+        simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
+        intervals: [],
+        intervals15: [],
+        intervalSumKwh: 41.2,
+        displayDayKwh: 41.2,
+        rawDayKwh: 35,
+        weatherAdjustedDayKwh: 39,
+        profileSelectedDayKwh: 35,
+        finalDayKwh: 41.2,
+        weatherSeverityMultiplier: 1.12,
+        weatherModeUsed: "cooling",
+        auxHeatKwhAdder: 0,
+        poolFreezeProtectKwhAdder: 0,
+        dayClassification: "weather_scaled_day",
+        fallbackLevel: "month_daytype_neighbor",
+        clampApplied: false,
+        shape96Used: Array.from({ length: 96 }, () => 1 / 96),
+        dayTypeUsed: "weekday",
+        weatherRegimeUsed: "cooling",
+        shapeVariantUsed: "month_weekday_weather_cooling",
+        templateSelectionKind: "monthly_manual_constrained_shared_day_template",
+        selectedFingerprintBucketMonth: "2025-06",
+        selectedFingerprintBucketDayType: "weekday",
+        selectedFingerprintWeatherBucket: "cooling",
+        selectedFingerprintIdentity: "fp_123",
+        selectedReferencePoolCount: 7,
+        weatherScalingCoefficientUsed: 1.12,
+        dayTotalBeforeWeatherScale: 35,
+        dayTotalAfterWeatherScale: 39,
+        intervalShapeScalingMethod: "shape_variant:month_weekday_weather_cooling",
+      },
+    ]);
+
+    expect(trace[0]).toMatchObject({
+      simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
+      templateSelectionKind: "monthly_manual_constrained_shared_day_template",
+      selectedFingerprintBucketMonth: "2025-06",
+      selectedFingerprintBucketDayType: "weekday",
+      selectedFingerprintWeatherBucket: "cooling",
+      selectedFingerprintIdentity: "fp_123",
+      selectedReferencePoolCount: 7,
+      weatherScalingCoefficientUsed: 1.12,
+      dayTotalBeforeWeatherScale: 35,
+      dayTotalAfterWeatherScale: 39,
+      intervalShapeScalingMethod: "shape_variant:month_weekday_weather_cooling",
+    });
   });
 });

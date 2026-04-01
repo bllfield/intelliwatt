@@ -900,20 +900,30 @@ export async function simulatePastUsageDataset(
     });
     const isLowDataSharedPastMode =
       buildInputs.mode === "MANUAL_TOTALS" || buildInputs.mode === "NEW_BUILD_ESTIMATE";
+    const manualTotalsConstraint =
+      (buildInputs.resolvedSimFingerprint as { manualTotalsConstraint?: string } | undefined)?.manualTotalsConstraint ??
+      null;
+    const shouldUseTrustedActualIntervalsForManualMonthly =
+      buildInputs.mode === "MANUAL_TOTALS" && manualTotalsConstraint === "monthly";
+    const fetchedActualIntervals = preloadedIntervals
+      ? null
+      : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
+          timestamp: p.timestamp,
+          kwh: p.kwh,
+        }));
     const actualIntervals =
       preloadedIntervals != null
         ? preloadedIntervals
-        : isLowDataSharedPastMode
-          ? buildSyntheticIntervalsForSharedPastWindow({
-              buildInputs,
-              startDate,
-              endDate,
-              timezone,
-            })
-          : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
-              timestamp: p.timestamp,
-              kwh: p.kwh,
-            }));
+        : shouldUseTrustedActualIntervalsForManualMonthly && (fetchedActualIntervals?.length ?? 0) > 0
+          ? fetchedActualIntervals!
+          : isLowDataSharedPastMode
+            ? buildSyntheticIntervalsForSharedPastWindow({
+                buildInputs,
+                startDate,
+                endDate,
+                timezone,
+              })
+            : fetchedActualIntervals ?? [];
 
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
@@ -1095,7 +1105,7 @@ export async function simulatePastUsageDataset(
       : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
     let usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     let lowDataShapeAdapterUsed = false;
-    if (!usageShapeProfileSnap && isLowDataSharedPastMode) {
+    if (!usageShapeProfileSnap && isLowDataSharedPastMode && !shouldUseTrustedActualIntervalsForManualMonthly) {
       usageShapeProfileSnap = buildUsageShapeSnapFromMonthlyTotalsForLowData({
         canonicalMonths,
         monthlyTotalsKwhByMonth: (buildInputs as SimulatorBuildInputsV1).monthlyTotalsKwhByMonth ?? {},
@@ -1166,7 +1176,23 @@ export async function simulatePastUsageDataset(
     const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
     const collectSimulatedDayResultsDateKeys =
       retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined;
-    const pastDayCounts: { totalDays?: number; excludedDays?: number; leadingMissingDays?: number; simulatedDays?: number } = {};
+    const pastDayCounts: {
+      totalDays?: number;
+      excludedDays?: number;
+      leadingMissingDays?: number;
+      simulatedDays?: number;
+      referenceDaysUsed?: number;
+      intervalUsageFingerprintIdentity?: string;
+      trustedIntervalFingerprintDayCount?: number;
+      excludedTravelVacantFingerprintDayCount?: number;
+      excludedIncompleteMeterFingerprintDayCount?: number;
+      excludedLeadingMissingFingerprintDayCount?: number;
+      excludedOtherUntrustedFingerprintDayCount?: number;
+      fingerprintMonthBucketsUsed?: string[];
+      fingerprintWeekdayWeekendBucketsUsed?: string[];
+      fingerprintWeatherBucketsUsed?: string[];
+      fingerprintShapeSummaryByMonthDayType?: Record<string, Record<string, Record<string, number>>>;
+    } = {};
     // Single shared day-level model (Section 21 / Phase 1): travel/vacant and Gap-Fill keep-ref modeled days
     // both flow through buildPastSimulatedBaselineV1 → simulatePastDay; stitch/compare remain downstream consumers only.
     const baselinePhaseStartedAt = Date.now();
@@ -1209,6 +1235,9 @@ export async function simulatePastUsageDataset(
         forceModeledOutputKeepReferencePoolDateKeys:
           keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
         emitAllIntervals,
+        modeledKeepRefReasonCode: shouldUseTrustedActualIntervalsForManualMonthly
+          ? "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+          : "TEST_MODELED_KEEP_REF",
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
       });
@@ -1500,6 +1529,16 @@ export async function simulatePastUsageDataset(
         excludedDateKeysCount: excludedDateKeys.size,
         excludedDateKeysFingerprint,
         leadingMissingDaysCount: pastDayCounts.leadingMissingDays ?? undefined,
+        trustedIntervalFingerprintDayCount: pastDayCounts.trustedIntervalFingerprintDayCount,
+        intervalUsageFingerprintIdentity: pastDayCounts.intervalUsageFingerprintIdentity,
+        excludedTravelVacantFingerprintDayCount: pastDayCounts.excludedTravelVacantFingerprintDayCount,
+        excludedIncompleteMeterFingerprintDayCount: pastDayCounts.excludedIncompleteMeterFingerprintDayCount,
+        excludedLeadingMissingFingerprintDayCount: pastDayCounts.excludedLeadingMissingFingerprintDayCount,
+        excludedOtherUntrustedFingerprintDayCount: pastDayCounts.excludedOtherUntrustedFingerprintDayCount,
+        fingerprintMonthBucketsUsed: pastDayCounts.fingerprintMonthBucketsUsed,
+        fingerprintWeekdayWeekendBucketsUsed: pastDayCounts.fingerprintWeekdayWeekendBucketsUsed,
+        fingerprintWeatherBucketsUsed: pastDayCounts.fingerprintWeatherBucketsUsed,
+        fingerprintShapeSummaryByMonthDayType: pastDayCounts.fingerprintShapeSummaryByMonthDayType,
         weatherLogicMode: provenance.weatherLogicMode,
         weatherKindUsed: provenance.weatherKindUsed,
         weatherSourceSummary: provenance.weatherSourceSummary,

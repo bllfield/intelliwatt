@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { ManualUsagePayload, SimulatedCurve, TravelRange } from "./types";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
@@ -711,6 +712,16 @@ export type PastSimulationDebug = {
   leadingMissingDays: number;
   referenceDaysUsed: number;
   simulatedDays: number;
+  intervalUsageFingerprintIdentity?: string;
+  trustedIntervalFingerprintDayCount?: number;
+  excludedTravelVacantFingerprintDayCount?: number;
+  excludedIncompleteMeterFingerprintDayCount?: number;
+  excludedLeadingMissingFingerprintDayCount?: number;
+  excludedOtherUntrustedFingerprintDayCount?: number;
+  fingerprintMonthBucketsUsed?: string[];
+  fingerprintWeekdayWeekendBucketsUsed?: string[];
+  fingerprintWeatherBucketsUsed?: string[];
+  fingerprintShapeSummaryByMonthDayType?: Record<string, Record<string, Record<string, number>>>;
   dayDiagnostics: PastSimulatedDayDiagnostic[];
 };
 
@@ -1053,6 +1064,7 @@ export function buildPastSimulatedBaselineV1(args: {
    * (same core as travel/vacant fills). Mutually exclusive use: do not duplicate keys in `forceSimulateDateKeys`.
    */
   forceModeledOutputKeepReferencePoolDateKeys?: Set<string>;
+  modeledKeepRefReasonCode?: "TEST_MODELED_KEEP_REF" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY";
   /**
    * Optional: when false, omit passthrough actual intervals for non-simulated days.
    * Useful for selected-day fresh compare scoring where only simulated-day intervals are needed.
@@ -1131,11 +1143,21 @@ export function buildPastSimulatedBaselineV1(args: {
     wx: { tAvgF: number; hdd65: number; cdd65: number } | null;
     hvacKwh: number;
   }> = [];
+  let excludedTravelVacantFingerprintDayCount = 0;
+  let excludedIncompleteMeterFingerprintDayCount = 0;
+  let excludedLeadingMissingFingerprintDayCount = 0;
+  let excludedOtherUntrustedFingerprintDayCount = 0;
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
     if (!day.gridTs.length || !day.dateKey) continue;
-    if (!day.isReferenceDayForPool) continue;
+    if (!day.isReferenceDayForPool) {
+      if (day.dayIsExcluded) excludedTravelVacantFingerprintDayCount += 1;
+      else if (day.dayIsIncomplete) excludedIncompleteMeterFingerprintDayCount += 1;
+      else if (day.dayIsLeadingMissing) excludedLeadingMissingFingerprintDayCount += 1;
+      else if (day.dayIsForcedSimulate) excludedOtherUntrustedFingerprintDayCount += 1;
+      continue;
+    }
 
     const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
     for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(day.gridTs[i]) ?? 0) || 0;
@@ -1494,6 +1516,19 @@ export function buildPastSimulatedBaselineV1(args: {
   }
   const normalizedFromAcc = (acc: ShapeAcc): number[] | null =>
     acc.count > 0 ? normalizeShape96OrNull(acc.sum.map((v) => v / acc.count)) : null;
+  const summarizeShapeToDayparts = (shape: number[] | null): Record<string, number> | null => {
+    if (!Array.isArray(shape) || shape.length !== INTERVALS_PER_DAY) return null;
+    const bucket = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
+    for (let i = 0; i < shape.length; i++) {
+      const hour = Math.floor(i / 4);
+      const value = Number(shape[i]) || 0;
+      if (hour < 6) bucket.overnight += value;
+      else if (hour < 12) bucket.morning += value;
+      else if (hour < 18) bucket.afternoon += value;
+      else bucket.evening += value;
+    }
+    return bucket;
+  };
   for (const ym of monthKeysRef) {
     const wd = monthDayTypeAcc[ym]?.weekday;
     const we = monthDayTypeAcc[ym]?.weekend;
@@ -1536,6 +1571,52 @@ export function buildPastSimulatedBaselineV1(args: {
       neutral: normalizedFromAcc(weekdayWeekendWeatherAcc[dt].neutral),
     };
   }
+  const fingerprintMonthBucketsUsed = Object.keys(shapeVariants.byMonthDayType96 ?? {}).sort();
+  const fingerprintWeekdayWeekendBucketsUsed = ["weekday", "weekend"].filter(
+    (dt) =>
+      normalizeShape96OrNull((shapeVariants.weekdayWeekend96 as Record<string, unknown> | null | undefined)?.[dt] as
+        | number[]
+        | undefined) != null
+  );
+  const fingerprintWeatherBucketsUsed = (["heating", "cooling", "neutral"] as const).filter((regime) =>
+    ["weekday", "weekend"].some(
+      (dt) =>
+        normalizeShape96OrNull(
+          ((shapeVariants.weekdayWeekendWeather96 as Record<string, any> | null | undefined)?.[dt] ?? {})[regime]
+        ) != null
+    )
+  );
+  const fingerprintShapeSummaryByMonthDayType = fingerprintMonthBucketsUsed.reduce<
+    Record<string, Record<string, Record<string, number>>>
+  >((acc, ym) => {
+    const monthBucket = (shapeVariants.byMonthDayType96 as Record<string, any> | null | undefined)?.[ym] ?? {};
+    const weekdaySummary = summarizeShapeToDayparts(normalizeShape96OrNull(monthBucket.weekday));
+    const weekendSummary = summarizeShapeToDayparts(normalizeShape96OrNull(monthBucket.weekend));
+    acc[ym] = {};
+    if (weekdaySummary) acc[ym].weekday = weekdaySummary;
+    if (weekendSummary) acc[ym].weekend = weekendSummary;
+    return acc;
+  }, {});
+  const intervalUsageFingerprintIdentity =
+    referenceDays.length > 0
+      ? createHash("sha256")
+          .update(
+            JSON.stringify({
+              version: "monthly_interval_usage_fingerprint_v1",
+              referenceDays: referenceDays.map((day) => ({
+                dateKey: day.dateKey,
+                monthKey: day.monthKey,
+                dow: day.dow,
+                total: Number(day.total.toFixed(4)),
+                wx: day.wx,
+                hourlyWeights: day.hourlyWeights.map((value) => Number(value.toFixed(6))),
+              })),
+            }),
+            "utf8"
+          )
+          .digest("base64url")
+          .slice(0, 24)
+      : null;
   const wholeHomeOnlyPrior =
     args.resolvedSimFingerprint?.blendMode === "whole_home_only";
   const shapeVariantsForContext = wholeHomeOnlyPrior
@@ -1664,6 +1745,30 @@ export function buildPastSimulatedBaselineV1(args: {
   const maxDayDiagnostics = Math.max(0, Number(args.debug?.maxDayDiagnostics ?? 0) || 0);
   const dayDiagnostics: PastSimulatedDayDiagnostic[] = [];
   const legacyShapeByMonth96ForPastDay = wholeHomeOnlyPrior ? {} : shapeByMonth96Ref;
+  const modeledKeepRefReasonCode = args.modeledKeepRefReasonCode ?? "TEST_MODELED_KEEP_REF";
+  const selectedReferencePoolCountForVariant = (
+    shapeVariantUsed: string,
+    monthKey: string,
+    dayType: PastDayTypeKey,
+    weatherRegime: PastWeatherRegimeKey
+  ): number | null => {
+    if (shapeVariantUsed.startsWith("month_") && shapeVariantUsed.includes("_weather_")) {
+      return monthWeatherDayTypeAcc[monthKey]?.[dayType]?.[weatherRegime]?.count ?? null;
+    }
+    if (shapeVariantUsed.startsWith("month_")) {
+      return monthDayTypeAcc[monthKey]?.[dayType]?.count ?? null;
+    }
+    if (shapeVariantUsed === "month") {
+      return (monthDayTypeAcc[monthKey]?.weekday?.count ?? 0) + (monthDayTypeAcc[monthKey]?.weekend?.count ?? 0);
+    }
+    if (shapeVariantUsed.startsWith("weekdayweekend_weather_")) {
+      return weekdayWeekendWeatherAcc[dayType]?.[weatherRegime]?.count ?? null;
+    }
+    if (shapeVariantUsed.startsWith("weekdayweekend_")) {
+      return weekdayWeekendAcc[dayType]?.count ?? null;
+    }
+    return referenceDays.length;
+  };
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
@@ -1697,13 +1802,14 @@ export function buildPastSimulatedBaselineV1(args: {
       const simulatedReasonCode:
         | "TRAVEL_VACANT"
         | "TEST_MODELED_KEEP_REF"
+        | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
         | "FORCED_SELECTED_DAY"
         | "INCOMPLETE_METER_DAY"
         | "LEADING_MISSING_DAY" =
         simulatedReason === "EXCLUDED"
           ? "TRAVEL_VACANT"
           : simulatedReason === "GAPFILL_MODELED_KEEP_REF"
-            ? "TEST_MODELED_KEEP_REF"
+            ? modeledKeepRefReasonCode
             : simulatedReason === "FORCED_SELECTED_DAY"
               ? "FORCED_SELECTED_DAY"
               : simulatedReason === "LEADING_MISSING"
@@ -1751,6 +1857,31 @@ export function buildPastSimulatedBaselineV1(args: {
       const classifiedResult: SimulatedDayResult = {
         ...blendedResult,
         simulatedReasonCode,
+        templateSelectionKind:
+          simulatedReasonCode === "TRAVEL_VACANT"
+            ? "travel_vacant_shared_day_template"
+            : simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+              ? "monthly_manual_constrained_shared_day_template"
+              : simulatedReasonCode === "TEST_MODELED_KEEP_REF"
+                ? "validation_keep_ref_shared_day_template"
+                : "shared_day_template",
+        selectedFingerprintBucketMonth: ym,
+        selectedFingerprintBucketDayType: blendedResult.dayTypeUsed,
+        selectedFingerprintWeatherBucket: blendedResult.weatherRegimeUsed,
+        selectedFingerprintIdentity: intervalUsageFingerprintIdentity ?? undefined,
+        selectedReferencePoolCount:
+          blendedResult.dayTypeUsed && blendedResult.weatherRegimeUsed
+            ? selectedReferencePoolCountForVariant(
+                blendedResult.shapeVariantUsed ?? "uniform_fallback",
+                ym,
+                blendedResult.dayTypeUsed,
+                blendedResult.weatherRegimeUsed
+              ) ?? undefined
+            : undefined,
+        weatherScalingCoefficientUsed: blendedResult.weatherSeverityMultiplier,
+        dayTotalBeforeWeatherScale: blendedResult.targetDayKwhBeforeWeather,
+        dayTotalAfterWeatherScale: blendedResult.weatherAdjustedDayKwh,
+        intervalShapeScalingMethod: `shape_variant:${blendedResult.shapeVariantUsed ?? "uniform_fallback"}`,
       };
       if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
         dayResults.push(classifiedResult);
@@ -1844,6 +1975,16 @@ export function buildPastSimulatedBaselineV1(args: {
     args.debug.out.leadingMissingDays = leadingMissingDays;
     args.debug.out.referenceDaysUsed = referenceDays.length;
     args.debug.out.simulatedDays = simulatedDays;
+    args.debug.out.intervalUsageFingerprintIdentity = intervalUsageFingerprintIdentity ?? undefined;
+    args.debug.out.trustedIntervalFingerprintDayCount = referenceDays.length;
+    args.debug.out.excludedTravelVacantFingerprintDayCount = excludedTravelVacantFingerprintDayCount;
+    args.debug.out.excludedIncompleteMeterFingerprintDayCount = excludedIncompleteMeterFingerprintDayCount;
+    args.debug.out.excludedLeadingMissingFingerprintDayCount = excludedLeadingMissingFingerprintDayCount;
+    args.debug.out.excludedOtherUntrustedFingerprintDayCount = excludedOtherUntrustedFingerprintDayCount;
+    args.debug.out.fingerprintMonthBucketsUsed = fingerprintMonthBucketsUsed;
+    args.debug.out.fingerprintWeekdayWeekendBucketsUsed = fingerprintWeekdayWeekendBucketsUsed;
+    args.debug.out.fingerprintWeatherBucketsUsed = fingerprintWeatherBucketsUsed;
+    args.debug.out.fingerprintShapeSummaryByMonthDayType = fingerprintShapeSummaryByMonthDayType;
     args.debug.out.dayDiagnostics = dayDiagnostics;
     (args.debug.out as Record<string, unknown>).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
   }

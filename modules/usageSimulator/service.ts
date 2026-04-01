@@ -4337,16 +4337,20 @@ async function recalcSimulatorBuildImpl(args: {
   }
 
   const scenarioMergedTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
+  const preserveCanonicalTravelTruthForManualMonthly =
+    simMode === "MANUAL_TOTALS" && manualMonthlySourceDerivedResolution != null;
   const allTravelRanges =
     simMode === "MANUAL_TOTALS"
-      ? normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
+      ? preserveCanonicalTravelTruthForManualMonthly
+        ? scenarioMergedTravelRanges
+        : normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
       : simMode === "NEW_BUILD_ESTIMATE"
         ? []
         : scenarioMergedTravelRanges;
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
   // Past SMT patch baseline mode uses day-level patching and must not use month-level travel uplift.
   const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && simMode === "SMT_BASELINE";
-  if (allTravelRanges.length > 0 && !isPastSmtPatchMode) {
+  if (allTravelRanges.length > 0 && !isPastSmtPatchMode && !preserveCanonicalTravelTruthForManualMonthly) {
     const excludeSet = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
     for (const ym of built.canonicalMonths) {
       const [y, m] = ym.split("-").map(Number);
@@ -4936,7 +4940,10 @@ async function recalcSimulatorBuildImpl(args: {
     sourceDerivedAnnualTotalKwh,
     homeProfileSnapshotRef: homeProfile ? `home_profile:${initialLockboxInput.profileContext.profileHouseId}` : null,
     applianceProfileSnapshotRef: applianceProfile ? `appliance_profile:${initialLockboxInput.profileContext.profileHouseId}` : null,
-    usageShapeProfileIdentity: resolvedSimFingerprint?.usageSourceHash ?? null,
+    usageShapeProfileIdentity:
+      ((dataset as any)?.meta?.intervalUsageFingerprintIdentity as string | null | undefined) ??
+      resolvedSimFingerprint?.usageSourceHash ??
+      null,
     validationSelectionMode: effectiveValidationSelectionMode ?? null,
     validationDiagnosticsRef: null,
   });

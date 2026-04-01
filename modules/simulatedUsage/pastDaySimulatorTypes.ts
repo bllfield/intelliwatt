@@ -112,6 +112,7 @@ export type SimulatedDayResult = {
   simulatedReasonCode?:
     | "TRAVEL_VACANT"
     | "TEST_MODELED_KEEP_REF"
+    | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
     | "INCOMPLETE_METER_DAY"
     | "LEADING_MISSING_DAY";
@@ -135,6 +136,16 @@ export type SimulatedDayResult = {
   shapeVariantUsed?: string;
   weatherRegimeUsed?: PastWeatherRegimeKey;
   targetDayKwhBeforeWeather?: number;
+  templateSelectionKind?: string;
+  selectedFingerprintBucketMonth?: string;
+  selectedFingerprintBucketDayType?: PastDayTypeKey;
+  selectedFingerprintWeatherBucket?: PastWeatherRegimeKey;
+  selectedFingerprintIdentity?: string;
+  selectedReferencePoolCount?: number;
+  weatherScalingCoefficientUsed?: number;
+  dayTotalBeforeWeatherScale?: number;
+  dayTotalAfterWeatherScale?: number;
+  intervalShapeScalingMethod?: string;
   /** Diagnostics: why aux heat did or did not apply. */
   auxHeatGate_minTempPassed?: boolean;
   auxHeatGate_freezeHoursPassed?: boolean;

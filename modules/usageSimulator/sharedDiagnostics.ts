@@ -119,6 +119,26 @@ export function buildSharedPastSimDiagnostics(args: {
         sourceContext.sourceDerivedMonthlyTotalsKwhByMonth ?? null,
       sourceDerivedAnnualTotalKwh:
         sourceContext.sourceDerivedAnnualTotalKwh ?? null,
+      intervalUsageFingerprintIdentity:
+        profileContext.usageShapeProfileIdentity ??
+        meta.intervalUsageFingerprintIdentity ??
+        null,
+      intervalUsageFingerprintDiagnostics: {
+        trustedIntervalFingerprintDayCount: meta.trustedIntervalFingerprintDayCount ?? null,
+        excludedTravelVacantFingerprintDayCount: meta.excludedTravelVacantFingerprintDayCount ?? null,
+        excludedIncompleteMeterFingerprintDayCount: meta.excludedIncompleteMeterFingerprintDayCount ?? null,
+        excludedLeadingMissingFingerprintDayCount: meta.excludedLeadingMissingFingerprintDayCount ?? null,
+        excludedOtherUntrustedFingerprintDayCount: meta.excludedOtherUntrustedFingerprintDayCount ?? null,
+        fingerprintMonthBucketsUsed: Array.isArray(meta.fingerprintMonthBucketsUsed)
+          ? meta.fingerprintMonthBucketsUsed
+          : [],
+        fingerprintWeekdayWeekendBucketsUsed: Array.isArray(meta.fingerprintWeekdayWeekendBucketsUsed)
+          ? meta.fingerprintWeekdayWeekendBucketsUsed
+          : [],
+        fingerprintWeatherBucketsUsed: Array.isArray(meta.fingerprintWeatherBucketsUsed)
+          ? meta.fingerprintWeatherBucketsUsed
+          : [],
+      },
       monthlyTargetConstructionDiagnostics: Array.isArray(meta.monthlyTargetConstructionDiagnostics)
         ? meta.monthlyTargetConstructionDiagnostics
         : null,
@@ -177,6 +197,8 @@ export function buildSharedPastSimDiagnostics(args: {
         rawActualIntervalsMeta: simulatorDiagnostic.rawActualIntervalsMeta ?? null,
         stitchedPastIntervalsMeta: simulatorDiagnostic.stitchedPastIntervalsMeta ?? null,
       },
+      fingerprintShapeSummaryByMonthDayType:
+        asRecord(meta).fingerprintShapeSummaryByMonthDayType ?? null,
     },
   };
 }

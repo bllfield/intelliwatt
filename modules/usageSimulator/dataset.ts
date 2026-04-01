@@ -12,6 +12,7 @@ type UsageSeriesPoint = { timestamp: string; kwh: number };
 export type PastSimulatedDaySourceDetail =
   | "SIMULATED_TRAVEL_VACANT"
   | "SIMULATED_TEST_DAY"
+  | "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
   | "SIMULATED_INCOMPLETE_METER"
   | "SIMULATED_LEADING_MISSING"
   | "SIMULATED_OTHER";
@@ -532,7 +533,9 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
     if (hasMetaDetailKey) {
       const detail = (byDetail as Record<string, unknown>)[dk];
       const sourceDetail: PastSimulatedDaySourceDetail =
-        detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_TEST_DAY"
+        detail === "SIMULATED_TRAVEL_VACANT" ||
+        detail === "SIMULATED_TEST_DAY" ||
+        detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
           ? detail
           : detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING"
             ? detail
@@ -543,6 +546,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
     if (
       legacyDetail === "SIMULATED_TRAVEL_VACANT" ||
       legacyDetail === "SIMULATED_TEST_DAY" ||
+      legacyDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
       legacyDetail === "SIMULATED_INCOMPLETE_METER" ||
       legacyDetail === "SIMULATED_LEADING_MISSING"
     ) {
@@ -1238,6 +1242,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     const detail: PastSimulatedDaySourceDetail =
       reason === "TRAVEL_VACANT"
         ? "SIMULATED_TRAVEL_VACANT"
+        : reason === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+          ? "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
         : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
           ? "SIMULATED_TEST_DAY"
           : reason === "INCOMPLETE_METER_DAY"
@@ -1384,7 +1390,11 @@ export function buildSimulatedUsageDatasetFromCurve(
         .filter((row) => row.sourceDetail === "SIMULATED_TRAVEL_VACANT")
         .map((row) => row.date),
       simulatedTestModeledDateKeysLocal: daily
-        .filter((row) => row.sourceDetail === "SIMULATED_TEST_DAY")
+        .filter(
+          (row) =>
+            row.sourceDetail === "SIMULATED_TEST_DAY" ||
+            row.sourceDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
+        )
         .map((row) => row.date),
       simulatedSourceDetailByDate: daily.reduce<Record<string, PastSimulatedDaySourceDetail>>((acc, row) => {
         if (row.source !== "SIMULATED") return acc;
@@ -1392,6 +1402,7 @@ export function buildSimulatedUsageDatasetFromCurve(
         acc[row.date] =
           d === "SIMULATED_TRAVEL_VACANT" ||
           d === "SIMULATED_TEST_DAY" ||
+          d === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
           d === "SIMULATED_INCOMPLETE_METER" ||
           d === "SIMULATED_LEADING_MISSING" ||
           d === "SIMULATED_OTHER"

@@ -201,6 +201,86 @@ describe("resolveSharedPastRecalcWindow", () => {
   });
 });
 
+describe("monthly/manual constrained trusted interval fingerprint foundation", () => {
+  it("preserves travel exclusions outside the trusted fingerprint pool while keeping modeled non-travel days in the pool", () => {
+    const day1StartMs = new Date("2026-02-02T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-02-03T00:00:00.000Z").getTime();
+    const day3StartMs = new Date("2026-02-04T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const day3Grid = getDayGridTimestamps(day3StartMs);
+    const actualIntervals = [
+      ...day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.1 + (idx % 8) * 0.02 })),
+      ...day2Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.2 + (idx % 6) * 0.03 })),
+      ...day3Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.05 + (idx % 12) * 0.025 })),
+    ];
+    const wx = { tAvgF: 34, tMinF: 26, tMaxF: 42, hdd65: 31, cdd65: 0 };
+    const actualWxByDateKey = new Map<string, typeof wx>([
+      [dateKeyFromTimestamp(day1Grid[0]!), wx],
+      [dateKeyFromTimestamp(day2Grid[0]!), wx],
+      [dateKeyFromTimestamp(day3Grid[0]!), wx],
+    ]);
+    const debug: any = { dayDiagnostics: [] };
+
+    const built = buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs, day3StartMs],
+      excludedDateKeys: new Set<string>([dateKeyFromTimestamp(day2Grid[0]!)]),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      actualWxByDateKey,
+      collectSimulatedDayResults: true,
+      forceModeledOutputKeepReferencePoolDateKeys: new Set<string>([dateKeyFromTimestamp(day3Grid[0]!)]),
+      modeledKeepRefReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
+      debug: { out: debug },
+    });
+
+    expect(debug.trustedIntervalFingerprintDayCount).toBe(2);
+    expect(debug.excludedTravelVacantFingerprintDayCount).toBe(1);
+    expect(debug.intervalUsageFingerprintIdentity).toEqual(expect.any(String));
+    expect(debug.fingerprintMonthBucketsUsed).toContain("2026-02");
+    const nonTravelModeled = built.dayResults.find(
+      (row) => row.localDate === "2026-02-04" && row.simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+    );
+    expect(nonTravelModeled?.selectedFingerprintIdentity).toBe(debug.intervalUsageFingerprintIdentity);
+  });
+
+  it("excludes incomplete and leading-missing days from the trusted fingerprint pool", () => {
+    const day1StartMs = new Date("2026-03-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-03-02T00:00:00.000Z").getTime();
+    const day3StartMs = new Date("2026-03-03T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const day3Grid = getDayGridTimestamps(day3StartMs);
+    const actualIntervals = [
+      ...day2Grid.slice(0, 48).map((ts, idx) => ({ timestamp: ts, kwh: 0.3 + idx * 0.001 })),
+      ...day3Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.12 + (idx % 5) * 0.04 })),
+    ];
+    const wx = { tAvgF: 55, tMinF: 48, tMaxF: 63, hdd65: 9, cdd65: 0 };
+    const actualWxByDateKey = new Map<string, typeof wx>([
+      [dateKeyFromTimestamp(day1Grid[0]!), wx],
+      [dateKeyFromTimestamp(day2Grid[0]!), wx],
+      [dateKeyFromTimestamp(day3Grid[0]!), wx],
+    ]);
+    const debug: any = { dayDiagnostics: [] };
+
+    buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs, day3StartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      actualWxByDateKey,
+      collectSimulatedDayResults: true,
+      debug: { out: debug },
+    });
+
+    expect(debug.trustedIntervalFingerprintDayCount).toBe(1);
+    expect(debug.excludedLeadingMissingFingerprintDayCount).toBe(1);
+    expect(debug.excludedIncompleteMeterFingerprintDayCount).toBe(1);
+  });
+});
+
 describe("pastSimPolicy split helpers", () => {
   it("keeps user Past and GapFill Actual Home on userValidationPolicy", () => {
     expect(
