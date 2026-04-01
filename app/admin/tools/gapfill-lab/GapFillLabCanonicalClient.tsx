@@ -12,6 +12,7 @@ import {
   type GapfillFailureFields,
 } from "@/components/admin/gapfillLabAdminUi";
 import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdminSerialization";
+import { mergeActualHouseDiagnosticsSnapshot } from "./actualHouseDiagnosticsMerge";
 import { buildGapfillExportPayload } from "./exportPayload";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
