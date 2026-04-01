@@ -222,7 +222,7 @@ export async function POST(req: NextRequest) {
         scenarioId,
         executionMode: dispatched.executionMode,
         correlationId: dispatched.correlationId,
-        jobId: dispatched.jobId ?? null,
+        jobId: dispatched.executionMode === "droplet_async" ? dispatched.jobId : null,
         result: dispatched.executionMode === "inline" ? dispatched.result : null,
       });
     }
@@ -234,14 +234,24 @@ export async function POST(req: NextRequest) {
         scenarioId,
         readMode: "allow_rebuild",
       });
+      if (readResult.ok) {
+        return NextResponse.json({
+          ok: true,
+          action,
+          email: resolved.email,
+          userId: resolved.userId,
+          selectedHouse: resolved.selectedHouse,
+          scenarioId,
+          readResult,
+        });
+      }
       return NextResponse.json({
-        ok: readResult.ok,
         action,
         email: resolved.email,
         userId: resolved.userId,
         selectedHouse: resolved.selectedHouse,
         scenarioId,
-        ...(readResult.ok ? { readResult } : readResult),
+        ...readResult,
       });
     }
 

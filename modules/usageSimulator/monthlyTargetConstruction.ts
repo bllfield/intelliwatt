@@ -123,7 +123,7 @@ export function buildSourceDerivedMonthlyTargetResolution(args: {
     const normalizedMonthTarget =
       nonTravelDailyAverage == null ? null : nonTravelDailyAverage * periodDateKeys.length;
 
-    if (normalizedMonthTarget != null) {
+    if (normalizedMonthTarget != null && nonTravelDailyAverage != null) {
       const rounded = round2(Math.max(0, normalizedMonthTarget));
       monthlyKwhByMonth[month] = rounded;
       trustedMonthlyAnchorsByMonth[month] = rounded;
