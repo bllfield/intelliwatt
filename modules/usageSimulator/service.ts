@@ -4140,16 +4140,7 @@ async function recalcSimulatorBuildImpl(args: {
       };
     }
     simMode = "MANUAL_TOTALS";
-    const reqManual = computeRequirements(
-      {
-        manualUsagePayload: manualUsagePayload as any,
-        homeProfile: homeProfile as any,
-        applianceProfile: applianceProfile as any,
-        hasActualIntervals: actualOk,
-      },
-      "MANUAL_TOTALS",
-    );
-    if (!reqManual.canRecalc) {
+    if (!manualUsagePayload) {
       emitRecalcPreIntervalStageEvent({
         event: "recalc_pre_interval_admin_treatment_adaptation_failure",
         correlationId: args.correlationId,
@@ -4161,7 +4152,11 @@ async function recalcSimulatorBuildImpl(args: {
         failureCode: "requirements_unmet",
         failureMessage: "admin_lab_manual_constraints_requirements_unmet",
       });
-      return { ok: false, error: "requirements_unmet", missingItems: reqManual.missingItems };
+      return {
+        ok: false,
+        error: "requirements_unmet",
+        missingItems: ["Admin lab manual constraint builder did not produce a valid manual usage payload."],
+      };
     }
     emitRecalcPreIntervalStageEvent({
       event: "recalc_pre_interval_admin_treatment_adaptation_success",
@@ -4487,6 +4482,10 @@ async function recalcSimulatorBuildImpl(args: {
   // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
+  const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
+  const shouldUseSharedPastProducer =
+    simMode === "MANUAL_TOTALS" ||
+    (scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode));
   const recalcIntervalPreload =
     simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
       ? createRecalcIntervalPreloadContext({
@@ -4497,7 +4496,7 @@ async function recalcSimulatorBuildImpl(args: {
         })
       : null;
   const sharedPastRecalcWindow =
-    scenario?.name === WORKSPACE_PAST_NAME
+    shouldUseSharedPastProducer
       ? resolveSharedPastRecalcWindow({
           mode: simMode,
           canonicalMonths: built.canonicalMonths,
@@ -4689,8 +4688,7 @@ async function recalcSimulatorBuildImpl(args: {
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
   const producerBuildPathKind =
     runContext.buildPathKind === "cache_restore" ? "recalc" : runContext.buildPathKind;
-  const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
-  if (scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode)) {
+  if (shouldUseSharedPastProducer) {
     try {
       const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
       const startDate = sharedPastRecalcWindow?.startDate ?? canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
@@ -4719,10 +4717,13 @@ async function recalcSimulatorBuildImpl(args: {
         travelRanges: allTravelRanges,
         notes: built.notes ?? [],
         filledMonths: built.filledMonths ?? [],
+        monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
+        manualMonthlyInputState: built.manualMonthlyInputState ?? null,
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
         effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
         validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
         actualContextHouseId,
+        sharedProducerPathUsed: true,
         snapshots: { homeProfile, applianceProfile },
         ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
       };
@@ -4801,9 +4802,18 @@ async function recalcSimulatorBuildImpl(args: {
         }
         if (Object.keys(byMonth).length > 0) monthlyTotalsKwhByMonth = byMonth;
         pastSimulatedMonths = [];
-        notes.push("Past: baseline patched for excluded + leading-missing days");
+        notes.push(
+          simMode === "MANUAL_TOTALS"
+            ? "Manual monthly: shared Past producer built the normalized artifact."
+            : "Past: baseline patched for excluded + leading-missing days"
+        );
+      } else if (simMode === "MANUAL_TOTALS") {
+        throw new Error("manual_monthly_shared_producer_no_dataset");
       }
     } catch (e) {
+      if (simMode === "MANUAL_TOTALS") {
+        throw e;
+      }
       console.warn("[usageSimulator] Past stitched curve failed, using monthly curve", e);
     }
   }
@@ -4821,7 +4831,7 @@ async function recalcSimulatorBuildImpl(args: {
     canonicalEndMonth: canonicalForBuild.endMonth,
     canonicalMonths: built.canonicalMonths,
     canonicalPeriods:
-      scenario?.name === WORKSPACE_PAST_NAME
+      shouldUseSharedPastProducer
         ? [
             {
               id: "canonical_usage_365_coverage",
@@ -4838,7 +4848,12 @@ async function recalcSimulatorBuildImpl(args: {
     monthlyTotalsKwhByMonth,
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
-    travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
+    travelRanges:
+      simMode === "MANUAL_TOTALS"
+        ? allTravelRanges
+        : scenarioId
+          ? [...pastTravelRanges, ...scenarioTravelRanges]
+          : [],
     actualContextHouseId,
     validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
     effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
@@ -4846,6 +4861,9 @@ async function recalcSimulatorBuildImpl(args: {
     timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,
+    monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
+    manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+    sharedProducerPathUsed: shouldUseSharedPastProducer,
     ...(pastSimulatedMonths != null ? { pastSimulatedMonths } : {}),
     snapshots: {
       manualUsagePayload: manualUsagePayload ?? null,
@@ -4905,12 +4923,19 @@ async function recalcSimulatorBuildImpl(args: {
           canonicalEndMonth: buildInputs.canonicalEndMonth,
           notes: buildInputs.notes,
           filledMonths: buildInputs.filledMonths,
+          monthlyTargetConstructionDiagnostics: buildInputs.monthlyTargetConstructionDiagnostics ?? null,
+          manualMonthlyInputState: buildInputs.manualMonthlyInputState ?? null,
+          sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
         }, {
           timezone: (buildInputs as any).timezone ?? undefined,
           useUtcMonth: true,
           simulatedDayResults: pastSimulatedDayResults,
         })
-      : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+      : shouldUseSharedPastProducer && simMode === "MANUAL_TOTALS"
+        ? (() => {
+            throw new Error("manual_monthly_direct_builder_disabled_for_truth_path");
+          })()
+        : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
   const sourceDerivedMonthlyTotalsKwhByMonth =
     built.source?.actualMonthlyAnchorsByMonth && typeof built.source.actualMonthlyAnchorsByMonth === "object"
       ? (built.source.actualMonthlyAnchorsByMonth as Record<string, number>)
@@ -4967,6 +4992,8 @@ async function recalcSimulatorBuildImpl(args: {
       ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
       : [],
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
+    manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+    sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
     lockboxInput: normalizedLockboxInput,
     lockboxRunContext: runContext,
     lockboxPerDayTrace: perDayTrace,
@@ -6486,12 +6513,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ensureBaselineMonthlyFromBuild(dataset, buildInputs);
         }
       }
-      // Always build stitched curve for Past + SMT/GB so Travel/Vacant and missing/incomplete intervals are filled.
-      const isPastStitched =
+      // Build through the shared producer when the authoritative runtime path owns truth there.
+      const shouldUseSharedProducerRead =
         !dataset &&
-        isPastScenario &&
-        isSmtBaselineMode;
-      if (isPastStitched) {
+        (mode === "MANUAL_TOTALS" || (isPastScenario && isSmtBaselineMode));
+      if (shouldUseSharedProducerRead) {
         // Use buildInputs.canonicalMonths for window so we avoid getActualUsageDatasetForHouse (and its full-year
         // getActualIntervalsForRange) before the cache check. One full-year fetch in getPastSimulatedDatasetForHouse is enough.
         let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
@@ -6545,7 +6571,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         }
         const window = canonicalWindowDateRange(canonicalMonths);
         const parityWindow = resolveSharedPastRecalcWindow({
-          mode: "SMT_BASELINE",
+          mode: mode === "MANUAL_TOTALS" ? "MANUAL_TOTALS" : "SMT_BASELINE",
           canonicalMonths,
           smtAnchorPeriods: periodsForStitch,
         });
@@ -6766,6 +6792,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
           }
         }
       }
+      if (!dataset && mode === "MANUAL_TOTALS") {
+        return {
+          ok: false,
+          code: "INTERNAL_ERROR",
+          message: "manual_monthly_shared_producer_required",
+        };
+      }
       if (!dataset) {
         dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
       }
@@ -6796,6 +6829,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
         scenarioId,
         monthProvenanceByMonth,
         actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
+        manualMonthlyInputState: (buildInputs as any)?.manualMonthlyInputState ?? null,
+        sharedProducerPathUsed: (buildInputs as any)?.sharedProducerPathUsed ?? false,
       };
     }
 

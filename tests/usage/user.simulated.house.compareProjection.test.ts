@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { shouldResetPastValidationCompareExpanded } from "@/modules/usageSimulator/pastCompareUiDefaults";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
+import { resolvePastCompareSectionMode } from "@/components/usage/pastCompareSectionMode";
 import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
 import {
   buildActualDiagnosticsHeaderReadout,
@@ -15,6 +16,7 @@ import {
   buildSourceDerivedMonthlyTargetResolution,
   type MonthlyTargetConstructionDiagnostic,
   resolveManualMonthlyAnchorEndDateKey,
+  resolveManualMonthlyTargetDiagnostics,
 } from "@/modules/usageSimulator/monthlyTargetConstruction";
 import { buildPastSimPerDayTrace } from "@/modules/usageSimulator/pastSimLockbox";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
@@ -30,6 +32,7 @@ const {
   cookiesMock: vi.fn(),
   prisma: {
     user: { findUnique: vi.fn() },
+    manualUsageInput: { findUnique: vi.fn() },
   } as any,
   getSimulatedUsageForHouseScenario: vi.fn(),
   buildValidationCompareProjectionSidecar: vi.fn((dataset: any) => ({
@@ -70,6 +73,7 @@ describe("user simulated house compare projection", () => {
         name === "intelliwatt_user" ? { value: "brian@intellipath-solutions.com" } : undefined,
     });
     prisma.user.findUnique.mockResolvedValue({ id: "u1" });
+    prisma.manualUsageInput.findUnique.mockResolvedValue(null);
     getSimulatedUsageForHouseScenario.mockResolvedValue({
       ok: true,
       houseId: "h1",
@@ -177,6 +181,76 @@ describe("user simulated house compare projection", () => {
     expect(buildValidationCompareProjectionSidecar).toHaveBeenCalledTimes(1);
   });
 
+  it("returns manual monthly statement-range reconciliation for monthly-manual Past runs", async () => {
+    prisma.manualUsageInput.findUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+        travelRanges: [],
+      },
+      updatedAt: new Date("2025-05-01T00:00:00.000Z"),
+    });
+    getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED" },
+        meta: {
+          mode: "MANUAL_TOTALS",
+          manualMonthlyInputState: {
+            enteredMonthKeys: ["2025-04"],
+            missingMonthKeys: [
+              "2024-05",
+              "2024-06",
+              "2024-07",
+              "2024-08",
+              "2024-09",
+              "2024-10",
+              "2024-11",
+              "2024-12",
+              "2025-01",
+              "2025-02",
+              "2025-03",
+            ],
+            explicitZeroMonthKeys: [],
+            inputKindByMonth: {
+              "2025-04": "entered_nonzero",
+            },
+          },
+          filledMonths: [],
+          validationCompareRows: [],
+          validationCompareMetrics: {},
+        },
+        daily: Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+          source: "SIMULATED",
+        })),
+        monthly: [{ month: "2025-04", kwh: 300 }],
+        series: { intervals15: [] },
+      },
+    });
+
+    const { GET } = await import("@/app/api/user/usage/simulated/house/route");
+    const req = new NextRequest("http://localhost/api/user/usage/simulated/house?houseId=h1&scenarioId=past-s1");
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.manualMonthlyReconciliation?.eligibleRangeCount).toBe(1);
+    const aprilRow = body.manualMonthlyReconciliation?.rows?.find((row: any) => row.month === "2025-04");
+    expect(aprilRow).toMatchObject({
+      eligible: true,
+      enteredStatementTotalKwh: 300,
+      simulatedStatementTotalKwh: 300,
+      deltaKwh: 0,
+      status: "reconciled",
+    });
+  });
+
   it("shared compare display builder reuses sidecar rows for user and gapfill presentation", () => {
     const display = buildValidationCompareDisplay({
       compareProjection: {
@@ -260,6 +334,35 @@ describe("user simulated house compare projection", () => {
       percentError: 9.09,
     });
     expect(display.metrics).toMatchObject({ wape: 9.09, mae: 1, rmse: 1 });
+  });
+
+  it("switches monthly-manual Past display semantics to statement-range reconciliation only when reconciliation rows exist", () => {
+    expect(resolvePastCompareSectionMode({ manualMonthlyReconciliation: null })).toBe("validation_compare");
+    expect(
+      resolvePastCompareSectionMode({
+        manualMonthlyReconciliation: {
+          anchorEndDate: "2025-04-30",
+          eligibleRangeCount: 1,
+          ineligibleRangeCount: 0,
+          reconciledRangeCount: 1,
+          deltaPresentRangeCount: 0,
+          rows: [
+            {
+              month: "2025-04",
+              startDate: "2025-04-01",
+              endDate: "2025-04-30",
+              inputKind: "entered_nonzero",
+              enteredStatementTotalKwh: 300,
+              simulatedStatementTotalKwh: 300,
+              deltaKwh: 0,
+              eligible: true,
+              status: "reconciled",
+              reason: null,
+            },
+          ],
+        },
+      })
+    ).toBe("statement_range_reconciliation");
   });
 
   it("actual-house diagnostics header falls back to persisted shared read fields", () => {
@@ -513,6 +616,110 @@ describe("user simulated house compare projection", () => {
     expect(built.sourceDerivedTrustedMonthlyTotalsKwhByMonth).toBeNull();
   });
 
+  it("preserves blank vs explicit zero in Stage 1 manual monthly state and fills missing months later", async () => {
+    const canonicalMonths = [
+      "2025-03",
+      "2025-04",
+      "2025-05",
+      "2025-06",
+      "2025-07",
+      "2025-08",
+      "2025-09",
+      "2025-10",
+      "2025-11",
+      "2025-12",
+      "2026-01",
+      "2026-02",
+    ];
+    const resolution = resolveManualMonthlyTargetDiagnostics({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-05-31",
+        monthlyKwh: [
+          { month: "2025-03", kwh: 0 },
+          { month: "2025-05", kwh: 456 },
+        ],
+        travelRanges: [],
+      },
+      canonicalMonths,
+    });
+
+    expect(resolution.monthlyKwhByMonth).toEqual({
+      "2025-03": 0,
+      "2025-05": 456,
+    });
+    expect(resolution.manualMonthlyInputState).toEqual({
+      enteredMonthKeys: ["2025-03", "2025-05"],
+      missingMonthKeys: [
+        "2025-04",
+        "2025-06",
+        "2025-07",
+        "2025-08",
+        "2025-09",
+        "2025-10",
+        "2025-11",
+        "2025-12",
+        "2026-01",
+        "2026-02",
+      ],
+      explicitZeroMonthKeys: ["2025-03"],
+      inputKindByMonth: {
+        "2025-03": "entered_zero",
+        "2025-04": "missing",
+        "2025-05": "entered_nonzero",
+        "2025-06": "missing",
+        "2025-07": "missing",
+        "2025-08": "missing",
+        "2025-09": "missing",
+        "2025-10": "missing",
+        "2025-11": "missing",
+        "2025-12": "missing",
+        "2026-01": "missing",
+        "2026-02": "missing",
+      },
+    });
+    expect(
+      (resolution.diagnostics as MonthlyTargetConstructionDiagnostic[]).find((row) => row.month === "2025-04")
+    ).toMatchObject({
+      month: "2025-04",
+      monthlyTargetBuildMethod: "missing_user_manual_month_fill_later",
+      trustedMonthlyAnchorUsed: false,
+    });
+
+    const built = await buildSimulatorInputs({
+      mode: "MANUAL_TOTALS",
+      manualUsagePayload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-05-31",
+        monthlyKwh: [
+          { month: "2025-03", kwh: 0 },
+          { month: "2025-05", kwh: 456 },
+        ],
+        travelRanges: [],
+      },
+      homeProfile: {} as any,
+      applianceProfile: { fuelConfiguration: {} } as any,
+      canonicalMonths,
+    });
+
+    expect(built.manualMonthlyInputState).toEqual(resolution.manualMonthlyInputState);
+    expect(built.filledMonths).toEqual([
+      "2025-04",
+      "2025-06",
+      "2025-07",
+      "2025-08",
+      "2025-09",
+      "2025-10",
+      "2025-11",
+      "2025-12",
+      "2026-01",
+      "2026-02",
+    ]);
+    expect(Object.prototype.hasOwnProperty.call(built.monthlyTotalsKwhByMonth, "2025-04")).toBe(true);
+    expect(built.monthlyTotalsKwhByMonth["2025-03"]).toBe(0);
+    expect(built.monthlyTotalsKwhByMonth["2025-05"]).toBe(456);
+  });
+
   it("surfaces shared monthly target construction diagnostics on the read side", () => {
     const sharedDiagnostics = buildSharedPastSimDiagnostics({
       callerType: "user_past",
@@ -552,6 +759,7 @@ describe("user simulated house compare projection", () => {
         trustedMonthlyAnchorUsed: true,
       },
     ]);
+    expect(sharedDiagnostics.sourceTruthContext.manualMonthlyInputState).toEqual({});
   });
 
   it("surfaces monthly constrained interval fingerprint diagnostics on the read side", () => {

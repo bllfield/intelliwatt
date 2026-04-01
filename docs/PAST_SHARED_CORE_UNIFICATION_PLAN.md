@@ -4,6 +4,17 @@
 
 Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume output from the shared Past simulator path after persistence, not a separate compare artifact or compare-side fresh sim path.
 
+## Manual-Monthly Alignment (Authoritative)
+
+- Shared producer path after normalization remains the rule.
+- USER MANUAL MONTHLY and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` are distinct only in input semantics and pre-lockbox normalization.
+- USER MANUAL MONTHLY starts as a bill-cycle input chart anchored by the latest entered bill end date. That Stage 1 input chart must not be collapsed into the normalized shared Past Sim window.
+- The latest entered bill end date is the last day of the Stage 1 input sequence, and that sequence runs backward by bill-cycle months.
+- GapFill monthly-from-source starts from source-derived monthly anchors used for grading/tuning. It is not the same input semantic as USER MANUAL MONTHLY.
+- USER MANUAL MONTHLY is still travel/vacant-aware. Travel/vacant behavior does not belong only to GapFill monthly-from-source.
+- After normalization, both paths must use the same shared weather loader, lockbox producer path, persistence path, and artifact read path.
+- Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
+
 ## Implemented wiring (verification checklist still open)
 
 - **Shared module** `modules/simulatedUsage/simulatePastUsageDataset.ts`
@@ -22,6 +33,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Artifact-producing rebuilds normalize inputs then call the same shared recalc producer path before persistence; GapFill diagnostics may differ only after stored outputs exist.
   - GapFill Actual Home is the exact same user Past Sim flow with a different trigger/view surface only; it stays on `userValidationPolicy` and the shared persisted read/display path.
   - GapFill Test Home may fork only before lockbox entry: admin-owned validation policy plus usage input mode (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). After normalization it must use the same lockbox producer chain and artifact writer.
+  - USER MANUAL MONTHLY remains a distinct user-input semantic before normalization. GapFill `MONTHLY_FROM_SOURCE_INTERVALS` must not be treated as the only travel-aware monthly mode or as a replacement definition for user manual monthly.
   - Weather logic is pre-lockbox only: user Past owns `userWeatherLogicSetting`; GapFill Actual/Test share `gapfillWeatherLogicSetting` for a run; the shared resolver and lockbox chain stay the same after normalization.
 - **Metadata**
   - dataset.meta includes: buildPathKind, sourceOfDaySimulationCore, simVersion, derivationVersion, weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount, dailyRowCount, intervalCount, coverageStart/End, actualDayCount, simulatedDayCount, stitchedDayCount, actualIntervalsCount, referenceDaysCount, shapeMonthsPresent, excludedDateKeysCount, leadingMissingDaysCount, usageShapeProfileDiag, etc.

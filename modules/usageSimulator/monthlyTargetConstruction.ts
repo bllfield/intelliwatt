@@ -8,7 +8,8 @@ export const MIN_TRUSTED_NON_TRAVEL_DAYS_PER_MONTH = 5;
 export type MonthlyTargetBuildMethod =
   | "normalized_from_non_travel_days"
   | "insufficient_non_travel_days_fallback_to_pool_sim"
-  | "user_manual_month_value";
+  | "user_manual_month_value"
+  | "missing_user_manual_month_fill_later";
 
 export type MonthlyTargetConstructionDiagnostic = {
   month: string;
@@ -27,6 +28,15 @@ export type SourceDerivedMonthlyTargetResolution = {
   trustedMonthlyAnchorsByMonth: Record<string, number>;
   diagnostics: MonthlyTargetConstructionDiagnostic[];
   notes: string[];
+};
+
+export type ManualMonthlyInputKind = "entered_nonzero" | "entered_zero" | "missing";
+
+export type ManualMonthlyInputState = {
+  enteredMonthKeys: string[];
+  missingMonthKeys: string[];
+  explicitZeroMonthKeys: string[];
+  inputKindByMonth: Record<string, ManualMonthlyInputKind>;
 };
 
 function round2(value: number): number {
@@ -169,6 +179,7 @@ export function resolveManualMonthlyTargetDiagnostics(args: {
   monthlyKwhByMonth: Record<string, number>;
   diagnostics: MonthlyTargetConstructionDiagnostic[] | null;
   sourceDerivedTrustedMonthlyAnchorsByMonth: Record<string, number> | null;
+  manualMonthlyInputState: ManualMonthlyInputState | null;
   notes: string[];
 } {
   if ((args.payload as any)?.mode !== "MONTHLY") {
@@ -176,15 +187,29 @@ export function resolveManualMonthlyTargetDiagnostics(args: {
       monthlyKwhByMonth: {},
       diagnostics: null,
       sourceDerivedTrustedMonthlyAnchorsByMonth: null,
+      manualMonthlyInputState: null,
       notes: [],
     };
   }
 
   if (args.sourceDerivedResolution) {
+    const inputKindByMonth: Record<string, ManualMonthlyInputKind> = {};
+    const explicitZeroMonthKeys: string[] = [];
+    for (const month of args.canonicalMonths) {
+      const value = Number(args.sourceDerivedResolution.monthlyKwhByMonth?.[month]);
+      if (Number.isFinite(value) && value === 0) explicitZeroMonthKeys.push(month);
+      inputKindByMonth[month] = Number.isFinite(value) && value === 0 ? "entered_zero" : "entered_nonzero";
+    }
     return {
       monthlyKwhByMonth: { ...args.sourceDerivedResolution.monthlyKwhByMonth },
       diagnostics: args.sourceDerivedResolution.diagnostics.map((row) => ({ ...row })),
       sourceDerivedTrustedMonthlyAnchorsByMonth: { ...args.sourceDerivedResolution.trustedMonthlyAnchorsByMonth },
+      manualMonthlyInputState: {
+        enteredMonthKeys: [...args.canonicalMonths],
+        missingMonthKeys: [],
+        explicitZeroMonthKeys,
+        inputKindByMonth,
+      },
       notes: [...args.sourceDerivedResolution.notes],
     };
   }
@@ -199,9 +224,26 @@ export function resolveManualMonthlyTargetDiagnostics(args: {
 
   const monthlyKwhByMonth: Record<string, number> = {};
   const diagnostics: MonthlyTargetConstructionDiagnostic[] = [];
+  const inputKindByMonth: Record<string, ManualMonthlyInputKind> = {};
+  const enteredMonthKeys: string[] = [];
+  const missingMonthKeys: string[] = [];
+  const explicitZeroMonthKeys: string[] = [];
   for (const month of args.canonicalMonths) {
-    const value = enteredByMonth.get(month) ?? 0;
-    monthlyKwhByMonth[month] = value;
+    const hasExplicitValue = enteredByMonth.has(month);
+    const value = enteredByMonth.get(month);
+    if (hasExplicitValue && value != null) {
+      monthlyKwhByMonth[month] = value;
+      enteredMonthKeys.push(month);
+      if (value === 0) {
+        explicitZeroMonthKeys.push(month);
+        inputKindByMonth[month] = "entered_zero";
+      } else {
+        inputKindByMonth[month] = "entered_nonzero";
+      }
+    } else {
+      missingMonthKeys.push(month);
+      inputKindByMonth[month] = "missing";
+    }
     diagnostics.push({
       month,
       rawMonthKwhFromSource: null,
@@ -209,9 +251,11 @@ export function resolveManualMonthlyTargetDiagnostics(args: {
       eligibleNonTravelDayCount: 0,
       eligibleNonTravelKwhTotal: 0,
       nonTravelDailyAverage: null,
-      normalizedMonthTarget: null,
-      monthlyTargetBuildMethod: "user_manual_month_value",
-      trustedMonthlyAnchorUsed: enteredByMonth.has(month),
+      normalizedMonthTarget: hasExplicitValue ? value ?? null : null,
+      monthlyTargetBuildMethod: hasExplicitValue
+        ? "user_manual_month_value"
+        : "missing_user_manual_month_fill_later",
+      trustedMonthlyAnchorUsed: hasExplicitValue,
     });
   }
 
@@ -219,6 +263,12 @@ export function resolveManualMonthlyTargetDiagnostics(args: {
     monthlyKwhByMonth,
     diagnostics,
     sourceDerivedTrustedMonthlyAnchorsByMonth: null,
+    manualMonthlyInputState: {
+      enteredMonthKeys,
+      missingMonthKeys,
+      explicitZeroMonthKeys,
+      inputKindByMonth,
+    },
     notes: [],
   };
 }

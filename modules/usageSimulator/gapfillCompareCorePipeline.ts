@@ -187,8 +187,8 @@ export async function runGapfillCompareCorePipeline(
   const pastScenario = await (prisma as any).usageSimulatorScenario
     .findFirst({
       where: {
-        userId: user.id,
-        houseId: house.id,
+      userId: user.id,
+      houseId: house.id,
         name: "Past (Corrected)",
         archivedAt: null,
       },
@@ -208,42 +208,42 @@ export async function runGapfillCompareCorePipeline(
 
   const normalizedArtifactIdentitySource = normalizeArtifactIdentitySource(artifactIdentitySource);
   if (!resumeExistingCompareRunId) {
-    const compareRunStart = await createGapfillCompareRunStart({
-      userId: user.id,
-      houseId: house.id,
+  const compareRunStart = await createGapfillCompareRunStart({
+    userId: user.id,
+    houseId: house.id,
       compareFreshMode: "artifact_only",
-      requestedInputHash: requestedArtifactInputHash,
+    requestedInputHash: requestedArtifactInputHash,
       artifactScenarioId: String(pastScenario.id),
-      requireExactArtifactMatch,
+    requireExactArtifactMatch,
       artifactIdentitySource: normalizedArtifactIdentitySource,
       initialStatus: "started",
       initialPhase: "compare_core_artifact_read_started",
-      statusMeta: {
-        route: "admin_gapfill_lab",
+    statusMeta: {
+      route: "admin_gapfill_lab",
         phase: "compare_core_artifact_read_started",
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
-        requestedCompareRunId,
+      requestedCompareRunId,
         compareFreshMode: "artifact_only",
-      },
-    });
-    if (!compareRunStart.ok) {
-      return NextResponse.json(
+    },
+  });
+  if (!compareRunStart.ok) {
+    return NextResponse.json(
         attachFailureContract({
-          ok: false,
+        ok: false,
           error: String(compareRunStart.error ?? "compare_run_queue_persist_failed"),
           message: compareRunStart.message,
           reasonCode: "COMPARE_RUN_QUEUE_PERSIST_FAILED",
         }),
-        { status: 500 }
-      );
-    }
-    out.compareRunId = compareRunStart.compareRunId;
+      { status: 500 }
+    );
+  }
+  out.compareRunId = compareRunStart.compareRunId;
     out.compareRunStatus = "running";
     out.compareRunSnapshotReady = false;
   }
 
   const compareRequestTruth = {
-    route: "admin_gapfill_lab",
+      route: "admin_gapfill_lab",
     compareExecutionMode: "canonical_artifact_only",
     canonicalReadLayer: "getSimulatedUsageForHouseScenario",
     canonicalReadRoute: "/api/user/usage/simulated/house",
@@ -301,7 +301,7 @@ export async function runGapfillCompareCorePipeline(
         ok: false,
         error: "compare_core_canonical_read_failed",
         message: String(canonicalRead.message ?? "Canonical read failed."),
-        compareRunId: out.compareRunId,
+      compareRunId: out.compareRunId,
         compareRunStatus: "failed",
       }),
       { status: 500 }
@@ -315,8 +315,8 @@ export async function runGapfillCompareCorePipeline(
       artifactReadMode: "artifact_only",
       projectionMode: "baseline",
       compareSidecarRequest: true,
-    },
-  });
+      },
+    });
   const canonicalDataset = canonicalRead.dataset as any;
   const baselineReadUsedCanonicalRawFallback = !baselineRead.ok;
   const baselineDataset = baselineRead.ok ? (baselineRead.dataset as any) : canonicalDataset;
@@ -415,7 +415,7 @@ export async function runGapfillCompareCorePipeline(
   };
   const userPipelineCompareProjection = userPipelineReadResolved?.ok
     ? buildValidationCompareProjectionSidecar(userPipelineDataset)
-    : null;
+          : null;
 
   const selectedDateKeysSorted = Array.from(testDateKeysLocal).sort();
   const testDateKeySet = new Set<string>(selectedDateKeysSorted);
@@ -482,7 +482,7 @@ export async function runGapfillCompareCorePipeline(
     actual: actualIntervalsForSelected,
     simulated: simulatedIntervalsForSelected,
     simulatedByTs,
-    timezone,
+            timezone,
   });
   const scoredDayTruthRows = selectedDateKeysSorted.map((dk) => {
     const actualDayKwh = round2(actualDailyByDate.get(dk) ?? 0);
@@ -521,14 +521,14 @@ export async function runGapfillCompareCorePipeline(
   markCompareCoreStep(compareCoreTiming, "build_metrics");
 
   const metricsSummary = {
-    mae: metrics.mae,
-    rmse: metrics.rmse,
-    mape: metrics.mape,
-    wape: metrics.wape,
-    maxAbs: metrics.maxAbs,
-    totalActualKwhMasked: metrics.totalActualKwhMasked,
-    totalSimKwhMasked: metrics.totalSimKwhMasked,
-    deltaKwhMasked: metrics.deltaKwhMasked,
+      mae: metrics.mae,
+      rmse: metrics.rmse,
+      mape: metrics.mape,
+      wape: metrics.wape,
+      maxAbs: metrics.maxAbs,
+      totalActualKwhMasked: metrics.totalActualKwhMasked,
+      totalSimKwhMasked: metrics.totalSimKwhMasked,
+      deltaKwhMasked: metrics.deltaKwhMasked,
     mapeFiltered: metrics.mapeFiltered,
     mapeFilteredCount: metrics.mapeFilteredCount,
   };
@@ -611,38 +611,38 @@ export async function runGapfillCompareCorePipeline(
     compareRunId: out.compareRunId!,
     phase: "compare_core_complete",
     snapshot: snapshotPayload,
-    statusMeta: {
-      route: "admin_gapfill_lab",
+      statusMeta: {
+        route: "admin_gapfill_lab",
       projectionMode: "baseline_vs_accuracy",
       canonicalTruthSource: "/api/user/usage/simulated/house",
       compareFreshMode: "artifact_only",
-    },
-  });
+      },
+    });
   if (!finalized) {
-    await markGapfillCompareRunFailed({
+      await markGapfillCompareRunFailed({
       compareRunId: out.compareRunId!,
       phase: "compare_core_snapshot_persist_failed",
       failureCode: "compare_core_snapshot_persist_failed",
       failureMessage: "Could not persist compare snapshot payload.",
       statusMeta: { route: "admin_gapfill_lab" },
-    });
-    out.compareRunStatus = "failed";
-    out.compareRunTerminalState = true;
-    return NextResponse.json(
+      });
+      out.compareRunStatus = "failed";
+      out.compareRunTerminalState = true;
+      return NextResponse.json(
       attachFailureContract({
-        ok: false,
+          ok: false,
         error: "compare_core_snapshot_persist_failed",
         message: "Could not persist compare snapshot payload.",
-        compareRunId: out.compareRunId,
+          compareRunId: out.compareRunId,
         compareRunStatus: "failed",
       }),
-      { status: 500 }
-    );
-  }
+        { status: 500 }
+      );
+    }
 
-  out.compareRunStatus = "succeeded";
-  out.compareRunSnapshotReady = true;
-  out.compareRunTerminalState = true;
+    out.compareRunStatus = "succeeded";
+    out.compareRunSnapshotReady = true;
+    out.compareRunTerminalState = true;
   state.compareCoreTimingForLifecycle = compareCoreTiming;
   state.compareRequestTruthForLifecycle = compareRequestTruth;
   state.artifactRequestTruthForLifecycle = {

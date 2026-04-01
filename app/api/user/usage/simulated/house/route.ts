@@ -10,6 +10,8 @@ import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile
 import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
+import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -138,12 +140,18 @@ export async function GET(request: NextRequest) {
     if (out.ok) {
       const datasetAny = (out as any)?.dataset ?? {};
       const compareProjection = buildValidationCompareProjectionSidecar(datasetAny);
+      const manualUsage = await getManualUsageInputForUserHouse({ userId: u.user.id, houseId });
+      const manualMonthlyReconciliation = buildManualMonthlyReconciliation({
+        payload: manualUsage.payload,
+        dataset: datasetAny,
+      });
       const sharedDiagnostics = buildSharedPastSimDiagnostics({
         callerType: "user_past",
         dataset: datasetAny,
         scenarioId,
         correlationId,
         compareProjection,
+        manualMonthlyReconciliation,
         readMode: "allow_rebuild",
         projectionMode: "baseline",
       });
@@ -153,6 +161,7 @@ export async function GET(request: NextRequest) {
         {
           ...out,
           compareProjection,
+          manualMonthlyReconciliation,
           sharedDiagnostics,
           correlationId,
         },

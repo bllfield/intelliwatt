@@ -65,6 +65,8 @@
 
 - Usage layer contract map: `docs/USAGE_LAYER_MAP.md` (canonical interval-series layer meanings + endpoint/function mapping)
 
+- Manual-monthly product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage USER MANUAL MONTHLY model: Stage 1 bill-cycle input semantics versus Stage 2 normalized shared Past Sim behavior.
+
 ## Where To Start
 
 1. Open `docs/QUICK_START.md` and follow the workflow steps.
@@ -584,6 +586,7 @@ For detailed information about specific areas, see:
 - **[Google Maps Setup](./GOOGLE_MAPS_SETUP.md)** - Google Places API configuration
 - **[Architecture Standards](./ARCHITECTURE_STANDARDS.md)** - Core principles and patterns
 - **[Project Plan](./PROJECT_PLAN.md)** - Authoritative project guardrails
+- **[Usage Simulation Plan](./USAGE_SIMULATION_PLAN.md)** - Authoritative manual-monthly and shared Past Sim semantics
 - **[API Contracts](./API_CONTRACTS.md)** - API versioning strategy
 - **[Usage Layer Map](./USAGE_LAYER_MAP.md)** - Canonical interval-series layer map and route/function mapping
 - **[Environment Variables](./ENV_VARS.md)** - Required env vars

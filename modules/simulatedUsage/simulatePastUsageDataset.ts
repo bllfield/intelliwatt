@@ -1565,6 +1565,12 @@ export async function simulatePastUsageDataset(
             : undefined,
         gapfillForceModeledKeepRefUtcKeyCount: keepRefUtcDateKeys.size,
         resolvedSimFingerprint: (buildInputs as { resolvedSimFingerprint?: unknown }).resolvedSimFingerprint ?? undefined,
+        monthlyTargetConstructionDiagnostics:
+          (buildInputs as { monthlyTargetConstructionDiagnostics?: unknown }).monthlyTargetConstructionDiagnostics ?? null,
+        manualMonthlyInputState:
+          (buildInputs as { manualMonthlyInputState?: unknown }).manualMonthlyInputState ?? null,
+        sharedProducerPathUsed:
+          (buildInputs as { sharedProducerPathUsed?: unknown }).sharedProducerPathUsed === false ? false : true,
       } as unknown as typeof dataset.meta;
     }
 

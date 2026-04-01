@@ -3,7 +3,10 @@ import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
-import type { MonthlyTargetConstructionDiagnostic } from "@/modules/usageSimulator/monthlyTargetConstruction";
+import type {
+  ManualMonthlyInputState,
+  MonthlyTargetConstructionDiagnostic,
+} from "@/modules/usageSimulator/monthlyTargetConstruction";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
@@ -788,6 +791,9 @@ export type SimulatorBuildInputsV1 = {
   validationSelectionDiagnostics?: Record<string, unknown>;
   notes?: string[];
   filledMonths?: string[];
+  monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
+  manualMonthlyInputState?: ManualMonthlyInputState | null;
+  sharedProducerPathUsed?: boolean;
   // Snapshots (for auditing / future UI): not required for regen.
   snapshots?: {
     manualUsagePayload?: any;
@@ -931,6 +937,8 @@ export type SimulatedUsageDatasetMeta = {
   validationSelectionDiagnostics?: Record<string, unknown>;
   /** Shared month-anchor diagnostics for manual monthly flows. */
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
+  manualMonthlyInputState?: ManualMonthlyInputState | null;
+  sharedProducerPathUsed?: boolean;
   /** Compare-only projection rows for validation/test days from this same canonical family. */
   validationCompareRows?: Array<{
     localDate: string;
@@ -1132,8 +1140,11 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
       canonicalEndMonth: buildInputs.canonicalEndMonth,
       notes: buildInputs.notes ?? [],
       filledMonths: buildInputs.filledMonths ?? [],
+      monthlyTargetConstructionDiagnostics: buildInputs.monthlyTargetConstructionDiagnostics ?? null,
+      manualMonthlyInputState: buildInputs.manualMonthlyInputState ?? null,
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
+      sharedProducerPathUsed: false,
     },
     usageBucketsByMonth,
     ...(intervals15m !== undefined && { intervals15m }),
@@ -1197,6 +1208,9 @@ export function buildSimulatedUsageDatasetFromCurve(
     canonicalEndMonth: string;
     notes?: string[];
     filledMonths?: string[];
+    monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
+    manualMonthlyInputState?: ManualMonthlyInputState | null;
+    sharedProducerPathUsed?: boolean;
   },
   options?: {
     excludedDateKeys?: Set<string>;
@@ -1383,8 +1397,11 @@ export function buildSimulatedUsageDatasetFromCurve(
       canonicalEndMonth: meta.canonicalEndMonth,
       notes: meta.notes ?? [],
       filledMonths: meta.filledMonths ?? [],
+      monthlyTargetConstructionDiagnostics: meta.monthlyTargetConstructionDiagnostics ?? null,
+      manualMonthlyInputState: meta.manualMonthlyInputState ?? null,
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
+      sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
       canonicalArtifactSimulatedDayTotalsByDate,
       simulatedTravelVacantDateKeysLocal: daily
         .filter((row) => row.sourceDetail === "SIMULATED_TRAVEL_VACANT")

@@ -1,4 +1,5 @@
 import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 
 export type SharedDiagnosticsCallerType =
   | "user_past"
@@ -67,6 +68,7 @@ export function buildSharedPastSimDiagnostics(args: {
   artifactEngineVersion?: string | null;
   artifactPersistenceOutcome?: string | null;
   compareProjection?: { rows?: unknown; metrics?: unknown } | null;
+  manualMonthlyReconciliation?: ManualMonthlyReconciliation | null;
 }): SharedPastSimDiagnostics {
   const dataset = args.dataset ?? {};
   const meta = asRecord(dataset?.meta);
@@ -142,6 +144,7 @@ export function buildSharedPastSimDiagnostics(args: {
       monthlyTargetConstructionDiagnostics: Array.isArray(meta.monthlyTargetConstructionDiagnostics)
         ? meta.monthlyTargetConstructionDiagnostics
         : null,
+      manualMonthlyInputState: asRecord(meta.manualMonthlyInputState),
       travelRangesUsed: asRecord(lockboxInput.travelRanges).ranges ?? [],
       validationTestKeysUsed: validationKeys.localDateKeys ?? [],
       exclusionDrivingCanonicalInputsSummary: {
@@ -158,6 +161,7 @@ export function buildSharedPastSimDiagnostics(args: {
       keepRefUtcDateKeyCount: meta.gapfillForceModeledKeepRefUtcKeyCount ?? null,
       intervalCount: meta.intervalCount ?? null,
       dailyRowCount: meta.dailyRowCount ?? null,
+      sharedProducerPathUsed: meta.sharedProducerPathUsed ?? null,
       artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
       artifactId: args.artifactId ?? null,
       artifactInputHash:
@@ -184,6 +188,14 @@ export function buildSharedPastSimDiagnostics(args: {
         validationRowsCount: normalizeRows(compareProjection?.rows).length,
         validationMetricsSummary: asRecord(compareProjection?.metrics),
       },
+      manualMonthlyReconciliationSummary: args.manualMonthlyReconciliation
+        ? {
+            eligibleRangeCount: args.manualMonthlyReconciliation.eligibleRangeCount,
+            ineligibleRangeCount: args.manualMonthlyReconciliation.ineligibleRangeCount,
+            reconciledRangeCount: args.manualMonthlyReconciliation.reconciledRangeCount,
+            deltaPresentRangeCount: args.manualMonthlyReconciliation.deltaPresentRangeCount,
+          }
+        : null,
       validationRowsCount: normalizeRows(compareProjection?.rows).length,
       validationMetricsSummary: asRecord(compareProjection?.metrics),
     },

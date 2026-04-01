@@ -921,6 +921,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/tools/manual-monthly"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🧾 Manual Monthly Lab</div>
+              <div className="text-sm text-brand-navy/60">
+                Browser-based test harness for the real customer manual-monthly flow, with diagnostics
+              </div>
+            </a>
+            <a
               href="/admin/tools/usage-shape-profile"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

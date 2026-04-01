@@ -24,6 +24,7 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 - **Canonical lab actual context (shared parameter):** when calibration uses a reusable test home, recalc/read may specify `actualContextHouseId` (defaulting to `houseId`) so simulated truth still comes from the same shared simulator chain and artifact family without route-side math forks.
 - **Actual Home identity rule:** GapFill Actual Home is only a trigger/view onto the same normal user Past Sim flow. It must reuse `userValidationPolicy`, the same source/travel/weather state the user Past run uses, the same sealed lockbox chain, and the same shared persisted read/display modules.
 - **Test Home split rule:** GapFill Test Home may own pre-lockbox inputs only: `adminValidationPolicy`, pre-lockbox travel/vacant state, and the usage input mode split (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). After normalization it must enter the same sealed lockbox chain and persisted artifact family as every other Past run.
+- **Manual-monthly semantics rule:** USER MANUAL MONTHLY and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` are distinct only in input semantics before normalization. USER MANUAL MONTHLY keeps user-entered bill-cycle values as Stage 1 input semantics; GapFill monthly-from-source uses source-derived monthly anchors for grading/tuning. After normalization both must use the same shared Past Sim path.
 - **Compare boundary:** compare remains post-persist only. It may read persisted artifacts and sidecars, but must not trigger recalc, rebuild, simulation, or truth shaping.
 - **Shared diagnostics contract:** user Past, GapFill Actual Home, GapFill Test Home, and compare read surfaces should expose one shared diagnostics shape with `identityContext`, `sourceTruthContext`, `lockboxExecutionSummary`, `projectionReadSummary`, and `tuningSummary`. Route/UI-specific wrappers may exist, but the underlying parity/tuning facts should come from that shared contract.
 - **Shared weather selector rule:** weather logic is a pre-lockbox selector split only. User Past uses `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home use the same `gapfillWeatherLogicSetting` for a given run. All of them still use the same shared weather resolver and the same sealed lockbox chain after normalization.
@@ -33,6 +34,48 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 - **Mode-weighted evidence**: observed-history reconstruction prioritizes measured interval behavior + weather response; home details/appliances act as context/priors/fallback there, and become primary in overlay/synthetic/sparse-data modes.
 - **Deterministic + auditable**: given the same inputs, we should regenerate the same simulated series (or store the generated series + an inputs hash).
 - **Compatibility with the plan engine**: the generated data must obey the plan engine invariants (e.g., monthly totals match the sum of required period buckets → no `USAGE_BUCKET_SUM_MISMATCH`).
+
+## User Manual Monthly Product Semantics (Authoritative)
+
+This section is authoritative for future USER MANUAL MONTHLY implementation and handoff language.
+
+### Stage 1: Bill-Cycle Input Chart
+
+- USER MANUAL MONTHLY starts as a bill-cycle input chart, not a calendar-month chart.
+- The latest bill end date entered by the user is the input anchor.
+- That latest entered bill end date is the last day of the input sequence.
+- The input sequence runs backward from that anchor by bill-cycle months.
+- The user may enter fewer than 12 bills.
+- The user may leave some bill-cycle months missing.
+- On the input chart, entered bill-cycle months are filled and missing bill-cycle months remain blank.
+- Do not silently convert the input chart into calendar-month semantics.
+- "Explicit month values stay authoritative" and "manual totals immutability" apply at this input stage: the values the user entered remain authoritative for the bill-cycle months they entered.
+- They do not mean missing bill-cycle months remain permanently blank in the final simulated artifact.
+
+### Stage 2: Shared Past Sim Normalization and Simulation
+
+- After the bill-cycle input sequence is built, it must normalize into the same shared Past Sim coverage window used by the rest of the system.
+- Do not invent a separate manual-monthly sim window.
+- Do not collapse bill-cycle input semantics into the normalized shared Past Sim window semantics.
+- The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
+- Missing bill-cycle months are an input-state concept, not the final simulated-output contract.
+- Blank on the input chart does not mean blank forever in the final simulated artifact.
+- Past Sim must fill missing bill-cycle months the user did not provide, excluded travel/vacant days inside the normalized shared sim window, and other missing or simulated days required by the shared Past Sim logic.
+
+### Travel/Vacant Rule
+
+- USER MANUAL MONTHLY is travel/vacant-aware.
+- User-entered travel/vacant dates must affect Past Sim for manual monthly too.
+- Travel awareness does not belong only to GapFill monthly-from-source.
+- GapFill monthly-from-source is not the only travel-aware monthly mode.
+- Travel ranges may come from the manual payload for user manual monthly and must drive excluded date keys in the shared simulator after normalization.
+- Past Sim must simulate excluded travel/vacant days for user manual monthly too.
+
+### Input-Semantic Distinction
+
+- USER MANUAL MONTHLY keeps user-entered bill-cycle monthly values as Stage 1 input semantics, may be partial, is travel/vacant-aware, and may leave bill-cycle months blank on the input chart before entering the shared Past Sim path after normalization.
+- GAPFILL `MONTHLY_FROM_SOURCE_INTERVALS` uses source-derived monthly anchors from actuals for grading/tuning, may also be travel/vacant-aware, and then enters the same shared Past Sim path after normalization.
+- These are distinct input semantics. Do not rewrite user manual monthly into source-derived monthly semantics.
 
 ## Canonical Reference Rule
 
@@ -84,6 +127,8 @@ Rule: apply structured add/subtract deltas on top of observed or synthetic basel
 ### 3) Synthetic / Sparse-Data Mode
 
 Used for manual usage simulation, new-build simulation, and sparse-history homes.
+
+For USER MANUAL MONTHLY, this modeling-mode label applies after the Stage 1 bill-cycle input chart is constructed and then normalized into the shared Past Sim window. It does not turn the user input chart into a calendar-month chart.
 
 Primary drivers:
 - declared home/appliance/occupancy details
@@ -730,6 +775,8 @@ Past simulation now runs through a lockbox split:
 
 Weather identity and weather loading for normal graded Past flows are tied to `sourceHouseId`.
 
-`MANUAL_MONTHLY` and `MANUAL_ANNUAL` are distinct internal curve-construction branches even though persistence remains backward-compatible with `SimulatorBuildInputsV1.mode = MANUAL_TOTALS`.
+Current runtime behavior note: `MANUAL_MONTHLY` and `MANUAL_ANNUAL` are distinct internal curve-construction branches even though persistence remains backward-compatible with `SimulatorBuildInputsV1.mode = MANUAL_TOTALS`.
+
+Authoritative product target: this internal branch naming must not be read as permission to collapse Stage 1 bill-cycle input semantics into Stage 2 normalized shared-window semantics. For USER MANUAL MONTHLY, bill-cycle input ownership remains a separate product concept from the normalized Past Sim coverage window, and `MANUAL_TOTALS` must not be treated as the product definition of user manual monthly semantics.
 
 Lockbox stages end at persistence. Artifact reads, baseline/raw projection, compare sidecars, and UI rendering are downstream consumer stages outside the lockbox engine.

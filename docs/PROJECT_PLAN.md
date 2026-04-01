@@ -381,7 +381,7 @@ Notes:
 
 ### Phase Summary
 - Manual entry is no longer a placeholder. /dashboard/api/manual contains real Monthly + Annual entry UI (with travel ranges) and persists real kWh inputs.
-- Manual monthly requires an explicit anchor (anchorEndMonth YYYY-MM or anchorEndDate). Default is the platform’s last full month in America/Chicago. Anchor is persisted and used for validation, simulated generation, and chart labels.
+- Manual monthly requires an explicit anchor (anchorEndMonth YYYY-MM or anchorEndDate). For user manual monthly product semantics, the latest entered bill end date is the input anchor for the bill-cycle chart. After that bill-cycle input is built, the shared Past Sim path normalizes it into the canonical Past coverage window used by the rest of the system.
 - Existing SMT and Green Button ingestion/storage paths are untouched. Real usage remains immutable.
 - Added a new simulated usage engine module that generates a baseline 15-minute interval curve (flat distribution) from manual totals, applies whole-day travel exclusions, and renormalizes totals.
 - Added /api/user/usage/simulated which returns the exact same JSON shape as /api/user/usage (ok + houses[] with dataset), enabling reuse of UsageDashboard charts.
@@ -390,6 +390,34 @@ Notes:
 - Replaced Home Details and Appliances dashboard placeholders with real forms using existing dashboard design language, persisted to additive simulated-layer tables.
 - Home Details supports WattBuy prefill from existing stored sources (HouseAddress.rawWattbuyJson, WattBuyApiSnapshot, fallback proxy). Prefill never auto-saves; user edits always win; Apply/Reset controls provided.
 - SmtManualFallbackCard no longer creates placeholder records; it links/scrolls the user into the real manual entry UI. Manual status helper reflects “Active” when valid manual inputs exist.
+
+## Plan Change (2026-04) — User Manual Monthly Product Target Clarification
+
+This section is authoritative for future manual-monthly implementation work.
+
+- USER MANUAL MONTHLY has a two-stage model:
+  - Stage 1 = bill-cycle input chart.
+  - Stage 2 = shared Past Sim normalization + simulation.
+- Those two stages are not the same thing and must not be collapsed into one concept.
+- The Stage 1 input chart is bill-cycle based, not calendar-month based.
+- The latest entered bill end date is the input anchor.
+- That latest entered bill end date is the last day of the entered bill-cycle sequence.
+- The entered sequence runs backward by bill-cycle months from that latest entered bill end date.
+- The user may enter fewer than 12 bills.
+- The user may leave some bill-cycle months missing.
+- On the input chart, entered bill-cycle months are filled and missing bill-cycle months remain blank.
+- "Explicit month values stay authoritative" means the values the user entered remain authoritative as user input for the bill-cycle months they entered. It does not mean missing bill-cycle months stay blank forever in the final simulated artifact.
+- After the bill-cycle input sequence is constructed, the system must preserve which bill-cycle months were entered versus missing, then normalize that input into the same shared Past Sim window, weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
+- Stage 1 bill-cycle chart semantics and Stage 2 normalized shared-window semantics must never be described as if they are the same thing.
+- USER MANUAL MONTHLY is travel/vacant-aware. User-entered travel/vacant ranges must affect Past Sim for manual monthly too.
+- Past Sim must fill:
+  - missing bill-cycle months the user did not provide
+  - excluded travel/vacant days inside the normalized shared Past Sim window
+  - any other missing or simulated days required by the shared Past Sim logic
+- Blank or missing bill-cycle input months are an input-state concept, not the final simulated-output contract.
+- GapFill monthly-from-source remains a distinct input semantic used for grading and tuning. It uses source-derived monthly anchors from actuals before entering the same shared Past Sim path after normalization.
+- USER MANUAL MONTHLY must not be reframed as source-derived monthly, and GapFill monthly-from-source must not be treated as the only travel-aware monthly mode.
+- GapFill Actual remains the normal Past baseline truth path. GapFill Test may differ only in pre-lockbox normalized input semantics, then must enter the same shared producer path.
 
 ### Architecture Notes
 - New modules added under /modules (additive, isolated): manualUsage, simulatedUsage, homeProfile, applianceProfile, usageScenario.
@@ -420,14 +448,15 @@ Notes:
 - **No simulator “Step 1: choose source” UI**. Source selection happens on Usage Entry (`/dashboard/api`). Simulator is entered via redirect intents or when partial actual coverage requires gap-fill.
 - **No “ACTUAL_BASELINE mode”**. Actual baseline is the saved usage dataset served by `GET /api/user/usage` (SMT or Green Button). Simulator never modifies actual months/intervals.
 - **Gap‑fill rule (critical)**: for partial SMT/GB, simulate ONLY missing months deterministically; do NOT rescale/reshape/modify actual months.
-- **Manual totals immutability**: never modify user-entered monthly/annual totals; only generate intervals beneath fixed totals.
-- **Manual anchor date (billing‑cycle)**: manual usage requires `anchorEndDate (YYYY‑MM‑DD, America/Chicago)` and uses 12 billing periods ending at that date (UI may label as “months” in V1).
+- **Current implementation shorthand note - Manual totals immutability**: this phrase refers to Stage 1 input ownership only. Preserve the user-entered bill-cycle values for the bill-cycle months the user actually entered. It does not mean the final normalized Past Sim artifact must leave missing bill-cycle months blank forever.
+- **Current implementation shorthand note - Manual anchor date (billing‑cycle)**: `anchorEndDate (YYYY‑MM‑DD, America/Chicago)` defines the Stage 1 bill-cycle input chart. The anchor date is the last day of the entered bill-cycle sequence, and that sequence runs backward by bill-cycle months before the result is normalized into the shared Past Sim coverage window.
+- **Current implementation shorthand note - Travel/vacant applies to user manual monthly too**: travel/vacant-aware behavior is not a GapFill-only or source-derived-only concept. User manual monthly may carry travel ranges in the manual payload, and those travel ranges must participate in shared Past Sim exclusion/simulation after normalization.
 
 ### Checklist (Phase 1)
 
 - [ ] Implement simulator entry intents (`MANUAL`, `NEW_BUILD`, `GAP_FILL_ACTUAL`) and full-actual behavior per `docs/plans/USAGE_SIMULATOR_WORKSPACES_V1_PHASE1.md`.
 - [ ] Ensure partial SMT/GB gap-fill generates missing months ONLY (actual months untouched).
-- [ ] Ensure manual anchorEndDate mid‑month billing periods are supported and totals remain immutable.
+- [ ] Ensure Stage 1 manual anchorEndDate bill-cycle periods are supported, preserve entered bill-cycle values as authoritative user input, and still allow the shared Past Sim artifact to fill missing bill-cycle months after normalization.
 
 ### Past Curve Completion V1 (ACTUAL baseline fill)
 

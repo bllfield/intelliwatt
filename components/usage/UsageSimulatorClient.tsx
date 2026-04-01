@@ -6,7 +6,10 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
+import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
+import { resolvePastCompareSectionMode } from "@/components/usage/pastCompareSectionMode";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
+import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import {
   PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED,
   shouldResetPastValidationCompareExpanded,
@@ -105,6 +108,7 @@ type ScenarioHouseResp =
         }>;
         metrics?: Record<string, number | null>;
       };
+      manualMonthlyReconciliation?: ManualMonthlyReconciliation | null;
     }
   | { ok: false; code: string; message: string; failureCode?: string; failureMessage?: string };
 
@@ -209,9 +213,16 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     }>;
     metrics: Record<string, unknown>;
   } | null>(null);
+  const [scenarioManualMonthlyReconciliation, setScenarioManualMonthlyReconciliation] =
+    useState<ManualMonthlyReconciliation | null>(null);
   /** Past: Validation / Test Day Compare starts collapsed; expand for full table. */
   const [pastCompareExpanded, setPastCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
   const [scenarioLoading, setScenarioLoading] = useState(false);
+  const pastCompareSectionMode = resolvePastCompareSectionMode({
+    manualMonthlyReconciliation: scenarioManualMonthlyReconciliation,
+  });
+  const activeManualMonthlyReconciliation =
+    pastCompareSectionMode === "statement_range_reconciliation" ? scenarioManualMonthlyReconciliation : null;
 
   const WORKSPACE_PAST_NAME = "Past (Corrected)";
   const WORKSPACE_FUTURE_NAME = "Future (What-if)";
@@ -522,6 +533,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       if (!viewScenarioId || viewScenarioId === "baseline") {
         setScenarioLoading(false);
         setScenarioCompareProjection(null);
+        setScenarioManualMonthlyReconciliation(null);
         return;
       }
       setScenarioLoading(true);
@@ -547,6 +559,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         if (outcome.kind !== "success") {
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
+          setScenarioManualMonthlyReconciliation(null);
           return;
         }
         if (!j || j.ok !== true) {
@@ -556,6 +569,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           });
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
+          setScenarioManualMonthlyReconciliation(null);
           return;
         }
         const okBody = j;
@@ -575,6 +589,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             dataset: okBody.dataset,
           })
         );
+        setScenarioManualMonthlyReconciliation(okBody.manualMonthlyReconciliation ?? null);
       } catch (e: any) {
         if (!cancelled) {
           const aborted = e?.name === "AbortError";
@@ -589,6 +604,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           );
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
+          setScenarioManualMonthlyReconciliation(null);
         }
       } finally {
         if (timeoutId != null) clearTimeout(timeoutId);
@@ -1421,16 +1437,30 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         <div className="mt-4 rounded-2xl border border-brand-blue/10 bg-white p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+              <div className="text-sm font-semibold text-brand-navy">
+                {pastCompareSectionMode === "statement_range_reconciliation"
+                  ? "Statement Range Reconciliation"
+                  : "Validation / Test Day Compare"}
+              </div>
               <div className="mt-1 text-xs text-brand-navy/70">
                 {scenarioLoading
                   ? ""
+                  : activeManualMonthlyReconciliation
+                    ? `${activeManualMonthlyReconciliation.eligibleRangeCount} eligible entered statement range(s). Entered statement totals reconcile against the persisted Past Sim totals for matching bill-cycle ranges; later-filled or travel-overlapped ranges are shown as excluded.`
                   : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length
                     ? `${scenarioCompareProjection.rows.length} scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.`
                     : "This section compares modeled vs actual on validation days for simulator accuracy transparency."}
               </div>
+              {!scenarioLoading && activeManualMonthlyReconciliation ? (
+                <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
+                  Eligible {activeManualMonthlyReconciliation.eligibleRangeCount} · Ineligible{" "}
+                  {activeManualMonthlyReconciliation.ineligibleRangeCount} · Reconciled{" "}
+                  {activeManualMonthlyReconciliation.reconciledRangeCount}
+                </div>
+              ) : null}
               {!scenarioLoading &&
               scenarioCurveOutcome?.kind === "success" &&
+              !scenarioManualMonthlyReconciliation?.rows?.length &&
               scenarioCompareProjection?.rows?.length ? (
                 <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
                   WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
@@ -1441,7 +1471,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             </div>
             {!scenarioLoading &&
             scenarioCurveOutcome?.kind === "success" &&
-            scenarioCompareProjection?.rows?.length ? (
+            (pastCompareSectionMode === "statement_range_reconciliation" || scenarioCompareProjection?.rows?.length) ? (
               <button
                 type="button"
                 className="shrink-0 rounded-lg border border-brand-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-brand-navy shadow-sm hover:bg-brand-navy/5"
@@ -1456,6 +1486,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div className="mt-2 text-xs text-brand-navy/70" role="status" aria-live="polite">
               Loading compare data…
             </div>
+          ) : scenarioCurveOutcome?.kind === "success" && activeManualMonthlyReconciliation ? (
+            pastCompareExpanded ? (
+              <ManualMonthlyReconciliationPanel reconciliation={activeManualMonthlyReconciliation} />
+            ) : null
           ) : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length ? (
             pastCompareExpanded ? (
               <ValidationComparePanel
@@ -1466,7 +1500,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             ) : null
           ) : scenarioCurveOutcome?.kind === "success" ? (
             <div className="mt-2 text-xs text-brand-navy/70">
-              {pastScenarioHasConfiguredValidationDays
+              {pastCompareSectionMode === "statement_range_reconciliation"
+                ? "No statement-range reconciliation rows are available for this manual-monthly run yet."
+                : pastScenarioHasConfiguredValidationDays
                 ? "Validation test days are configured, but compare rows were not returned with this response. Recalculate Past usage or retry; if this persists, compare truth may be incomplete (server returns a specific error when that happens)."
                 : "No validation/test-day compare rows are available for this Past scenario yet."}
             </div>

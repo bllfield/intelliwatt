@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { anchorEndDateUtc, lastFullMonthChicago, monthsEndingAt } from "@/lib/time/chicago";
+import { anchorEndDateUtc, lastFullMonthChicago } from "@/lib/time/chicago";
+import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 
 type TravelRange = { startDate: string; endDate: string };
 
@@ -28,6 +29,11 @@ type LoadResp =
   | { ok: true; houseId: string; payload: ManualUsagePayload | null; updatedAt: string | null }
   | { ok: false; error: string };
 
+type ManualUsageTransport = {
+  load?: (houseId: string) => Promise<LoadResp>;
+  save?: (args: { houseId: string; payload: ManualUsagePayload }) => Promise<{ ok: true; updatedAt?: string | null } | { ok: false; error: string }>;
+};
+
 function clampInt(n: unknown, lo: number, hi: number): number {
   const x = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : Number(n);
   const y = Number.isFinite(x) ? x : lo;
@@ -43,7 +49,23 @@ function normalizeRanges(ranges: TravelRange[]): TravelRange[] {
     .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
 }
 
-export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSaved?: () => void | Promise<void> }) {
+function manualMonthlyPeriodLabels(anchorEndDate: string): string[] {
+  const resolvedAnchor =
+    /^\d{4}-\d{2}-\d{2}$/.test(String(anchorEndDate ?? "").trim())
+      ? String(anchorEndDate).trim()
+      : `${lastFullMonthChicago()}-15`;
+  return billingPeriodsEndingAt(resolvedAnchor, 12).map((period) => period.id);
+}
+
+export function ManualUsageEntry({
+  houseId,
+  onSaved,
+  transport,
+}: {
+  houseId: string;
+  onSaved?: () => void | Promise<void>;
+  transport?: ManualUsageTransport;
+}) {
   const [activeTab, setActiveTab] = React.useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -52,7 +74,7 @@ export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSave
 
   const [monthlyAnchorEndDate, setMonthlyAnchorEndDate] = React.useState<string>(`${lastFullMonthChicago()}-15`);
   const [monthlyKwh, setMonthlyKwh] = React.useState<Array<{ month: string; kwh: number | "" }>>(
-    monthsEndingAt(lastFullMonthChicago(), 12).map((m) => ({ month: m, kwh: "" })),
+    manualMonthlyPeriodLabels(`${lastFullMonthChicago()}-15`).map((month) => ({ month, kwh: "" })),
   );
   const [annualAnchorEndDate, setAnnualAnchorEndDate] = React.useState<string>("");
   const [annualKwh, setAnnualKwh] = React.useState<number | "">("");
@@ -64,12 +86,20 @@ export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSave
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/user/manual-usage?houseId=${encodeURIComponent(houseId)}`, {
-          cache: "no-store",
-        });
-        const json = (await res.json().catch(() => null)) as LoadResp | null;
-        if (!res.ok || !json || (json as any).ok !== true) {
-          throw new Error((json as any)?.error || `HTTP ${res.status}`);
+        const json = transport?.load
+          ? await transport.load(houseId)
+          : ((await (async () => {
+              const res = await fetch(`/api/user/manual-usage?houseId=${encodeURIComponent(houseId)}`, {
+                cache: "no-store",
+              });
+              const body = (await res.json().catch(() => null)) as LoadResp | null;
+              if (!res.ok || !body || (body as any).ok !== true) {
+                throw new Error((body as any)?.error || `HTTP ${res.status}`);
+              }
+              return body;
+            })()) as LoadResp);
+        if (!json || (json as any).ok !== true) {
+          throw new Error((json as any)?.error || "Failed to load manual usage");
         }
         if (cancelled) return;
         const payload = (json as any).payload as ManualUsagePayload | null;
@@ -88,7 +118,7 @@ export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSave
                   })()
                 : `${lastFullMonthChicago()}-15`;
           setMonthlyAnchorEndDate(anchor);
-          const months = monthsEndingAt(anchor.slice(0, 7), 12);
+          const months = manualMonthlyPeriodLabels(anchor);
           const map = new Map<string, number | "">(
             payload.monthlyKwh.map((r) => [r.month, typeof r.kwh === "number" ? r.kwh : ""]),
           );
@@ -116,9 +146,9 @@ export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSave
   }, [houseId]);
 
   React.useEffect(() => {
-    // Keep month labels stable when anchor changes (months are billing-period labels ending at anchor's month).
+    // Keep the input sequence anchored by the full bill-cycle end date.
     setMonthlyKwh((prev) => {
-      const months = monthsEndingAt(String(monthlyAnchorEndDate ?? "").slice(0, 7), 12);
+      const months = manualMonthlyPeriodLabels(monthlyAnchorEndDate);
       const map = new Map(prev.map((r) => [r.month, r.kwh]));
       return months.map((m) => ({ month: m, kwh: map.get(m) ?? "" }));
     });
@@ -143,14 +173,22 @@ export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSave
               travelRanges: normalizeRanges(travelRanges),
             };
 
-      const res = await fetch("/api/user/manual-usage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ houseId, payload }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json || json.ok !== true) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
+      const json = transport?.save
+        ? await transport.save({ houseId, payload })
+        : await (async () => {
+            const res = await fetch("/api/user/manual-usage", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ houseId, payload }),
+            });
+            const body = await res.json().catch(() => null);
+            if (!res.ok || !body || body.ok !== true) {
+              throw new Error(body?.error || `HTTP ${res.status}`);
+            }
+            return body as { ok: true; updatedAt?: string | null };
+          })();
+      if (!json || json.ok !== true) {
+        throw new Error((json as any)?.error || "Save failed");
       }
       setSavedAt(json.updatedAt ?? new Date().toISOString());
       if (onSaved) await Promise.resolve(onSaved());

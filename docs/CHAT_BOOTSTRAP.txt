@@ -31,6 +31,26 @@ SHARED SIM → DROPLET (SHIPPED 2026-03-27, EXTENDED)
 - **Shared pipeline (Gap-Fill):** canonical compare path recalcs Past once with validation-only keys, reads from canonical saved artifact family, then applies baseline-vs-accuracy projection only (no compare-only simulator as canonical truth).
 
 ========================================
+USER MANUAL MONTHLY (AUTHORITATIVE)
+========================================
+
+- Two-stage model:
+  - Stage 1 = bill-cycle input chart
+  - Stage 2 = shared Past Sim normalization/simulation
+- Do not collapse those two stages into one concept.
+- The latest entered bill end date is the Stage 1 input anchor.
+- That anchor date is the last day of the entered input sequence.
+- The input sequence runs backward by bill-cycle months.
+- The user may enter fewer than 12 bills.
+- Missing bill-cycle months remain blank on the input chart.
+- Blank input months are not the final artifact contract.
+- USER MANUAL MONTHLY is travel/vacant-aware.
+- Past Sim fills missing bill-cycle months and excluded travel/vacant days after normalization.
+- USER MANUAL MONTHLY and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` are distinct input semantics.
+- GapFill monthly-from-source is for grading/tuning with source-derived monthly anchors.
+- After normalization, both paths enter the same shared Past Sim path.
+
+========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)
 ========================================
 

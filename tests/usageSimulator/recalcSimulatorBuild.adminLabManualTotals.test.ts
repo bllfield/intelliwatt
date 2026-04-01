@@ -252,6 +252,62 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
   });
 
   it("builds source-derived monthly manual payloads before MANUAL_TOTALS requirements are enforced", async () => {
+    buildAdminLabSyntheticManualUsagePayload.mockResolvedValueOnce({
+      mode: "MONTHLY",
+      anchorEndDate: "2026-02-28",
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-02-28",
+        monthlyKwh: [
+          { month: "2025-03", kwh: 1000 },
+          { month: "2025-04", kwh: 900 },
+          { month: "2025-05", kwh: 800 },
+          { month: "2025-06", kwh: 700 },
+          { month: "2025-07", kwh: 600 },
+          { month: "2025-08", kwh: 500 },
+          { month: "2025-09", kwh: 400 },
+          { month: "2025-10", kwh: 300 },
+          { month: "2025-11", kwh: 200 },
+          { month: "2025-12", kwh: 100 },
+          { month: "2026-01", kwh: 50 },
+          { month: "2026-02", kwh: 25 },
+        ],
+        travelRanges: [],
+      },
+      monthlySourceDerivedResolution: null,
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {
+          sharedProducerPathUsed: true,
+        },
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2025-03-30",
+        end: "2026-03-29",
+        intervals: [],
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+        annualTotalKwh: 1.5,
+        meta: { excludedDays: 0, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
+
     const out = await recalcSimulatorBuild({
       userId: "u1",
       houseId: "test-home-1",
@@ -278,18 +334,23 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     );
     expect(out.ok).toBe(false);
     if (!out.ok) {
-      expect(out.error).not.toBe("requirements_unmet");
       expect(out.error).toBe("artifact_persist_failed");
-      expect(out.missingItems).toEqual([
-        "Canonical artifact persistence requires non-empty intervals15 output.",
-      ]);
     }
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buildInputs: expect.objectContaining({
+          mode: "MANUAL_TOTALS",
+          monthlyTotalsKwhByMonth: expect.objectContaining({
+            "2025-03": 1000,
+            "2026-02": 25,
+          }),
+          sharedProducerPathUsed: true,
+        }),
+      })
+    );
     expect(upsertSimulatorBuild).toHaveBeenCalledTimes(1);
     expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.mode).toBe("MANUAL_TOTALS");
-    expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs?.monthlyTotalsKwhByMonth).toMatchObject({
-      "2025-03": 1000,
-      "2026-02": 25,
-    });
+    expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs?.sharedProducerPathUsed).toBe(true);
   }, 15000);
 
   it("does not fail source-derived manual modes when source travel ranges cover the canonical window", async () => {
