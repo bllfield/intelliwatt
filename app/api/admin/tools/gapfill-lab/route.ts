@@ -1912,6 +1912,13 @@ export async function POST(req: NextRequest) {
         );
       }
     }
+    const sourcePastExactArtifactInputHash =
+      sourcePastRecalc.executionMode === "inline" &&
+      sourcePastRecalc.result.ok &&
+      typeof sourcePastRecalc.result.canonicalArtifactInputHash === "string" &&
+      sourcePastRecalc.result.canonicalArtifactInputHash.trim()
+        ? sourcePastRecalc.result.canonicalArtifactInputHash.trim()
+        : null;
     const sourceTravelRangesFromDb = await getTravelRangesFromDb(user.id, selectedSourceHouse.id);
     const boundedExcludedDateKeysSorted = Array.from(
       boundDateKeysToCoverageWindow(
@@ -1925,16 +1932,19 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       houseId: selectedSourceHouse.id,
       scenarioId: String(pastScenario.id),
-      readMode: "allow_rebuild",
+      readMode: sourcePastExactArtifactInputHash ? "artifact_only" : "allow_rebuild",
+      exactArtifactInputHash: sourcePastExactArtifactInputHash ?? undefined,
+      requireExactArtifactMatch: Boolean(sourcePastExactArtifactInputHash),
       correlationId: sourcePastCorrelationId,
       readContext: {
-        artifactReadMode: "allow_rebuild",
+        artifactReadMode: sourcePastExactArtifactInputHash ? "artifact_only" : "allow_rebuild",
         projectionMode: "baseline",
         compareSidecarRequest: true,
       },
     });
     const sourceExactArtifactInputHash =
-      typeof (defaultRead as any)?.dataset?.meta?.artifactInputHashUsed === "string" &&
+      sourcePastExactArtifactInputHash ??
+      (typeof (defaultRead as any)?.dataset?.meta?.artifactInputHashUsed === "string" &&
       String((defaultRead as any).dataset.meta.artifactInputHashUsed).trim()
         ? String((defaultRead as any).dataset.meta.artifactInputHashUsed).trim()
         : typeof (defaultRead as any)?.dataset?.meta?.artifactInputHash === "string" &&
@@ -1943,7 +1953,7 @@ export async function POST(req: NextRequest) {
           : typeof (defaultRead as any)?.dataset?.meta?.requestedInputHash === "string" &&
               String((defaultRead as any).dataset.meta.requestedInputHash).trim()
             ? String((defaultRead as any).dataset.meta.requestedInputHash).trim()
-            : null;
+            : null);
     const [baselineRead, rawRead, sourceBuildRow, sourceProfiles] = await Promise.all([
       sourceExactArtifactInputHash
         ? getSimulatedUsageForHouseScenario({

@@ -33,6 +33,9 @@ const getIntervalDataFingerprint = vi.fn();
 const computePastWeatherIdentity = vi.fn();
 const getUsageShapeProfileIdentityForPast = vi.fn();
 const ensureUsageShapeProfileForSharedSimulation = vi.fn();
+const getHouseWeatherDays = vi.fn();
+const ensureHouseWeatherBackfill = vi.fn();
+const ensureHouseWeatherNormalAvgBackfill = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -92,6 +95,15 @@ vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
 
 vi.mock("@/modules/weather/identity", () => ({
   computePastWeatherIdentity: (...args: any[]) => computePastWeatherIdentity(...args),
+}));
+
+vi.mock("@/modules/weather/repo", () => ({
+  getHouseWeatherDays: (...args: any[]) => getHouseWeatherDays(...args),
+}));
+
+vi.mock("@/modules/weather/backfill", () => ({
+  ensureHouseWeatherBackfill: (...args: any[]) => ensureHouseWeatherBackfill(...args),
+  ensureHouseWeatherNormalAvgBackfill: (...args: any[]) => ensureHouseWeatherNormalAvgBackfill(...args),
 }));
 
 import {
@@ -391,6 +403,9 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     computePastWeatherIdentity.mockReset();
     getUsageShapeProfileIdentityForPast.mockReset();
     ensureUsageShapeProfileForSharedSimulation.mockReset();
+    getHouseWeatherDays.mockReset();
+    ensureHouseWeatherBackfill.mockReset();
+    ensureHouseWeatherNormalAvgBackfill.mockReset();
 
     getHouseAddressForUserHouse.mockResolvedValue({ id: "h1", esiid: "1044" });
     scenarioFindFirst.mockResolvedValue({ id: "gapfill_lab", name: "Past (Corrected)" });
@@ -448,6 +463,16 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
       { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
     ]);
+    getHouseWeatherDays.mockResolvedValue(
+      new Map([
+        [
+          "2026-01-01",
+          { tAvgF: 50, tMinF: 40, tMaxF: 60, hdd65: 15, cdd65: 0, source: "OPEN_METEO_CACHE" },
+        ],
+      ])
+    );
+    ensureHouseWeatherBackfill.mockResolvedValue(undefined);
+    ensureHouseWeatherNormalAvgBackfill.mockResolvedValue(undefined);
     loadWeatherForPastWindow.mockImplementation(async ({ canonicalDateKeys }: any) => ({
       actualWxByDateKey: new Map(
         (canonicalDateKeys ?? []).map((dateKey: string) => [
@@ -603,6 +628,61 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
       expect(Array.isArray(out.dataset?.series?.intervals15)).toBe(true);
     }
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
+  });
+
+  it("enriches artifact_only reads with shared real-weather data and never uses stub weather fallback", async () => {
+    getCachedPastDataset.mockResolvedValueOnce({
+      inputHash: "hash-weather-enriched",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96,
+          totalKwh: 12,
+          start: "2026-01-01",
+          end: "2026-01-01",
+          latest: "2026-01-01",
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          weatherLogicMode: "LAST_YEAR_ACTUAL_WEATHER",
+          validationOnlyDateKeysLocal: [],
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 12 },
+        },
+        daily: [{ date: "2026-01-01", kwh: 12, source: "SIMULATED" }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+      exactArtifactInputHash: "hash-weather-enriched",
+      projectionMode: "raw",
+    });
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(ensureHouseWeatherBackfill).toHaveBeenCalledWith({
+      houseId: "h1",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: "America/Chicago",
+    });
+    expect(ensureHouseWeatherNormalAvgBackfill).not.toHaveBeenCalled();
+    expect(out.dataset?.dailyWeather?.["2026-01-01"]).toMatchObject({
+      tAvgF: 50,
+      tMinF: 40,
+      tMaxF: 60,
+      hdd65: 15,
+      cdd65: 0,
+      source: "OPEN_METEO_CACHE",
+    });
+    expect(out.dataset?.meta?.weatherSourceSummary).toBe("actual_only");
   });
 
   it("allows shared long-term-average weather artifacts through the same persisted read path", async () => {

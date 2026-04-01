@@ -310,6 +310,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         houseId: "h1",
         buildInputsHash: "source-hash-1",
         dataset: {},
+        canonicalArtifactInputHash: "source-canonical-hash-1",
       },
     });
     getPastSimRecalcJobForUser.mockResolvedValue({
@@ -861,15 +862,19 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     });
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
-    expect(readModes).toEqual(["allow_rebuild", "artifact_only", "artifact_only"]);
+    expect(readModes).toEqual(["artifact_only", "artifact_only", "artifact_only"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     expect(projectionModes).toEqual([undefined, "baseline", "raw"]);
+    expect(getSimulatedUsageForHouseScenario.mock.calls[0]?.[0]).toMatchObject({
+      exactArtifactInputHash: "source-canonical-hash-1",
+      requireExactArtifactMatch: true,
+    });
     expect(getSimulatedUsageForHouseScenario.mock.calls[1]?.[0]).toMatchObject({
-      exactArtifactInputHash: "artifact-input-hash",
+      exactArtifactInputHash: "source-canonical-hash-1",
       requireExactArtifactMatch: true,
     });
     expect(getSimulatedUsageForHouseScenario.mock.calls[2]?.[0]).toMatchObject({
-      exactArtifactInputHash: "artifact-input-hash",
+      exactArtifactInputHash: "source-canonical-hash-1",
       requireExactArtifactMatch: true,
     });
     expect(body.pastSimSnapshot?.reads?.defaultProjection?.ok).toBe(true);

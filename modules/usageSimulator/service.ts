@@ -55,9 +55,11 @@ import {
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
-import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
-import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
+import {
+  ensureHouseWeatherBackfill,
+  ensureHouseWeatherNormalAvgBackfill,
+} from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import {
@@ -151,8 +153,12 @@ async function attachSelectedDailyWeatherForDataset(args: {
       endDate: dateKeys[dateKeys.length - 1]!,
       timezone,
     }).catch(() => null);
+  } else if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
+    await ensureHouseWeatherNormalAvgBackfill({
+      houseId: weatherHouseId,
+      dateKeys,
+    }).catch(() => null);
   }
-  await ensureHouseWeatherStubbed({ houseId: weatherHouseId, dateKeys }).catch(() => null);
   const wxMap = await getHouseWeatherDays({
     houseId: weatherHouseId,
     dateKeys,
@@ -176,6 +182,15 @@ async function attachSelectedDailyWeatherForDataset(args: {
     (dataset as any).meta = {};
   }
   (dataset as any).meta.weatherLogicMode = weatherLogicMode;
+  if (
+    weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER" &&
+    (dataset as any).meta.weatherSourceSummary == null
+  ) {
+    (dataset as any).meta.weatherSourceSummary = "actual_only";
+  }
+  if ((dataset as any).meta.weatherFallbackReason == null) {
+    (dataset as any).meta.weatherFallbackReason = null;
+  }
 }
 import { buildAdminLabSyntheticManualUsagePayload } from "@/modules/usageSimulator/adminLabManualFromActuals";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
@@ -6083,6 +6098,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, {
         buildInputs,
         coverageWindow: sharedCoverageWindow,
+      });
+      await attachSelectedDailyWeatherForDataset({
+        dataset: restored,
+        buildInputs,
+        fallbackHouseId: args.houseId,
+        fallbackTimezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
       });
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {
