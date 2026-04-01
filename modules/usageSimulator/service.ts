@@ -4659,6 +4659,7 @@ async function recalcSimulatorBuildImpl(args: {
 
   let pastSimulatedMonths: string[] | undefined;
   let pastPatchedCurve: SimulatedCurve | null = null;
+  let pastPatchedDataset: ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs> | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
   const producerBuildPathKind =
     runContext.buildPathKind === "cache_restore" ? "recalc" : runContext.buildPathKind;
@@ -4764,6 +4765,7 @@ async function recalcSimulatorBuildImpl(args: {
         });
       }
       if (result.dataset !== null && result.stitchedCurve) {
+        pastPatchedDataset = result.dataset as ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs>;
         pastPatchedCurve = result.stitchedCurve;
         pastSimulatedDayResults = result.simulatedDayResults;
         const byMonth: Record<string, number> = {};
@@ -4868,7 +4870,9 @@ async function recalcSimulatorBuildImpl(args: {
   });
 
   const dataset =
-    pastPatchedCurve != null
+    pastPatchedDataset != null
+      ? pastPatchedDataset
+      : pastPatchedCurve != null
       ? buildSimulatedUsageDatasetFromCurve(pastPatchedCurve, {
           baseKind: buildInputs.baseKind,
           mode: buildInputs.mode,

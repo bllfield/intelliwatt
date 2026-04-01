@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+const buildSimulatedUsageDatasetFromCurve = vi.fn();
+
 const manualUsageInputFindUnique = vi.fn();
 const usageSimulatorScenarioFindFirst = vi.fn();
 const usageSimulatorScenarioEventFindMany = vi.fn();
@@ -11,6 +13,8 @@ const getHomeProfileSimulatedByUserHouse = vi.fn();
 const getApplianceProfileSimulatedByUserHouse = vi.fn();
 const hasActualIntervals = vi.fn();
 const resolveActualUsageSourceAnchor = vi.fn();
+const fetchActualCanonicalMonthlyTotals = vi.fn();
+const fetchActualIntradayShape96 = vi.fn();
 const buildAdminLabSyntheticManualUsagePayload = vi.fn();
 const simulatePastUsageDataset = vi.fn();
 const ensureSimulatorFingerprintsWithContext = vi.fn();
@@ -67,6 +71,8 @@ vi.mock("@/modules/manualUsage/validation", () => ({
 vi.mock("@/modules/realUsageAdapter/actual", () => ({
   hasActualIntervals: (...args: any[]) => hasActualIntervals(...args),
   resolveActualUsageSourceAnchor: (...args: any[]) => resolveActualUsageSourceAnchor(...args),
+  fetchActualCanonicalMonthlyTotals: (...args: any[]) => fetchActualCanonicalMonthlyTotals(...args),
+  fetchActualIntradayShape96: (...args: any[]) => fetchActualIntradayShape96(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/adminLabManualFromActuals", () => ({
@@ -125,6 +131,14 @@ vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
   encodeIntervalsV1: (...args: any[]) => encodeIntervalsV1(...args),
 }));
 
+vi.mock("@/modules/usageSimulator/dataset", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/modules/usageSimulator/dataset")>();
+  return {
+    ...mod,
+    buildSimulatedUsageDatasetFromCurve: (...args: any[]) => buildSimulatedUsageDatasetFromCurve(...args),
+  };
+});
+
 vi.mock("@/modules/upgradesLedger/repo", () => ({
   listLedgerRows: (...args: any[]) => listLedgerRows(...args),
 }));
@@ -168,6 +182,16 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       smtAnchorEndDate: "2026-02-28",
       greenButtonAnchorEndDate: null,
     });
+    fetchActualCanonicalMonthlyTotals.mockResolvedValue({
+      source: "SMT",
+      monthlyKwhByMonth: {
+        "2025-03": 1.5,
+      },
+    });
+    fetchActualIntradayShape96.mockResolvedValue({
+      source: "SMT",
+      shape96: Array.from({ length: 96 }, () => 1 / 96),
+    });
     buildAdminLabSyntheticManualUsagePayload.mockResolvedValue({
       mode: "MONTHLY",
       anchorEndDate: "2026-02-28",
@@ -204,6 +228,24 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       usageShapeProfileSimHash: "shape-hash-1",
     });
     encodeIntervalsV1.mockReturnValue({ bytes: Buffer.from("00", "hex") });
+    buildSimulatedUsageDatasetFromCurve.mockReturnValue({
+      summary: {
+        source: "SIMULATED",
+        intervalsCount: 2,
+        totalKwh: 1.5,
+        start: "2025-03-30",
+        end: "2026-03-29",
+      },
+      meta: {},
+      daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+      monthly: [{ month: "2025-03", kwh: 1.5 }],
+      series: {
+        intervals15: [
+          { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+          { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+        ],
+      },
+    });
     listLedgerRows.mockResolvedValue([]);
   });
 
@@ -246,5 +288,53 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       "2025-03": 1000,
       "2026-02": 25,
     });
+  }, 15000);
+
+  it("reuses the stitched dataset returned by simulatePastUsageDataset", async () => {
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {},
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+      },
+      simulatedDayResults: [],
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "SMT_BASELINE",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: false,
+      correlationId: "cid-2",
+      validationDaySelectionMode: "manual",
+      validationDayCount: 21,
+      runContext: {
+        callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: false,
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(buildSimulatedUsageDatasetFromCurve).not.toHaveBeenCalled();
   }, 15000);
 });
