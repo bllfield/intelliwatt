@@ -118,9 +118,10 @@ describe("low-data Past shared chain (Slice 14)", () => {
     getHouseWeatherDays.mockImplementation(async ({ dateKeys, kind }: any) => {
       const keys = Array.from(dateKeys ?? []) as string[];
       const m = new Map();
+      const backfillCompleted = ensureHouseWeatherBackfill.mock.calls.length > 0;
       for (const dk of keys) {
         if (kind === "ACTUAL_LAST_YEAR") {
-          m.set(dk, dk === "2026-01-05" ? weatherRow("stub") : weatherRow("actual"));
+          m.set(dk, !backfillCompleted && dk === "2026-01-05" ? weatherRow("stub") : weatherRow("actual"));
         } else {
           m.set(dk, weatherRow("actual"));
         }
@@ -153,7 +154,13 @@ describe("low-data Past shared chain (Slice 14)", () => {
       endDate: "2026-01-05",
       timezone: "America/Chicago",
       travelRanges: [],
-      buildInputs: { ...baseBuildInputs, mode: "MANUAL_TOTALS" } as any,
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "MANUAL_TOTALS",
+        resolvedSimFingerprint: {
+          manualTotalsConstraint: "monthly",
+        },
+      } as any,
       buildPathKind: "recalc",
       includeSimulatedDayResults: false,
     });
@@ -194,7 +201,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(keepRef?.size).toBe(2);
   });
 
-  it("SMT_BASELINE still requires actual_only weather summary (strict)", async () => {
+  it("SMT_BASELINE fails when actual weather coverage is still missing after backfill", async () => {
     buildPastSimulatedBaselineV1.mockClear();
     getHouseWeatherDays.mockImplementation(async ({ kind }: any) => {
       const m = new Map();
@@ -229,6 +236,6 @@ describe("low-data Past shared chain (Slice 14)", () => {
     });
 
     expect(out.dataset).toBeNull();
-    expect("error" in out ? out.error : "").toMatch(/actual_weather_required/);
+    expect("error" in out ? out.error : "").toMatch(/ACTUAL_LAST_YEAR coverage is still missing after real API backfill/);
   });
 });
