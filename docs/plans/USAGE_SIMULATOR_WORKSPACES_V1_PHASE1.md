@@ -103,6 +103,8 @@ The simulator is entered only via the following contexts:
   - monthly manual shows billing-period totals only before simulation
   - annual manual shows billing-date context plus the annual total only before simulation
   - annual manual does not render a pre-sim usage chart
+- Once manual inputs are submitted into the shared Past path, user Past and admin manual-monthly test surfaces must use the same Stage 2 sim/read/display path until the shared charts render.
+- Admin-only bill-period reconciliation is an additive layer after the shared Stage 2 result exists; it must not introduce a separate read gate or a separate chart-truth path.
 - Annual entry:
   - annual is authoritative
   - a deterministic monthly split may be generated once for that build, then treated as anchored monthly totals

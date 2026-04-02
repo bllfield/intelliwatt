@@ -808,6 +808,85 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     directBuilderSpy.mockRestore();
   });
 
+  it("accepts the valid low-data manual shape adapter on Past MANUAL_TOTALS allow_rebuild", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        canonicalMonths: ["2026-01"],
+        canonicalEndMonth: "2026-01",
+        canonicalPeriods: [
+          {
+            id: "canonical_usage_365_coverage",
+            startDate: "2026-01-01",
+            endDate: "2026-01-31",
+          },
+        ],
+        timezone: "America/Chicago",
+        travelRanges: [],
+        monthlyTotalsKwhByMonth: { "2026-01": 123 },
+        intradayShape96: Array.from({ length: 96 }, () => 1 / 96),
+        sharedProducerPathUsed: true,
+      },
+      buildInputsHash: "manual-shared-hash-low-data",
+      lastBuiltAt: new Date("2026-01-10T00:00:00.000Z"),
+    });
+    getCachedPastDataset.mockResolvedValueOnce(null);
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1,
+          start: "2026-01-01",
+          end: "2026-01-31",
+          latest: "2026-01-31",
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          sharedProducerPathUsed: true,
+          lowDataSharedPastAdapter: true,
+          lowDataShapeAdapterUsed: true,
+          dayTotalSource: "usageShapeProfile_avgKwhPerDayByMonth",
+          usageShapeProfileDiag: {
+            reasonNotUsed: "low_data_monthly_shape_adapter",
+          },
+          weatherSourceSummary: "actual_only",
+          weatherLogicMode: "LAST_YEAR_ACTUAL_WEATHER",
+        },
+        daily: [{ date: "2026-01-03", kwh: 1, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 1 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-03T00:00:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-01-03T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2026-01-01",
+        end: "2026-01-31",
+        intervals: [],
+        monthlyTotals: [{ month: "2026-01", kwh: 1 }],
+        annualTotalKwh: 1,
+        meta: { excludedDays: 0, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.dataset?.meta?.lowDataShapeAdapterUsed).toBe(true);
+      expect(out.dataset?.meta?.usageShapeProfileDiag?.reasonNotUsed).toBe("low_data_monthly_shape_adapter");
+    }
+  });
+
   it("does not fall back to the direct builder when Past MANUAL_TOTALS shared producer rebuild fails", async () => {
     const directBuilderSpy = vi.spyOn(usageDatasetModule, "buildSimulatedUsageDatasetFromBuildInputs");
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({

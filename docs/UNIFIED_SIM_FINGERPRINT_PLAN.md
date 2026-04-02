@@ -178,12 +178,14 @@ Invariants stated explicitly:
 - selecting which shared module to call
 - explicit error handling
 - lightweight orchestration that does not change modeled outputs
+- additive admin diagnostics after the shared Stage 2 result already exists for display
 
 **Forbidden wrappers:**
 - wrappers that change defaults or arguments in a way that changes modeled results for the same logical input set
 - wrappers that add route-local simulation math
 - wrappers that alter modeled outputs before or after persistence
 - wrappers that make admin and user produce different modeled results for the same inputs
+- wrappers that let admin and user manual-monthly surfaces fail at different post-submit stages before the shared charts render
 - wrappers that add a second compare engine
 - wrappers that create a second truth source
 - wrappers that adjust or "improve" results outside the shared modules

@@ -72,6 +72,12 @@ This section is authoritative for future manual-usage implementation and handoff
 - Manual monthly and manual annual now enter a shared bill-period-first pipeline before the Past producer runs.
 - Shared helpers derive normalized `ManualBillPeriodTarget[]` metadata, bill-period totals, and exclusion ranges from the manual payload before Stage 2 shaping.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
+- For manual monthly, the user Past page and the admin manual-monthly test page must share the same post-submit path all the way through:
+  - shared producer execution
+  - persisted artifact/readback
+  - shared projection and quality gating
+  - chart/dashboard payload generation
+- Those two surfaces may begin from different page-owned inputs, but once the normalized manual payload enters the shared Past path they must not fail in different places, apply different acceptance rules, or render from different chart-truth paths.
 - The main Past chart/result remains the shared normalized Past output:
   - shared 365-day artifact
   - standard calendar-month stitched Past chart
@@ -116,6 +122,7 @@ This section is authoritative for future manual-usage implementation and handoff
   - the full normal Past dashboard
   - a bill-period parity compare sourced from shared artifact totals
   - excluded bill periods kept visible as excluded/non-scored rows
+- The admin lab may add diagnostics after the shared Stage 2 result exists, but it must not own a different readback gate, a different chart acceptance rule, or a different display-truth path before the shared Past dashboard renders.
 
 ### Transitional Runtime Contract
 

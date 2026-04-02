@@ -20,6 +20,15 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - non-excluded bill periods stay eligible parity constraints
   - travel-touched bill periods stay visible but non-scored
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
+- Manual monthly user Past and admin manual-monthly lab are required to stay identical from normalized input submission through chart rendering.
+- Allowed admin-only divergence begins only after the shared Past result is accepted for display:
+  - bill-period parity compare
+  - extra diagnostics
+  - read-only operator wrappers
+- Not allowed:
+  - different post-lockbox failure points
+  - different artifact/read acceptance gates
+  - different chart payload generation before the shared dashboard renders
 
 ## Implemented wiring (verification checklist still open)
 
@@ -46,6 +55,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Stage 1 monthly surfaces render bill-period rows only.
   - Stage 1 annual surfaces render billing-date context plus annual total only, with no pre-sim chart.
   - Stage 2 admin read surfaces show the standard Past dashboard plus a bill-period parity compare where excluded rows stay visible but non-scored.
+  - The standard Past dashboard on the admin lab must come from the same shared service/read/projection path the user Past page uses for the same normalized manual scenario.
 - **modules/weather/backfill.ts**
   - `ensureHouseWeatherBackfill` returns `{ fetched, stubbed, skippedLatLng?: boolean }`; `skippedLatLng: true` when house has no lat/lng (no API call).
 - **GapFill Lab**

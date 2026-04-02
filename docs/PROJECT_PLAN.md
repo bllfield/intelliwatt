@@ -419,6 +419,9 @@ This section is authoritative for future manual-usage implementation work.
 - After the Stage 1 input is constructed, the system must preserve which bill periods were entered versus missing, then normalize that input into the same shared Past Sim window, weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
 - Stage 1 bill-cycle chart semantics and Stage 2 normalized shared-window semantics must never be described as if they are the same thing.
 - Shared Stage 2 manual shaping now starts from normalized bill-period targets for both monthly and annual payloads.
+- Manual monthly user Past and admin manual-monthly lab must use the same Stage 2 path from normalized input submission until the shared Past dashboard renders.
+- Different page-owned inputs are allowed before normalization. Different chart-read gates, different post-lockbox failure points, or different display-truth paths after normalization are not allowed.
+- Admin-only bill-period parity compare and diagnostics are additive layers that begin only after the same shared Past result is already available for display.
 - Statement-range reconciliation now uses shared bill-period targets:
   - monthly uses explicit stored `statementRanges` when present and falls back to anchor-derived contiguous bill ranges for legacy payloads
   - annual derives one anchor-based annual bill period and compares against that shared target
@@ -455,6 +458,7 @@ This section is authoritative for future manual-usage implementation work.
   - `modules/manualUsage/statementRanges.ts` owns Stage 1 presentation, bill-range row construction, and shared bill-period target shaping
   - `modules/manualUsage/reconciliation.ts` owns shared bill-period parity rows for monthly and annual manual compare
   - `modules/manualUsage/prefill.ts` owns source-payload usability checks plus deterministic admin monthly/annual seed derivation
+  - shared service/read/projection modules remain the only authority for Stage 2 Past chart rendering on both user and admin manual-monthly surfaces
 
 ### Out of Scope / Next Phase
 - Patch incomplete SMT months using simulated segments (real usage remains unchanged; simulated curve will support patch ranges).

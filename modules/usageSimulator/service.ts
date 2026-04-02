@@ -287,6 +287,8 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
 
   const dayTotalSource = String(meta?.dayTotalSource ?? "");
   const profileReason = String(meta?.usageShapeProfileDiag?.reasonNotUsed ?? "");
+  const lowDataShapeAdapterUsed =
+    meta?.lowDataShapeAdapterUsed === true || profileReason === "low_data_monthly_shape_adapter";
   const weatherSourceSummary = String(meta?.weatherSourceSummary ?? "");
   const weatherLogicMode = String(
     meta?.weatherLogicMode ??
@@ -294,7 +296,14 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
       ""
   );
 
-  if (dayTotalSource === "fallback_month_avg" || profileReason) {
+  if (dayTotalSource === "fallback_month_avg") {
+    return {
+      ok: false,
+      message:
+        "Shared simulation quality guard failed: usage-shape profile is missing/invalid (fallback_month_avg).",
+    };
+  }
+  if (profileReason && !lowDataShapeAdapterUsed) {
     return {
       ok: false,
       message:

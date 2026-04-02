@@ -422,4 +422,25 @@ describe("admin manual monthly route", () => {
       },
     });
   });
+
+  it("returns a non-2xx status when read_result fails on the shared read path", async () => {
+    mocks.getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+      ok: false,
+      code: "COMPARE_TRUTH_INCOMPLETE",
+      message: "Missing canonical simulated-day totals.",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const readRes = await POST(buildRequest({ action: "read_result", email: "user@example.com", houseId: "source-house-1" }));
+    const readBody = await readRes.json();
+
+    expect(readRes.status).toBe(409);
+    expect(readBody).toMatchObject({
+      ok: false,
+      action: "read_result",
+      error: "COMPARE_TRUTH_INCOMPLETE",
+      failureCode: "COMPARE_TRUTH_INCOMPLETE",
+      failureMessage: "Missing canonical simulated-day totals.",
+    });
+  });
 });

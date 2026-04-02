@@ -132,6 +132,26 @@ async function buildReadResult(args: {
   };
 }
 
+function statusForReadResultFailure(result: {
+  error?: string | null;
+  failureCode?: string | null;
+}): number {
+  const code = String(result.failureCode ?? result.error ?? "").trim();
+  switch (code) {
+    case "past_scenario_missing":
+    case "NO_BUILD":
+    case "SCENARIO_NOT_FOUND":
+    case "ARTIFACT_MISSING":
+      return 404;
+    case "HOUSE_NOT_FOUND":
+      return 403;
+    case "COMPARE_TRUTH_INCOMPLETE":
+      return 409;
+    default:
+      return 500;
+  }
+}
+
 function normalizeTravelRanges(payload: ManualUsagePayload | null): TravelRange[] {
   return Array.isArray(payload?.travelRanges) ? payload!.travelRanges : [];
 }
@@ -477,17 +497,20 @@ export async function POST(req: NextRequest) {
           readResult,
         });
       }
-      return NextResponse.json({
-        action,
-        email: sourceResolved.email,
-        userId: ownerUserId,
-        sourceUserId: sourceResolved.userId,
-        selectedHouse: sourceResolved.selectedHouse,
-        selectedSourceHouse: sourceResolved.selectedHouse,
-        labHome,
-        scenarioId,
-        ...readResult,
-      });
+      return NextResponse.json(
+        {
+          action,
+          email: sourceResolved.email,
+          userId: ownerUserId,
+          sourceUserId: sourceResolved.userId,
+          selectedHouse: sourceResolved.selectedHouse,
+          selectedSourceHouse: sourceResolved.selectedHouse,
+          labHome,
+          scenarioId,
+          ...readResult,
+        },
+        { status: statusForReadResultFailure(readResult) }
+      );
     }
 
     return NextResponse.json({ ok: false, error: "action_invalid" }, { status: 400 });
