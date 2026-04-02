@@ -27,7 +27,7 @@ export function scenarioCurveOutcomeFromFetch(params: {
   curveLabel: "Past" | "Future";
 }): ScenarioCurveOutcome {
   const { httpOk, httpStatus, json, aborted, curveLabel } = params;
-  const defaultNotReady = `Scenario not computed yet. Save changes in this workspace to compute ${curveLabel} simulated usage.`;
+  const defaultNotReady = `Scenario not computed yet. Wait for background generation to finish, or recalculate ${curveLabel} simulated usage.`;
 
   if (aborted) {
     return {

@@ -6,7 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import UsageDashboard from "@/components/usage/UsageDashboard";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
-import { buildManualMonthlyStageOneRows, pickMonthlyManualUsagePayload } from "@/modules/manualUsage/statementRanges";
+import { buildManualMonthlyStageOneRows, resolveManualMonthlyLabStageOnePayloads } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 type HouseOption = {
@@ -94,18 +94,18 @@ export default function ManualMonthlyLab() {
   const labHome = resultJson?.labHome ?? recalcJson?.labHome ?? saveJson?.labHome ?? loadJson?.labHome ?? lookupJson?.labHome ?? null;
   const labReady = Boolean(loadJson?.labHome);
   const sourceUsageHouse = resultJson?.sourceUsageHouse ?? loadJson?.sourceUsageHouse ?? lookupJson?.sourceUsageHouse ?? null;
-  const sourceStageOnePayload = pickMonthlyManualUsagePayload(
-    saveJson?.payload,
-    loadJson?.payload,
-    lookupJson?.payload,
-    loadJson?.sourcePayload,
-    lookupJson?.sourcePayload,
-    loadJson?.seed?.monthly,
-    lookupJson?.sourceSeed?.monthly
-  );
-  const sourceStageOneRows = useMemo(
-    () => (sourceStageOnePayload ? buildManualMonthlyStageOneRows(sourceStageOnePayload) : []),
-    [sourceStageOnePayload]
+  const { sourcePayload: sourceStageOnePayload, previewPayload: stageOnePreviewPayload } = resolveManualMonthlyLabStageOnePayloads({
+    savedPayload: saveJson?.payload,
+    loadedPayload: loadJson?.payload,
+    lookupPayload: lookupJson?.payload,
+    loadedSourcePayload: loadJson?.sourcePayload,
+    lookupSourcePayload: lookupJson?.sourcePayload,
+    loadedSourceSeed: loadJson?.seed?.monthly,
+    lookupSourceSeed: lookupJson?.sourceSeed?.monthly,
+  });
+  const stageOnePreviewRows = useMemo(
+    () => (stageOnePreviewPayload ? buildManualMonthlyStageOneRows(stageOnePreviewPayload) : []),
+    [stageOnePreviewPayload]
   );
 
   const sourceUsageOverride = useMemo(() => {
@@ -402,7 +402,7 @@ export default function ManualMonthlyLab() {
                 Read-only pre-sim statement totals for the selected source house. This surface intentionally hides daily and interval analytics.
               </p>
             </div>
-            {sourceStageOnePayload ? (
+            {stageOnePreviewPayload ? (
               <UsageDashboard
                 forcedMode="REAL"
                 fetchModeOverride="REAL"
@@ -413,7 +413,7 @@ export default function ManualMonthlyLab() {
                 preferredHouseId={selectedSourceHouse?.id ?? null}
                 manualUsagePayload={sourceStageOnePayload}
                 manualUsageHouseId={selectedSourceHouse?.id ?? null}
-                manualMonthlyStageOneRowsOverride={sourceStageOneRows}
+                manualMonthlyStageOneRowsOverride={stageOnePreviewRows}
                 forceManualMonthlyStageOne
                 presentationSurface="admin_manual_monthly_stage_one"
               />

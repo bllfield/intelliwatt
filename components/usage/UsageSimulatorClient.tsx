@@ -26,6 +26,10 @@ import {
   recalcUserMessageFromResponse,
   scenarioCurveOutcomeFromFetch,
 } from "@/components/usage/scenarioCurveOutcome";
+import {
+  shouldAutoPreparePastWorkspace,
+  shouldRecalcPastWorkspaceWithoutEvents,
+} from "@/modules/usageSimulator/manualWorkspaceAutoBuild";
 
 /**
  * Client wait for GET `/api/user/usage/simulated/house` (Past/Future curve + compare).
@@ -263,6 +267,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const recalcQueueRef = useRef<Array<{ scenarioId: string | null; note?: string }>>([]);
   const recalcRunningRef = useRef(false);
   const autoBaselineAttemptedRef = useRef(false);
+  const autoPastScenarioCreateAttemptedRef = useRef(false);
+  const autoPastScenarioRecalcAttemptedRef = useRef<string | null>(null);
   const lastWeatherPreferenceRef = useRef(weatherPreference);
 
   useEffect(() => {
@@ -502,11 +508,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
   useEffect(() => {
     autoBaselineAttemptedRef.current = false;
+    autoPastScenarioCreateAttemptedRef.current = false;
+    autoPastScenarioRecalcAttemptedRef.current = null;
     scenarioRecalcTimersRef.current.forEach((t) => window.clearTimeout(t));
     scenarioRecalcTimersRef.current.clear();
     recalcQueueRef.current = [];
     recalcRunningRef.current = false;
-  }, [houseId]);
+  }, [houseId, mode]);
 
   useEffect(() => {
     if (workspace === "BASELINE") {
@@ -994,17 +1002,41 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   }, [baselineReady, canRecalc, recalcBusy, mode, weatherPreference]);
 
   useEffect(() => {
+    const action = shouldAutoPreparePastWorkspace({
+      mode,
+      canRecalc,
+      baselineReady,
+      pastScenarioId: pastScenario?.id ?? null,
+      pastBuildLastBuiltAt: pastBuild?.lastBuiltAt ?? null,
+    });
+    if (action === "none" || recalcBusy) return;
+    if (action === "create") {
+      if (autoPastScenarioCreateAttemptedRef.current) return;
+      autoPastScenarioCreateAttemptedRef.current = true;
+      void createScenario(WORKSPACE_PAST_NAME);
+      return;
+    }
+    if (!pastScenario?.id) return;
+    if (autoPastScenarioRecalcAttemptedRef.current === pastScenario.id) return;
+    autoPastScenarioRecalcAttemptedRef.current = pastScenario.id;
+    enqueueRecalc({ scenarioId: pastScenario.id, note: "Preparing Past…" });
+    void drainRecalcQueue();
+  }, [baselineReady, canRecalc, mode, pastBuild?.lastBuiltAt, pastScenario?.id, recalcBusy]);
+
+  useEffect(() => {
     // Weather preference affects determinism of builds; recompute when it changes.
     if (lastWeatherPreferenceRef.current === weatherPreference) return;
     lastWeatherPreferenceRef.current = weatherPreference;
     if (!canRecalc) return;
     void (async () => {
       enqueueRecalc({ scenarioId: null, note: "Updating usage…" });
-      if (pastScenario?.id && pastEventCount > 0) enqueueRecalc({ scenarioId: pastScenario.id, note: "Updating Past…" });
+      if (shouldRecalcPastWorkspaceWithoutEvents({ mode, pastScenarioId: pastScenario?.id ?? null }) || pastEventCount > 0) {
+        if (pastScenario?.id) enqueueRecalc({ scenarioId: pastScenario.id, note: "Updating Past…" });
+      }
       if (futureScenario?.id && futureEventCount > 0) enqueueRecalc({ scenarioId: futureScenario.id, note: "Updating Future…" });
       await drainRecalcQueue();
     })();
-  }, [canRecalc, futureEventCount, futureScenario?.id, pastEventCount, pastScenario?.id, weatherPreference]);
+  }, [canRecalc, futureEventCount, futureScenario?.id, mode, pastEventCount, pastScenario?.id, weatherPreference]);
 
   return (
     <div className="space-y-6">
@@ -1203,7 +1235,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     disabled={!baselineReady}
                     className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                   >
-                    {pastScenario ? "Past workspace ready" : "Create Past"}
+                    {pastScenario ? "Past workspace ready" : mode === "MANUAL_TOTALS" ? "Preparing Past" : "Create Past"}
                   </button>
                   <button
                     type="button"
@@ -1649,6 +1681,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           houseId={houseId}
           onSaved={async () => {
             await recalcNow({ scenarioId: null, note: "Updating usage…" });
+            if (shouldRecalcPastWorkspaceWithoutEvents({ mode, pastScenarioId: pastScenario?.id ?? null })) {
+              await recalcNow({ scenarioId: pastScenario!.id, note: "Updating Past…" });
+            }
           }}
         />
       </Modal>
@@ -1664,7 +1699,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           houseId={houseId}
           onSaved={async () => {
             await recalcNow({ scenarioId: null, note: "Updating usage…" });
-            if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+            if (shouldRecalcPastWorkspaceWithoutEvents({ mode, pastScenarioId: pastScenario?.id ?? null }) || pastEventCount > 0) {
+              if (pastScenario?.id) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+            }
             if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
           }}
         />
@@ -1681,7 +1718,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           houseId={houseId}
           onSaved={async () => {
             await recalcNow({ scenarioId: null, note: "Updating usage…" });
-            if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+            if (shouldRecalcPastWorkspaceWithoutEvents({ mode, pastScenarioId: pastScenario?.id ?? null }) || pastEventCount > 0) {
+              if (pastScenario?.id) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+            }
             if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
           }}
         />

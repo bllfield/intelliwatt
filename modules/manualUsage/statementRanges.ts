@@ -195,6 +195,31 @@ export function pickMonthlyManualUsagePayload(
   return null;
 }
 
+export function resolveManualMonthlyLabStageOnePayloads(args: {
+  savedPayload?: ManualUsagePayload | null;
+  loadedPayload?: ManualUsagePayload | null;
+  lookupPayload?: ManualUsagePayload | null;
+  loadedSourcePayload?: ManualUsagePayload | null;
+  lookupSourcePayload?: ManualUsagePayload | null;
+  loadedSourceSeed?: Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null;
+  lookupSourceSeed?: Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null;
+}): {
+  sourcePayload: Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null;
+  previewPayload: Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null;
+} {
+  const sourcePayload = pickMonthlyManualUsagePayload(
+    args.loadedSourcePayload,
+    args.lookupSourcePayload,
+    args.loadedSourceSeed,
+    args.lookupSourceSeed
+  );
+  const previewPayload = pickMonthlyManualUsagePayload(args.savedPayload, args.loadedPayload, args.lookupPayload, sourcePayload);
+  return {
+    sourcePayload,
+    previewPayload,
+  };
+}
+
 export function shouldUseManualMonthlyStageOnePayload(args: {
   manualUsageHouseId?: string | null;
   selectedUsageHouseId?: string | null;

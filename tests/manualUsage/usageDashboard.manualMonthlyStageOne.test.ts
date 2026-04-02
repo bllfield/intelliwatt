@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   pickMonthlyManualUsagePayload,
+  resolveManualMonthlyLabStageOnePayloads,
   resolveManualMonthlyStageOnePresentation,
   resolveManualMonthlyStageOneRenderMode,
   shouldUseManualMonthlyStageOnePayload,
@@ -70,27 +71,32 @@ describe("manual monthly stage one dashboard state", () => {
     ).toBe("rows");
   });
 
-  it("prefers the current saved monthly payload over older source prefills", () => {
-    expect(
-      pickMonthlyManualUsagePayload(
-        {
-          mode: "MONTHLY",
-          anchorEndDate: "2026-03-31",
-          monthlyKwh: [{ month: "2026-03", kwh: 805.22 }],
-          statementRanges: [{ month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" }],
-          travelRanges: [],
-        },
-        {
-          mode: "MONTHLY",
-          anchorEndDate: "2025-12-31",
-          monthlyKwh: [{ month: "2025-12", kwh: 999 }],
-          statementRanges: [{ month: "2025-12", startDate: "2025-12-01", endDate: "2025-12-31" }],
-          travelRanges: [],
-        }
-      )
-    ).toMatchObject({
+  it("keeps source payload selection separate from the stage-one preview payload", () => {
+    const savedPayload = {
+      mode: "MONTHLY" as const,
       anchorEndDate: "2026-03-31",
       monthlyKwh: [{ month: "2026-03", kwh: 805.22 }],
+      statementRanges: [{ month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" }],
+      travelRanges: [],
+    };
+    const sourcePayload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-12-31",
+      monthlyKwh: [{ month: "2025-12", kwh: 999 }],
+      statementRanges: [{ month: "2025-12", startDate: "2025-12-01", endDate: "2025-12-31" }],
+      travelRanges: [],
+    };
+
+    expect(pickMonthlyManualUsagePayload(savedPayload, sourcePayload)).toMatchObject(savedPayload);
+
+    expect(
+      resolveManualMonthlyLabStageOnePayloads({
+        savedPayload,
+        loadedSourcePayload: sourcePayload,
+      })
+    ).toMatchObject({
+      sourcePayload,
+      previewPayload: savedPayload,
     });
   });
 });

@@ -419,6 +419,26 @@ export async function POST(req: NextRequest) {
           persistRequested: true,
         },
       });
+      if (dispatched.executionMode === "inline" && !dispatched.result.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            action,
+            email: sourceResolved.email,
+            userId: ownerUserId,
+            sourceUserId: sourceResolved.userId,
+            selectedHouse: sourceResolved.selectedHouse,
+            selectedSourceHouse: sourceResolved.selectedHouse,
+            labHome,
+            scenarioId,
+            executionMode: "inline",
+            correlationId: dispatched.correlationId,
+            result: dispatched.result,
+            error: dispatched.result.error,
+          },
+          { status: dispatched.result.error === "recalc_timeout" ? 504 : 400 }
+        );
+      }
       return NextResponse.json({
         ok: true,
         action,

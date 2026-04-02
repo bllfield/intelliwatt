@@ -390,4 +390,36 @@ describe("admin manual monthly route", () => {
       })
     );
   });
+
+  it("returns a recalc failure directly instead of masking it behind a later read_result error", async () => {
+    mocks.dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "cid-fail",
+      result: { ok: false, error: "requirements_unmet", missingItems: ["manual usage totals"] },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const recalcRes = await POST(
+      buildRequest({
+        action: "recalc",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        weatherPreference: "LAST_YEAR_WEATHER",
+      })
+    );
+    const recalcBody = await recalcRes.json();
+
+    expect(recalcRes.status).toBe(400);
+    expect(recalcBody).toMatchObject({
+      ok: false,
+      action: "recalc",
+      executionMode: "inline",
+      correlationId: "cid-fail",
+      error: "requirements_unmet",
+      result: {
+        ok: false,
+        error: "requirements_unmet",
+      },
+    });
+  });
 });
