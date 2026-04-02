@@ -205,6 +205,19 @@ function stripIntervalHeavyDatasetFields(dataset: any) {
   };
 }
 
+function summarizeDailyWeatherMap(dailyWeather: any) {
+  if (!dailyWeather || typeof dailyWeather !== "object" || Array.isArray(dailyWeather)) return dailyWeather;
+  const dateKeys = Object.keys(dailyWeather)
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+    .sort();
+  return {
+    redacted: true,
+    count: dateKeys.length,
+    startDate: dateKeys[0] ?? null,
+    endDate: dateKeys[dateKeys.length - 1] ?? null,
+  };
+}
+
 function buildMonthlyOnlySourceDataset(dataset: any) {
   if (!dataset || typeof dataset !== "object") return dataset;
   const series = dataset.series && typeof dataset.series === "object" ? dataset.series : null;
@@ -229,6 +242,7 @@ function buildMonthlyOnlySourceDataset(dataset: any) {
       : dataset.insights,
     daily: Array.isArray(dataset.daily) ? [] : dataset.daily,
     intervals15m: Array.isArray(dataset.intervals15m) ? [] : dataset.intervals15m,
+    dailyWeather: summarizeDailyWeatherMap(dataset.dailyWeather),
   };
 }
 

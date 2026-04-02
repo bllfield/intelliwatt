@@ -29,6 +29,20 @@ function compactSummary(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : "unavailable";
 }
 
+function summarizeDateKeyedObject(value: unknown): { redacted: true; count: number; startDate: string | null; endDate: string | null } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const keys = Object.keys(value as Record<string, unknown>)
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+    .sort();
+  if (!keys.length) return null;
+  return {
+    redacted: true,
+    count: keys.length,
+    startDate: keys[0] ?? null,
+    endDate: keys[keys.length - 1] ?? null,
+  };
+}
+
 function redactIntervalHeavyFields(value: unknown, parents: object[] = []): unknown {
   if (value == null) return value;
   if (typeof value !== "object") return value;
@@ -42,9 +56,47 @@ function redactIntervalHeavyFields(value: unknown, parents: object[] = []): unkn
       out[key] = { redacted: true, count: entry.length };
       continue;
     }
+    if (key === "dailyWeather") {
+      out[key] = summarizeDateKeyedObject(entry) ?? redactIntervalHeavyFields(entry, nextParents);
+      continue;
+    }
     out[key] = redactIntervalHeavyFields(entry, nextParents);
   }
   return out;
+}
+
+function summarizeLabActionJson(value: any) {
+  if (!value || typeof value !== "object") return value ?? null;
+  return {
+    ok: value.ok ?? null,
+    action: value.action ?? null,
+    executionMode: value.executionMode ?? null,
+    correlationId: value.correlationId ?? null,
+    error: value.error ?? null,
+    message: value.message ?? null,
+    selectedSourceHouse: value.selectedSourceHouse
+      ? {
+          id: value.selectedSourceHouse.id ?? null,
+          label: value.selectedSourceHouse.label ?? null,
+        }
+      : null,
+    labHome: value.labHome
+      ? {
+          id: value.labHome.id ?? null,
+          label: value.labHome.label ?? null,
+        }
+      : null,
+    scenarioId: value.scenarioId ?? null,
+    payloadMode: value.payload?.mode ?? null,
+    readResult: value.readResult
+      ? {
+          ok: value.readResult.ok ?? null,
+          error: value.readResult.error ?? null,
+          failureCode: value.readResult.failureCode ?? null,
+          message: value.readResult.message ?? value.readResult.failureMessage ?? null,
+        }
+      : null,
+  };
 }
 
 function sleep(ms: number) {
@@ -339,6 +391,7 @@ export default function ManualMonthlyLab() {
             : await callRoute("load");
         setLoadJson(existing);
         setScenarioId(existing.scenarioId ?? null);
+        setShowManualEditor(false);
         setStatus("Manual payload loaded from the isolated lab home.");
         return {
           ok: true as const,
@@ -661,11 +714,11 @@ export default function ManualMonthlyLab() {
                 status,
                 error,
                 busyAction,
-                lookupJson,
-                loadJson,
-                saveJson,
-                recalcJson,
-                resultJson,
+                lookupJson: summarizeLabActionJson(lookupJson),
+                loadJson: summarizeLabActionJson(loadJson),
+                saveJson: summarizeLabActionJson(saveJson),
+                recalcJson: summarizeLabActionJson(recalcJson),
+                resultJson: summarizeLabActionJson(resultJson),
               }}
             />
           </div>

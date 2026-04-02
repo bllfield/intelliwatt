@@ -165,6 +165,10 @@ describe("admin manual monthly route", () => {
           timeOfDayBuckets: [{ label: "overnight", kwh: 12 }],
         },
         totals: { importKwh: 3650, exportKwh: 0, netKwh: 3650 },
+        dailyWeather: {
+          "2025-01-01": { tAvgF: 45, hdd65: 20, cdd65: 0 },
+          "2025-12-31": { tAvgF: 48, hdd65: 17, cdd65: 0 },
+        },
       },
     });
     mocks.getHomeProfileSimulatedByUserHouse.mockResolvedValue({ squareFeet: 2200, hvacType: "central" });
@@ -223,6 +227,12 @@ describe("admin manual monthly route", () => {
     expect(body.sourceUsageHouse.dataset.series.hourly).toEqual([]);
     expect(body.sourceUsageHouse.dataset.series.daily).toEqual([]);
     expect(body.sourceUsageHouse.dataset.series.monthly).toEqual([{ month: "2025-01", kwh: 310 }]);
+    expect(body.sourceUsageHouse.dataset.dailyWeather).toEqual({
+      redacted: true,
+      count: 2,
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    });
     expect(body.sourceSeed.monthly.statementRanges[0]).toMatchObject({
       month: "2025-12",
       endDate: "2025-12-31",
@@ -252,6 +262,12 @@ describe("admin manual monthly route", () => {
     expect(body.sourceUsageHouse.dataset.daily).toEqual([]);
     expect(body.sourceUsageHouse.dataset.series.hourly).toEqual([]);
     expect(body.sourceUsageHouse.dataset.series.daily).toEqual([]);
+    expect(body.sourceUsageHouse.dataset.dailyWeather).toEqual({
+      redacted: true,
+      count: 2,
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    });
     expect(mocks.replaceGlobalManualMonthlyLabTestHomeFromSource).toHaveBeenCalledWith({
       ownerUserId: "admin-owner-1",
       sourceUserId: "source-user-1",
