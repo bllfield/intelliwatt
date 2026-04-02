@@ -191,25 +191,17 @@ function stripIntervalHeavyDatasetFields(dataset: any) {
     series: series
       ? {
           ...series,
-          intervals15: Array.isArray((series as any).intervals15)
-            ? { redacted: true, count: (series as any).intervals15.length }
-            : (series as any).intervals15,
+          intervals15: Array.isArray((series as any).intervals15) ? [] : (series as any).intervals15,
         }
       : dataset.series,
     insights: insights
       ? {
           ...insights,
-          fifteenMinuteAverages: Array.isArray((insights as any).fifteenMinuteAverages)
-            ? { redacted: true, count: (insights as any).fifteenMinuteAverages.length }
-            : (insights as any).fifteenMinuteAverages,
-          timeOfDayBuckets: Array.isArray((insights as any).timeOfDayBuckets)
-            ? { redacted: true, count: (insights as any).timeOfDayBuckets.length }
-            : (insights as any).timeOfDayBuckets,
+          fifteenMinuteAverages: Array.isArray((insights as any).fifteenMinuteAverages) ? [] : (insights as any).fifteenMinuteAverages,
+          timeOfDayBuckets: Array.isArray((insights as any).timeOfDayBuckets) ? [] : (insights as any).timeOfDayBuckets,
         }
       : dataset.insights,
-    intervals15m: Array.isArray(dataset.intervals15m)
-      ? { redacted: true, count: dataset.intervals15m.length }
-      : dataset.intervals15m,
+    intervals15m: Array.isArray(dataset.intervals15m) ? [] : dataset.intervals15m,
   };
 }
 
