@@ -62,6 +62,26 @@ async function findPastScenarioId(args: { userId: string; houseId: string }): Pr
   return row?.id ?? null;
 }
 
+async function resolvePreferredPastScenarioId(args: {
+  userId: string;
+  houseId: string;
+  preferredScenarioId?: string | null;
+}): Promise<string | null> {
+  const preferred = String(args.preferredScenarioId ?? "").trim();
+  if (!preferred) return null;
+  const row = await (prisma as any).usageSimulatorScenario.findFirst({
+    where: {
+      id: preferred,
+      userId: args.userId,
+      houseId: args.houseId,
+      name: WORKSPACE_PAST_NAME,
+      archivedAt: null,
+    },
+    select: { id: true },
+  });
+  return row?.id ?? null;
+}
+
 async function ensurePastScenarioId(args: { userId: string; houseId: string }): Promise<string> {
   const existing = await findPastScenarioId(args);
   if (existing) return existing;
@@ -340,7 +360,12 @@ export async function POST(req: NextRequest) {
     }
 
     const labHome = await ensureGlobalManualMonthlyLabTestHomeHouse(ownerUserId);
-    const scenarioId = await ensurePastScenarioId({ userId: ownerUserId, houseId: labHome.id });
+    const preferredScenarioId = await resolvePreferredPastScenarioId({
+      userId: ownerUserId,
+      houseId: labHome.id,
+      preferredScenarioId: body?.scenarioId,
+    });
+    const scenarioId = preferredScenarioId ?? (await ensurePastScenarioId({ userId: ownerUserId, houseId: labHome.id }));
     const [sourcePayloadRecord, sourceHomeProfile, sourceApplianceProfile, sourceUsageHouse] = await Promise.all([
       getManualUsageInputForUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
       getHomeProfileSimulatedByUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),

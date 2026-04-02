@@ -423,6 +423,36 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(constrainedDay?.shape96Used).toEqual(whDay?.shape96Used);
   });
 
+  it("baseline intervals remain in canonical chronological order", () => {
+    const day1StartMs = new Date("2026-10-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-10-02T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const excludedDate = dateKeyFromTimestamp(day2Grid[0]!);
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals: day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 0.2 + idx * 0.001 })),
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>([excludedDate]),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map([
+        [dateKeyFromTimestamp(day1Grid[0]!), { tAvgF: 70, tMinF: 62, tMaxF: 80, hdd65: 0, cdd65: 5 }],
+        [excludedDate, { tAvgF: 72, tMinF: 64, tMaxF: 82, hdd65: 0, cdd65: 7 }],
+      ]),
+      resolvedSimFingerprint: baseResolved({ blendMode: "whole_home_only", usageBlendWeight: 0 }),
+      homeProfile: { squareFeet: 1800 },
+    });
+
+    expect(out.intervals[0]?.timestamp).toBe(day1Grid[0]);
+    expect(out.intervals[95]?.timestamp).toBe(day1Grid[95]);
+    expect(out.intervals[96]?.timestamp).toBe(day2Grid[0]);
+    for (let i = 1; i < out.intervals.length; i++) {
+      expect(out.intervals[i]!.timestamp >= out.intervals[i - 1]!.timestamp).toBe(true);
+    }
+  });
+
   it("travel/vacant excluded days remain modeled and labeled as SIMULATED/EXCLUDED", () => {
     const day1StartMs = new Date("2026-09-01T00:00:00.000Z").getTime();
     const day2StartMs = new Date("2026-09-02T00:00:00.000Z").getTime();

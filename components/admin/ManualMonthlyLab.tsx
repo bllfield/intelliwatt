@@ -267,6 +267,7 @@ export default function ManualMonthlyLab() {
         action,
         email: email.trim(),
         houseId: selectedHouseId || undefined,
+        scenarioId: scenarioId || undefined,
         ...extra,
       }),
     });
@@ -288,6 +289,7 @@ export default function ManualMonthlyLab() {
         action,
         email: email.trim(),
         houseId: selectedHouseId || undefined,
+        scenarioId: scenarioId || undefined,
         ...extra,
       }),
     });
@@ -415,7 +417,7 @@ export default function ManualMonthlyLab() {
         }
       },
     }),
-    [adminToken, email, loadJson, selectedHouseId]
+    [adminToken, email, loadJson, scenarioId, selectedHouseId]
   );
 
   return (

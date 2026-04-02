@@ -2052,7 +2052,8 @@ export function buildPastSimulatedBaselineV1(args: {
   }
 
   actualByTs.clear();
-  out.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  // `canonicalDayStartsMs` and each per-day grid are emitted in chronological order,
+  // so re-sorting the full stitched interval list only burns CPU on large annual runs.
   return { intervals: out, dayResults };
 }
 
