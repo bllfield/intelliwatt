@@ -1,22 +1,236 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin";
 import { lookupAdminHousesByEmail } from "@/lib/admin/adminHouseLookup";
 import { prisma } from "@/lib/db";
-import { saveManualUsageInputForUserHouse, getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
+import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import type {
+  AnnualManualUsagePayload,
+  ManualUsagePayload,
+  MonthlyManualUsagePayload,
+  TravelRange,
+} from "@/modules/simulatedUsage/types";
+import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+import {
+  MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+  ensureGlobalManualMonthlyLabTestHomeHouse,
+  replaceGlobalManualMonthlyLabTestHomeFromSource,
+} from "@/modules/usageSimulator/labTestHome";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
-import { getUserDefaultValidationSelectionMode, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
-import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
-import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
+import { getSimulatedUsageForHouseScenario, getUserDefaultValidationSelectionMode } from "@/modules/usageSimulator/service";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
+import { gateManualMonthlyLabAdmin, resolveManualMonthlyLabOwnerUserId } from "./_helpers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
+
+function round2(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+function normalizeTravelRanges(payload: ManualUsagePayload | null): TravelRange[] {
+  if (!payload || !Array.isArray(payload.travelRanges)) return [];
+  return payload.travelRanges
+    .map((range) => ({
+      startDate: String(range?.startDate ?? "").slice(0, 10),
+      endDate: String(range?.endDate ?? "").slice(0, 10),
+    }))
+    .filter((range) => isIsoDate(range.startDate) && isIsoDate(range.endDate));
+}
+
+function resolveAnchorDate(args: {
+  requestedAnchorDate?: unknown;
+  sourcePayload: ManualUsagePayload | null;
+  actualDataset: any | null;
+}): string | null {
+  const requested = String(args.requestedAnchorDate ?? "").trim().slice(0, 10);
+  if (isIsoDate(requested)) return requested;
+  const payloadAnchor = String((args.sourcePayload as any)?.anchorEndDate ?? "").trim().slice(0, 10);
+  if (isIsoDate(payloadAnchor)) return payloadAnchor;
+  const latest = String(args.actualDataset?.summary?.latest ?? "").trim().slice(0, 10);
+  if (isIsoDate(latest)) return latest;
+  const dailyRows = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
+  const lastDailyDate = String(dailyRows[dailyRows.length - 1]?.date ?? "").trim().slice(0, 10);
+  if (isIsoDate(lastDailyDate)) return lastDailyDate;
+  return null;
+}
+
+function sumDailyRowsByRange(dailyRows: Array<{ date: string; kwh: number }>, startDate: string, endDate: string): number {
+  let total = 0;
+  for (const row of dailyRows) {
+    const date = String(row?.date ?? "").slice(0, 10);
+    const kwh = Number(row?.kwh ?? NaN);
+    if (!isIsoDate(date) || !Number.isFinite(kwh)) continue;
+    if (date < startDate || date > endDate) continue;
+    total += kwh;
+  }
+  return round2(total);
+}
+
+function deriveMonthlySeedFromActual(args: {
+  anchorEndDate: string | null;
+  actualDataset: any | null;
+  travelRanges: TravelRange[];
+}): MonthlyManualUsagePayload | null {
+  if (!isIsoDate(args.anchorEndDate)) return null;
+  const dailyRows = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
+  if (!dailyRows.length) return null;
+  const monthlyKwh = billingPeriodsEndingAt(args.anchorEndDate, 12).map((period) => ({
+    month: period.id,
+    kwh: sumDailyRowsByRange(dailyRows, period.startDate, period.endDate),
+  }));
+  return {
+    mode: "MONTHLY",
+    anchorEndDate: args.anchorEndDate,
+    monthlyKwh,
+    travelRanges: args.travelRanges,
+  };
+}
+
+function deriveAnnualSeed(args: {
+  anchorEndDate: string | null;
+  actualDataset: any | null;
+  sourcePayload: ManualUsagePayload | null;
+  travelRanges: TravelRange[];
+}): AnnualManualUsagePayload | null {
+  if (args.sourcePayload?.mode === "ANNUAL" && isIsoDate(args.sourcePayload.anchorEndDate)) {
+    return {
+      mode: "ANNUAL",
+      anchorEndDate: args.sourcePayload.anchorEndDate,
+      annualKwh:
+        typeof args.sourcePayload.annualKwh === "number" && Number.isFinite(args.sourcePayload.annualKwh)
+          ? args.sourcePayload.annualKwh
+          : "",
+      travelRanges: normalizeTravelRanges(args.sourcePayload),
+    };
+  }
+  if (!isIsoDate(args.anchorEndDate)) return null;
+  const dailyRows = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
+  if (dailyRows.length > 0) {
+    const annualKwh = round2(
+      dailyRows.reduce((sum, row) => sum + (Number.isFinite(Number(row?.kwh)) ? Number(row.kwh) : 0), 0)
+    );
+    return {
+      mode: "ANNUAL",
+      anchorEndDate: args.anchorEndDate,
+      annualKwh,
+      travelRanges: args.travelRanges,
+    };
+  }
+  if (args.sourcePayload?.mode === "MONTHLY") {
+    const annualKwh = round2(
+      (args.sourcePayload.monthlyKwh ?? []).reduce((sum, row) => sum + (typeof row.kwh === "number" ? row.kwh : 0), 0)
+    );
+    return {
+      mode: "ANNUAL",
+      anchorEndDate: isIsoDate(args.sourcePayload.anchorEndDate) ? args.sourcePayload.anchorEndDate : args.anchorEndDate,
+      annualKwh,
+      travelRanges: normalizeTravelRanges(args.sourcePayload),
+    };
+  }
+  return null;
+}
+
+async function buildSourceUsageHouse(sourceHouse: {
+  id: string;
+  label?: string | null;
+  addressLine1?: string | null;
+  addressCity?: string | null;
+  addressState?: string | null;
+  esiid?: string | null;
+}) {
+  const actualResult = await getActualUsageDatasetForHouse(sourceHouse.id, sourceHouse.esiid ?? null).catch(() => null);
+  return {
+    houseId: sourceHouse.id,
+    label: sourceHouse.label ?? sourceHouse.addressLine1 ?? "Home",
+    address: {
+      line1: sourceHouse.addressLine1 ?? "",
+      city: sourceHouse.addressCity ?? null,
+      state: sourceHouse.addressState ?? null,
+    },
+    esiid: sourceHouse.esiid ?? null,
+    dataset: actualResult?.dataset ?? null,
+    alternatives: { smt: null, greenButton: null },
+    datasetError:
+      actualResult?.dataset == null
+        ? {
+            code: "ACTUAL_DATA_UNAVAILABLE",
+            explanation:
+              "We could not load interval usage for this source home right now. This can happen when SMT/Green Button data is still syncing or temporarily unavailable.",
+          }
+        : null,
+  };
+}
+
+async function buildLabPrefill(args: {
+  sourceUserId: string;
+  sourceHouse: {
+    id: string;
+    esiid?: string | null;
+    label?: string | null;
+    addressLine1?: string | null;
+    addressCity?: string | null;
+    addressState?: string | null;
+  };
+  requestedAnchorDate?: unknown;
+}) {
+  const sourcePayloadRecord = await getManualUsageInputForUserHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouse.id,
+  });
+  const sourceUsageHouse = await buildSourceUsageHouse(args.sourceHouse);
+  const sourcePayload = sourcePayloadRecord.payload;
+  const travelRanges = normalizeTravelRanges(sourcePayload);
+  const anchorEndDate = resolveAnchorDate({
+    requestedAnchorDate: args.requestedAnchorDate,
+    sourcePayload,
+    actualDataset: sourceUsageHouse.dataset,
+  });
+  const monthlySeed =
+    sourcePayload?.mode === "MONTHLY"
+      ? {
+          mode: "MONTHLY" as const,
+          anchorEndDate: sourcePayload.anchorEndDate,
+          monthlyKwh: sourcePayload.monthlyKwh,
+          travelRanges: normalizeTravelRanges(sourcePayload),
+        }
+      : deriveMonthlySeedFromActual({
+          anchorEndDate,
+          actualDataset: sourceUsageHouse.dataset,
+          travelRanges,
+        });
+  const annualSeed = deriveAnnualSeed({
+    anchorEndDate,
+    actualDataset: sourceUsageHouse.dataset,
+    sourcePayload,
+    travelRanges,
+  });
+  const payloadToPersist = sourcePayload ?? monthlySeed ?? annualSeed ?? null;
+  return {
+    payloadToPersist,
+    updatedAt: sourcePayloadRecord.updatedAt,
+    sourcePayload,
+    sourceUsageHouse,
+    seed: {
+      anchorEndDate,
+      sourceMode: sourcePayload?.mode ?? (monthlySeed ? "ACTUAL_INTERVALS_MONTHLY_PREFILL" : annualSeed ? "ACTUAL_INTERVALS_ANNUAL_PREFILL" : null),
+      monthly: monthlySeed,
+      annual: annualSeed,
+    },
+  };
+}
 
 async function resolveUserAndHouse(emailRaw: string, preferredHouseId?: string | null) {
   const lookup = await lookupAdminHousesByEmail(String(emailRaw ?? ""));
@@ -37,12 +251,21 @@ async function resolveUserAndHouse(emailRaw: string, preferredHouseId?: string |
   };
 }
 
-async function findPastScenarioId(args: { userId: string; houseId: string }): Promise<string | null> {
+async function ensurePastScenarioId(args: { userId: string; houseId: string }): Promise<string> {
   const row = await (prisma as any).usageSimulatorScenario.findFirst({
     where: { userId: args.userId, houseId: args.houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
     select: { id: true },
   });
-  return row?.id ?? null;
+  if (row?.id) return String(row.id);
+  const created = await (prisma as any).usageSimulatorScenario.create({
+    data: {
+      userId: args.userId,
+      houseId: args.houseId,
+      name: WORKSPACE_PAST_NAME,
+    },
+    select: { id: true },
+  });
+  return String(created.id);
 }
 
 async function buildReadResult(args: {
@@ -102,12 +325,16 @@ async function buildReadResult(args: {
 }
 
 export async function POST(req: NextRequest) {
-  const gate = requireAdmin(req);
-  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+  const gate = gateManualMonthlyLabAdmin(req);
+  if (gate) return gate;
 
   try {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "").trim();
+    const ownerUserId = await resolveManualMonthlyLabOwnerUserId(req);
+    if (!ownerUserId) {
+      return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+    }
     const resolved = await resolveUserAndHouse(body?.email, body?.houseId);
     if (!resolved.ok) {
       const status =
@@ -115,15 +342,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status });
     }
 
-    const scenarioId = await findPastScenarioId({ userId: resolved.userId, houseId: resolved.selectedHouse.id });
+    const labHome = await ensureGlobalManualMonthlyLabTestHomeHouse(ownerUserId);
+    const labScenarioId = await ensurePastScenarioId({ userId: ownerUserId, houseId: labHome.id });
+    const [sourceHomeProfile, sourceApplianceProfile] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
+      getApplianceProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
+    ]);
 
     if (action === "lookup") {
-      const payload = await getManualUsageInputForUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id });
-      const currentResult = scenarioId
+      const sourcePayload = await getManualUsageInputForUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id });
+      const sourceUsageHouse = await buildSourceUsageHouse(resolved.selectedHouse);
+      const currentResult = labScenarioId
         ? await buildReadResult({
-            userId: resolved.userId,
-            houseId: resolved.selectedHouse.id,
-            scenarioId,
+            userId: ownerUserId,
+            houseId: labHome.id,
+            scenarioId: labScenarioId,
             readMode: "artifact_only",
           })
         : null;
@@ -131,33 +364,82 @@ export async function POST(req: NextRequest) {
         ok: true,
         action,
         email: resolved.email,
-        userId: resolved.userId,
+        userId: ownerUserId,
+        sourceUserId: resolved.userId,
         houses: resolved.houses,
+        selectedSourceHouse: resolved.selectedHouse,
         selectedHouse: resolved.selectedHouse,
-        scenarioId,
-        payload: payload.payload,
-        updatedAt: payload.updatedAt,
+        labHome: {
+          id: labHome.id,
+          label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+        },
+        scenarioId: labScenarioId,
+        payload: sourcePayload.payload,
+        updatedAt: sourcePayload.updatedAt,
+        sourceUsageHouse,
+        sourceHomeProfile,
+        sourceApplianceProfile,
         currentResult,
       });
     }
 
     if (action === "load") {
-      const payload = await getManualUsageInputForUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id });
+      const replaced = await replaceGlobalManualMonthlyLabTestHomeFromSource({
+        ownerUserId,
+        sourceUserId: resolved.userId,
+        sourceHouseId: resolved.selectedHouse.id,
+      });
+      if (!replaced.ok) {
+        return NextResponse.json({ ok: false, error: replaced.error, message: replaced.message }, { status: 500 });
+      }
+      const labSeed = await buildLabPrefill({
+        sourceUserId: resolved.userId,
+        sourceHouse: resolved.selectedHouse,
+        requestedAnchorDate: body?.anchorEndDate,
+      });
+      let payload = await getManualUsageInputForUserHouse({ userId: ownerUserId, houseId: labHome.id });
+      if (labSeed.payloadToPersist) {
+        const saved = await saveManualUsageInputForUserHouse({
+          userId: ownerUserId,
+          houseId: labHome.id,
+          payload: labSeed.payloadToPersist,
+        });
+        if (saved.ok) {
+          payload = { payload: saved.payload, updatedAt: saved.updatedAt };
+        }
+      }
+      const [labHomeProfile, labApplianceProfile] = await Promise.all([
+        getHomeProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }).catch(() => null),
+        getApplianceProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }).catch(() => null),
+      ]);
       const readResult = await buildReadResult({
-        userId: resolved.userId,
-        houseId: resolved.selectedHouse.id,
-        scenarioId,
+        userId: ownerUserId,
+        houseId: labHome.id,
+        scenarioId: labScenarioId,
         readMode: "artifact_only",
       });
       return NextResponse.json({
         ok: true,
         action,
         email: resolved.email,
-        userId: resolved.userId,
+        userId: ownerUserId,
+        sourceUserId: resolved.userId,
+        selectedSourceHouse: resolved.selectedHouse,
         selectedHouse: resolved.selectedHouse,
-        scenarioId,
+        labHome: {
+          id: labHome.id,
+          label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+        },
+        scenarioId: labScenarioId,
         payload: payload.payload,
         updatedAt: payload.updatedAt,
+        seed: labSeed.seed,
+        sourcePayload: labSeed.sourcePayload,
+        sourceUsageHouse: labSeed.sourceUsageHouse,
+        sourceHomeProfile,
+        sourceApplianceProfile,
+        labHomeProfile,
+        labApplianceProfile,
         readResult,
       });
     }
@@ -166,8 +448,8 @@ export async function POST(req: NextRequest) {
       const payload = body?.payload as ManualUsagePayload | null;
       if (!payload) return NextResponse.json({ ok: false, error: "payload_required" }, { status: 400 });
       const saved = await saveManualUsageInputForUserHouse({
-        userId: resolved.userId,
-        houseId: resolved.selectedHouse.id,
+        userId: ownerUserId,
+        houseId: labHome.id,
         payload,
       });
       if (!saved.ok) return NextResponse.json(saved, { status: 400 });
@@ -175,18 +457,21 @@ export async function POST(req: NextRequest) {
         ok: true,
         action,
         email: resolved.email,
-        userId: resolved.userId,
+        userId: ownerUserId,
+        sourceUserId: resolved.userId,
+        selectedSourceHouse: resolved.selectedHouse,
         selectedHouse: resolved.selectedHouse,
-        scenarioId,
+        labHome: {
+          id: labHome.id,
+          label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+        },
+        scenarioId: labScenarioId,
         updatedAt: saved.updatedAt,
         payload: saved.payload,
       });
     }
 
     if (action === "recalc") {
-      if (!scenarioId) {
-        return NextResponse.json({ ok: false, error: "past_scenario_missing" }, { status: 404 });
-      }
       const weatherPreferenceRaw = typeof body?.weatherPreference === "string" ? body.weatherPreference.trim() : "";
       const weatherPreference: WeatherPreference =
         weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
@@ -198,11 +483,11 @@ export async function POST(req: NextRequest) {
         validationDayCount: 21,
       });
       const dispatched = await dispatchPastSimRecalc({
-        userId: resolved.userId,
-        houseId: resolved.selectedHouse.id,
-        esiid: resolved.selectedHouse.esiid ?? null,
+        userId: ownerUserId,
+        houseId: labHome.id,
+        esiid: labHome.esiid ?? null,
         mode: "MANUAL_TOTALS",
-        scenarioId,
+        scenarioId: labScenarioId,
         weatherPreference: userWeatherLogic.weatherPreference,
         persistPastSimBaseline: true,
         validationDaySelectionMode: userValidationPolicy.selectionMode,
@@ -213,44 +498,67 @@ export async function POST(req: NextRequest) {
           persistRequested: true,
         },
       });
+      const jobId = dispatched.executionMode === "droplet_async" ? dispatched.jobId : null;
+      const result = dispatched.executionMode === "inline" ? dispatched.result : null;
       return NextResponse.json({
         ok: true,
         action,
         email: resolved.email,
-        userId: resolved.userId,
+        userId: ownerUserId,
+        sourceUserId: resolved.userId,
+        selectedSourceHouse: resolved.selectedHouse,
         selectedHouse: resolved.selectedHouse,
-        scenarioId,
+        labHome: {
+          id: labHome.id,
+          label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+        },
+        scenarioId: labScenarioId,
         executionMode: dispatched.executionMode,
         correlationId: dispatched.correlationId,
-        jobId: dispatched.executionMode === "droplet_async" ? dispatched.jobId : null,
-        result: dispatched.executionMode === "inline" ? dispatched.result : null,
+        jobId,
+        result,
       });
     }
 
     if (action === "read_result") {
       const readResult = await buildReadResult({
-        userId: resolved.userId,
-        houseId: resolved.selectedHouse.id,
-        scenarioId,
+        userId: ownerUserId,
+        houseId: labHome.id,
+        scenarioId: labScenarioId,
         readMode: "allow_rebuild",
       });
+      const sourceUsageHouse = await buildSourceUsageHouse(resolved.selectedHouse);
       if (readResult.ok) {
         return NextResponse.json({
           ok: true,
           action,
           email: resolved.email,
-          userId: resolved.userId,
+          userId: ownerUserId,
+          sourceUserId: resolved.userId,
+          selectedSourceHouse: resolved.selectedHouse,
           selectedHouse: resolved.selectedHouse,
-          scenarioId,
+          labHome: {
+            id: labHome.id,
+            label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+          },
+          scenarioId: labScenarioId,
+          sourceUsageHouse,
           readResult,
         });
       }
       return NextResponse.json({
         action,
         email: resolved.email,
-        userId: resolved.userId,
+        userId: ownerUserId,
+        sourceUserId: resolved.userId,
+        selectedSourceHouse: resolved.selectedHouse,
         selectedHouse: resolved.selectedHouse,
-        scenarioId,
+        labHome: {
+          id: labHome.id,
+          label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+        },
+        scenarioId: labScenarioId,
+        sourceUsageHouse,
         ...readResult,
       });
     }

@@ -6,6 +6,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 
 export const GAPFILL_LAB_TEST_HOME_LABEL = "GAPFILL_CANONICAL_LAB_TEST_HOME";
+export const MANUAL_MONTHLY_LAB_TEST_HOME_LABEL = "MANUAL_MONTHLY_LAB_TEST_HOME";
 
 type LabTestHomeLink = {
   ownerUserId: string;
@@ -15,6 +16,13 @@ type LabTestHomeLink = {
   status: string;
   statusMessage: string | null;
   lastReplacedAt: Date | null;
+};
+
+type NamedLabHomeConfig = {
+  label: string;
+  addressLine1: string;
+  addressCity: string;
+  addressState: string;
 };
 
 function resolveModel(db: any, modelName: string): any | null {
@@ -67,12 +75,35 @@ export async function getLabTestHomeLink(
 export async function ensureGlobalLabTestHomeHouse(
   ownerUserId: string
 ): Promise<{ id: string; esiid: string | null; label: string }> {
+  return ensureNamedLabTestHomeHouse(ownerUserId, {
+    label: GAPFILL_LAB_TEST_HOME_LABEL,
+    addressLine1: "Gap-Fill Canonical Lab Test Home",
+    addressCity: "Lab",
+    addressState: "TX",
+  });
+}
+
+export async function ensureGlobalManualMonthlyLabTestHomeHouse(
+  ownerUserId: string
+): Promise<{ id: string; esiid: string | null; label: string }> {
+  return ensureNamedLabTestHomeHouse(ownerUserId, {
+    label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+    addressLine1: "Manual Monthly Lab Test Home",
+    addressCity: "Lab",
+    addressState: "TX",
+  });
+}
+
+async function ensureNamedLabTestHomeHouse(
+  ownerUserId: string,
+  config: NamedLabHomeConfig
+): Promise<{ id: string; esiid: string | null; label: string }> {
   const existing = await (prisma as any).houseAddress
     .findFirst({
       where: {
         userId: ownerUserId,
         archivedAt: null,
-        label: GAPFILL_LAB_TEST_HOME_LABEL,
+        label: config.label,
       },
       select: { id: true, esiid: true, label: true },
       orderBy: { updatedAt: "desc" },
@@ -89,12 +120,12 @@ export async function ensureGlobalLabTestHomeHouse(
   const created = await (prisma as any).houseAddress.create({
     data: {
       userId: ownerUserId,
-      addressLine1: "Gap-Fill Canonical Lab Test Home",
-      addressCity: "Lab",
-      addressState: "TX",
+      addressLine1: config.addressLine1,
+      addressCity: config.addressCity,
+      addressState: config.addressState,
       addressZip5: "00000",
       addressCountry: "US",
-      label: GAPFILL_LAB_TEST_HOME_LABEL,
+      label: config.label,
       isPrimary: false,
     },
     select: { id: true, esiid: true, label: true },
@@ -105,6 +136,87 @@ export async function ensureGlobalLabTestHomeHouse(
     esiid: created.esiid ? String(created.esiid) : null,
     label: String(created.label ?? GAPFILL_LAB_TEST_HOME_LABEL),
   };
+}
+
+async function resetLabHomeMutableState(args: { tx: any; ownerUserId: string; houseId: string }) {
+  const usageSimulatorBuildModel = resolveModel(args.tx, "usageSimulatorBuild");
+  const usageSimulatorScenarioModel = resolveModel(args.tx, "usageSimulatorScenario");
+  const usageSimulatorScenarioEventModel = resolveModel(args.tx, "usageSimulatorScenarioEvent");
+  const manualUsageInputModel = resolveModel(args.tx, "manualUsageInput");
+  if (!usageSimulatorBuildModel?.deleteMany) throw new Error("usageSimulatorBuild_model_unavailable");
+  if (!usageSimulatorScenarioModel?.findMany || !usageSimulatorScenarioModel?.deleteMany) {
+    throw new Error("usageSimulatorScenario_model_unavailable");
+  }
+  if (!usageSimulatorScenarioEventModel?.deleteMany) throw new Error("usageSimulatorScenarioEvent_model_unavailable");
+  if (!manualUsageInputModel?.deleteMany) throw new Error("manualUsageInput_model_unavailable");
+
+  await usageSimulatorBuildModel.deleteMany({
+    where: { userId: args.ownerUserId, houseId: args.houseId },
+  });
+  const scenarioRows = await usageSimulatorScenarioModel.findMany({
+    where: { userId: args.ownerUserId, houseId: args.houseId },
+    select: { id: true },
+  });
+  const scenarioIds = scenarioRows.map((s: any) => String(s.id));
+  if (scenarioIds.length > 0) {
+    await usageSimulatorScenarioEventModel.deleteMany({
+      where: { scenarioId: { in: scenarioIds } },
+    });
+    await usageSimulatorScenarioModel.deleteMany({
+      where: { id: { in: scenarioIds } },
+    });
+  }
+  await manualUsageInputModel.deleteMany({
+    where: { userId: args.ownerUserId, houseId: args.houseId },
+  });
+}
+
+async function copySourceHouseIdentityToLabHome(args: {
+  tx: any;
+  labHouseId: string;
+  sourceHouse: {
+    addressLine1: string | null;
+    addressLine2: string | null;
+    addressCity: string | null;
+    addressState: string | null;
+    addressZip5: string | null;
+    addressZip4: string | null;
+    addressCountry: string | null;
+    placeId: string | null;
+    lat: number | null;
+    lng: number | null;
+    addressValidated: boolean | null;
+    validationSource: string | null;
+    tdspSlug: string | null;
+    utilityName: string | null;
+    utilityPhone: string | null;
+  };
+  label: string;
+}) {
+  const houseAddressModel = resolveModel(args.tx, "houseAddress");
+  if (!houseAddressModel?.update) throw new Error("houseAddress_model_unavailable");
+  await houseAddressModel.update({
+    where: { id: args.labHouseId },
+    data: {
+      addressLine1: args.sourceHouse.addressLine1,
+      addressLine2: args.sourceHouse.addressLine2,
+      addressCity: args.sourceHouse.addressCity,
+      addressState: args.sourceHouse.addressState,
+      addressZip5: args.sourceHouse.addressZip5,
+      addressZip4: args.sourceHouse.addressZip4,
+      addressCountry: args.sourceHouse.addressCountry,
+      placeId: args.sourceHouse.placeId,
+      lat: args.sourceHouse.lat,
+      lng: args.sourceHouse.lng,
+      addressValidated: args.sourceHouse.addressValidated,
+      validationSource: args.sourceHouse.validationSource,
+      tdspSlug: args.sourceHouse.tdspSlug,
+      utilityName: args.sourceHouse.utilityName,
+      utilityPhone: args.sourceHouse.utilityPhone,
+      label: args.label,
+      esiid: null,
+    },
+  });
 }
 
 export async function upsertLabTestHomeLink(args: {
@@ -310,63 +422,12 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       statusMessage: "Replacing reusable lab test-home data from selected source house.",
     });
     await (prisma as any).$transaction(async (tx: any) => {
-      const usageSimulatorBuildModel = resolveModel(tx, "usageSimulatorBuild");
-      const usageSimulatorScenarioModel = resolveModel(tx, "usageSimulatorScenario");
-      const usageSimulatorScenarioEventModel = resolveModel(tx, "usageSimulatorScenarioEvent");
-      const manualUsageInputModel = resolveModel(tx, "manualUsageInput");
-      const houseAddressModel = resolveModel(tx, "houseAddress");
-      if (!usageSimulatorBuildModel?.deleteMany) throw new Error("usageSimulatorBuild_model_unavailable");
-      if (!usageSimulatorScenarioModel?.findMany || !usageSimulatorScenarioModel?.deleteMany) {
-        throw new Error("usageSimulatorScenario_model_unavailable");
-      }
-      if (!usageSimulatorScenarioEventModel?.deleteMany) throw new Error("usageSimulatorScenarioEvent_model_unavailable");
-      if (!manualUsageInputModel?.deleteMany) throw new Error("manualUsageInput_model_unavailable");
-      if (!houseAddressModel?.update) throw new Error("houseAddress_model_unavailable");
-      // Remove all existing lab-owned data first.
-      await usageSimulatorBuildModel.deleteMany({
-        where: { userId: args.ownerUserId, houseId: testHome!.id },
-      });
-      const testHomeScenarioRows = await usageSimulatorScenarioModel.findMany({
-        where: { userId: args.ownerUserId, houseId: testHome!.id },
-        select: { id: true },
-      });
-      const testHomeScenarioIds = testHomeScenarioRows.map((s: any) => String(s.id));
-      if (testHomeScenarioIds.length > 0) {
-        await usageSimulatorScenarioEventModel.deleteMany({
-          where: { scenarioId: { in: testHomeScenarioIds } },
-        });
-        await usageSimulatorScenarioModel.deleteMany({
-          where: { id: { in: testHomeScenarioIds } },
-        });
-      }
-      await manualUsageInputModel.deleteMany({
-        where: { userId: args.ownerUserId, houseId: testHome!.id },
-      });
-
-      // Copy selected source-house location/detail fields onto test home identity.
-      await houseAddressModel.update({
-        where: { id: testHome!.id },
-        data: {
-          addressLine1: sourceHouse.addressLine1,
-          addressLine2: sourceHouse.addressLine2,
-          addressCity: sourceHouse.addressCity,
-          addressState: sourceHouse.addressState,
-          addressZip5: sourceHouse.addressZip5,
-          addressZip4: sourceHouse.addressZip4,
-          addressCountry: sourceHouse.addressCountry,
-          placeId: sourceHouse.placeId,
-          lat: sourceHouse.lat,
-          lng: sourceHouse.lng,
-          addressValidated: sourceHouse.addressValidated,
-          validationSource: sourceHouse.validationSource,
-          tdspSlug: sourceHouse.tdspSlug,
-          utilityName: sourceHouse.utilityName,
-          utilityPhone: sourceHouse.utilityPhone,
-          // Keep the dedicated test-home identity explicit.
-          label: GAPFILL_LAB_TEST_HOME_LABEL,
-          // Do not copy ESIID to avoid unique conflicts and ownership coupling.
-          esiid: null,
-        },
+      await resetLabHomeMutableState({ tx, ownerUserId: args.ownerUserId, houseId: testHome!.id });
+      await copySourceHouseIdentityToLabHome({
+        tx,
+        labHouseId: testHome!.id,
+        sourceHouse,
+        label: GAPFILL_LAB_TEST_HOME_LABEL,
       });
 
       await copyScenariosAndEvents({
@@ -480,6 +541,134 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       ok: false,
       error: "replace_lab_test_home_failed",
       message: error instanceof Error ? error.message : "replace_lab_test_home_failed",
+    };
+  }
+}
+
+export async function replaceGlobalManualMonthlyLabTestHomeFromSource(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+}): Promise<{
+  ok: boolean;
+  testHomeHouseId?: string;
+  sourceHouseId?: string;
+  error?: string;
+  message?: string;
+}> {
+  const sourceHouse = await (prisma as any).houseAddress
+    .findFirst({
+      where: {
+        id: args.sourceHouseId,
+        userId: args.sourceUserId,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        userId: true,
+        addressLine1: true,
+        addressLine2: true,
+        addressCity: true,
+        addressState: true,
+        addressZip5: true,
+        addressZip4: true,
+        addressCountry: true,
+        placeId: true,
+        lat: true,
+        lng: true,
+        addressValidated: true,
+        validationSource: true,
+        esiid: true,
+        tdspSlug: true,
+        utilityName: true,
+        utilityPhone: true,
+      },
+    })
+    .catch(() => null);
+  if (!sourceHouse?.id) {
+    return { ok: false, error: "source_house_not_found" };
+  }
+
+  let testHome: { id: string; esiid: string | null; label: string } | null = null;
+  try {
+    testHome = await ensureGlobalManualMonthlyLabTestHomeHouse(args.ownerUserId);
+    await (prisma as any).$transaction(async (tx: any) => {
+      await resetLabHomeMutableState({ tx, ownerUserId: args.ownerUserId, houseId: testHome!.id });
+      await copySourceHouseIdentityToLabHome({
+        tx,
+        labHouseId: testHome!.id,
+        sourceHouse,
+        label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+      });
+      await copyManualUsageInput({
+        tx,
+        sourceUserId: args.sourceUserId,
+        sourceHouseId: args.sourceHouseId,
+        targetUserId: args.ownerUserId,
+        targetHouseId: testHome!.id,
+      });
+    });
+
+    await (usagePrisma as any).pastSimulatedDatasetCache
+      ?.deleteMany?.({
+        where: { houseId: testHome!.id },
+      })
+      .catch(() => null);
+
+    const [sourceHomeProfile, sourceApplianceProfile] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+      }),
+      getApplianceProfileSimulatedByUserHouse({
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+      }),
+    ]);
+
+    if (sourceHomeProfile) {
+      await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
+        where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
+        create: {
+          userId: args.ownerUserId,
+          houseId: testHome!.id,
+          ...sourceHomeProfile,
+        },
+        update: {
+          ...sourceHomeProfile,
+        },
+      });
+    }
+    if (sourceApplianceProfile?.appliancesJson) {
+      await (appliancesPrisma as any).applianceProfileSimulated.upsert({
+        where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
+        create: {
+          userId: args.ownerUserId,
+          houseId: testHome!.id,
+          appliancesJson: sourceApplianceProfile.appliancesJson,
+        },
+        update: {
+          appliancesJson: sourceApplianceProfile.appliancesJson,
+        },
+      });
+    }
+
+    await (prisma as any).houseDailyWeather
+      .deleteMany({
+        where: { houseId: testHome.id },
+      })
+      .catch(() => null);
+
+    return {
+      ok: true,
+      testHomeHouseId: testHome!.id,
+      sourceHouseId: args.sourceHouseId,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: "replace_manual_monthly_lab_test_home_failed",
+      message: error instanceof Error ? error.message : "replace_manual_monthly_lab_test_home_failed",
     };
   }
 }

@@ -26,7 +26,22 @@ type ManualUsagePayload =
     };
 
 type LoadResp =
-  | { ok: true; houseId: string; payload: ManualUsagePayload | null; updatedAt: string | null }
+  | {
+      ok: true;
+      houseId: string;
+      payload: ManualUsagePayload | null;
+      updatedAt: string | null;
+      seed?: {
+        monthly?: {
+          anchorEndDate: string;
+          monthlyKwh: Array<{ month: string; kwh: number | "" }>;
+        } | null;
+        annual?: {
+          anchorEndDate: string;
+          annualKwh: number | "";
+        } | null;
+      } | null;
+    }
   | { ok: false; error: string };
 
 type ManualUsageTransport = {
@@ -55,6 +70,33 @@ function manualMonthlyPeriodLabels(anchorEndDate: string): string[] {
       ? String(anchorEndDate).trim()
       : `${lastFullMonthChicago()}-15`;
   return billingPeriodsEndingAt(resolvedAnchor, 12).map((period) => period.id);
+}
+
+function setMonthlyStateFromPayload(
+  payload: {
+    anchorEndDate?: string;
+    anchorEndMonth?: string;
+    billEndDay?: number;
+    monthlyKwh?: Array<{ month: string; kwh: number | "" }>;
+  },
+  setAnchor: (value: string) => void,
+  setRows: (rows: Array<{ month: string; kwh: number | "" }>) => void
+) {
+  const anchor =
+    typeof payload.anchorEndDate === "string" && String(payload.anchorEndDate).trim().length > 0
+      ? String(payload.anchorEndDate).slice(0, 10)
+      : typeof payload.anchorEndMonth === "string"
+        ? (() => {
+            const endMonth = String(payload.anchorEndMonth).trim();
+            const day = clampInt(payload.billEndDay ?? 15, 1, 31);
+            const d = anchorEndDateUtc(endMonth, day);
+            return d ? d.toISOString().slice(0, 10) : `${endMonth}-15`;
+          })()
+        : `${lastFullMonthChicago()}-15`;
+  setAnchor(anchor);
+  const months = manualMonthlyPeriodLabels(anchor);
+  const map = new Map<string, number | "">((payload.monthlyKwh ?? []).map((r) => [r.month, typeof r.kwh === "number" ? r.kwh : ""]));
+  setRows(months.map((m) => ({ month: m, kwh: map.get(m) ?? "" })));
 }
 
 export function ManualUsageEntry({
@@ -104,25 +146,17 @@ export function ManualUsageEntry({
         if (cancelled) return;
         const payload = (json as any).payload as ManualUsagePayload | null;
         setSavedAt((json as any).updatedAt ?? null);
+        const seed = (json as any).seed ?? null;
+        if (seed?.monthly) {
+          setMonthlyStateFromPayload(seed.monthly, setMonthlyAnchorEndDate, setMonthlyKwh);
+        }
+        if (seed?.annual) {
+          setAnnualAnchorEndDate(String(seed.annual.anchorEndDate ?? "").slice(0, 10));
+          setAnnualKwh(seed.annual.annualKwh);
+        }
         if (payload?.mode === "MONTHLY") {
           setActiveTab("MONTHLY");
-          const anchor =
-            typeof (payload as any).anchorEndDate === "string" && String((payload as any).anchorEndDate).trim().length > 0
-              ? String((payload as any).anchorEndDate).slice(0, 10)
-              : typeof (payload as any).anchorEndMonth === "string"
-                ? (() => {
-                    const endMonth = String((payload as any).anchorEndMonth).trim();
-                    const day = clampInt((payload as any).billEndDay ?? 15, 1, 31);
-                    const d = anchorEndDateUtc(endMonth, day);
-                    return d ? d.toISOString().slice(0, 10) : `${endMonth}-15`;
-                  })()
-                : `${lastFullMonthChicago()}-15`;
-          setMonthlyAnchorEndDate(anchor);
-          const months = manualMonthlyPeriodLabels(anchor);
-          const map = new Map<string, number | "">(
-            payload.monthlyKwh.map((r) => [r.month, typeof r.kwh === "number" ? r.kwh : ""]),
-          );
-          setMonthlyKwh(months.map((m) => ({ month: m, kwh: map.get(m) ?? "" })));
+          setMonthlyStateFromPayload(payload, setMonthlyAnchorEndDate, setMonthlyKwh);
           setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
         }

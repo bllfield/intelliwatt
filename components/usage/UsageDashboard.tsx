@@ -5,6 +5,7 @@ import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
+import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 type UsageSeriesPoint = {
@@ -139,11 +140,11 @@ type UsageApiResponse =
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
 const SESSION_KEY_PREFIX = "usage_dashboard_v2";
 const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
-const INTERNAL_LAB_HOME_LABEL = "GAPFILL_CANONICAL_LAB_TEST_HOME";
-
 function publicHomeLabel(h: Pick<HouseUsage, "label" | "address">): string {
-  if (String(h.label ?? "").trim() === INTERNAL_LAB_HOME_LABEL) return "Home";
-  return h.label || h.address.line1 || "Home";
+  return toPublicHouseLabel({
+    label: h.label,
+    addressLine1: h.address.line1,
+  });
 }
 
 function sessionKey(mode: "REAL" | "SIMULATED") {
@@ -269,6 +270,7 @@ type Props = {
   forcedMode?: "REAL" | "SIMULATED";
   allowModeToggle?: boolean;
   refreshToken?: string | number;
+  housesOverride?: HouseUsage[] | null;
   simulatedHousesOverride?: HouseUsage[] | null;
   /**
    * When set, this mode is used for the data fetch (and cache key) instead of datasetMode.
@@ -295,6 +297,7 @@ export const UsageDashboard: React.FC<Props> = ({
   forcedMode,
   allowModeToggle = true,
   refreshToken,
+  housesOverride = null,
   simulatedHousesOverride = null,
   fetchModeOverride,
   dashboardVariant,
@@ -324,6 +327,14 @@ export const UsageDashboard: React.FC<Props> = ({
 
         // Effective mode for fetch: when simulator shows Usage tab, use REAL so we hit the same API as the main Usage page (one source).
         const effectiveFetchMode = fetchModeOverride ?? datasetMode;
+
+        if (housesOverride && housesOverride.length) {
+          setHouses(housesOverride);
+          const firstWithData = housesOverride.find((h) => h.dataset);
+          setSelectedHouseId(firstWithData?.houseId ?? housesOverride[0]?.houseId ?? null);
+          setLoading(false);
+          return;
+        }
 
         // When the simulator supplies a scenario-specific dataset (Past/Future only), use it as-is. No scenario on Usage tab.
         if (effectiveFetchMode === "SIMULATED" && simulatedHousesOverride && simulatedHousesOverride.length) {
@@ -390,13 +401,20 @@ export const UsageDashboard: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [datasetMode, fetchModeOverride, refreshToken, simulatedHousesOverride]);
+  }, [datasetMode, fetchModeOverride, housesOverride, refreshToken, simulatedHousesOverride]);
 
   // If usage isn't available yet (common immediately after SMT backfill request),
   // keep checking until it lands by polling the SMT orchestrator and reloading usage.
   // Only poll when we're actually showing REAL data (main Usage or simulator Usage tab).
   const effectiveFetchMode = fetchModeOverride ?? datasetMode;
   useEffect(() => {
+    if (housesOverride && housesOverride.length) {
+      if (smtPollTimerRef.current) {
+        window.clearTimeout(smtPollTimerRef.current);
+        smtPollTimerRef.current = null;
+      }
+      return;
+    }
     if (effectiveFetchMode === "SIMULATED") {
       if (smtPollTimerRef.current) {
         window.clearTimeout(smtPollTimerRef.current);
@@ -487,7 +505,7 @@ export const UsageDashboard: React.FC<Props> = ({
         smtPollTimerRef.current = null;
       }
     };
-  }, [datasetMode, fetchModeOverride, loading, selectedHouseId, houses]);
+  }, [datasetMode, fetchModeOverride, houses, housesOverride, loading, selectedHouseId]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
