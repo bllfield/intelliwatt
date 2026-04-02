@@ -61,13 +61,13 @@ function resolveAnchorDate(args: {
   if (isIsoDate(payloadAnchor)) return payloadAnchor;
   const latest = String(args.actualDataset?.summary?.latest ?? "").trim().slice(0, 10);
   if (isIsoDate(latest)) return latest;
-  const dailyRows = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
+  const dailyRows: Array<{ date?: string; kwh?: number }> = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
   const lastDailyDate = String(dailyRows[dailyRows.length - 1]?.date ?? "").trim().slice(0, 10);
   if (isIsoDate(lastDailyDate)) return lastDailyDate;
   return null;
 }
 
-function sumDailyRowsByRange(dailyRows: Array<{ date: string; kwh: number }>, startDate: string, endDate: string): number {
+function sumDailyRowsByRange(dailyRows: Array<{ date?: string; kwh?: number }>, startDate: string, endDate: string): number {
   let total = 0;
   for (const row of dailyRows) {
     const date = String(row?.date ?? "").slice(0, 10);
@@ -85,7 +85,7 @@ function deriveMonthlySeedFromActual(args: {
   travelRanges: TravelRange[];
 }): MonthlyManualUsagePayload | null {
   if (!isIsoDate(args.anchorEndDate)) return null;
-  const dailyRows = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
+  const dailyRows: Array<{ date?: string; kwh?: number }> = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
   if (!dailyRows.length) return null;
   const monthlyKwh = billingPeriodsEndingAt(args.anchorEndDate, 12).map((period) => ({
     month: period.id,
@@ -117,10 +117,10 @@ function deriveAnnualSeed(args: {
     };
   }
   if (!isIsoDate(args.anchorEndDate)) return null;
-  const dailyRows = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
+  const dailyRows: Array<{ date?: string; kwh?: number }> = Array.isArray(args.actualDataset?.daily) ? args.actualDataset.daily : [];
   if (dailyRows.length > 0) {
     const annualKwh = round2(
-      dailyRows.reduce((sum, row) => sum + (Number.isFinite(Number(row?.kwh)) ? Number(row.kwh) : 0), 0)
+      dailyRows.reduce((sum: number, row) => sum + (Number.isFinite(Number(row?.kwh)) ? Number(row.kwh) : 0), 0)
     );
     return {
       mode: "ANNUAL",
