@@ -249,6 +249,26 @@ describe("admin manual monthly route", () => {
     expect(typeof body.seed.annual.annualKwh).toBe("number");
   });
 
+  it("load fails closed when derived lab-home prefill persistence fails", async () => {
+    mocks.saveManualUsageInputForUserHouse.mockResolvedValueOnce({
+      ok: false,
+      error: "anchorEndDate_invalid",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body).toMatchObject({
+      ok: false,
+      action: "load",
+      error: "anchorEndDate_invalid",
+    });
+    expect(body.seed).toBeUndefined();
+    expect(body.payload).toBeUndefined();
+  });
+
   it("save, recalc, and read_result stay on the isolated lab home runtime path", async () => {
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
 

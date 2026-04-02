@@ -399,15 +399,24 @@ export async function POST(req: NextRequest) {
       });
       let payload = await getManualUsageInputForUserHouse({ userId: ownerUserId, houseId: labHome.id });
       if (labSeed.payloadToPersist) {
-        const saved = await saveManualUsageInputForUserHouse({
-          userId: ownerUserId,
-          houseId: labHome.id,
-          payload: labSeed.payloadToPersist,
-        });
-        if (saved.ok) {
+          const saved = await saveManualUsageInputForUserHouse({
+            userId: ownerUserId,
+            houseId: labHome.id,
+            payload: labSeed.payloadToPersist,
+          });
+          if (!saved.ok) {
+            return NextResponse.json(
+              {
+                ok: false,
+                action,
+                error: saved.error,
+                message: "Failed to persist the derived prefill payload for the isolated lab home.",
+              },
+              { status: 400 }
+            );
+          }
           payload = { payload: saved.payload, updatedAt: saved.updatedAt };
         }
-      }
       const [labHomeProfile, labApplianceProfile] = await Promise.all([
         getHomeProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }).catch(() => null),
         getApplianceProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }).catch(() => null),
