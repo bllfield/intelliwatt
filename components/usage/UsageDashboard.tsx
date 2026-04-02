@@ -7,6 +7,8 @@ import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatt
 import {
   type ManualMonthlyStageOneRow,
   resolveManualMonthlyStageOnePresentation,
+  resolveManualMonthlyStageOneRenderMode,
+  shouldUseManualMonthlyStageOnePayload,
   type ManualMonthlyStageOneSurface,
 } from "@/modules/manualUsage/statementRanges";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
@@ -576,8 +578,13 @@ export const UsageDashboard: React.FC<Props> = ({
         rows: manualMonthlyStageOneRowsOverride,
       };
     }
+    const selectedManualUsageHouseId = activeHouse?.houseId ?? selectedHouseId ?? preferredHouseId ?? null;
     const resolvedPayload =
-      manualUsagePayload && (!manualUsageHouseId || activeHouse?.houseId === manualUsageHouseId)
+      manualUsagePayload &&
+      shouldUseManualMonthlyStageOnePayload({
+        manualUsageHouseId,
+        selectedUsageHouseId: selectedManualUsageHouseId,
+      })
         ? manualUsagePayload
         : fetchedManualUsagePayload;
     if (!resolvedPayload) return null;
@@ -585,8 +592,24 @@ export const UsageDashboard: React.FC<Props> = ({
       surface: presentationSurface,
       payload: resolvedPayload,
     });
-  }, [activeHouse?.houseId, fetchedManualUsagePayload, manualMonthlyStageOneRowsOverride, manualUsageHouseId, manualUsagePayload, presentationSurface]);
-  const shouldRenderManualMonthlyStageOne = forceManualMonthlyStageOne || Boolean(manualMonthlyStageOne?.rows?.length);
+  }, [
+    activeHouse?.houseId,
+    fetchedManualUsagePayload,
+    manualMonthlyStageOneRowsOverride,
+    manualUsageHouseId,
+    manualUsagePayload,
+    preferredHouseId,
+    presentationSurface,
+    selectedHouseId,
+  ]);
+  const manualMonthlyStageOneRows = manualMonthlyStageOne?.rows ?? [];
+  const manualMonthlyStageOneRenderMode = resolveManualMonthlyStageOneRenderMode({
+    forceManualMonthlyStageOne,
+    rows: manualMonthlyStageOneRows,
+  });
+  const shouldRenderManualMonthlyStageOne = manualMonthlyStageOneRenderMode === "rows";
+  const shouldShowForcedManualMonthlyStageOneEmptyState = manualMonthlyStageOneRenderMode === "empty";
+  const isManualMonthlyStageOnePresentation = manualMonthlyStageOneRenderMode !== "off";
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
@@ -772,7 +795,7 @@ export const UsageDashboard: React.FC<Props> = ({
     );
   }
 
-  const hasData = Boolean(activeHouse?.dataset) || shouldRenderManualMonthlyStageOne;
+  const hasData = Boolean(activeHouse?.dataset) || isManualMonthlyStageOnePresentation;
   const houseDatasetExplanation = String(activeHouse?.datasetError?.explanation ?? "").trim();
 
   return (
@@ -784,7 +807,7 @@ export const UsageDashboard: React.FC<Props> = ({
           </p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
-            {shouldRenderManualMonthlyStageOne
+            {isManualMonthlyStageOnePresentation
               ? "Based on your saved monthly statement totals. Daily and interval analytics stay on the Past Sim page after the house usage is simulated."
               : datasetMode === "SIMULATED"
               ? coverage?.hasSimulatedFill
@@ -792,7 +815,7 @@ export const UsageDashboard: React.FC<Props> = ({
                 : "Based on a simulated 15-minute curve generated from your manual entry or SMT baseline."
               : "Based on normalized 15-minute interval data from your connected sources."}
           </p>
-          {!shouldRenderManualMonthlyStageOne && coverage?.start && coverage?.end ? (
+          {!isManualMonthlyStageOnePresentation && coverage?.start && coverage?.end ? (
             <p className="mt-1 text-xs text-neutral-500">
               Data coverage:{" "}
               <span className="font-medium text-neutral-700">
@@ -802,10 +825,10 @@ export const UsageDashboard: React.FC<Props> = ({
               {typeof coverage.intervalsCount === "number" ? <span> · {coverage.intervalsCount.toLocaleString()} intervals</span> : null}
             </p>
           ) : null}
-          {!shouldRenderManualMonthlyStageOne && coverage?.weatherBasisLabel ? (
+          {!isManualMonthlyStageOnePresentation && coverage?.weatherBasisLabel ? (
             <p className="mt-0.5 text-xs text-neutral-500">{coverage.weatherBasisLabel}</p>
           ) : null}
-          {!shouldRenderManualMonthlyStageOne && coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
+          {!isManualMonthlyStageOnePresentation && coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
             <p className="mt-0.5 text-xs text-neutral-500">
               Simulation core: <span className="font-medium text-neutral-600">{coverage.sourceOfDaySimulationCore}</span>
             </p>
@@ -937,11 +960,20 @@ export const UsageDashboard: React.FC<Props> = ({
             onDailyViewChange={setDailyView}
             daily={[]}
             fifteenCurve={[]}
-            summaryTotalKwh={manualMonthlyStageOne?.rows?.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0) ?? null}
+            summaryTotalKwh={manualMonthlyStageOneRows.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)}
             coverageStart={null}
             coverageEnd={null}
-            manualMonthlyStageOneRows={manualMonthlyStageOne?.rows ?? []}
+            manualMonthlyStageOneRows={manualMonthlyStageOneRows}
           />
+        ) : shouldShowForcedManualMonthlyStageOneEmptyState ? (
+          <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <p className="text-sm text-neutral-700">
+              No saved monthly statement totals are available for this Stage 1 view yet.
+            </p>
+            <p className="mt-2 text-xs text-neutral-500">
+              Save monthly totals with their statement ranges to preview the bill-date chart on this surface.
+            </p>
+          </div>
         ) : (
           <>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

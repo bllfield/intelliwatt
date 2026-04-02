@@ -186,6 +186,22 @@ export function resolveManualMonthlyStageOnePresentation(args: {
   };
 }
 
+export function shouldUseManualMonthlyStageOnePayload(args: {
+  manualUsageHouseId?: string | null;
+  selectedUsageHouseId?: string | null;
+}): boolean {
+  return !args.manualUsageHouseId || !args.selectedUsageHouseId || args.selectedUsageHouseId === args.manualUsageHouseId;
+}
+
+export function resolveManualMonthlyStageOneRenderMode(args: {
+  forceManualMonthlyStageOne?: boolean;
+  rows?: ManualMonthlyStageOneRow[] | null;
+}): "rows" | "empty" | "off" {
+  if ((args.rows?.length ?? 0) > 0) return "rows";
+  if (args.forceManualMonthlyStageOne) return "empty";
+  return "off";
+}
+
 export function buildMonthlyPayloadFromStatementRows(rows: ManualStatementInputRow[]): {
   ok: true;
   anchorEndDate: string;
