@@ -14,7 +14,12 @@ export default function UsagePage() {
 
       <section className="bg-brand-white px-4 pb-12 pt-4">
         <div className="mx-auto w-full max-w-6xl">
-          <UsageDashboard forcedMode="REAL" allowModeToggle={false} showHouseSelector={false} />
+          <UsageDashboard
+            forcedMode="REAL"
+            allowModeToggle={false}
+            showHouseSelector={false}
+            presentationSurface="user_usage_manual_monthly_stage_one"
+          />
         </div>
       </section>
     </div>

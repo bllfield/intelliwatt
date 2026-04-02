@@ -6,6 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import UsageDashboard from "@/components/usage/UsageDashboard";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
+import { buildManualMonthlyStageOneRows } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 type HouseOption = {
@@ -99,6 +100,10 @@ export default function ManualMonthlyLab() {
     loadJson?.seed?.monthly ??
     lookupJson?.sourceSeed?.monthly ??
     null;
+  const sourceStageOneRows = useMemo(
+    () => (sourceStageOnePayload ? buildManualMonthlyStageOneRows(sourceStageOnePayload) : []),
+    [sourceStageOnePayload]
+  );
 
   const sourceUsageOverride = useMemo(() => {
     if (!selectedSourceHouse) return null;
@@ -405,6 +410,7 @@ export default function ManualMonthlyLab() {
                 preferredHouseId={selectedSourceHouse?.id ?? null}
                 manualUsagePayload={sourceStageOnePayload}
                 manualUsageHouseId={selectedSourceHouse?.id ?? null}
+                manualMonthlyStageOneRowsOverride={sourceStageOneRows}
                 presentationSurface="admin_manual_monthly_stage_one"
               />
             ) : (

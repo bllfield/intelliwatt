@@ -5,6 +5,8 @@ import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import {
+  buildManualMonthlyStageOneRows,
+  type ManualMonthlyStageOneRow,
   resolveManualMonthlyStageOnePresentation,
   type ManualMonthlyStageOneSurface,
 } from "@/modules/manualUsage/statementRanges";
@@ -292,6 +294,7 @@ type Props = {
   preferredHouseId?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   manualUsageHouseId?: string | null;
+  manualMonthlyStageOneRowsOverride?: ManualMonthlyStageOneRow[] | null;
   presentationSurface?: ManualMonthlyStageOneSurface | null;
 };
 
@@ -316,6 +319,7 @@ export const UsageDashboard: React.FC<Props> = ({
   preferredHouseId = null,
   manualUsagePayload = null,
   manualUsageHouseId = null,
+  manualMonthlyStageOneRowsOverride = null,
   presentationSurface = null,
 }) => {
   const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
@@ -325,6 +329,7 @@ export const UsageDashboard: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
+  const [fetchedManualUsagePayload, setFetchedManualUsagePayload] = useState<ManualUsagePayload | null>(null);
   const lastSmtIntervalsRef = useRef<number>(0);
   const smtPollTimerRef = useRef<number | null>(null);
 
@@ -529,14 +534,57 @@ export const UsageDashboard: React.FC<Props> = ({
     return houses.find((h) => h.houseId === selectedHouseId) || null;
   }, [houses, selectedHouseId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (presentationSurface !== "user_usage_manual_monthly_stage_one") {
+      setFetchedManualUsagePayload(null);
+      return;
+    }
+    const targetHouseId = manualUsageHouseId ?? activeHouse?.houseId ?? null;
+    if (!targetHouseId) {
+      setFetchedManualUsagePayload(null);
+      return;
+    }
+    if (manualUsagePayload && (!manualUsageHouseId || manualUsageHouseId === targetHouseId)) {
+      setFetchedManualUsagePayload(null);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch(`/api/user/manual-usage?houseId=${encodeURIComponent(targetHouseId)}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; payload?: ManualUsagePayload | null } | null;
+        if (cancelled) return;
+        if (!res.ok || !json?.ok) {
+          setFetchedManualUsagePayload(null);
+          return;
+        }
+        setFetchedManualUsagePayload(json.payload ?? null);
+      } catch {
+        if (!cancelled) setFetchedManualUsagePayload(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHouse?.houseId, manualUsageHouseId, manualUsagePayload, presentationSurface]);
+
   const manualMonthlyStageOne = useMemo(() => {
-    if (!manualUsagePayload || !manualUsageHouseId) return null;
-    if (activeHouse?.houseId !== manualUsageHouseId) return null;
+    if (manualMonthlyStageOneRowsOverride?.length) {
+      return {
+        surface: presentationSurface ?? "admin_manual_monthly_stage_one",
+        rows: manualMonthlyStageOneRowsOverride,
+      };
+    }
+    const resolvedPayload =
+      manualUsagePayload && (!manualUsageHouseId || activeHouse?.houseId === manualUsageHouseId)
+        ? manualUsagePayload
+        : fetchedManualUsagePayload;
+    if (!resolvedPayload) return null;
     return resolveManualMonthlyStageOnePresentation({
       surface: presentationSurface,
-      payload: manualUsagePayload,
+      payload: resolvedPayload,
     });
-  }, [activeHouse?.houseId, manualUsageHouseId, manualUsagePayload, presentationSurface]);
+  }, [activeHouse?.houseId, fetchedManualUsagePayload, manualMonthlyStageOneRowsOverride, manualUsageHouseId, manualUsagePayload, presentationSurface]);
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
