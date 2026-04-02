@@ -131,6 +131,63 @@ function sumSimulatedResultIntervalsForLocalDate(
   return any ? round2CanonicalSimDayTotal(sum) : null;
 }
 
+export function renormalizeManualBillPeriodIntervals(args: {
+  patchedIntervals: Array<{ timestamp: string; kwh: number }>;
+  dayResults: SimulatedDayResult[];
+  manualBillPeriods: Array<{ id: string; startDate: string; endDate: string; eligibleForConstraint?: boolean }>;
+  manualBillPeriodTotalsKwhById?: Record<string, number> | null;
+  timezone: string;
+}) {
+  const eligiblePeriods = args.manualBillPeriods.filter((period) => period.eligibleForConstraint !== false);
+  if (eligiblePeriods.length === 0 || !args.patchedIntervals.length) return;
+
+  const timestampToKwh = new Map<string, number>();
+  for (const interval of args.patchedIntervals) {
+    timestampToKwh.set(String(interval.timestamp ?? ""), Number(interval.kwh) || 0);
+  }
+
+  for (const period of eligiblePeriods) {
+    const targetTotal = Number(args.manualBillPeriodTotalsKwhById?.[period.id] ?? NaN);
+    if (!Number.isFinite(targetTotal) || targetTotal < 0) continue;
+
+    let actualTotal = 0;
+    for (const interval of args.patchedIntervals) {
+      const dateKey = dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone);
+      if (dateKey < period.startDate || dateKey > period.endDate) continue;
+      actualTotal += Number(interval.kwh) || 0;
+    }
+    if (!Number.isFinite(actualTotal) || actualTotal <= 0) continue;
+
+    const factor = targetTotal / actualTotal;
+    if (!Number.isFinite(factor) || Math.abs(factor - 1) <= 1e-9) continue;
+
+    for (const interval of args.patchedIntervals) {
+      const timestamp = String(interval.timestamp ?? "");
+      const dateKey = dateKeyInTimezone(timestamp, args.timezone);
+      if (dateKey < period.startDate || dateKey > period.endDate) continue;
+      const scaledKwh = (Number(interval.kwh) || 0) * factor;
+      interval.kwh = scaledKwh;
+      timestampToKwh.set(timestamp, scaledKwh);
+    }
+  }
+
+  for (const result of args.dayResults) {
+    if (!Array.isArray(result.intervals) || result.intervals.length === 0) continue;
+    const scaledIntervals = result.intervals.map((interval) => ({
+      ...interval,
+      kwh: timestampToKwh.get(String(interval.timestamp ?? "")) ?? (Number(interval.kwh) || 0),
+    }));
+    const scaledSum = scaledIntervals.reduce((sum, interval) => sum + (Number(interval.kwh) || 0), 0);
+    result.intervals = scaledIntervals;
+    result.intervals15 = scaledIntervals.map((interval) => Number(interval.kwh) || 0);
+    result.intervalSumKwh = scaledSum;
+    result.displayDayKwh = round2CanonicalSimDayTotal(scaledSum);
+    result.finalDayKwh = scaledSum;
+    result.weatherAdjustedDayKwh = scaledSum;
+    result.dayTotalAfterWeatherScale = scaledSum;
+  }
+}
+
 /**
  * `dataset.meta.canonicalArtifactSimulatedDayTotalsByDate` keys daily rows by the same date keys as
  * `simulatedDayResult.localDate` (UTC grid anchors). Selected GapFill scored dates use local calendar
@@ -1260,6 +1317,15 @@ export async function simulatePastUsageDataset(
       });
       patchedIntervals = baselineBuild.intervals;
       dayResults = baselineBuild.dayResults;
+      if (buildInputs.mode === "MANUAL_TOTALS") {
+        renormalizeManualBillPeriodIntervals({
+          patchedIntervals,
+          dayResults,
+          manualBillPeriods: eligibleManualBillPeriods,
+          manualBillPeriodTotalsKwhById: buildInputs.manualBillPeriodTotalsKwhById ?? null,
+          timezone: timezoneResolved || "UTC",
+        });
+      }
       logSimPipelineEvent("day_simulation_baseline_build_success", {
         correlationId,
         houseId,

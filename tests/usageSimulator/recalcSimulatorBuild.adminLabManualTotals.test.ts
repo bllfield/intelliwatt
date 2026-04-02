@@ -386,6 +386,75 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     expect(out).toBeTruthy();
   }, 15000);
 
+  it("propagates saved manual travel ranges into the shared Past producer inputs", async () => {
+    manualUsageInputFindUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-02-28",
+        monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+        statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+        travelRanges: [{ startDate: "2026-02-10", endDate: "2026-02-12" }],
+      },
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 25,
+          start: "2026-02-01",
+          end: "2026-02-28",
+        },
+        meta: {
+          sharedProducerPathUsed: true,
+        },
+        daily: [{ date: "2026-02-10", kwh: 1, source: "SIMULATED" }],
+        monthly: [{ month: "2026-02", kwh: 25 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-02-10T00:00:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-02-10T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2026-02-01",
+        end: "2026-02-28",
+        intervals: [],
+        monthlyTotals: [{ month: "2026-02", kwh: 25 }],
+        annualTotalKwh: 25,
+        meta: { excludedDays: 3, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "cid-manual-travel",
+      runContext: {
+        callerLabel: "user_recalc",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        travelRanges: expect.arrayContaining([{ startDate: "2026-02-10", endDate: "2026-02-12" }]),
+        buildInputs: expect.objectContaining({
+          travelRanges: expect.arrayContaining([{ startDate: "2026-02-10", endDate: "2026-02-12" }]),
+        }),
+      })
+    );
+    expect(out).toBeTruthy();
+  }, 15000);
+
   it("does not fail source-derived manual modes when source travel ranges cover the canonical window", async () => {
     const out = await recalcSimulatorBuild({
       userId: "u1",

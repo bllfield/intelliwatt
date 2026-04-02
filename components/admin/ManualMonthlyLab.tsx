@@ -4,10 +4,13 @@ import { useMemo, useState } from "react";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
-import UsageDashboard from "@/components/usage/UsageDashboard";
+import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
 import { buildManualMonthlyStageOneRows, resolveManualStageOneLabPayloads } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+
+const LAB_RUN_POLL_MS = 2000;
+const LAB_RUN_MAX_WAIT_MS = 14 * 60 * 1000;
 
 type HouseOption = {
   id: string;
@@ -24,6 +27,14 @@ function prettyJson(value: unknown): string {
 
 function compactSummary(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : "unavailable";
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isPendingReadResultError(message: string): boolean {
+  return ["past_scenario_missing", "NO_BUILD", "SCENARIO_NOT_FOUND", "ARTIFACT_MISSING"].some((code) => message.includes(code));
 }
 
 function SectionJson(props: { title: string; value: unknown; open?: boolean }) {
@@ -86,8 +97,8 @@ export default function ManualMonthlyLab() {
   );
 
   const displayedReadResult = useMemo(
-    () => resultJson?.readResult ?? loadJson?.readResult ?? lookupJson?.currentResult ?? null,
-    [resultJson, loadJson, lookupJson]
+    () => resultJson?.readResult ?? recalcJson?.readResult ?? null,
+    [recalcJson, resultJson]
   );
 
   const runtimeSummary = displayedReadResult?.sharedDiagnostics ?? null;
@@ -106,6 +117,10 @@ export default function ManualMonthlyLab() {
   const stageOnePreviewRows = useMemo(
     () => (stageOnePreviewPayload?.mode === "MONTHLY" ? buildManualMonthlyStageOneRows(stageOnePreviewPayload) : []),
     [stageOnePreviewPayload]
+  );
+  const activeManualPayload = useMemo(
+    () => (saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null) as ManualUsagePayload | null,
+    [loadJson, lookupJson, saveJson]
   );
 
   const sourceUsageOverride = useMemo(() => {
@@ -143,6 +158,32 @@ export default function ManualMonthlyLab() {
       },
     ];
   }, [displayedReadResult, labHome, selectedSourceHouse]);
+  const pastScenarioVariables = useMemo<ScenarioVariable[]>(() => {
+    const lockboxRanges = Array.isArray((displayedReadResult?.dataset as any)?.meta?.lockboxInput?.travelRanges?.ranges)
+      ? ((displayedReadResult?.dataset as any)?.meta?.lockboxInput?.travelRanges?.ranges as Array<{ startDate?: string; endDate?: string }>)
+      : [];
+    const payloadRanges = Array.isArray(activeManualPayload?.travelRanges)
+      ? (activeManualPayload.travelRanges as Array<{ startDate?: string; endDate?: string }>)
+      : [];
+    const seen = new Set<string>();
+    return [...lockboxRanges, ...payloadRanges]
+      .map((range) => ({
+        startDate: String(range?.startDate ?? "").slice(0, 10),
+        endDate: String(range?.endDate ?? "").slice(0, 10),
+      }))
+      .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate))
+      .filter((range) => {
+        const key = `${range.startDate}__${range.endDate}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((range) => ({
+        kind: "TRAVEL_RANGE",
+        effectiveMonth: range.startDate.slice(0, 7),
+        payloadJson: range,
+      }));
+  }, [activeManualPayload, displayedReadResult]);
 
   async function callRoute(action: string, extra: Record<string, unknown> = {}) {
     const res = await fetch("/api/admin/tools/manual-monthly", {
@@ -165,12 +206,34 @@ export default function ManualMonthlyLab() {
     return json;
   }
 
+  async function callRouteResult(action: string, extra: Record<string, unknown> = {}) {
+    const res = await fetch("/api/admin/tools/manual-monthly", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": adminToken,
+      },
+      body: JSON.stringify({
+        action,
+        email: email.trim(),
+        houseId: selectedHouseId || undefined,
+        ...extra,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    return { ok: res.ok && json?.ok === true, status: res.status, json };
+  }
+
   async function runLookup() {
     setBusyAction("lookup");
     setError(null);
     try {
       const json = await callRoute("lookup");
       setLookupJson(json);
+      setLoadJson(null);
+      setSaveJson(null);
+      setRecalcJson(null);
+      setResultJson(null);
       setUserId(json.userId ?? null);
       setSourceUserId(json.sourceUserId ?? null);
       setHouses(Array.isArray(json.houses) ? json.houses : []);
@@ -193,6 +256,9 @@ export default function ManualMonthlyLab() {
     try {
       const json = await callRoute("load");
       setLoadJson(json);
+      setSaveJson(null);
+      setRecalcJson(null);
+      setResultJson(null);
       setScenarioId(json.scenarioId ?? null);
       setManualEntryKey((value) => value + 1);
       setStatus("Isolated lab home reset, copied, and prefilled from the selected source home.");
@@ -209,31 +275,35 @@ export default function ManualMonthlyLab() {
     try {
       const json = await callRoute("recalc");
       setRecalcJson(json);
-      if (json.executionMode === "inline") {
-        const refreshed = await callRoute("read_result");
-        setResultJson(refreshed);
+      if (json.readResult?.ok) {
+        setResultJson(json);
+      } else if (json.executionMode === "droplet_async") {
+        const started = Date.now();
+        let latestMessage = `Run dispatched${json.jobId ? ` (job ${json.jobId})` : ""}. Waiting for the shared result...`;
+        setStatus(latestMessage);
+        while (Date.now() - started < LAB_RUN_MAX_WAIT_MS) {
+          await sleep(LAB_RUN_POLL_MS);
+          const readAttempt = await callRouteResult("read_result");
+          if (readAttempt.ok) {
+            setResultJson(readAttempt.json);
+            latestMessage = "Past Sim completed and Stage 2 refreshed.";
+            setStatus(latestMessage);
+            break;
+          }
+          const message = String(
+            readAttempt.json?.failureCode ?? readAttempt.json?.error ?? readAttempt.json?.message ?? `HTTP ${readAttempt.status}`
+          );
+          if (!isPendingReadResultError(message)) {
+            throw new Error(String(readAttempt.json?.message ?? readAttempt.json?.error ?? `HTTP ${readAttempt.status}`));
+          }
+        }
+        if (Date.now() - started >= LAB_RUN_MAX_WAIT_MS) {
+          throw new Error("Past Sim is still running. Wait a minute and run again if the result has not appeared.");
+        }
       }
-      setStatus(
-        json.executionMode === "droplet_async"
-          ? `Recalc dispatched asynchronously${json.jobId ? ` (job ${json.jobId})` : ""}.`
-          : "Recalc completed and Stage 2 refreshed."
-      );
+      if (json.executionMode === "inline") setStatus("Past Sim completed and Stage 2 refreshed.");
     } catch (err: any) {
       setError(err?.message ?? "Recalc failed.");
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  async function runReadResult() {
-    setBusyAction("read_result");
-    setError(null);
-    try {
-      const json = await callRoute("read_result");
-      setResultJson(json);
-      setStatus("Lab-home Past Sim result refreshed.");
-    } catch (err: any) {
-      setError(err?.message ?? "Read result failed.");
     } finally {
       setBusyAction(null);
     }
@@ -261,7 +331,8 @@ export default function ManualMonthlyLab() {
         try {
           const json = await callRoute("save", { payload: args.payload });
           setSaveJson(json);
-          setStatus("Manual payload saved to the isolated lab home.");
+          setLoadJson((current: any) => (current ? { ...current, payload: json.payload, updatedAt: json.updatedAt } : current));
+          setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");
           return { ok: true as const, updatedAt: json.updatedAt ?? null };
         } catch (err: any) {
           const message = err?.message ?? "Save failed.";
@@ -279,8 +350,8 @@ export default function ManualMonthlyLab() {
         <div className="rounded-lg bg-brand-white p-6 shadow-lg">
           <h1 className="text-2xl font-bold text-brand-navy">Manual Monthly Lab</h1>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Isolated test-home harness for the real shared manual-monthly runtime. Source house usage is read-only; saves, profile edits,
-            recalcs, and result reads stay on the dedicated lab home only.
+            Isolated test-home harness for the real shared manual-monthly runtime. Load a source home into the lab, adjust the lab-only
+            inputs, then run one shared Past Sim action to render Stage 2.
           </p>
         </div>
 
@@ -345,15 +416,7 @@ export default function ManualMonthlyLab() {
               disabled={busyAction !== null || !labReady}
               className="rounded border border-brand-blue/50 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
             >
-              {busyAction === "recalc" ? "Recalculating..." : "Recalc"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void runReadResult()}
-              disabled={busyAction !== null || !labReady}
-              className="rounded border border-brand-blue/50 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
-            >
-              {busyAction === "read_result" ? "Refreshing..." : "Read result / refresh"}
+              {busyAction === "recalc" ? "Running Past Sim..." : "Run Past Sim"}
             </button>
             <button
               type="button"
@@ -399,7 +462,8 @@ export default function ManualMonthlyLab() {
             <div>
               <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 1</div>
               <p className="text-sm text-slate-600">
-                Read-only pre-sim manual usage for the selected source house. This surface intentionally hides daily and interval analytics.
+                Pre-sim bill-period view for the lab flow. It starts from the selected source home when loaded and updates here whenever the
+                admin saves lab-home manual usage.
               </p>
             </div>
             {stageOnePreviewPayload ? (
@@ -419,7 +483,7 @@ export default function ManualMonthlyLab() {
               />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                No manual usage totals are available to preview yet. Use Lookup or Load to populate the Stage 1 statement view.
+                No manual usage totals are available to preview yet. Use Lookup and Load to populate the Stage 1 statement view.
               </div>
             )}
           </div>
@@ -438,7 +502,7 @@ export default function ManualMonthlyLab() {
               houseId={labHome?.id ?? selectedHouseId}
               transport={manualTransport}
               onSaved={async () => {
-                setStatus("Manual payload saved to the isolated lab home.");
+                setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");
               }}
             />
           </div>
@@ -458,10 +522,11 @@ export default function ManualMonthlyLab() {
                   initialMode="SIMULATED"
                   simulatedHousesOverride={pastSimOverride}
                   dashboardVariant="PAST_SIMULATED_USAGE"
+                  pastVariables={pastScenarioVariables}
                 />
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                  Stage 2 Past Sim appears here after the isolated lab home has a readable Past result. Use Recalc, then Read result / refresh if needed.
+                  Stage 2 Past Sim appears here after the isolated lab home runs the shared Past Sim flow.
                 </div>
               )}
             </div>

@@ -287,8 +287,6 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
 
   const dayTotalSource = String(meta?.dayTotalSource ?? "");
   const profileReason = String(meta?.usageShapeProfileDiag?.reasonNotUsed ?? "");
-  const lowDataShapeAdapterUsed =
-    meta?.lowDataShapeAdapterUsed === true || profileReason === "low_data_monthly_shape_adapter";
   const weatherSourceSummary = String(meta?.weatherSourceSummary ?? "");
   const weatherLogicMode = String(
     meta?.weatherLogicMode ??
@@ -296,14 +294,7 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
       ""
   );
 
-  if (dayTotalSource === "fallback_month_avg") {
-    return {
-      ok: false,
-      message:
-        "Shared simulation quality guard failed: usage-shape profile is missing/invalid (fallback_month_avg).",
-    };
-  }
-  if (profileReason && !lowDataShapeAdapterUsed) {
+  if (dayTotalSource === "fallback_month_avg" || profileReason) {
     return {
       ok: false,
       message:
@@ -4344,14 +4335,17 @@ async function recalcSimulatorBuildImpl(args: {
   const preserveCanonicalTravelTruthForManualMonthly =
     simMode === "MANUAL_TOTALS" && manualMonthlySourceDerivedResolution != null;
   const manualBillPeriodExclusionRanges = built.manualBillPeriodExclusionRanges ?? [];
+  const manualPayloadTravelRanges =
+    simMode === "MANUAL_TOTALS"
+      ? normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
+      : [];
   const allTravelRanges =
     simMode === "MANUAL_TOTALS"
-      ? preserveCanonicalTravelTruthForManualMonthly
-        ? scenarioMergedTravelRanges
-        : [
-            ...normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges),
-            ...manualBillPeriodExclusionRanges,
-          ]
+      ? normalizePreLockboxTravelRanges([
+          ...manualPayloadTravelRanges,
+          ...scenarioMergedTravelRanges,
+          ...manualBillPeriodExclusionRanges,
+        ])
       : simMode === "NEW_BUILD_ESTIMATE"
         ? []
         : scenarioMergedTravelRanges;

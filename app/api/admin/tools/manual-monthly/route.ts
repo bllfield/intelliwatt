@@ -459,6 +459,49 @@ export async function POST(req: NextRequest) {
           { status: dispatched.result.error === "recalc_timeout" ? 504 : 400 }
         );
       }
+      if (dispatched.executionMode === "inline") {
+        const readResult = await buildReadResult({
+          userId: ownerUserId,
+          houseId: labHome.id,
+          scenarioId,
+          readMode: "allow_rebuild",
+        });
+        if (!readResult.ok) {
+          return NextResponse.json(
+            {
+              ...readResult,
+              action,
+              email: sourceResolved.email,
+              userId: ownerUserId,
+              sourceUserId: sourceResolved.userId,
+              selectedHouse: sourceResolved.selectedHouse,
+              selectedSourceHouse: sourceResolved.selectedHouse,
+              labHome,
+              scenarioId,
+              executionMode: "inline",
+              correlationId: dispatched.correlationId,
+              result: dispatched.result,
+            },
+            { status: statusForReadResultFailure(readResult) }
+          );
+        }
+        return NextResponse.json({
+          ok: true,
+          action,
+          email: sourceResolved.email,
+          userId: ownerUserId,
+          sourceUserId: sourceResolved.userId,
+          selectedHouse: sourceResolved.selectedHouse,
+          selectedSourceHouse: sourceResolved.selectedHouse,
+          labHome,
+          scenarioId,
+          executionMode: "inline",
+          correlationId: dispatched.correlationId,
+          jobId: null,
+          result: dispatched.result,
+          readResult,
+        });
+      }
       return NextResponse.json({
         ok: true,
         action,
@@ -469,10 +512,10 @@ export async function POST(req: NextRequest) {
         selectedSourceHouse: sourceResolved.selectedHouse,
         labHome,
         scenarioId,
-        executionMode: dispatched.executionMode,
+        executionMode: "droplet_async",
         correlationId: dispatched.correlationId,
-        jobId: dispatched.executionMode === "droplet_async" ? dispatched.jobId : null,
-        result: dispatched.executionMode === "inline" ? dispatched.result : null,
+        jobId: dispatched.jobId,
+        result: null,
       });
     }
 

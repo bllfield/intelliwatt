@@ -336,7 +336,7 @@ describe("admin manual monthly route", () => {
     expect(body.payload).toBeUndefined();
   });
 
-  it("save, recalc, and read_result stay on the isolated lab home runtime path", async () => {
+  it("save and recalc stay on the isolated lab home runtime path and return the shared read result", async () => {
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
 
     const saveRes = await POST(
@@ -368,6 +368,7 @@ describe("admin manual monthly route", () => {
     );
     const recalcBody = await recalcRes.json();
     expect(recalcBody.ok).toBe(true);
+    expect(recalcBody.readResult.ok).toBe(true);
     expect(mocks.dispatchPastSimRecalc).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "admin-owner-1",
@@ -377,10 +378,6 @@ describe("admin manual monthly route", () => {
         scenarioId: "past-lab-s1",
       })
     );
-
-    const readRes = await POST(buildRequest({ action: "read_result", email: "user@example.com", houseId: "source-house-1" }));
-    const readBody = await readRes.json();
-    expect(readBody.readResult.ok).toBe(true);
     expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenLastCalledWith(
       expect.objectContaining({
         userId: "admin-owner-1",
