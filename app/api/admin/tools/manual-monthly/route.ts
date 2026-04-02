@@ -182,6 +182,53 @@ async function buildSourceUsageHouse(selectedSourceHouse: {
   };
 }
 
+function stripIntervalHeavyDatasetFields(dataset: any) {
+  if (!dataset || typeof dataset !== "object") return dataset;
+  const series = dataset.series && typeof dataset.series === "object" ? dataset.series : null;
+  const insights = dataset.insights && typeof dataset.insights === "object" ? dataset.insights : null;
+  return {
+    ...dataset,
+    series: series
+      ? {
+          ...series,
+          intervals15: Array.isArray((series as any).intervals15)
+            ? { redacted: true, count: (series as any).intervals15.length }
+            : (series as any).intervals15,
+        }
+      : dataset.series,
+    insights: insights
+      ? {
+          ...insights,
+          fifteenMinuteAverages: Array.isArray((insights as any).fifteenMinuteAverages)
+            ? { redacted: true, count: (insights as any).fifteenMinuteAverages.length }
+            : (insights as any).fifteenMinuteAverages,
+          timeOfDayBuckets: Array.isArray((insights as any).timeOfDayBuckets)
+            ? { redacted: true, count: (insights as any).timeOfDayBuckets.length }
+            : (insights as any).timeOfDayBuckets,
+        }
+      : dataset.insights,
+    intervals15m: Array.isArray(dataset.intervals15m)
+      ? { redacted: true, count: dataset.intervals15m.length }
+      : dataset.intervals15m,
+  };
+}
+
+function buildSourceUsageHouseResponse(sourceUsageHouse: Awaited<ReturnType<typeof buildSourceUsageHouse>>) {
+  if (!sourceUsageHouse) return null;
+  return {
+    ...sourceUsageHouse,
+    dataset: stripIntervalHeavyDatasetFields(sourceUsageHouse.dataset),
+  };
+}
+
+function summarizeReadResultForLabResponse(readResult: Awaited<ReturnType<typeof buildReadResult>>) {
+  if (!readResult || readResult.ok !== true) return readResult;
+  return {
+    ...readResult,
+    dataset: stripIntervalHeavyDatasetFields(readResult.dataset),
+  };
+}
+
 async function buildLabPrefill(args: {
   sourcePayload: ManualUsagePayload | null;
   sourceUsageHouse: Awaited<ReturnType<typeof buildSourceUsageHouse>>;
@@ -267,6 +314,7 @@ export async function POST(req: NextRequest) {
       getApplianceProfileSimulatedByUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
       buildSourceUsageHouse(sourceResolved.selectedHouse),
     ]);
+    const sourceUsageHouseResponse = buildSourceUsageHouseResponse(sourceUsageHouse);
 
     if (action === "lookup") {
       const sourceSeed = await buildLabPrefill({
@@ -300,12 +348,12 @@ export async function POST(req: NextRequest) {
         sourcePayload: sourcePayloadRecord.payload,
         sourceUpdatedAt: sourcePayloadRecord.updatedAt,
         sourceSeed: sourceSeed.seed,
-        sourceUsageHouse,
+        sourceUsageHouse: sourceUsageHouseResponse,
         sourceHomeProfile,
         sourceApplianceProfile,
         labHomeProfile,
         labApplianceProfile,
-        currentResult,
+        currentResult: summarizeReadResultForLabResponse(currentResult),
       });
     }
 
@@ -378,13 +426,13 @@ export async function POST(req: NextRequest) {
         updatedAt: payload.updatedAt,
         sourcePayload: sourcePayloadRecord.payload,
         sourceUpdatedAt: sourcePayloadRecord.updatedAt,
-        sourceUsageHouse,
+        sourceUsageHouse: sourceUsageHouseResponse,
         sourceHomeProfile,
         sourceApplianceProfile,
         labHomeProfile,
         labApplianceProfile,
         seed: labSeed.seed,
-        readResult,
+        readResult: summarizeReadResultForLabResponse(readResult),
       });
     }
 

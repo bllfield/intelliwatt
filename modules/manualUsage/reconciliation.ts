@@ -1,3 +1,4 @@
+import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { buildManualBillPeriodTargets } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
@@ -52,6 +53,21 @@ function buildDailyTotalsByDate(dataset: any): Map<string, number> {
   return out;
 }
 
+function buildIntervalTotalsByDate(dataset: any): Map<string, number> {
+  const out = new Map<string, number>();
+  const intervals = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+  const timezone = String(dataset?.meta?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  for (const row of intervals) {
+    const timestamp = String((row as any)?.timestamp ?? "").trim();
+    const kwh = Number((row as any)?.kwh ?? NaN);
+    if (!timestamp || !Number.isFinite(kwh)) continue;
+    const dateKey = dateKeyInTimezone(timestamp, timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    out.set(dateKey, (out.get(dateKey) ?? 0) + kwh);
+  }
+  return out;
+}
+
 function dayKeysForRange(startDate: string, endDate: string): string[] {
   const out: string[] = [];
   const start = new Date(`${startDate}T00:00:00.000Z`);
@@ -75,7 +91,8 @@ export function buildManualMonthlyReconciliation(args: {
   const periods = buildManualBillPeriodTargets(payload);
   if (periods.length === 0) return null;
 
-  const dailyTotalsByDate = buildDailyTotalsByDate(args.dataset);
+  const intervalTotalsByDate = buildIntervalTotalsByDate(args.dataset);
+  const dailyTotalsByDate = intervalTotalsByDate.size > 0 ? intervalTotalsByDate : buildDailyTotalsByDate(args.dataset);
   const meta = args.dataset?.meta && typeof args.dataset.meta === "object" ? args.dataset.meta : {};
   const inputState = (meta.manualMonthlyInputState ?? null) as ManualMonthlyInputStateLike;
   const filledMonths = new Set(

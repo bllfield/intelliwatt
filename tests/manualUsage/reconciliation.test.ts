@@ -143,4 +143,38 @@ describe("manual monthly reconciliation", () => {
       status: "reconciled",
     });
   });
+
+  it("prefers interval-backed statement totals over rounded daily display rows", () => {
+    const intervals15 = Array.from({ length: 96 }, (_, idx) => ({
+      timestamp: new Date(Date.UTC(2025, 3, 1, 0, idx * 15)).toISOString(),
+      kwh: 100 / 96,
+    }));
+    const out = buildManualMonthlyReconciliation({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [{ month: "2025-04", kwh: 100 }],
+        travelRanges: [],
+      },
+      dataset: {
+        meta: {
+          timezone: "UTC",
+          filledMonths: [],
+          manualMonthlyInputState: {
+            inputKindByMonth: { "2025-04": "entered_nonzero" },
+          },
+        },
+        daily: [{ date: "2025-04-01", kwh: 99.99 }],
+        series: { intervals15 },
+      },
+    });
+
+    expect(out?.rows[0]).toMatchObject({
+      month: "2025-04",
+      enteredStatementTotalKwh: 100,
+      simulatedStatementTotalKwh: 100,
+      deltaKwh: 0,
+      status: "reconciled",
+    });
+  });
 });
