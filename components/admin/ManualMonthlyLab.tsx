@@ -103,6 +103,7 @@ export default function ManualMonthlyLab() {
   const [resultJson, setResultJson] = useState<any>(null);
   const [showHomeDetails, setShowHomeDetails] = useState(false);
   const [showAppliances, setShowAppliances] = useState(false);
+  const [showManualEditor, setShowManualEditor] = useState(false);
 
   const selectedHouse = useMemo(
     () => houses.find((house) => house.id === selectedHouseId) ?? null,
@@ -260,6 +261,7 @@ export default function ManualMonthlyLab() {
         String((Array.isArray(json.houses) ? json.houses[0]?.id : "") ?? "").trim();
       setSelectedHouseId(nextHouseId);
       setScenarioId(json.scenarioId ?? null);
+      setShowManualEditor(false);
       setStatus("Lookup complete. Source house context loaded.");
     } catch (err: any) {
       setError(err?.message ?? "Lookup failed.");
@@ -279,6 +281,7 @@ export default function ManualMonthlyLab() {
       setResultJson(null);
       setScenarioId(json.scenarioId ?? null);
       setManualEntryKey((value) => value + 1);
+      setShowManualEditor(false);
       setStatus("Isolated lab home reset, copied, and prefilled from the selected source home.");
     } catch (err: any) {
       setError(err?.message ?? "Load failed.");
@@ -336,6 +339,7 @@ export default function ManualMonthlyLab() {
             : await callRoute("load");
         setLoadJson(existing);
         setScenarioId(existing.scenarioId ?? null);
+        setShowManualEditor(false);
         setStatus("Manual payload loaded from the isolated lab home.");
         return {
           ok: true as const,
@@ -509,20 +513,37 @@ export default function ManualMonthlyLab() {
 
         {labReady ? (
           <div className="rounded-lg bg-brand-white p-6 shadow-lg">
-            <div className="mb-4">
-              <div className="text-lg font-semibold text-brand-navy">Manual input editor</div>
-              <p className="text-sm text-slate-600">
-                This editor saves only to the isolated lab home. Source-home manual input is used only as a prefill source.
-              </p>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-semibold text-brand-navy">Manual input editor</div>
+                <p className="text-sm text-slate-600">
+                  This editor saves only to the isolated lab home. Source-home manual input is used only as a prefill source.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManualEditor((current) => !current)}
+                className="rounded border border-brand-blue/50 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20"
+              >
+                {showManualEditor ? "Collapse editor" : "Expand to edit"}
+              </button>
             </div>
-            <ManualUsageEntry
-              key={`${selectedHouseId}:${manualEntryKey}`}
-              houseId={labHome?.id ?? selectedHouseId}
-              transport={manualTransport}
-              onSaved={async () => {
-                setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");
-              }}
-            />
+            {showManualEditor ? (
+              <ManualUsageEntry
+                key={`${selectedHouseId}:${manualEntryKey}`}
+                houseId={labHome?.id ?? selectedHouseId}
+                transport={manualTransport}
+                onSaved={async () => {
+                  setShowManualEditor(false);
+                  setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");
+                }}
+              />
+            ) : (
+              <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                The monthly usage editor is collapsed by default to keep Stage 1 and Stage 2 visible. Use "Expand to edit" when you want to
+                update the lab-home inputs.
+              </div>
+            )}
           </div>
         ) : null}
 
