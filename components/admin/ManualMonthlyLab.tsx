@@ -31,10 +31,10 @@ function compactSummary(value: unknown): string {
 
 function redactIntervalHeavyFields(value: unknown, parents: object[] = []): unknown {
   if (value == null) return value;
-  if (Array.isArray(value)) return value.map((item) => redactIntervalHeavyFields(item, parents));
   if (typeof value !== "object") return value;
   if (parents.includes(value as object)) return "[Circular]";
   const nextParents = [...parents, value as object];
+  if (Array.isArray(value)) return value.map((item) => redactIntervalHeavyFields(item, nextParents));
 
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
