@@ -1135,6 +1135,7 @@ export function buildPastSimulatedBaselineV1(args: {
     };
   };
 
+  const wholeHomeOnlyPrior = args.resolvedSimFingerprint?.blendMode === "whole_home_only";
   const referenceDays: Array<{
     dayStartMs: number;
     dateKey: string;
@@ -1152,70 +1153,72 @@ export function buildPastSimulatedBaselineV1(args: {
   let excludedIncompleteMeterFingerprintDayCount = 0;
   let excludedLeadingMissingFingerprintDayCount = 0;
   let excludedOtherUntrustedFingerprintDayCount = 0;
-  for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
-    if (!Number.isFinite(dayStartMs)) continue;
-    const day = analyzeDay(dayStartMs);
-    if (!day.gridTs.length || !day.dateKey) continue;
-    if (!day.isReferenceDayForPool) {
-      if (day.dayIsExcluded) excludedTravelVacantFingerprintDayCount += 1;
-      else if (day.dayIsIncomplete) excludedIncompleteMeterFingerprintDayCount += 1;
-      else if (day.dayIsLeadingMissing) excludedLeadingMissingFingerprintDayCount += 1;
-      else if (day.dayIsForcedSimulate) excludedOtherUntrustedFingerprintDayCount += 1;
-      continue;
-    }
-
-    const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
-    for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(day.gridTs[i]) ?? 0) || 0;
-
-    const hourly = Array.from({ length: 24 }, (_, h) => {
-      let s = 0;
-      for (let q = 0; q < 4; q++) s += slotKwh[h * 4 + q] ?? 0;
-      return s;
-    });
-    const total = slotKwh.reduce((a, b) => a + b, 0);
-    const totalForWeights = total > 0 ? total : 1;
-    const hourlyWeights = hourly.map((h) => (Number(h) || 0) / totalForWeights);
-    const sHourly = hourlyWeights.reduce((a, b) => a + b, 0) || 1;
-    for (let h = 0; h < 24; h++) hourlyWeights[h] = (hourlyWeights[h] ?? 0) / sHourly;
-
-    const quarterShapeByHour: number[][] = [];
-    for (let h = 0; h < 24; h++) {
-      const hourSum = (hourly[h] ?? 0) || 0;
-      const q = [0.25, 0.25, 0.25, 0.25];
-      if (hourSum > 0) {
-        for (let i = 0; i < 4; i++) q[i] = Math.max(0, (Number(slotKwh[h * 4 + i]) || 0) / hourSum);
-        const qs = q.reduce((a, b) => a + b, 0) || 1;
-        for (let i = 0; i < 4; i++) q[i] /= qs;
+  if (!wholeHomeOnlyPrior) {
+    for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
+      if (!Number.isFinite(dayStartMs)) continue;
+      const day = analyzeDay(dayStartMs);
+      if (!day.gridTs.length || !day.dateKey) continue;
+      if (!day.isReferenceDayForPool) {
+        if (day.dayIsExcluded) excludedTravelVacantFingerprintDayCount += 1;
+        else if (day.dayIsIncomplete) excludedIncompleteMeterFingerprintDayCount += 1;
+        else if (day.dayIsLeadingMissing) excludedLeadingMissingFingerprintDayCount += 1;
+        else if (day.dayIsForcedSimulate) excludedOtherUntrustedFingerprintDayCount += 1;
+        continue;
       }
-      quarterShapeByHour.push(q);
-    }
 
-    const wxRaw = args.actualWxByDateKey?.get(day.dateKey) ?? null;
-    const wx = wxRaw
-      ? {
-          tAvgF: Number(wxRaw.tAvgF) || 0,
-          hdd65: Number(wxRaw.hdd65) || 0,
-          cdd65: Number(wxRaw.cdd65) || 0,
+      const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
+      for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(day.gridTs[i]) ?? 0) || 0;
+
+      const hourly = Array.from({ length: 24 }, (_, h) => {
+        let s = 0;
+        for (let q = 0; q < 4; q++) s += slotKwh[h * 4 + q] ?? 0;
+        return s;
+      });
+      const total = slotKwh.reduce((a, b) => a + b, 0);
+      const totalForWeights = total > 0 ? total : 1;
+      const hourlyWeights = hourly.map((h) => (Number(h) || 0) / totalForWeights);
+      const sHourly = hourlyWeights.reduce((a, b) => a + b, 0) || 1;
+      for (let h = 0; h < 24; h++) hourlyWeights[h] = (hourlyWeights[h] ?? 0) / sHourly;
+
+      const quarterShapeByHour: number[][] = [];
+      for (let h = 0; h < 24; h++) {
+        const hourSum = (hourly[h] ?? 0) || 0;
+        const q = [0.25, 0.25, 0.25, 0.25];
+        if (hourSum > 0) {
+          for (let i = 0; i < 4; i++) q[i] = Math.max(0, (Number(slotKwh[h * 4 + i]) || 0) / hourSum);
+          const qs = q.reduce((a, b) => a + b, 0) || 1;
+          for (let i = 0; i < 4; i++) q[i] /= qs;
         }
-      : null;
-    const hvacRef = weatherAwareHvacKwh({
-      wx,
-      homeProfile: args.homeProfile,
-      applianceProfile: args.applianceProfile,
-    });
-    referenceDays.push({
-      dayStartMs,
-      dateKey: day.dateKey,
-      monthKey: day.dateKey.slice(0, 7),
-      dow: new Date(dayStartMs).getUTCDay(),
-      slotKwh,
-      hourly,
-      total,
-      hourlyWeights,
-      quarterShapeByHour,
-      wx,
-      hvacKwh: Number(hvacRef.hvacKwh) || 0,
-    });
+        quarterShapeByHour.push(q);
+      }
+
+      const wxRaw = args.actualWxByDateKey?.get(day.dateKey) ?? null;
+      const wx = wxRaw
+        ? {
+            tAvgF: Number(wxRaw.tAvgF) || 0,
+            hdd65: Number(wxRaw.hdd65) || 0,
+            cdd65: Number(wxRaw.cdd65) || 0,
+          }
+        : null;
+      const hvacRef = weatherAwareHvacKwh({
+        wx,
+        homeProfile: args.homeProfile,
+        applianceProfile: args.applianceProfile,
+      });
+      referenceDays.push({
+        dayStartMs,
+        dateKey: day.dateKey,
+        monthKey: day.dateKey.slice(0, 7),
+        dow: new Date(dayStartMs).getUTCDay(),
+        slotKwh,
+        hourly,
+        total,
+        hourlyWeights,
+        quarterShapeByHour,
+        wx,
+        hvacKwh: Number(hvacRef.hvacKwh) || 0,
+      });
+    }
   }
 
   const avgHourly: Record<string, Record<number, number[]>> = {};
@@ -1622,8 +1625,6 @@ export function buildPastSimulatedBaselineV1(args: {
           .digest("base64url")
           .slice(0, 24)
       : null;
-  const wholeHomeOnlyPrior =
-    args.resolvedSimFingerprint?.blendMode === "whole_home_only";
   const shapeVariantsForContext = wholeHomeOnlyPrior
     ? syntheticWholeHomeShapeVariants(
         finalProfile.monthKeys.length > 0 ? finalProfile.monthKeys : monthKeysRef

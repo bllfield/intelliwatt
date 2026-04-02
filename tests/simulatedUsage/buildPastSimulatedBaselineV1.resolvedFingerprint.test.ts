@@ -323,6 +323,54 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(keepRefReasons.every((r: string) => r === "GAPFILL_MODELED_KEEP_REF")).toBe(true);
   });
 
+  it("whole_home_only keep-ref runs skip the reference-day pool build", () => {
+    const day1StartMs = new Date("2026-04-05T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-04-06T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const k1 = dateKeyFromTimestamp(day1Grid[0]!);
+    const k2 = dateKeyFromTimestamp(day2Grid[0]!);
+    const mkIntervals = (grid: string[]) => grid.map((ts, idx) => ({ timestamp: ts, kwh: 1.25 + (idx % 11) * 0.03 }));
+    const actualIntervals = [...mkIntervals(day1Grid), ...mkIntervals(day2Grid)];
+
+    const wx = { tAvgF: 55, tMinF: 45, tMaxF: 65, hdd65: 10, cdd65: 5 };
+    const actualWxByDateKey = new Map<string, typeof wx>([
+      [k1, wx],
+      [k2, wx],
+    ]);
+
+    const dbg: {
+      totalDays?: number;
+      simulatedDays?: number;
+      referenceDaysUsed?: number;
+      dayDiagnostics?: Array<{ dayType?: string }>;
+    } = {};
+    buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-04": 45 },
+        weekendAvgByMonthKey: { "2026-04": 42 },
+      },
+      timezoneForProfile: "UTC",
+      homeProfile: { squareFeet: 2200 },
+      forceModeledOutputKeepReferencePoolDateKeys: new Set([k1, k2]),
+      resolvedSimFingerprint: baseResolved({ blendMode: "whole_home_only", usageBlendWeight: 0 }),
+      actualWxByDateKey,
+      debug: { out: dbg as any, collectDayDiagnostics: true, maxDayDiagnostics: 10 },
+    });
+
+    expect(dbg.totalDays).toBe(2);
+    expect(dbg.simulatedDays).toBe(2);
+    expect(dbg.referenceDaysUsed).toBe(0);
+    const actualPassthrough = (dbg.dayDiagnostics ?? []).filter((d) => d.dayType === "ACTUAL").length;
+    expect(actualPassthrough).toBe(0);
+  });
+
   it("travel/vacant excluded days remain modeled and labeled as SIMULATED/EXCLUDED", () => {
     const day1StartMs = new Date("2026-09-01T00:00:00.000Z").getTime();
     const day2StartMs = new Date("2026-09-02T00:00:00.000Z").getTime();

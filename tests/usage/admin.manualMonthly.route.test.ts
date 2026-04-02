@@ -153,8 +153,17 @@ describe("admin manual monthly route", () => {
           kwh: 10,
         })),
         monthly: [{ month: "2025-01", kwh: 310 }],
-        series: { intervals15: [], hourly: [], daily: [], monthly: [], annual: [] },
-        insights: null,
+        series: {
+          intervals15: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.4 }],
+          hourly: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 1.6 }],
+          daily: [{ date: "2025-01-01", kwh: 10 }],
+          monthly: [{ month: "2025-01", kwh: 310 }],
+          annual: [{ year: 2025, kwh: 3650 }],
+        },
+        insights: {
+          fifteenMinuteAverages: [{ slot: 0, kwh: 0.4 }],
+          timeOfDayBuckets: [{ label: "overnight", kwh: 12 }],
+        },
         totals: { importKwh: 3650, exportKwh: 0, netKwh: 3650 },
       },
     });
@@ -210,12 +219,17 @@ describe("admin manual monthly route", () => {
     expect(body.selectedSourceHouse.id).toBe("source-house-1");
     expect(body.labHome.id).toBe("lab-home-1");
     expect(body.sourceUsageHouse.houseId).toBe("source-house-1");
+    expect(body.sourceUsageHouse.dataset.daily).toEqual([]);
+    expect(body.sourceUsageHouse.dataset.series.hourly).toEqual([]);
+    expect(body.sourceUsageHouse.dataset.series.daily).toEqual([]);
+    expect(body.sourceUsageHouse.dataset.series.monthly).toEqual([{ month: "2025-01", kwh: 310 }]);
     expect(body.sourceSeed.monthly.statementRanges[0]).toMatchObject({
       month: "2025-12",
       endDate: "2025-12-31",
     });
     expect(body.currentResult.ok).toBe(true);
     expect(body.currentResult.houseId).toBe("lab-home-1");
+    expect(body.currentResult.dataset.daily).toHaveLength(30);
     expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "admin-owner-1",
@@ -235,6 +249,9 @@ describe("admin manual monthly route", () => {
     expect(body.selectedSourceHouse.id).toBe("source-house-1");
     expect(body.labHome.id).toBe("lab-home-1");
     expect(body.sourceUsageHouse.houseId).toBe("source-house-1");
+    expect(body.sourceUsageHouse.dataset.daily).toEqual([]);
+    expect(body.sourceUsageHouse.dataset.series.hourly).toEqual([]);
+    expect(body.sourceUsageHouse.dataset.series.daily).toEqual([]);
     expect(mocks.replaceGlobalManualMonthlyLabTestHomeFromSource).toHaveBeenCalledWith({
       ownerUserId: "admin-owner-1",
       sourceUserId: "source-user-1",

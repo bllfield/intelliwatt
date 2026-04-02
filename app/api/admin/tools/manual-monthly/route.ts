@@ -205,11 +205,38 @@ function stripIntervalHeavyDatasetFields(dataset: any) {
   };
 }
 
+function buildMonthlyOnlySourceDataset(dataset: any) {
+  if (!dataset || typeof dataset !== "object") return dataset;
+  const series = dataset.series && typeof dataset.series === "object" ? dataset.series : null;
+  const insights = dataset.insights && typeof dataset.insights === "object" ? dataset.insights : null;
+  return {
+    ...dataset,
+    series: series
+      ? {
+          monthly: Array.isArray((series as any).monthly) ? (series as any).monthly : [],
+          annual: Array.isArray((series as any).annual) ? (series as any).annual : [],
+          intervals15: [],
+          hourly: [],
+          daily: [],
+        }
+      : dataset.series,
+    insights: insights
+      ? {
+          ...insights,
+          fifteenMinuteAverages: Array.isArray((insights as any).fifteenMinuteAverages) ? [] : (insights as any).fifteenMinuteAverages,
+          timeOfDayBuckets: Array.isArray((insights as any).timeOfDayBuckets) ? [] : (insights as any).timeOfDayBuckets,
+        }
+      : dataset.insights,
+    daily: Array.isArray(dataset.daily) ? [] : dataset.daily,
+    intervals15m: Array.isArray(dataset.intervals15m) ? [] : dataset.intervals15m,
+  };
+}
+
 function buildSourceUsageHouseResponse(sourceUsageHouse: Awaited<ReturnType<typeof buildSourceUsageHouse>>) {
   if (!sourceUsageHouse) return null;
   return {
     ...sourceUsageHouse,
-    dataset: stripIntervalHeavyDatasetFields(sourceUsageHouse.dataset),
+    dataset: buildMonthlyOnlySourceDataset(sourceUsageHouse.dataset),
   };
 }
 
