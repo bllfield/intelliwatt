@@ -29,12 +29,12 @@ function compactSummary(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : "unavailable";
 }
 
-function redactIntervalHeavyFields(value: unknown, seen = new WeakSet<object>()): unknown {
+function redactIntervalHeavyFields(value: unknown, parents: object[] = []): unknown {
   if (value == null) return value;
-  if (Array.isArray(value)) return value.map((item) => redactIntervalHeavyFields(item, seen));
+  if (Array.isArray(value)) return value.map((item) => redactIntervalHeavyFields(item, parents));
   if (typeof value !== "object") return value;
-  if (seen.has(value as object)) return "[Circular]";
-  seen.add(value as object);
+  if (parents.includes(value as object)) return "[Circular]";
+  const nextParents = [...parents, value as object];
 
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
@@ -42,7 +42,7 @@ function redactIntervalHeavyFields(value: unknown, seen = new WeakSet<object>())
       out[key] = { redacted: true, count: entry.length };
       continue;
     }
-    out[key] = redactIntervalHeavyFields(entry, seen);
+    out[key] = redactIntervalHeavyFields(entry, nextParents);
   }
   return out;
 }
