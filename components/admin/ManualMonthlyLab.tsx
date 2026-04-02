@@ -411,6 +411,7 @@ export default function ManualMonthlyLab() {
                 manualUsagePayload={sourceStageOnePayload}
                 manualUsageHouseId={selectedSourceHouse?.id ?? null}
                 manualMonthlyStageOneRowsOverride={sourceStageOneRows}
+                forceManualMonthlyStageOne
                 presentationSurface="admin_manual_monthly_stage_one"
               />
             ) : (

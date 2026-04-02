@@ -5,7 +5,6 @@ import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import {
-  buildManualMonthlyStageOneRows,
   type ManualMonthlyStageOneRow,
   resolveManualMonthlyStageOnePresentation,
   type ManualMonthlyStageOneSurface,
@@ -295,6 +294,7 @@ type Props = {
   manualUsagePayload?: ManualUsagePayload | null;
   manualUsageHouseId?: string | null;
   manualMonthlyStageOneRowsOverride?: ManualMonthlyStageOneRow[] | null;
+  forceManualMonthlyStageOne?: boolean;
   presentationSurface?: ManualMonthlyStageOneSurface | null;
 };
 
@@ -320,6 +320,7 @@ export const UsageDashboard: React.FC<Props> = ({
   manualUsagePayload = null,
   manualUsageHouseId = null,
   manualMonthlyStageOneRowsOverride = null,
+  forceManualMonthlyStageOne = false,
   presentationSurface = null,
 }) => {
   const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
@@ -585,6 +586,7 @@ export const UsageDashboard: React.FC<Props> = ({
       payload: resolvedPayload,
     });
   }, [activeHouse?.houseId, fetchedManualUsagePayload, manualMonthlyStageOneRowsOverride, manualUsageHouseId, manualUsagePayload, presentationSurface]);
+  const shouldRenderManualMonthlyStageOne = forceManualMonthlyStageOne || Boolean(manualMonthlyStageOne?.rows?.length);
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
@@ -770,7 +772,7 @@ export const UsageDashboard: React.FC<Props> = ({
     );
   }
 
-  const hasData = Boolean(activeHouse?.dataset) || Boolean(manualMonthlyStageOne);
+  const hasData = Boolean(activeHouse?.dataset) || shouldRenderManualMonthlyStageOne;
   const houseDatasetExplanation = String(activeHouse?.datasetError?.explanation ?? "").trim();
 
   return (
@@ -782,7 +784,7 @@ export const UsageDashboard: React.FC<Props> = ({
           </p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
-            {manualMonthlyStageOne
+            {shouldRenderManualMonthlyStageOne
               ? "Based on your saved monthly statement totals. Daily and interval analytics stay on the Past Sim page after the house usage is simulated."
               : datasetMode === "SIMULATED"
               ? coverage?.hasSimulatedFill
@@ -790,7 +792,7 @@ export const UsageDashboard: React.FC<Props> = ({
                 : "Based on a simulated 15-minute curve generated from your manual entry or SMT baseline."
               : "Based on normalized 15-minute interval data from your connected sources."}
           </p>
-          {!manualMonthlyStageOne && coverage?.start && coverage?.end ? (
+          {!shouldRenderManualMonthlyStageOne && coverage?.start && coverage?.end ? (
             <p className="mt-1 text-xs text-neutral-500">
               Data coverage:{" "}
               <span className="font-medium text-neutral-700">
@@ -800,10 +802,10 @@ export const UsageDashboard: React.FC<Props> = ({
               {typeof coverage.intervalsCount === "number" ? <span> · {coverage.intervalsCount.toLocaleString()} intervals</span> : null}
             </p>
           ) : null}
-          {!manualMonthlyStageOne && coverage?.weatherBasisLabel ? (
+          {!shouldRenderManualMonthlyStageOne && coverage?.weatherBasisLabel ? (
             <p className="mt-0.5 text-xs text-neutral-500">{coverage.weatherBasisLabel}</p>
           ) : null}
-          {!manualMonthlyStageOne && coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
+          {!shouldRenderManualMonthlyStageOne && coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
             <p className="mt-0.5 text-xs text-neutral-500">
               Simulation core: <span className="font-medium text-neutral-600">{coverage.sourceOfDaySimulationCore}</span>
             </p>
@@ -922,8 +924,26 @@ export const UsageDashboard: React.FC<Props> = ({
           ) : null}
         </div>
       ) : (
-        <>
-          {!manualMonthlyStageOne ? (
+        shouldRenderManualMonthlyStageOne ? (
+          <UsageChartsPanel
+            monthly={[]}
+            stitchedMonth={null}
+            weekdayKwh={0}
+            weekendKwh={0}
+            timeOfDayBuckets={[]}
+            monthlyView={monthlyView}
+            onMonthlyViewChange={setMonthlyView}
+            dailyView={dailyView}
+            onDailyViewChange={setDailyView}
+            daily={[]}
+            fifteenCurve={[]}
+            summaryTotalKwh={manualMonthlyStageOne?.rows?.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0) ?? null}
+            coverageStart={null}
+            coverageEnd={null}
+            manualMonthlyStageOneRows={manualMonthlyStageOne?.rows ?? []}
+          />
+        ) : (
+          <>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Net usage</div>
@@ -999,28 +1019,27 @@ export const UsageDashboard: React.FC<Props> = ({
                 </div>
               </div>
             </div>
-          ) : null}
 
-          <UsageChartsPanel
-            monthly={derived.monthly}
-            stitchedMonth={derived.stitchedMonth}
-            weekdayKwh={derived.weekdayKwh}
-            weekendKwh={derived.weekendKwh}
-            timeOfDayBuckets={derived.timeOfDayBuckets}
-            monthlyView={monthlyView}
-            onMonthlyViewChange={setMonthlyView}
-            dailyView={dailyView}
-            onDailyViewChange={setDailyView}
-            daily={derived.daily}
-            dailyWeather={derived.dailyWeather ?? undefined}
-            weatherBasisLabel={coverage?.weatherBasisLabel ?? undefined}
-            fifteenCurve={derived.fifteenCurve}
-            summaryTotalKwh={derived.totalKwh}
-            coverageStart={coverage?.start ?? null}
-            coverageEnd={coverage?.end ?? null}
-            manualMonthlyStageOneRows={manualMonthlyStageOne?.rows ?? null}
-          />
-        </>
+            <UsageChartsPanel
+              monthly={derived.monthly}
+              stitchedMonth={derived.stitchedMonth}
+              weekdayKwh={derived.weekdayKwh}
+              weekendKwh={derived.weekendKwh}
+              timeOfDayBuckets={derived.timeOfDayBuckets}
+              monthlyView={monthlyView}
+              onMonthlyViewChange={setMonthlyView}
+              dailyView={dailyView}
+              onDailyViewChange={setDailyView}
+              daily={derived.daily}
+              dailyWeather={derived.dailyWeather ?? undefined}
+              weatherBasisLabel={coverage?.weatherBasisLabel ?? undefined}
+              fifteenCurve={derived.fifteenCurve}
+              summaryTotalKwh={derived.totalKwh}
+              coverageStart={coverage?.start ?? null}
+              coverageEnd={coverage?.end ?? null}
+            />
+          </>
+        )
       )}
     </div>
   );
