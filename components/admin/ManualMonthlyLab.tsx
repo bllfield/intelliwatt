@@ -94,7 +94,7 @@ export default function ManualMonthlyLab() {
   const labHome = resultJson?.labHome ?? recalcJson?.labHome ?? saveJson?.labHome ?? loadJson?.labHome ?? lookupJson?.labHome ?? null;
   const labReady = Boolean(loadJson?.labHome);
   const sourceUsageHouse = resultJson?.sourceUsageHouse ?? loadJson?.sourceUsageHouse ?? lookupJson?.sourceUsageHouse ?? null;
-  const { sourcePayload: sourceStageOnePayload, previewPayload: stageOnePreviewPayload } = resolveManualMonthlyLabStageOnePayloads({
+  const { previewPayload: stageOnePreviewPayload } = resolveManualMonthlyLabStageOnePayloads({
     savedPayload: saveJson?.payload,
     loadedPayload: loadJson?.payload,
     lookupPayload: lookupJson?.payload,
@@ -411,8 +411,6 @@ export default function ManualMonthlyLab() {
                 housesOverride={sourceUsageOverride}
                 dashboardVariant="USAGE"
                 preferredHouseId={selectedSourceHouse?.id ?? null}
-                manualUsagePayload={sourceStageOnePayload}
-                manualUsageHouseId={selectedSourceHouse?.id ?? null}
                 manualMonthlyStageOneRowsOverride={stageOnePreviewRows}
                 forceManualMonthlyStageOne
                 presentationSurface="admin_manual_monthly_stage_one"

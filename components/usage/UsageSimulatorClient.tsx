@@ -1682,7 +1682,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           onSaved={async () => {
             await recalcNow({ scenarioId: null, note: "Updating usage…" });
             if (shouldRecalcPastWorkspaceWithoutEvents({ mode, pastScenarioId: pastScenario?.id ?? null })) {
-              await recalcNow({ scenarioId: pastScenario!.id, note: "Updating Past…" });
+              if (pastScenario?.id) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
             }
           }}
         />
