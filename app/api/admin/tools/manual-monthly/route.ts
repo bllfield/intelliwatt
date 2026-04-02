@@ -504,7 +504,7 @@ export async function POST(req: NextRequest) {
           userId: ownerUserId,
           houseId: labHome.id,
           scenarioId,
-          readMode: "allow_rebuild",
+          readMode: "artifact_only",
         });
         if (!readResult.ok) {
           return NextResponse.json(
@@ -564,7 +564,7 @@ export async function POST(req: NextRequest) {
         userId: ownerUserId,
         houseId: labHome.id,
         scenarioId,
-        readMode: "allow_rebuild",
+        readMode: "artifact_only",
       });
       if (readResult.ok) {
         return NextResponse.json({

@@ -1054,6 +1054,11 @@ export function buildPastSimulatedBaselineV1(args: {
    */
   collectSimulatedDayResultsDateKeys?: Set<string>;
   /**
+   * Optional memory-saving mode: retain only scalar simulated-day metadata and
+   * omit per-day interval arrays from `dayResults`.
+   */
+  compactSimulatedDayResults?: boolean;
+  /**
    * Optional: force simulation for specific UTC date keys (`dateKeyFromTimestamp` for the grid day).
    * Forced-simulated days are excluded from reference-day selection (e.g. expanded selected-day forcing).
    */
@@ -1730,6 +1735,7 @@ export function buildPastSimulatedBaselineV1(args: {
 
   const out: Array<{ timestamp: string; kwh: number }> = [];
   const collectSimulatedDayResults = args.collectSimulatedDayResults !== false;
+  const compactSimulatedDayResults = args.compactSimulatedDayResults === true;
   const collectSimulatedDayResultsLimitRaw = Number(args.collectSimulatedDayResultsLimit);
   const collectSimulatedDayResultsLimit =
     Number.isFinite(collectSimulatedDayResultsLimitRaw) && collectSimulatedDayResultsLimitRaw >= 0
@@ -1884,7 +1890,42 @@ export function buildPastSimulatedBaselineV1(args: {
         intervalShapeScalingMethod: `shape_variant:${blendedResult.shapeVariantUsed ?? "uniform_fallback"}`,
       };
       if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
-        dayResults.push(classifiedResult);
+        dayResults.push(
+          compactSimulatedDayResults
+            ? ({
+                localDate: classifiedResult.localDate,
+                source: classifiedResult.source,
+                simulatedReasonCode: classifiedResult.simulatedReasonCode,
+                intervalSumKwh: classifiedResult.intervalSumKwh,
+                displayDayKwh: classifiedResult.displayDayKwh,
+                rawDayKwh: classifiedResult.rawDayKwh,
+                weatherAdjustedDayKwh: classifiedResult.weatherAdjustedDayKwh,
+                profileSelectedDayKwh: classifiedResult.profileSelectedDayKwh,
+                finalDayKwh: classifiedResult.finalDayKwh,
+                weatherSeverityMultiplier: classifiedResult.weatherSeverityMultiplier,
+                weatherModeUsed: classifiedResult.weatherModeUsed,
+                auxHeatKwhAdder: classifiedResult.auxHeatKwhAdder,
+                poolFreezeProtectKwhAdder: classifiedResult.poolFreezeProtectKwhAdder,
+                dayClassification: classifiedResult.dayClassification,
+                fallbackLevel: classifiedResult.fallbackLevel,
+                clampApplied: classifiedResult.clampApplied,
+                dayTypeUsed: classifiedResult.dayTypeUsed,
+                shapeVariantUsed: classifiedResult.shapeVariantUsed,
+                weatherRegimeUsed: classifiedResult.weatherRegimeUsed,
+                targetDayKwhBeforeWeather: classifiedResult.targetDayKwhBeforeWeather,
+                templateSelectionKind: classifiedResult.templateSelectionKind,
+                selectedFingerprintBucketMonth: classifiedResult.selectedFingerprintBucketMonth,
+                selectedFingerprintBucketDayType: classifiedResult.selectedFingerprintBucketDayType,
+                selectedFingerprintWeatherBucket: classifiedResult.selectedFingerprintWeatherBucket,
+                selectedFingerprintIdentity: classifiedResult.selectedFingerprintIdentity,
+                selectedReferencePoolCount: classifiedResult.selectedReferencePoolCount,
+                weatherScalingCoefficientUsed: classifiedResult.weatherScalingCoefficientUsed,
+                dayTotalBeforeWeatherScale: classifiedResult.dayTotalBeforeWeatherScale,
+                dayTotalAfterWeatherScale: classifiedResult.dayTotalAfterWeatherScale,
+                intervalShapeScalingMethod: classifiedResult.intervalShapeScalingMethod,
+              } as SimulatedDayResult)
+            : classifiedResult
+        );
       }
       for (const iv of classifiedResult.intervals) out.push(iv);
       const mappedFallback = pastDayFallbackToEngineLevel(classifiedResult.fallbackLevel);

@@ -171,15 +171,26 @@ export function renormalizeManualBillPeriodIntervals(args: {
     }
   }
 
+  const summedDayTotalsByDate = new Map<string, number>();
+  for (const interval of args.patchedIntervals) {
+    const dateKey = dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    summedDayTotalsByDate.set(dateKey, (summedDayTotalsByDate.get(dateKey) ?? 0) + (Number(interval.kwh) || 0));
+  }
+
   for (const result of args.dayResults) {
-    if (!Array.isArray(result.intervals) || result.intervals.length === 0) continue;
-    const scaledIntervals = result.intervals.map((interval) => ({
-      ...interval,
-      kwh: timestampToKwh.get(String(interval.timestamp ?? "")) ?? (Number(interval.kwh) || 0),
-    }));
-    const scaledSum = scaledIntervals.reduce((sum, interval) => sum + (Number(interval.kwh) || 0), 0);
-    result.intervals = scaledIntervals;
-    result.intervals15 = scaledIntervals.map((interval) => Number(interval.kwh) || 0);
+    const dateKey = String(result.localDate ?? "").slice(0, 10);
+    const scaledSum = summedDayTotalsByDate.has(dateKey)
+      ? summedDayTotalsByDate.get(dateKey) ?? 0
+      : (Number(result.intervalSumKwh) || 0);
+    if (Array.isArray(result.intervals) && result.intervals.length > 0) {
+      const scaledIntervals = result.intervals.map((interval) => ({
+        ...interval,
+        kwh: timestampToKwh.get(String(interval.timestamp ?? "")) ?? (Number(interval.kwh) || 0),
+      }));
+      result.intervals = scaledIntervals;
+      result.intervals15 = scaledIntervals.map((interval) => Number(interval.kwh) || 0);
+    }
     result.intervalSumKwh = scaledSum;
     result.displayDayKwh = round2CanonicalSimDayTotal(scaledSum);
     result.finalDayKwh = scaledSum;
@@ -1246,6 +1257,8 @@ export async function simulatePastUsageDataset(
     // In serverless paths, retaining full per-day simulated diagnostics can trigger
     // memory pressure for large windows. Only collect when explicitly requested.
     const collectSimulatedDayResultsForDiagnostics = includeSimulatedDayResults;
+    const compactSimulatedDayResults =
+      buildInputs.mode === "MANUAL_TOTALS" && buildPathKind === "recalc" && retainedResultUtcDateKeys.size === 0;
     const collectSimulatedDayResultsDateKeys =
       retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined;
     const pastDayCounts: {
@@ -1302,6 +1315,7 @@ export async function simulatePastUsageDataset(
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
+        compactSimulatedDayResults,
         collectSimulatedDayResultsDateKeys,
         forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
         forceModeledOutputKeepReferencePoolDateKeys:

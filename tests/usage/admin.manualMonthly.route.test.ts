@@ -383,7 +383,7 @@ describe("admin manual monthly route", () => {
         userId: "admin-owner-1",
         houseId: "lab-home-1",
         scenarioId: "past-lab-s1",
-        readMode: "allow_rebuild",
+        readMode: "artifact_only",
       })
     );
   });
