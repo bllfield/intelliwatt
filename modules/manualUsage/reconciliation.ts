@@ -1,6 +1,5 @@
-import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
-import { addDaysToIsoDate, normalizeStatementRanges } from "@/modules/manualUsage/statementRanges";
-import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
+import { buildManualBillPeriodTargets } from "@/modules/manualUsage/statementRanges";
+import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 export type ManualMonthlyReconciliationStatus =
   | "reconciled"
@@ -14,7 +13,7 @@ export type ManualMonthlyReconciliationRow = {
   month: string;
   startDate: string;
   endDate: string;
-  inputKind: "entered_nonzero" | "entered_zero" | "missing";
+  inputKind: "entered_nonzero" | "entered_zero" | "missing" | "annual_total";
   enteredStatementTotalKwh: number | null;
   simulatedStatementTotalKwh: number | null;
   deltaKwh: number | null;
@@ -36,16 +35,6 @@ type ManualMonthlyInputStateLike = {
   inputKindByMonth?: Record<string, "entered_nonzero" | "entered_zero" | "missing">;
 } | null;
 
-function normalizeRanges(ranges: unknown): TravelRange[] {
-  if (!Array.isArray(ranges)) return [];
-  return ranges
-    .map((range) => ({
-      startDate: String((range as any)?.startDate ?? "").slice(0, 10),
-      endDate: String((range as any)?.endDate ?? "").slice(0, 10),
-    }))
-    .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate));
-}
-
 function round2(value: number | null): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.round(value * 100) / 100;
@@ -63,10 +52,6 @@ function buildDailyTotalsByDate(dataset: any): Map<string, number> {
   return out;
 }
 
-function overlapsTravel(period: { startDate: string; endDate: string }, travelRanges: TravelRange[]): boolean {
-  return travelRanges.some((range) => !(range.endDate < period.startDate || range.startDate > period.endDate));
-}
-
 function dayKeysForRange(startDate: string, endDate: string): string[] {
   const out: string[] = [];
   const start = new Date(`${startDate}T00:00:00.000Z`);
@@ -78,52 +63,17 @@ function dayKeysForRange(startDate: string, endDate: string): string[] {
   return out;
 }
 
-function resolveReconciliationRanges(payload: Extract<ManualUsagePayload, { mode: "MONTHLY" }>) {
-  const explicitRanges = normalizeStatementRanges(payload.statementRanges);
-  if (explicitRanges.length > 0) {
-    return explicitRanges
-      .map((range, index, all) => {
-        const inferredStartDate =
-          range.startDate ?? (index === all.length - 1 ? null : addDaysToIsoDate(all[index + 1]!.endDate, 1));
-        return {
-          month: range.month,
-          startDate: inferredStartDate,
-          endDate: range.endDate,
-        };
-      })
-      .filter((range): range is { month: string; startDate: string; endDate: string } => Boolean(range.startDate))
-      .reverse()
-      .map((range) => ({
-        month: range.month,
-        startDate: range.startDate,
-        endDate: range.endDate,
-      }));
-  }
-  return billingPeriodsEndingAt(payload.anchorEndDate, 12).map((period) => ({
-    month: period.id,
-    startDate: period.startDate,
-    endDate: period.endDate,
-  }));
-}
-
 export function buildManualMonthlyReconciliation(args: {
   payload: ManualUsagePayload | null;
   dataset: any;
 }): ManualMonthlyReconciliation | null {
   const payload = args.payload;
-  if (!payload || payload.mode !== "MONTHLY") return null;
+  if (!payload || (payload.mode !== "MONTHLY" && payload.mode !== "ANNUAL")) return null;
   const anchorEndDate = String(payload.anchorEndDate ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorEndDate)) return null;
 
-  const periods = resolveReconciliationRanges(payload);
+  const periods = buildManualBillPeriodTargets(payload);
   if (periods.length === 0) return null;
-
-  const enteredByMonth = new Map<string, number | null>();
-  for (const row of Array.isArray(payload.monthlyKwh) ? payload.monthlyKwh : []) {
-    const month = String((row as any)?.month ?? "").trim();
-    const raw = (row as any)?.kwh;
-    enteredByMonth.set(month, typeof raw === "number" && Number.isFinite(raw) ? raw : null);
-  }
 
   const dailyTotalsByDate = buildDailyTotalsByDate(args.dataset);
   const meta = args.dataset?.meta && typeof args.dataset.meta === "object" ? args.dataset.meta : {};
@@ -131,28 +81,32 @@ export function buildManualMonthlyReconciliation(args: {
   const filledMonths = new Set(
     Array.isArray(meta.filledMonths) ? meta.filledMonths.map((value: unknown) => String(value ?? "").trim()) : []
   );
-  const travelRanges = normalizeRanges(payload.travelRanges);
-
   const rows: ManualMonthlyReconciliationRow[] = periods.map((period) => {
-    const inputKind = inputState?.inputKindByMonth?.[period.month] ?? (enteredByMonth.get(period.month) == null ? "missing" : "entered_nonzero");
-    const enteredStatementTotalKwh = enteredByMonth.get(period.month) ?? null;
+    const inputKind =
+      payload.mode === "MONTHLY"
+        ? (inputState?.inputKindByMonth?.[period.month] ?? period.inputKind)
+        : period.inputKind;
+    const enteredStatementTotalKwh = period.enteredKwh ?? null;
     const simulatedStatementTotalKwh = round2(
       dayKeysForRange(period.startDate, period.endDate).reduce((sum, date) => sum + (dailyTotalsByDate.get(date) ?? 0), 0)
     );
-    const isFilledLater = filledMonths.has(period.month) || inputKind === "missing";
-    const hasTravelOverlap = overlapsTravel(period, travelRanges);
+    const isFilledLater = payload.mode === "MONTHLY" && filledMonths.has(period.month);
 
-    let eligible = true;
+    let eligible = period.eligibleForConstraint;
     let status: ManualMonthlyReconciliationStatus = "reconciled";
     let reason: string | null = null;
-    if (isFilledLater) {
+    if (period.exclusionReason === "missing_input") {
       eligible = false;
-      status = inputKind === "missing" ? "missing_input" : "filled_later";
-      reason = inputKind === "missing" ? "User did not provide this statement range." : "This statement range was filled later by shared Past Sim.";
-    } else if (hasTravelOverlap) {
+      status = "missing_input";
+      reason = "User did not provide this statement range.";
+    } else if (period.exclusionReason === "travel_overlap") {
       eligible = false;
       status = "travel_overlap";
       reason = "This entered statement range overlaps travel/vacant exclusions.";
+    } else if (isFilledLater) {
+      eligible = false;
+      status = "filled_later";
+      reason = "This statement range was filled later by shared Past Sim.";
     } else if (simulatedStatementTotalKwh == null) {
       eligible = false;
       status = "sim_result_unavailable";

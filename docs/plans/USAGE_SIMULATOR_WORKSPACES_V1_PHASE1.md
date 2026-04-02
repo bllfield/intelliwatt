@@ -99,6 +99,10 @@ The simulator is entered only via the following contexts:
 ### B) Manual totals immutability
 - Never modify user-entered monthly or annual kWh totals.
 - Simulator only generates a 15-minute curve that exactly sums to those totals within each billing period bucket.
+- Stage 1 presentation rules:
+  - monthly manual shows billing-period totals only before simulation
+  - annual manual shows billing-date context plus the annual total only before simulation
+  - annual manual does not render a pre-sim usage chart
 - Annual entry:
   - annual is authoritative
   - a deterministic monthly split may be generated once for that build, then treated as anchored monthly totals

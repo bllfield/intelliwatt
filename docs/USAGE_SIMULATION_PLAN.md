@@ -35,11 +35,11 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 - **Deterministic + auditable**: given the same inputs, we should regenerate the same simulated series (or store the generated series + an inputs hash).
 - **Compatibility with the plan engine**: the generated data must obey the plan engine invariants (e.g., monthly totals match the sum of required period buckets → no `USAGE_BUCKET_SUM_MISMATCH`).
 
-## User Manual Monthly Product Semantics (Authoritative)
+## User Manual Usage Product Semantics (Authoritative)
 
-This section is authoritative for future USER MANUAL MONTHLY implementation and handoff language.
+This section is authoritative for future manual-usage implementation and handoff language.
 
-### Stage 1: Bill-Cycle Input Chart
+### Stage 1: Pre-Sim Manual Input Surfaces
 
 - USER MANUAL MONTHLY starts as a bill-cycle input chart, not a calendar-month chart.
 - The latest bill end date entered by the user is the input anchor.
@@ -54,29 +54,44 @@ This section is authoritative for future USER MANUAL MONTHLY implementation and 
 - The user may leave some bill-cycle months missing.
 - On the input chart, entered bill-cycle months are filled and missing bill-cycle months remain blank.
 - Current implementation persists additive `statementRanges[]` metadata in the manual payload so explicit bill ranges survive into reconciliation without changing schemas.
+- USER MANUAL ANNUAL starts as a billing-date-context summary plus one annual usage total, not as a pre-sim 12-month chart.
+- Annual Stage 1 should show the derived annual coverage range from `anchorEndDate` plus the saved annual kWh total only.
+- Annual Stage 1 should not render a pre-sim usage chart on the user surface or on the admin lab surface.
+- Shared Stage 1 presentation now resolves through `resolveManualStageOnePresentation()`:
+  - monthly payloads render bill-period rows only
+  - annual payloads render billing-date context plus the annual total only
 - Do not silently convert the input chart into calendar-month semantics.
 - "Explicit month values stay authoritative" and "manual totals immutability" apply at this input stage: the values the user entered remain authoritative for the bill-cycle months they entered.
 - They do not mean missing bill-cycle months remain permanently blank in the final simulated artifact.
 
 ### Stage 2: Shared Past Sim Normalization and Simulation
 
-- After the bill-cycle input sequence is built, it must normalize into the same shared Past Sim coverage window used by the rest of the system.
+- After the Stage 1 manual input is built, it must normalize into the same shared Past Sim coverage window used by the rest of the system.
 - Do not invent a separate manual-monthly sim window.
 - Do not collapse bill-cycle input semantics into the normalized shared Past Sim window semantics.
+- Manual monthly and manual annual now enter a shared bill-period-first pipeline before the Past producer runs.
+- Shared helpers derive normalized `ManualBillPeriodTarget[]` metadata, bill-period totals, and exclusion ranges from the manual payload before Stage 2 shaping.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
-- The main Past chart/result remains the shared normalized Past output. Statement ranges belong to Stage 1 entry/reconciliation only.
+- The main Past chart/result remains the shared normalized Past output:
+  - shared 365-day artifact
+  - standard calendar-month stitched Past chart
+  - normal Stage 2 analytics
+- Bill-period parity/reconciliation belongs to Stage 2 verification and must read back from the shared artifact rather than route-local chart math.
 - Missing bill-cycle months are an input-state concept, not the final simulated-output contract.
 - Blank on the input chart does not mean blank forever in the final simulated artifact.
 - Past Sim must fill missing bill-cycle months the user did not provide, excluded travel/vacant days inside the normalized shared sim window, and other missing or simulated days required by the shared Past Sim logic.
+- After simulation has run, both monthly and annual manual modes flow into the same full Stage 2/Past chart and analytics surface.
 
 ### Travel/Vacant Rule
 
-- USER MANUAL MONTHLY is travel/vacant-aware.
-- User-entered travel/vacant dates must affect Past Sim for manual monthly too.
+- USER MANUAL MONTHLY and USER MANUAL ANNUAL are travel/vacant-aware.
+- User-entered travel/vacant dates must affect Past Sim for manual modes too.
 - Travel awareness does not belong only to GapFill monthly-from-source.
 - GapFill monthly-from-source is not the only travel-aware monthly mode.
-- Travel ranges may come from the manual payload for user manual monthly and must drive excluded date keys in the shared simulator after normalization.
-- Past Sim must simulate excluded travel/vacant days for user manual monthly too.
+- Travel ranges may come from the manual payload for user manual monthly or annual and must drive excluded date keys in the shared simulator after normalization.
+- Bill periods touched by travel/vacant dates are excluded from manual parity shaping and compare scoring rather than treated as a fatal build error.
+- Non-excluded bill periods must still reconcile back to the entered totals.
+- Past Sim must simulate excluded travel/vacant days for user manual modes too.
 
 ### Input-Semantic Distinction
 
@@ -89,16 +104,28 @@ This section is authoritative for future USER MANUAL MONTHLY implementation and 
 - Admin Manual Monthly Lab is the same manual-monthly feature family, but it owns a different Stage 1 convenience path.
 - Source home is read-only source context only.
 - Isolated test home is the only writable lab target for `load`, `save`, `recalc`, and `read_result`.
-- Usable source monthly payload wins by default during lab prefill/load.
+- Usable source manual payload wins by default during lab prefill/load.
+- Stage 1 preview supports both manual payload modes:
+  - monthly preview = bill-period totals only
+  - annual preview = billing-date context plus annual total only
 - If source monthly payload is absent or unusable, the lab may derive deterministic contiguous seeded bill ranges from source actual coverage.
 - Deterministic admin seeding is bounded by available actual coverage, capped at 12 seeded ranges, and must not create unsupported partial rows.
 - Derived lab-home seed persistence must fail closed.
 - Admin seeded bill ranges are Stage 1 convenience only. They do not redefine customer semantics or Stage 2 shared Past behavior.
+- Stage 2 on the admin lab should show:
+  - the full normal Past dashboard
+  - a bill-period parity compare sourced from shared artifact totals
+  - excluded bill periods kept visible as excluded/non-scored rows
 
 ### Transitional Runtime Contract
 
-- Current runtime still centers the simulator contract on `anchorEndDate + monthlyKwh + travelRanges`.
-- Current runtime now also carries additive `statementRanges[]` metadata for Stage 1 bill-range semantics.
+- Current runtime accepts `ManualUsagePayload` in `MONTHLY` or `ANNUAL` mode with shared `anchorEndDate` semantics and travel ranges.
+- Monthly payloads still carry additive `statementRanges[]` metadata for Stage 1 bill-range semantics.
+- Shared runtime helpers now derive:
+  - `ManualStageOnePresentation`
+  - `ManualBillPeriodTarget[]`
+  - bill-period totals by id
+  - bill-period exclusion ranges
 - This remains a transitional runtime contract rather than the full product definition.
 - Future payload evolution may still be needed if Stage 1 eventually needs richer per-bill metadata than the additive bridge supports.
 

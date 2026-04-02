@@ -1,6 +1,12 @@
 import { lastFullMonthChicago } from "@/modules/manualUsage/anchor";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
-import type { ManualStatementRange, ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type {
+  AnnualManualUsagePayload,
+  ManualStatementRange,
+  ManualUsagePayload,
+  MonthlyManualUsagePayload,
+  TravelRange,
+} from "@/modules/simulatedUsage/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -28,6 +34,44 @@ export type ManualMonthlyStageOneRow = {
   kwh: number;
 };
 
+export type ManualAnnualStageOneSummary = {
+  key: string;
+  startDate: string;
+  endDate: string;
+  anchorEndDate: string;
+  label: string;
+  shortLabel: string;
+  annualKwh: number;
+};
+
+export type ManualBillPeriodInputKind = "entered_nonzero" | "entered_zero" | "missing" | "annual_total";
+
+export type ManualBillPeriodTarget = {
+  id: string;
+  periodType: "monthly_statement" | "annual_total";
+  month: string;
+  startDate: string;
+  endDate: string;
+  label: string;
+  shortLabel: string;
+  enteredKwh: number | null;
+  inputKind: ManualBillPeriodInputKind;
+  eligibleForConstraint: boolean;
+  exclusionReason: "travel_overlap" | "missing_input" | null;
+};
+
+export type ManualStageOnePresentation =
+  | {
+      mode: "MONTHLY";
+      surface: ManualMonthlyStageOneSurface;
+      rows: ManualMonthlyStageOneRow[];
+    }
+  | {
+      mode: "ANNUAL";
+      surface: ManualMonthlyStageOneSurface;
+      summary: ManualAnnualStageOneSummary;
+    };
+
 function isIsoDate(value: unknown): value is string {
   return typeof value === "string" && ISO_DATE_RE.test(value.trim());
 }
@@ -40,6 +84,21 @@ function formatShortDate(dateKey: string): string {
   if (!isIsoDate(dateKey)) return dateKey;
   const [year, month, day] = dateKey.split("-");
   return `${Number(month)}/${Number(day)}/${year.slice(2)}`;
+}
+
+function normalizeTravelRanges(ranges: TravelRange[] | undefined): TravelRange[] {
+  return Array.isArray(ranges)
+    ? ranges
+        .map((range) => ({
+          startDate: String(range?.startDate ?? "").slice(0, 10),
+          endDate: String(range?.endDate ?? "").slice(0, 10),
+        }))
+        .filter((range) => isIsoDate(range.startDate) && isIsoDate(range.endDate))
+    : [];
+}
+
+function overlapsTravelRange(range: { startDate: string; endDate: string }, travelRanges: TravelRange[]): boolean {
+  return travelRanges.some((travelRange) => !(travelRange.endDate < range.startDate || travelRange.startDate > range.endDate));
 }
 
 export function addDaysToIsoDate(dateKey: string, deltaDays: number): string {
@@ -145,7 +204,7 @@ export function formatStatementRangeLabel(range: {
 }
 
 export function buildManualMonthlyStageOneRows(
-  payload: Pick<Extract<ManualUsagePayload, { mode: "MONTHLY" }>, "anchorEndDate" | "monthlyKwh" | "statementRanges">
+  payload: Pick<MonthlyManualUsagePayload, "anchorEndDate" | "monthlyKwh" | "statementRanges">
 ): ManualMonthlyStageOneRow[] {
   const numericValuesByMonth = new Map<string, number>();
   for (const row of Array.isArray(payload.monthlyKwh) ? payload.monthlyKwh : []) {
@@ -173,6 +232,106 @@ export function buildManualMonthlyStageOneRows(
     .sort((a, b) => (a.endDate < b.endDate ? -1 : a.endDate > b.endDate ? 1 : 0));
 }
 
+export function buildManualAnnualStageOneSummary(
+  payload: Pick<AnnualManualUsagePayload, "anchorEndDate" | "annualKwh">
+): ManualAnnualStageOneSummary | null {
+  const anchorEndDate = String(payload.anchorEndDate ?? "").slice(0, 10);
+  const annualKwh = Number(payload.annualKwh);
+  if (!isIsoDate(anchorEndDate) || !Number.isFinite(annualKwh)) return null;
+  const startDate = addDaysToIsoDate(anchorEndDate, -364);
+  const labels = formatStatementRangeLabel({ startDate, endDate: anchorEndDate });
+  return {
+    key: `annual:${anchorEndDate}`,
+    startDate,
+    endDate: anchorEndDate,
+    anchorEndDate,
+    label: labels.label,
+    shortLabel: labels.shortLabel,
+    annualKwh,
+  };
+}
+
+export function buildManualBillPeriodTargets(payload: ManualUsagePayload): ManualBillPeriodTarget[] {
+  if (payload.mode === "MONTHLY") {
+    const numericValuesByMonth = new Map<string, number | null>();
+    for (const row of Array.isArray(payload.monthlyKwh) ? payload.monthlyKwh : []) {
+      const month = String((row as any)?.month ?? "").trim();
+      const rawKwh = (row as any)?.kwh;
+      if (!isYearMonth(month)) continue;
+      numericValuesByMonth.set(month, typeof rawKwh === "number" && Number.isFinite(rawKwh) ? rawKwh : null);
+    }
+    const travelRanges = normalizeTravelRanges(payload.travelRanges);
+    return deriveStatementRangesFromMonthlyPayload(payload)
+      .map((range) => {
+        const labels = formatStatementRangeLabel(range);
+        const enteredKwh = numericValuesByMonth.get(range.month) ?? null;
+        const inputKind: ManualBillPeriodInputKind =
+          enteredKwh == null ? "missing" : enteredKwh === 0 ? "entered_zero" : "entered_nonzero";
+        const travelOverlap = isIsoDate(range.startDate) ? overlapsTravelRange({ startDate: range.startDate, endDate: range.endDate }, travelRanges) : false;
+        return {
+          id: range.month,
+          periodType: "monthly_statement" as const,
+          month: range.month,
+          startDate: range.startDate ?? range.endDate,
+          endDate: range.endDate,
+          label: labels.label,
+          shortLabel: labels.shortLabel,
+          enteredKwh,
+          inputKind,
+          eligibleForConstraint: enteredKwh != null && !travelOverlap,
+          exclusionReason: travelOverlap ? ("travel_overlap" as const) : enteredKwh == null ? ("missing_input" as const) : null,
+        };
+      })
+      .filter((period) => isIsoDate(period.startDate))
+      .sort((a, b) => (a.endDate < b.endDate ? -1 : a.endDate > b.endDate ? 1 : 0));
+  }
+
+  const summary = buildManualAnnualStageOneSummary(payload);
+  if (!summary) return [];
+  const travelOverlap = overlapsTravelRange(
+    {
+      startDate: summary.startDate,
+      endDate: summary.endDate,
+    },
+    normalizeTravelRanges(payload.travelRanges)
+  );
+  return [
+    {
+      id: summary.key,
+      periodType: "annual_total",
+      month: "Annual total",
+      startDate: summary.startDate,
+      endDate: summary.endDate,
+      label: summary.label,
+      shortLabel: summary.shortLabel,
+      enteredKwh: summary.annualKwh,
+      inputKind: "annual_total",
+      eligibleForConstraint: !travelOverlap,
+      exclusionReason: travelOverlap ? "travel_overlap" : null,
+    },
+  ];
+}
+
+export function buildManualBillPeriodExclusionRanges(periods: ManualBillPeriodTarget[]): TravelRange[] {
+  return periods
+    .filter((period) => period.exclusionReason === "travel_overlap")
+    .map((period) => ({
+      startDate: period.startDate,
+      endDate: period.endDate,
+    }));
+}
+
+export function buildManualBillPeriodTotalsById(periods: ManualBillPeriodTarget[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const period of periods) {
+    if (!period.eligibleForConstraint) continue;
+    const enteredKwh = Number(period.enteredKwh);
+    if (!Number.isFinite(enteredKwh)) continue;
+    out[period.id] = Math.max(0, enteredKwh);
+  }
+  return out;
+}
+
 export function resolveManualMonthlyStageOnePresentation(args: {
   surface?: ManualMonthlyStageOneSurface | null;
   payload?: ManualUsagePayload | null;
@@ -186,6 +345,39 @@ export function resolveManualMonthlyStageOnePresentation(args: {
   };
 }
 
+export function resolveManualAnnualStageOnePresentation(args: {
+  surface?: ManualMonthlyStageOneSurface | null;
+  payload?: ManualUsagePayload | null;
+}): { surface: ManualMonthlyStageOneSurface; summary: ManualAnnualStageOneSummary } | null {
+  if (!args.surface || args.payload?.mode !== "ANNUAL") return null;
+  const summary = buildManualAnnualStageOneSummary(args.payload);
+  if (!summary) return null;
+  return {
+    surface: args.surface,
+    summary,
+  };
+}
+
+export function resolveManualStageOnePresentation(args: {
+  surface?: ManualMonthlyStageOneSurface | null;
+  payload?: ManualUsagePayload | null;
+}): ManualStageOnePresentation | null {
+  const monthly = resolveManualMonthlyStageOnePresentation(args);
+  if (monthly) return { mode: "MONTHLY", ...monthly };
+  const annual = resolveManualAnnualStageOnePresentation(args);
+  if (annual) return { mode: "ANNUAL", ...annual };
+  return null;
+}
+
+export function pickManualUsagePayload(
+  ...candidates: Array<ManualUsagePayload | null | undefined>
+): ManualUsagePayload | null {
+  for (const candidate of candidates) {
+    if (candidate?.mode === "MONTHLY" || candidate?.mode === "ANNUAL") return candidate;
+  }
+  return null;
+}
+
 export function pickMonthlyManualUsagePayload(
   ...candidates: Array<ManualUsagePayload | Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null | undefined>
 ): Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null {
@@ -193,6 +385,31 @@ export function pickMonthlyManualUsagePayload(
     if (candidate?.mode === "MONTHLY") return candidate;
   }
   return null;
+}
+
+export function resolveManualStageOneLabPayloads(args: {
+  savedPayload?: ManualUsagePayload | null;
+  loadedPayload?: ManualUsagePayload | null;
+  lookupPayload?: ManualUsagePayload | null;
+  loadedSourcePayload?: ManualUsagePayload | null;
+  lookupSourcePayload?: ManualUsagePayload | null;
+  loadedSourceSeed?: ManualUsagePayload | null;
+  lookupSourceSeed?: ManualUsagePayload | null;
+}): {
+  sourcePayload: ManualUsagePayload | null;
+  previewPayload: ManualUsagePayload | null;
+} {
+  const sourcePayload = pickManualUsagePayload(
+    args.loadedSourcePayload,
+    args.lookupSourcePayload,
+    args.loadedSourceSeed,
+    args.lookupSourceSeed
+  );
+  const previewPayload = pickManualUsagePayload(args.savedPayload, args.loadedPayload, args.lookupPayload, sourcePayload);
+  return {
+    sourcePayload,
+    previewPayload,
+  };
 }
 
 export function resolveManualMonthlyLabStageOnePayloads(args: {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildManualAnnualStageOneSummary,
+  buildManualBillPeriodTargets,
   buildMonthlyPayloadFromStatementRows,
   buildStatementRowsFromMonthlyPayload,
 } from "@/modules/manualUsage/statementRanges";
@@ -66,6 +68,50 @@ describe("manual usage statement ranges", () => {
         startDate: "2025-03-01",
         endDate: "2025-03-30",
         kwh: 390,
+      },
+    ]);
+  });
+
+  it("builds an annual Stage 1 summary from the anchor range", () => {
+    const summary = buildManualAnnualStageOneSummary({
+      anchorEndDate: "2025-12-31",
+      annualKwh: 5432.1,
+    });
+
+    expect(summary).toMatchObject({
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+      anchorEndDate: "2025-12-31",
+      annualKwh: 5432.1,
+    });
+    expect(summary?.label).toBe("1/1/25 - 12/31/25");
+  });
+
+  it("marks travel-touched bill periods as excluded from manual bill-period constraints", () => {
+    const periods = buildManualBillPeriodTargets({
+      mode: "MONTHLY",
+      anchorEndDate: "2025-04-30",
+      monthlyKwh: [
+        { month: "2025-04", kwh: 300 },
+        { month: "2025-03", kwh: 280 },
+      ],
+      statementRanges: [
+        { month: "2025-04", startDate: "2025-03-31", endDate: "2025-04-30" },
+        { month: "2025-03", startDate: "2025-03-01", endDate: "2025-03-30" },
+      ],
+      travelRanges: [{ startDate: "2025-04-10", endDate: "2025-04-12" }],
+    });
+
+    expect(periods).toMatchObject([
+      {
+        id: "2025-03",
+        eligibleForConstraint: true,
+        exclusionReason: null,
+      },
+      {
+        id: "2025-04",
+        eligibleForConstraint: false,
+        exclusionReason: "travel_overlap",
       },
     ]);
   });

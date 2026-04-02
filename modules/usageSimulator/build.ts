@@ -4,6 +4,12 @@ import { estimateUsageForCanonicalWindow } from "@/modules/usageEstimator/estima
 import type { HomeProfileInput } from "@/modules/homeProfile/validation";
 import type { ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/validation";
 import {
+  buildManualBillPeriodExclusionRanges,
+  buildManualBillPeriodTargets,
+  buildManualBillPeriodTotalsById,
+  type ManualBillPeriodTarget,
+} from "@/modules/manualUsage/statementRanges";
+import {
   resolveManualMonthlyTargetDiagnostics,
   type ManualMonthlyInputState,
   type MonthlyTargetConstructionDiagnostic,
@@ -28,6 +34,9 @@ export type BuildResult = {
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   sourceDerivedTrustedMonthlyTotalsKwhByMonth?: Record<string, number> | null;
   manualMonthlyInputState?: ManualMonthlyInputState | null;
+  manualBillPeriods?: ManualBillPeriodTarget[];
+  manualBillPeriodTotalsKwhById?: Record<string, number> | null;
+  manualBillPeriodExclusionRanges?: Array<{ startDate: string; endDate: string }>;
   source?: {
     actualSource?: "SMT" | "GREEN_BUTTON";
     actualMonthlyAnchorsByMonth?: Record<string, number>;
@@ -169,6 +178,17 @@ export async function buildSimulatorInputs(args: {
       estimateMonthlyKwhByMonth,
       args.manualMonthlySourceDerivedResolution ?? null
     );
+    const manualBillPeriods = buildManualBillPeriodTargets(args.manualUsagePayload);
+    const manualBillPeriodTotalsKwhById = buildManualBillPeriodTotalsById(manualBillPeriods);
+    const manualBillPeriodExclusionRanges = buildManualBillPeriodExclusionRanges(manualBillPeriods);
+    const eligibleBillPeriodCount = manualBillPeriods.filter((period) => period.eligibleForConstraint).length;
+    const excludedBillPeriodCount = manualBillPeriods.length - eligibleBillPeriodCount;
+    const manualNotes = [...notes];
+    if (manualBillPeriods.length > 0) {
+      manualNotes.push(
+        `Manual Stage 2 is constrained by ${eligibleBillPeriodCount} eligible bill period(s); ${excludedBillPeriodCount} bill period(s) are excluded from parity shaping.`
+      );
+    }
 
     return {
       baseKind: "MANUAL",
@@ -176,7 +196,7 @@ export async function buildSimulatorInputs(args: {
       monthlyTotalsKwhByMonth: monthly,
       intradayShape96: getGenericWeekdayShape96(),
       weekdayWeekendShape96: { weekday: getGenericWeekdayShape96(), weekend: getGenericWeekendShape96() },
-      notes,
+      notes: manualNotes,
       filledMonths,
       monthlyTargetConstructionDiagnostics: monthlyResolution?.diagnostics ?? null,
       sourceDerivedTrustedMonthlyTotalsKwhByMonth:
@@ -184,6 +204,9 @@ export async function buildSimulatorInputs(args: {
           ? monthlyResolution.sourceDerivedTrustedMonthlyAnchorsByMonth
           : null,
       manualMonthlyInputState,
+      manualBillPeriods,
+      manualBillPeriodTotalsKwhById,
+      manualBillPeriodExclusionRanges,
     };
   }
 

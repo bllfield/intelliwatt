@@ -113,4 +113,34 @@ describe("manual monthly reconciliation", () => {
       simulatedStatementTotalKwh: 309,
     });
   });
+
+  it("reconciles annual manual totals across the full anchored range", () => {
+    const out = buildManualMonthlyReconciliation({
+      payload: {
+        mode: "ANNUAL",
+        anchorEndDate: "2025-12-31",
+        annualKwh: 3650,
+        travelRanges: [],
+      },
+      dataset: {
+        meta: {
+          filledMonths: [],
+          manualMonthlyInputState: null,
+        },
+        daily: Array.from({ length: 365 }, (_, idx) => ({
+          date: new Date(Date.UTC(2025, 0, 1 + idx)).toISOString().slice(0, 10),
+          kwh: 10,
+        })),
+      },
+    });
+
+    expect(out?.rows).toHaveLength(1);
+    expect(out?.rows[0]).toMatchObject({
+      month: "Annual total",
+      inputKind: "annual_total",
+      enteredStatementTotalKwh: 3650,
+      simulatedStatementTotalKwh: 3650,
+      status: "reconciled",
+    });
+  });
 });

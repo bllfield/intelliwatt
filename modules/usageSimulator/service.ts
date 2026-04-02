@@ -4334,18 +4334,28 @@ async function recalcSimulatorBuildImpl(args: {
   const scenarioMergedTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
   const preserveCanonicalTravelTruthForManualMonthly =
     simMode === "MANUAL_TOTALS" && manualMonthlySourceDerivedResolution != null;
+  const manualBillPeriodExclusionRanges = built.manualBillPeriodExclusionRanges ?? [];
   const allTravelRanges =
     simMode === "MANUAL_TOTALS"
       ? preserveCanonicalTravelTruthForManualMonthly
         ? scenarioMergedTravelRanges
-        : normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
+        : [
+            ...normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges),
+            ...manualBillPeriodExclusionRanges,
+          ]
       : simMode === "NEW_BUILD_ESTIMATE"
         ? []
         : scenarioMergedTravelRanges;
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
   // Past SMT patch baseline mode uses day-level patching and must not use month-level travel uplift.
   const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && simMode === "SMT_BASELINE";
-  if (allTravelRanges.length > 0 && !isPastSmtPatchMode && !preserveCanonicalTravelTruthForManualMonthly) {
+  const hasManualBillPeriodConstraints = (built.manualBillPeriods?.length ?? 0) > 0;
+  if (
+    allTravelRanges.length > 0 &&
+    !isPastSmtPatchMode &&
+    !preserveCanonicalTravelTruthForManualMonthly &&
+    !(simMode === "MANUAL_TOTALS" && hasManualBillPeriodConstraints)
+  ) {
     const excludeSet = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
     for (const ym of built.canonicalMonths) {
       const [y, m] = ym.split("-").map(Number);
@@ -4429,6 +4439,16 @@ async function recalcSimulatorBuildImpl(args: {
   const manualCanonicalPeriods =
     simMode === "MANUAL_TOTALS" && manualUsagePayload
       ? (() => {
+          const manualBillPeriods = built.manualBillPeriods ?? [];
+          if (manualBillPeriods.length > 0) {
+            return manualBillPeriods
+              .filter((period) => period.eligibleForConstraint)
+              .map((period) => ({
+                id: period.id,
+                startDate: period.startDate,
+                endDate: period.endDate,
+              }));
+          }
           const p = manualUsagePayload as any;
           const endKey =
             typeof p.anchorEndDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.anchorEndDate)
@@ -4483,8 +4503,7 @@ async function recalcSimulatorBuildImpl(args: {
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
-  const shouldUseSharedPastProducer =
-    scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
+  const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
   const recalcIntervalPreload =
     simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
       ? createRecalcIntervalPreloadContext({
@@ -4718,6 +4737,8 @@ async function recalcSimulatorBuildImpl(args: {
         filledMonths: built.filledMonths ?? [],
         monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
         manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+        manualBillPeriods: built.manualBillPeriods ?? [],
+        manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
         effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
         validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
@@ -4862,6 +4883,8 @@ async function recalcSimulatorBuildImpl(args: {
     filledMonths: built.filledMonths,
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+    manualBillPeriods: built.manualBillPeriods ?? [],
+    manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
     sharedProducerPathUsed: shouldUseSharedPastProducer,
     ...(pastSimulatedMonths != null ? { pastSimulatedMonths } : {}),
     snapshots: {

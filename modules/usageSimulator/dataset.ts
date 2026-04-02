@@ -7,6 +7,7 @@ import type {
   ManualMonthlyInputState,
   MonthlyTargetConstructionDiagnostic,
 } from "@/modules/usageSimulator/monthlyTargetConstruction";
+import type { ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
@@ -793,6 +794,8 @@ export type SimulatorBuildInputsV1 = {
   filledMonths?: string[];
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   manualMonthlyInputState?: ManualMonthlyInputState | null;
+  manualBillPeriods?: ManualBillPeriodTarget[];
+  manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   sharedProducerPathUsed?: boolean;
   // Snapshots (for auditing / future UI): not required for regen.
   snapshots?: {
@@ -1032,10 +1035,22 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
   buildInputs: SimulatorBuildInputsV1,
   options?: { excludedDateKeys?: Set<string>; includeIntervals15m?: boolean }
 ): SimulatedUsageDataset {
+  const eligibleManualBillPeriods = Array.isArray(buildInputs.manualBillPeriods)
+    ? buildInputs.manualBillPeriods
+        .filter((period) => period.eligibleForConstraint)
+        .map((period) => ({
+          id: period.id,
+          startDate: period.startDate,
+          endDate: period.endDate,
+        }))
+    : [];
   const curve = generateSimulatedCurve({
     canonicalMonths: buildInputs.canonicalMonths,
-    periods: (buildInputs as any).canonicalPeriods ?? undefined,
-    monthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
+    periods: eligibleManualBillPeriods.length > 0 ? eligibleManualBillPeriods : (buildInputs as any).canonicalPeriods ?? undefined,
+    monthlyTotalsKwhByMonth:
+      eligibleManualBillPeriods.length > 0
+        ? buildInputs.manualBillPeriodTotalsKwhById ?? {}
+        : buildInputs.monthlyTotalsKwhByMonth,
     intradayShape96: buildInputs.intradayShape96,
     weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
     travelRanges: buildInputs.travelRanges,

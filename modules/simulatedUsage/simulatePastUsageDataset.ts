@@ -903,8 +903,13 @@ export async function simulatePastUsageDataset(
     const manualTotalsConstraint =
       (buildInputs.resolvedSimFingerprint as { manualTotalsConstraint?: string } | undefined)?.manualTotalsConstraint ??
       null;
+    const eligibleManualBillPeriods = Array.isArray(buildInputs.manualBillPeriods)
+      ? buildInputs.manualBillPeriods.filter((period) => period.eligibleForConstraint)
+      : [];
     const shouldUseTrustedActualIntervalsForManualMonthly =
-      buildInputs.mode === "MANUAL_TOTALS" && manualTotalsConstraint === "monthly";
+      buildInputs.mode === "MANUAL_TOTALS" &&
+      manualTotalsConstraint === "monthly" &&
+      eligibleManualBillPeriods.length === 0;
     const fetchedActualIntervals = preloadedIntervals
       ? null
       : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
@@ -958,16 +963,28 @@ export async function simulatePastUsageDataset(
      */
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
     if (isLowDataSharedPastMode) {
-      const tzForKeepRef = String(timezone ?? "").trim();
-      for (const dayStartMs of canonicalDayStartsMs) {
-        const gridTs = getDayGridTimestamps(dayStartMs);
-        if (!gridTs.length) continue;
-        const localKey = tzForKeepRef
-          ? dateKeyInTimezone(gridTs[0], tzForKeepRef)
-          : dateKeyFromTimestamp(gridTs[0]);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(localKey)) continue;
-        if (!excludedDateKeys.has(localKey)) {
-          mergedKeepRefLocalDateKeys.add(localKey);
+      if (buildInputs.mode === "MANUAL_TOTALS" && eligibleManualBillPeriods.length > 0) {
+        for (const period of eligibleManualBillPeriods) {
+          const startMs = new Date(`${period.startDate}T00:00:00.000Z`).getTime();
+          const endMs = new Date(`${period.endDate}T00:00:00.000Z`).getTime();
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) continue;
+          for (let cursor = startMs; cursor <= endMs; cursor += 24 * 60 * 60 * 1000) {
+            const localKey = new Date(cursor).toISOString().slice(0, 10);
+            if (!excludedDateKeys.has(localKey)) mergedKeepRefLocalDateKeys.add(localKey);
+          }
+        }
+      } else {
+        const tzForKeepRef = String(timezone ?? "").trim();
+        for (const dayStartMs of canonicalDayStartsMs) {
+          const gridTs = getDayGridTimestamps(dayStartMs);
+          if (!gridTs.length) continue;
+          const localKey = tzForKeepRef
+            ? dateKeyInTimezone(gridTs[0], tzForKeepRef)
+            : dateKeyFromTimestamp(gridTs[0]);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(localKey)) continue;
+          if (!excludedDateKeys.has(localKey)) {
+            mergedKeepRefLocalDateKeys.add(localKey);
+          }
         }
       }
     }

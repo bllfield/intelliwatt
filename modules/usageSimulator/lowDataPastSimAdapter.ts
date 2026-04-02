@@ -13,10 +13,22 @@ export function buildSyntheticIntervalsForSharedPastWindow(args: {
   endDate: string;
   timezone?: string;
 }): Array<{ timestamp: string; kwh: number }> {
+  const eligibleBillPeriods = Array.isArray(args.buildInputs.manualBillPeriods)
+    ? args.buildInputs.manualBillPeriods
+        .filter((period) => period.eligibleForConstraint)
+        .map((period) => ({
+          id: period.id,
+          startDate: period.startDate,
+          endDate: period.endDate,
+        }))
+    : [];
   const curve = generateSimulatedCurve({
     canonicalMonths: args.buildInputs.canonicalMonths,
-    periods: args.buildInputs.canonicalPeriods,
-    monthlyTotalsKwhByMonth: args.buildInputs.monthlyTotalsKwhByMonth,
+    periods: eligibleBillPeriods.length > 0 ? eligibleBillPeriods : args.buildInputs.canonicalPeriods,
+    monthlyTotalsKwhByMonth:
+      eligibleBillPeriods.length > 0
+        ? args.buildInputs.manualBillPeriodTotalsKwhById ?? {}
+        : args.buildInputs.monthlyTotalsKwhByMonth,
     intradayShape96: args.buildInputs.intradayShape96,
     weekdayWeekendShape96: args.buildInputs.weekdayWeekendShape96,
     travelRanges: args.buildInputs.travelRanges,

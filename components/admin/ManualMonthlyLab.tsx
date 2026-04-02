@@ -6,7 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import UsageDashboard from "@/components/usage/UsageDashboard";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
-import { buildManualMonthlyStageOneRows, resolveManualMonthlyLabStageOnePayloads } from "@/modules/manualUsage/statementRanges";
+import { buildManualMonthlyStageOneRows, resolveManualStageOneLabPayloads } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 type HouseOption = {
@@ -94,17 +94,17 @@ export default function ManualMonthlyLab() {
   const labHome = resultJson?.labHome ?? recalcJson?.labHome ?? saveJson?.labHome ?? loadJson?.labHome ?? lookupJson?.labHome ?? null;
   const labReady = Boolean(loadJson?.labHome);
   const sourceUsageHouse = resultJson?.sourceUsageHouse ?? loadJson?.sourceUsageHouse ?? lookupJson?.sourceUsageHouse ?? null;
-  const { previewPayload: stageOnePreviewPayload } = resolveManualMonthlyLabStageOnePayloads({
+  const { previewPayload: stageOnePreviewPayload } = resolveManualStageOneLabPayloads({
     savedPayload: saveJson?.payload,
     loadedPayload: loadJson?.payload,
     lookupPayload: lookupJson?.payload,
     loadedSourcePayload: loadJson?.sourcePayload,
     lookupSourcePayload: lookupJson?.sourcePayload,
-    loadedSourceSeed: loadJson?.seed?.monthly,
-    lookupSourceSeed: lookupJson?.sourceSeed?.monthly,
+    loadedSourceSeed: loadJson?.sourcePayload ?? loadJson?.seed?.monthly ?? loadJson?.seed?.annual ?? null,
+    lookupSourceSeed: lookupJson?.sourcePayload ?? lookupJson?.sourceSeed?.monthly ?? lookupJson?.sourceSeed?.annual ?? null,
   });
   const stageOnePreviewRows = useMemo(
-    () => (stageOnePreviewPayload ? buildManualMonthlyStageOneRows(stageOnePreviewPayload) : []),
+    () => (stageOnePreviewPayload?.mode === "MONTHLY" ? buildManualMonthlyStageOneRows(stageOnePreviewPayload) : []),
     [stageOnePreviewPayload]
   );
 
@@ -397,9 +397,9 @@ export default function ManualMonthlyLab() {
         {sourceUsageOverride ? (
           <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
             <div>
-              <div className="text-lg font-semibold text-brand-navy">Manual Monthly Stage 1</div>
+              <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 1</div>
               <p className="text-sm text-slate-600">
-                Read-only pre-sim statement totals for the selected source house. This surface intentionally hides daily and interval analytics.
+                Read-only pre-sim manual usage for the selected source house. This surface intentionally hides daily and interval analytics.
               </p>
             </div>
             {stageOnePreviewPayload ? (
@@ -411,13 +411,15 @@ export default function ManualMonthlyLab() {
                 housesOverride={sourceUsageOverride}
                 dashboardVariant="USAGE"
                 preferredHouseId={selectedSourceHouse?.id ?? null}
+                manualUsagePayload={stageOnePreviewPayload}
+                manualUsageHouseId={selectedSourceHouse?.id ?? null}
                 manualMonthlyStageOneRowsOverride={stageOnePreviewRows}
                 forceManualMonthlyStageOne
                 presentationSurface="admin_manual_monthly_stage_one"
               />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                No monthly manual statement totals are available to preview yet. Use Lookup or Load to populate the Stage 1 statement view.
+                No manual usage totals are available to preview yet. Use Lookup or Load to populate the Stage 1 statement view.
               </div>
             )}
           </div>
@@ -446,7 +448,7 @@ export default function ManualMonthlyLab() {
           <div className="space-y-4">
             <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
               <div>
-                <div className="text-lg font-semibold text-brand-navy">Manual Monthly Stage 2</div>
+                <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 2</div>
                 <p className="text-sm text-slate-600">Shared Past Sim results rendered from the dedicated lab home artifact only.</p>
               </div>
               {pastSimOverride ? (
@@ -465,7 +467,10 @@ export default function ManualMonthlyLab() {
             </div>
             {displayedReadResult?.manualMonthlyReconciliation ? (
               <div className="rounded-lg bg-brand-white p-6 shadow-lg">
-                <div className="text-sm font-semibold text-brand-navy">Statement Range Reconciliation</div>
+                <div className="text-sm font-semibold text-brand-navy">Bill Period Parity Compare</div>
+                <div className="mt-1 text-xs text-slate-600">
+                  Totals below sum the simulated daily output across each manual bill period so eligible periods can be checked against the entered total.
+                </div>
                 <ManualMonthlyReconciliationPanel reconciliation={displayedReadResult.manualMonthlyReconciliation} />
               </div>
             ) : null}

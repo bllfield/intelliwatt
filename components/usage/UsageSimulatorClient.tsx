@@ -1494,14 +1494,14 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-brand-navy">
                 {pastCompareSectionMode === "statement_range_reconciliation"
-                  ? "Statement Range Reconciliation"
+                  ? "Bill Period Parity Compare"
                   : "Validation / Test Day Compare"}
               </div>
               <div className="mt-1 text-xs text-brand-navy/70">
                 {scenarioLoading
                   ? ""
                   : activeManualMonthlyReconciliation
-                    ? `${activeManualMonthlyReconciliation.eligibleRangeCount} eligible entered statement range(s). Entered statement totals reconcile against the persisted Past Sim totals for matching bill-cycle ranges; later-filled or travel-overlapped ranges are shown as excluded.`
+                    ? `${activeManualMonthlyReconciliation.eligibleRangeCount} eligible entered bill period(s). Entered manual totals reconcile against the persisted Past Sim totals for matching bill-cycle ranges; later-filled or travel-overlapped ranges are shown as excluded.`
                   : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length
                     ? `${scenarioCompareProjection.rows.length} scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.`
                     : "This section compares modeled vs actual on validation days for simulator accuracy transparency."}
@@ -1682,7 +1682,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           onSaved={async () => {
             await recalcNow({ scenarioId: null, note: "Updating usage…" });
             if (shouldRecalcPastWorkspaceWithoutEvents({ mode, pastScenarioId: pastScenario?.id ?? null })) {
-              if (pastScenario?.id) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+              await recalcNow({ scenarioId: pastScenario!.id, note: "Updating Past…" });
             }
           }}
         />

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  pickManualUsagePayload,
   pickMonthlyManualUsagePayload,
+  resolveManualStageOneLabPayloads,
+  resolveManualStageOnePresentation,
   resolveManualMonthlyLabStageOnePayloads,
-  resolveManualMonthlyStageOnePresentation,
   resolveManualMonthlyStageOneRenderMode,
   shouldUseManualMonthlyStageOnePayload,
 } from "@/modules/manualUsage/statementRanges";
@@ -48,7 +50,7 @@ describe("manual monthly stage one dashboard state", () => {
   });
 
   it("keeps the forced stage-one surface in rows mode once saved monthly totals resolve", () => {
-    const presentation = resolveManualMonthlyStageOnePresentation({
+    const presentation = resolveManualStageOnePresentation({
       surface: "admin_manual_monthly_stage_one",
       payload: {
         mode: "MONTHLY",
@@ -59,7 +61,7 @@ describe("manual monthly stage one dashboard state", () => {
       },
     });
 
-    expect(presentation?.rows[0]).toMatchObject({
+    expect(presentation && presentation.mode === "MONTHLY" ? presentation.rows[0] : null).toMatchObject({
       label: "5/1/25 - 5/31/25",
       kwh: 456,
     });
@@ -97,6 +99,38 @@ describe("manual monthly stage one dashboard state", () => {
     ).toMatchObject({
       sourcePayload,
       previewPayload: savedPayload,
+    });
+  });
+
+  it("selects annual payloads for generic Stage 1 preview surfaces", () => {
+    const annualPayload = {
+      mode: "ANNUAL" as const,
+      anchorEndDate: "2025-12-31",
+      annualKwh: 6789,
+      travelRanges: [],
+    };
+
+    expect(pickManualUsagePayload(annualPayload)).toMatchObject(annualPayload);
+    expect(
+      resolveManualStageOneLabPayloads({
+        loadedSourcePayload: annualPayload,
+        loadedPayload: annualPayload,
+      })
+    ).toMatchObject({
+      sourcePayload: annualPayload,
+      previewPayload: annualPayload,
+    });
+    expect(
+      resolveManualStageOnePresentation({
+        surface: "admin_manual_monthly_stage_one",
+        payload: annualPayload,
+      })
+    ).toMatchObject({
+      mode: "ANNUAL",
+      summary: {
+        annualKwh: 6789,
+        endDate: "2025-12-31",
+      },
     });
   });
 });

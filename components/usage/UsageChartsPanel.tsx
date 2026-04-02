@@ -42,6 +42,15 @@ type ManualMonthlyStageOneRow = {
   shortLabel: string;
   kwh: number;
 };
+type ManualAnnualStageOneSummary = {
+  key: string;
+  startDate: string;
+  endDate: string;
+  anchorEndDate: string;
+  label: string;
+  shortLabel: string;
+  annualKwh: number;
+};
 type StitchedMonth =
   | {
       mode: "PRIOR_YEAR_TAIL";
@@ -76,6 +85,7 @@ export function UsageChartsPanel(props: {
   coverageStart?: string | null;
   coverageEnd?: string | null;
   manualMonthlyStageOneRows?: ManualMonthlyStageOneRow[] | null;
+  manualAnnualStageOneSummary?: ManualAnnualStageOneSummary | null;
 }) {
   const {
     monthly,
@@ -96,6 +106,7 @@ export function UsageChartsPanel(props: {
     coverageStart,
     coverageEnd,
     manualMonthlyStageOneRows,
+    manualAnnualStageOneSummary,
   } = props;
   const spansTwoYears = coverageStart && coverageEnd && coverageStart.slice(0, 4) !== coverageEnd.slice(0, 4);
   const firstLastSameMonthDay =
@@ -219,6 +230,31 @@ export function UsageChartsPanel(props: {
             </table>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (manualAnnualStageOneSummary) {
+    return (
+      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Annual usage total</div>
+        <p className="mt-1 text-xs text-neutral-500">
+          Stage 1 annual manual view shows only the saved annual total and billing-date context. The full chart appears
+          after Past Sim is generated.
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Billing range</div>
+            <div className="mt-2 text-sm font-semibold text-neutral-900">{manualAnnualStageOneSummary.label}</div>
+            <div className="mt-1 text-xs text-neutral-500">Anchor end date {manualAnnualStageOneSummary.anchorEndDate}</div>
+          </div>
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Annual total</div>
+            <div className="mt-2 text-2xl font-semibold text-neutral-900">
+              {manualAnnualStageOneSummary.annualKwh.toFixed(1)} <span className="text-base font-normal text-neutral-500">kWh</span>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

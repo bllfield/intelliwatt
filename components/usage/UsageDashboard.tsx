@@ -5,9 +5,9 @@ import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import {
+  type ManualAnnualStageOneSummary,
   type ManualMonthlyStageOneRow,
-  resolveManualMonthlyStageOnePresentation,
-  resolveManualMonthlyStageOneRenderMode,
+  resolveManualStageOnePresentation,
   shouldUseManualMonthlyStageOnePayload,
   type ManualMonthlyStageOneSurface,
 } from "@/modules/manualUsage/statementRanges";
@@ -574,6 +574,7 @@ export const UsageDashboard: React.FC<Props> = ({
   const manualMonthlyStageOne = useMemo(() => {
     if (manualMonthlyStageOneRowsOverride?.length) {
       return {
+        mode: "MONTHLY" as const,
         surface: presentationSurface ?? "admin_manual_monthly_stage_one",
         rows: manualMonthlyStageOneRowsOverride,
       };
@@ -588,7 +589,7 @@ export const UsageDashboard: React.FC<Props> = ({
         ? manualUsagePayload
         : fetchedManualUsagePayload;
     if (!resolvedPayload) return null;
-    return resolveManualMonthlyStageOnePresentation({
+    return resolveManualStageOnePresentation({
       surface: presentationSurface,
       payload: resolvedPayload,
     });
@@ -602,14 +603,15 @@ export const UsageDashboard: React.FC<Props> = ({
     presentationSurface,
     selectedHouseId,
   ]);
-  const manualMonthlyStageOneRows = manualMonthlyStageOne?.rows ?? [];
-  const manualMonthlyStageOneRenderMode = resolveManualMonthlyStageOneRenderMode({
-    forceManualMonthlyStageOne,
-    rows: manualMonthlyStageOneRows,
-  });
-  const shouldRenderManualMonthlyStageOne = manualMonthlyStageOneRenderMode === "rows";
-  const shouldShowForcedManualMonthlyStageOneEmptyState = manualMonthlyStageOneRenderMode === "empty";
-  const isManualMonthlyStageOnePresentation = manualMonthlyStageOneRenderMode !== "off";
+  const manualMonthlyStageOneRows =
+    manualMonthlyStageOne?.mode === "MONTHLY" ? manualMonthlyStageOne.rows : [];
+  const manualAnnualStageOneSummary: ManualAnnualStageOneSummary | null =
+    manualMonthlyStageOne?.mode === "ANNUAL" ? manualMonthlyStageOne.summary : null;
+  const shouldRenderManualMonthlyStageOne = manualMonthlyStageOne?.mode === "MONTHLY";
+  const shouldRenderManualAnnualStageOne = manualMonthlyStageOne?.mode === "ANNUAL";
+  const isManualMonthlyStageOnePresentation = Boolean(manualMonthlyStageOne);
+  const shouldShowForcedManualMonthlyStageOneEmptyState =
+    forceManualMonthlyStageOne && !shouldRenderManualMonthlyStageOne && !shouldRenderManualAnnualStageOne;
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
@@ -807,8 +809,10 @@ export const UsageDashboard: React.FC<Props> = ({
           </p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
-            {isManualMonthlyStageOnePresentation
+            {shouldRenderManualMonthlyStageOne
               ? "Based on your saved monthly statement totals. Daily and interval analytics stay on the Past Sim page after the house usage is simulated."
+              : shouldRenderManualAnnualStageOne
+              ? "Based on your saved annual total and billing-date context. The full chart and analytics appear on the Past Sim page after the house usage is simulated."
               : datasetMode === "SIMULATED"
               ? coverage?.hasSimulatedFill
                 ? "Based on actual usage data with simulated fill for Travel/Vacant dates."
@@ -965,13 +969,31 @@ export const UsageDashboard: React.FC<Props> = ({
             coverageEnd={null}
             manualMonthlyStageOneRows={manualMonthlyStageOneRows}
           />
+        ) : shouldRenderManualAnnualStageOne ? (
+          <UsageChartsPanel
+            monthly={[]}
+            stitchedMonth={null}
+            weekdayKwh={0}
+            weekendKwh={0}
+            timeOfDayBuckets={[]}
+            monthlyView={monthlyView}
+            onMonthlyViewChange={setMonthlyView}
+            dailyView={dailyView}
+            onDailyViewChange={setDailyView}
+            daily={[]}
+            fifteenCurve={[]}
+            summaryTotalKwh={manualAnnualStageOneSummary?.annualKwh ?? null}
+            coverageStart={null}
+            coverageEnd={null}
+            manualAnnualStageOneSummary={manualAnnualStageOneSummary}
+          />
         ) : shouldShowForcedManualMonthlyStageOneEmptyState ? (
           <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
             <p className="text-sm text-neutral-700">
-              No saved monthly statement totals are available for this Stage 1 view yet.
+              No saved manual usage totals are available for this Stage 1 view yet.
             </p>
             <p className="mt-2 text-xs text-neutral-500">
-              Save monthly totals with their statement ranges to preview the bill-date chart on this surface.
+              Save monthly statement totals or an annual total to preview the pre-sim manual view on this surface.
             </p>
           </div>
         ) : (
