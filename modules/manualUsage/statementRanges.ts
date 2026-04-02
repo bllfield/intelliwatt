@@ -186,6 +186,15 @@ export function resolveManualMonthlyStageOnePresentation(args: {
   };
 }
 
+export function pickMonthlyManualUsagePayload(
+  ...candidates: Array<ManualUsagePayload | Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null | undefined>
+): Extract<ManualUsagePayload, { mode: "MONTHLY" }> | null {
+  for (const candidate of candidates) {
+    if (candidate?.mode === "MONTHLY") return candidate;
+  }
+  return null;
+}
+
 export function shouldUseManualMonthlyStageOnePayload(args: {
   manualUsageHouseId?: string | null;
   selectedUsageHouseId?: string | null;

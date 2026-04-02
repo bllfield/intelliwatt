@@ -6,7 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import UsageDashboard from "@/components/usage/UsageDashboard";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
-import { buildManualMonthlyStageOneRows } from "@/modules/manualUsage/statementRanges";
+import { buildManualMonthlyStageOneRows, pickMonthlyManualUsagePayload } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 type HouseOption = {
@@ -94,12 +94,15 @@ export default function ManualMonthlyLab() {
   const labHome = resultJson?.labHome ?? recalcJson?.labHome ?? saveJson?.labHome ?? loadJson?.labHome ?? lookupJson?.labHome ?? null;
   const labReady = Boolean(loadJson?.labHome);
   const sourceUsageHouse = resultJson?.sourceUsageHouse ?? loadJson?.sourceUsageHouse ?? lookupJson?.sourceUsageHouse ?? null;
-  const sourceStageOnePayload =
-    (loadJson?.sourcePayload?.mode === "MONTHLY" ? loadJson.sourcePayload : null) ??
-    (lookupJson?.sourcePayload?.mode === "MONTHLY" ? lookupJson.sourcePayload : null) ??
-    loadJson?.seed?.monthly ??
-    lookupJson?.sourceSeed?.monthly ??
-    null;
+  const sourceStageOnePayload = pickMonthlyManualUsagePayload(
+    saveJson?.payload,
+    loadJson?.payload,
+    lookupJson?.payload,
+    loadJson?.sourcePayload,
+    lookupJson?.sourcePayload,
+    loadJson?.seed?.monthly,
+    lookupJson?.sourceSeed?.monthly
+  );
   const sourceStageOneRows = useMemo(
     () => (sourceStageOnePayload ? buildManualMonthlyStageOneRows(sourceStageOnePayload) : []),
     [sourceStageOnePayload]

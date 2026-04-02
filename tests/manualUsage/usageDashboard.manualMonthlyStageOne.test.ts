@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  pickMonthlyManualUsagePayload,
   resolveManualMonthlyStageOnePresentation,
   resolveManualMonthlyStageOneRenderMode,
   shouldUseManualMonthlyStageOnePayload,
@@ -67,5 +68,29 @@ describe("manual monthly stage one dashboard state", () => {
         rows: presentation?.rows ?? [],
       })
     ).toBe("rows");
+  });
+
+  it("prefers the current saved monthly payload over older source prefills", () => {
+    expect(
+      pickMonthlyManualUsagePayload(
+        {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-03-31",
+          monthlyKwh: [{ month: "2026-03", kwh: 805.22 }],
+          statementRanges: [{ month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" }],
+          travelRanges: [],
+        },
+        {
+          mode: "MONTHLY",
+          anchorEndDate: "2025-12-31",
+          monthlyKwh: [{ month: "2025-12", kwh: 999 }],
+          statementRanges: [{ month: "2025-12", startDate: "2025-12-01", endDate: "2025-12-31" }],
+          travelRanges: [],
+        }
+      )
+    ).toMatchObject({
+      anchorEndDate: "2026-03-31",
+      monthlyKwh: [{ month: "2026-03", kwh: 805.22 }],
+    });
   });
 });
