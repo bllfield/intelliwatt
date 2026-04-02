@@ -33,6 +33,15 @@ type DailyRow = {
     | "ACTUAL";
 };
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
+type ManualMonthlyStageOneRow = {
+  key: string;
+  month: string;
+  startDate: string | null;
+  endDate: string;
+  label: string;
+  shortLabel: string;
+  kwh: number;
+};
 type StitchedMonth =
   | {
       mode: "PRIOR_YEAR_TAIL";
@@ -66,6 +75,7 @@ export function UsageChartsPanel(props: {
   /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
   coverageStart?: string | null;
   coverageEnd?: string | null;
+  manualMonthlyStageOneRows?: ManualMonthlyStageOneRow[] | null;
 }) {
   const {
     monthly,
@@ -85,6 +95,7 @@ export function UsageChartsPanel(props: {
     summaryTotalKwh,
     coverageStart,
     coverageEnd,
+    manualMonthlyStageOneRows,
   } = props;
   const spansTwoYears = coverageStart && coverageEnd && coverageStart.slice(0, 4) !== coverageEnd.slice(0, 4);
   const firstLastSameMonthDay =
@@ -123,6 +134,94 @@ export function UsageChartsPanel(props: {
     }
     return row.source ?? "ACTUAL";
   };
+
+  if (manualMonthlyStageOneRows?.length) {
+    const totalKwh = manualMonthlyStageOneRows.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
+    return (
+      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Monthly statement totals</div>
+            <p className="mt-1 text-xs text-neutral-500">
+              Stage 1 manual monthly view shows only saved bill totals by statement range. Daily and interval analytics appear after Past Sim is generated.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onMonthlyViewChange("chart")}
+              className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                monthlyView === "chart"
+                  ? "border-sky-300 bg-sky-50 text-sky-700"
+                  : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+              }`}
+            >
+              Chart
+            </button>
+            <button
+              type="button"
+              onClick={() => onMonthlyViewChange("table")}
+              className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                monthlyView === "table"
+                  ? "border-sky-300 bg-sky-50 text-sky-700"
+                  : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+              }`}
+            >
+              Table
+            </button>
+          </div>
+        </div>
+        {monthlyView === "chart" ? (
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={manualMonthlyStageOneRows.map((row) => ({
+                  ...row,
+                  total: row.kwh,
+                }))}
+                margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="shortLabel" tick={{ fontSize: 10 }} minTickGap={20} />
+                <YAxis />
+                <Tooltip
+                  formatter={(value) => `${Number(value ?? 0).toFixed(1)} kWh`}
+                  labelFormatter={(_value, payload) => String(payload?.[0]?.payload?.label ?? "")}
+                />
+                <Legend />
+                <Bar dataKey="total" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Statement total" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="overflow-auto rounded-lg border border-neutral-200">
+            <table className="min-w-[420px] w-full text-sm">
+              <thead className="bg-neutral-50 text-neutral-600">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Statement range</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Total</th>
+                </tr>
+              </thead>
+              <tbody className="text-neutral-800">
+                {manualMonthlyStageOneRows.map((row) => (
+                  <tr key={row.key} className="border-t border-neutral-200">
+                    <td className="px-3 py-2 font-medium">{row.label}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{row.kwh.toFixed(1)} kWh</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-neutral-50 text-neutral-800">
+                <tr className="border-t border-neutral-200">
+                  <td className="px-3 py-2 font-semibold">Total</td>
+                  <td className="px-3 py-2 text-right font-semibold">{totalKwh.toFixed(1)} kWh</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>

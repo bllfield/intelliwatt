@@ -4,9 +4,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
+import {
+  resolveManualMonthlyStageOnePresentation,
+  type ManualMonthlyStageOneSurface,
+} from "@/modules/manualUsage/statementRanges";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -284,6 +289,10 @@ type Props = {
   futureVariables?: ScenarioVariable[];
   /** When false, hide the multi-home selector (main Energy Usage page uses a single primary home). Default true. */
   showHouseSelector?: boolean;
+  preferredHouseId?: string | null;
+  manualUsagePayload?: ManualUsagePayload | null;
+  manualUsageHouseId?: string | null;
+  presentationSurface?: ManualMonthlyStageOneSurface | null;
 };
 
 const DASHBOARD_LABELS: Record<NonNullable<Props["dashboardVariant"]>, string> = {
@@ -304,6 +313,10 @@ export const UsageDashboard: React.FC<Props> = ({
   pastVariables = [],
   futureVariables = [],
   showHouseSelector = true,
+  preferredHouseId = null,
+  manualUsagePayload = null,
+  manualUsageHouseId = null,
+  presentationSurface = null,
 }) => {
   const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
   const [houses, setHouses] = useState<HouseUsage[]>([]);
@@ -314,6 +327,15 @@ export const UsageDashboard: React.FC<Props> = ({
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
   const lastSmtIntervalsRef = useRef<number>(0);
   const smtPollTimerRef = useRef<number | null>(null);
+
+  const pickSelectedHouseId = (nextHouses: HouseUsage[]): string | null => {
+    if (!nextHouses.length) return null;
+    const preferred =
+      preferredHouseId && nextHouses.some((house) => house.houseId === preferredHouseId) ? preferredHouseId : null;
+    if (preferred) return preferred;
+    const firstWithData = nextHouses.find((house) => house.dataset);
+    return firstWithData?.houseId ?? nextHouses[0]?.houseId ?? null;
+  };
 
   useEffect(() => {
     if (forcedMode) setDatasetMode(forcedMode);
@@ -330,8 +352,7 @@ export const UsageDashboard: React.FC<Props> = ({
 
         if (housesOverride && housesOverride.length) {
           setHouses(housesOverride);
-          const firstWithData = housesOverride.find((h) => h.dataset);
-          setSelectedHouseId(firstWithData?.houseId ?? housesOverride[0]?.houseId ?? null);
+          setSelectedHouseId(pickSelectedHouseId(housesOverride));
           setLoading(false);
           return;
         }
@@ -340,8 +361,7 @@ export const UsageDashboard: React.FC<Props> = ({
         if (effectiveFetchMode === "SIMULATED" && simulatedHousesOverride && simulatedHousesOverride.length) {
           const hs = simulatedHousesOverride;
           setHouses(hs);
-          const firstWithData = hs.find((h) => h.dataset);
-          setSelectedHouseId(firstWithData?.houseId ?? hs[0]?.houseId ?? null);
+          setSelectedHouseId(pickSelectedHouseId(hs));
           setLoading(false);
           return;
         }
@@ -356,8 +376,7 @@ export const UsageDashboard: React.FC<Props> = ({
         if (cachedPayload && (cachedPayload as any).ok !== false && (cachedPayload as any).houses) {
           const c = cachedPayload as { ok: true; houses: HouseUsage[] };
           setHouses(c.houses || []);
-          const firstWithData = c.houses.find((h) => h.dataset);
-          setSelectedHouseId(firstWithData?.houseId ?? c.houses[0]?.houseId ?? null);
+          setSelectedHouseId(pickSelectedHouseId(c.houses || []));
           setLoading(false);
         } else {
           setLoading(true);
@@ -389,8 +408,7 @@ export const UsageDashboard: React.FC<Props> = ({
           writeSessionCache(effectiveFetchMode, json);
         }
         setHouses(json.houses || []);
-        const firstWithData = json.houses.find((h) => h.dataset);
-        setSelectedHouseId(firstWithData?.houseId ?? json.houses[0]?.houseId ?? null);
+        setSelectedHouseId(pickSelectedHouseId(json.houses || []));
       } catch (err: any) {
         if (!cancelled) setError(err?.message || "Failed to load usage data");
       } finally {
@@ -401,7 +419,7 @@ export const UsageDashboard: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [datasetMode, fetchModeOverride, housesOverride, refreshToken, simulatedHousesOverride]);
+  }, [datasetMode, fetchModeOverride, housesOverride, preferredHouseId, refreshToken, simulatedHousesOverride]);
 
   // If usage isn't available yet (common immediately after SMT backfill request),
   // keep checking until it lands by polling the SMT orchestrator and reloading usage.
@@ -455,8 +473,7 @@ export const UsageDashboard: React.FC<Props> = ({
       writeSessionCache("REAL", json);
       setHouses((json as any).houses || []);
       const nextHouses = (json as any).houses || [];
-      const firstWithData = nextHouses.find((h: any) => h.dataset);
-      setSelectedHouseId(firstWithData?.houseId ?? nextHouses[0]?.houseId ?? null);
+      setSelectedHouseId(pickSelectedHouseId(nextHouses));
     }
 
     async function tick() {
@@ -511,6 +528,15 @@ export const UsageDashboard: React.FC<Props> = ({
     if (!selectedHouseId) return null;
     return houses.find((h) => h.houseId === selectedHouseId) || null;
   }, [houses, selectedHouseId]);
+
+  const manualMonthlyStageOne = useMemo(() => {
+    if (!manualUsagePayload || !manualUsageHouseId) return null;
+    if (activeHouse?.houseId !== manualUsageHouseId) return null;
+    return resolveManualMonthlyStageOnePresentation({
+      surface: presentationSurface,
+      payload: manualUsagePayload,
+    });
+  }, [activeHouse?.houseId, manualUsageHouseId, manualUsagePayload, presentationSurface]);
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
@@ -696,7 +722,7 @@ export const UsageDashboard: React.FC<Props> = ({
     );
   }
 
-  const hasData = Boolean(activeHouse?.dataset);
+  const hasData = Boolean(activeHouse?.dataset) || Boolean(manualMonthlyStageOne);
   const houseDatasetExplanation = String(activeHouse?.datasetError?.explanation ?? "").trim();
 
   return (
@@ -708,13 +734,15 @@ export const UsageDashboard: React.FC<Props> = ({
           </p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
-            {datasetMode === "SIMULATED"
+            {manualMonthlyStageOne
+              ? "Based on your saved monthly statement totals. Daily and interval analytics stay on the Past Sim page after the house usage is simulated."
+              : datasetMode === "SIMULATED"
               ? coverage?.hasSimulatedFill
                 ? "Based on actual usage data with simulated fill for Travel/Vacant dates."
                 : "Based on a simulated 15-minute curve generated from your manual entry or SMT baseline."
               : "Based on normalized 15-minute interval data from your connected sources."}
           </p>
-          {coverage?.start && coverage?.end ? (
+          {!manualMonthlyStageOne && coverage?.start && coverage?.end ? (
             <p className="mt-1 text-xs text-neutral-500">
               Data coverage:{" "}
               <span className="font-medium text-neutral-700">
@@ -724,10 +752,10 @@ export const UsageDashboard: React.FC<Props> = ({
               {typeof coverage.intervalsCount === "number" ? <span> · {coverage.intervalsCount.toLocaleString()} intervals</span> : null}
             </p>
           ) : null}
-          {coverage?.weatherBasisLabel ? (
+          {!manualMonthlyStageOne && coverage?.weatherBasisLabel ? (
             <p className="mt-0.5 text-xs text-neutral-500">{coverage.weatherBasisLabel}</p>
           ) : null}
-          {coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
+          {!manualMonthlyStageOne && coverage?.sourceOfDaySimulationCore && dashboardVariant === "PAST_SIMULATED_USAGE" ? (
             <p className="mt-0.5 text-xs text-neutral-500">
               Simulation core: <span className="font-medium text-neutral-600">{coverage.sourceOfDaySimulationCore}</span>
             </p>
@@ -847,84 +875,84 @@ export const UsageDashboard: React.FC<Props> = ({
         </div>
       ) : (
         <>
-          {/* Summary cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Net usage</div>
-              <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                {derived.totalKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+          {!manualMonthlyStageOne ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Net usage</div>
+                <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                  {derived.totalKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">Imports minus exports.</p>
               </div>
-              <p className="mt-1 text-xs text-neutral-500">Imports minus exports.</p>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Exported to grid</div>
-              <div className="mt-2 text-2xl font-semibold text-amber-700">
-                {derived.totals.exportKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Exported to grid</div>
+                <div className="mt-2 text-2xl font-semibold text-amber-700">
+                  {derived.totals.exportKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">Solar backfeed / buyback volume.</p>
               </div>
-              <p className="mt-1 text-xs text-neutral-500">Solar backfeed / buyback volume.</p>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Imported from grid</div>
-              <div className="mt-2 text-2xl font-semibold text-emerald-700">
-                {derived.totals.importKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Imported from grid</div>
+                <div className="mt-2 text-2xl font-semibold text-emerald-700">
+                  {derived.totals.importKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Average daily</div>
-              <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                {derived.avgDailyKwh.toFixed(1)} <span className="text-base font-normal text-neutral-500">kWh/day</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Average daily</div>
+                <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                  {derived.avgDailyKwh.toFixed(1)} <span className="text-base font-normal text-neutral-500">kWh/day</span>
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (15-min)</div>
-              <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                {derived.baseload != null ? derived.baseload.toFixed(2) : "--"} <span className="text-base font-normal text-neutral-500">kWh</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (15-min)</div>
+                <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                  {derived.baseload != null ? derived.baseload.toFixed(2) : "--"} <span className="text-base font-normal text-neutral-500">kWh</span>
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">Estimated always-on interval energy.</p>
               </div>
-              <p className="mt-1 text-xs text-neutral-500">Estimated always-on interval energy.</p>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (daily)</div>
-              <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                {derived.baseloadDaily != null ? derived.baseloadDaily.toFixed(2) : "--"}{" "}
-                <span className="text-base font-normal text-neutral-500">kWh/day</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (daily)</div>
+                <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                  {derived.baseloadDaily != null ? derived.baseloadDaily.toFixed(2) : "--"}{" "}
+                  <span className="text-base font-normal text-neutral-500">kWh/day</span>
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (monthly)</div>
-              <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                {derived.baseloadMonthly != null ? derived.baseloadMonthly.toFixed(2) : "--"}{" "}
-                <span className="text-base font-normal text-neutral-500">kWh/month</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (monthly)</div>
+                <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                  {derived.baseloadMonthly != null ? derived.baseloadMonthly.toFixed(2) : "--"}{" "}
+                  <span className="text-base font-normal text-neutral-500">kWh/month</span>
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Peak pattern</div>
-              <div className="mt-2 text-sm text-neutral-800">
-                {derived.peakDay ? (
-                  <>
-                    <div>
-                      <span className="font-semibold">Day:</span> {formatDateShort(derived.peakDay.date)} ({derived.peakDay.kwh.toFixed(1)} kWh)
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Peak pattern</div>
+                <div className="mt-2 text-sm text-neutral-800">
+                  {derived.peakDay ? (
+                    <>
+                      <div>
+                        <span className="font-semibold">Day:</span> {formatDateShort(derived.peakDay.date)} ({derived.peakDay.kwh.toFixed(1)} kWh)
+                      </div>
+                    </>
+                  ) : (
+                    <div>–</div>
+                  )}
+                  {derived.peakHour ? (
+                    <div className="mt-1">
+                      <span className="font-semibold">Hour:</span> {derived.peakHour.hour}:00 ({derived.peakHour.kw.toFixed(1)} kW)
                     </div>
-                  </>
-                ) : (
-                  <div>–</div>
-                )}
-                {derived.peakHour ? (
-                  <div className="mt-1">
-                    <span className="font-semibold">Hour:</span> {derived.peakHour.hour}:00 ({derived.peakHour.kw.toFixed(1)} kW)
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
 
-          {/* Weekday vs weekend + Monthly */}
           <UsageChartsPanel
             monthly={derived.monthly}
             stitchedMonth={derived.stitchedMonth}
@@ -942,6 +970,7 @@ export const UsageDashboard: React.FC<Props> = ({
             summaryTotalKwh={derived.totalKwh}
             coverageStart={coverage?.start ?? null}
             coverageEnd={coverage?.end ?? null}
+            manualMonthlyStageOneRows={manualMonthlyStageOne?.rows ?? null}
           />
         </>
       )}

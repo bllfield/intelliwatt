@@ -210,6 +210,10 @@ describe("admin manual monthly route", () => {
     expect(body.selectedSourceHouse.id).toBe("source-house-1");
     expect(body.labHome.id).toBe("lab-home-1");
     expect(body.sourceUsageHouse.houseId).toBe("source-house-1");
+    expect(body.sourceSeed.monthly.statementRanges[0]).toMatchObject({
+      month: "2025-12",
+      endDate: "2025-12-31",
+    });
     expect(body.currentResult.ok).toBe(true);
     expect(body.currentResult.houseId).toBe("lab-home-1");
     expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(

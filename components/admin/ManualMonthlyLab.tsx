@@ -93,10 +93,30 @@ export default function ManualMonthlyLab() {
   const labHome = resultJson?.labHome ?? recalcJson?.labHome ?? saveJson?.labHome ?? loadJson?.labHome ?? lookupJson?.labHome ?? null;
   const labReady = Boolean(loadJson?.labHome);
   const sourceUsageHouse = resultJson?.sourceUsageHouse ?? loadJson?.sourceUsageHouse ?? lookupJson?.sourceUsageHouse ?? null;
+  const sourceStageOnePayload =
+    (loadJson?.sourcePayload?.mode === "MONTHLY" ? loadJson.sourcePayload : null) ??
+    (lookupJson?.sourcePayload?.mode === "MONTHLY" ? lookupJson.sourcePayload : null) ??
+    loadJson?.seed?.monthly ??
+    lookupJson?.sourceSeed?.monthly ??
+    null;
 
   const sourceUsageOverride = useMemo(() => {
-    return sourceUsageHouse ? [sourceUsageHouse] : null;
-  }, [sourceUsageHouse]);
+    if (!selectedSourceHouse) return null;
+    return [
+      {
+        houseId: selectedSourceHouse.id,
+        label: selectedSourceHouse.label,
+        address: {
+          line1: selectedSourceHouse.addressLine1 ?? "",
+          city: selectedSourceHouse.addressCity ?? null,
+          state: selectedSourceHouse.addressState ?? null,
+        },
+        esiid: selectedSourceHouse.esiid ?? null,
+        dataset: sourceUsageHouse?.dataset ?? null,
+        alternatives: sourceUsageHouse?.alternatives ?? { smt: null, greenButton: null },
+      },
+    ];
+  }, [selectedSourceHouse, sourceUsageHouse]);
 
   const pastSimOverride = useMemo(() => {
     if (!displayedReadResult?.ok || !displayedReadResult?.dataset || !labHome) return null;
@@ -181,10 +201,14 @@ export default function ManualMonthlyLab() {
     try {
       const json = await callRoute("recalc");
       setRecalcJson(json);
+      if (json.executionMode === "inline") {
+        const refreshed = await callRoute("read_result");
+        setResultJson(refreshed);
+      }
       setStatus(
         json.executionMode === "droplet_async"
           ? `Recalc dispatched asynchronously${json.jobId ? ` (job ${json.jobId})` : ""}.`
-          : "Recalc completed."
+          : "Recalc completed and Stage 2 refreshed."
       );
     } catch (err: any) {
       setError(err?.message ?? "Recalc failed.");
@@ -365,17 +389,29 @@ export default function ManualMonthlyLab() {
         {sourceUsageOverride ? (
           <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
             <div>
-              <div className="text-lg font-semibold text-brand-navy">Usage</div>
-              <p className="text-sm text-slate-600">Read-only source-house usage shown with the same dashboard surface the user sees.</p>
+              <div className="text-lg font-semibold text-brand-navy">Manual Monthly Stage 1</div>
+              <p className="text-sm text-slate-600">
+                Read-only pre-sim statement totals for the selected source house. This surface intentionally hides daily and interval analytics.
+              </p>
             </div>
-            <UsageDashboard
-              forcedMode="REAL"
-              fetchModeOverride="REAL"
-              allowModeToggle={false}
-              initialMode="REAL"
-              housesOverride={sourceUsageOverride}
-              dashboardVariant="USAGE"
-            />
+            {sourceStageOnePayload ? (
+              <UsageDashboard
+                forcedMode="REAL"
+                fetchModeOverride="REAL"
+                allowModeToggle={false}
+                initialMode="REAL"
+                housesOverride={sourceUsageOverride}
+                dashboardVariant="USAGE"
+                preferredHouseId={selectedSourceHouse?.id ?? null}
+                manualUsagePayload={sourceStageOnePayload}
+                manualUsageHouseId={selectedSourceHouse?.id ?? null}
+                presentationSurface="admin_manual_monthly_stage_one"
+              />
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                No monthly manual statement totals are available to preview yet. Use Lookup or Load to populate the Stage 1 statement view.
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -398,20 +434,26 @@ export default function ManualMonthlyLab() {
           </div>
         ) : null}
 
-        {pastSimOverride ? (
+        {labHome ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
               <div>
-                <div className="text-lg font-semibold text-brand-navy">Past Sim</div>
+                <div className="text-lg font-semibold text-brand-navy">Manual Monthly Stage 2</div>
                 <p className="text-sm text-slate-600">Shared Past Sim results rendered from the dedicated lab home artifact only.</p>
               </div>
-              <UsageDashboard
-                forcedMode="SIMULATED"
-                allowModeToggle={false}
-                initialMode="SIMULATED"
-                simulatedHousesOverride={pastSimOverride}
-                dashboardVariant="PAST_SIMULATED_USAGE"
-              />
+              {pastSimOverride ? (
+                <UsageDashboard
+                  forcedMode="SIMULATED"
+                  allowModeToggle={false}
+                  initialMode="SIMULATED"
+                  simulatedHousesOverride={pastSimOverride}
+                  dashboardVariant="PAST_SIMULATED_USAGE"
+                />
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  Stage 2 Past Sim appears here after the isolated lab home has a readable Past result. Use Recalc, then Read result / refresh if needed.
+                </div>
+              )}
             </div>
             {displayedReadResult?.manualMonthlyReconciliation ? (
               <div className="rounded-lg bg-brand-white p-6 shadow-lg">

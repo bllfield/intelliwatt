@@ -1,6 +1,6 @@
 import { lastFullMonthChicago } from "@/modules/manualUsage/anchor";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
-import type { ManualStatementRange } from "@/modules/simulatedUsage/types";
+import type { ManualStatementRange, ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -8,10 +8,24 @@ const YEAR_MONTH_RE = /^\d{4}-\d{2}$/;
 
 export const MAX_MANUAL_MONTHLY_BILLS = 12;
 
+export type ManualMonthlyStageOneSurface =
+  | "user_usage_manual_monthly_stage_one"
+  | "admin_manual_monthly_stage_one";
+
 export type ManualStatementInputRow = {
   startDate: string;
   endDate: string;
   kwh: number | "";
+};
+
+export type ManualMonthlyStageOneRow = {
+  key: string;
+  month: string;
+  startDate: string | null;
+  endDate: string;
+  label: string;
+  shortLabel: string;
+  kwh: number;
 };
 
 function isIsoDate(value: unknown): value is string {
@@ -20,6 +34,12 @@ function isIsoDate(value: unknown): value is string {
 
 function isYearMonth(value: unknown): value is string {
   return typeof value === "string" && YEAR_MONTH_RE.test(value.trim());
+}
+
+function formatShortDate(dateKey: string): string {
+  if (!isIsoDate(dateKey)) return dateKey;
+  const [year, month, day] = dateKey.split("-");
+  return `${Number(month)}/${Number(day)}/${year.slice(2)}`;
 }
 
 export function addDaysToIsoDate(dateKey: string, deltaDays: number): string {
@@ -104,6 +124,66 @@ export function buildStatementRowsFromMonthlyPayload(payload: {
     endDate: range.endDate,
     kwh: valueByMonth.get(range.month) ?? "",
   }));
+}
+
+export function formatStatementRangeLabel(range: {
+  startDate?: string | null;
+  endDate: string;
+}): { label: string; shortLabel: string } {
+  const endLabel = formatShortDate(range.endDate);
+  if (isIsoDate(range.startDate)) {
+    const startLabel = formatShortDate(range.startDate);
+    return {
+      label: `${startLabel} - ${endLabel}`,
+      shortLabel: `${startLabel}-${endLabel}`,
+    };
+  }
+  return {
+    label: `Ending ${endLabel}`,
+    shortLabel: endLabel,
+  };
+}
+
+export function buildManualMonthlyStageOneRows(
+  payload: Pick<Extract<ManualUsagePayload, { mode: "MONTHLY" }>, "anchorEndDate" | "monthlyKwh" | "statementRanges">
+): ManualMonthlyStageOneRow[] {
+  const numericValuesByMonth = new Map<string, number>();
+  for (const row of Array.isArray(payload.monthlyKwh) ? payload.monthlyKwh : []) {
+    const month = String((row as any)?.month ?? "").trim();
+    const kwh = (row as any)?.kwh;
+    if (!isYearMonth(month) || typeof kwh !== "number" || !Number.isFinite(kwh)) continue;
+    numericValuesByMonth.set(month, kwh);
+  }
+  return deriveStatementRangesFromMonthlyPayload(payload)
+    .map((range) => {
+      const kwh = numericValuesByMonth.get(range.month);
+      if (typeof kwh !== "number" || !Number.isFinite(kwh)) return null;
+      const labels = formatStatementRangeLabel(range);
+      return {
+        key: `${range.month}:${range.endDate}`,
+        month: range.month,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        label: labels.label,
+        shortLabel: labels.shortLabel,
+        kwh,
+      };
+    })
+    .filter((row): row is ManualMonthlyStageOneRow => row != null)
+    .sort((a, b) => (a.endDate < b.endDate ? -1 : a.endDate > b.endDate ? 1 : 0));
+}
+
+export function resolveManualMonthlyStageOnePresentation(args: {
+  surface?: ManualMonthlyStageOneSurface | null;
+  payload?: ManualUsagePayload | null;
+}): { surface: ManualMonthlyStageOneSurface; rows: ManualMonthlyStageOneRow[] } | null {
+  if (!args.surface || args.payload?.mode !== "MONTHLY") return null;
+  const rows = buildManualMonthlyStageOneRows(args.payload);
+  if (rows.length === 0) return null;
+  return {
+    surface: args.surface,
+    rows,
+  };
 }
 
 export function buildMonthlyPayloadFromStatementRows(rows: ManualStatementInputRow[]): {

@@ -10,6 +10,7 @@ import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonth
 import { resolvePastCompareSectionMode } from "@/components/usage/pastCompareSectionMode";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
+import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import {
   PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED,
   shouldResetPastValidationCompareExpanded,
@@ -215,6 +216,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   } | null>(null);
   const [scenarioManualMonthlyReconciliation, setScenarioManualMonthlyReconciliation] =
     useState<ManualMonthlyReconciliation | null>(null);
+  const [manualUsagePayload, setManualUsagePayload] = useState<ManualUsagePayload | null>(null);
   /** Past: Validation / Test Day Compare starts collapsed; expand for full table. */
   const [pastCompareExpanded, setPastCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
   const [scenarioLoading, setScenarioLoading] = useState(false);
@@ -401,6 +403,27 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       cancelled = true;
     };
   }, [houseId, mode, refreshToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/user/manual-usage?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" });
+        const j = (await r.json().catch(() => null)) as { ok?: boolean; payload?: ManualUsagePayload | null } | null;
+        if (cancelled) return;
+        if (!r.ok || !j?.ok) {
+          setManualUsagePayload(null);
+          return;
+        }
+        setManualUsagePayload(j.payload ?? null);
+      } catch {
+        if (!cancelled) setManualUsagePayload(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [houseId, refreshToken]);
 
   const actualDisabledReason = useMemo(() => {
     if (loadingActual) return "Checking actual usage availability…";
@@ -1532,6 +1555,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             simulatedHousesOverride={null}
             fetchModeOverride="REAL"
             dashboardVariant="USAGE"
+            preferredHouseId={houseId}
+            manualUsagePayload={mode === "MANUAL_TOTALS" ? manualUsagePayload : null}
+            manualUsageHouseId={houseId}
+            presentationSurface="user_usage_manual_monthly_stage_one"
           />
         ) : scenarioLoading ? (
           <div

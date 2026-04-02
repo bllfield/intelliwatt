@@ -249,6 +249,10 @@ export async function POST(req: NextRequest) {
     ]);
 
     if (action === "lookup") {
+      const sourceSeed = await buildLabPrefill({
+        sourcePayload: sourcePayloadRecord.payload,
+        sourceUsageHouse,
+      });
       const [payload, labHomeProfile, labApplianceProfile, currentResult] = await Promise.all([
         getManualUsageInputForUserHouse({ userId: ownerUserId, houseId: labHome.id }),
         getHomeProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }),
@@ -275,6 +279,7 @@ export async function POST(req: NextRequest) {
         updatedAt: payload.updatedAt,
         sourcePayload: sourcePayloadRecord.payload,
         sourceUpdatedAt: sourcePayloadRecord.updatedAt,
+        sourceSeed: sourceSeed.seed,
         sourceUsageHouse,
         sourceHomeProfile,
         sourceApplianceProfile,
