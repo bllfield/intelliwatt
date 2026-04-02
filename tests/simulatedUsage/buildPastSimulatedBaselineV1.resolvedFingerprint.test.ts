@@ -371,6 +371,58 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(actualPassthrough).toBe(0);
   });
 
+  it("constrained_monthly_totals with whole_home_only underlying mix reuses the whole-home-only engine path", () => {
+    const day1StartMs = new Date("2026-04-05T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-04-06T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const excludedDate = dateKeyFromTimestamp(day2Grid[0]!);
+    const actualIntervals = day1Grid.map((ts, idx) => ({ timestamp: ts, kwh: 1.25 + (idx % 11) * 0.03 }));
+
+    const wx = { tAvgF: 55, tMinF: 45, tMaxF: 65, hdd65: 10, cdd65: 5 };
+    const actualWxByDateKey = new Map<string, typeof wx>([
+      [dateKeyFromTimestamp(day1Grid[0]!), wx],
+      [excludedDate, wx],
+    ]);
+
+    const common = {
+      actualIntervals,
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>([excludedDate]),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey,
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-04": 200 },
+        weekendAvgByMonthKey: { "2026-04": 180 },
+      },
+      timezoneForProfile: "UTC",
+      homeProfile: { squareFeet: 2200 },
+    };
+
+    const wholeHomeOnly = buildPastSimulatedBaselineV1({
+      ...common,
+      resolvedSimFingerprint: baseResolved({ blendMode: "whole_home_only", underlyingSourceMix: "whole_home_only", usageBlendWeight: 0 }),
+    });
+    const constrainedWholeHome = buildPastSimulatedBaselineV1({
+      ...common,
+      resolvedSimFingerprint: baseResolved({
+        blendMode: "constrained_monthly_totals",
+        underlyingSourceMix: "whole_home_only",
+        manualTotalsConstraint: "monthly",
+        usageBlendWeight: 0,
+      }),
+    });
+
+    const whDay = wholeHomeOnly.dayResults.find((r) => String(r.localDate).slice(0, 10) === excludedDate);
+    const constrainedDay = constrainedWholeHome.dayResults.find((r) => String(r.localDate).slice(0, 10) === excludedDate);
+    expect(whDay?.targetDayKwhBeforeWeather).toBeDefined();
+    expect(constrainedDay?.targetDayKwhBeforeWeather).toBeDefined();
+    expect(constrainedDay!.targetDayKwhBeforeWeather).toBeCloseTo(whDay!.targetDayKwhBeforeWeather ?? 0, 6);
+    expect(constrainedDay?.shape96Used).toEqual(whDay?.shape96Used);
+  });
+
   it("travel/vacant excluded days remain modeled and labeled as SIMULATED/EXCLUDED", () => {
     const day1StartMs = new Date("2026-09-01T00:00:00.000Z").getTime();
     const day2StartMs = new Date("2026-09-02T00:00:00.000Z").getTime();

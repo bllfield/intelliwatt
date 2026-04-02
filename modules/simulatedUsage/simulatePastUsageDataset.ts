@@ -968,11 +968,19 @@ export async function simulatePastUsageDataset(
     });
     const isLowDataSharedPastMode =
       buildInputs.mode === "MANUAL_TOTALS" || buildInputs.mode === "NEW_BUILD_ESTIMATE";
+    const resolvedSimFingerprint =
+      (buildInputs.resolvedSimFingerprint as
+        | { blendMode?: string | null; underlyingSourceMix?: string | null; manualTotalsConstraint?: string | null }
+        | undefined) ?? null;
     const manualTotalsConstraint =
-      (buildInputs.resolvedSimFingerprint as { manualTotalsConstraint?: string } | undefined)?.manualTotalsConstraint ??
+      resolvedSimFingerprint?.manualTotalsConstraint ??
       null;
     const isMonthlyConstrainedManualTotals =
       buildInputs.mode === "MANUAL_TOTALS" && manualTotalsConstraint === "monthly";
+    const usesWholeHomeOnlyPrior =
+      resolvedSimFingerprint?.blendMode === "whole_home_only" ||
+      resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
+    const useWholeHomeOnlyLowDataFastPath = isLowDataSharedPastMode && usesWholeHomeOnlyPrior;
     const eligibleManualBillPeriods = Array.isArray(buildInputs.manualBillPeriods)
       ? buildInputs.manualBillPeriods.filter((period) => period.eligibleForConstraint)
       : [];
@@ -987,6 +995,8 @@ export async function simulatePastUsageDataset(
     const actualIntervals =
       preloadedIntervals != null
         ? preloadedIntervals
+        : useWholeHomeOnlyLowDataFastPath
+          ? []
         : isLowDataSharedPastMode
           ? buildSyntheticIntervalsForSharedPastWindow({
               buildInputs,
@@ -1028,7 +1038,7 @@ export async function simulatePastUsageDataset(
      * intervals remain in the reference pool (same mechanism as Gap-Fill graded test days).
      */
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
-    if (isLowDataSharedPastMode) {
+    if (isLowDataSharedPastMode && !useWholeHomeOnlyLowDataFastPath) {
       if (buildInputs.mode === "MANUAL_TOTALS" && eligibleManualBillPeriods.length > 0) {
         for (const period of eligibleManualBillPeriods) {
           const startMs = new Date(`${period.startDate}T00:00:00.000Z`).getTime();

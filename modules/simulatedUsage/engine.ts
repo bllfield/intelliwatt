@@ -934,6 +934,13 @@ function uniformShape96(): number[] {
   return Array.from({ length: 96 }, () => 1 / 96);
 }
 
+function usesWholeHomeOnlyPrior(resolvedSimFingerprint: ResolvedSimFingerprint | null | undefined): boolean {
+  return (
+    resolvedSimFingerprint?.blendMode === "whole_home_only" ||
+    resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only"
+  );
+}
+
 /**
  * Intraday shape for `whole_home_only`: uniform 96-slot curves only (no reference-interval aggregation).
  * Populates `PastShapeVariants` so `selectShape96` never falls through to meter-derived `legacyByMonth96`.
@@ -1135,7 +1142,7 @@ export function buildPastSimulatedBaselineV1(args: {
     };
   };
 
-  const wholeHomeOnlyPrior = args.resolvedSimFingerprint?.blendMode === "whole_home_only";
+  const wholeHomeOnlyPrior = usesWholeHomeOnlyPrior(args.resolvedSimFingerprint);
   const referenceDays: Array<{
     dayStartMs: number;
     dateKey: string;
@@ -1374,7 +1381,7 @@ export function buildPastSimulatedBaselineV1(args: {
     return v != null && Number.isFinite(v) && v > 0 ? v : undefined;
   };
   const rf = args.resolvedSimFingerprint ?? undefined;
-  const skipUsageShapeMerge = rf?.blendMode === "whole_home_only";
+  const skipUsageShapeMerge = usesWholeHomeOnlyPrior(rf);
 
   let finalProfile: PastDayProfileLite = pastProfile;
   let mergedFromUsageShape: PastDayProfileLite | null = null;
@@ -1440,7 +1447,7 @@ export function buildPastSimulatedBaselineV1(args: {
     finalProfile = blendPastDayProfileLite(pastProfile, mergedFromUsageShape, rf.usageBlendWeight);
   }
 
-  if (rf?.blendMode === "whole_home_only") {
+  if (usesWholeHomeOnlyPrior(rf)) {
     const mk =
       monthKeysFromCanonical.length > 0 ? monthKeysFromCanonical : pastProfile.monthKeys;
     finalProfile = syntheticWholeHomePastDayProfileLite({

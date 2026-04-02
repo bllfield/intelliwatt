@@ -179,6 +179,40 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(meta?.lowDataKeepRefModeledDays).toBe(true);
   });
 
+  it("MANUAL_TOTALS whole-home-only constrained path skips synthetic interval materialization and keep-ref expansion", async () => {
+    buildPastSimulatedBaselineV1.mockClear();
+    const out = await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "h1",
+      esiid: null,
+      startDate: "2026-01-01",
+      endDate: "2026-01-05",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "MANUAL_TOTALS",
+        resolvedSimFingerprint: {
+          blendMode: "constrained_monthly_totals",
+          underlyingSourceMix: "whole_home_only",
+          manualTotalsConstraint: "monthly",
+        },
+      } as any,
+      buildPathKind: "recalc",
+      includeSimulatedDayResults: false,
+    });
+
+    expect(getActualIntervalsForRange).not.toHaveBeenCalled();
+    expect(out.dataset).not.toBeNull();
+    const firstCall = buildPastSimulatedBaselineV1.mock.calls[0]?.[0];
+    expect(Array.isArray(firstCall?.actualIntervals)).toBe(true);
+    expect(firstCall?.actualIntervals).toHaveLength(0);
+    const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
+    expect(keepRef == null || keepRef.size === 0).toBe(true);
+    expect(firstCall?.modeledKeepRefReasonCode).toBe("MONTHLY_CONSTRAINED_NON_TRAVEL_DAY");
+  });
+
   it("NEW_BUILD_ESTIMATE uses synthetic intervals path (no DB interval fetch)", async () => {
     buildPastSimulatedBaselineV1.mockClear();
     await simulatePastUsageDataset({
