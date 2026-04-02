@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
+import { normalizeStatementRanges } from "@/modules/manualUsage/statementRanges";
 import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
 import type {
   AnnualManualUsagePayload,
@@ -96,6 +97,7 @@ export async function saveManualUsageInputForUserHouse(args: {
       mode: "MONTHLY",
       anchorEndDate: (anchorEndDateKey ?? `${anchorEndMonth}-${String(anchorEndDate.getUTCDate()).padStart(2, "0")}`).slice(0, 10),
       monthlyKwh: cleanedMonthly,
+      statementRanges: normalizeStatementRanges((payload as any).statementRanges),
       travelRanges: normalizeRanges(payload.travelRanges),
     };
 

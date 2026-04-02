@@ -1613,7 +1613,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
       <Modal
         open={openManual}
-        title="Manual usage totals"
+        title="Manual monthly bills"
         onClose={() => {
           setOpenManual(false);
         }}

@@ -410,9 +410,12 @@ This section is authoritative for future manual-monthly implementation work.
 - The user may enter fewer than 12 bills.
 - The user may leave some bill-cycle months missing.
 - On the input chart, entered bill-cycle months are filled and missing bill-cycle months remain blank.
+- Current implementation labels the Stage 1 anchor as `Bill End Date`, enters bills newest-first, supports `Add Bill`, and only requires a manual `Bill Start Date` on the oldest visible bill row.
+- Current implementation persists additive `statementRanges[]` metadata alongside `anchorEndDate + monthlyKwh` so Stage 1 bill ranges survive without changing database tables.
 - "Explicit month values stay authoritative" means the values the user entered remain authoritative as user input for the bill-cycle months they entered. It does not mean missing bill-cycle months stay blank forever in the final simulated artifact.
 - After the bill-cycle input sequence is constructed, the system must preserve which bill-cycle months were entered versus missing, then normalize that input into the same shared Past Sim window, weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
 - Stage 1 bill-cycle chart semantics and Stage 2 normalized shared-window semantics must never be described as if they are the same thing.
+- Statement-range reconciliation now uses explicit stored `statementRanges` when present, and falls back to anchor-derived contiguous bill ranges for legacy payloads.
 - USER MANUAL MONTHLY is travel/vacant-aware. User-entered travel/vacant ranges must affect Past Sim for manual monthly too.
 - Past Sim must fill:
   - missing bill-cycle months the user did not provide
@@ -422,11 +425,25 @@ This section is authoritative for future manual-monthly implementation work.
 - GapFill monthly-from-source remains a distinct input semantic used for grading and tuning. It uses source-derived monthly anchors from actuals before entering the same shared Past Sim path after normalization.
 - USER MANUAL MONTHLY must not be reframed as source-derived monthly, and GapFill monthly-from-source must not be treated as the only travel-aware monthly mode.
 - GapFill Actual remains the normal Past baseline truth path. GapFill Test may differ only in pre-lockbox normalized input semantics, then must enter the same shared producer path.
+- Admin Manual Monthly Lab now enforces explicit ownership boundaries:
+  - selected customer house is read-only source context only
+  - `lookup` reads source context plus current isolated lab-home state
+  - `load` replaces and seeds the isolated lab home only
+  - `save`, `recalc`, and `read_result` stay on the isolated lab home only
+- Admin Manual Monthly Lab seed precedence is explicit:
+  - usable source monthly payload wins by default
+  - annual source payload may still inform annual seed behavior
+  - deterministic SMT-derived monthly bill ranges are fallback/reset behavior only
+  - fallback seeding is bounded by actual source coverage and capped at 12 contiguous seeded bill ranges
+  - derived lab-home seed persistence fails closed
 
 ### Architecture Notes
 - New modules added under /modules (additive, isolated): manualUsage, simulatedUsage, homeProfile, applianceProfile, usageScenario.
 - New additive prisma models/tables were added for simulated-layer persistence (manual inputs, home profile, appliances, scenarios). Existing real-usage tables are unchanged.
 - Tests added (Vitest): simulation totals preserved, travel exclusions renormalize, prefill merge rules, monthly-anchor labeling consistency.
+- Manual-monthly helper ownership now lives in shared module space:
+  - `modules/manualUsage/statementRanges.ts` owns Stage 1 bill-range row construction and additive payload shaping
+  - `modules/manualUsage/prefill.ts` owns source-payload usability checks plus deterministic admin monthly/annual seed derivation
 
 ### Out of Scope / Next Phase
 - Patch incomplete SMT months using simulated segments (real usage remains unchanged; simulated curve will support patch ranges).

@@ -10,8 +10,10 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - USER MANUAL MONTHLY and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` are distinct only in input semantics and pre-lockbox normalization.
 - USER MANUAL MONTHLY starts as a bill-cycle input chart anchored by the latest entered bill end date. That Stage 1 input chart must not be collapsed into the normalized shared Past Sim window.
 - The latest entered bill end date is the last day of the Stage 1 input sequence, and that sequence runs backward by bill-cycle months.
+- Current runtime keeps Stage 1 bill-range semantics with additive `statementRanges[]` metadata while Stage 2 still uses the shared normalized Past contract.
 - GapFill monthly-from-source starts from source-derived monthly anchors used for grading/tuning. It is not the same input semantic as USER MANUAL MONTHLY.
 - USER MANUAL MONTHLY is still travel/vacant-aware. Travel/vacant behavior does not belong only to GapFill monthly-from-source.
+- Admin Manual Monthly Lab uses read-only source-home context plus a writable isolated test home. Usable source monthly payload wins by default; deterministic SMT-derived seeded bill ranges are fallback/reset convenience only.
 - After normalization, both paths must use the same shared weather loader, lockbox producer path, persistence path, and artifact read path.
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
 

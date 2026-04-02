@@ -1,4 +1,5 @@
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { addDaysToIsoDate, normalizeStatementRanges } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
 
 export type ManualMonthlyReconciliationStatus =
@@ -77,6 +78,34 @@ function dayKeysForRange(startDate: string, endDate: string): string[] {
   return out;
 }
 
+function resolveReconciliationRanges(payload: Extract<ManualUsagePayload, { mode: "MONTHLY" }>) {
+  const explicitRanges = normalizeStatementRanges(payload.statementRanges);
+  if (explicitRanges.length > 0) {
+    return explicitRanges
+      .map((range, index, all) => {
+        const inferredStartDate =
+          range.startDate ?? (index === all.length - 1 ? null : addDaysToIsoDate(all[index + 1]!.endDate, 1));
+        return {
+          month: range.month,
+          startDate: inferredStartDate,
+          endDate: range.endDate,
+        };
+      })
+      .filter((range): range is { month: string; startDate: string; endDate: string } => Boolean(range.startDate))
+      .reverse()
+      .map((range) => ({
+        month: range.month,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      }));
+  }
+  return billingPeriodsEndingAt(payload.anchorEndDate, 12).map((period) => ({
+    month: period.id,
+    startDate: period.startDate,
+    endDate: period.endDate,
+  }));
+}
+
 export function buildManualMonthlyReconciliation(args: {
   payload: ManualUsagePayload | null;
   dataset: any;
@@ -86,7 +115,7 @@ export function buildManualMonthlyReconciliation(args: {
   const anchorEndDate = String(payload.anchorEndDate ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorEndDate)) return null;
 
-  const periods = billingPeriodsEndingAt(anchorEndDate, 12);
+  const periods = resolveReconciliationRanges(payload);
   if (periods.length === 0) return null;
 
   const enteredByMonth = new Map<string, number | null>();
@@ -105,12 +134,12 @@ export function buildManualMonthlyReconciliation(args: {
   const travelRanges = normalizeRanges(payload.travelRanges);
 
   const rows: ManualMonthlyReconciliationRow[] = periods.map((period) => {
-    const inputKind = inputState?.inputKindByMonth?.[period.id] ?? (enteredByMonth.get(period.id) == null ? "missing" : "entered_nonzero");
-    const enteredStatementTotalKwh = enteredByMonth.get(period.id) ?? null;
+    const inputKind = inputState?.inputKindByMonth?.[period.month] ?? (enteredByMonth.get(period.month) == null ? "missing" : "entered_nonzero");
+    const enteredStatementTotalKwh = enteredByMonth.get(period.month) ?? null;
     const simulatedStatementTotalKwh = round2(
       dayKeysForRange(period.startDate, period.endDate).reduce((sum, date) => sum + (dailyTotalsByDate.get(date) ?? 0), 0)
     );
-    const isFilledLater = filledMonths.has(period.id) || inputKind === "missing";
+    const isFilledLater = filledMonths.has(period.month) || inputKind === "missing";
     const hasTravelOverlap = overlapsTravel(period, travelRanges);
 
     let eligible = true;
@@ -140,7 +169,7 @@ export function buildManualMonthlyReconciliation(args: {
     }
 
     return {
-      month: period.id,
+      month: period.month,
       startDate: period.startDate,
       endDate: period.endDate,
       inputKind,

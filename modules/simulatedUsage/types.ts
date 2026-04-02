@@ -1,10 +1,18 @@
 export type TravelRange = { startDate: string; endDate: string };
 
+export type ManualStatementRange = {
+  month: string;
+  startDate: string | null;
+  endDate: string;
+};
+
 export type MonthlyManualUsagePayload = {
   mode: "MONTHLY";
   // V1 contract: full-date anchor for billing-cycle periods (America/Chicago semantics at UI level).
   anchorEndDate: string; // YYYY-MM-DD
   monthlyKwh: Array<{ month: string; kwh: number | "" }>;
+  // Transitional additive metadata for Stage 1 bill-range entry semantics.
+  statementRanges?: ManualStatementRange[];
   travelRanges: TravelRange[];
   // Legacy (supported for backward compatibility with saved payloads)
   anchorEndMonth?: string; // YYYY-MM

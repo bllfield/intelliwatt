@@ -228,6 +228,9 @@ describe("admin manual monthly route", () => {
     const body = await res.json();
 
     expect(body.ok).toBe(true);
+    expect(body.selectedSourceHouse.id).toBe("source-house-1");
+    expect(body.labHome.id).toBe("lab-home-1");
+    expect(body.sourceUsageHouse.houseId).toBe("source-house-1");
     expect(mocks.replaceGlobalManualMonthlyLabTestHomeFromSource).toHaveBeenCalledWith({
       ownerUserId: "admin-owner-1",
       sourceUserId: "source-user-1",
@@ -246,7 +249,67 @@ describe("admin manual monthly route", () => {
       })
     );
     expect(body.seed.monthly.anchorEndDate).toBe("2025-12-31");
+    expect(body.seed.monthly.statementRanges[0]).toMatchObject({
+      month: "2025-12",
+      endDate: "2025-12-31",
+    });
+    expect(body.payload.statementRanges[0]).toMatchObject({
+      month: "2025-12",
+      endDate: "2025-12-31",
+    });
     expect(typeof body.seed.annual.annualKwh).toBe("number");
+  });
+
+  it("load falls back to actual-derived monthly totals when source monthly payload has no numeric entries", async () => {
+    mocks.getManualUsageInputForUserHouse.mockImplementation(async ({ userId, houseId }: any) => {
+      if (userId === "source-user-1" && houseId === "source-house-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2025-12-31",
+            monthlyKwh: [{ month: "2025-12", kwh: "" }],
+            travelRanges: [],
+          },
+          updatedAt: "2025-05-01T00:00:00.000Z",
+        };
+      }
+      if (userId === "admin-owner-1" && houseId === "lab-home-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2025-04-30",
+            monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+            travelRanges: [],
+          },
+          updatedAt: "2025-05-01T00:00:00.000Z",
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.seed.monthly.anchorEndDate).toBe("2025-12-31");
+    expect(body.seed.sourceMode).toBe("ACTUAL_INTERVALS_MONTHLY_PREFILL");
+    expect(body.payload.mode).toBe("MONTHLY");
+    expect(body.payload.monthlyKwh.some((row: any) => typeof row.kwh === "number")).toBe(true);
+    expect(body.payload.statementRanges[0]).toMatchObject({
+      month: "2025-12",
+      endDate: "2025-12-31",
+    });
+    expect(mocks.saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-owner-1",
+        houseId: "lab-home-1",
+        payload: expect.objectContaining({
+          mode: "MONTHLY",
+        }),
+      })
+    );
   });
 
   it("load fails closed when derived lab-home prefill persistence fails", async () => {

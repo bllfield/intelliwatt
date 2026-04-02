@@ -65,7 +65,7 @@
 
 - Usage layer contract map: `docs/USAGE_LAYER_MAP.md` (canonical interval-series layer meanings + endpoint/function mapping)
 
-- Manual-monthly product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage USER MANUAL MONTHLY model: Stage 1 bill-cycle input semantics versus Stage 2 normalized shared Past Sim behavior.
+- Manual-monthly product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage USER MANUAL MONTHLY model: Stage 1 bill-cycle input semantics versus Stage 2 normalized shared Past Sim behavior. Current implementation also stores additive `statementRanges[]` metadata, keeps admin source-home vs isolated test-home ownership explicit, and treats deterministic admin SMT bill-range seeding as fallback convenience rather than customer semantics.
 
 ## Where To Start
 

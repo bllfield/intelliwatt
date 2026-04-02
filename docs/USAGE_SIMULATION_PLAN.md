@@ -45,9 +45,15 @@ This section is authoritative for future USER MANUAL MONTHLY implementation and 
 - The latest bill end date entered by the user is the input anchor.
 - That latest entered bill end date is the last day of the input sequence.
 - The input sequence runs backward from that anchor by bill-cycle months.
+- The Stage 1 label for that anchor is `Bill End Date`.
+- Bills are entered newest-first.
+- `Add Bill` appends older statement rows.
+- Only the oldest entered bill row requires a manual start date when multiple bills are present.
+- Intermediate start dates are inferred from the next older bill's end date.
 - The user may enter fewer than 12 bills.
 - The user may leave some bill-cycle months missing.
 - On the input chart, entered bill-cycle months are filled and missing bill-cycle months remain blank.
+- Current implementation persists additive `statementRanges[]` metadata in the manual payload so explicit bill ranges survive into reconciliation without changing schemas.
 - Do not silently convert the input chart into calendar-month semantics.
 - "Explicit month values stay authoritative" and "manual totals immutability" apply at this input stage: the values the user entered remain authoritative for the bill-cycle months they entered.
 - They do not mean missing bill-cycle months remain permanently blank in the final simulated artifact.
@@ -58,6 +64,7 @@ This section is authoritative for future USER MANUAL MONTHLY implementation and 
 - Do not invent a separate manual-monthly sim window.
 - Do not collapse bill-cycle input semantics into the normalized shared Past Sim window semantics.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
+- The main Past chart/result remains the shared normalized Past output. Statement ranges belong to Stage 1 entry/reconciliation only.
 - Missing bill-cycle months are an input-state concept, not the final simulated-output contract.
 - Blank on the input chart does not mean blank forever in the final simulated artifact.
 - Past Sim must fill missing bill-cycle months the user did not provide, excluded travel/vacant days inside the normalized shared sim window, and other missing or simulated days required by the shared Past Sim logic.
@@ -76,6 +83,24 @@ This section is authoritative for future USER MANUAL MONTHLY implementation and 
 - USER MANUAL MONTHLY keeps user-entered bill-cycle monthly values as Stage 1 input semantics, may be partial, is travel/vacant-aware, and may leave bill-cycle months blank on the input chart before entering the shared Past Sim path after normalization.
 - GAPFILL `MONTHLY_FROM_SOURCE_INTERVALS` uses source-derived monthly anchors from actuals for grading/tuning, may also be travel/vacant-aware, and then enters the same shared Past Sim path after normalization.
 - These are distinct input semantics. Do not rewrite user manual monthly into source-derived monthly semantics.
+
+### Admin Manual Monthly Lab
+
+- Admin Manual Monthly Lab is the same manual-monthly feature family, but it owns a different Stage 1 convenience path.
+- Source home is read-only source context only.
+- Isolated test home is the only writable lab target for `load`, `save`, `recalc`, and `read_result`.
+- Usable source monthly payload wins by default during lab prefill/load.
+- If source monthly payload is absent or unusable, the lab may derive deterministic contiguous seeded bill ranges from source actual coverage.
+- Deterministic admin seeding is bounded by available actual coverage, capped at 12 seeded ranges, and must not create unsupported partial rows.
+- Derived lab-home seed persistence must fail closed.
+- Admin seeded bill ranges are Stage 1 convenience only. They do not redefine customer semantics or Stage 2 shared Past behavior.
+
+### Transitional Runtime Contract
+
+- Current runtime still centers the simulator contract on `anchorEndDate + monthlyKwh + travelRanges`.
+- Current runtime now also carries additive `statementRanges[]` metadata for Stage 1 bill-range semantics.
+- This remains a transitional runtime contract rather than the full product definition.
+- Future payload evolution may still be needed if Stage 1 eventually needs richer per-bill metadata than the additive bridge supports.
 
 ## Canonical Reference Rule
 

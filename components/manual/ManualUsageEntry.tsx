@@ -1,29 +1,21 @@
 "use client";
 
 import * as React from "react";
-import { anchorEndDateUtc, lastFullMonthChicago } from "@/lib/time/chicago";
-import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
-
-type TravelRange = { startDate: string; endDate: string };
-
-type ManualUsagePayload =
-  | {
-      mode: "MONTHLY";
-      anchorEndDate: string; // YYYY-MM-DD
-      monthlyKwh: Array<{ month: string; kwh: number | "" }>; // month == YYYY-MM
-      travelRanges: TravelRange[];
-      // legacy
-      anchorEndMonth?: string;
-      billEndDay?: number;
-    }
-  | {
-      mode: "ANNUAL";
-      anchorEndDate: string; // YYYY-MM-DD
-      annualKwh: number | "";
-      travelRanges: TravelRange[];
-      // legacy
-      endDate?: string;
-    };
+import { lastFullMonthChicago } from "@/modules/manualUsage/anchor";
+import {
+  addDaysToIsoDate,
+  buildContiguousStatementRanges,
+  buildMonthlyPayloadFromStatementRows,
+  buildStatementRowsFromMonthlyPayload,
+  MAX_MANUAL_MONTHLY_BILLS,
+  type ManualStatementInputRow,
+} from "@/modules/manualUsage/statementRanges";
+import type {
+  AnnualManualUsagePayload,
+  ManualUsagePayload,
+  MonthlyManualUsagePayload,
+  TravelRange,
+} from "@/modules/simulatedUsage/types";
 
 type LoadResp =
   | {
@@ -32,14 +24,9 @@ type LoadResp =
       payload: ManualUsagePayload | null;
       updatedAt: string | null;
       seed?: {
-        monthly?: {
-          anchorEndDate: string;
-          monthlyKwh: Array<{ month: string; kwh: number | "" }>;
-        } | null;
-        annual?: {
-          anchorEndDate: string;
-          annualKwh: number | "";
-        } | null;
+        sourceMode?: string | null;
+        monthly?: MonthlyManualUsagePayload | null;
+        annual?: AnnualManualUsagePayload | null;
       } | null;
     }
   | { ok: false; error: string };
@@ -48,12 +35,6 @@ type ManualUsageTransport = {
   load?: (houseId: string) => Promise<LoadResp>;
   save?: (args: { houseId: string; payload: ManualUsagePayload }) => Promise<{ ok: true; updatedAt?: string | null } | { ok: false; error: string }>;
 };
-
-function clampInt(n: unknown, lo: number, hi: number): number {
-  const x = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : Number(n);
-  const y = Number.isFinite(x) ? x : lo;
-  return Math.max(lo, Math.min(hi, y));
-}
 
 function normalizeRanges(ranges: TravelRange[]): TravelRange[] {
   return (ranges || [])
@@ -64,39 +45,54 @@ function normalizeRanges(ranges: TravelRange[]): TravelRange[] {
     .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
 }
 
-function manualMonthlyPeriodLabels(anchorEndDate: string): string[] {
-  const resolvedAnchor =
-    /^\d{4}-\d{2}-\d{2}$/.test(String(anchorEndDate ?? "").trim())
-      ? String(anchorEndDate).trim()
-      : `${lastFullMonthChicago()}-15`;
-  return billingPeriodsEndingAt(resolvedAnchor, 12).map((period) => period.id);
+const DEFAULT_ANCHOR_END_DATE = `${lastFullMonthChicago()}-15`;
+
+function defaultMonthlyRows(): ManualStatementInputRow[] {
+  const defaultRange = buildContiguousStatementRanges(DEFAULT_ANCHOR_END_DATE, 1)[0];
+  return [
+    {
+      startDate: defaultRange?.startDate ?? DEFAULT_ANCHOR_END_DATE,
+      endDate: defaultRange?.endDate ?? DEFAULT_ANCHOR_END_DATE,
+      kwh: "",
+    },
+  ];
 }
 
-function setMonthlyStateFromPayload(
-  payload: {
-    anchorEndDate?: string;
-    anchorEndMonth?: string;
-    billEndDay?: number;
-    monthlyKwh?: Array<{ month: string; kwh: number | "" }>;
-  },
-  setAnchor: (value: string) => void,
-  setRows: (rows: Array<{ month: string; kwh: number | "" }>) => void
-) {
-  const anchor =
-    typeof payload.anchorEndDate === "string" && String(payload.anchorEndDate).trim().length > 0
-      ? String(payload.anchorEndDate).slice(0, 10)
-      : typeof payload.anchorEndMonth === "string"
-        ? (() => {
-            const endMonth = String(payload.anchorEndMonth).trim();
-            const day = clampInt(payload.billEndDay ?? 15, 1, 31);
-            const d = anchorEndDateUtc(endMonth, day);
-            return d ? d.toISOString().slice(0, 10) : `${endMonth}-15`;
-          })()
-        : `${lastFullMonthChicago()}-15`;
-  setAnchor(anchor);
-  const months = manualMonthlyPeriodLabels(anchor);
-  const map = new Map<string, number | "">((payload.monthlyKwh ?? []).map((r) => [r.month, typeof r.kwh === "number" ? r.kwh : ""]));
-  setRows(months.map((m) => ({ month: m, kwh: map.get(m) ?? "" })));
+function mapSaveError(error: string): string {
+  switch (error) {
+    case "billEndDate_invalid":
+      return "Each bill needs a valid Bill End Date.";
+    case "billEndDate_order_invalid":
+      return "Each older bill must end before the newer bill above it.";
+    case "billStartDate_invalid":
+      return "The oldest bill needs a valid Bill Start Date.";
+    case "billStartDate_after_endDate":
+      return "Bill Start Date must be on or before Bill End Date.";
+    case "billEndMonth_duplicate":
+      return "Each bill must end in a different month with the current runtime contract.";
+    case "monthly_statement_required":
+      return "Add at least one bill before saving.";
+    default:
+      return error;
+  }
+}
+
+function statementStartDateForRow(rows: ManualStatementInputRow[], index: number): string {
+  return index === rows.length - 1 ? rows[index]!.startDate : addDaysToIsoDate(rows[index + 1]!.endDate, 1);
+}
+
+function statementMonthLabel(endDate: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate.slice(0, 7) : "pending";
+}
+
+function addOlderBillRow(rows: ManualStatementInputRow[]): ManualStatementInputRow[] {
+  if (rows.length >= MAX_MANUAL_MONTHLY_BILLS) return rows;
+  const oldest = rows[rows.length - 1]!;
+  const defaultOlder = buildContiguousStatementRanges(oldest.endDate || DEFAULT_ANCHOR_END_DATE, 2)[1];
+  const nextEndDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(oldest.startDate) ? addDaysToIsoDate(oldest.startDate, -1) : defaultOlder?.endDate ?? DEFAULT_ANCHOR_END_DATE;
+  const nextStartDate = defaultOlder?.startDate ?? nextEndDate;
+  return [...rows, { startDate: nextStartDate, endDate: nextEndDate, kwh: "" }];
 }
 
 export function ManualUsageEntry({
@@ -114,10 +110,7 @@ export function ManualUsageEntry({
   const [error, setError] = React.useState<string | null>(null);
   const [savedAt, setSavedAt] = React.useState<string | null>(null);
 
-  const [monthlyAnchorEndDate, setMonthlyAnchorEndDate] = React.useState<string>(`${lastFullMonthChicago()}-15`);
-  const [monthlyKwh, setMonthlyKwh] = React.useState<Array<{ month: string; kwh: number | "" }>>(
-    manualMonthlyPeriodLabels(`${lastFullMonthChicago()}-15`).map((month) => ({ month, kwh: "" })),
-  );
+  const [monthlyRows, setMonthlyRows] = React.useState<ManualStatementInputRow[]>(defaultMonthlyRows);
   const [annualAnchorEndDate, setAnnualAnchorEndDate] = React.useState<string>("");
   const [annualKwh, setAnnualKwh] = React.useState<number | "">("");
   const [travelRanges, setTravelRanges] = React.useState<TravelRange[]>([]);
@@ -148,7 +141,7 @@ export function ManualUsageEntry({
         setSavedAt((json as any).updatedAt ?? null);
         const seed = (json as any).seed ?? null;
         if (seed?.monthly) {
-          setMonthlyStateFromPayload(seed.monthly, setMonthlyAnchorEndDate, setMonthlyKwh);
+          setMonthlyRows(buildStatementRowsFromMonthlyPayload(seed.monthly));
         }
         if (seed?.annual) {
           setAnnualAnchorEndDate(String(seed.annual.anchorEndDate ?? "").slice(0, 10));
@@ -156,7 +149,7 @@ export function ManualUsageEntry({
         }
         if (payload?.mode === "MONTHLY") {
           setActiveTab("MONTHLY");
-          setMonthlyStateFromPayload(payload, setMonthlyAnchorEndDate, setMonthlyKwh);
+          setMonthlyRows(buildStatementRowsFromMonthlyPayload(payload));
           setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
         }
@@ -177,35 +170,33 @@ export function ManualUsageEntry({
     return () => {
       cancelled = true;
     };
-  }, [houseId]);
-
-  React.useEffect(() => {
-    // Keep the input sequence anchored by the full bill-cycle end date.
-    setMonthlyKwh((prev) => {
-      const months = manualMonthlyPeriodLabels(monthlyAnchorEndDate);
-      const map = new Map(prev.map((r) => [r.month, r.kwh]));
-      return months.map((m) => ({ month: m, kwh: map.get(m) ?? "" }));
-    });
-  }, [monthlyAnchorEndDate]);
+  }, [houseId, transport]);
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      const payload: ManualUsagePayload =
-        activeTab === "MONTHLY"
-          ? {
-              mode: "MONTHLY",
-              anchorEndDate: String(monthlyAnchorEndDate ?? "").slice(0, 10),
-              monthlyKwh: monthlyKwh.map((r) => ({ month: r.month, kwh: r.kwh === "" ? "" : Number(r.kwh) })),
-              travelRanges: normalizeRanges(travelRanges),
-            }
-          : {
-              mode: "ANNUAL",
-              anchorEndDate: String(annualAnchorEndDate ?? "").slice(0, 10),
-              annualKwh: annualKwh === "" ? "" : Number(annualKwh),
-              travelRanges: normalizeRanges(travelRanges),
-            };
+      let payload: ManualUsagePayload;
+      if (activeTab === "MONTHLY") {
+        const built = buildMonthlyPayloadFromStatementRows(monthlyRows);
+        if (!built.ok) {
+          throw new Error(mapSaveError(built.error));
+        }
+        payload = {
+          mode: "MONTHLY",
+          anchorEndDate: built.anchorEndDate,
+          monthlyKwh: built.monthlyKwh,
+          statementRanges: built.statementRanges,
+          travelRanges: normalizeRanges(travelRanges),
+        };
+      } else {
+        payload = {
+          mode: "ANNUAL",
+          anchorEndDate: String(annualAnchorEndDate ?? "").slice(0, 10),
+          annualKwh: annualKwh === "" ? "" : Number(annualKwh),
+          travelRanges: normalizeRanges(travelRanges),
+        };
+      }
 
       const json = transport?.save
         ? await transport.save({ houseId, payload })
@@ -282,54 +273,120 @@ export function ManualUsageEntry({
           {activeTab === "MONTHLY" ? (
             <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_16px_45px_rgba(16,46,90,0.22)]">
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
-                Monthly entry
+                Monthly bill entry
               </p>
 
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
-                    Anchor end date (meter read end date)
-                  </label>
-                  <input
-                    type="date"
-                    value={monthlyAnchorEndDate}
-                    onChange={(e) => setMonthlyAnchorEndDate(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
-                  />
-                  <p className="mt-2 text-xs text-brand-cyan/60">
-                    We model 12 billing periods ending at this date (America/Chicago). UI labels periods by the end month.
-                  </p>
-                </div>
-                <div className="text-xs text-brand-cyan/70 sm:flex sm:items-end">
-                  Each “month” entered is treated as a billing-period total (not a calendar month). We generate a curve that
-                  matches these totals exactly.
-                </div>
+              <div className="mt-4 rounded-2xl border border-brand-cyan/15 bg-brand-navy px-4 py-4 text-xs text-brand-cyan/75">
+                Stage 1 uses bill ranges. The newest bill is entered first, each older bill is added below it, and only the oldest
+                bill needs a manual start date when multiple bills are present. Stage 2 still normalizes the saved totals into the
+                shared Past Sim display.
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {monthlyKwh.map((r, idx) => (
-                  <div key={r.month} className="rounded-2xl border border-brand-cyan/15 bg-brand-navy px-4 py-3">
-                    <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
-                      {r.month}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={r.kwh}
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? "" : Number(e.target.value);
-                        setMonthlyKwh((prev) => {
-                          const next = prev.slice();
-                          next[idx] = { ...next[idx], kwh: v === "" ? "" : Number.isFinite(v) ? v : "" };
-                          return next;
-                        });
-                      }}
-                      className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
-                      placeholder="kWh"
-                    />
-                  </div>
-                ))}
+              <div className="mt-6 space-y-4">
+                {monthlyRows.map((row, idx) => {
+                  const isNewest = idx === 0;
+                  const isOldest = idx === monthlyRows.length - 1;
+                  const statementStartDate = statementStartDateForRow(monthlyRows, idx);
+                  return (
+                    <div key={`${idx}:${row.endDate}:${statementMonthLabel(row.endDate)}`} className="rounded-2xl border border-brand-cyan/15 bg-brand-navy px-4 py-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold text-brand-cyan">
+                            Bill {idx + 1} {isNewest ? "(Newest)" : isOldest ? "(Oldest)" : ""}
+                          </div>
+                          <div className="text-[0.7rem] uppercase tracking-wide text-brand-cyan/60">
+                            Runtime month key {statementMonthLabel(row.endDate)}
+                          </div>
+                        </div>
+                        <div className="text-xs text-brand-cyan/70">
+                          Statement range: {statementStartDate || "pending"} to {row.endDate || "pending"}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                        <div>
+                          <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
+                            Bill End Date
+                          </label>
+                          <input
+                            type="date"
+                            value={row.endDate}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, endDate: value } : entry)));
+                            }}
+                            className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
+                            {isOldest ? "Bill Start Date" : "Bill Start Date (Auto)"}
+                          </label>
+                          <input
+                            type="date"
+                            value={statementStartDate}
+                            onChange={(e) => {
+                              if (!isOldest) return;
+                              const value = e.target.value;
+                              setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, startDate: value } : entry)));
+                            }}
+                            readOnly={!isOldest}
+                            className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan read-only:opacity-70"
+                          />
+                          <p className="mt-2 text-[0.7rem] text-brand-cyan/60">
+                            {isOldest
+                              ? monthlyRows.length === 1
+                                ? "Single-bill entry needs both a start and end date."
+                                : "Only the oldest entered bill needs a manual start date."
+                              : "This start date is inferred from the next older bill’s end date."}
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
+                            Statement kWh
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.1"
+                            value={row.kwh}
+                            onChange={(e) => {
+                              const value = e.target.value === "" ? "" : Number(e.target.value);
+                              setMonthlyRows((prev) =>
+                                prev.map((entry, entryIdx) =>
+                                  entryIdx === idx ? { ...entry, kwh: value === "" ? "" : Number.isFinite(value) ? value : "" } : entry
+                                )
+                              );
+                            }}
+                            className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                            placeholder="kWh"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMonthlyRows((prev) => addOlderBillRow(prev))}
+                  disabled={monthlyRows.length >= MAX_MANUAL_MONTHLY_BILLS}
+                  className="rounded-full border border-brand-blue/60 bg-brand-blue/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
+                >
+                  Add Bill
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonthlyRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev))}
+                  disabled={monthlyRows.length <= 1}
+                  className="rounded-full border border-brand-cyan/20 bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80 transition hover:bg-brand-cyan/5 disabled:opacity-60"
+                >
+                  Remove Oldest Bill
+                </button>
               </div>
             </div>
           ) : (

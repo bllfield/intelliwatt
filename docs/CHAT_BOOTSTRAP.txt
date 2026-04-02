@@ -39,16 +39,29 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
   - Stage 2 = shared Past Sim normalization/simulation
 - Do not collapse those two stages into one concept.
 - The latest entered bill end date is the Stage 1 input anchor.
+- The Stage 1 anchor label is `Bill End Date`.
 - That anchor date is the last day of the entered input sequence.
 - The input sequence runs backward by bill-cycle months.
+- Bills are entered newest-first.
+- `Add Bill` adds older statement rows.
+- Only the oldest entered bill needs a manual `Bill Start Date` when multiple bills are present.
+- Intermediate start dates are inferred from the next older bill's end date.
 - The user may enter fewer than 12 bills.
 - Missing bill-cycle months remain blank on the input chart.
 - Blank input months are not the final artifact contract.
+- Current runtime still uses `anchorEndDate + monthlyKwh + travelRanges` for the shared simulator contract, but now carries additive `statementRanges[]` metadata for Stage 1 bill-range semantics.
 - USER MANUAL MONTHLY is travel/vacant-aware.
 - Past Sim fills missing bill-cycle months and excluded travel/vacant days after normalization.
 - USER MANUAL MONTHLY and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` are distinct input semantics.
 - GapFill monthly-from-source is for grading/tuning with source-derived monthly anchors.
 - After normalization, both paths enter the same shared Past Sim path.
+- Admin Manual Monthly Lab rules:
+  - source home is read-only context only
+  - isolated test home is the only writable target
+  - usable source monthly payload wins by default
+  - deterministic SMT-derived bill ranges are fallback/reset convenience only
+  - fallback seeding is bounded by actual coverage, capped at 12, and fails closed if lab-home seed persistence fails
+- Stage 1 reconciliation may use exact stored statement ranges, but the main Stage 2 Past chart remains the normalized shared Past output.
 
 ========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)
