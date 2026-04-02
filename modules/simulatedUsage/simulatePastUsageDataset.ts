@@ -960,32 +960,30 @@ export async function simulatePastUsageDataset(
     const manualTotalsConstraint =
       (buildInputs.resolvedSimFingerprint as { manualTotalsConstraint?: string } | undefined)?.manualTotalsConstraint ??
       null;
+    const isMonthlyConstrainedManualTotals =
+      buildInputs.mode === "MANUAL_TOTALS" && manualTotalsConstraint === "monthly";
     const eligibleManualBillPeriods = Array.isArray(buildInputs.manualBillPeriods)
       ? buildInputs.manualBillPeriods.filter((period) => period.eligibleForConstraint)
       : [];
-    const shouldUseTrustedActualIntervalsForManualMonthly =
-      buildInputs.mode === "MANUAL_TOTALS" &&
-      manualTotalsConstraint === "monthly" &&
-      eligibleManualBillPeriods.length === 0;
     const fetchedActualIntervals = preloadedIntervals
       ? null
-      : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
+      : isLowDataSharedPastMode
+        ? null
+        : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
           timestamp: p.timestamp,
           kwh: p.kwh,
         }));
     const actualIntervals =
       preloadedIntervals != null
         ? preloadedIntervals
-        : shouldUseTrustedActualIntervalsForManualMonthly && (fetchedActualIntervals?.length ?? 0) > 0
-          ? fetchedActualIntervals!
-          : isLowDataSharedPastMode
-            ? buildSyntheticIntervalsForSharedPastWindow({
-                buildInputs,
-                startDate,
-                endDate,
-                timezone,
-              })
-            : fetchedActualIntervals ?? [];
+        : isLowDataSharedPastMode
+          ? buildSyntheticIntervalsForSharedPastWindow({
+              buildInputs,
+              startDate,
+              endDate,
+              timezone,
+            })
+          : fetchedActualIntervals ?? [];
 
     const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
@@ -1179,7 +1177,7 @@ export async function simulatePastUsageDataset(
       : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
     let usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     let lowDataShapeAdapterUsed = false;
-    if (!usageShapeProfileSnap && isLowDataSharedPastMode && !shouldUseTrustedActualIntervalsForManualMonthly) {
+    if (!usageShapeProfileSnap && isLowDataSharedPastMode) {
       usageShapeProfileSnap = buildUsageShapeSnapFromMonthlyTotalsForLowData({
         canonicalMonths,
         monthlyTotalsKwhByMonth: (buildInputs as SimulatorBuildInputsV1).monthlyTotalsKwhByMonth ?? {},
@@ -1309,7 +1307,7 @@ export async function simulatePastUsageDataset(
         forceModeledOutputKeepReferencePoolDateKeys:
           keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
         emitAllIntervals,
-        modeledKeepRefReasonCode: shouldUseTrustedActualIntervalsForManualMonthly
+        modeledKeepRefReasonCode: isMonthlyConstrainedManualTotals
           ? "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
           : "TEST_MODELED_KEEP_REF",
         debug: { out: pastDayCounts as any },

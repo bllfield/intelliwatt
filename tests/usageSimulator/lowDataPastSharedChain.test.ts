@@ -165,6 +165,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(wxArg?.get("2026-01-05")?.source).toBe("OPEN_METEO");
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
     expect(keepRef?.size).toBe(5);
+    expect(firstCall?.modeledKeepRefReasonCode).toBe("MONTHLY_CONSTRAINED_NON_TRAVEL_DAY");
     const meta = out.dataset?.meta as Record<string, unknown> | undefined;
     expect(meta?.sharedWeatherTimelineContract).toBe("last365_actual_with_normal_gapfill");
     expect(meta?.lowDataSharedPastAdapter).toBe(true);
