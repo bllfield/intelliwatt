@@ -339,7 +339,6 @@ export default function ManualMonthlyLab() {
             : await callRoute("load");
         setLoadJson(existing);
         setScenarioId(existing.scenarioId ?? null);
-        setShowManualEditor(false);
         setStatus("Manual payload loaded from the isolated lab home.");
         return {
           ok: true as const,
