@@ -4155,7 +4155,7 @@ async function recalcSimulatorBuildImpl(args: {
               actualSourceAnchor.anchorEndDate ??
               ""
           ).slice(0, 10) || null,
-        travelRanges: travelRangesForBuild,
+        travelRanges: travelRangesForBuild ?? [],
         dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
       });
       const resolvedManualStageOne = resolveManualUsageStageOnePayloadForMode({

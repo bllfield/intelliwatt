@@ -699,7 +699,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       ? [
           {
             label: "Monthly constraint quality",
-            priorityBand: "Hard Constraint",
+            priorityBand: "Hard Constraint" as const,
             explanation: "If the monthly totals or seeded statement ranges are off, every downstream daily/interval result is anchored to the wrong monthly target.",
           },
         ]
@@ -708,7 +708,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       ? [
           {
             label: "Annual seed quality",
-            priorityBand: "Hard Constraint",
+            priorityBand: "Hard Constraint" as const,
             explanation: "The annual total is the top-level anchor; downstream month/day tuning cannot fix a wrong annual input.",
           },
         ]
@@ -717,7 +717,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       ? [
           {
             label: "Reference-pool cleanliness",
-            priorityBand: "Reference Truth Pool",
+            priorityBand: "Reference Truth Pool" as const,
             explanation: "Travel, incomplete meter, and leading-missing exclusions materially change how much trusted actual history remains available.",
           },
         ]
