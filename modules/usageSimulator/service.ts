@@ -54,6 +54,10 @@ import {
 } from "@/modules/usageSimulator/intervalCodec";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import {
+  buildManualUsageStageOneResolvedSeeds,
+  resolveManualUsageStageOnePayloadForMode,
+} from "@/modules/manualUsage/prefill";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import {
@@ -192,7 +196,6 @@ async function attachSelectedDailyWeatherForDataset(args: {
     (dataset as any).meta.weatherFallbackReason = null;
   }
 }
-import { buildAdminLabSyntheticManualUsagePayload } from "@/modules/usageSimulator/adminLabManualFromActuals";
 import {
   resolveManualMonthlyAnchorEndDateKey,
   type SourceDerivedMonthlyTargetResolution,
@@ -4116,18 +4119,52 @@ async function recalcSimulatorBuildImpl(args: {
       mode,
     });
     try {
-      const adminLabManualBuild = await buildAdminLabSyntheticManualUsagePayload({
-        treatmentMode: args.adminLabTreatmentMode as "manual_monthly_constrained" | "manual_annual_constrained",
-        canonicalMonths: canonicalForBuild.months,
-        actualContextHouseId,
-        esiid,
-        monthlyAnchorEndDate: actualSourceAnchor.anchorEndDate,
-        homeProfile: homeProfile as any,
-        applianceProfile: applianceProfile as any,
+      const sourceOwner =
+        actualContextHouseId && actualContextHouseId !== houseId
+          ? await (prisma as any).houseAddress
+              .findUnique({
+                where: { id: actualContextHouseId },
+                select: { userId: true },
+              })
+              .catch(() => null)
+          : { userId };
+      const sourceManualRec =
+        sourceOwner?.userId && actualContextHouseId
+          ? await (prisma as any).manualUsageInput
+              .findUnique({
+                where: {
+                  userId_houseId: {
+                    userId: String(sourceOwner.userId),
+                    houseId: actualContextHouseId,
+                  },
+                },
+                select: { payload: true },
+              })
+              .catch(() => null)
+          : null;
+      const sourceUsageDataset = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+        skipFullYearIntervalFetch: true,
+      }).catch(() => ({ dataset: null }));
+      const desiredManualStageOneMode =
+        args.adminLabTreatmentMode === "manual_annual_constrained" ? "ANNUAL" : "MONTHLY";
+      const seedSet = buildManualUsageStageOneResolvedSeeds({
+        sourcePayload: (sourceManualRec?.payload as any) ?? null,
+        actualEndDate:
+          String(
+            sourceUsageDataset?.dataset?.summary?.end ??
+              actualSourceAnchor.anchorEndDate ??
+              ""
+          ).slice(0, 10) || null,
         travelRanges: travelRangesForBuild,
+        dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
       });
-      manualUsagePayload = adminLabManualBuild.payload;
-      manualMonthlySourceDerivedResolution = adminLabManualBuild.monthlySourceDerivedResolution;
+      const resolvedManualStageOne = resolveManualUsageStageOnePayloadForMode({
+        mode: desiredManualStageOneMode,
+        testHomePayload: manualUsagePayload,
+        seedSet,
+      });
+      manualUsagePayload = resolvedManualStageOne.payload;
+      manualMonthlySourceDerivedResolution = null;
     } catch (e) {
       emitRecalcPreIntervalStageEvent({
         event: "recalc_pre_interval_admin_treatment_adaptation_failure",

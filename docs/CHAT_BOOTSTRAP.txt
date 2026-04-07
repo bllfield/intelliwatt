@@ -59,9 +59,13 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
   - source home is read-only context only
   - isolated test home is the only writable target
   - usable source monthly payload wins by default
+  - usable source annual payload wins for annual mode
+  - shared Stage 1/pre-lockbox monthly+annual helper ownership lives in `modules/manualUsage/prefill.ts`
+  - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same helper family before the shared lockbox path
   - deterministic SMT-derived bill ranges are fallback/reset convenience only
   - fallback seeding is bounded by actual coverage, capped at 12, and fails closed if lab-home seed persistence fails
 - Stage 1 reconciliation may use exact stored statement ranges, but the main Stage 2 Past chart remains the normalized shared Past output.
+- Manual Usage Lab and GapFill stay separate pages; daily curve compare/tuning belongs on GapFill/admin tuning surfaces, not on the Manual Usage Lab flow/debug page.
 
 ========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)
@@ -101,6 +105,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `modules/usageShapeProfile/autoBuild.ts`
 
 6) Manual-usage shared helpers:
+- `modules/manualUsage/prefill.ts`
 - `modules/manualUsage/store.ts`
 - `modules/manualUsage/reconciliation.ts`
 

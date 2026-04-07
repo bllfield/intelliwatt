@@ -424,10 +424,10 @@ export default function ManualMonthlyLab() {
     <div className="min-h-screen bg-brand-navy">
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
         <div className="rounded-lg bg-brand-white p-6 shadow-lg">
-          <h1 className="text-2xl font-bold text-brand-navy">Manual Monthly Lab</h1>
+          <h1 className="text-2xl font-bold text-brand-navy">Manual Usage Lab</h1>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Isolated test-home harness for the real shared manual-monthly runtime. Load a source home into the lab, adjust the lab-only
-            inputs, then run one shared Past Sim action to render Stage 2.
+            Isolated test-home harness for the real shared manual Stage 1 runtime. Load a source home into the lab, adjust the lab-only
+            monthly or annual inputs, then run one shared Past Sim action to render Stage 2.
           </p>
         </div>
 
@@ -538,8 +538,8 @@ export default function ManualMonthlyLab() {
             <div>
               <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 1</div>
               <p className="text-sm text-slate-600">
-                Pre-sim bill-period view for the lab flow. It starts from the selected source home when loaded and updates here whenever the
-                admin saves lab-home manual usage.
+                Pre-sim Stage 1 view for the lab flow. Monthly mode keeps bill-period semantics, annual mode keeps annual-total semantics, and
+                both update here whenever the admin saves lab-home manual usage.
               </p>
             </div>
             {stageOnePreviewPayload ? (
@@ -559,7 +559,7 @@ export default function ManualMonthlyLab() {
               />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                No manual usage totals are available to preview yet. Use Lookup and Load to populate the Stage 1 statement view.
+                No manual usage totals are available to preview yet. Use Lookup and Load to populate the shared monthly or annual Stage 1 view.
               </div>
             )}
           </div>
@@ -594,8 +594,8 @@ export default function ManualMonthlyLab() {
               />
             ) : (
               <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                The monthly usage editor is collapsed by default to keep Stage 1 and Stage 2 visible. Use "Expand to edit" when you want to
-                update the lab-home inputs.
+                The manual usage editor is collapsed by default to keep Stage 1 and Stage 2 visible. Use "Expand to edit" when you want to
+                update the lab-home monthly or annual inputs.
               </div>
             )}
           </div>
@@ -636,7 +636,7 @@ export default function ManualMonthlyLab() {
         ) : null}
 
         <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
-          <div className="text-lg font-semibold text-brand-navy">Manual Monthly Flow Diagnostics</div>
+          <div className="text-lg font-semibold text-brand-navy">Manual Usage Flow Diagnostics</div>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <SectionJson

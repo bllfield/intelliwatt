@@ -101,6 +101,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `modules/usageShapeProfile/autoBuild.ts`
 
 6) Manual-usage shared helpers:
+- `modules/manualUsage/prefill.ts`
 - `modules/manualUsage/store.ts`
 - `modules/manualUsage/reconciliation.ts`
 
@@ -437,6 +438,13 @@ This section is authoritative for future manual-usage implementation work.
 - GapFill monthly-from-source remains a distinct input semantic used for grading and tuning. It uses source-derived monthly anchors from actuals before entering the same shared Past Sim path after normalization.
 - USER MANUAL MONTHLY must not be reframed as source-derived monthly, and GapFill monthly-from-source must not be treated as the only travel-aware monthly mode.
 - GapFill Actual remains the normal Past baseline truth path. GapFill Test may differ only in pre-lockbox normalized input semantics, then must enter the same shared producer path.
+- Manual Usage Lab and GapFill remain separate pages with separate purposes.
+- Shared Stage 1/pre-lockbox helper ownership for both surfaces now lives in `modules/manualUsage/prefill.ts`:
+  - monthly source-payload usability and precedence
+  - annual source-payload usability and precedence
+  - deterministic monthly seeded bill-range fallback
+  - annual seed derivation
+- GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same shared Stage 1 helper family before entering the shared lockbox/sim/artifact path.
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only
   - `lookup` reads source context plus current isolated lab-home state
@@ -455,8 +463,10 @@ This section is authoritative for future manual-usage implementation work.
 - New additive prisma models/tables were added for simulated-layer persistence (manual inputs, home profile, appliances, scenarios). Existing real-usage tables are unchanged.
 - Tests added (Vitest): simulation totals preserved, travel exclusions renormalize, prefill merge rules, monthly-anchor labeling consistency.
 - Manual-monthly helper ownership now lives in shared module space:
+  - `modules/manualUsage/prefill.ts` owns shared Stage 1 source-payload precedence plus monthly/annual seed resolution for Manual Usage Lab and GapFill manual modes
   - `modules/manualUsage/statementRanges.ts` owns Stage 1 presentation, bill-range row construction, and shared bill-period target shaping
   - `modules/manualUsage/reconciliation.ts` owns shared bill-period parity rows for monthly and annual manual compare
+  - daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab customer-flow/debug surface
   - `modules/manualUsage/prefill.ts` owns source-payload usability checks plus deterministic admin monthly/annual seed derivation
   - shared service/read/projection modules remain the only authority for Stage 2 Past chart rendering on both user and admin manual-monthly surfaces
 

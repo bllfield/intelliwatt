@@ -15,6 +15,8 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - GapFill monthly-from-source starts from source-derived monthly anchors used for grading/tuning. It is not the same input semantic as USER MANUAL MONTHLY.
 - USER MANUAL MONTHLY and USER MANUAL ANNUAL are still travel/vacant-aware. Travel/vacant behavior does not belong only to GapFill monthly-from-source.
 - Admin Manual Monthly Lab uses read-only source-home context plus a writable isolated test home. Usable source manual payload wins by default; deterministic SMT-derived seeded bill ranges are fallback/reset convenience only.
+- Manual Usage Lab and GapFill stay separate surfaces; shared ownership here is Stage 1/pre-lockbox helper logic only.
+- Shared monthly+annual Stage 1 helper ownership now lives in `modules/manualUsage/prefill.ts`, and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` / `ANNUAL_FROM_SOURCE_INTERVALS` must use that same helper family before the shared lockbox path.
 - After normalization, both paths must use the same shared weather loader, lockbox producer path, persistence path, and artifact read path.
 - Shared Past Sim now derives shared bill-period targets before shaping:
   - non-excluded bill periods stay eligible parity constraints
@@ -62,6 +64,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Artifact-producing rebuilds normalize inputs then call the same shared recalc producer path before persistence; GapFill diagnostics may differ only after stored outputs exist.
   - GapFill Actual Home is the exact same user Past Sim flow with a different trigger/view surface only; it stays on `userValidationPolicy` and the shared persisted read/display path.
   - GapFill Test Home may fork only before lockbox entry: admin-owned validation policy plus usage input mode (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). After normalization it must use the same lockbox producer chain and artifact writer.
+  - Daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab flow/debug surface.
   - USER MANUAL MONTHLY remains a distinct user-input semantic before normalization. GapFill `MONTHLY_FROM_SOURCE_INTERVALS` must not be treated as the only travel-aware monthly mode or as a replacement definition for user manual monthly.
   - Weather logic is pre-lockbox only: user Past owns `userWeatherLogicSetting`; GapFill Actual/Test share `gapfillWeatherLogicSetting` for a run; the shared resolver and lockbox chain stay the same after normalization.
 - **Metadata**

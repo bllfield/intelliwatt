@@ -684,6 +684,52 @@ export function localSlot96InTimezone(tsIso: string, tz: string): number {
   }
 }
 
+/**
+ * Shared hook point for future GapFill/admin daily-curve diagnostics.
+ * Computes mean 96-slot actual vs simulated usage for the selected local dates only.
+ */
+export function buildDailyCurveCompareBySlot(args: {
+  actual: IntervalPoint[];
+  simulated: IntervalPoint[];
+  timezone: string;
+  selectedDateKeys?: Iterable<string> | null;
+}): Array<{ slot: number; actualMeanKwh: number; simMeanKwh: number; deltaMeanKwh: number; actualCount: number; simCount: number }> {
+  const selectedDateKeys =
+    args.selectedDateKeys == null ? null : new Set(Array.from(args.selectedDateKeys).map((value) => String(value ?? "").slice(0, 10)));
+  const actualBuckets = Array.from({ length: 96 }, () => ({ sum: 0, count: 0 }));
+  const simBuckets = Array.from({ length: 96 }, () => ({ sum: 0, count: 0 }));
+  const accumulate = (rows: IntervalPoint[], buckets: Array<{ sum: number; count: number }>) => {
+    for (const row of rows ?? []) {
+      const ts = String(row?.timestamp ?? "").trim();
+      if (!ts) continue;
+      const localDateKey = dateKeyInTimezone(ts, args.timezone);
+      if (selectedDateKeys && !selectedDateKeys.has(localDateKey)) continue;
+      const slot = localSlot96InTimezone(ts, args.timezone);
+      const kwh = Number(row?.kwh ?? Number.NaN);
+      if (!Number.isFinite(kwh) || slot < 0 || slot > 95) continue;
+      buckets[slot]!.sum += kwh;
+      buckets[slot]!.count += 1;
+    }
+  };
+  accumulate(args.actual ?? [], actualBuckets);
+  accumulate(args.simulated ?? [], simBuckets);
+  const round4 = (value: number) => Math.round(value * 10000) / 10000;
+  return Array.from({ length: 96 }, (_, slot) => {
+    const actualBucket = actualBuckets[slot]!;
+    const simBucket = simBuckets[slot]!;
+    const actualMeanKwh = actualBucket.count > 0 ? actualBucket.sum / actualBucket.count : 0;
+    const simMeanKwh = simBucket.count > 0 ? simBucket.sum / simBucket.count : 0;
+    return {
+      slot,
+      actualMeanKwh: round4(actualMeanKwh),
+      simMeanKwh: round4(simMeanKwh),
+      deltaMeanKwh: round4(simMeanKwh - actualMeanKwh),
+      actualCount: actualBucket.count,
+      simCount: simBucket.count,
+    };
+  });
+}
+
 /** Get local day of week (0 = Sunday, 6 = Saturday) for a timestamp in the given timezone. */
 export function localDayOfWeekInTimezone(tsIso: string, tz: string): number {
   try {

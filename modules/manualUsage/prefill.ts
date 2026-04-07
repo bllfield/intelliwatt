@@ -8,6 +8,48 @@ import type {
 
 type DailyUsageRow = { date?: string; kwh?: number };
 
+export type ManualUsageStageOneSeedSourceMode =
+  | "MONTHLY"
+  | "ANNUAL"
+  | "ACTUAL_INTERVALS_MONTHLY_PREFILL"
+  | "ACTUAL_INTERVALS_ANNUAL_PREFILL"
+  | null;
+
+export type ManualUsageStageOnePayloadSource =
+  | "test_home_saved_payload"
+  | "source_payload"
+  | "actual_derived_seed"
+  | "unresolved";
+
+export type ManualUsageStageOneResolvedSeeds = {
+  anchorEndDate: string | null;
+  usableSourceMonthlyPayload: MonthlyManualUsagePayload | null;
+  usableSourceAnnualPayload: AnnualManualUsagePayload | null;
+  monthlySeed: MonthlyManualUsagePayload | null;
+  annualSeed: AnnualManualUsagePayload | null;
+  sourceMode: ManualUsageStageOneSeedSourceMode;
+};
+
+export type ManualUsageStageOneResolvedPayload =
+  | {
+      mode: "MONTHLY";
+      payload: MonthlyManualUsagePayload;
+      payloadSource: Exclude<ManualUsageStageOnePayloadSource, "unresolved">;
+      seedSet: ManualUsageStageOneResolvedSeeds;
+    }
+  | {
+      mode: "ANNUAL";
+      payload: AnnualManualUsagePayload;
+      payloadSource: Exclude<ManualUsageStageOnePayloadSource, "unresolved">;
+      seedSet: ManualUsageStageOneResolvedSeeds;
+    }
+  | {
+      mode: "MONTHLY" | "ANNUAL";
+      payload: null;
+      payloadSource: "unresolved";
+      seedSet: ManualUsageStageOneResolvedSeeds;
+    };
+
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isIsoDate(value: unknown): value is string {
@@ -158,5 +200,140 @@ export function deriveAnnualSeed(args: {
     anchorEndDate: args.anchorEndDate,
     annualKwh,
     travelRanges: args.travelRanges,
+  };
+}
+
+export function buildManualUsageStageOneResolvedSeeds(args: {
+  sourcePayload: ManualUsagePayload | null;
+  actualEndDate?: string | null;
+  travelRanges: TravelRange[];
+  dailyRows: unknown;
+}): ManualUsageStageOneResolvedSeeds {
+  const usableSourceMonthlyPayload = hasUsableMonthlyPayload(args.sourcePayload)
+    ? {
+        mode: "MONTHLY" as const,
+        anchorEndDate: args.sourcePayload.anchorEndDate,
+        monthlyKwh: args.sourcePayload.monthlyKwh,
+        statementRanges: args.sourcePayload.statementRanges,
+        travelRanges: args.sourcePayload.travelRanges,
+      }
+    : null;
+  const usableSourceAnnualPayload = hasUsableAnnualPayload(args.sourcePayload)
+    ? {
+        mode: "ANNUAL" as const,
+        anchorEndDate: args.sourcePayload.anchorEndDate,
+        annualKwh: args.sourcePayload.annualKwh,
+        travelRanges: args.sourcePayload.travelRanges,
+      }
+    : null;
+  const anchorEndDate = resolveSeedAnchorEndDate({
+    sourcePayload: args.sourcePayload,
+    actualEndDate: args.actualEndDate,
+  });
+  const monthlySeed =
+    anchorEndDate && !usableSourceMonthlyPayload
+      ? deriveMonthlySeedFromActual({
+          anchorEndDate,
+          sourcePayload: args.sourcePayload,
+          travelRanges: args.travelRanges,
+          dailyRows: args.dailyRows,
+        })
+      : null;
+  const annualSeed =
+    anchorEndDate && !usableSourceAnnualPayload
+      ? deriveAnnualSeed({
+          anchorEndDate,
+          sourcePayload: args.sourcePayload,
+          travelRanges: args.travelRanges,
+          dailyRows: args.dailyRows,
+          monthlySeed,
+        })
+      : null;
+  const sourceMode: ManualUsageStageOneSeedSourceMode =
+    usableSourceMonthlyPayload?.mode ??
+    usableSourceAnnualPayload?.mode ??
+    (monthlySeed ? "ACTUAL_INTERVALS_MONTHLY_PREFILL" : annualSeed ? "ACTUAL_INTERVALS_ANNUAL_PREFILL" : null);
+  return {
+    anchorEndDate,
+    usableSourceMonthlyPayload,
+    usableSourceAnnualPayload,
+    monthlySeed,
+    annualSeed,
+    sourceMode,
+  };
+}
+
+export function resolveManualUsageStageOnePayloadForMode(args: {
+  mode: "MONTHLY" | "ANNUAL";
+  testHomePayload?: ManualUsagePayload | null;
+  seedSet: ManualUsageStageOneResolvedSeeds;
+}): ManualUsageStageOneResolvedPayload {
+  if (args.mode === "MONTHLY") {
+    if (hasUsableMonthlyPayload(args.testHomePayload)) {
+      return {
+        mode: "MONTHLY",
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: args.testHomePayload.anchorEndDate,
+          monthlyKwh: args.testHomePayload.monthlyKwh,
+          statementRanges: args.testHomePayload.statementRanges,
+          travelRanges: args.testHomePayload.travelRanges,
+        },
+        payloadSource: "test_home_saved_payload",
+        seedSet: args.seedSet,
+      };
+    }
+    if (args.seedSet.usableSourceMonthlyPayload) {
+      return {
+        mode: "MONTHLY",
+        payload: args.seedSet.usableSourceMonthlyPayload,
+        payloadSource: "source_payload",
+        seedSet: args.seedSet,
+      };
+    }
+    if (args.seedSet.monthlySeed) {
+      return {
+        mode: "MONTHLY",
+        payload: args.seedSet.monthlySeed,
+        payloadSource: "actual_derived_seed",
+        seedSet: args.seedSet,
+      };
+    }
+  } else {
+    if (hasUsableAnnualPayload(args.testHomePayload)) {
+      return {
+        mode: "ANNUAL",
+        payload: {
+          mode: "ANNUAL",
+          anchorEndDate: args.testHomePayload.anchorEndDate,
+          annualKwh: args.testHomePayload.annualKwh,
+          travelRanges: args.testHomePayload.travelRanges,
+        },
+        payloadSource: "test_home_saved_payload",
+        seedSet: args.seedSet,
+      };
+    }
+    if (args.seedSet.usableSourceAnnualPayload) {
+      return {
+        mode: "ANNUAL",
+        payload: args.seedSet.usableSourceAnnualPayload,
+        payloadSource: "source_payload",
+        seedSet: args.seedSet,
+      };
+    }
+    if (args.seedSet.annualSeed) {
+      return {
+        mode: "ANNUAL",
+        payload: args.seedSet.annualSeed,
+        payloadSource: "actual_derived_seed",
+        seedSet: args.seedSet,
+      };
+    }
+  }
+  return {
+    mode: args.mode,
+    payload: null,
+    payloadSource: "unresolved",
+    seedSet: args.seedSet,
   };
 }

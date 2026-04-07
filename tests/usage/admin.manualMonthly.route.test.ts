@@ -297,6 +297,22 @@ describe("admin manual monthly route", () => {
     expect(typeof body.seed.annual.annualKwh).toBe("number");
   });
 
+  it("routes shared Stage 1 monthly/annual seed resolution through manualUsage/prefill", async () => {
+    const prefill = await import("@/modules/manualUsage/prefill");
+    const seedSpy = vi.spyOn(prefill, "buildManualUsageStageOneResolvedSeeds");
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+
+    const res = await POST(buildRequest({ action: "lookup", email: "user@example.com", houseId: "source-house-1" }));
+    expect(res.status).toBe(200);
+    expect(seedSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePayload: null,
+        actualEndDate: "2025-12-31",
+        dailyRows: expect.any(Array),
+      })
+    );
+  });
+
   it("load falls back to actual-derived monthly totals when source monthly payload has no numeric entries", async () => {
     mocks.getManualUsageInputForUserHouse.mockImplementation(async ({ userId, houseId }: any) => {
       if (userId === "source-user-1" && houseId === "source-house-1") {

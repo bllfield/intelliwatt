@@ -2143,6 +2143,36 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
   });
 
+  it("maps annual source-interval mode onto the shared MANUAL_TOTALS recalc entry", async () => {
+    recalcSimulatorBuild.mockResolvedValueOnce({
+      ok: true,
+      houseId: "h1",
+      buildInputsHash: "hash-annual",
+      dataset: {},
+      effectiveSimulatorMode: "MANUAL_TOTALS",
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      testUsageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.simulatorMode).toBe("MANUAL_TOTALS");
+    expect(body.treatmentMode).toBe("ANNUAL_FROM_SOURCE_INTERVALS");
+    expect(body.usageInputMode).toBe("ANNUAL_FROM_SOURCE_INTERVALS");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_annual_constrained");
+    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
+  });
+
   it("returns explicit canonical recalc timeout without route hang", async () => {
     const timeoutErr = new Error("canonical_recalc_timeout");
     (timeoutErr as any).code = "canonical_recalc_timeout";

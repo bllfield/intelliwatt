@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as manualPrefill from "@/modules/manualUsage/prefill";
 
 vi.mock("server-only", () => ({}));
 
 const buildSimulatedUsageDatasetFromCurve = vi.fn();
 
 const manualUsageInputFindUnique = vi.fn();
+const houseAddressFindUnique = vi.fn();
 const usageSimulatorScenarioFindFirst = vi.fn();
 const usageSimulatorScenarioEventFindMany = vi.fn();
 const usageSimulatorBuildFindUnique = vi.fn();
@@ -15,7 +17,7 @@ const hasActualIntervals = vi.fn();
 const resolveActualUsageSourceAnchor = vi.fn();
 const fetchActualCanonicalMonthlyTotals = vi.fn();
 const fetchActualIntradayShape96 = vi.fn();
-const buildAdminLabSyntheticManualUsagePayload = vi.fn();
+const getActualUsageDatasetForHouseMock = vi.fn();
 const simulatePastUsageDataset = vi.fn();
 const ensureSimulatorFingerprintsWithContext = vi.fn();
 const resolveSimFingerprintWithContext = vi.fn();
@@ -44,6 +46,9 @@ vi.mock("@/lib/db", () => ({
     },
     usageSimulatorBuild: {
       findUnique: (...args: any[]) => usageSimulatorBuildFindUnique(...args),
+    },
+    houseAddress: {
+      findUnique: (...args: any[]) => houseAddressFindUnique(...args),
     },
   },
 }));
@@ -74,10 +79,6 @@ vi.mock("@/modules/realUsageAdapter/actual", () => ({
   resolveActualUsageSourceAnchor: (...args: any[]) => resolveActualUsageSourceAnchor(...args),
   fetchActualCanonicalMonthlyTotals: (...args: any[]) => fetchActualCanonicalMonthlyTotals(...args),
   fetchActualIntradayShape96: (...args: any[]) => fetchActualIntradayShape96(...args),
-}));
-
-vi.mock("@/modules/usageSimulator/adminLabManualFromActuals", () => ({
-  buildAdminLabSyntheticManualUsagePayload: (...args: any[]) => buildAdminLabSyntheticManualUsagePayload(...args),
 }));
 
 vi.mock("@/modules/simulatedUsage/simulatePastUsageDataset", () => ({
@@ -117,7 +118,7 @@ vi.mock("@/lib/usage/intervalSeriesRepo", () => ({
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualDailyKwhForLocalDateKeys: vi.fn().mockResolvedValue(new Map()),
   getActualIntervalsForRange: vi.fn().mockResolvedValue([]),
-  getActualUsageDatasetForHouse: vi.fn().mockResolvedValue(null),
+  getActualUsageDatasetForHouse: (...args: any[]) => getActualUsageDatasetForHouseMock(...args),
   getIntervalDataFingerprint: (...args: any[]) => getIntervalDataFingerprint(...args),
 }));
 
@@ -151,6 +152,7 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     vi.clearAllMocks();
 
     manualUsageInputFindUnique.mockResolvedValue(null);
+    houseAddressFindUnique.mockResolvedValue({ userId: "source-user-1" });
     usageSimulatorScenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
     usageSimulatorScenarioEventFindMany.mockResolvedValue([]);
     usageSimulatorBuildFindUnique.mockResolvedValue({
@@ -193,24 +195,17 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       source: "SMT",
       shape96: Array.from({ length: 96 }, () => 1 / 96),
     });
-    buildAdminLabSyntheticManualUsagePayload.mockResolvedValue({
-      mode: "MONTHLY",
-      anchorEndDate: "2026-02-28",
-      monthlyKwh: [
-        { month: "2025-03", kwh: 1000 },
-        { month: "2025-04", kwh: 900 },
-        { month: "2025-05", kwh: 800 },
-        { month: "2025-06", kwh: 700 },
-        { month: "2025-07", kwh: 600 },
-        { month: "2025-08", kwh: 500 },
-        { month: "2025-09", kwh: 400 },
-        { month: "2025-10", kwh: 300 },
-        { month: "2025-11", kwh: 200 },
-        { month: "2025-12", kwh: 100 },
-        { month: "2026-01", kwh: 50 },
-        { month: "2026-02", kwh: 25 },
-      ],
-      travelRanges: [],
+    getActualUsageDatasetForHouseMock.mockResolvedValue({
+      dataset: {
+        summary: {
+          end: "2026-02-28",
+        },
+        daily: [
+          { date: "2025-03-01", kwh: 10 },
+          { date: "2025-03-02", kwh: 10 },
+          { date: "2026-02-28", kwh: 25 },
+        ],
+      },
     });
     simulatePastUsageDataset.mockResolvedValue({ dataset: null, stitchedCurve: null, simulatedDayResults: [] });
     ensureSimulatorFingerprintsWithContext.mockResolvedValue(undefined);
@@ -252,29 +247,34 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
   });
 
   it("builds source-derived monthly manual payloads before MANUAL_TOTALS requirements are enforced", async () => {
-    buildAdminLabSyntheticManualUsagePayload.mockResolvedValueOnce({
-      mode: "MONTHLY",
-      anchorEndDate: "2026-02-28",
-      payload: {
-        mode: "MONTHLY",
-        anchorEndDate: "2026-02-28",
-        monthlyKwh: [
-          { month: "2025-03", kwh: 1000 },
-          { month: "2025-04", kwh: 900 },
-          { month: "2025-05", kwh: 800 },
-          { month: "2025-06", kwh: 700 },
-          { month: "2025-07", kwh: 600 },
-          { month: "2025-08", kwh: 500 },
-          { month: "2025-09", kwh: 400 },
-          { month: "2025-10", kwh: 300 },
-          { month: "2025-11", kwh: 200 },
-          { month: "2025-12", kwh: 100 },
-          { month: "2026-01", kwh: 50 },
-          { month: "2026-02", kwh: 25 },
-        ],
-        travelRanges: [],
-      },
-      monthlySourceDerivedResolution: null,
+    const resolveSpy = vi.spyOn(manualPrefill, "resolveManualUsageStageOnePayloadForMode");
+    manualUsageInputFindUnique.mockImplementation(async ({ where }: any) => {
+      const key = where?.userId_houseId;
+      if (key?.userId === "source-user-1" && key?.houseId === "source-home-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [
+              { month: "2025-03", kwh: 1000 },
+              { month: "2025-04", kwh: 900 },
+              { month: "2025-05", kwh: 800 },
+              { month: "2025-06", kwh: 700 },
+              { month: "2025-07", kwh: 600 },
+              { month: "2025-08", kwh: 500 },
+              { month: "2025-09", kwh: 400 },
+              { month: "2025-10", kwh: 300 },
+              { month: "2025-11", kwh: 200 },
+              { month: "2025-12", kwh: 100 },
+              { month: "2026-01", kwh: 50 },
+              { month: "2026-02", kwh: 25 },
+            ],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+        };
+      }
+      return null;
     });
     simulatePastUsageDataset.mockResolvedValueOnce({
       dataset: {
@@ -326,11 +326,20 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       },
     });
 
-    expect(buildAdminLabSyntheticManualUsagePayload).toHaveBeenCalledWith(
+    expect(houseAddressFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({
-        treatmentMode: "manual_monthly_constrained",
-        actualContextHouseId: "source-home-1",
+        where: { id: "source-home-1" },
       })
+    );
+    expect(resolveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "MONTHLY",
+      })
+    );
+    expect(getActualUsageDatasetForHouseMock).toHaveBeenCalledWith(
+      "source-home-1",
+      "E1",
+      expect.objectContaining({ skipFullYearIntervalFetch: true })
     );
     expect(out.ok).toBe(false);
     if (!out.ok) {
@@ -456,6 +465,37 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
   }, 15000);
 
   it("does not fail source-derived manual modes when source travel ranges cover the canonical window", async () => {
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {
+          sharedProducerPathUsed: true,
+        },
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2025-03-30",
+        end: "2026-03-29",
+        intervals: [],
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+        annualTotalKwh: 1.5,
+        meta: { excludedDays: 365, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
     const out = await recalcSimulatorBuild({
       userId: "u1",
       houseId: "test-home-1",
@@ -475,11 +515,10 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       },
     });
 
-    expect(buildAdminLabSyntheticManualUsagePayload).toHaveBeenCalledWith(
-      expect.objectContaining({
-        treatmentMode: "manual_monthly_constrained",
-        travelRanges: [{ startDate: "2025-03-01", endDate: "2026-02-28" }],
-      })
+    expect(getActualUsageDatasetForHouseMock).toHaveBeenCalledWith(
+      "source-home-1",
+      "E1",
+      expect.objectContaining({ skipFullYearIntervalFetch: true })
     );
     expect(out.ok).toBe(false);
     if (!out.ok) {

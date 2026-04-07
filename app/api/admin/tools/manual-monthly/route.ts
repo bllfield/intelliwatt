@@ -6,11 +6,7 @@ import { gateManualMonthlyLabAdmin, resolveManualMonthlyLabOwnerUserId } from ".
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
-  deriveAnnualSeed,
-  deriveMonthlySeedFromActual,
-  hasUsableAnnualPayload,
-  hasUsableMonthlyPayload,
-  resolveSeedAnchorEndDate,
+  buildManualUsageStageOneResolvedSeeds,
 } from "@/modules/manualUsage/prefill";
 import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
@@ -292,46 +288,29 @@ async function buildLabPrefill(args: {
       args.sourceUsageHouse?.dataset?.summary?.end ??
         ""
     ).slice(0, 10) || null;
-  const anchorEndDate = resolveSeedAnchorEndDate({
+  const seedSet = buildManualUsageStageOneResolvedSeeds({
     sourcePayload: args.sourcePayload,
     actualEndDate,
+    travelRanges,
+    dailyRows: args.sourceUsageHouse?.dataset?.daily ?? [],
   });
-  const usableSourceMonthlySeed = hasUsableMonthlyPayload(args.sourcePayload) ? args.sourcePayload : null;
-  const usableSourceAnnualSeed = hasUsableAnnualPayload(args.sourcePayload) ? args.sourcePayload : null;
+  const anchorEndDate = seedSet.anchorEndDate;
   if (!anchorEndDate) {
     return {
       payloadToPersist: null,
       seed: {
-        sourceMode: usableSourceMonthlySeed?.mode ?? usableSourceAnnualSeed?.mode ?? null,
-        monthly: usableSourceMonthlySeed,
-        annual: usableSourceAnnualSeed,
+        sourceMode: seedSet.sourceMode,
+        monthly: seedSet.usableSourceMonthlyPayload ?? seedSet.monthlySeed,
+        annual: seedSet.usableSourceAnnualPayload ?? seedSet.annualSeed,
       },
     };
   }
-
-  const monthlySeed = deriveMonthlySeedFromActual({
-    anchorEndDate,
-    sourcePayload: args.sourcePayload,
-    travelRanges,
-    dailyRows: args.sourceUsageHouse?.dataset?.daily ?? [],
-  });
-  const annualSeed = deriveAnnualSeed({
-    anchorEndDate,
-    sourcePayload: args.sourcePayload,
-    travelRanges,
-    dailyRows: args.sourceUsageHouse?.dataset?.daily ?? [],
-    monthlySeed,
-  });
-
   return {
-    payloadToPersist: usableSourceMonthlySeed ? null : monthlySeed,
+    payloadToPersist: seedSet.usableSourceMonthlyPayload ? null : seedSet.monthlySeed,
     seed: {
-      sourceMode:
-        usableSourceMonthlySeed?.mode ??
-        usableSourceAnnualSeed?.mode ??
-        (monthlySeed ? "ACTUAL_INTERVALS_MONTHLY_PREFILL" : annualSeed ? "ACTUAL_INTERVALS_ANNUAL_PREFILL" : null),
-      monthly: monthlySeed,
-      annual: annualSeed,
+      sourceMode: seedSet.sourceMode,
+      monthly: seedSet.usableSourceMonthlyPayload ?? seedSet.monthlySeed,
+      annual: seedSet.usableSourceAnnualPayload ?? seedSet.annualSeed,
     },
   };
 }

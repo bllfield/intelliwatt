@@ -108,9 +108,12 @@ This section is authoritative for future manual-usage implementation and handoff
 ### Admin Manual Monthly Lab
 
 - Admin Manual Monthly Lab is the same manual-monthly feature family, but it owns a different Stage 1 convenience path.
+- Manual Usage Lab and GapFill remain separate surfaces with separate purposes; this alignment is shared helper ownership only.
 - Source home is read-only source context only.
 - Isolated test home is the only writable lab target for `load`, `save`, `recalc`, and `read_result`.
 - Usable source manual payload wins by default during lab prefill/load.
+- Shared Stage 1/pre-lockbox helper ownership for both monthly and annual manual modes now lives in `modules/manualUsage/prefill.ts`.
+- GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must call that same shared helper family before entering the shared lockbox/sim/artifact path.
 - Stage 1 preview supports both manual payload modes:
   - monthly preview = bill-period totals only
   - annual preview = billing-date context plus annual total only
@@ -123,6 +126,7 @@ This section is authoritative for future manual-usage implementation and handoff
   - a bill-period parity compare sourced from shared artifact totals
   - excluded bill periods kept visible as excluded/non-scored rows
 - The admin lab may add diagnostics after the shared Stage 2 result exists, but it must not own a different readback gate, a different chart acceptance rule, or a different display-truth path before the shared Past dashboard renders.
+- Daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab flow/debug page.
 
 ### Transitional Runtime Contract
 

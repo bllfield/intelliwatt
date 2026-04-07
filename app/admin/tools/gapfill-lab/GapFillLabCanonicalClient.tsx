@@ -1136,8 +1136,8 @@ export default function GapFillLabCanonicalClient() {
               Last recalc echo: {visibilityFromResult?.treatmentMode ?? "—"}
             </div>
             <div className="text-xs text-brand-navy/60 mt-1">
-              Sent on &quot;Run canonical recalc&quot; only. This split happens before lockbox entry only; after normalization the Test Home
-              enters the same shared Past Sim chain the user flow and Actual Home use.
+              Sent on &quot;Run canonical recalc&quot; only. Manual monthly and manual annual both reuse the shared Stage 1 helper family that
+              powers the Manual Usage Lab, then the Test Home enters the same shared Past Sim chain the user flow and Actual Home use.
             </div>
           </div>
           <div>

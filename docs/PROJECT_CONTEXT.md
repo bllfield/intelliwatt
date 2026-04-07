@@ -65,7 +65,7 @@
 
 - Usage layer contract map: `docs/USAGE_LAYER_MAP.md` (canonical interval-series layer meanings + endpoint/function mapping)
 
-- Manual-monthly product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage USER MANUAL MONTHLY model: Stage 1 bill-cycle input semantics versus Stage 2 normalized shared Past Sim behavior. Current implementation also stores additive `statementRanges[]` metadata, keeps admin source-home vs isolated test-home ownership explicit, and treats deterministic admin SMT bill-range seeding as fallback convenience rather than customer semantics.
+- Manual-usage product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage manual model: monthly Stage 1 bill-cycle semantics, annual Stage 1 annual-total semantics, then shared Stage 2 normalized Past Sim behavior. Current implementation stores additive `statementRanges[]` metadata for monthly payloads, keeps Manual Usage Lab and GapFill as separate surfaces, and centralizes shared Stage 1/pre-lockbox monthly+annual helper ownership in `modules/manualUsage/prefill.ts`.
 
 ## Where To Start
 
@@ -205,6 +205,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `modules/usageShapeProfile/autoBuild.ts`
 
 6) Manual-usage shared helpers:
+- `modules/manualUsage/prefill.ts`
 - `modules/manualUsage/store.ts`
 - `modules/manualUsage/reconciliation.ts`
 
