@@ -11,6 +11,11 @@ import {
   gapfillPrimaryErrorLine,
   type GapfillFailureFields,
 } from "@/components/admin/gapfillLabAdminUi";
+import {
+  GapFillCalculationLogicLauncher,
+  GapFillCalculationLogicModal,
+} from "@/components/admin/GapFillCalculationLogicModal";
+import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/calculationLogicSummary";
 import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdminSerialization";
 import {
   buildActualDiagnosticsHeaderReadout,
@@ -466,6 +471,7 @@ export default function GapFillLabCanonicalClient() {
   const [pastSimSnapshot, setPastSimSnapshot] = useState<Record<string, unknown> | null>(null);
   const [actualEngineDiagnosticsLoading, setActualEngineDiagnosticsLoading] = useState(false);
   const [actualEngineDiagnosticsError, setActualEngineDiagnosticsError] = useState<string | null>(null);
+  const [openCalculationLogic, setOpenCalculationLogic] = useState(false);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
@@ -902,6 +908,29 @@ export default function GapFillLabCanonicalClient() {
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
+  const calculationLogicSummary = useMemo(
+    () =>
+      result?.ok && testHouseBaselineDataset
+        ? buildGapfillCalculationLogicSummary({
+            selectedMode: visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode,
+            dataset: testHouseBaselineDataset,
+            sharedDiagnostics: (result as any).sharedDiagnostics ?? null,
+            compareProjection: result.compareProjection ?? null,
+            sourceHouseId: apiSourceHouseId ?? sourceHouse?.id ?? null,
+            testHomeId: apiTestHomeId ?? effectiveTestHomeId ?? null,
+          })
+        : null,
+    [
+      adminLabTreatmentMode,
+      apiSourceHouseId,
+      apiTestHomeId,
+      effectiveTestHomeId,
+      result,
+      sourceHouse?.id,
+      testHouseBaselineDataset,
+      visibilityFromResult?.treatmentMode,
+    ]
+  );
   const exportPayloadBase = useMemo(
     () => ({
       workspace: "gapfill-lab-canonical-client",
@@ -1097,7 +1126,18 @@ export default function GapFillLabCanonicalClient() {
       )}
 
       <div className="border rounded p-4 bg-white space-y-3">
-        <div className="font-semibold text-sm">Modes & diagnostics (authoritative API fields)</div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold text-sm">Modes & diagnostics (authoritative API fields)</div>
+            <div className="mt-1 text-xs text-brand-navy/65">
+              The calculation-logic popup explains the current GapFill mode from persisted lockbox, artifact, and shared diagnostics data only.
+            </div>
+          </div>
+          <GapFillCalculationLogicLauncher
+            onOpen={() => setOpenCalculationLogic(true)}
+            disabled={!calculationLogicSummary}
+          />
+        </div>
         <div className="grid gap-3 md:grid-cols-2 text-sm">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab weather treatment</div>
@@ -1973,6 +2013,12 @@ export default function GapFillLabCanonicalClient() {
           ))}
         </div>
       </details>
+
+      <GapFillCalculationLogicModal
+        open={openCalculationLogic}
+        onClose={() => setOpenCalculationLogic(false)}
+        summary={calculationLogicSummary}
+      />
 
       <Modal
         open={openFullHomeEditor}
