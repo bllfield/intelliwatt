@@ -2314,6 +2314,53 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.travelRangesSource).toBe("test_home");
   });
 
+  it("canonicalizes duplicate source houses onto the esiid-backed record", async () => {
+    prisma.houseAddress.findMany.mockResolvedValueOnce([
+      {
+        id: "shell-house",
+        addressLine1: "146 Valley View Drive",
+        addressCity: "Lewisville",
+        addressState: "TX",
+        addressZip5: "75067",
+        esiid: null,
+      },
+      {
+        id: "real-house",
+        addressLine1: "146 Valley View Drive",
+        addressCity: "Lewisville",
+        addressState: "TX",
+        addressZip5: "75067",
+        esiid: "10400511114390001",
+      },
+    ]);
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ startDate: "2025-09-01", endDate: "2025-09-03" }]);
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "lookup_source_houses",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "shell-house",
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sourceHouses).toEqual([
+      {
+        id: "real-house",
+        esiid: "10400511114390001",
+        label: "146 Valley View Drive, Lewisville, TX",
+      },
+    ]);
+    expect(body.selectedSourceHouseId).toBe("real-house");
+    expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-09-01", endDate: "2025-09-03" }]);
+  });
+
   it("saves home/appliance inputs only to test-home house id", async () => {
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({

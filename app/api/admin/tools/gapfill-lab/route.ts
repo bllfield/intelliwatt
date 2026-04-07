@@ -155,6 +155,79 @@ const VALIDATION_SELECTION_MODES = [
   ...VALIDATION_DAY_SELECTION_MODES,
 ] as const;
 
+function gapfillHouseGroupKey(house: {
+  addressLine1?: unknown;
+  addressCity?: unknown;
+  addressState?: unknown;
+  addressZip5?: unknown;
+}): string {
+  return [
+    String(house?.addressLine1 ?? "").trim().toLowerCase(),
+    String(house?.addressCity ?? "").trim().toLowerCase(),
+    String(house?.addressState ?? "").trim().toLowerCase(),
+    String(house?.addressZip5 ?? "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function selectCanonicalGapfillHouseFromGroup<T extends {
+  id?: unknown;
+  esiid?: unknown;
+  addressLine1?: unknown;
+  addressCity?: unknown;
+  addressState?: unknown;
+  addressZip5?: unknown;
+}>(houses: T[], selectedId?: string | null): T | null {
+  const candidates = houses.filter(Boolean);
+  if (candidates.length === 0) return null;
+  const exact = selectedId
+    ? candidates.find((house) => String(house?.id ?? "").trim() === String(selectedId).trim()) ?? null
+    : null;
+  const withEsiid = candidates.find((house) => String(house?.esiid ?? "").trim()) ?? null;
+  return withEsiid ?? exact ?? candidates[0] ?? null;
+}
+
+function buildCanonicalGapfillSourceHouseOptions<T extends {
+  id?: unknown;
+  esiid?: unknown;
+  addressLine1?: unknown;
+  addressCity?: unknown;
+  addressState?: unknown;
+  addressZip5?: unknown;
+}>(houses: T[], testHomeHouseId?: string | null): T[] {
+  const filtered = houses.filter(
+    (house) => !(testHomeHouseId && String(house?.id ?? "").trim() === String(testHomeHouseId).trim())
+  );
+  const groups = new Map<string, T[]>();
+  for (const house of filtered) {
+    const key = gapfillHouseGroupKey(house);
+    const bucket = groups.get(key) ?? [];
+    bucket.push(house);
+    groups.set(key, bucket);
+  }
+  return Array.from(groups.values())
+    .map((group) => selectCanonicalGapfillHouseFromGroup(group))
+    .filter((house): house is T => Boolean(house));
+}
+
+function resolveCanonicalGapfillSourceHouse<T extends {
+  id?: unknown;
+  esiid?: unknown;
+  addressLine1?: unknown;
+  addressCity?: unknown;
+  addressState?: unknown;
+  addressZip5?: unknown;
+}>(houses: T[], selectedId?: string | null, testHomeHouseId?: string | null): T | null {
+  const exact = houses.find((house) => String(house?.id ?? "").trim() === String(selectedId ?? "").trim()) ?? null;
+  if (!exact) return null;
+  const groupKey = gapfillHouseGroupKey(exact);
+  const siblings = houses.filter(
+    (house) =>
+      gapfillHouseGroupKey(house) === groupKey &&
+      !(testHomeHouseId && String(house?.id ?? "").trim() === String(testHomeHouseId).trim())
+  );
+  return selectCanonicalGapfillHouseFromGroup(siblings, selectedId);
+}
+
 function buildSourceCopySelectionDiagnostics(args: {
   selectionMode: ValidationDaySelectionMode;
   selectedDateKeys: string[];
@@ -636,16 +709,18 @@ export async function POST(req: NextRequest) {
   if (rawAction === "lookup_source_houses") {
     const link = labOwnerUserId ? await getLabTestHomeLink(labOwnerUserId) : null;
     const testHomeHouseId = String(link?.testHomeHouseId ?? "").trim();
-    const sourceHouseOptions = houses.filter(
-      (h: any) => !(testHomeHouseId && String(h.id) === testHomeHouseId)
-    );
+    const sourceHouseOptions = buildCanonicalGapfillSourceHouseOptions(houses, testHomeHouseId);
     const requestedSourceHouseId = String(sourceHouseIdParam ?? "").trim();
-    const linkedSourceHouseId = String(link?.sourceHouseId ?? "").trim();
+    const linkedSourceHouseId = String(
+      resolveCanonicalGapfillSourceHouse(houses, String(link?.sourceHouseId ?? "").trim(), testHomeHouseId)?.id ??
+        link?.sourceHouseId ??
+        ""
+    ).trim();
     const selectedSourceHouseId =
       (requestedSourceHouseId &&
       requestedSourceHouseId !== testHomeHouseId &&
-      sourceHouseOptions.some((h: any) => String(h.id) === requestedSourceHouseId)
-        ? requestedSourceHouseId
+      resolveCanonicalGapfillSourceHouse(houses, requestedSourceHouseId, testHomeHouseId)?.id
+        ? String(resolveCanonicalGapfillSourceHouse(houses, requestedSourceHouseId, testHomeHouseId)?.id ?? "")
         : linkedSourceHouseId &&
             linkedSourceHouseId !== testHomeHouseId &&
             sourceHouseOptions.some((h: any) => String(h.id) === linkedSourceHouseId)
@@ -704,7 +779,9 @@ export async function POST(req: NextRequest) {
     }
     const link = await getLabTestHomeLink(labOwnerUserId);
     const testHomeHouseId = String(link?.testHomeHouseId ?? "").trim();
-    if (testHomeHouseId && String(sourceHouseIdParam ?? "").trim() === testHomeHouseId) {
+    const canonicalSelectedSourceHouse = resolveCanonicalGapfillSourceHouse(houses, sourceHouseIdParam, testHomeHouseId);
+    const canonicalSourceHouseId = String(canonicalSelectedSourceHouse?.id ?? sourceHouseIdParam ?? "").trim();
+    if (testHomeHouseId && canonicalSourceHouseId === testHomeHouseId) {
       return NextResponse.json(
         attachFailureContract({
           ok: false,
@@ -714,14 +791,14 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const selectedSourceHouse = houses.find((h: any) => String(h.id) === sourceHouseIdParam);
+    const selectedSourceHouse = canonicalSelectedSourceHouse;
     if (!selectedSourceHouse) {
       return NextResponse.json(attachFailureContract({ ok: false, error: "source_house_not_found" }), { status: 404 });
     }
     const replaced = await replaceGlobalLabTestHomeFromSource({
       ownerUserId: labOwnerUserId,
       sourceUserId: user.id,
-      sourceHouseId: sourceHouseIdParam,
+      sourceHouseId: canonicalSourceHouseId,
     });
     if (!replaced.ok) {
       return NextResponse.json(
@@ -745,7 +822,7 @@ export async function POST(req: NextRequest) {
         houseId: String(replaced.testHomeHouseId),
       });
       let testHomeTravelRanges = await getTravelRangesFromDb(labOwnerUserId, String(replaced.testHomeHouseId));
-      const sourceTravelRanges = await getTravelRangesFromDb(user.id, sourceHouseIdParam);
+      const sourceTravelRanges = await getTravelRangesFromDb(user.id, canonicalSourceHouseId);
       if (testHomeTravelRanges.length === 0 && sourceTravelRanges.length > 0) {
         await replaceTravelRangesForHousePastScenario(
           labOwnerUserId,
@@ -766,7 +843,7 @@ export async function POST(req: NextRequest) {
         action: "replace_test_home_from_source",
         userId: labOwnerUserId,
         sourceUserId: user.id,
-        sourceHouseId: sourceHouseIdParam,
+        sourceHouseId: canonicalSourceHouseId,
         testHomeId: String(replaced.testHomeHouseId ?? ""),
       });
       return NextResponse.json({
@@ -817,7 +894,7 @@ export async function POST(req: NextRequest) {
             postLoadError instanceof Error
               ? postLoadError.message
               : "Test-home replacement succeeded but post-load snapshot failed.",
-          sourceHouseId: sourceHouseIdParam,
+          sourceHouseId: canonicalSourceHouseId,
           testHomeHouseId: replaced.testHomeHouseId ?? null,
         }),
         { status: 500 }
@@ -954,6 +1031,14 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
+    const canonicalLinkedSourceHouse = resolveCanonicalGapfillSourceHouse(
+      houses,
+      String(link.sourceHouseId ?? ""),
+      String(link.testHomeHouseId ?? "")
+    );
+    const canonicalLinkedSourceHouseId = String(
+      canonicalLinkedSourceHouse?.id ?? link.sourceHouseId ?? ""
+    ).trim();
     const [labOwnerUser, testHomeHouse, sourceHouse] = await Promise.all([
       prisma.user.findUnique({ where: { id: labOwnerUserId }, select: { id: true, email: true } }),
       (prisma as any).houseAddress.findUnique({
@@ -961,7 +1046,7 @@ export async function POST(req: NextRequest) {
         select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
       }),
       (prisma as any).houseAddress.findUnique({
-        where: { id: link.sourceHouseId },
+        where: { id: canonicalLinkedSourceHouseId },
         select: { id: true, userId: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
       }),
     ]);
