@@ -110,6 +110,10 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
     },
     sourceHouseId: "source-house-1",
     testHomeId: "test-home-1",
+    sourceTravelRanges: [{ startDate: "2025-05-01", endDate: "2025-05-03" }],
+    testHomeTravelRanges: [{ startDate: "2025-06-10", endDate: "2025-06-12" }],
+    effectiveTravelRanges: [{ startDate: "2025-06-10", endDate: "2025-06-12" }],
+    effectiveTravelRangesSource: "test_home_saved",
   };
 }
 
@@ -169,5 +173,10 @@ describe("buildGapfillCalculationLogicSummary", () => {
       intervalSourceIdentity: "ifp-lockbox-1",
       weatherDatasetIdentity: "wx-lockbox-1",
     });
+    expect(summary.inputGroups.find((group) => group.key === "travel-validation")?.details.join(" ")).toContain(
+      "Latest effective travel source: test_home_saved"
+    );
+    expect(summary.rawDiagnostics.sourceTravelRanges).toEqual([{ startDate: "2025-05-01", endDate: "2025-05-03" }]);
+    expect(summary.rawDiagnostics.testHomeTravelRanges).toEqual([{ startDate: "2025-06-10", endDate: "2025-06-12" }]);
   });
 });

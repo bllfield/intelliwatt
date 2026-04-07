@@ -657,6 +657,10 @@ export async function POST(req: NextRequest) {
       labOwnerUserId && link?.testHomeHouseId
         ? await getTravelRangesFromDb(labOwnerUserId, String(link.testHomeHouseId))
         : [];
+    const sourceTravelRanges =
+      selectedSourceHouseId
+        ? await getTravelRangesFromDb(user.id, selectedSourceHouseId)
+        : [];
     const userDefaultValidationSelectionMode = await getUserDefaultValidationSelectionMode();
     const labCorrelationId = createSimCorrelationId();
     logSimPipelineEvent("admin_lab_source_house_selected", {
@@ -681,6 +685,8 @@ export async function POST(req: NextRequest) {
       selectedSourceHouseId,
       testHomeLink: link,
       travelRangesFromDb: testHomeTravelRanges,
+      testHomeTravelRangesFromDb: testHomeTravelRanges,
+      sourceTravelRangesFromDb: sourceTravelRanges,
       travelRangesSource: "test_home",
       userDefaultValidationSelectionMode,
       adminLabDefaultValidationSelectionMode: getAdminLabDefaultValidationSelectionMode(),
@@ -788,6 +794,11 @@ export async function POST(req: NextRequest) {
         homeProfile: testHomeProfiles.homeProfile,
         applianceProfile: testHomeProfiles.applianceProfile,
         travelRangesFromDb: effectiveTravelRanges,
+        testHomeTravelRangesFromDb: testHomeTravelRanges,
+        sourceTravelRangesFromDb: sourceTravelRanges,
+        effectiveTravelRangesForRecalc: effectiveTravelRanges,
+        effectiveTravelRangesSource:
+          testHomeTravelRanges.length > 0 ? "test_home_saved" : "source_house_fallback",
         travelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home" : "source_house_fallback",
         testHomeLink: refreshedLink,
@@ -919,6 +930,10 @@ export async function POST(req: NextRequest) {
       homeProfile: refreshedProfiles.homeProfile,
       applianceProfile: refreshedProfiles.applianceProfile,
       travelRangesFromDb: refreshedTravel,
+      testHomeTravelRangesFromDb: refreshedTravel,
+      sourceTravelRangesFromDb: link.sourceHouseId
+        ? await getTravelRangesFromDb(user.id, String(link.sourceHouseId))
+        : [],
       message: "Saved canonical test-home inputs. Recalc to refresh outputs.",
     });
   }
@@ -1064,14 +1079,13 @@ export async function POST(req: NextRequest) {
     let testRangesUsed: Array<{ startDate: string; endDate: string }> = [];
     let testDaysSelected = 0;
     let selectionDiagnostics: Record<string, unknown> | null = null;
-    if (
-      shouldUseCanonicalSourceCopyPolicy({
-        usageInputMode: testUsageInputMode,
-        explicitAdminValidationMode: explicitAdminLabValidationMode,
-        testRanges: selectedTestRanges,
-        testDaysRequested,
-      })
-    ) {
+    const usingSourceTravelRangesForRecalc = shouldUseCanonicalSourceCopyPolicy({
+      usageInputMode: testUsageInputMode,
+      explicitAdminValidationMode: explicitAdminLabValidationMode,
+      testRanges: selectedTestRanges,
+      testDaysRequested,
+    });
+    if (usingSourceTravelRangesForRecalc) {
       const sourcePastScenario = await (prisma as any).usageSimulatorScenario
         .findFirst({
           where: {
@@ -1686,6 +1700,11 @@ export async function POST(req: NextRequest) {
         helper: canonicalWindowHelper,
       },
       travelRangesFromDb: travelRangesForRecalc,
+      testHomeTravelRangesFromDb: travelRangesFromDb,
+      sourceTravelRangesFromDb,
+      effectiveTravelRangesForRecalc: travelRangesForRecalc,
+      effectiveTravelRangesSource:
+        usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
       testRangesUsed,
       testSelectionMode,
       adminValidationMode: testSelectionMode,

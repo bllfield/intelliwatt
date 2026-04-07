@@ -231,6 +231,10 @@ export function buildGapfillCalculationLogicSummary(args: {
   compareProjection?: { rows?: unknown; metrics?: unknown } | null;
   sourceHouseId?: string | null;
   testHomeId?: string | null;
+  sourceTravelRanges?: Array<{ startDate: string; endDate: string }> | null;
+  testHomeTravelRanges?: Array<{ startDate: string; endDate: string }> | null;
+  effectiveTravelRanges?: Array<{ startDate: string; endDate: string }> | null;
+  effectiveTravelRangesSource?: string | null;
 }): GapfillCalculationLogicSummary {
   const dataset = args.dataset ?? {};
   const meta = asRecord(dataset?.meta);
@@ -250,6 +254,9 @@ export function buildGapfillCalculationLogicSummary(args: {
   const compareProjection = asRecord(args.compareProjection);
   const compareMetrics = asRecord(compareProjection.metrics);
   const compareRows = asArray(compareProjection.rows);
+  const sourceTravelRangeList = asArray<Record<string, unknown>>(args.sourceTravelRanges);
+  const testHomeTravelRangeList = asArray<Record<string, unknown>>(args.testHomeTravelRanges);
+  const effectiveTravelRangeList = asArray<Record<string, unknown>>(args.effectiveTravelRanges);
   const selectedMode = String(
     args.selectedMode ??
       identityContext.usageInputMode ??
@@ -386,11 +393,15 @@ export function buildGapfillCalculationLogicSummary(args: {
       key: "travel-validation",
       label: "Travel/vacant and validation selection",
       used: travelRangeList.length > 0 || validationKeyList.length > 0 || keepRefUtcDateKeyCount != null,
-      sourceOfTruth: "Persisted lockbox travel ranges and validation keys",
+      sourceOfTruth: "Persisted lockbox validation keys plus the effective travel-range set used for the latest test-home recalc",
       role: "Exclusion and compare-scope control",
       priorityBand: "Exclusion",
       details: [
-        `Travel ranges: ${travelRangeList.length}`,
+        `Effective travel ranges used in artifact: ${travelRangeList.length}`,
+        `Latest effective travel source: ${String(args.effectiveTravelRangesSource ?? "not attached")}`,
+        `Source Home travel ranges visible in GapFill: ${sourceTravelRangeList.length}`,
+        `Test Home saved travel ranges visible in GapFill: ${testHomeTravelRangeList.length}`,
+        `Latest effective travel ranges returned by route: ${effectiveTravelRangeList.length}`,
         `Validation/test days: ${validationKeyList.length}`,
         `Modeled keep-ref days: ${formatMaybeCount(keepRefUtcDateKeyCount)}`,
       ],
@@ -769,6 +780,10 @@ export function buildGapfillCalculationLogicSummary(args: {
       lockboxInput,
       perRunTrace,
       compareMetrics,
+      sourceTravelRanges: sourceTravelRangeList,
+      testHomeTravelRanges: testHomeTravelRangeList,
+      effectiveTravelRanges: effectiveTravelRangeList,
+      effectiveTravelRangesSource: args.effectiveTravelRangesSource ?? null,
     },
   };
 }

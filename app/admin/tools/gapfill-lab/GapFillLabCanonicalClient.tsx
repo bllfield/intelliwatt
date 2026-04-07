@@ -42,6 +42,11 @@ type RunResult = {
   homeProfile?: any;
   applianceProfile?: any;
   travelRangesFromDb?: DateRange[];
+  testHomeTravelRangesFromDb?: DateRange[];
+  sourceTravelRangesFromDb?: DateRange[];
+  effectiveTravelRangesForRecalc?: DateRange[];
+  effectiveTravelRangesSource?: string | null;
+  travelRangesSource?: string | null;
   testHomeLink?: any;
   usage365?: any;
   baselineDatasetProjection?: any;
@@ -179,6 +184,21 @@ function summarizeValidationKeys(keys: unknown): string {
 
 function formatNumberMaybe(value: unknown, digits = 2): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+}
+
+function formatTravelRangeSourceLabel(value: unknown): string {
+  switch (String(value ?? "").trim()) {
+    case "test_home_saved":
+      return "Test Home saved travel ranges";
+    case "source_house_fallback":
+      return "Source Home fallback travel ranges";
+    case "source_house_copy_policy":
+      return "Source Home travel ranges (canonical source-copy policy)";
+    case "test_home":
+      return "Test Home saved travel ranges";
+    default:
+      return "Pending recalc";
+  }
 }
 
 function getModeExplanation(mode: unknown): string {
@@ -443,6 +463,9 @@ export default function GapFillLabCanonicalClient() {
   const [testHome, setTestHome] = useState<any>(null);
   const [sourceHouse, setSourceHouse] = useState<any>(null);
   const [travelRanges, setTravelRanges] = useState<DateRange[]>([]);
+  const [sourceTravelRanges, setSourceTravelRanges] = useState<DateRange[]>([]);
+  const [effectiveTravelRanges, setEffectiveTravelRanges] = useState<DateRange[] | null>(null);
+  const [effectiveTravelRangesSource, setEffectiveTravelRangesSource] = useState<string | null>(null);
   const [testRanges, setTestRanges] = useState<DateRange[]>([{ ...EMPTY_RANGE }]);
   const [randomMode, setRandomMode] = useState(false);
   const [testDays, setTestDays] = useState(21);
@@ -613,8 +636,24 @@ export default function GapFillLabCanonicalClient() {
     } else if (!json.userDefaultValidationSelectionMode && json.adminLabDefaultValidationSelectionMode) {
       setAdminLabValidationSelectionMode(String(json.adminLabDefaultValidationSelectionMode));
     }
-    if (json.travelRangesFromDb) {
+    if (Array.isArray(json.testHomeTravelRangesFromDb)) {
+      setTravelRanges(json.testHomeTravelRangesFromDb);
+    } else if (Array.isArray(json.travelRangesFromDb)) {
       setTravelRanges(json.travelRangesFromDb);
+    }
+    if (Array.isArray(json.sourceTravelRangesFromDb)) {
+      setSourceTravelRanges(json.sourceTravelRangesFromDb);
+    }
+    if (Array.isArray(json.effectiveTravelRangesForRecalc)) {
+      setEffectiveTravelRanges(json.effectiveTravelRangesForRecalc);
+      setEffectiveTravelRangesSource(json.effectiveTravelRangesSource ?? null);
+    } else if (
+      action === "lookup_source_houses" ||
+      action === "replace_test_home_from_source" ||
+      action === "save_test_home_inputs"
+    ) {
+      setEffectiveTravelRanges(null);
+      setEffectiveTravelRangesSource(null);
     }
     if (json.homeProfile) setHomeProfileJson(prettyJson(json.homeProfile));
     if (json.applianceProfile) setApplianceProfileJson(prettyJson(json.applianceProfile));
@@ -918,16 +957,24 @@ export default function GapFillLabCanonicalClient() {
             compareProjection: result.compareProjection ?? null,
             sourceHouseId: apiSourceHouseId ?? sourceHouse?.id ?? null,
             testHomeId: apiTestHomeId ?? effectiveTestHomeId ?? null,
+            sourceTravelRanges,
+            testHomeTravelRanges: travelRanges,
+            effectiveTravelRanges: effectiveTravelRanges ?? undefined,
+            effectiveTravelRangesSource,
           })
         : null,
     [
       adminLabTreatmentMode,
       apiSourceHouseId,
       apiTestHomeId,
+      effectiveTravelRanges,
+      effectiveTravelRangesSource,
       effectiveTestHomeId,
       result,
       sourceHouse?.id,
+      sourceTravelRanges,
       testHouseBaselineDataset,
+      travelRanges,
       visibilityFromResult?.treatmentMode,
     ]
   );
@@ -1138,6 +1185,11 @@ export default function GapFillLabCanonicalClient() {
             disabled={!calculationLogicSummary}
           />
         </div>
+        {!calculationLogicSummary ? (
+          <div className="text-xs text-brand-navy/60">
+            Run canonical recalc first to unlock the persisted calculation-logic explanation for the current test-home result.
+          </div>
+        ) : null}
         <div className="grid gap-3 md:grid-cols-2 text-sm">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Admin lab weather treatment</div>
@@ -1407,8 +1459,30 @@ export default function GapFillLabCanonicalClient() {
           ) : null}
         </div>
 
+        <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-3 space-y-2">
+          <div className="text-xs font-semibold text-brand-navy">Travel range visibility</div>
+          <div className="grid gap-2 md:grid-cols-3 text-xs text-brand-navy/85">
+            <div className="rounded border border-brand-blue/10 bg-white p-2">
+              <div className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Source Home</div>
+              <div className="mt-1">{summarizeRanges(sourceTravelRanges)}</div>
+            </div>
+            <div className="rounded border border-brand-blue/10 bg-white p-2">
+              <div className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Test Home saved</div>
+              <div className="mt-1">{summarizeRanges(travelRanges)}</div>
+            </div>
+            <div className="rounded border border-brand-blue/10 bg-white p-2">
+              <div className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Effective latest recalc</div>
+              <div className="mt-1">{effectiveTravelRanges ? summarizeRanges(effectiveTravelRanges) : "Run canonical recalc to confirm the exact travel ranges used."}</div>
+              <div className="mt-1 text-brand-navy/60">{formatTravelRangeSourceLabel(effectiveTravelRangesSource)}</div>
+            </div>
+          </div>
+          <div className="text-[11px] text-brand-navy/65">
+            Source Home and Test Home ranges are shown separately. The Effective latest recalc bucket reflects the exact travel ranges that the most recent canonical test-home run used.
+          </div>
+        </div>
+
         <div>
-          <div className="text-xs font-semibold mb-1">Travel/Vacant Ranges (DB-backed)</div>
+          <div className="text-xs font-semibold mb-1">Test Home Travel/Vacant Ranges (editable DB-backed)</div>
           <div className="space-y-2">
             {travelRanges.map((r, idx) => (
               <div key={`travel-${idx}`} className="flex gap-2">

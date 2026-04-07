@@ -15,6 +15,17 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).toContain("GapFillCalculationLogicLauncher");
     expect(source).toContain("setOpenCalculationLogic(true)");
     expect(source).toContain("The calculation-logic popup explains the current GapFill mode");
+    expect(source).toContain("Run canonical recalc first to unlock the persisted calculation-logic explanation");
+  });
+
+  it("shows separate source, test-home, and effective travel-range visibility in GapFill", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("Travel range visibility");
+    expect(source).toContain("Source Home");
+    expect(source).toContain("Test Home saved");
+    expect(source).toContain("Effective latest recalc");
+    expect(source).toContain("The Effective latest recalc bucket reflects the exact travel ranges");
   });
 
   it("defines the modal sections for the admin-only calculation logic view", () => {

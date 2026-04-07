@@ -1282,6 +1282,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.validationPolicyOwner).toBe("adminValidationPolicy");
     expect(body.testSelectionMode).toBe("random_simple");
     expect(body.travelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.testHomeTravelRangesFromDb).toEqual([]);
+    expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.effectiveTravelRangesForRecalc).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.effectiveTravelRangesSource).toBe("source_house_copy_policy");
     expect(body.testRangesUsed).toEqual([{ startDate: "2025-04-11", endDate: "2025-04-12" }]);
     expect(Array.from(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal ?? []).sort()).toEqual([
       "2025-04-11",
@@ -2255,6 +2259,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("replaces test home from selected source house", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ startDate: "2025-08-13", endDate: "2025-08-17" }])
+      .mockResolvedValueOnce([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
       action: "replace_test_home_from_source",
@@ -2268,6 +2278,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.ok).toBe(true);
     expect(body.action).toBe("replace_test_home_from_source");
     expect(body.testHome?.label).toBe("Test Home");
+    expect(body.testHomeTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.effectiveTravelRangesForRecalc).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.effectiveTravelRangesSource).toBe("test_home_saved");
     expect(replaceGlobalLabTestHomeFromSource).toHaveBeenCalledWith({
       ownerUserId: "u1",
       sourceUserId: "u1",
@@ -2278,9 +2292,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   it("prefills lookup travel ranges from linked test home", async () => {
     const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
     const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
-    getTravelRangesFromDbMock.mockResolvedValueOnce([
-      { startDate: "2025-08-13", endDate: "2025-08-17" },
-    ]);
+    getTravelRangesFromDbMock
+      .mockResolvedValueOnce([{ startDate: "2025-08-13", endDate: "2025-08-17" }])
+      .mockResolvedValueOnce([{ startDate: "2025-09-01", endDate: "2025-09-03" }]);
 
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
@@ -2295,6 +2309,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.ok).toBe(true);
     expect(body.action).toBe("lookup_source_houses");
     expect(body.travelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.testHomeTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-09-01", endDate: "2025-09-03" }]);
     expect(body.travelRangesSource).toBe("test_home");
   });
 
