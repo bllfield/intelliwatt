@@ -3870,6 +3870,45 @@ function baseKindFromMode(mode: SimulatorMode): BaseKind {
   return "SMT_ACTUAL_BASELINE";
 }
 
+function isLeanManualTotalsMode(mode: SimulatorMode): boolean {
+  return mode === "MANUAL_TOTALS";
+}
+
+function buildLeanManualTotalsResolvedFingerprint(args: {
+  houseId: string;
+  actualContextHouseId: string;
+  manualUsagePayload: unknown;
+}): ResolvedSimFingerprint {
+  const payload = args.manualUsagePayload as { mode?: unknown } | null;
+  const manualTotalsConstraint =
+    payload?.mode === "MONTHLY" ? "monthly" : payload?.mode === "ANNUAL" ? "annual" : "none";
+  return {
+    resolverVersion: "manual_totals_lean_v1",
+    resolvedHash: `manual_totals_lean:${args.houseId}:${args.actualContextHouseId}:${manualTotalsConstraint}`,
+    blendMode:
+      manualTotalsConstraint === "monthly"
+        ? "constrained_monthly_totals"
+        : manualTotalsConstraint === "annual"
+          ? "constrained_annual_total"
+          : "insufficient_inputs",
+    underlyingSourceMix: "insufficient_inputs",
+    manualTotalsConstraint,
+    resolutionNotes: [
+      "manual_totals_lean_recalc_skips_fingerprint_resolution",
+      "manual_totals_readback_loads_richer_diagnostics_from_persisted_artifact",
+    ],
+    wholeHomeHouseId: args.houseId,
+    usageFingerprintHouseId: args.actualContextHouseId,
+    wholeHomeFingerprintArtifactId: null,
+    usageFingerprintArtifactId: null,
+    wholeHomeStatus: null,
+    usageStatus: null,
+    wholeHomeSourceHash: null,
+    usageSourceHash: null,
+    usageBlendWeight: 0,
+  };
+}
+
 export type SimulatorRecalcOk = {
   ok: true;
   houseId: string;
@@ -3959,14 +3998,13 @@ async function recalcSimulatorBuildImpl(args: {
     mode,
   });
 
-  // Load persisted baseline inputs
-  const [manualRec, homeRec, applianceRec] = await Promise.all([
-    (prisma as any).manualUsageInput
-      .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
-      .catch(() => null),
-    getHomeProfileSimulatedByUserHouse({ userId, houseId }),
-    getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-  ]);
+  // Manual totals runs under a very small Prisma pool in admin environments, so avoid
+  // fan-out here and keep the shared recalc lean before the persisted readback loads richer diagnostics.
+  const manualRec = await (prisma as any).manualUsageInput
+    .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
+    .catch(() => null);
+  const homeRec = await getHomeProfileSimulatedByUserHouse({ userId, houseId });
+  const applianceRec = await getApplianceProfileSimulatedByUserHouse({ userId, houseId });
 
   let manualUsagePayload = (manualRec?.payload as any) ?? null;
   const canonical = canonicalMonthsForRecalc({ mode, manualUsagePayload, now: args.now });
@@ -3974,17 +4012,33 @@ async function recalcSimulatorBuildImpl(args: {
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const actualOk = await hasActualIntervals({
-    houseId: actualContextHouseId,
-    esiid: esiid ?? null,
-    canonicalMonths: canonical.months,
-  });
-  const actualSourceAnchor = await resolveActualUsageSourceAnchor({
-    houseId: actualContextHouseId,
-    esiid: esiid ?? null,
-    timezone: "America/Chicago",
-  });
-  const actualSource = actualSourceAnchor.source;
+  const actualOk = mode === "SMT_BASELINE"
+    ? await hasActualIntervals({
+        houseId: actualContextHouseId,
+        esiid: esiid ?? null,
+        canonicalMonths: canonical.months,
+      })
+    : false;
+  let actualSourceAnchor = {
+    source: null as "SMT" | "GREEN_BUTTON" | null,
+    anchorEndDate: null as string | null,
+    smtAnchorEndDate: null as string | null,
+    greenButtonAnchorEndDate: null as string | null,
+  };
+  if (!isLeanManualTotalsMode(mode)) {
+    const resolvedActualSourceAnchor = await resolveActualUsageSourceAnchor({
+      houseId: actualContextHouseId,
+      esiid: esiid ?? null,
+      timezone: "America/Chicago",
+    });
+    actualSourceAnchor = {
+      source: resolvedActualSourceAnchor.source,
+      anchorEndDate: resolvedActualSourceAnchor.anchorEndDate,
+      smtAnchorEndDate: resolvedActualSourceAnchor.smtAnchorEndDate,
+      greenButtonAnchorEndDate: resolvedActualSourceAnchor.greenButtonAnchorEndDate,
+    };
+  }
+  let actualSource = actualSourceAnchor.source;
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
   if (mode === "SMT_BASELINE" && !actualOk) {
@@ -4145,6 +4199,13 @@ async function recalcSimulatorBuildImpl(args: {
       const sourceUsageDataset = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
         skipFullYearIntervalFetch: true,
       }).catch(() => ({ dataset: null }));
+      if (!actualSource) {
+        const sourceFromDataset = String(sourceUsageDataset?.dataset?.summary?.source ?? "").trim().toUpperCase();
+        actualSource =
+          sourceFromDataset === "SMT" || sourceFromDataset === "GREEN_BUTTON"
+            ? (sourceFromDataset as "SMT" | "GREEN_BUTTON")
+            : actualSource;
+      }
       const desiredManualStageOneMode =
         args.adminLabTreatmentMode === "manual_annual_constrained" ? "ANNUAL" : "MONTHLY";
       const seedSet = buildManualUsageStageOneResolvedSeeds({
@@ -4727,19 +4788,26 @@ async function recalcSimulatorBuildImpl(args: {
     windowEnd: fingerprintWindowEnd,
     correlationId: args.correlationId,
   });
-  try {
-    await ensureSimulatorFingerprintsWithContext(fingerprintContext);
-  } catch (e) {
-    console.warn("[usageSimulator] ensureSimulatorFingerprintsForRecalc failed", e);
-  }
-
   let resolvedSimFingerprint: ResolvedSimFingerprint | undefined;
-  try {
-    resolvedSimFingerprint = await resolveSimFingerprintWithContext(fingerprintContext, {
-      manualUsagePayload: simMode === "MANUAL_TOTALS" ? manualUsagePayload : null,
+  if (isLeanManualTotalsMode(simMode)) {
+    resolvedSimFingerprint = buildLeanManualTotalsResolvedFingerprint({
+      houseId,
+      actualContextHouseId,
+      manualUsagePayload,
     });
-  } catch (e) {
-    console.warn("[usageSimulator] resolveSimFingerprint failed", e);
+  } else {
+    try {
+      await ensureSimulatorFingerprintsWithContext(fingerprintContext);
+    } catch (e) {
+      console.warn("[usageSimulator] ensureSimulatorFingerprintsForRecalc failed", e);
+    }
+    try {
+      resolvedSimFingerprint = await resolveSimFingerprintWithContext(fingerprintContext, {
+        manualUsagePayload: simMode === "MANUAL_TOTALS" ? manualUsagePayload : null,
+      });
+    } catch (e) {
+      console.warn("[usageSimulator] resolveSimFingerprint failed", e);
+    }
   }
   if (resolvedSimFingerprint && args.adminLabTreatmentMode) {
     resolvedSimFingerprint = applyAdminLabTreatmentToResolvedFingerprint({
@@ -4877,11 +4945,23 @@ async function recalcSimulatorBuildImpl(args: {
             : "Past: baseline patched for excluded + leading-missing days"
         );
       } else if (simMode === "MANUAL_TOTALS") {
-        throw new Error("manual_monthly_shared_producer_no_dataset");
+        const producerError =
+          "error" in result && typeof result.error === "string"
+            ? result.error
+            : "Shared MANUAL_TOTALS producer returned no dataset.";
+        return {
+          ok: false,
+          error: "manual_monthly_shared_producer_no_dataset",
+          missingItems: [producerError],
+        };
       }
     } catch (e) {
       if (simMode === "MANUAL_TOTALS") {
-        throw e;
+        return {
+          ok: false,
+          error: "manual_monthly_shared_producer_no_dataset",
+          missingItems: [e instanceof Error ? e.message : String(e)],
+        };
       }
       console.warn("[usageSimulator] Past stitched curve failed, using monthly curve", e);
     }
@@ -5215,7 +5295,14 @@ async function recalcSimulatorBuildImpl(args: {
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
       });
-      const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
+      const usageShapeProfileIdentity = isLeanManualTotalsMode(simMode)
+        ? {
+            usageShapeProfileId: null,
+            usageShapeProfileVersion: null,
+            usageShapeProfileDerivedAt: null,
+            usageShapeProfileSimHash: null,
+          }
+        : await getUsageShapeProfileIdentityForPast(houseId);
       const weatherIdentity = await computePastWeatherIdentity({
         houseId: canonicalActualIdentity.houseId,
         startDate: identityWindow.startDate,

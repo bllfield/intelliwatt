@@ -67,9 +67,11 @@
 
 - Manual-usage product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage manual model: monthly Stage 1 bill-cycle semantics, annual Stage 1 annual-total semantics, then shared Stage 2 normalized Past Sim behavior. Current implementation stores additive `statementRanges[]` metadata for monthly payloads, keeps Manual Usage Lab and GapFill as separate surfaces, and centralizes shared Stage 1/pre-lockbox monthly+annual helper ownership in `modules/manualUsage/prefill.ts`.
 - GapFill manual monthly/manual annual now reuse that same shared Stage 1 helper family and the shared recalc dispatch/readback contract: the route triggers the canonical Past recalc, then loads persisted manual compare/reconciliation views from the artifact. Actual House remains the interval-backed source truth; Test Home shows the constrained shared result.
+- `MANUAL_TOTALS` recalc is intentionally lean on that shared path: exact-interval fingerprint/profile tuning work is not part of manual monthly/annual truth production, and admin-facing compare/diagnostic enrichment belongs on persisted readback after recalc succeeds.
 - Exact-interval observed-history modeling intent is now explicit in runtime and docs: bounded K-nearest weather-similar donor blending leads modeled-day reconstruction in actual-backed mode, donor-pool variance guardrails damp noisy donor cohorts, heating-day donor ranking weights HDD/min-temp more strongly, broader calendar ladders are fallback-only, bounded post-donor weather tuning is secondary, and home/appliance profiles stay supportive context rather than the main selector.
 - GapFill tuning surfaces must report donor-path usage separately from true broad fallback usage, and the Actual House lockbox-flow panel must read the same shared-diagnostics truth already attached to the artifact.
 - Manual-usage wiring work must not replace or weaken that exact-interval path; Daily Curve Compare, calculation-logic exact-interval summaries, and actual/test parity stay on the existing shared donor-tuning branch.
+- Admin-only manual-mode failures may surface root-cause infrastructure detail such as Prisma pool exhaustion (`P2024`) for debugging without changing customer-page semantics.
 
 ## Where To Start
 

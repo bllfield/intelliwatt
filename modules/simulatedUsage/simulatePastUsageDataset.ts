@@ -355,7 +355,7 @@ function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
       for (const [localDateKey, count] of Array.from(localDateKeyCounts.entries())) {
         if (
           count > dominantLocalDateCount ||
-          (count === dominantLocalDateCount && (dominantLocalDateKey == null || localDateKey < dominantLocalDateKey))
+          (count === dominantLocalDateCount && (dominantLocalDateKey == null || localDateKey > dominantLocalDateKey))
         ) {
           dominantLocalDateKey = localDateKey;
           dominantLocalDateCount = count;
@@ -972,18 +972,26 @@ export async function simulatePastUsageDataset(
       (buildInputs.resolvedSimFingerprint as
         | { blendMode?: string | null; underlyingSourceMix?: string | null; manualTotalsConstraint?: string | null }
         | undefined) ?? null;
+    const manualBillPeriodsRaw = (buildInputs as SimulatorBuildInputsV1).manualBillPeriods;
+    const manualBillPeriods: NonNullable<SimulatorBuildInputsV1["manualBillPeriods"]> = Array.isArray(manualBillPeriodsRaw)
+      ? (manualBillPeriodsRaw as NonNullable<SimulatorBuildInputsV1["manualBillPeriods"]>)
+      : [];
+    const inferredManualTotalsConstraint =
+      buildInputs.mode === "MANUAL_TOTALS"
+        ? manualBillPeriods.length > 0
+          ? "monthly"
+          : "annual"
+        : null;
     const manualTotalsConstraint =
       resolvedSimFingerprint?.manualTotalsConstraint ??
-      null;
+      inferredManualTotalsConstraint;
     const isMonthlyConstrainedManualTotals =
       buildInputs.mode === "MANUAL_TOTALS" && manualTotalsConstraint === "monthly";
     const usesWholeHomeOnlyPrior =
       resolvedSimFingerprint?.blendMode === "whole_home_only" ||
       resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
     const useWholeHomeOnlyLowDataFastPath = isLowDataSharedPastMode && usesWholeHomeOnlyPrior;
-    const eligibleManualBillPeriods = Array.isArray(buildInputs.manualBillPeriods)
-      ? buildInputs.manualBillPeriods.filter((period) => period.eligibleForConstraint)
-      : [];
+    const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
     const fetchedActualIntervals = preloadedIntervals
       ? null
       : isLowDataSharedPastMode
@@ -1181,21 +1189,53 @@ export async function simulatePastUsageDataset(
         : mergedActualWxByDateKey;
 
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
-    const [homeRecForPast, applianceRecForPast, ensuredUsageShape] = await Promise.all([
-      getHomeProfileSimulatedByUserHouse({ userId, houseId }),
-      getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
-      ensureUsageShapeProfileForSharedSimulation({
-        userId,
-        houseId: actualHouseId,
-        timezone,
-        canonicalMonths,
-      }),
-    ]);
-    const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
-    const applianceProfileFromDb = normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null);
-    const applianceProfileForPast = applianceProfileFromDb?.fuelConfiguration
-      ? applianceProfileFromDb
-      : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+    let homeProfileForPast = (buildInputs as any)?.snapshots?.homeProfile ?? null;
+    let applianceProfileForPast = normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+    let ensuredUsageShape: Awaited<ReturnType<typeof ensureUsageShapeProfileForSharedSimulation>> = {
+      usageShapeProfileSnap: null,
+      usageShapeProfileDiag: {
+        found: false,
+        id: null,
+        version: null,
+        derivedAt: null,
+        windowStartUtc: null,
+        windowEndUtc: null,
+        profileMonthKeys: [],
+        weekdayAvgLen: null,
+        weekendAvgLen: null,
+        canonicalMonths: canonicalMonths.map((m) => String(m)),
+        canonicalMonthsLen: canonicalMonths.length,
+        inlineDerivedFromActual: false,
+        reasonNotUsed: "manual_totals_low_data_adapter",
+        ensuredInFlow: false,
+        ensureAttempted: false,
+        ensuredReason: null,
+        ensureFailedReason: null,
+        ensuredProfileId: null,
+        canonicalCoverageStartDate: resolveCanonicalUsage365CoverageWindow().startDate,
+        canonicalCoverageEndDate: resolveCanonicalUsage365CoverageWindow().endDate,
+      },
+      profileAutoBuilt: false,
+      error: null,
+    };
+    if (buildInputs.mode !== "MANUAL_TOTALS") {
+      const [homeRecForPast, applianceRecForPast, ensuredUsageShapeFromDb] = await Promise.all([
+        getHomeProfileSimulatedByUserHouse({ userId, houseId }),
+        getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
+        ensureUsageShapeProfileForSharedSimulation({
+          userId,
+          houseId: actualHouseId,
+          timezone,
+          canonicalMonths,
+        }),
+      ]);
+      homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : homeProfileForPast;
+      const applianceProfileFromDb = normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null);
+      applianceProfileForPast = applianceProfileFromDb?.fuelConfiguration
+        ? applianceProfileFromDb
+        : applianceProfileForPast;
+      ensuredUsageShape = ensuredUsageShapeFromDb;
+    }
     let usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     let lowDataShapeAdapterUsed = false;
     if (!usageShapeProfileSnap && isLowDataSharedPastMode) {

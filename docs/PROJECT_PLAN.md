@@ -453,8 +453,10 @@ This section is authoritative for future manual-usage implementation work.
   - annual seed derivation
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same shared Stage 1 helper family before entering the shared lockbox/sim/artifact path.
 - GapFill manual monthly/manual annual now dispatch through the shared `dispatchPastSimRecalc` entry with the same Stage 1 seed-resolution family (`modules/manualUsage/prefill.ts`) and then read back the persisted artifact, instead of doing the old inline recalc-plus-heavy-read orchestration in one blocking request.
+- `MANUAL_TOTALS` recalc on that shared path must stay lean: exact-interval fingerprint resolution, usage-shape profile DB reads/ensures, and bucket-oriented persistence work are not part of manual monthly/annual truth production and should be deferred to readback-only diagnostics when needed.
 - GapFill Actual House remains the full interval-backed source-truth view in manual modes; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
 - GapFill manual monthly compare must reconcile source actual interval monthly totals, shared Stage 1 monthly targets, and final simulated monthly totals; GapFill manual annual compare must reconcile source actual annual total, shared Stage 1 annual target, and final simulated annual total.
+- Admin manual-mode responses may surface root-cause infrastructure failures such as Prisma pool exhaustion (`P2024`) so GapFill and Manual Monthly Lab can distinguish producer failure from a generic timeout.
 - The exact-interval donor-tuning path remains locked: weather-first K-nearest donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic diagnostics are preserved and not replaced by manual-usage work.
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only

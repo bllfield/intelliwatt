@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+vi.mock("server-only", () => ({}));
+
 const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
   lookupAdminHousesByEmail: vi.fn(),
@@ -455,18 +457,49 @@ describe("admin manual monthly route", () => {
     );
     const recalcBody = await recalcRes.json();
 
-    expect(recalcRes.status).toBe(400);
+    expect(recalcRes.status).toBe(500);
     expect(recalcBody).toMatchObject({
       ok: false,
       action: "recalc",
       executionMode: "inline",
       correlationId: "cid-fail",
       error: "requirements_unmet",
+      failureCode: "SIMULATION_RUNTIME_ERROR",
+      failureMessage: "manual usage totals",
+      detail: "manual usage totals",
       result: {
         ok: false,
         error: "requirements_unmet",
       },
     });
+  });
+
+  it("surfaces Prisma pool exhaustion details for admin manual recalc failures", async () => {
+    mocks.dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "cid-pool",
+      result: {
+        ok: false,
+        error: "manual_monthly_shared_producer_no_dataset",
+        missingItems: ["P2024: Timed out fetching a new connection from the connection pool. connection limit: 1"],
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const recalcRes = await POST(
+      buildRequest({
+        action: "recalc",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        weatherPreference: "LAST_YEAR_WEATHER",
+      })
+    );
+    const recalcBody = await recalcRes.json();
+
+    expect(recalcRes.status).toBe(500);
+    expect(recalcBody.failureCode).toBe("PRISMA_POOL_EXHAUSTION");
+    expect(recalcBody.failureMessage).toContain("P2024");
+    expect(recalcBody.detail).toContain("connection limit: 1");
   });
 
   it("returns a non-2xx status when read_result fails on the shared read path", async () => {

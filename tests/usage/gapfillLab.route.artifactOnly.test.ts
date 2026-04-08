@@ -2316,6 +2316,36 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
   });
 
+  it("surfaces Prisma pool exhaustion details for manual shared-producer failures", async () => {
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "manual-cid-pool",
+      result: {
+        ok: false,
+        error: "manual_monthly_shared_producer_no_dataset",
+        missingItems: ["P2024: Timed out fetching a new connection from the connection pool. connection limit: 1"],
+      },
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      adminLabTreatmentMode: "manual_monthly_constrained",
+      includeUsage365: false,
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("manual_monthly_shared_producer_no_dataset");
+    expect(body.failureCode).toBe("PRISMA_POOL_EXHAUSTION");
+    expect(body.failureMessage).toContain("P2024");
+    expect(body.failureMessage).toContain("connection limit: 1");
+  });
+
   it("returns explicit canonical recalc timeout without route hang", async () => {
     const timeoutErr = new Error("canonical_recalc_timeout");
     (timeoutErr as any).code = "canonical_recalc_timeout";

@@ -63,7 +63,9 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
   - shared Stage 1/pre-lockbox monthly+annual helper ownership lives in `modules/manualUsage/prefill.ts`
   - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same helper family before the shared lockbox path
   - GapFill manual monthly/manual annual should trigger recalc through shared `dispatchPastSimRecalc` and then read the persisted artifact back for manual compare/reconciliation UI; do not reintroduce the old single-request heavy recalc/read bundle
+  - keep `MANUAL_TOTALS` recalc lean: exact-interval fingerprint/profile work is not required for manual monthly/annual truth production and richer diagnostics belong on persisted readback
   - In GapFill manual modes, Actual House stays the full interval-backed source truth, while Test Home shows the shared constrained result with monthly or annual reconciliation compare
+  - admin manual-mode failures may expose root-cause infrastructure detail like Prisma pool exhaustion (`P2024`) instead of only a generic timeout
   - deterministic SMT-derived bill ranges are fallback/reset convenience only
   - fallback seeding is bounded by actual coverage, capped at 12, and fails closed if lab-home seed persistence fails
 - Stage 1 reconciliation may use exact stored statement ranges, but the main Stage 2 Past chart remains the normalized shared Past output.

@@ -392,6 +392,41 @@ describe("shared sim usage-shape ensure path", () => {
     expect(successEv?.[1]).toHaveProperty("memoryRssMb");
   });
 
+  it("keeps MANUAL_TOTALS on the low-data adapter path without profile/home/appliance DB fetches", async () => {
+    const out = await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "source-h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        mode: "MANUAL_TOTALS",
+        monthlyTotalsKwhByMonth: { "2026-01": 310 },
+        snapshots: {
+          homeProfile: { squareFeet: 2000 },
+          applianceProfile: { fuelConfiguration: { heating: "electric" } },
+        },
+      } as any,
+      buildPathKind: "recalc",
+      includeSimulatedDayResults: false,
+    });
+
+    expect(out.dataset).not.toBeNull();
+    expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(getLatestUsageShapeProfile).not.toHaveBeenCalled();
+    expect(ensureUsageShapeProfileForUserHouse).not.toHaveBeenCalled();
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.usageShapeProfile).toBeTruthy();
+    expect(out.dataset?.meta?.usageShapeProfileDiag).toMatchObject({
+      reasonNotUsed: "low_data_monthly_shape_adapter",
+      ensureAttempted: false,
+    });
+  });
+
   it("refreshes stale usage shape in selected-days shared sim before simulation runs", async () => {
     const staleRow = {
       ...validUsageShapeRow(),

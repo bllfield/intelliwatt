@@ -24,6 +24,33 @@ export function classifySimulationFailure(args: {
   const error = normalizeText(args.error).toUpperCase();
   const haystack = `${code} ${error} ${message}`.toLowerCase();
 
+  if (
+    haystack.includes("p2024") ||
+    haystack.includes("connection pool") ||
+    haystack.includes("timed out fetching a new connection") ||
+    haystack.includes("connection limit: 1")
+  ) {
+    return {
+      reasonCode: "PRISMA_POOL_EXHAUSTION",
+      reasonMessage: "Simulation failed because the database connection pool was exhausted during recalc.",
+      missingData: [],
+      userFacingExplanation:
+        "The simulation could not finish because the database connection pool was exhausted during recalc. Retry after the current workload clears; admin diagnostics now include the root-cause detail.",
+      shouldAlert: true,
+    };
+  }
+
+  if (haystack.includes("manual_monthly_shared_producer_no_dataset")) {
+    return {
+      reasonCode: "MANUAL_SHARED_PRODUCER_NO_DATASET",
+      reasonMessage: "The shared MANUAL_TOTALS producer failed before it could return a dataset.",
+      missingData: [],
+      userFacingExplanation:
+        "The shared manual-usage producer did not complete successfully. Retry the run; admin diagnostics include the producer failure detail when available.",
+      shouldAlert: true,
+    };
+  }
+
   if (haystack.includes("usage_shape_profile_required") || haystack.includes("usage-shape profile")) {
     return {
       reasonCode: "MISSING_USAGE_SHAPE_PROFILE",

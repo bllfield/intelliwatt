@@ -18,6 +18,7 @@ import {
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
+import { classifySimulationFailure } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
   getUserDefaultValidationSelectionMode,
 } from "@/modules/usageSimulator/service";
@@ -122,6 +123,41 @@ function statusForReadResultFailure(result: {
     default:
       return 500;
   }
+}
+
+function buildAdminManualRecalcFailure(args: {
+  error?: string | null;
+  missingItems?: string[] | null;
+  fallbackMessage: string;
+}) {
+  const detail = Array.isArray(args.missingItems) && args.missingItems.length > 0
+    ? args.missingItems.join("; ")
+    : args.fallbackMessage;
+  const classification = classifySimulationFailure({
+    code: args.error,
+    error: args.error,
+    message: detail,
+  });
+  const normalizedDetail = detail.toLowerCase();
+  const reasonCode =
+    normalizedDetail.includes("p2024") ||
+    normalizedDetail.includes("connection pool") ||
+    normalizedDetail.includes("timed out fetching a new connection") ||
+    normalizedDetail.includes("connection limit: 1")
+      ? "PRISMA_POOL_EXHAUSTION"
+      : classification.reasonCode;
+  return {
+    status: String(args.error ?? "").trim() === "recalc_timeout" ? 504 : 500,
+    body: {
+      ok: false,
+      error: args.error ?? "recalc_failed",
+      message: classification.userFacingExplanation,
+      detail,
+      failureCode: reasonCode,
+      failureMessage: detail,
+      reasonCode,
+    },
+  };
 }
 
 function normalizeTravelRanges(payload: ManualUsagePayload | null): TravelRange[] {
@@ -464,26 +500,53 @@ export async function POST(req: NextRequest) {
         defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
         validationDayCount: 21,
       });
-      const dispatched = await dispatchPastSimRecalc({
-        userId: ownerUserId,
-        houseId: labHome.id,
-        esiid: null,
-        mode: "MANUAL_TOTALS",
-        scenarioId,
-        weatherPreference: userWeatherLogic.weatherPreference,
-        persistPastSimBaseline: true,
-        validationDaySelectionMode: userValidationPolicy.selectionMode,
-        validationDayCount: userValidationPolicy.validationDayCount,
-        runContext: {
-          callerLabel: "admin_manual_monthly_lab",
-          buildPathKind: "recalc",
-          persistRequested: true,
-        },
-      });
-      if (dispatched.executionMode === "inline" && !dispatched.result.ok) {
+      let dispatched: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
+      try {
+        dispatched = await dispatchPastSimRecalc({
+          userId: ownerUserId,
+          houseId: labHome.id,
+          esiid: null,
+          mode: "MANUAL_TOTALS",
+          scenarioId,
+          weatherPreference: userWeatherLogic.weatherPreference,
+          persistPastSimBaseline: true,
+          validationDaySelectionMode: userValidationPolicy.selectionMode,
+          validationDayCount: userValidationPolicy.validationDayCount,
+          runContext: {
+            callerLabel: "admin_manual_monthly_lab",
+            buildPathKind: "recalc",
+            persistRequested: true,
+          },
+        });
+      } catch (error: unknown) {
+        const failure = buildAdminManualRecalcFailure({
+          error: error instanceof Error ? error.name : "recalc_exception",
+          missingItems: [error instanceof Error ? error.message : String(error)],
+          fallbackMessage: "Manual recalc failed before the shared producer returned a persisted artifact.",
+        });
         return NextResponse.json(
           {
-            ok: false,
+            ...failure.body,
+            action,
+            email: sourceResolved.email,
+            userId: ownerUserId,
+            sourceUserId: sourceResolved.userId,
+            selectedHouse: sourceResolved.selectedHouse,
+            selectedSourceHouse: sourceResolved.selectedHouse,
+            labHome,
+            scenarioId,
+          },
+          { status: failure.status }
+        );
+      }
+      if (dispatched.executionMode === "inline" && !dispatched.result.ok) {
+        const failure = buildAdminManualRecalcFailure({
+          error: dispatched.result.error,
+          missingItems: dispatched.result.missingItems ?? null,
+          fallbackMessage: String(dispatched.result.error ?? "Manual recalc failed."),
+        });
+        return NextResponse.json(
+          {
             action,
             email: sourceResolved.email,
             userId: ownerUserId,
@@ -495,9 +558,9 @@ export async function POST(req: NextRequest) {
             executionMode: "inline",
             correlationId: dispatched.correlationId,
             result: dispatched.result,
-            error: dispatched.result.error,
+            ...failure.body,
           },
-          { status: dispatched.result.error === "recalc_timeout" ? 504 : 400 }
+          { status: failure.status }
         );
       }
       if (dispatched.executionMode === "inline") {

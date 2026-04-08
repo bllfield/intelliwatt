@@ -357,6 +357,9 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
         }),
       })
     );
+    expect(ensureSimulatorFingerprintsWithContext).not.toHaveBeenCalled();
+    expect(resolveSimFingerprintWithContext).not.toHaveBeenCalled();
+    expect(getUsageShapeProfileIdentityForPast).not.toHaveBeenCalled();
     expect(upsertSimulatorBuild).toHaveBeenCalledTimes(1);
     expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.mode).toBe("MANUAL_TOTALS");
     expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs?.sharedProducerPathUsed).toBe(true);

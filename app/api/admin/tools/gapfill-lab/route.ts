@@ -296,6 +296,45 @@ function statusForGapfillManualReadResultFailure(result: {
   }
 }
 
+function buildAdminGapfillManualRecalcFailure(args: {
+  error?: string | null;
+  missingItems?: string[] | null;
+  fallbackMessage: string;
+  correlationId?: string | null;
+}) {
+  const detail = Array.isArray(args.missingItems) && args.missingItems.length > 0
+    ? args.missingItems.join("; ")
+    : args.fallbackMessage;
+  const classification = classifySimulationFailure({
+    code: args.error,
+    error: args.error,
+    message: detail,
+  });
+  const normalizedDetail = detail.toLowerCase();
+  const reasonCode =
+    normalizedDetail.includes("p2024") ||
+    normalizedDetail.includes("connection pool") ||
+    normalizedDetail.includes("timed out fetching a new connection") ||
+    normalizedDetail.includes("connection limit: 1")
+      ? "PRISMA_POOL_EXHAUSTION"
+      : classification.reasonCode;
+  return {
+    status: String(args.error ?? "").trim() === "recalc_timeout" ? 504 : 500,
+    body: {
+      ...attachFailureContract({
+        ok: false,
+        error: args.error ?? "canonical_recalc_failed",
+        message: classification.userFacingExplanation,
+      }),
+      detail,
+      failureCode: reasonCode,
+      failureMessage: detail,
+      reasonCode,
+      correlationId: args.correlationId ?? undefined,
+    },
+  };
+}
+
 async function buildGapfillManualConstraintPayload(args: {
   labOwnerUserId: string;
   testHomeHouseId: string;
@@ -1595,37 +1634,46 @@ export async function POST(req: NextRequest) {
     });
 
     if (isManualUsageMode) {
-      const dispatched = await dispatchPastSimRecalc({
-        userId: labOwnerUser.id,
-        houseId: testHomeHouse.id,
-        esiid: sourceEsiid,
-        actualContextHouseId: sourceHouse.id,
-        mode: testHomeSimulatorMode,
-        scenarioId: String(pastScenario.id),
-        weatherPreference: gapfillWeatherLogic.weatherPreference,
-        persistPastSimBaseline: true,
-        preLockboxTravelRanges: travelRangesForRecalc,
-        validationDaySelectionMode: testSelectionMode,
-        validationDayCount: validationPolicy.validationDayCount,
-        correlationId: labCorrelationId,
-        adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
-        runContext: {
-          callerLabel: "gapfill_launcher",
-          buildPathKind: "recalc",
-          persistRequested: true,
+      let dispatched: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
+      try {
+        dispatched = await dispatchPastSimRecalc({
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          esiid: sourceEsiid,
+          actualContextHouseId: sourceHouse.id,
+          mode: testHomeSimulatorMode,
+          scenarioId: String(pastScenario.id),
+          weatherPreference: gapfillWeatherLogic.weatherPreference,
+          persistPastSimBaseline: true,
+          preLockboxTravelRanges: travelRangesForRecalc,
+          validationDaySelectionMode: testSelectionMode,
+          validationDayCount: validationPolicy.validationDayCount,
+          correlationId: labCorrelationId,
           adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
-        },
-      });
+          runContext: {
+            callerLabel: "gapfill_launcher",
+            buildPathKind: "recalc",
+            persistRequested: true,
+            adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
+          },
+        });
+      } catch (error: unknown) {
+        const failure = buildAdminGapfillManualRecalcFailure({
+          error: error instanceof Error ? error.name : "recalc_exception",
+          missingItems: [error instanceof Error ? error.message : String(error)],
+          fallbackMessage: "Canonical MANUAL_TOTALS recalc failed before the shared artifact could be persisted.",
+          correlationId: labCorrelationId,
+        });
+        return NextResponse.json(failure.body, { status: failure.status });
+      }
       if (dispatched.executionMode === "inline" && !dispatched.result.ok) {
-        return NextResponse.json(
-          attachFailureContract({
-            ok: false,
-            error: dispatched.result.error ?? "canonical_recalc_failed",
-            message: String(dispatched.result.error ?? "Canonical recalc failed."),
-            correlationId: dispatched.correlationId,
-          }),
-          { status: dispatched.result.error === "recalc_timeout" ? 504 : 500 }
-        );
+        const failure = buildAdminGapfillManualRecalcFailure({
+          error: dispatched.result.error,
+          missingItems: dispatched.result.missingItems ?? null,
+          fallbackMessage: String(dispatched.result.error ?? "Canonical recalc failed."),
+          correlationId: dispatched.correlationId,
+        });
+        return NextResponse.json(failure.body, { status: failure.status });
       }
       if (dispatched.executionMode === "droplet_async") {
         return NextResponse.json({
