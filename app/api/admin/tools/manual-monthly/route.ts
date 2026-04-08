@@ -8,10 +8,9 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   buildManualUsageStageOneResolvedSeeds,
 } from "@/modules/manualUsage/prefill";
-import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
-import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import {
   ensureGlobalManualMonthlyLabTestHomeHouse,
   replaceGlobalManualMonthlyLabTestHomeFromSource,
@@ -19,9 +18,7 @@ import {
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
-import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import {
-  getSimulatedUsageForHouseScenario,
   getUserDefaultValidationSelectionMode,
 } from "@/modules/usageSimulator/service";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
@@ -98,54 +95,13 @@ async function buildReadResult(args: {
   scenarioId: string | null;
   readMode: "artifact_only" | "allow_rebuild";
 }) {
-  if (!args.scenarioId) {
-    return { ok: false as const, error: "past_scenario_missing", message: "Past (Corrected) scenario is missing for this house." };
-  }
-  const out = await getSimulatedUsageForHouseScenario({
+  return buildManualUsagePastSimReadResult({
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
     readMode: args.readMode,
-    projectionMode: "baseline",
-    readContext: {
-      artifactReadMode: args.readMode,
-      projectionMode: "baseline",
-      compareSidecarRequest: true,
-    },
-  });
-  if (!out.ok) {
-    return {
-      ok: false as const,
-      error: out.code,
-      message: out.message,
-      failureCode: out.code,
-      failureMessage: out.message,
-    };
-  }
-  const manualUsage = await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
-  const compareProjection = buildValidationCompareProjectionSidecar(out.dataset);
-  const manualMonthlyReconciliation = buildManualMonthlyReconciliation({
-    payload: manualUsage.payload,
-    dataset: out.dataset,
-  });
-  const sharedDiagnostics = buildSharedPastSimDiagnostics({
     callerType: "user_past",
-    dataset: out.dataset,
-    scenarioId: args.scenarioId,
-    compareProjection,
-    manualMonthlyReconciliation,
-    readMode: args.readMode,
-    projectionMode: "baseline",
   });
-  return {
-    ok: true as const,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
-    dataset: out.dataset,
-    compareProjection,
-    manualMonthlyReconciliation,
-    sharedDiagnostics,
-  };
 }
 
 function statusForReadResultFailure(result: {

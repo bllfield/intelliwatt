@@ -708,10 +708,21 @@ export type PastSimulatedDayDiagnostic = {
   displayDayKwh?: number | null;
   intervalSumKwh?: number | null;
   donorSelectionModeUsed?: string | null;
+  donorCandidatePoolSize?: number | null;
   selectedDonorLocalDates?: string[] | null;
+  selectedDonorWeights?: Array<{ localDate: string; weight: number; distance: number; dayKwh: number }> | null;
   donorWeatherRegimeUsed?: string | null;
+  donorMonthKeyUsed?: string | null;
+  thermalDistanceScore?: number | null;
   broadFallbackUsed?: boolean | null;
+  sameRegimeDonorPoolAvailable?: boolean | null;
+  donorPoolBlendStrategy?: string | null;
+  donorPoolKwhSpread?: number | null;
+  donorPoolKwhVariance?: number | null;
+  donorPoolMedianKwh?: number | null;
+  donorVarianceGuardrailTriggered?: boolean | null;
   weatherAdjustmentModeUsed?: string | null;
+  postDonorAdjustmentCoefficient?: number | null;
 };
 
 export type PastSimulationDebug = {
@@ -1960,11 +1971,19 @@ export function buildPastSimulatedBaselineV1(args: {
                 donorSelectionModeUsed: classifiedResult.donorSelectionModeUsed,
                 donorCandidatePoolSize: classifiedResult.donorCandidatePoolSize,
                 selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates,
+                selectedDonorWeights: classifiedResult.selectedDonorWeights,
                 donorWeatherRegimeUsed: classifiedResult.donorWeatherRegimeUsed,
                 donorMonthKeyUsed: classifiedResult.donorMonthKeyUsed,
                 thermalDistanceScore: classifiedResult.thermalDistanceScore,
                 broadFallbackUsed: classifiedResult.broadFallbackUsed,
+                sameRegimeDonorPoolAvailable: classifiedResult.sameRegimeDonorPoolAvailable,
+                donorPoolBlendStrategy: classifiedResult.donorPoolBlendStrategy,
+                donorPoolKwhSpread: classifiedResult.donorPoolKwhSpread,
+                donorPoolKwhVariance: classifiedResult.donorPoolKwhVariance,
+                donorPoolMedianKwh: classifiedResult.donorPoolMedianKwh,
+                donorVarianceGuardrailTriggered: classifiedResult.donorVarianceGuardrailTriggered,
                 weatherAdjustmentModeUsed: classifiedResult.weatherAdjustmentModeUsed,
+                postDonorAdjustmentCoefficient: classifiedResult.postDonorAdjustmentCoefficient,
                 templateSelectionKind: classifiedResult.templateSelectionKind,
                 selectedFingerprintBucketMonth: classifiedResult.selectedFingerprintBucketMonth,
                 selectedFingerprintBucketDayType: classifiedResult.selectedFingerprintBucketDayType,
@@ -2018,10 +2037,27 @@ export function buildPastSimulatedBaselineV1(args: {
           displayDayKwh: classifiedResult.displayDayKwh,
           intervalSumKwh: classifiedResult.intervalSumKwh,
           donorSelectionModeUsed: classifiedResult.donorSelectionModeUsed ?? null,
+          donorCandidatePoolSize: classifiedResult.donorCandidatePoolSize ?? null,
           selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates ?? null,
+          selectedDonorWeights:
+            classifiedResult.selectedDonorWeights?.map((entry) => ({
+              localDate: entry.localDate,
+              weight: entry.weight,
+              distance: entry.distance,
+              dayKwh: entry.dayKwh,
+            })) ?? null,
           donorWeatherRegimeUsed: classifiedResult.donorWeatherRegimeUsed ?? null,
+          donorMonthKeyUsed: classifiedResult.donorMonthKeyUsed ?? null,
+          thermalDistanceScore: classifiedResult.thermalDistanceScore ?? null,
           broadFallbackUsed: classifiedResult.broadFallbackUsed ?? null,
+          sameRegimeDonorPoolAvailable: classifiedResult.sameRegimeDonorPoolAvailable ?? null,
+          donorPoolBlendStrategy: classifiedResult.donorPoolBlendStrategy ?? null,
+          donorPoolKwhSpread: classifiedResult.donorPoolKwhSpread ?? null,
+          donorPoolKwhVariance: classifiedResult.donorPoolKwhVariance ?? null,
+          donorPoolMedianKwh: classifiedResult.donorPoolMedianKwh ?? null,
+          donorVarianceGuardrailTriggered: classifiedResult.donorVarianceGuardrailTriggered ?? null,
           weatherAdjustmentModeUsed: classifiedResult.weatherAdjustmentModeUsed ?? null,
+          postDonorAdjustmentCoefficient: classifiedResult.postDonorAdjustmentCoefficient ?? null,
         });
       }
     } else {

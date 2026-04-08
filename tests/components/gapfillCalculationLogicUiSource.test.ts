@@ -35,8 +35,22 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(componentSource).toContain("Why this day looks the way it does");
     expect(componentSource).toContain("Donor selection mode");
     expect(componentSource).toContain("Selected donor day(s)");
+    expect(componentSource).toContain("Donor weights + variance guardrail");
     expect(componentSource).toContain("Thermal similarity + adjustment");
+    expect(componentSource).toContain("Final selected shape path");
     expect(manualMonthlySource).not.toContain("Daily Curve Compare");
+    expect(source).toContain("showExactIntervalCurveCompare");
+  });
+
+  it("adds manual-usage reconciliation compare panels without replacing exact-interval UI", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("Manual monthly reconciliation compare");
+    expect(source).toContain("Manual annual reconciliation compare");
+    expect(source).toContain("Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals.");
+    expect(source).toContain("Source actual interval annual total, shared Stage 1 annual target, and final simulated annual total.");
+    expect(source).toContain("LockboxFlowPanel");
+    expect(source).toContain("sharedDiagnostics={testSharedDiagnostics}");
   });
 
   it("shows separate source, test-home, and effective travel-range visibility in GapFill", () => {
@@ -47,6 +61,15 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).toContain("Test Home saved");
     expect(source).toContain("Effective latest recalc");
     expect(source).toContain("The Effective latest recalc bucket reflects the exact travel ranges");
+  });
+
+  it("hydrates Actual House lockbox flow from shared diagnostics when attached", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("sharedDiagnostics?: Record<string, unknown> | null");
+    expect(source).toContain("sourceTruthContext?.intervalSourceIdentity");
+    expect(source).toContain("sourceTruthContext?.weatherDatasetIdentity");
+    expect(source).toContain("artifactEngineVersion");
   });
 
   it("defines the modal sections for the admin-only calculation logic view", () => {

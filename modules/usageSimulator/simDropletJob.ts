@@ -3,6 +3,8 @@ import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
 import type { PastSimRunContext } from "@/modules/usageSimulator/pastSimLockbox";
+import type { AdminLabTreatmentMode } from "@/modules/usageSimulator/adminLabTreatment";
+import type { TravelRange } from "@/modules/simulatedUsage/types";
 import {
   SIM_DROPLET_JOB_KIND_PAST_SIM_RECALC,
   triggerDropletSimWebhook,
@@ -19,8 +21,11 @@ export type PastSimRecalcQueuedPayloadV1 = {
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;
   persistPastSimBaseline?: boolean;
+  actualContextHouseId?: string | null;
+  preLockboxTravelRanges?: TravelRange[];
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;
+  adminLabTreatmentMode?: AdminLabTreatmentMode;
   /** Observability: same id logged on enqueue and worker recalc (plan §6). */
   correlationId?: string;
   runContext?: Partial<PastSimRunContext>;

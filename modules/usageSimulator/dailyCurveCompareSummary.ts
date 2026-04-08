@@ -32,11 +32,19 @@ type DailyDecisionTrace = {
   donorSelectionModeUsed: string | null;
   donorCandidatePoolSize: number | null;
   selectedDonorLocalDates: string[];
+  selectedDonorWeights: Array<{ localDate: string; weight: number; distance: number; dayKwh: number }>;
   donorWeatherRegimeUsed: string | null;
   donorMonthKeyUsed: string | null;
   thermalDistanceScore: number | null;
   broadFallbackUsed: boolean;
+  sameRegimeDonorPoolAvailable: boolean;
+  donorPoolBlendStrategy: string | null;
+  donorPoolKwhSpread: number | null;
+  donorPoolKwhVariance: number | null;
+  donorPoolMedianKwh: number | null;
+  donorVarianceGuardrailTriggered: boolean;
   weatherAdjustmentModeUsed: string | null;
+  postDonorAdjustmentCoefficient: number | null;
 };
 
 type DailyRowSummary = {
@@ -82,11 +90,19 @@ export type DailyCurveCompareDay = {
   donorSelectionModeUsed: string | null;
   donorCandidatePoolSize: number | null;
   selectedDonorLocalDates: string[];
+  selectedDonorWeights: Array<{ localDate: string; weight: number; distance: number; dayKwh: number }>;
   donorWeatherRegimeUsed: string | null;
   donorMonthKeyUsed: string | null;
   thermalDistanceScore: number | null;
   broadFallbackUsed: boolean;
+  sameRegimeDonorPoolAvailable: boolean;
+  donorPoolBlendStrategy: string | null;
+  donorPoolKwhSpread: number | null;
+  donorPoolKwhVariance: number | null;
+  donorPoolMedianKwh: number | null;
+  donorVarianceGuardrailTriggered: boolean;
   weatherAdjustmentModeUsed: string | null;
+  postDonorAdjustmentCoefficient: number | null;
   slots: DailyCurveCompareSlot[];
 };
 
@@ -224,12 +240,35 @@ function normalizeDecisionTraceRows(traceRows: unknown): Map<string, DailyDecisi
             .map((value: unknown) => String(value ?? "").slice(0, 10))
             .filter((value: string) => value.length > 0)
         : [],
+      selectedDonorWeights: Array.isArray((row as any).selectedDonorWeights)
+        ? (row as any).selectedDonorWeights
+            .map((entry: any) => ({
+              localDate: String(entry?.localDate ?? "").slice(0, 10),
+              weight: typeof entry?.weight === "number" ? Number(entry.weight) : 0,
+              distance: typeof entry?.distance === "number" ? Number(entry.distance) : 0,
+              dayKwh: typeof entry?.dayKwh === "number" ? Number(entry.dayKwh) : 0,
+            }))
+            .filter((entry: { localDate: string }) => entry.localDate.length > 0)
+        : [],
       donorWeatherRegimeUsed: String((row as any).donorWeatherRegimeUsed ?? "").trim() || null,
       donorMonthKeyUsed: String((row as any).donorMonthKeyUsed ?? "").trim() || null,
       thermalDistanceScore:
         typeof (row as any).thermalDistanceScore === "number" ? Number((row as any).thermalDistanceScore) : null,
       broadFallbackUsed: (row as any).broadFallbackUsed === true,
+      sameRegimeDonorPoolAvailable: (row as any).sameRegimeDonorPoolAvailable === true,
+      donorPoolBlendStrategy: String((row as any).donorPoolBlendStrategy ?? "").trim() || null,
+      donorPoolKwhSpread:
+        typeof (row as any).donorPoolKwhSpread === "number" ? Number((row as any).donorPoolKwhSpread) : null,
+      donorPoolKwhVariance:
+        typeof (row as any).donorPoolKwhVariance === "number" ? Number((row as any).donorPoolKwhVariance) : null,
+      donorPoolMedianKwh:
+        typeof (row as any).donorPoolMedianKwh === "number" ? Number((row as any).donorPoolMedianKwh) : null,
+      donorVarianceGuardrailTriggered: (row as any).donorVarianceGuardrailTriggered === true,
       weatherAdjustmentModeUsed: String((row as any).weatherAdjustmentModeUsed ?? "").trim() || null,
+      postDonorAdjustmentCoefficient:
+        typeof (row as any).postDonorAdjustmentCoefficient === "number"
+          ? Number((row as any).postDonorAdjustmentCoefficient)
+          : null,
     });
   }
   return byDate;
@@ -425,11 +464,19 @@ export function buildDailyCurveCompareSummary(args: {
         donorSelectionModeUsed: decisionTrace?.donorSelectionModeUsed ?? null,
         donorCandidatePoolSize: decisionTrace?.donorCandidatePoolSize ?? null,
         selectedDonorLocalDates: decisionTrace?.selectedDonorLocalDates ?? [],
+        selectedDonorWeights: decisionTrace?.selectedDonorWeights ?? [],
         donorWeatherRegimeUsed: decisionTrace?.donorWeatherRegimeUsed ?? null,
         donorMonthKeyUsed: decisionTrace?.donorMonthKeyUsed ?? null,
         thermalDistanceScore: decisionTrace?.thermalDistanceScore ?? null,
         broadFallbackUsed: decisionTrace?.broadFallbackUsed ?? false,
+        sameRegimeDonorPoolAvailable: decisionTrace?.sameRegimeDonorPoolAvailable ?? false,
+        donorPoolBlendStrategy: decisionTrace?.donorPoolBlendStrategy ?? null,
+        donorPoolKwhSpread: decisionTrace?.donorPoolKwhSpread ?? null,
+        donorPoolKwhVariance: decisionTrace?.donorPoolKwhVariance ?? null,
+        donorPoolMedianKwh: decisionTrace?.donorPoolMedianKwh ?? null,
+        donorVarianceGuardrailTriggered: decisionTrace?.donorVarianceGuardrailTriggered ?? false,
         weatherAdjustmentModeUsed: decisionTrace?.weatherAdjustmentModeUsed ?? null,
+        postDonorAdjustmentCoefficient: decisionTrace?.postDonorAdjustmentCoefficient ?? null,
         slots,
       };
     })

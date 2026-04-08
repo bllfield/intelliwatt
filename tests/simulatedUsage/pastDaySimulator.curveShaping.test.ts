@@ -114,8 +114,91 @@ describe("pastDaySimulator shared curve shaping", () => {
     expect(result.donorSelectionModeUsed).toBe("weather_nearest_daytype_regime");
     expect(result.donorWeatherRegimeUsed).toBe("cooling");
     expect(result.selectedDonorLocalDates).toContain("2026-02-10");
+    expect(result.selectedDonorWeights?.length).toBe(3);
+    expect((result.selectedDonorWeights ?? []).reduce((sum, entry) => sum + entry.weight, 0)).toBeCloseTo(1, 6);
+    expect(result.sameRegimeDonorPoolAvailable).toBe(true);
+    expect(result.broadFallbackUsed).toBe(false);
     expect(result.targetDayKwhBeforeWeather).toBeGreaterThan(19);
     expect(result.selectedFingerprintBucketMonth).toBe("2026-02");
+  });
+
+  it("dampens noisy donor pools back toward the donor median when variance is high", () => {
+    const context = buildPastDaySimulationContext({
+      profile: {
+        monthKeys: ["2026-06"],
+        avgKwhPerDayWeekdayByMonth: [20],
+        avgKwhPerDayWeekendByMonth: [16],
+        weekdayCountByMonth: { "2026-06": 22 },
+        weekendCountByMonth: { "2026-06": 8 },
+        monthOverallAvgByMonth: { "2026-06": 19 },
+        monthOverallCountByMonth: { "2026-06": 30 },
+      },
+      trainingWeatherStats: makeTrainingStats(),
+      weatherByDateKey: new Map(),
+      modeledDaySelectionStrategy: "weather_donor_first",
+      weatherDonorSamples: [
+        {
+          localDate: "2026-06-07",
+          monthKey: "2026-06",
+          dayType: "weekend",
+          weatherRegime: "cooling",
+          dayKwh: 18,
+          dailyAvgTempC: 31,
+          dailyMinTempC: 25,
+          dailyMaxTempC: 37,
+          tempSpreadC: 12,
+          heatingDegreeSeverity: 0,
+          coolingDegreeSeverity: 16,
+        },
+        {
+          localDate: "2026-06-14",
+          monthKey: "2026-06",
+          dayType: "weekend",
+          weatherRegime: "cooling",
+          dayKwh: 42,
+          dailyAvgTempC: 32,
+          dailyMinTempC: 26,
+          dailyMaxTempC: 38,
+          tempSpreadC: 12,
+          heatingDegreeSeverity: 0,
+          coolingDegreeSeverity: 17,
+        },
+        {
+          localDate: "2026-06-21",
+          monthKey: "2026-06",
+          dayType: "weekend",
+          weatherRegime: "cooling",
+          dayKwh: 20,
+          dailyAvgTempC: 30,
+          dailyMinTempC: 24,
+          dailyMaxTempC: 36,
+          tempSpreadC: 12,
+          heatingDegreeSeverity: 0,
+          coolingDegreeSeverity: 15,
+        },
+      ],
+    });
+    const result = simulatePastDay(
+      {
+        localDate: "2026-06-28",
+        isWeekend: true,
+        gridTimestamps: fixedGrid("2026-06-28"),
+        weatherForDay: {
+          dailyAvgTempC: 31,
+          dailyMinTempC: 25,
+          dailyMaxTempC: 37,
+          heatingDegreeSeverity: 0,
+          coolingDegreeSeverity: 16,
+          freezeHoursCount: 0,
+        },
+      },
+      context
+    );
+    expect(result.donorVarianceGuardrailTriggered).toBe(true);
+    expect(result.donorPoolBlendStrategy).toBe("variance_dampened_blend");
+    expect(result.donorPoolMedianKwh).toBe(20);
+    expect(result.targetDayKwhBeforeWeather).toBeLessThan(30);
+    expect(result.targetDayKwhBeforeWeather).toBeGreaterThan(19);
   });
 
   it("uses neighboring actual day totals before month average fallback", () => {
@@ -217,6 +300,7 @@ describe("pastDaySimulator shared curve shaping", () => {
     expect(result.donorSelectionModeUsed).toBe("calendar_fallback");
     expect(result.fallbackLevel).toBe("month_daytype");
     expect(result.broadFallbackUsed).toBe(true);
+    expect(result.sameRegimeDonorPoolAvailable).toBe(false);
     expect(result.targetDayKwhBeforeWeather).toBe(16);
   });
 

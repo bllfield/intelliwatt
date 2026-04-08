@@ -274,8 +274,88 @@ describe("pastDaySimulator Phase 1 temperature-primary day totals (Section 21)",
     const multiplier = result.finalDayKwh / Math.max(result.targetDayKwhBeforeWeather ?? 1, 1);
     expect(result.donorSelectionModeUsed).toBe("weather_nearest_daytype_regime");
     expect(result.weatherAdjustmentModeUsed).toBe("bounded_post_donor");
+    expect(result.postDonorAdjustmentCoefficient).toBeCloseTo(result.weatherSeverityMultiplier, 8);
     expect(multiplier).toBeGreaterThan(0.92);
     expect(multiplier).toBeLessThan(1.1);
+  });
+
+  it("weights HDD and overnight minimum temperature more heavily on heating-day donor ranking", () => {
+    const context = buildPastDaySimulationContext({
+      profile: {
+        monthKeys: ["2026-12"],
+        avgKwhPerDayWeekdayByMonth: [18],
+        avgKwhPerDayWeekendByMonth: [15],
+        weekdayCountByMonth: { "2026-12": 21 },
+        weekendCountByMonth: { "2026-12": 8 },
+        monthOverallAvgByMonth: { "2026-12": 17.5 },
+        monthOverallCountByMonth: { "2026-12": 29 },
+      },
+      trainingWeatherStats: trainingStats(),
+      weatherByDateKey: new Map(),
+      modeledDaySelectionStrategy: "weather_donor_first",
+      weatherDonorSamples: [
+        {
+          localDate: "2026-12-02",
+          monthKey: "2026-12",
+          dayType: "weekday",
+          weatherRegime: "heating",
+          dayKwh: 34,
+          dailyAvgTempC: -2,
+          dailyMinTempC: -8,
+          dailyMaxTempC: 5,
+          tempSpreadC: 13,
+          heatingDegreeSeverity: 25,
+          coolingDegreeSeverity: 0,
+        },
+        {
+          localDate: "2026-12-03",
+          monthKey: "2026-12",
+          dayType: "weekday",
+          weatherRegime: "heating",
+          dayKwh: 26,
+          dailyAvgTempC: -4,
+          dailyMinTempC: -2,
+          dailyMaxTempC: 1,
+          tempSpreadC: 3,
+          heatingDegreeSeverity: 13,
+          coolingDegreeSeverity: 0,
+        },
+        {
+          localDate: "2026-12-04",
+          monthKey: "2026-12",
+          dayType: "weekday",
+          weatherRegime: "heating",
+          dayKwh: 30,
+          dailyAvgTempC: 4,
+          dailyMinTempC: -1,
+          dailyMaxTempC: 10,
+          tempSpreadC: 11,
+          heatingDegreeSeverity: 12,
+          coolingDegreeSeverity: 0,
+        },
+      ],
+    });
+
+    const result = simulatePastDay(
+      {
+        localDate: "2026-12-09",
+        isWeekend: false,
+        gridTimestamps: fixedGrid("2026-12-09"),
+        weatherForDay: {
+          dailyAvgTempC: -1,
+          dailyMinTempC: -7,
+          dailyMaxTempC: 4,
+          heatingDegreeSeverity: 23,
+          coolingDegreeSeverity: 0,
+          freezeHoursCount: 8,
+        },
+      },
+      context
+    );
+
+    expect(result.selectedDonorLocalDates?.[0]).toBe("2026-12-02");
+    expect(result.donorWeatherRegimeUsed).toBe("heating");
+    expect(result.postDonorAdjustmentCoefficient).toBeGreaterThan(0.92);
   });
 });
 

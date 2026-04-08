@@ -459,10 +459,18 @@ export function buildGapfillCalculationLogicSummary(args: {
   const perDayClassificationCounts = countBy(perDayTrace, (row) => String(row.dayClassification ?? "").trim());
   const perDayDonorSelectionCounts = countBy(perDayTrace, (row) => String((row as any).donorSelectionModeUsed ?? "").trim());
   const perDayDonorRegimeCounts = countBy(perDayTrace, (row) => String((row as any).donorWeatherRegimeUsed ?? "").trim());
+  const perDayDonorBlendCounts = countBy(perDayTrace, (row) => String((row as any).donorPoolBlendStrategy ?? "").trim());
+  const broadFallbackCounts = countBy(perDayTrace, (row) => {
+    const key = String(row.fallbackLevel ?? "").trim();
+    return key === "weather_nearest_daytype_regime" || key === "weather_nearest_daytype" ? null : key;
+  });
   const perDayWeatherAdjustmentModeCounts = countBy(
     perDayTrace,
     (row) => String((row as any).weatherAdjustmentModeUsed ?? "").trim()
   );
+  const donorVarianceGuardrailTriggeredCount = perDayTrace.filter((row) => (row as any).donorVarianceGuardrailTriggered === true).length;
+  const donorPathUsageCount = Object.values(perDayDonorSelectionCounts).reduce((sum, value) => sum + value, 0);
+  const trueBroadFallbackDayCount = Object.values(broadFallbackCounts).reduce((sum, value) => sum + value, 0);
   const keepRefUtcDateKeyCount = lockboxExecutionSummary.keepRefUtcDateKeyCount;
   const dailySourceClassificationsSummary = asRecord(tuningSummary.dailySourceClassificationsSummary);
   const monthlyLayer = monthlyLayerSummary(modeInfo.modeFamily);
@@ -509,6 +517,7 @@ export function buildGapfillCalculationLogicSummary(args: {
     Number(perDayClassificationCounts.weather_scaled_day ?? 0) +
     Number(perDayClassificationCounts.extreme_cold_event_day ?? 0) +
     Number(perDayClassificationCounts.freeze_protect_day ?? 0);
+  const actualBackedMode = modeInfo.modeFamily === "actual_backed";
   const usageShapeIdentity =
     String(
       sourceTruthContext.intervalUsageFingerprintIdentity ??
@@ -548,7 +557,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       details: [
         `Trusted fingerprint days: ${formatMaybeCount(fingerprintDiagnostics.trustedIntervalFingerprintDayCount)}`,
         `Interval fingerprint: ${String(sourceTruthContext.intervalSourceIdentity ?? "not attached")}`,
-        `Nearest-weather donor selections: ${weatherFirstDonorCount}`,
+        `Donor-path selections: ${donorPathUsageCount}`,
       ],
       evidence: [
         `Modeled final-output days: ${modeledFinalDayCount}`,
@@ -791,25 +800,40 @@ export function buildGapfillCalculationLogicSummary(args: {
     },
     {
       key: "fallback-estimate",
-      label: "Fallback estimation path",
-      used: modeInfo.modeFamily !== "actual_backed",
+      label: actualBackedMode ? "Donor-path vs broad fallback reporting" : "Fallback estimation path",
+      used: actualBackedMode ? donorPathUsageCount > 0 || trueBroadFallbackDayCount > 0 : true,
       status:
-        modeInfo.modeFamily === "actual_backed"
-          ? "inactive"
+        actualBackedMode
+          ? donorPathUsageCount > 0 || trueBroadFallbackDayCount > 0
+            ? "modeled-subset-only"
+            : "context only"
           : Object.keys(perDayFallbackCounts).length > 0
             ? "modeled-subset-only"
             : "context only",
-      whereEntered: modeInfo.modeFamily === "actual_backed" ? [] : ["daily-total selection"],
-      sourceOfTruth: "Shared simulator fallback ladder",
-      role: "Used only when stronger monthly/day-shape evidence is missing",
-      priorityBand: modeInfo.modeFamily === "actual_backed" ? "Not Used" : "Fallback Only",
+      whereEntered: ["daily-total selection"],
+      sourceOfTruth:
+        actualBackedMode
+          ? "Shared per-day donor diagnostics plus the shared broad calendar fallback ladder"
+          : "Shared simulator fallback ladder",
+      role:
+        actualBackedMode
+          ? "Read-only reporting that separates weather-donor path usage from true broad calendar fallbacks"
+          : "Used only when stronger monthly/day-shape evidence is missing",
+      priorityBand: "Fallback Only",
       details: [
-        `Observed daily fallback levels: ${describeCountMap(perDayFallbackCounts)}`,
+        actualBackedMode
+          ? `Donor-path usage: ${describeCountMap(perDayDonorSelectionCounts)}`
+          : `Observed daily fallback levels: ${describeCountMap(perDayFallbackCounts)}`,
+        actualBackedMode
+          ? `Broad fallback usage: ${describeCountMap(broadFallbackCounts)}`
+          : `Fallback usage count: ${Object.values(perDayFallbackCounts).reduce((sum, value) => sum + value, 0)}`,
       ],
       evidence: [
-        Object.keys(perDayFallbackCounts).length > 0
-          ? `Fallbacks were exercised on ${Object.values(perDayFallbackCounts).reduce((sum, value) => sum + value, 0)} day(s).`
-          : "No observed fallback selections were attached to this artifact.",
+        actualBackedMode
+          ? `Donor-path exercised on ${donorPathUsageCount} day(s); true broad fallbacks exercised on ${trueBroadFallbackDayCount} day(s).`
+          : Object.keys(perDayFallbackCounts).length > 0
+            ? `Fallbacks were exercised on ${Object.values(perDayFallbackCounts).reduce((sum, value) => sum + value, 0)} day(s).`
+            : "No observed fallback selections were attached to this artifact.",
       ],
     },
   ];
@@ -892,12 +916,12 @@ export function buildGapfillCalculationLogicSummary(args: {
       title: "4. Daily Total Selection Layer",
       summary:
         modeInfo.modeFamily === "actual_backed"
-          ? "The shared day selector now starts from trusted weather-similar donor days inside the reference pool. Broader calendar averages only appear when donor evidence is weak."
+          ? "The shared day selector now starts from a bounded K-nearest weather-similar donor blend inside the reference pool. Variance guardrails damp noisy donor cohorts before any true calendar fallback is used."
           : "The shared day selector chooses a target daily kWh from the strongest available same-shape history, then falls back step-by-step when that evidence is weak.",
       variablesUsed: [
-        modeInfo.modeFamily === "actual_backed" ? "Trusted donor-day weather similarity" : "Month/day-type history",
+        modeInfo.modeFamily === "actual_backed" ? "Trusted donor-day weather similarity and weighted donor blending" : "Month/day-type history",
         modeInfo.modeFamily === "actual_backed" ? "Weekday/weekend donor separation" : "Neighbor day-of-month samples",
-        modeInfo.modeFamily === "actual_backed" ? "Same-regime heating/cooling/neutral preference" : "Adjacent-month day-type averages",
+        modeInfo.modeFamily === "actual_backed" ? "Same-regime heating/cooling/neutral preference plus donor-pool variance guardrails" : "Adjacent-month day-type averages",
         "Global fallback averages",
       ],
       preservedOrLocked: ["Hard monthly or annual constraints remain intact above this layer"],
@@ -905,8 +929,8 @@ export function buildGapfillCalculationLogicSummary(args: {
       fallbackOrder: [
         ...(modeInfo.modeFamily === "actual_backed"
           ? [
-              "Nearest-weather donor inside same day-type and same heating/cooling/neutral regime",
-              "Nearest-weather donor inside same day-type when same-regime evidence is thin",
+              "Bounded K-nearest donor blend inside same day-type and same heating/cooling/neutral regime",
+              "Bounded K-nearest donor blend inside same day-type when same-regime evidence is thin",
             ]
           : ["Same-month nearest day-of-month neighbor"]),
         "Same-month weekday/weekend average",
@@ -917,7 +941,7 @@ export function buildGapfillCalculationLogicSummary(args: {
         "Global overall average",
       ],
       modeSpecificRules: [
-        `Observed fallback levels in this artifact: ${describeCountMap(perDayFallbackCounts)}`,
+        `Observed broad fallback levels in this artifact: ${describeCountMap(broadFallbackCounts)}`,
         modeInfo.modeFamily === "actual_backed"
           ? `Observed donor selection modes: ${describeCountMap(perDayDonorSelectionCounts)}`
           : "Weather-nearest donor diagnostics are not the primary selector in this mode.",
@@ -1073,7 +1097,7 @@ export function buildGapfillCalculationLogicSummary(args: {
   const dailyTotalLogic = {
     summary:
       modeInfo.modeFamily === "actual_backed"
-        ? "This layer chooses the day's kWh target from trusted weather-similar donors first. Calendar ladders remain available, but only after donor evidence weakens."
+        ? "This layer chooses the day's kWh target from a bounded K-nearest donor blend first. Weekday/weekend and regime matching stay primary, donor-pool variance can damp noisy blends, and true calendar fallbacks only appear if donor evidence is too thin."
         : "This layer chooses the day's kWh target first. The shared day selector starts with the narrowest same-month evidence and only falls back toward broader priors when local evidence is weak.",
     ladder: [
       ...(modeInfo.modeFamily === "actual_backed"
@@ -1081,15 +1105,15 @@ export function buildGapfillCalculationLogicSummary(args: {
             {
               rank: 1,
               key: "weather_nearest_daytype_regime",
-              label: "Nearest-weather donor, same day-type and same regime",
-              explanation: "Heating/cooling/neutral-matched donor pool ranked by thermal similarity inside the trusted reference pool.",
+              label: "K-nearest donor blend, same day-type and same regime",
+              explanation: "Small deterministic donor cohort ranked by thermal similarity, then blended with inverse-distance weighting and variance guardrails inside the trusted reference pool.",
               observedCount: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype_regime"]),
             },
             {
               rank: 2,
               key: "weather_nearest_daytype",
-              label: "Nearest-weather donor, same day-type broad regime fallback",
-              explanation: "Still weather-first and day-type-safe, but allowed to broaden beyond the primary heating/cooling/neutral bucket.",
+              label: "K-nearest donor blend, same day-type broadened beyond regime",
+              explanation: "Still weather-first and weekday/weekend-safe, but allowed to broaden beyond the primary heating/cooling/neutral bucket before any true broad calendar fallback.",
               observedCount: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype"]),
             },
           ]
@@ -1204,18 +1228,31 @@ export function buildGapfillCalculationLogicSummary(args: {
   const weatherExplanation = {
     summary:
       modeInfo.modeFamily === "actual_backed"
-        ? "In exact-interval actual-backed runs, weather now does two jobs: it leads donor selection inside the trusted pool, then it applies only bounded post-donor fine-tuning plus any event-day adders."
+        ? "In exact-interval actual-backed runs, weather now does three jobs: it ranks the donor cohort, it can trigger donor-pool variance guardrails when the cohort is noisy, and it applies only bounded post-donor fine-tuning plus any event-day adders."
         : "Weather does not create the whole day from scratch. The shared simulator first chooses a base daily kWh target, then weather can scale that day total and can also change which weather-regime shape bucket is selected.",
     rows: [
       {
-        label: "Nearest-weather donor selections",
+        label: "Donor-path usage",
         value: describeCountMap(perDayDonorSelectionCounts),
-        explanation: "Shows how often modeled days were anchored by same-regime nearest-weather donors versus broader weather-first day-type matching.",
+        explanation: "Shows how often modeled days used the same-regime donor path versus the broadened same-day-type donor path.",
+      },
+      {
+        label: "True broad fallback usage",
+        value: describeCountMap(broadFallbackCounts),
+        explanation: "Counts only the broad calendar fallback ladder. Weather-donor path broadening is reported separately above and is not counted as a broad fallback.",
       },
       {
         label: "Donor regime dominance",
         value: describeCountMap(perDayDonorRegimeCounts),
         explanation: "Heating/cooling/neutral donor-bucket counts reveal which thermal cohorts dominated donor selection.",
+      },
+      {
+        label: "Donor blend / guardrail usage",
+        value: joinNonEmpty([
+          `Blend modes: ${describeCountMap(perDayDonorBlendCounts)}`,
+          `Variance guardrails: ${String(donorVarianceGuardrailTriggeredCount)}`,
+        ]),
+        explanation: "Shows whether modeled days stayed on the default distance-weighted blend or were damped back toward the donor median because the donor cohort was noisy.",
       },
       {
         label: "Weather provenance / mode",
@@ -1275,17 +1312,22 @@ export function buildGapfillCalculationLogicSummary(args: {
       explanation: "How many selected validation/test days remained in the reference pool while still producing modeled compare output.",
     },
     {
-      label: "Nearest-weather donor usage",
-      value: describeCountMap({
-        weather_nearest_daytype_regime: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype_regime"]) ?? 0,
-        weather_nearest_daytype: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype"]) ?? 0,
-      }),
-      explanation: "How many modeled days were resolved by weather-first donor logic before any broad calendar fallback was needed.",
+      label: "Donor-path usage",
+      value: describeCountMap(perDayDonorSelectionCounts),
+      explanation: "How many modeled days were resolved by weather-first donor logic before any true broad calendar fallback was needed.",
     },
     {
-      label: "Most common daily fallback levels",
-      value: describeCountMap(perDayFallbackCounts),
-      explanation: "Shows which daily-total fallback levels actually dominated this run.",
+      label: "True broad daily fallback levels",
+      value: describeCountMap(broadFallbackCounts),
+      explanation: "Shows which broad calendar fallback levels actually dominated this run after weather-donor paths ran out.",
+    },
+    {
+      label: "Donor variance guardrails",
+      value: joinNonEmpty([
+        `Triggered: ${String(donorVarianceGuardrailTriggeredCount)}`,
+        `Blend modes: ${describeCountMap(perDayDonorBlendCounts)}`,
+      ]),
+      explanation: "Summarizes how often noisy donor cohorts were damped toward their local median instead of letting one donor dominate.",
     },
     {
       label: "Most common shape variants",

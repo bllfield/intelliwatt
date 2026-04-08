@@ -15,6 +15,10 @@ import {
   GapFillCalculationLogicLauncher,
   GapFillCalculationLogicModal,
 } from "@/components/admin/GapFillCalculationLogicModal";
+import {
+  buildGapfillManualAnnualCompareSummary,
+  buildGapfillManualMonthlyCompareRows,
+} from "@/modules/manualUsage/gapfillCompare";
 import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/calculationLogicSummary";
 import { GapFillDailyCurveCompare } from "@/components/admin/GapFillDailyCurveCompare";
 import { buildDailyCurveCompareSummary } from "@/modules/usageSimulator/dailyCurveCompareSummary";
@@ -89,6 +93,8 @@ type RunResult = {
   artifactInputHash?: string | null;
   buildLastBuiltAt?: string | null;
   buildInputsHash?: string | null;
+  executionMode?: "inline" | "droplet_async";
+  jobId?: string | null;
   compareProjection?: {
     rows?: Array<{
       localDate: string;
@@ -131,6 +137,7 @@ const EMPTY_RANGE: DateRange = { startDate: "", endDate: "" };
 const TEST_HOME_DISPLAY_LABEL = "Test Home";
 /** Client wait for gapfill-lab POST; keep under `maxDuration` in `app/api/admin/tools/gapfill-lab/route.ts` (300s). */
 const GAPFILL_LAB_HTTP_FETCH_MS = 295_000;
+const GAPFILL_LAB_READBACK_POLL_MS = 2_500;
 
 function routeForAction(action: string): string {
   if (action === "run_source_home_past_sim_snapshot") {
@@ -141,6 +148,10 @@ function routeForAction(action: string): string {
 
 function prettyJson(v: unknown): string {
   return JSON.stringify(v ?? {}, null, 2);
+}
+
+function isManualUsageTreatmentMode(value: string | null | undefined): boolean {
+  return value === "MONTHLY_FROM_SOURCE_INTERVALS" || value === "ANNUAL_FROM_SOURCE_INTERVALS";
 }
 
 function parseJsonSafe(s: string): { ok: true; value: any } | { ok: false; error: string } {
@@ -316,12 +327,27 @@ function LockboxFlowPanel(props: {
   dataset: any;
   fallbackTravelRanges?: unknown;
   fallbackValidationKeys?: unknown;
+  sharedDiagnostics?: Record<string, unknown> | null;
 }) {
   const presentation = readLockboxPresentation(props.dataset);
   const sourceContext = presentation.sourceContext as Record<string, unknown> | null;
   const profileContext = presentation.profileContext as Record<string, unknown> | null;
   const validationKeys = presentation.validationKeys as Record<string, unknown> | null;
   const travelRanges = presentation.travelRanges as Record<string, unknown> | null;
+  const sharedDiagnostics =
+    props.sharedDiagnostics && typeof props.sharedDiagnostics === "object" ? props.sharedDiagnostics : null;
+  const identityContext =
+    sharedDiagnostics?.identityContext && typeof sharedDiagnostics.identityContext === "object"
+      ? (sharedDiagnostics.identityContext as Record<string, unknown>)
+      : null;
+  const sourceTruthContext =
+    sharedDiagnostics?.sourceTruthContext && typeof sharedDiagnostics.sourceTruthContext === "object"
+      ? (sharedDiagnostics.sourceTruthContext as Record<string, unknown>)
+      : null;
+  const lockboxExecutionSummary =
+    sharedDiagnostics?.lockboxExecutionSummary && typeof sharedDiagnostics.lockboxExecutionSummary === "object"
+      ? (sharedDiagnostics.lockboxExecutionSummary as Record<string, unknown>)
+      : null;
   const stageTimingReadout = buildStageTimingReadout({
     stageTimings: presentation.stageTimings,
     artifactReadMode: presentation.artifactReadMode,
@@ -336,11 +362,20 @@ function LockboxFlowPanel(props: {
       </div>
       <MetadataGrid
         items={[
-          { label: "sourceHouseId", value: String(sourceContext?.sourceHouseId ?? presentation.perRunTrace?.sourceHouseId ?? "—") },
+          {
+            label: "sourceHouseId",
+            value: String(sourceContext?.sourceHouseId ?? presentation.perRunTrace?.sourceHouseId ?? identityContext?.sourceHouseId ?? "—"),
+          },
           { label: "profileHouseId", value: String(profileContext?.profileHouseId ?? presentation.perRunTrace?.profileHouseId ?? "—") },
           { label: "mode", value: String(presentation.mode ?? "—") },
-          { label: "travelRanges", value: summarizeRanges(travelRanges?.ranges ?? props.fallbackTravelRanges) },
-          { label: "validationKeys", value: summarizeValidationKeys(validationKeys?.localDateKeys ?? props.fallbackValidationKeys) },
+          {
+            label: "travelRanges",
+            value: summarizeRanges(travelRanges?.ranges ?? sourceTruthContext?.travelRangesUsed ?? props.fallbackTravelRanges),
+          },
+          {
+            label: "validationKeys",
+            value: summarizeValidationKeys(validationKeys?.localDateKeys ?? sourceTruthContext?.validationTestKeysUsed ?? props.fallbackValidationKeys),
+          },
           {
             label: "sourceDerivedMonthlyTotalsKwhByMonth",
             value: JSON.stringify(sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null),
@@ -349,11 +384,18 @@ function LockboxFlowPanel(props: {
             label: "sourceDerivedAnnualTotalKwh",
             value: formatNumberMaybe(sourceContext?.sourceDerivedAnnualTotalKwh),
           },
-          { label: "intervalFingerprint", value: formatIdentityReadout(sourceContext?.intervalFingerprint) },
-          { label: "weatherIdentity", value: formatIdentityReadout(sourceContext?.weatherIdentity) },
+          {
+            label: "intervalFingerprint",
+            value: formatIdentityReadout(sourceContext?.intervalFingerprint ?? sourceTruthContext?.intervalSourceIdentity),
+          },
+          {
+            label: "weatherIdentity",
+            value: formatIdentityReadout(sourceContext?.weatherIdentity ?? sourceTruthContext?.weatherDatasetIdentity),
+          },
           { label: "usageShapeProfileIdentity", value: formatIdentityReadout(profileContext?.usageShapeProfileIdentity) },
-          { label: "inputHash", value: String(presentation.inputHash ?? "—") },
+          { label: "inputHash", value: String(presentation.inputHash ?? lockboxExecutionSummary?.artifactInputHash ?? "—") },
           { label: "fullChainHash", value: String(presentation.fullChainHash ?? "—") },
+          { label: "artifactEngineVersion", value: String(lockboxExecutionSummary?.artifactEngineVersion ?? "—") },
         ]}
       />
       <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
@@ -528,9 +570,10 @@ export default function GapFillLabCanonicalClient() {
   async function runAction(
     action: string,
     extra: Record<string, unknown> = {},
-    options?: { setAsPrimaryResult?: boolean }
+    options?: { setAsPrimaryResult?: boolean; suppressErrors?: boolean }
   ) {
     const setAsPrimaryResult = options?.setAsPrimaryResult !== false;
+    const suppressErrors = options?.suppressErrors === true;
     setLoading(true);
     setError(null);
     setLastFailureFields(null);
@@ -582,7 +625,9 @@ export default function GapFillLabCanonicalClient() {
             : "Request failed.",
       };
       const ff = gapfillFailureFieldsFromJson(fallback as Record<string, unknown>);
-      setLastFailureFields({ ...ff, failureCode: timedOut ? "REQUEST_TIMEOUT" : "REQUEST_FAILED", failureMessage: gapfillPrimaryErrorLine(ff) });
+      if (!suppressErrors) {
+        setLastFailureFields({ ...ff, failureCode: timedOut ? "REQUEST_TIMEOUT" : "REQUEST_FAILED", failureMessage: gapfillPrimaryErrorLine(ff) });
+      }
       setRequestDebug((prev) => [
         {
           at: new Date().toISOString(),
@@ -594,7 +639,7 @@ export default function GapFillLabCanonicalClient() {
         ...prev,
       ].slice(0, 12));
       if (setAsPrimaryResult) setResult(fallback);
-      setError(gapfillPrimaryErrorLine(ff));
+      if (!suppressErrors) setError(gapfillPrimaryErrorLine(ff));
       setLoading(false);
       return fallback;
     }
@@ -612,12 +657,12 @@ export default function GapFillLabCanonicalClient() {
     if (setAsPrimaryResult) setResult(json);
     if (!json.ok) {
       const ff = gapfillFailureFieldsFromJson(json as Record<string, unknown>);
-      setLastFailureFields(ff);
+      if (!suppressErrors) setLastFailureFields(ff);
       const isTimeout = resp.status === 504 || resp.status === 502 || String(json.error ?? "").includes("timeout");
       const line = isTimeout
         ? gapfillPrimaryErrorLine(ff) || "Server timed out before completion."
         : gapfillPrimaryErrorLine(ff);
-      setError(line);
+      if (!suppressErrors) setError(line);
       setLoading(false);
       return json;
     }
@@ -677,6 +722,41 @@ export default function GapFillLabCanonicalClient() {
     return json;
   }
 
+  async function pollForCanonicalManualUsageReadback(extra: Record<string, unknown>): Promise<RunResult> {
+    for (;;) {
+      await new Promise((resolve) => window.setTimeout(resolve, GAPFILL_LAB_READBACK_POLL_MS));
+      const readback = await runAction(
+        "read_test_home_canonical_result",
+        extra,
+        { setAsPrimaryResult: false, suppressErrors: true }
+      );
+      if (readback.ok) {
+        setResult(readback);
+        setError(null);
+        return readback;
+      }
+      const code = String((readback as any)?.failureCode ?? (readback as any)?.error ?? "");
+      if (code === "ARTIFACT_MISSING" || code === "past_scenario_missing") {
+        continue;
+      }
+      setResult(readback);
+      return readback;
+    }
+  }
+
+  async function runManualUsageRecalcFlow() {
+    const extra = {
+      adminLabTreatmentMode,
+      testUsageInputMode: adminLabTreatmentMode,
+    };
+    const trigger = await runAction("run_test_home_canonical_recalc", extra);
+    if (!trigger.ok) return trigger;
+    if (trigger.executionMode === "droplet_async") {
+      return pollForCanonicalManualUsageReadback(extra);
+    }
+    return trigger;
+  }
+
   async function onLookup() {
     await runAction("lookup_source_houses");
   }
@@ -719,6 +799,10 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onRunRecalc() {
+    if (isManualUsageTreatmentMode(adminLabTreatmentMode)) {
+      await runManualUsageRecalcFlow();
+      return;
+    }
     await runAction("run_test_home_canonical_recalc", {
       adminLabTreatmentMode,
       testUsageInputMode: adminLabTreatmentMode,
@@ -865,7 +949,9 @@ export default function GapFillLabCanonicalClient() {
   const actualVsTestMonthlyRows = useMemo(() => {
     const actualMonthly = Array.isArray(actualHouseBaselineDataset?.monthly)
       ? actualHouseBaselineDataset.monthly
-      : [];
+      : Array.isArray((result as any)?.usage365?.monthly)
+        ? (((result as any)?.usage365?.monthly as Array<Record<string, unknown>>) ?? [])
+        : [];
     const testMonthly = Array.isArray(testHouseBaselineDataset?.monthly)
       ? testHouseBaselineDataset.monthly
       : [];
@@ -892,6 +978,43 @@ export default function GapFillLabCanonicalClient() {
       };
     });
   }, [actualHouseBaselineDataset, testHouseBaselineDataset]);
+  const testSharedDiagnostics =
+    result?.ok && (result as any).sharedDiagnostics && typeof (result as any).sharedDiagnostics === "object"
+      ? ((result as any).sharedDiagnostics as Record<string, unknown>)
+      : null;
+  const testSourceTruthContext =
+    testSharedDiagnostics?.sourceTruthContext && typeof testSharedDiagnostics.sourceTruthContext === "object"
+      ? (testSharedDiagnostics.sourceTruthContext as Record<string, unknown>)
+      : null;
+  const sourceActualMonthlyForManualCompare =
+    Array.isArray(actualHouseBaselineDataset?.monthly)
+      ? actualHouseBaselineDataset.monthly
+      : Array.isArray((result as any)?.usage365?.monthly)
+        ? (((result as any)?.usage365?.monthly as Array<Record<string, unknown>>) ?? [])
+        : [];
+  const manualMonthlyCompareRows = useMemo(
+    () =>
+      buildGapfillManualMonthlyCompareRows({
+        actualMonthlyTotals: sourceActualMonthlyForManualCompare,
+        stageOneMonthlyTotalsKwhByMonth:
+          (testSourceTruthContext?.sourceDerivedMonthlyTotalsKwhByMonth as Record<string, number> | null | undefined) ??
+          null,
+        simulatedMonthlyTotals: testHouseBaselineDataset?.monthly ?? [],
+      }),
+    [sourceActualMonthlyForManualCompare, testHouseBaselineDataset?.monthly, testSourceTruthContext]
+  );
+  const manualAnnualCompareSummary = useMemo(
+    () =>
+      buildGapfillManualAnnualCompareSummary({
+        actualMonthlyTotals: sourceActualMonthlyForManualCompare,
+        stageOneAnnualTotalKwh:
+          typeof testSourceTruthContext?.sourceDerivedAnnualTotalKwh === "number"
+            ? testSourceTruthContext.sourceDerivedAnnualTotalKwh
+            : Number(testSourceTruthContext?.sourceDerivedAnnualTotalKwh ?? 0) || 0,
+        simulatedMonthlyTotals: testHouseBaselineDataset?.monthly ?? [],
+      }),
+    [sourceActualMonthlyForManualCompare, testHouseBaselineDataset?.monthly, testSourceTruthContext]
+  );
   const hasCurveData = Boolean(actualHouseOverride?.length || testHouseOverride?.length);
   const actualDiagnosticsHeader = useMemo(
     () =>
@@ -951,6 +1074,10 @@ export default function GapFillLabCanonicalClient() {
       fingerprintBuildFreshness: apiFresh,
     };
   }, [result]);
+  const selectedTreatmentMode = visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode;
+  const showManualMonthlyCompare = selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS";
+  const showManualAnnualCompare = selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
+  const showExactIntervalCurveCompare = selectedTreatmentMode === "EXACT_INTERVALS";
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
@@ -1674,6 +1801,7 @@ export default function GapFillLabCanonicalClient() {
                 title="Actual House lockbox flow"
                 dataset={actualHouseBaselineDataset}
                 fallbackTravelRanges={(pastSimSnapshot as any)?.travelRangesFromDb ?? []}
+                sharedDiagnostics={actualSharedDiagnostics}
               />
               <LeverVisibilityPanel
                 title="Actual House fixed inputs and constraints"
@@ -1826,6 +1954,7 @@ export default function GapFillLabCanonicalClient() {
                 dataset={testHouseBaselineDataset}
                 fallbackTravelRanges={travelRanges}
                 fallbackValidationKeys={(result as any)?.modelAssumptions?.validationOnlyDateKeysLocal ?? []}
+                sharedDiagnostics={testSharedDiagnostics}
               />
               <LeverVisibilityPanel
                 title="Test House fixed inputs and adjustable controls"
@@ -1918,10 +2047,82 @@ export default function GapFillLabCanonicalClient() {
             />
           </div>
         </div>
-        <GapFillDailyCurveCompare
-          summary={dailyCurveCompareSummary}
-          rawReadStatus={result?.ok ? result.curveCompareRawReadStatus ?? null : null}
-        />
+        {showManualMonthlyCompare ? (
+          <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+            <div className="text-sm font-semibold text-brand-navy">Manual monthly reconciliation compare</div>
+            <div className="mt-1 text-xs text-brand-navy/70">
+              Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals.
+            </div>
+            <div className="mt-3 max-h-80 overflow-auto">
+              <table className="min-w-full text-xs border border-brand-blue/10">
+                <thead className="bg-brand-blue/5">
+                  <tr>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-left">Month</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual interval</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-right">Stage 1 target</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-right">Final simulated</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim vs actual</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim vs target</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-right">Target vs actual</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualMonthlyCompareRows.map((row) => (
+                    <tr key={row.month}>
+                      <td className="border border-brand-blue/10 px-2 py-1">{row.month}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actualIntervalKwh.toFixed(2)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.stageOneTargetKwh.toFixed(2)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedKwh.toFixed(2)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedVsActualDeltaKwh.toFixed(2)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedVsTargetDeltaKwh.toFixed(2)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.targetVsActualDeltaKwh.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+        {showManualAnnualCompare ? (
+          <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+            <div className="text-sm font-semibold text-brand-navy">Manual annual reconciliation compare</div>
+            <div className="mt-1 text-xs text-brand-navy/70">
+              Source actual interval annual total, shared Stage 1 annual target, and final simulated annual total.
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Actual interval</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.actualIntervalKwh.toFixed(2)}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Stage 1 target</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.stageOneTargetKwh.toFixed(2)}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Final simulated</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.simulatedKwh.toFixed(2)}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Sim vs actual</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.simulatedVsActualDeltaKwh.toFixed(2)}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Sim vs target</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.simulatedVsTargetDeltaKwh.toFixed(2)}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Target vs actual</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.targetVsActualDeltaKwh.toFixed(2)}</div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {showExactIntervalCurveCompare ? (
+          <GapFillDailyCurveCompare
+            summary={dailyCurveCompareSummary}
+            rawReadStatus={result?.ok ? result.curveCompareRawReadStatus ?? null : null}
+          />
+        ) : null}
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
             <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>

@@ -101,11 +101,19 @@ export type PastSimPerDayTrace = {
   donorSelectionModeUsed: string | null;
   donorCandidatePoolSize: number | null;
   selectedDonorLocalDates: string[];
+  selectedDonorWeights: Array<{ localDate: string; weight: number; distance: number; dayKwh: number }>;
   donorWeatherRegimeUsed: string | null;
   donorMonthKeyUsed: string | null;
   thermalDistanceScore: number | null;
   broadFallbackUsed: boolean;
+  sameRegimeDonorPoolAvailable: boolean;
+  donorPoolBlendStrategy: string | null;
+  donorPoolKwhSpread: number | null;
+  donorPoolKwhVariance: number | null;
+  donorPoolMedianKwh: number | null;
+  donorVarianceGuardrailTriggered: boolean;
   weatherAdjustmentModeUsed: string | null;
+  postDonorAdjustmentCoefficient: number | null;
   shape96Hash: string | null;
   templateSelectionKind: string | null;
   selectedFingerprintBucketMonth: string | null;
@@ -339,11 +347,29 @@ export function buildPastSimPerDayTrace(results: SimulatedDayResult[] | undefine
     selectedDonorLocalDates: Array.isArray(result.selectedDonorLocalDates)
       ? result.selectedDonorLocalDates.map((value) => String(value ?? "").slice(0, 10)).filter((value) => value.length > 0)
       : [],
+    selectedDonorWeights: Array.isArray(result.selectedDonorWeights)
+      ? result.selectedDonorWeights
+          .map((entry) => ({
+            localDate: String(entry?.localDate ?? "").slice(0, 10),
+            weight: typeof entry?.weight === "number" ? entry.weight : 0,
+            distance: typeof entry?.distance === "number" ? entry.distance : 0,
+            dayKwh: typeof entry?.dayKwh === "number" ? entry.dayKwh : 0,
+          }))
+          .filter((entry) => entry.localDate.length > 0)
+      : [],
     donorWeatherRegimeUsed: result.donorWeatherRegimeUsed ?? null,
     donorMonthKeyUsed: result.donorMonthKeyUsed ?? null,
     thermalDistanceScore: typeof result.thermalDistanceScore === "number" ? result.thermalDistanceScore : null,
     broadFallbackUsed: result.broadFallbackUsed === true,
+    sameRegimeDonorPoolAvailable: result.sameRegimeDonorPoolAvailable === true,
+    donorPoolBlendStrategy: result.donorPoolBlendStrategy ?? null,
+    donorPoolKwhSpread: typeof result.donorPoolKwhSpread === "number" ? result.donorPoolKwhSpread : null,
+    donorPoolKwhVariance: typeof result.donorPoolKwhVariance === "number" ? result.donorPoolKwhVariance : null,
+    donorPoolMedianKwh: typeof result.donorPoolMedianKwh === "number" ? result.donorPoolMedianKwh : null,
+    donorVarianceGuardrailTriggered: result.donorVarianceGuardrailTriggered === true,
     weatherAdjustmentModeUsed: result.weatherAdjustmentModeUsed ?? null,
+    postDonorAdjustmentCoefficient:
+      typeof result.postDonorAdjustmentCoefficient === "number" ? result.postDonorAdjustmentCoefficient : null,
     shape96Hash: Array.isArray(result.shape96Used)
       ? createHash("sha256")
           .update(JSON.stringify(result.shape96Used), "utf8")

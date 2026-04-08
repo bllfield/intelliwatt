@@ -20,6 +20,7 @@ import type {
   PastWeatherRegimeKey,
   PastNeighborDaySample,
   PastWeatherDonorSample,
+  PastWeatherDonorContribution,
 } from "./pastDaySimulatorTypes";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
@@ -73,10 +74,12 @@ const MIN_DAYS_GLOBAL_DAYTYPE = 8;
 const MIN_DAYS_NEIGHBOR_DAYTYPE = 3;
 const MIN_DAYS_WEATHER_DONOR_SAME_DAYTYPE = 3;
 const MIN_DAYS_WEATHER_DONOR_SAME_REGIME = 2;
-const WEATHER_DONOR_PICK_COUNT = 4;
+const WEATHER_DONOR_PICK_COUNT = 5;
 const NEIGHBOR_DOM_RADIUS = 5;
 const GUARDRAIL_MAX_MULT = 1.75;
 const GUARDRAIL_MIN_MULT = 0.45;
+const DONOR_VARIANCE_CV_TRIGGER = 0.18;
+const DONOR_SPREAD_TO_MEDIAN_TRIGGER = 0.38;
 
 function parseLocalDayOfMonth(localDate: string): number | null {
   const dom = Number(String(localDate ?? "").slice(8, 10));
@@ -143,25 +146,46 @@ function monthDistance(targetMonthKey: string, donorMonthKey: string): number {
   return Math.abs((targetYear - donorYear) * 12 + (targetMonth - donorMonth));
 }
 
+function medianOfNumbers(values: number[]): number | null {
+  const finite = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (finite.length === 0) return null;
+  const mid = Math.floor(finite.length / 2);
+  return finite.length % 2 === 1 ? finite[mid]! : (finite[mid - 1]! + finite[mid]!) / 2;
+}
+
+function varianceOfNumbers(values: number[]): number | null {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length === 0) return null;
+  const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
+  return finite.reduce((sum, value) => sum + (value - mean) ** 2, 0) / finite.length;
+}
+
 function weatherDistanceScore(args: {
   target: PastDayWeatherFeatures;
   donor: PastWeatherDonorSample;
   targetMonthKey: string;
   targetDayOfMonth: number | null;
+  targetRegime: PastWeatherRegimeKey;
 }): number {
   const targetSpread = spreadForWeather(args.target) ?? 0;
   const donorSpread = Number(args.donor.tempSpreadC);
   const donorDayOfMonth = parseLocalDayOfMonth(args.donor.localDate);
-  return (
-    Math.abs((Number(args.donor.heatingDegreeSeverity) || 0) - (Number(args.target.heatingDegreeSeverity) || 0)) * 2.4 +
-    Math.abs((Number(args.donor.coolingDegreeSeverity) || 0) - (Number(args.target.coolingDegreeSeverity) || 0)) * 2.4 +
-    Math.abs((Number(args.donor.dailyAvgTempC) || 0) - (Number(args.target.dailyAvgTempC) || 0)) * 0.8 +
-    Math.abs((Number(args.donor.dailyMaxTempC) || 0) - (Number(args.target.dailyMaxTempC) || 0)) * 0.35 +
-    Math.abs((Number(args.donor.dailyMinTempC) || 0) - (Number(args.target.dailyMinTempC) || 0)) * 0.35 +
-    Math.abs((Number.isFinite(donorSpread) ? donorSpread : 0) - targetSpread) * 0.2 +
-    monthDistance(args.targetMonthKey, args.donor.monthKey) * 0.35 +
-    Math.abs((donorDayOfMonth ?? 15) - (args.targetDayOfMonth ?? 15)) * 0.04
-  );
+  const heatingDiff = Math.abs((Number(args.donor.heatingDegreeSeverity) || 0) - (Number(args.target.heatingDegreeSeverity) || 0));
+  const coolingDiff = Math.abs((Number(args.donor.coolingDegreeSeverity) || 0) - (Number(args.target.coolingDegreeSeverity) || 0));
+  const avgDiff = Math.abs((Number(args.donor.dailyAvgTempC) || 0) - (Number(args.target.dailyAvgTempC) || 0));
+  const maxDiff = Math.abs((Number(args.donor.dailyMaxTempC) || 0) - (Number(args.target.dailyMaxTempC) || 0));
+  const minDiff = Math.abs((Number(args.donor.dailyMinTempC) || 0) - (Number(args.target.dailyMinTempC) || 0));
+  const spreadDiff = Math.abs((Number.isFinite(donorSpread) ? donorSpread : 0) - targetSpread);
+  const monthDiff = monthDistance(args.targetMonthKey, args.donor.monthKey);
+  const domDiff = Math.abs((donorDayOfMonth ?? 15) - (args.targetDayOfMonth ?? 15));
+
+  if (args.targetRegime === "heating") {
+    return heatingDiff * 3.4 + minDiff * 1.1 + avgDiff * 0.45 + maxDiff * 0.18 + spreadDiff * 0.12 + monthDiff * 0.28 + domDiff * 0.03;
+  }
+  if (args.targetRegime === "cooling") {
+    return coolingDiff * 3.1 + avgDiff * 0.75 + maxDiff * 0.45 + minDiff * 0.2 + spreadDiff * 0.18 + monthDiff * 0.32 + domDiff * 0.03;
+  }
+  return avgDiff * 0.95 + spreadDiff * 0.28 + maxDiff * 0.3 + minDiff * 0.3 + heatingDiff * 0.8 + coolingDiff * 0.8 + monthDiff * 0.35 + domDiff * 0.04;
 }
 
 function selectWeatherSimilarDonor(args: {
@@ -177,10 +201,17 @@ function selectWeatherSimilarDonor(args: {
       donorSelectionModeUsed: string;
       donorCandidatePoolSize: number;
       selectedDonorLocalDates: string[];
+      selectedDonorWeights: PastWeatherDonorContribution[];
       donorWeatherRegimeUsed: PastWeatherRegimeKey | null;
       donorMonthKeyUsed: string | null;
       thermalDistanceScore: number | null;
       broadFallbackUsed: boolean;
+      sameRegimeDonorPoolAvailable: boolean;
+      donorPoolBlendStrategy: "distance_weighted_blend" | "variance_dampened_blend";
+      donorPoolKwhSpread: number | null;
+      donorPoolKwhVariance: number | null;
+      donorPoolMedianKwh: number | null;
+      donorVarianceGuardrailTriggered: boolean;
       donorWeatherReference: PastDayWeatherFeatures | null;
     }
   | null {
@@ -198,6 +229,7 @@ function selectWeatherSimilarDonor(args: {
     sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME
       ? sameRegime
       : sameDayType;
+  const sameRegimeDonorPoolAvailable = sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME;
   if (candidatePool.length < MIN_DAYS_WEATHER_DONOR_SAME_DAYTYPE) return null;
 
   const scored = candidatePool
@@ -208,19 +240,51 @@ function selectWeatherSimilarDonor(args: {
         donor,
         targetMonthKey: args.monthKey,
         targetDayOfMonth,
+        targetRegime,
       }),
     }))
     .sort((a, b) => a.distance - b.distance || a.donor.localDate.localeCompare(b.donor.localDate));
   if (scored.length === 0) return null;
   const picked = scored.slice(0, Math.min(WEATHER_DONOR_PICK_COUNT, scored.length));
-  const weighted = picked.map((entry) => ({
+  const weightedBase = picked.map((entry) => ({
     ...entry,
-    weight: 1 / (1 + Math.max(0, entry.distance)),
+    weight: 1 / Math.pow(0.35 + Math.max(0, entry.distance), 2),
+  }));
+  const donorDayKwhs = picked.map((entry) => Number(entry.donor.dayKwh) || 0).filter((value) => value > 0);
+  const donorPoolMedianKwh = medianOfNumbers(donorDayKwhs);
+  const donorPoolKwhVariance = varianceOfNumbers(donorDayKwhs);
+  const donorPoolKwhSpread = donorDayKwhs.length > 0 ? Math.max(...donorDayKwhs) - Math.min(...donorDayKwhs) : null;
+  const donorStdDev = donorPoolKwhVariance != null ? Math.sqrt(donorPoolKwhVariance) : null;
+  const donorCv =
+    donorStdDev != null && donorPoolMedianKwh != null && donorPoolMedianKwh > 1e-6
+      ? donorStdDev / donorPoolMedianKwh
+      : 0;
+  const donorSpreadRatio =
+    donorPoolKwhSpread != null && donorPoolMedianKwh != null && donorPoolMedianKwh > 1e-6
+      ? donorPoolKwhSpread / donorPoolMedianKwh
+      : 0;
+  const donorVarianceGuardrailTriggered =
+    picked.length >= 3 &&
+    (donorCv > DONOR_VARIANCE_CV_TRIGGER || donorSpreadRatio > DONOR_SPREAD_TO_MEDIAN_TRIGGER);
+  const weighted = weightedBase.map((entry) => ({
+    ...entry,
+    adjustedDayKwh:
+      donorVarianceGuardrailTriggered && donorPoolMedianKwh != null
+        ? (Number(entry.donor.dayKwh) || 0) * 0.7 + donorPoolMedianKwh * 0.3
+        : Number(entry.donor.dayKwh) || 0,
   }));
   const weightSum = weighted.reduce((sum, entry) => sum + entry.weight, 0);
   if (!Number.isFinite(weightSum) || weightSum <= 0) return null;
   const targetDayKwh =
-    weighted.reduce((sum, entry) => sum + (Number(entry.donor.dayKwh) || 0) * entry.weight, 0) / weightSum;
+    weighted.reduce((sum, entry) => sum + entry.adjustedDayKwh * entry.weight, 0) / weightSum;
+  const selectedDonorWeights: PastWeatherDonorContribution[] = weighted.map((entry) => ({
+    localDate: entry.donor.localDate,
+    monthKey: entry.donor.monthKey,
+    weatherRegime: entry.donor.weatherRegime,
+    dayKwh: Number(entry.donor.dayKwh) || 0,
+    distance: entry.distance,
+    weight: entry.weight / weightSum,
+  }));
   const donorWeatherReference: PastDayWeatherFeatures = {
     dailyAvgTempC:
       weighted.reduce((sum, entry) => sum + (Number(entry.donor.dailyAvgTempC) || 0) * entry.weight, 0) / weightSum,
@@ -237,23 +301,30 @@ function selectWeatherSimilarDonor(args: {
   return {
     targetDayKwh,
     fallbackLevel:
-      sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME
+      sameRegimeDonorPoolAvailable
         ? "weather_nearest_daytype_regime"
         : "weather_nearest_daytype",
     donorSelectionModeUsed:
-      sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME
+      sameRegimeDonorPoolAvailable
         ? "weather_nearest_daytype_regime"
         : "weather_nearest_daytype",
     donorCandidatePoolSize: candidatePool.length,
     selectedDonorLocalDates: picked.map((entry) => entry.donor.localDate),
+    selectedDonorWeights,
     donorWeatherRegimeUsed:
-      sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME ? targetRegime : null,
+      sameRegimeDonorPoolAvailable ? targetRegime : null,
     donorMonthKeyUsed: picked[0]?.donor.monthKey ?? null,
     thermalDistanceScore:
       picked.length > 0
-        ? picked.reduce((sum, entry) => sum + entry.distance, 0) / picked.length
+        ? selectedDonorWeights.reduce((sum, entry) => sum + entry.distance * entry.weight, 0)
         : null,
-    broadFallbackUsed: sameRegime.length < MIN_DAYS_WEATHER_DONOR_SAME_REGIME,
+    broadFallbackUsed: false,
+    sameRegimeDonorPoolAvailable,
+    donorPoolBlendStrategy: donorVarianceGuardrailTriggered ? "variance_dampened_blend" : "distance_weighted_blend",
+    donorPoolKwhSpread,
+    donorPoolKwhVariance,
+    donorPoolMedianKwh,
+    donorVarianceGuardrailTriggered,
     donorWeatherReference,
   };
 }
@@ -278,10 +349,17 @@ function selectPastDayTotalWithFallback(args: {
   donorSelectionModeUsed: string;
   donorCandidatePoolSize: number;
   selectedDonorLocalDates: string[];
+  selectedDonorWeights: PastWeatherDonorContribution[];
   donorWeatherRegimeUsed: PastWeatherRegimeKey | null;
   donorMonthKeyUsed: string | null;
   thermalDistanceScore: number | null;
   broadFallbackUsed: boolean;
+  sameRegimeDonorPoolAvailable: boolean;
+  donorPoolBlendStrategy: "distance_weighted_blend" | "variance_dampened_blend" | null;
+  donorPoolKwhSpread: number | null;
+  donorPoolKwhVariance: number | null;
+  donorPoolMedianKwh: number | null;
+  donorVarianceGuardrailTriggered: boolean;
   donorWeatherReference: PastDayWeatherFeatures | null;
 } {
   const { monthKey, isWeekend, profile, localDate, neighborDayTotals } = args;
@@ -324,10 +402,17 @@ function selectPastDayTotalWithFallback(args: {
   let donorSelectionModeUsed = "calendar_fallback";
   let donorCandidatePoolSize = 0;
   let selectedDonorLocalDates: string[] = [];
+  let selectedDonorWeights: PastWeatherDonorContribution[] = [];
   let donorWeatherRegimeUsed: PastWeatherRegimeKey | null = null;
   let donorMonthKeyUsed: string | null = null;
   let thermalDistanceScore: number | null = null;
   let broadFallbackUsed = true;
+  let sameRegimeDonorPoolAvailable = false;
+  let donorPoolBlendStrategy: "distance_weighted_blend" | "variance_dampened_blend" | null = null;
+  let donorPoolKwhSpread: number | null = null;
+  let donorPoolKwhVariance: number | null = null;
+  let donorPoolMedianKwh: number | null = null;
+  let donorVarianceGuardrailTriggered = false;
   let donorWeatherReference: PastDayWeatherFeatures | null = null;
   const dom = parseLocalDayOfMonth(localDate);
   const neighborSamples = isWeekend
@@ -351,10 +436,17 @@ function selectPastDayTotalWithFallback(args: {
     donorSelectionModeUsed = weatherDonorSelection.donorSelectionModeUsed;
     donorCandidatePoolSize = weatherDonorSelection.donorCandidatePoolSize;
     selectedDonorLocalDates = weatherDonorSelection.selectedDonorLocalDates;
+    selectedDonorWeights = weatherDonorSelection.selectedDonorWeights;
     donorWeatherRegimeUsed = weatherDonorSelection.donorWeatherRegimeUsed;
     donorMonthKeyUsed = weatherDonorSelection.donorMonthKeyUsed;
     thermalDistanceScore = weatherDonorSelection.thermalDistanceScore;
     broadFallbackUsed = weatherDonorSelection.broadFallbackUsed;
+    sameRegimeDonorPoolAvailable = weatherDonorSelection.sameRegimeDonorPoolAvailable;
+    donorPoolBlendStrategy = weatherDonorSelection.donorPoolBlendStrategy;
+    donorPoolKwhSpread = weatherDonorSelection.donorPoolKwhSpread;
+    donorPoolKwhVariance = weatherDonorSelection.donorPoolKwhVariance;
+    donorPoolMedianKwh = weatherDonorSelection.donorPoolMedianKwh;
+    donorVarianceGuardrailTriggered = weatherDonorSelection.donorVarianceGuardrailTriggered;
     donorWeatherReference = weatherDonorSelection.donorWeatherReference;
   } else if (neighborKwh != null && Number.isFinite(neighborKwh) && neighborKwh > 0) {
     rawKwh = neighborKwh;
@@ -429,10 +521,17 @@ function selectPastDayTotalWithFallback(args: {
     donorSelectionModeUsed,
     donorCandidatePoolSize,
     selectedDonorLocalDates,
+    selectedDonorWeights,
     donorWeatherRegimeUsed,
     donorMonthKeyUsed,
     thermalDistanceScore,
     broadFallbackUsed,
+    sameRegimeDonorPoolAvailable,
+    donorPoolBlendStrategy,
+    donorPoolKwhSpread,
+    donorPoolKwhVariance,
+    donorPoolMedianKwh,
+    donorVarianceGuardrailTriggered,
     donorWeatherReference,
   };
 }
@@ -574,6 +673,7 @@ function computeWeatherAdjustedDayTotal(args: {
   preBlendAdjustedDayKwh: number;
   blendedBackTowardProfile: boolean;
   weatherAdjustmentModeUsed: "legacy_training_stats" | "bounded_post_donor";
+  postDonorAdjustmentCoefficient: number | null;
 } {
   const {
     baseDayKwh,
@@ -616,6 +716,7 @@ function computeWeatherAdjustedDayTotal(args: {
       preBlendAdjustedDayKwh: baseDayKwh,
       blendedBackTowardProfile: false,
       weatherAdjustmentModeUsed: adjustmentModeUsed,
+      postDonorAdjustmentCoefficient: 1,
     };
   }
 
@@ -642,9 +743,18 @@ function computeWeatherAdjustedDayTotal(args: {
     if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
       weatherModeUsed = "heating";
       const severityDelta = refHdd > 1e-6 ? (testHdd - refHdd) / Math.max(refHdd, 8) : 0;
-      const tempDelta = refAvgTempC != null && wx.dailyAvgTempC != null ? (refAvgTempC - wx.dailyAvgTempC) / 18 : 0;
+      const tempDelta = refAvgTempC != null && wx.dailyAvgTempC != null ? (refAvgTempC - wx.dailyAvgTempC) / 22 : 0;
+      const minTempDelta =
+        donorWeatherReference?.dailyMinTempC != null && wx.dailyMinTempC != null
+          ? (donorWeatherReference.dailyMinTempC - wx.dailyMinTempC) / 14
+          : 0;
+      const maxTempDelta =
+        donorWeatherReference?.dailyMaxTempC != null && wx.dailyMaxTempC != null
+          ? (donorWeatherReference.dailyMaxTempC - wx.dailyMaxTempC) / 24
+          : 0;
       const spreadDelta = refSpreadC != null ? (testSpreadC - refSpreadC) / 20 : 0;
-      weatherSeverityMultiplier = 1 + clampNumber(severityDelta * 0.4 + tempDelta * 0.15 + spreadDelta * 0.05, -0.1, 0.12);
+      weatherSeverityMultiplier =
+        1 + clampNumber(severityDelta * 0.52 + minTempDelta * 0.22 + tempDelta * 0.1 + maxTempDelta * 0.04 + spreadDelta * 0.04, -0.11, 0.15);
     } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
       weatherModeUsed = "cooling";
       const severityDelta = refCdd > 1e-6 ? (testCdd - refCdd) / Math.max(refCdd, 8) : 0;
@@ -797,6 +907,7 @@ function computeWeatherAdjustedDayTotal(args: {
     preBlendAdjustedDayKwh,
     blendedBackTowardProfile,
     weatherAdjustmentModeUsed: adjustmentModeUsed,
+    postDonorAdjustmentCoefficient: weatherSeverityMultiplier,
   };
 }
 
@@ -912,11 +1023,19 @@ export function simulatePastDay(
     donorSelectionModeUsed: sel.donorSelectionModeUsed,
     donorCandidatePoolSize: sel.donorCandidatePoolSize,
     selectedDonorLocalDates: sel.selectedDonorLocalDates,
+    selectedDonorWeights: sel.selectedDonorWeights,
     donorWeatherRegimeUsed: sel.donorWeatherRegimeUsed,
     donorMonthKeyUsed: sel.donorMonthKeyUsed,
     thermalDistanceScore: sel.thermalDistanceScore,
     broadFallbackUsed: sel.broadFallbackUsed,
+    sameRegimeDonorPoolAvailable: sel.sameRegimeDonorPoolAvailable,
+    donorPoolBlendStrategy: sel.donorPoolBlendStrategy ?? undefined,
+    donorPoolKwhSpread: sel.donorPoolKwhSpread,
+    donorPoolKwhVariance: sel.donorPoolKwhVariance,
+    donorPoolMedianKwh: sel.donorPoolMedianKwh,
+    donorVarianceGuardrailTriggered: sel.donorVarianceGuardrailTriggered,
     weatherAdjustmentModeUsed: adj.weatherAdjustmentModeUsed,
+    postDonorAdjustmentCoefficient: adj.postDonorAdjustmentCoefficient,
     selectedFingerprintBucketMonth: selectedShape.selectedMonthKeyUsed ?? monthKey,
     shape96Used: normShape,
     auxHeatGate_minTempPassed: adj.auxHeatGate_minTempPassed,

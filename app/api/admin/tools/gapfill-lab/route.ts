@@ -79,6 +79,13 @@ import {
   resolveGapfillWeatherLogicSetting,
   resolveUserWeatherLogicSetting,
 } from "@/modules/usageSimulator/pastSimWeatherPolicy";
+import {
+  buildManualUsageStageOneResolvedSeeds,
+  resolveManualUsageStageOnePayloadForMode,
+} from "@/modules/manualUsage/prefill";
+import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
+import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
@@ -262,6 +269,71 @@ function shouldUseCanonicalSourceCopyPolicy(args: {
   );
 }
 
+function isGapfillManualUsageInputMode(usageInputMode: TestHomeUsageInputMode): boolean {
+  return (
+    usageInputMode === "MONTHLY_FROM_SOURCE_INTERVALS" ||
+    usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
+  );
+}
+
+function statusForGapfillManualReadResultFailure(result: {
+  error?: string | null;
+  failureCode?: string | null;
+}): number {
+  const code = String(result.failureCode ?? result.error ?? "").trim();
+  switch (code) {
+    case "past_scenario_missing":
+    case "NO_BUILD":
+    case "SCENARIO_NOT_FOUND":
+    case "ARTIFACT_MISSING":
+      return 404;
+    case "HOUSE_NOT_FOUND":
+      return 403;
+    case "COMPARE_TRUTH_INCOMPLETE":
+      return 409;
+    default:
+      return 500;
+  }
+}
+
+async function buildGapfillManualConstraintPayload(args: {
+  labOwnerUserId: string;
+  testHomeHouseId: string;
+  sourceHouseUserId: string;
+  sourceHouseId: string;
+  sourceEsiid: string | null;
+  travelRangesForRecalc: DateRange[];
+  usageInputMode: TestHomeUsageInputMode;
+}): Promise<ManualUsagePayload | null> {
+  const [sourceManualRec, testHomeManualRec, sourceUsageDataset] = await Promise.all([
+    getManualUsageInputForUserHouse({
+      userId: args.sourceHouseUserId,
+      houseId: args.sourceHouseId,
+    }),
+    getManualUsageInputForUserHouse({
+      userId: args.labOwnerUserId,
+      houseId: args.testHomeHouseId,
+    }),
+    getActualUsageDatasetForHouse(args.sourceHouseId, args.sourceEsiid ?? null, {
+      skipFullYearIntervalFetch: true,
+    }).catch(() => ({ dataset: null })),
+  ]);
+  const seedSet = buildManualUsageStageOneResolvedSeeds({
+    sourcePayload: sourceManualRec.payload,
+    actualEndDate:
+      String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null,
+    travelRanges: args.travelRangesForRecalc,
+    dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
+  });
+  return (
+    resolveManualUsageStageOnePayloadForMode({
+      mode: args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS" ? "ANNUAL" : "MONTHLY",
+      testHomePayload: testHomeManualRec.payload,
+      seedSet,
+    }).payload ?? null
+  );
+}
+
 function hasAdminSessionCookie(request: NextRequest): boolean {
   const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
   const email = normalizeEmailSafe(raw);
@@ -290,6 +362,195 @@ async function waitForSourceHomePastSimJob(args: { userId: string; jobId: string
     }
     await new Promise((resolve) => setTimeout(resolve, SOURCE_HOME_PAST_SIM_POLL_MS));
   }
+}
+
+async function buildGapfillManualUsageReadbackResponse(args: {
+  action: string;
+  email: string;
+  timezone: string;
+  labOwnerUserId: string;
+  sourceHouse: {
+    id: string;
+    userId?: string | null;
+    esiid?: string | null;
+    addressLine1?: string | null;
+    addressCity?: string | null;
+    addressState?: string | null;
+  };
+  sourceUserId: string;
+  testHomeHouse: { id: string };
+  scenarioId: string;
+  correlationId?: string | null;
+  testUsageInputMode: TestHomeUsageInputMode;
+  weatherKind: string;
+  gapfillWeatherLogic: { weatherLogicMode: string; owner: string };
+  canonicalWindow: { startDate: string; endDate: string };
+  canonicalWindowHelper: string;
+  usage365?: Usage365Payload;
+  homeProfile: unknown;
+  applianceProfile: unknown;
+  travelRangesFromDb: DateRange[];
+  sourceTravelRangesFromDb: DateRange[];
+  travelRangesForRecalc: DateRange[];
+  usingSourceTravelRangesForRecalc: boolean;
+  testSelectionMode: ValidationDaySelectionMode;
+  validationPolicyOwner: ValidationPolicyOwner;
+  userDefaultValidationSelectionMode: string;
+  selectionDiagnostics: Record<string, unknown> | null;
+}) {
+  const [buildRow, artifactRow, manualUsagePayload] = await Promise.all([
+    (prisma as any).usageSimulatorBuild
+      .findUnique({
+        where: {
+          userId_houseId_scenarioKey: {
+            userId: args.labOwnerUserId,
+            houseId: args.testHomeHouse.id,
+            scenarioKey: String(args.scenarioId),
+          },
+        },
+        select: { id: true, lastBuiltAt: true, buildInputsHash: true, buildInputs: true },
+      })
+      .catch(() => null),
+    (usagePrisma as any).pastSimulatedDatasetCache
+      .findFirst({
+        where: { houseId: args.testHomeHouse.id, scenarioId: String(args.scenarioId) },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true, updatedAt: true, inputHash: true, engineVersion: true },
+      })
+      .catch(() => null),
+    buildGapfillManualConstraintPayload({
+      labOwnerUserId: args.labOwnerUserId,
+      testHomeHouseId: args.testHomeHouse.id,
+      sourceHouseUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouse.id,
+      sourceEsiid: args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null,
+      travelRangesForRecalc: args.travelRangesForRecalc,
+      usageInputMode: args.testUsageInputMode,
+    }),
+  ]);
+
+  const readResultWithManualPayload = await buildManualUsagePastSimReadResult({
+    userId: args.labOwnerUserId,
+    houseId: args.testHomeHouse.id,
+    scenarioId: String(args.scenarioId),
+    readMode: "artifact_only",
+    callerType: "gapfill_test",
+    correlationId: args.correlationId ?? null,
+    usageInputMode: args.testUsageInputMode,
+    validationPolicyOwner: args.validationPolicyOwner,
+    weatherLogicMode: args.gapfillWeatherLogic.weatherLogicMode,
+    artifactId: artifactRow?.id ?? null,
+    artifactInputHash: artifactRow?.inputHash ?? null,
+    artifactEngineVersion: artifactRow?.engineVersion ?? null,
+    artifactPersistenceOutcome: "persisted_artifact_exact_read",
+    manualUsagePayload,
+  });
+  if (!readResultWithManualPayload.ok) {
+    return NextResponse.json(
+      attachFailureContract({
+        ...readResultWithManualPayload,
+        action: args.action,
+      }),
+      { status: statusForGapfillManualReadResultFailure(readResultWithManualPayload) }
+    );
+  }
+
+  const { effectiveValidationSelectionMode, fromBuildInputs: effectiveValidationFromBuild } =
+    readEffectiveValidationFromBuildInputs(
+      buildRow?.buildInputs as Record<string, unknown> | undefined,
+      args.testSelectionMode
+    );
+
+  return NextResponse.json({
+    ok: true,
+    action: args.action,
+    mode: "canonical_test_home_lab",
+    correlationId:
+      args.correlationId ??
+      ((readResultWithManualPayload.sharedDiagnostics as any)?.identityContext?.correlationId as string | null) ??
+      null,
+    email: args.email,
+    sourceUserId: args.sourceUserId,
+    scenarioId: String(args.scenarioId),
+    sourceHouseId: args.sourceHouse.id,
+    testHomeId: args.testHomeHouse.id,
+    treatmentMode: args.testUsageInputMode,
+    supportedAdminTreatmentModes: [...ADMIN_LAB_TREATMENT_MODES],
+    usageInputMode: args.testUsageInputMode,
+    simulatorMode:
+      typeof (buildRow?.buildInputs as Record<string, unknown> | undefined)?.mode === "string"
+        ? String((buildRow?.buildInputs as Record<string, unknown>).mode)
+        : "MANUAL_TOTALS",
+    sourceHouse: {
+      id: args.sourceHouse.id,
+      label:
+        [args.sourceHouse.addressLine1, args.sourceHouse.addressCity, args.sourceHouse.addressState]
+          .filter(Boolean)
+          .join(", ") || args.sourceHouse.id,
+    },
+    testHome: {
+      id: args.testHomeHouse.id,
+      label: "Test Home",
+      canonicalIdentity: GAPFILL_LAB_TEST_HOME_LABEL,
+    },
+    timezone: args.timezone,
+    homeProfile: args.homeProfile,
+    applianceProfile: args.applianceProfile,
+    weatherKind: args.weatherKind,
+    weatherLogicMode: args.gapfillWeatherLogic.weatherLogicMode,
+    weatherLogicOwner: args.gapfillWeatherLogic.owner,
+    canonicalWindow: {
+      startDate: args.canonicalWindow.startDate,
+      endDate: args.canonicalWindow.endDate,
+      helper: args.canonicalWindowHelper,
+    },
+    travelRangesFromDb: args.travelRangesForRecalc,
+    testHomeTravelRangesFromDb: args.travelRangesFromDb,
+    sourceTravelRangesFromDb: args.sourceTravelRangesFromDb,
+    effectiveTravelRangesForRecalc: args.travelRangesForRecalc,
+    effectiveTravelRangesSource: args.usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
+    testRangesUsed: [],
+    testSelectionMode: args.testSelectionMode,
+    adminValidationMode: args.testSelectionMode,
+    validationPolicyOwner: args.validationPolicyOwner,
+    userDefaultValidationSelectionMode: args.userDefaultValidationSelectionMode,
+    effectiveValidationSelectionMode,
+    effectiveValidationSelectionModeSource: effectiveValidationFromBuild ? "usage_simulator_build" : "request_fallback",
+    testDaysRequested: null,
+    testDaysSelected: Array.isArray((readResultWithManualPayload.dataset as any)?.meta?.validationOnlyDateKeysLocal)
+      ? (readResultWithManualPayload.dataset as any).meta.validationOnlyDateKeysLocal.length
+      : 0,
+    seedUsed: null,
+    selectionDiagnostics: args.selectionDiagnostics,
+    validationSelectionDiagnostics: args.selectionDiagnostics,
+    usage365: args.usage365,
+    baselineDatasetProjection: readResultWithManualPayload.dataset,
+    compareProjection: readResultWithManualPayload.compareProjection,
+    buildId: buildRow?.id ?? null,
+    buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,
+    buildInputsHash: buildRow?.buildInputsHash ?? null,
+    artifactId: artifactRow?.id ?? null,
+    artifactInputHash: artifactRow?.inputHash ?? null,
+    artifactCacheUpdatedAt: artifactRow?.updatedAt instanceof Date ? artifactRow.updatedAt.toISOString() : null,
+    artifactEngineVersion: artifactRow?.engineVersion ?? null,
+    sharedDiagnostics: readResultWithManualPayload.sharedDiagnostics,
+    compareProjectionSummary: {
+      attached: Array.isArray(readResultWithManualPayload.compareProjection?.rows) &&
+        readResultWithManualPayload.compareProjection.rows.length > 0,
+      rowCount: Array.isArray(readResultWithManualPayload.compareProjection?.rows)
+        ? readResultWithManualPayload.compareProjection.rows.length
+        : 0,
+      metrics: readResultWithManualPayload.compareProjection?.metrics ?? {},
+    },
+    baselineProjectionSummary: {
+      applied: Boolean((readResultWithManualPayload.dataset as any)?.meta?.validationProjectionApplied),
+      expected: Array.isArray((readResultWithManualPayload.dataset as any)?.meta?.validationOnlyDateKeysLocal),
+      correct: true,
+      validationOnlyDateKeyCount: Array.isArray((readResultWithManualPayload.dataset as any)?.meta?.validationOnlyDateKeysLocal)
+        ? (readResultWithManualPayload.dataset as any).meta.validationOnlyDateKeysLocal.length
+        : 0,
+    },
+  });
 }
 
 function normalizeLabHomeProfileInput(input: any): any {
@@ -655,7 +916,8 @@ export async function POST(req: NextRequest) {
     rawAction === "set_user_default_validation_selection_mode" ||
     rawAction === "replace_test_home_from_source" ||
     rawAction === "save_test_home_inputs" ||
-    rawAction === "run_test_home_canonical_recalc";
+    rawAction === "run_test_home_canonical_recalc" ||
+    rawAction === "read_test_home_canonical_result";
   const labOwnerUserId = isCanonicalLabAction ? await resolveLabOwnerUserId(req) : null;
   const sourceHouseIdParam = typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim()
     ? body.sourceHouseId.trim()
@@ -1159,6 +1421,7 @@ export async function POST(req: NextRequest) {
       selectionMode: requestedMode,
       validationDayCount: targetValidationDayCount,
     });
+    const isManualUsageMode = isGapfillManualUsageInputMode(testUsageInputMode);
     let travelRangesForRecalc = travelRangesFromDb;
     let testSelectionMode = validationPolicy.selectionMode;
     let testDateKeysLocal = new Set<string>();
@@ -1171,7 +1434,15 @@ export async function POST(req: NextRequest) {
       testRanges: selectedTestRanges,
       testDaysRequested,
     });
-    if (usingSourceTravelRangesForRecalc) {
+    if (isManualUsageMode) {
+      selectionDiagnostics = {
+        modeUsed: validationPolicy.selectionMode,
+        targetCount: validationPolicy.validationDayCount,
+        selectedCount: null,
+        delegatedToSharedPastSimRead: true,
+        source: "manual_usage_shared_dispatch",
+      };
+    } else if (usingSourceTravelRangesForRecalc) {
       const sourcePastScenario = await (prisma as any).usageSimulatorScenario
         .findFirst({
           where: {
@@ -1263,7 +1534,7 @@ export async function POST(req: NextRequest) {
       testDaysSelected = selectedValidation.selectedDateKeys.length;
       selectionDiagnostics = selectedValidation.diagnostics;
     }
-    if (testDateKeysLocal.size === 0) {
+    if (!isManualUsageMode && testDateKeysLocal.size === 0) {
       return NextResponse.json(
         attachFailureContract({
           ok: false,
@@ -1278,7 +1549,7 @@ export async function POST(req: NextRequest) {
       travelRangesForRecalc.flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezone))
     );
     const overlapLocal = setIntersect(effectiveTravelDateKeysLocal, testDateKeysLocal);
-    if (overlapLocal.size > 0) {
+    if (!isManualUsageMode && overlapLocal.size > 0) {
       return NextResponse.json(
         attachFailureContract({
           ok: false,
@@ -1322,6 +1593,85 @@ export async function POST(req: NextRequest) {
       testHomeId: testHomeHouse.id,
       scenarioId: String(pastScenario.id),
     });
+
+    if (isManualUsageMode) {
+      const dispatched = await dispatchPastSimRecalc({
+        userId: labOwnerUser.id,
+        houseId: testHomeHouse.id,
+        esiid: sourceEsiid,
+        actualContextHouseId: sourceHouse.id,
+        mode: testHomeSimulatorMode,
+        scenarioId: String(pastScenario.id),
+        weatherPreference: gapfillWeatherLogic.weatherPreference,
+        persistPastSimBaseline: true,
+        preLockboxTravelRanges: travelRangesForRecalc,
+        validationDaySelectionMode: testSelectionMode,
+        validationDayCount: validationPolicy.validationDayCount,
+        correlationId: labCorrelationId,
+        adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
+        runContext: {
+          callerLabel: "gapfill_launcher",
+          buildPathKind: "recalc",
+          persistRequested: true,
+          adminLabTreatmentMode: adminLabTreatmentModeForRecalc ?? undefined,
+        },
+      });
+      if (dispatched.executionMode === "inline" && !dispatched.result.ok) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: dispatched.result.error ?? "canonical_recalc_failed",
+            message: String(dispatched.result.error ?? "Canonical recalc failed."),
+            correlationId: dispatched.correlationId,
+          }),
+          { status: dispatched.result.error === "recalc_timeout" ? 504 : 500 }
+        );
+      }
+      if (dispatched.executionMode === "droplet_async") {
+        return NextResponse.json({
+          ok: true,
+          action: "run_test_home_canonical_recalc",
+          mode: "canonical_test_home_lab",
+          executionMode: "droplet_async",
+          correlationId: dispatched.correlationId,
+          jobId: dispatched.jobId,
+          treatmentMode: testUsageInputMode,
+          simulatorMode: "MANUAL_TOTALS",
+          testSelectionMode,
+          adminValidationMode: testSelectionMode,
+          effectiveTravelRangesForRecalc: travelRangesForRecalc,
+          effectiveTravelRangesSource:
+            usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
+        });
+      }
+      return await buildGapfillManualUsageReadbackResponse({
+        action: "run_test_home_canonical_recalc",
+        email: user.email,
+        timezone,
+        labOwnerUserId: labOwnerUser.id,
+        sourceHouse,
+        sourceUserId: String(sourceHouse.userId ?? link.sourceUserId),
+        testHomeHouse,
+        scenarioId: String(pastScenario.id),
+        correlationId: dispatched.correlationId,
+        testUsageInputMode,
+        weatherKind,
+        gapfillWeatherLogic,
+        canonicalWindow,
+        canonicalWindowHelper,
+        usage365,
+        homeProfile,
+        applianceProfile,
+        travelRangesFromDb,
+        sourceTravelRangesFromDb,
+        travelRangesForRecalc,
+        usingSourceTravelRangesForRecalc,
+        testSelectionMode,
+        validationPolicyOwner,
+        userDefaultValidationSelectionMode: userValidationPolicy.selectionMode,
+        selectionDiagnostics,
+      });
+    }
 
     let recalcOut: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
     try {
@@ -1914,6 +2264,187 @@ export async function POST(req: NextRequest) {
         userDefaultValidationSelectionMode,
         adminLabValidationSelectionMode: testSelectionMode,
       },
+    });
+  }
+
+  if (rawAction === "read_test_home_canonical_result") {
+    if (!labOwnerUserId) {
+      return NextResponse.json(attachFailureContract({ ok: false, error: "lab_owner_not_found" }), { status: 400 });
+    }
+    const link = await getLabTestHomeLink(labOwnerUserId);
+    if (!link?.testHomeHouseId || !link.sourceHouseId || !link.sourceUserId || link.status !== "ready") {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "test_home_not_ready",
+          message: "Load/replace test home first and wait for ready state.",
+          testHomeLink: link ?? null,
+        }),
+        { status: 409 }
+      );
+    }
+    const canonicalLinkedSourceHouse = resolveCanonicalGapfillSourceHouse(
+      houses,
+      String(link.sourceHouseId ?? ""),
+      String(link.testHomeHouseId ?? "")
+    );
+    const canonicalLinkedSourceHouseId = String(
+      canonicalLinkedSourceHouse?.id ?? link.sourceHouseId ?? ""
+    ).trim();
+    const [labOwnerUser, testHomeHouse, sourceHouse] = await Promise.all([
+      prisma.user.findUnique({ where: { id: labOwnerUserId }, select: { id: true, email: true } }),
+      (prisma as any).houseAddress.findUnique({
+        where: { id: link.testHomeHouseId },
+        select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
+      }),
+      (prisma as any).houseAddress.findUnique({
+        where: { id: canonicalLinkedSourceHouseId },
+        select: { id: true, userId: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
+      }),
+    ]);
+    if (!labOwnerUser?.id || !testHomeHouse?.id || !sourceHouse?.id) {
+      return NextResponse.json(
+        attachFailureContract({ ok: false, error: "test_home_context_not_found" }),
+        { status: 404 }
+      );
+    }
+    const source = await chooseActualSource({ houseId: sourceHouse.id, esiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null });
+    if (!source) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "no_actual_data",
+          message: "No actual interval data (SMT or Green Button) on source house.",
+        }),
+        { status: 400 }
+      );
+    }
+    const { homeProfile, applianceProfile } = await loadDisplayProfilesForHouse({
+      userId: labOwnerUser.id,
+      houseId: testHomeHouse.id,
+    });
+    const canonicalWindow = await getSharedPastCoverageWindowForHouse({
+      userId: String(sourceHouse.userId ?? link.sourceUserId),
+      houseId: sourceHouse.id,
+    });
+    const canonicalWindowHelper = "resolveCanonicalUsage365CoverageWindow";
+    let usage365: Usage365Payload | undefined = undefined;
+    if (includeUsage365) {
+      const usageDatasetResult = await getActualUsageDatasetForHouse(
+        sourceHouse.id,
+        sourceHouse.esiid ? String(sourceHouse.esiid) : null,
+        { skipFullYearIntervalFetch: true }
+      ).catch(() => ({ dataset: null }));
+      const usageDataset = usageDatasetResult?.dataset ?? null;
+      if (usageDataset) {
+        usage365 = {
+          source: String((usageDataset as any)?.summary?.source ?? (source as any)?.source ?? "actual"),
+          timezone,
+          coverageStart: canonicalWindow.startDate,
+          coverageEnd: canonicalWindow.endDate,
+          intervalCount: Number((usageDataset as any)?.summary?.intervalsCount ?? 0) || 0,
+          daily: Array.isArray(usageDataset.daily)
+            ? usageDataset.daily
+                .filter((row) => {
+                  const dk = String((row as any)?.date ?? "").slice(0, 10);
+                  return dk >= canonicalWindow.startDate && dk <= canonicalWindow.endDate;
+                })
+                .map((row) => ({
+                  date: String((row as any)?.date ?? "").slice(0, 10),
+                  kwh: Number((row as any)?.kwh ?? 0) || 0,
+                }))
+            : [],
+          monthly: Array.isArray(usageDataset.monthly)
+            ? usageDataset.monthly.map((m) => ({
+                month: String((m as any)?.month ?? "").slice(0, 7),
+                kwh: Number((m as any)?.kwh ?? 0) || 0,
+              }))
+            : [],
+          weekdayKwh: Number((usageDataset as any)?.insights?.weekdayVsWeekend?.weekday ?? 0) || 0,
+          weekendKwh: Number((usageDataset as any)?.insights?.weekdayVsWeekend?.weekend ?? 0) || 0,
+          fifteenCurve: normalizeFifteenCurve96((usageDataset as any)?.insights?.fifteenMinuteAverages),
+          stitchedMonth: ((usageDataset as any)?.insights?.stitchedMonth ?? null) as Usage365Payload["stitchedMonth"],
+        };
+      }
+    }
+    const userValidationPolicy = resolveUserValidationPolicy({
+      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
+      validationDayCount: testDaysRequested != null ? testDaysRequested : 21,
+    });
+    const travelRangesFromDb = await getTravelRangesFromDb(labOwnerUser.id, testHomeHouse.id);
+    const sourceTravelRangesFromDb = await getTravelRangesFromDb(
+      String(sourceHouse.userId ?? link.sourceUserId),
+      sourceHouse.id
+    );
+    const selectedTestRanges = testRanges;
+    const targetValidationDayCount = testDaysRequested != null ? testDaysRequested : 21;
+    const manualDateKeys = selectedTestRanges.flatMap((r) =>
+      localDateKeysInRange(r.startDate, r.endDate, timezone)
+    );
+    const requestedModeRaw: ValidationDaySelectionMode =
+      explicitAdminLabValidationMode ??
+      (testDaysRequested != null
+        ? getAdminLabDefaultValidationSelectionMode()
+        : ("manual" as ValidationDaySelectionMode));
+    const requestedMode =
+      requestedModeRaw === "manual" && manualDateKeys.length === 0
+        ? ("customer_style_seasonal_mix" as ValidationDaySelectionMode)
+        : requestedModeRaw;
+    const validationPolicy = resolveAdminValidationPolicy({
+      selectionMode: requestedMode,
+      validationDayCount: targetValidationDayCount,
+    });
+    const usingSourceTravelRangesForRecalc = shouldUseCanonicalSourceCopyPolicy({
+      usageInputMode: testUsageInputMode,
+      explicitAdminValidationMode: explicitAdminLabValidationMode,
+      testRanges: selectedTestRanges,
+      testDaysRequested,
+    });
+    const travelRangesForRecalc = usingSourceTravelRangesForRecalc ? sourceTravelRangesFromDb : travelRangesFromDb;
+    const selectionDiagnostics = {
+      modeUsed: validationPolicy.selectionMode,
+      targetCount: validationPolicy.validationDayCount,
+      selectedCount: null,
+      delegatedToSharedPastSimRead: true,
+      source: "manual_usage_shared_dispatch",
+    };
+    const pastScenario = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: {
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          name: "Past (Corrected)",
+          archivedAt: null,
+        },
+        select: { id: true },
+      })
+      .catch(() => null);
+    return await buildGapfillManualUsageReadbackResponse({
+      action: "read_test_home_canonical_result",
+      email: user.email,
+      timezone,
+      labOwnerUserId: labOwnerUser.id,
+      sourceHouse,
+      sourceUserId: String(sourceHouse.userId ?? link.sourceUserId),
+      testHomeHouse,
+      scenarioId: String(pastScenario?.id ?? ""),
+      correlationId: null,
+      testUsageInputMode,
+      weatherKind,
+      gapfillWeatherLogic,
+      canonicalWindow,
+      canonicalWindowHelper,
+      usage365,
+      homeProfile,
+      applianceProfile,
+      travelRangesFromDb,
+      sourceTravelRangesFromDb,
+      travelRangesForRecalc,
+      usingSourceTravelRangesForRecalc,
+      testSelectionMode: validationPolicy.selectionMode,
+      validationPolicyOwner: "adminValidationPolicy",
+      userDefaultValidationSelectionMode: userValidationPolicy.selectionMode,
+      selectionDiagnostics,
     });
   }
 

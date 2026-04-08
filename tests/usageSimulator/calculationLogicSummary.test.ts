@@ -54,11 +54,22 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
             donorSelectionModeUsed: "weather_nearest_daytype_regime",
             donorCandidatePoolSize: 6,
             selectedDonorLocalDates: ["2025-06-10", "2025-06-13"],
+            selectedDonorWeights: [
+              { localDate: "2025-06-10", weight: 0.62, distance: 1.2, dayKwh: 32 },
+              { localDate: "2025-06-13", weight: 0.38, distance: 2.1, dayKwh: 29 },
+            ],
             donorWeatherRegimeUsed: "cooling",
             donorMonthKeyUsed: "2025-06",
             thermalDistanceScore: 1.8,
             broadFallbackUsed: false,
+            sameRegimeDonorPoolAvailable: true,
+            donorPoolBlendStrategy: "distance_weighted_blend",
+            donorPoolKwhSpread: 3,
+            donorPoolKwhVariance: 2.25,
+            donorPoolMedianKwh: 30.5,
+            donorVarianceGuardrailTriggered: false,
             weatherAdjustmentModeUsed: "bounded_post_donor",
+            postDonorAdjustmentCoefficient: 1.04,
           },
           {
             localDate: "2025-06-16",
@@ -70,11 +81,19 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
             donorSelectionModeUsed: "calendar_fallback",
             donorCandidatePoolSize: 0,
             selectedDonorLocalDates: [],
+            selectedDonorWeights: [],
             donorWeatherRegimeUsed: null,
             donorMonthKeyUsed: null,
             thermalDistanceScore: null,
             broadFallbackUsed: true,
+            sameRegimeDonorPoolAvailable: false,
+            donorPoolBlendStrategy: null,
+            donorPoolKwhSpread: null,
+            donorPoolKwhVariance: null,
+            donorPoolMedianKwh: null,
+            donorVarianceGuardrailTriggered: false,
             weatherAdjustmentModeUsed: "legacy_training_stats",
+            postDonorAdjustmentCoefficient: 1,
           },
         ],
       },
@@ -216,8 +235,11 @@ describe("buildGapfillCalculationLogicSummary", () => {
       key: "weather_nearest_daytype_regime",
       observedCount: 1,
     });
-    expect(summary.weatherExplanation.rows.find((row) => row.label === "Nearest-weather donor selections")?.value).toContain(
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Donor-path usage")?.value).toContain(
       "weather_nearest_daytype_regime: 1"
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "True broad fallback usage")?.value).toContain(
+      "adjacent_month_daytype: 1"
     );
   });
 
@@ -253,8 +275,14 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.runImpactSummary.find((item) => item.label === "Profile-input materiality")?.value).toContain(
       "modeled-subset-only"
     );
-    expect(summary.artifactDecisionSummary.find((item) => item.label === "Nearest-weather donor usage")?.value).toContain(
+    expect(summary.artifactDecisionSummary.find((item) => item.label === "Donor-path usage")?.value).toContain(
       "weather_nearest_daytype_regime: 1"
+    );
+    expect(summary.artifactDecisionSummary.find((item) => item.label === "True broad daily fallback levels")?.value).toContain(
+      "adjacent_month_daytype: 1"
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Donor blend / guardrail usage")?.value).toContain(
+      "distance_weighted_blend: 1"
     );
     expect(summary.artifactDecisionSummary.find((item) => item.label === "Most common shape variants")?.value).toContain(
       "month_weekday_weather_cooling: 1"

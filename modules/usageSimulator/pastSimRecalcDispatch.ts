@@ -3,6 +3,8 @@ import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
 import type { PastSimRunContext } from "@/modules/usageSimulator/pastSimLockbox";
+import type { AdminLabTreatmentMode } from "@/modules/usageSimulator/adminLabTreatment";
+import type { TravelRange } from "@/modules/simulatedUsage/types";
 import {
   createSimCorrelationId,
   logSimPipelineEvent,
@@ -41,8 +43,11 @@ export async function dispatchPastSimRecalc(args: {
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;
   persistPastSimBaseline?: boolean;
+  actualContextHouseId?: string | null;
+  preLockboxTravelRanges?: TravelRange[];
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;
+  adminLabTreatmentMode?: AdminLabTreatmentMode;
   correlationId?: string;
   runContext?: Partial<PastSimRunContext>;
 }): Promise<PastSimRecalcDispatchResult> {
@@ -56,8 +61,11 @@ export async function dispatchPastSimRecalc(args: {
     scenarioId: args.scenarioId ?? null,
     weatherPreference: args.weatherPreference,
     persistPastSimBaseline: args.persistPastSimBaseline === true,
+    actualContextHouseId: args.actualContextHouseId ?? null,
+    preLockboxTravelRanges: args.preLockboxTravelRanges ?? [],
     validationDaySelectionMode: args.validationDaySelectionMode,
     validationDayCount: args.validationDayCount,
+    adminLabTreatmentMode: args.adminLabTreatmentMode,
     correlationId,
     runContext: args.runContext,
   };
@@ -78,8 +86,11 @@ export async function dispatchPastSimRecalc(args: {
         scenarioId: args.scenarioId ?? null,
         weatherPreference: args.weatherPreference,
         persistPastSimBaseline: args.persistPastSimBaseline,
+        actualContextHouseId: args.actualContextHouseId ?? undefined,
+        preLockboxTravelRanges: args.preLockboxTravelRanges,
         validationDaySelectionMode: args.validationDaySelectionMode,
         validationDayCount: args.validationDayCount,
+        adminLabTreatmentMode: args.adminLabTreatmentMode,
         correlationId,
         runContext: args.runContext,
       }),

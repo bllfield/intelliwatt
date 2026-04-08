@@ -41,8 +41,11 @@ export async function runPastSimRecalcQueuedWorker(jobId: string): Promise<void>
     scenarioId: payload.scenarioId ?? null,
     weatherPreference: payload.weatherPreference,
     persistPastSimBaseline: payload.persistPastSimBaseline === true,
+    actualContextHouseId: payload.actualContextHouseId ?? undefined,
+    preLockboxTravelRanges: payload.preLockboxTravelRanges,
     validationDaySelectionMode: payload.validationDaySelectionMode,
     validationDayCount: payload.validationDayCount,
+    adminLabTreatmentMode: payload.adminLabTreatmentMode,
     correlationId: payload.correlationId,
     runContext: payload.runContext,
   });

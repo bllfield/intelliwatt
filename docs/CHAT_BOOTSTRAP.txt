@@ -62,6 +62,8 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
   - usable source annual payload wins for annual mode
   - shared Stage 1/pre-lockbox monthly+annual helper ownership lives in `modules/manualUsage/prefill.ts`
   - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same helper family before the shared lockbox path
+  - GapFill manual monthly/manual annual should trigger recalc through shared `dispatchPastSimRecalc` and then read the persisted artifact back for manual compare/reconciliation UI; do not reintroduce the old single-request heavy recalc/read bundle
+  - In GapFill manual modes, Actual House stays the full interval-backed source truth, while Test Home shows the shared constrained result with monthly or annual reconciliation compare
   - deterministic SMT-derived bill ranges are fallback/reset convenience only
   - fallback seeding is bounded by actual coverage, capped at 12, and fails closed if lab-home seed persistence fails
 - Stage 1 reconciliation may use exact stored statement ranges, but the main Stage 2 Past chart remains the normalized shared Past output.
@@ -174,7 +176,9 @@ Simulation modeling authority:
 
 Modeling mode split (summary):
 - Observed-history reconstruction (Past Sim + GapFill compare): prioritize actual interval history + weather + weekday/weekend + time-of-day + similar-day matching.
-- In exact-interval actual-backed runs, that similar-day matching means weather-similar donor selection inside the trusted reference pool first, with broad calendar ladders only as fallback and bounded post-donor weather adjustment as fine-tuning.
+- In exact-interval actual-backed runs, that similar-day matching means bounded K-nearest weather-similar donor blending inside the trusted reference pool first, with donor-pool variance guardrails, stronger heating-day HDD/min-temp weighting, broad calendar ladders only as fallback, and bounded post-donor weather adjustment as fine-tuning.
+- GapFill tuning diagnostics must report donor-path usage separately from true broad fallback usage, and the Actual House lockbox-flow readout must reuse the shared diagnostics already attached to the artifact.
+- Keep the exact-interval donor-tuning stack intact during manual-usage work: weather-first donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic wording are locked unless a tiny compatibility fix is unavoidable.
 - Overlay/delta mode: apply home/appliance/occupancy/HVAC/thermostat/pool/EV/envelope deltas on top of baseline.
 - Synthetic/sparse-data mode (manual/new-build/low-history): prioritize declared home/appliance/occupancy details + weather + learned priors.
 

@@ -80,6 +80,15 @@ export type PastWeatherDonorSample = {
   coolingDegreeSeverity: number;
 };
 
+export type PastWeatherDonorContribution = {
+  localDate: string;
+  monthKey: string;
+  weatherRegime: PastWeatherRegimeKey;
+  dayKwh: number;
+  distance: number;
+  weight: number;
+};
+
 export type PastModeledDaySelectionStrategy = "calendar_first" | "weather_donor_first";
 
 /** Training weather aggregates by bucket (month+daytype, season+daytype, global). */
@@ -157,11 +166,19 @@ export type SimulatedDayResult = {
   donorSelectionModeUsed?: string;
   donorCandidatePoolSize?: number;
   selectedDonorLocalDates?: string[];
+  selectedDonorWeights?: PastWeatherDonorContribution[];
   donorWeatherRegimeUsed?: PastWeatherRegimeKey | null;
   donorMonthKeyUsed?: string | null;
   thermalDistanceScore?: number | null;
   broadFallbackUsed?: boolean;
+  sameRegimeDonorPoolAvailable?: boolean;
+  donorPoolBlendStrategy?: "distance_weighted_blend" | "variance_dampened_blend";
+  donorPoolKwhSpread?: number | null;
+  donorPoolKwhVariance?: number | null;
+  donorPoolMedianKwh?: number | null;
+  donorVarianceGuardrailTriggered?: boolean;
   weatherAdjustmentModeUsed?: "legacy_training_stats" | "bounded_post_donor";
+  postDonorAdjustmentCoefficient?: number | null;
   templateSelectionKind?: string;
   selectedFingerprintBucketMonth?: string;
   selectedFingerprintBucketDayType?: PastDayTypeKey;

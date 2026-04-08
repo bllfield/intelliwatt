@@ -51,11 +51,19 @@ describe("dispatchPastSimRecalc", () => {
       mode: "SMT_BASELINE",
       scenarioId: "past-s1",
       persistPastSimBaseline: true,
+      actualContextHouseId: "source-h1",
+      preLockboxTravelRanges: [{ startDate: "2025-01-01", endDate: "2025-01-02" }],
+      adminLabTreatmentMode: "manual_monthly_constrained",
     });
 
     expect(out.executionMode).toBe("inline");
     expect(raceWithTimeout).toHaveBeenCalledTimes(1);
     expect(raceWithTimeout.mock.calls[0]?.[1]).toBe(USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS);
     expect(USER_PAST_SIM_RECALC_INLINE_TIMEOUT_MS).toBe(240_000);
+    expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.actualContextHouseId).toBe("source-h1");
+    expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.preLockboxTravelRanges).toEqual([
+      { startDate: "2025-01-01", endDate: "2025-01-02" },
+    ]);
+    expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
   });
 });

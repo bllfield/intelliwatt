@@ -143,19 +143,16 @@ function DayDecisionPanel(props: { day: DailyCurveCompareDay }) {
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
           <div className="font-semibold text-brand-navy">Modeled reason code</div>
           <div className="mt-1">{props.day.modeledReasonCode ?? "not attached"}</div>
-        </div>
-        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
-          <div className="font-semibold text-brand-navy">Daily fallback level</div>
-          <div className="mt-1">{props.day.fallbackLevel ?? "not attached"}</div>
-        </div>
-        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
-          <div className="font-semibold text-brand-navy">Shape variant</div>
-          <div className="mt-1">{props.day.shapeVariantUsed ?? "not attached"}</div>
+          <div className="text-brand-navy/60">Fallback level: {props.day.fallbackLevel ?? "not attached"}</div>
         </div>
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
           <div className="font-semibold text-brand-navy">Weather classification</div>
           <div className="mt-1">{props.day.weatherClassification ?? "not attached"}</div>
           <div className="text-brand-navy/60">{props.day.weatherModeUsed ?? "weather mode not attached"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Final selected shape path</div>
+          <div className="mt-1">{props.day.shapeVariantUsed ?? "not attached"}</div>
         </div>
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
           <div className="font-semibold text-brand-navy">Donor selection mode</div>
@@ -177,11 +174,33 @@ function DayDecisionPanel(props: { day: DailyCurveCompareDay }) {
           </div>
         </div>
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Donor weights + variance guardrail</div>
+          <div className="mt-1">
+            {props.day.selectedDonorWeights.length > 0
+              ? props.day.selectedDonorWeights
+                  .map((entry) => `${entry.localDate} ${(entry.weight * 100).toFixed(1)}%`)
+                  .join(", ")
+              : "not attached"}
+          </div>
+          <div className="text-brand-navy/60">
+            Spread: {round(props.day.donorPoolKwhSpread, 2)} kWh | Variance: {round(props.day.donorPoolKwhVariance, 2)} | Median:{" "}
+            {round(props.day.donorPoolMedianKwh, 2)}
+          </div>
+          <div className="text-brand-navy/60">
+            Blend: {props.day.donorPoolBlendStrategy ?? "not attached"} | Guardrail:{" "}
+            {props.day.donorVarianceGuardrailTriggered ? "triggered" : "not triggered"}
+          </div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
           <div className="font-semibold text-brand-navy">Thermal similarity + adjustment</div>
           <div className="mt-1">Distance: {round(props.day.thermalDistanceScore, 3)}</div>
           <div className="text-brand-navy/60">
-            Broad fallback: {props.day.broadFallbackUsed ? "yes" : "no"} | Adjustment:{" "}
-            {props.day.weatherAdjustmentModeUsed ?? "not attached"}
+            Same-regime donors: {props.day.sameRegimeDonorPoolAvailable ? "yes" : "broadened"} | True broad fallback:{" "}
+            {props.day.broadFallbackUsed ? "yes" : "no"}
+          </div>
+          <div className="text-brand-navy/60">
+            Adjustment: {props.day.weatherAdjustmentModeUsed ?? "not attached"} | Coefficient:{" "}
+            {round(props.day.postDonorAdjustmentCoefficient, 3)}
           </div>
         </div>
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">

@@ -27,6 +27,7 @@ const ensureGlobalLabTestHomeHouse = vi.fn();
 const selectValidationDayKeys = vi.fn();
 const logSimPipelineEvent = vi.fn();
 const createSimCorrelationId = vi.fn();
+const getManualUsageInputForUserHouse = vi.fn();
 
 const homeDetailsPrisma: any = {
   homeProfileSimulated: { upsert: vi.fn() },
@@ -117,6 +118,10 @@ vi.mock("@/modules/homeProfile/validation", () => ({
 vi.mock("@/modules/applianceProfile/validation", () => ({
   normalizeStoredApplianceProfile: (value: any) => value,
   validateApplianceProfile: (value: any) => ({ ok: true, value }),
+}));
+
+vi.mock("@/modules/manualUsage/store", () => ({
+  getManualUsageInputForUserHouse: (...args: any[]) => getManualUsageInputForUserHouse(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/validationSelection", () => ({
@@ -242,6 +247,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       startDate: "2025-03-01",
       endDate: "2026-02-28",
     });
+    getManualUsageInputForUserHouse.mockResolvedValue({ payload: null, updatedAt: null });
     getUserDefaultValidationSelectionMode.mockResolvedValue("random_simple");
     setUserDefaultValidationSelectionMode.mockResolvedValue({ ok: true, mode: "random_simple" });
     getAdminLabDefaultValidationSelectionMode.mockReturnValue("stratified_weather_balanced");
@@ -2173,13 +2179,33 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.diagnosticsVerdict?.validationDatesRenderedAsSimulatedCount).toBe(1);
   });
 
-  it("echoes effectiveSimulatorMode from recalc (e.g. MANUAL_TOTALS for manual constraint treatments)", async () => {
-    recalcSimulatorBuild.mockResolvedValueOnce({
-      ok: true,
-      houseId: "h1",
+  it("routes manual monthly mode through shared dispatch and artifact readback", async () => {
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "manual-cid-1",
+      result: {
+        ok: true,
+        houseId: "test-home-1",
+        buildInputsHash: "hash-manual",
+        dataset: {},
+        canonicalArtifactInputHash: "manual-canonical-hash-1",
+        effectiveSimulatorMode: "MANUAL_TOTALS",
+      },
+    });
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+      id: "build-manual-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
       buildInputsHash: "hash-manual",
-      dataset: {},
-      effectiveSimulatorMode: "MANUAL_TOTALS",
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+      },
+    });
+    pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+      id: "artifact-manual-1",
+      updatedAt: new Date("2026-01-02T00:01:00.000Z"),
+      inputHash: "artifact-manual-hash",
+      engineVersion: "production_past_stitched_v1",
     });
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
@@ -2199,17 +2225,46 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.simulatorMode).toBe("MANUAL_TOTALS");
     expect(body.treatmentMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
     expect(body.usageInputMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
-    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
-    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
+    expect(body.buildId).toBe("build-manual-1");
+    expect(body.artifactId).toBe("artifact-manual-1");
+    expect(body.correlationId).toBe("manual-cid-1");
+    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
+    expect(recalcSimulatorBuild).not.toHaveBeenCalled();
+    expect(selectValidationDayKeys).not.toHaveBeenCalled();
+    expect(getActualIntervalsForRange).not.toHaveBeenCalled();
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal).toBeUndefined();
+    expect(body.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_test");
   });
 
-  it("maps annual source-interval mode onto the shared MANUAL_TOTALS recalc entry", async () => {
-    recalcSimulatorBuild.mockResolvedValueOnce({
-      ok: true,
-      houseId: "h1",
+  it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "manual-cid-annual",
+      result: {
+        ok: true,
+        houseId: "test-home-1",
+        buildInputsHash: "hash-annual",
+        dataset: {},
+        canonicalArtifactInputHash: "manual-canonical-hash-annual",
+        effectiveSimulatorMode: "MANUAL_TOTALS",
+      },
+    });
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+      id: "build-annual-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
       buildInputsHash: "hash-annual",
-      dataset: {},
-      effectiveSimulatorMode: "MANUAL_TOTALS",
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+      },
+    });
+    pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+      id: "artifact-annual-1",
+      updatedAt: new Date("2026-01-02T00:01:00.000Z"),
+      inputHash: "artifact-annual-hash",
+      engineVersion: "production_past_stitched_v1",
     });
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
     const req = buildRequest({
@@ -2229,8 +2284,36 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.simulatorMode).toBe("MANUAL_TOTALS");
     expect(body.treatmentMode).toBe("ANNUAL_FROM_SOURCE_INTERVALS");
     expect(body.usageInputMode).toBe("ANNUAL_FROM_SOURCE_INTERVALS");
-    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_annual_constrained");
-    expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
+    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
+    expect(recalcSimulatorBuild).not.toHaveBeenCalled();
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_annual_constrained");
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
+  });
+
+  it("returns async handoff for manual monthly mode so the client can poll persisted readback", async () => {
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "droplet_async",
+      correlationId: "manual-cid-async",
+      jobId: "job-123",
+      result: null,
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      adminLabTreatmentMode: "manual_monthly_constrained",
+      includeUsage365: false,
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.executionMode).toBe("droplet_async");
+    expect(body.jobId).toBe("job-123");
+    expect(body.treatmentMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
+    expect(recalcSimulatorBuild).not.toHaveBeenCalled();
   });
 
   it("returns explicit canonical recalc timeout without route hang", async () => {
