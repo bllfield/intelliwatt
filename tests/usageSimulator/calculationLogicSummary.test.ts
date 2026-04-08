@@ -130,6 +130,10 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
     testHomeTravelRanges: [{ startDate: "2025-06-10", endDate: "2025-06-12" }],
     effectiveTravelRanges: [{ startDate: "2025-06-10", endDate: "2025-06-12" }],
     effectiveTravelRangesSource: "test_home_saved",
+    rawCompareDailyRows: [
+      { date: "2025-07-04", kwh: 31, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+      { date: "2025-07-05", kwh: 34, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+    ],
   };
 }
 
@@ -142,6 +146,7 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.stageOnePath).toContain("manual-monthly");
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.used).toBe(true);
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.details.join(" ")).toContain("Bill-range semantics");
+    expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.status).toBe("hard truth");
     expect(summary.layers.find((layer) => layer.key === "monthly-target-layer")?.summary).toContain("Monthly totals are fixed first");
     expect(summary.dailyTotalLogic.ladder[0]).toMatchObject({
       key: "month_daytype_neighbor",
@@ -183,6 +188,7 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.layers.find((layer) => layer.key === "compare-layer")?.summary).toContain("artifact-backed");
     expect(summary.priorityItems.some((item) => item.label === "Actual interval pool")).toBe(true);
     expect(summary.compositionSections[0]?.title).toContain("Final stitched output");
+    expect(summary.inputGroups.find((group) => group.key === "usage-shape-profile")?.status).toBe("modeled-subset-only");
   });
 
   it("uses shared diagnostics identities and counts as the source of truth", () => {
@@ -204,12 +210,18 @@ describe("buildGapfillCalculationLogicSummary", () => {
     );
     expect(summary.compositionSections.find((section) => section.key === "compare-output")?.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: "ACTUAL_VALIDATION_TEST_DAY", dayCount: 1 }),
-        expect.objectContaining({ label: "SIMULATED_TEST_DAY", dayCount: 1 }),
+        expect.objectContaining({ label: "SIMULATED_TEST_DAY", dayCount: 2 }),
       ])
     );
+    expect(summary.inputGroups.find((group) => group.key === "home-profile")).toMatchObject({
+      status: "modeled-subset-only",
+    });
+    expect(summary.inputGroups.find((group) => group.key === "usage-shape-profile")?.sourceOfTruth).toContain("shape-prof-1");
     expect(summary.weatherExplanation.rows.find((row) => row.label === "Normal vs weather-scaled counts")?.value).toContain(
       "weather_scaled_day: 1"
+    );
+    expect(summary.runImpactSummary.find((item) => item.label === "Profile-input materiality")?.value).toContain(
+      "modeled-subset-only"
     );
     expect(summary.artifactDecisionSummary.find((item) => item.label === "Most common shape variants")?.value).toContain(
       "month_weekday_weather_cooling: 1"

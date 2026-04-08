@@ -15,10 +15,13 @@ export type CalculationLogicInputGroup = {
   key: string;
   label: string;
   used: boolean;
+  status: "hard truth" | "active driver" | "modeled-subset-only" | "context only" | "inactive";
+  whereEntered: string[];
   sourceOfTruth: string;
   role: string;
   priorityBand: PriorityBand;
   details: string[];
+  evidence: string[];
 };
 
 export type CalculationLogicLayer = {
@@ -87,6 +90,12 @@ export type CalculationLogicArtifactDecision = {
   explanation: string;
 };
 
+export type CalculationLogicRunImpactItem = {
+  label: string;
+  value: string;
+  explanation: string;
+};
+
 export type CalculationLogicShapeBucketSummary = {
   bucketKey: string;
   monthKey: string;
@@ -126,6 +135,7 @@ export type GapfillCalculationLogicSummary = {
   exclusions: CalculationLogicExclusionItem[];
   tuningLevers: CalculationLogicTuningLever[];
   artifactDecisionSummary: CalculationLogicArtifactDecision[];
+  runImpactSummary: CalculationLogicRunImpactItem[];
   shapeBucketSummaries: CalculationLogicShapeBucketSummary[];
   rawDiagnostics: Record<string, unknown>;
 };
@@ -387,6 +397,7 @@ export function buildGapfillCalculationLogicSummary(args: {
   testHomeTravelRanges?: Array<{ startDate: string; endDate: string }> | null;
   effectiveTravelRanges?: Array<{ startDate: string; endDate: string }> | null;
   effectiveTravelRangesSource?: string | null;
+  rawCompareDailyRows?: Array<{ date: string; kwh: number; source?: string | null; sourceDetail?: string | null }> | null;
 }): GapfillCalculationLogicSummary {
   const dataset = args.dataset ?? {};
   const meta = asRecord(dataset?.meta);
@@ -409,6 +420,7 @@ export function buildGapfillCalculationLogicSummary(args: {
   const sourceTravelRangeList = asArray<Record<string, unknown>>(args.sourceTravelRanges);
   const testHomeTravelRangeList = asArray<Record<string, unknown>>(args.testHomeTravelRanges);
   const effectiveTravelRangeList = asArray<Record<string, unknown>>(args.effectiveTravelRanges);
+  const rawCompareDailyRows = asArray<Record<string, unknown>>(args.rawCompareDailyRows);
   const selectedMode = String(
     args.selectedMode ??
       identityContext.usageInputMode ??
@@ -454,7 +466,15 @@ export function buildGapfillCalculationLogicSummary(args: {
       .map((row) => String(row.localDate ?? "").slice(0, 10))
       .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
   );
-  const selectedCompareRows = dailyRows.filter((row) => selectedValidationDateSet.has(row.date));
+  const selectedCompareRows = rawCompareDailyRows.length > 0
+    ? rawCompareDailyRows
+        .map((row) => ({
+          date: String(row.date ?? "").slice(0, 10),
+          kwh: Number(row.kwh ?? 0) || 0,
+          sourceDetail: String(row.sourceDetail ?? row.source ?? "unknown").trim() || "unknown",
+        }))
+        .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && selectedValidationDateSet.has(row.date))
+    : dailyRows.filter((row) => selectedValidationDateSet.has(row.date));
   const fingerprintShapeSummaryByMonthDayType = asRecord(tuningSummary.fingerprintShapeSummaryByMonthDayType);
   const shapeBucketSummaries: CalculationLogicShapeBucketSummary[] = Object.entries(fingerprintShapeSummaryByMonthDayType)
     .flatMap(([monthKey, dayTypeBuckets]) => {
@@ -473,12 +493,39 @@ export function buildGapfillCalculationLogicSummary(args: {
       });
     })
     .sort((a, b) => a.monthKey.localeCompare(b.monthKey) || a.dayType.localeCompare(b.dayType));
+  const modeledFinalDayCount = dailyRows.filter((row) => /^SIMULATED/.test(row.sourceDetail)).length;
+  const modeledCompareDayCount = selectedCompareRows.filter((row) => /^SIMULATED/.test(row.sourceDetail)).length;
+  const weatherAdjustedDayCount =
+    Number(perDayClassificationCounts.weather_scaled_day ?? 0) +
+    Number(perDayClassificationCounts.extreme_cold_event_day ?? 0) +
+    Number(perDayClassificationCounts.freeze_protect_day ?? 0);
+  const usageShapeIdentity =
+    String(
+      sourceTruthContext.intervalUsageFingerprintIdentity ??
+      profileContext.usageShapeProfileIdentity ??
+      ""
+    ).trim();
+  const usageShapeProfileSourceOfTruth = usageShapeIdentity
+    ? usageShapeIdentity
+    : shapeBucketSummaries.length > 0
+      ? "Explicit usageShapeProfileIdentity was not attached, but fingerprint-derived month/day-type/weather shape buckets were attached to the artifact diagnostics."
+      : "not attached";
 
   const inputGroups: CalculationLogicInputGroup[] = [
     {
       key: "source-actual-intervals",
       label: "Source actual intervals",
       used: modeInfo.modeFamily !== "profile_only",
+      status:
+        modeInfo.modeFamily === "profile_only"
+          ? "inactive"
+          : modeInfo.modeFamily === "actual_backed"
+            ? "hard truth"
+            : "active driver",
+      whereEntered:
+        modeInfo.modeFamily === "profile_only"
+          ? []
+          : ["daily-total selection", "interval-shape selection", "compare only"],
       sourceOfTruth:
         sourceHouseId != null
           ? `Persisted source-house interval identity (${String(sourceTruthContext.intervalSourceIdentity ?? "identity not attached")})`
@@ -492,11 +539,17 @@ export function buildGapfillCalculationLogicSummary(args: {
         `Trusted fingerprint days: ${formatMaybeCount(fingerprintDiagnostics.trustedIntervalFingerprintDayCount)}`,
         `Interval fingerprint: ${String(sourceTruthContext.intervalSourceIdentity ?? "not attached")}`,
       ],
+      evidence: [
+        `Modeled final-output days: ${modeledFinalDayCount}`,
+        `Selected compare days: ${selectedCompareRows.length}`,
+      ],
     },
     {
       key: "manual-monthly",
       label: "Manual monthly totals",
       used: modeInfo.modeFamily === "manual_monthly",
+      status: modeInfo.modeFamily === "manual_monthly" ? "hard truth" : "inactive",
+      whereEntered: modeInfo.modeFamily === "manual_monthly" ? ["daily-total selection"] : [],
       sourceOfTruth:
         modeInfo.modeFamily === "manual_monthly"
           ? "Shared manual Stage 1 helper -> lockbox monthly constraints"
@@ -511,11 +564,18 @@ export function buildGapfillCalculationLogicSummary(args: {
           ? "Bill-range semantics stay relevant for reconciliation."
           : "No monthly bill-range constraint path is active.",
       ],
+      evidence: [
+        monthlyDiagnostics.length > 0
+          ? `Monthly target diagnostics present for ${monthlyDiagnostics.length} month bucket(s).`
+          : "No monthly target diagnostics were attached to this artifact.",
+      ],
     },
     {
       key: "manual-annual",
       label: "Manual annual total",
       used: modeInfo.modeFamily === "manual_annual",
+      status: modeInfo.modeFamily === "manual_annual" ? "hard truth" : "inactive",
+      whereEntered: modeInfo.modeFamily === "manual_annual" ? ["daily-total selection"] : [],
       sourceOfTruth:
         modeInfo.modeFamily === "manual_annual"
           ? `Shared annual constraint (${formatMaybeNumber(sourceContext.sourceDerivedAnnualTotalKwh, 0)} kWh when attached)`
@@ -527,33 +587,90 @@ export function buildGapfillCalculationLogicSummary(args: {
           ? "Annual total is preserved while monthly/daily shape is derived later."
           : "No annual constraint path is active.",
       ],
+      evidence: [
+        `Derived annual total attached: ${formatMaybeNumber(sourceContext.sourceDerivedAnnualTotalKwh, 0)} kWh`,
+      ],
     },
     {
       key: "home-profile",
       label: "Home profile",
       used: profileContext.profileHouseId != null || modeInfo.modeFamily === "profile_only",
+      status:
+        modeInfo.modeFamily === "profile_only"
+          ? "active driver"
+          : modeledFinalDayCount > 0
+            ? "modeled-subset-only"
+            : profileContext.profileHouseId != null
+              ? "context only"
+              : "inactive",
+      whereEntered:
+        modeInfo.modeFamily === "profile_only"
+          ? ["daily-total selection", "weather adjustment", "interval-shape selection"]
+          : modeledFinalDayCount > 0
+            ? ["weather adjustment"]
+            : [],
       sourceOfTruth: `Profile house ${String(profileContext.profileHouseId ?? testHomeId ?? "not attached")}`,
       role: modeInfo.modeFamily === "profile_only" ? "Primary synthetic driver" : "Context and tuning prior",
       priorityBand: modeInfo.modeFamily === "profile_only" ? "Primary Driver" : "Secondary Driver",
       details: [
         `Home profile snapshot ref: ${String(profileContext.homeProfileSnapshotRef ?? "not attached")}`,
       ],
+      evidence: [
+        modeInfo.modeFamily === "profile_only"
+          ? "Profile-only mode elevates home context into an active synthetic driver."
+          : modeledFinalDayCount > 0
+            ? `Modeled subset size: ${modeledFinalDayCount} day(s); home profile context can affect weather/event behavior on those modeled days.`
+            : "This artifact did not expose evidence that home profile inputs materially moved the final output.",
+      ],
     },
     {
       key: "appliance-profile",
       label: "Appliance profile",
       used: profileContext.profileHouseId != null || modeInfo.modeFamily === "profile_only",
+      status:
+        modeInfo.modeFamily === "profile_only"
+          ? "active driver"
+          : modeledFinalDayCount > 0
+            ? "modeled-subset-only"
+            : profileContext.profileHouseId != null
+              ? "context only"
+              : "inactive",
+      whereEntered:
+        modeInfo.modeFamily === "profile_only"
+          ? ["daily-total selection", "weather adjustment", "interval-shape selection"]
+          : modeledFinalDayCount > 0
+            ? ["weather adjustment"]
+            : [],
       sourceOfTruth: `Profile house ${String(profileContext.profileHouseId ?? testHomeId ?? "not attached")}`,
       role: modeInfo.modeFamily === "profile_only" ? "Primary synthetic driver" : "Context and tuning prior",
       priorityBand: modeInfo.modeFamily === "profile_only" ? "Primary Driver" : "Secondary Driver",
       details: [
         `Appliance profile snapshot ref: ${String(profileContext.applianceProfileSnapshotRef ?? "not attached")}`,
       ],
+      evidence: [
+        modeInfo.modeFamily === "profile_only"
+          ? "Profile-only mode elevates appliance context into an active synthetic driver."
+          : modeledFinalDayCount > 0
+            ? `Modeled subset size: ${modeledFinalDayCount} day(s); appliance context mostly matters on modeled weather/event days, not passthrough actual days.`
+            : "This artifact did not expose evidence that appliance profile inputs materially moved the final output.",
+      ],
     },
     {
       key: "weather",
       label: "Weather inputs",
       used: Boolean(identityContext.weatherLogicMode ?? sourceContext.weatherIdentity ?? meta.weatherSourceSummary),
+      status:
+        weatherAdjustedDayCount > 0
+          ? "active driver"
+          : modeledFinalDayCount > 0
+            ? "modeled-subset-only"
+            : Boolean(identityContext.weatherLogicMode ?? sourceContext.weatherIdentity ?? meta.weatherSourceSummary)
+              ? "context only"
+              : "inactive",
+      whereEntered:
+        Boolean(identityContext.weatherLogicMode ?? sourceContext.weatherIdentity ?? meta.weatherSourceSummary)
+          ? ["weather adjustment", "interval-shape selection"]
+          : [],
       sourceOfTruth: joinNonEmpty([
         String(identityContext.weatherLogicMode ?? sourceContext.weatherLogicMode ?? "weather mode not attached"),
         String(sourceTruthContext.weatherDatasetIdentity ?? sourceContext.weatherIdentity ?? "weather identity not attached"),
@@ -565,11 +682,23 @@ export function buildGapfillCalculationLogicSummary(args: {
         `Weather mode counts: ${describeCountMap(perDayWeatherModeCounts)}`,
         `Weather classifications: ${describeCountMap(perDayClassificationCounts)}`,
       ],
+      evidence: [
+        `Weather-adjusted or event-day count: ${weatherAdjustedDayCount}`,
+        `Modeled subset size: ${modeledFinalDayCount}`,
+      ],
     },
     {
       key: "travel-validation",
       label: "Travel/vacant and validation selection",
       used: travelRangeList.length > 0 || validationKeyList.length > 0 || keepRefUtcDateKeyCount != null,
+      status:
+        travelRangeList.length > 0 || validationKeyList.length > 0 || keepRefUtcDateKeyCount != null
+          ? "active driver"
+          : "inactive",
+      whereEntered:
+        travelRangeList.length > 0 || validationKeyList.length > 0 || keepRefUtcDateKeyCount != null
+          ? ["exclusions", "compare only"]
+          : [],
       sourceOfTruth: "Persisted lockbox validation keys plus the effective travel-range set used for the latest test-home recalc",
       role: "Exclusion and compare-scope control",
       priorityBand: "Exclusion",
@@ -582,16 +711,28 @@ export function buildGapfillCalculationLogicSummary(args: {
         `Validation/test days: ${validationKeyList.length}`,
         `Modeled keep-ref days: ${formatMaybeCount(keepRefUtcDateKeyCount)}`,
       ],
+      evidence: [
+        `Selected validation/test compare days: ${selectedCompareRows.length}`,
+        `Travel ranges attached to artifact: ${travelRangeList.length}`,
+      ],
     },
     {
       key: "usage-shape-profile",
       label: "Usage shape profile",
-      used: Boolean(sourceTruthContext.intervalUsageFingerprintIdentity ?? profileContext.usageShapeProfileIdentity),
-      sourceOfTruth: String(
-        sourceTruthContext.intervalUsageFingerprintIdentity ??
-          profileContext.usageShapeProfileIdentity ??
-          "not attached"
-      ),
+      used: Boolean(usageShapeIdentity || shapeBucketSummaries.length > 0 || Object.keys(perDayShapeVariantCounts).length > 0),
+      status:
+        Object.keys(perDayShapeVariantCounts).length > 0
+          ? modeledFinalDayCount > 0 || selectedCompareRows.length > 0
+            ? "modeled-subset-only"
+            : "active driver"
+          : usageShapeIdentity || shapeBucketSummaries.length > 0
+            ? "context only"
+            : "inactive",
+      whereEntered:
+        usageShapeIdentity || shapeBucketSummaries.length > 0 || Object.keys(perDayShapeVariantCounts).length > 0
+          ? ["interval-shape selection"]
+          : [],
+      sourceOfTruth: usageShapeProfileSourceOfTruth,
       role: "Interval-shape bucket selection and fallback shape context",
       priorityBand: modeInfo.modeFamily === "actual_backed" ? "Secondary Driver" : "Primary Driver",
       details: [
@@ -602,16 +743,38 @@ export function buildGapfillCalculationLogicSummary(args: {
           weather: asArray<string>(fingerprintDiagnostics.fingerprintWeatherBucketsUsed).length,
         })}`,
       ],
+      evidence: [
+        Object.keys(perDayShapeVariantCounts).length > 0
+          ? `Shape buckets were actually used on ${Object.values(perDayShapeVariantCounts).reduce((sum, value) => sum + value, 0)} modeled day(s).`
+          : "No per-day shape variant selections were attached to this artifact.",
+        usageShapeIdentity
+          ? `Explicit usageShapeProfileIdentity attached: ${usageShapeIdentity}`
+          : shapeBucketSummaries.length > 0
+            ? "Fingerprint-derived shape bucket summaries were attached even though an explicit identity string was missing."
+            : "No explicit identity or bucket summary was attached.",
+      ],
     },
     {
       key: "fallback-estimate",
       label: "Fallback estimation path",
       used: modeInfo.modeFamily !== "actual_backed",
+      status:
+        modeInfo.modeFamily === "actual_backed"
+          ? "inactive"
+          : Object.keys(perDayFallbackCounts).length > 0
+            ? "modeled-subset-only"
+            : "context only",
+      whereEntered: modeInfo.modeFamily === "actual_backed" ? [] : ["daily-total selection"],
       sourceOfTruth: "Shared simulator fallback ladder",
       role: "Used only when stronger monthly/day-shape evidence is missing",
       priorityBand: modeInfo.modeFamily === "actual_backed" ? "Not Used" : "Fallback Only",
       details: [
         `Observed daily fallback levels: ${describeCountMap(perDayFallbackCounts)}`,
+      ],
+      evidence: [
+        Object.keys(perDayFallbackCounts).length > 0
+          ? `Fallbacks were exercised on ${Object.values(perDayFallbackCounts).reduce((sum, value) => sum + value, 0)} day(s).`
+          : "No observed fallback selections were attached to this artifact.",
       ],
     },
   ];
@@ -1035,6 +1198,77 @@ export function buildGapfillCalculationLogicSummary(args: {
     },
   ];
 
+  const runImpactSummary: CalculationLogicRunImpactItem[] = [
+    {
+      label: "Final passthrough-vs-modeled mix",
+      value: describeCountMap(
+        buildCompositionItems(dailyRows).reduce<Record<string, number>>((acc, item) => {
+          acc[item.label] = Number(item.dayCount ?? 0) || 0;
+          return acc;
+        }, {})
+      ),
+      explanation:
+        modeledFinalDayCount > 0
+          ? "This run was materially influenced by modeled day ownership, not just passthrough actual truth."
+          : "This run was dominated by passthrough actual truth; modeled influence was minimal.",
+    },
+    {
+      label: "Modeled selected-day ownership",
+      value: describeCountMap(
+        buildCompositionItems(selectedCompareRows).reduce<Record<string, number>>((acc, item) => {
+          acc[item.label] = Number(item.dayCount ?? 0) || 0;
+          return acc;
+        }, {})
+      ),
+      explanation:
+        selectedCompareRows.length > 0
+          ? "These are the ownership categories on the scored/test-day slice used for tuning and compare inspection."
+          : "No selected compare-day ownership rows were attached.",
+    },
+    {
+      label: "Dominant daily fallback levels",
+      value: describeCountMap(perDayFallbackCounts),
+      explanation:
+        Object.keys(perDayFallbackCounts).length > 0
+          ? "Frequent broad fallbacks indicate weaker local daily evidence."
+          : "This artifact did not record observed daily fallbacks.",
+    },
+    {
+      label: "Dominant shape variants",
+      value: describeCountMap(perDayShapeVariantCounts),
+      explanation:
+        Object.keys(perDayShapeVariantCounts).length > 0
+          ? "These are the interval-shape buckets that actually shaped modeled days in this run."
+          : "No per-day shape variant selections were attached.",
+    },
+    {
+      label: "Profile-input materiality",
+      value:
+        modeInfo.modeFamily === "profile_only"
+          ? "primary synthetic driver"
+          : modeledFinalDayCount > 0
+            ? "modeled-subset-only context"
+            : "mostly passive context",
+      explanation:
+        modeInfo.modeFamily === "profile_only"
+          ? "Home and appliance profiles actively drive the synthetic run."
+          : modeledFinalDayCount > 0
+            ? "Home/appliance inputs mainly matter on modeled subsets, not passthrough actual days."
+            : "This run did not show strong evidence that profile inputs materially changed the final result.",
+    },
+    {
+      label: "Weather materiality",
+      value:
+        weatherAdjustedDayCount > 0
+          ? `${weatherAdjustedDayCount} weather-adjusted or event day(s)`
+          : "mostly passive weather context",
+      explanation:
+        weatherAdjustedDayCount > 0
+          ? "Weather moved this run on enough days to matter materially for tuning."
+          : "Weather provenance was attached, but attached diagnostics do not show frequent weather-driven changes.",
+    },
+  ];
+
   const priorityItems: CalculationLogicPriorityItem[] = [
     ...(modeInfo.modeFamily === "manual_monthly"
       ? [
@@ -1199,6 +1433,7 @@ export function buildGapfillCalculationLogicSummary(args: {
     exclusions,
     tuningLevers,
     artifactDecisionSummary,
+    runImpactSummary,
     shapeBucketSummaries,
     rawDiagnostics: {
       identityContext,
@@ -1218,7 +1453,9 @@ export function buildGapfillCalculationLogicSummary(args: {
       intervalCurveLogic,
       weatherExplanation,
       artifactDecisionSummary,
+      runImpactSummary,
       shapeBucketSummaries,
+      rawCompareDailyRows,
     },
   };
 }

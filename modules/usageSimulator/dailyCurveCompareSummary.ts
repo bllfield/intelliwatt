@@ -22,6 +22,22 @@ type CompareRow = {
   weather: CompareWeather | undefined;
 };
 
+type DailyDecisionTrace = {
+  localDate: string;
+  modeledReasonCode: string | null;
+  fallbackLevel: string | null;
+  shapeVariantUsed: string | null;
+  weatherClassification: string | null;
+  weatherModeUsed: string | null;
+};
+
+type DailyRowSummary = {
+  date: string;
+  kwh: number;
+  source: string | null;
+  sourceDetail: string | null;
+};
+
 export type DailyCurveCompareSlot = {
   slot: number;
   hhmm: string;
@@ -39,11 +55,22 @@ export type DailyCurveCompareDay = {
   actualDayKwh: number;
   simulatedDayKwh: number;
   deltaDayKwh: number;
+  compareActualDayKwh: number;
+  compareSimulatedDayKwh: number;
+  actualCompareParityDeltaKwh: number;
+  simulatedCompareParityDeltaKwh: number;
   peakActualSlot: number;
   peakSimulatedSlot: number;
   peakTimingErrorSlots: number;
   peakMagnitudeErrorKwh: number;
   curveCorrelation: number | null;
+  passthroughStatus: "modeled" | "passthrough_actual" | "unknown";
+  sourceDetail: string | null;
+  modeledReasonCode: string | null;
+  fallbackLevel: string | null;
+  shapeVariantUsed: string | null;
+  weatherClassification: string | null;
+  weatherModeUsed: string | null;
   slots: DailyCurveCompareSlot[];
 };
 
@@ -161,6 +188,38 @@ function normalizeCompareRows(compareRows: unknown): CompareRow[] {
   return rows;
 }
 
+function normalizeDecisionTraceRows(traceRows: unknown): Map<string, DailyDecisionTrace> {
+  const byDate = new Map<string, DailyDecisionTrace>();
+  for (const row of asArray<Record<string, unknown>>(traceRows)) {
+    const localDate = String(row.localDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) continue;
+    byDate.set(localDate, {
+      localDate,
+      modeledReasonCode: String(row.simulatedReasonCode ?? "").trim() || null,
+      fallbackLevel: String(row.fallbackLevel ?? "").trim() || null,
+      shapeVariantUsed: String(row.shapeVariantUsed ?? "").trim() || null,
+      weatherClassification: String(row.dayClassification ?? "").trim() || null,
+      weatherModeUsed: String(row.weatherModeUsed ?? "").trim() || null,
+    });
+  }
+  return byDate;
+}
+
+function normalizeDailyRows(rows: unknown): Map<string, DailyRowSummary> {
+  const byDate = new Map<string, DailyRowSummary>();
+  for (const row of asArray<Record<string, unknown>>(rows)) {
+    const date = String(row.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    byDate.set(date, {
+      date,
+      kwh: Number(row.kwh ?? 0) || 0,
+      source: String(row.source ?? "").trim() || null,
+      sourceDetail: String(row.sourceDetail ?? "").trim() || null,
+    });
+  }
+  return byDate;
+}
+
 function intervalsByDateAndSlot(
   rows: unknown,
   timezone: string,
@@ -175,7 +234,7 @@ function intervalsByDateAndSlot(
     if (!selectedDateKeys.has(localDate)) continue;
     const slot = localSlot96InTimezone(ts, timezone);
     const bucket = byDate.get(localDate) ?? Array.from({ length: 96 }, () => 0);
-    bucket[slot] = kwh;
+    bucket[slot] += kwh;
     byDate.set(localDate, bucket);
   }
   return byDate;
@@ -257,18 +316,24 @@ function buildAggregate(
 }
 
 export function buildDailyCurveCompareSummary(args: {
-  actualDataset: { series?: { intervals15?: unknown } | null } | null | undefined;
-  simulatedDataset: { series?: { intervals15?: unknown } | null } | null | undefined;
+  actualDataset?: { series?: { intervals15?: unknown } | null } | null | undefined;
+  simulatedDataset?: { series?: { intervals15?: unknown } | null } | null | undefined;
+  actualIntervals?: unknown;
+  simulatedIntervals?: unknown;
   compareRows: unknown;
   timezone: string | null | undefined;
+  perDayTrace?: unknown;
+  rawDailyRows?: unknown;
 }): DailyCurveCompareSummary | null {
   const timezone = String(args.timezone ?? "").trim();
   if (!timezone) return null;
   const compareRows = normalizeCompareRows(args.compareRows);
   if (compareRows.length === 0) return null;
-  const actualIntervals = asArray<IntervalPoint>(args.actualDataset?.series?.intervals15);
-  const simulatedIntervals = asArray<IntervalPoint>(args.simulatedDataset?.series?.intervals15);
+  const actualIntervals = asArray<IntervalPoint>(args.actualIntervals ?? args.actualDataset?.series?.intervals15);
+  const simulatedIntervals = asArray<IntervalPoint>(args.simulatedIntervals ?? args.simulatedDataset?.series?.intervals15);
   if (actualIntervals.length === 0 || simulatedIntervals.length === 0) return null;
+  const decisionTraceByDate = normalizeDecisionTraceRows(args.perDayTrace);
+  const rawDailyRowsByDate = normalizeDailyRows(args.rawDailyRows);
 
   const selectedDateKeys = Array.from(new Set(compareRows.map((row) => row.localDate))).sort();
   const selectedDateKeySet = new Set(selectedDateKeys);
@@ -287,22 +352,46 @@ export function buildDailyCurveCompareSummary(args: {
         simulatedKwh: round4(simulatedSlots[slot] ?? 0),
         deltaKwh: round4((simulatedSlots[slot] ?? 0) - (actualSlots[slot] ?? 0)),
       }));
+      const actualDayKwh = round4(actualSlots.reduce((sum, value) => sum + value, 0));
+      const simulatedDayKwh = round4(simulatedSlots.reduce((sum, value) => sum + value, 0));
       const peakActualSlot = peakSlot(actualSlots);
       const peakSimulatedSlot = peakSlot(simulatedSlots);
+      const rawDailyRow = rawDailyRowsByDate.get(row.localDate);
+      const decisionTrace = decisionTraceByDate.get(row.localDate);
+      const sourceDetail = rawDailyRow?.sourceDetail ?? null;
+      const passthroughStatus =
+        sourceDetail == null
+          ? "unknown"
+          : /^SIMULATED/.test(sourceDetail)
+            ? "modeled"
+            : sourceDetail === "ACTUAL" || sourceDetail === "ACTUAL_VALIDATION_TEST_DAY"
+              ? "passthrough_actual"
+              : "unknown";
       return {
         localDate: row.localDate,
         month: row.localDate.slice(0, 7),
         season: seasonForMonth(row.localDate.slice(0, 7)),
         dayType: row.dayType,
         weatherRegime: classifyWeatherRegime(row.weather),
-        actualDayKwh: round4(row.actualDayKwh),
-        simulatedDayKwh: round4(row.simulatedDayKwh),
-        deltaDayKwh: round4(row.simulatedDayKwh - row.actualDayKwh),
+        actualDayKwh,
+        simulatedDayKwh,
+        deltaDayKwh: round4(simulatedDayKwh - actualDayKwh),
+        compareActualDayKwh: round4(row.actualDayKwh),
+        compareSimulatedDayKwh: round4(row.simulatedDayKwh),
+        actualCompareParityDeltaKwh: round4(actualDayKwh - row.actualDayKwh),
+        simulatedCompareParityDeltaKwh: round4(simulatedDayKwh - row.simulatedDayKwh),
         peakActualSlot,
         peakSimulatedSlot,
         peakTimingErrorSlots: Math.abs(peakSimulatedSlot - peakActualSlot),
         peakMagnitudeErrorKwh: round4((simulatedSlots[peakSimulatedSlot] ?? 0) - (actualSlots[peakActualSlot] ?? 0)),
         curveCorrelation: correlation(actualSlots, simulatedSlots),
+        passthroughStatus,
+        sourceDetail,
+        modeledReasonCode: decisionTrace?.modeledReasonCode ?? null,
+        fallbackLevel: decisionTrace?.fallbackLevel ?? null,
+        shapeVariantUsed: decisionTrace?.shapeVariantUsed ?? null,
+        weatherClassification: decisionTrace?.weatherClassification ?? null,
+        weatherModeUsed: decisionTrace?.weatherModeUsed ?? null,
         slots,
       };
     })
@@ -413,6 +502,12 @@ export function buildDailyCurveCompareSummary(args: {
       selectedValidationRows: compareRows,
       actualIntervalCount: actualIntervals.length,
       simulatedIntervalCount: simulatedIntervals.length,
+      decisionTraceCount: decisionTraceByDate.size,
+      rawDailyRowCount: rawDailyRowsByDate.size,
+      intervalSources: {
+        actual: "actual_house_persisted_intervals15",
+        simulated: "test_house_raw_artifact_intervals15",
+      },
     },
   };
 }

@@ -21,14 +21,19 @@ describe("GapFill calculation logic UI wiring", () => {
   it("adds the admin-only Daily Curve Compare section to GapFill", () => {
     const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
     const componentSource = readRepoFile("components/admin/GapFillDailyCurveCompare.tsx");
+    const manualMonthlySource = readRepoFile("components/admin/ManualMonthlyLab.tsx");
 
     expect(source).toContain("GapFillDailyCurveCompare");
     expect(source).toContain("buildDailyCurveCompareSummary");
     expect(componentSource).toContain("Daily Curve Compare");
+    expect(componentSource).toContain("Raw Interval kWh Compare");
+    expect(componentSource).toContain("Normalized Shape Compare");
     expect(componentSource).toContain("Per-day curve overlay");
     expect(componentSource).toContain("Representative-day overlays");
     expect(componentSource).toContain("Slot-level metrics");
     expect(componentSource).toContain("Hour-block bias summary");
+    expect(componentSource).toContain("Why this day looks the way it does");
+    expect(manualMonthlySource).not.toContain("Daily Curve Compare");
   });
 
   it("shows separate source, test-home, and effective travel-range visibility in GapFill", () => {
@@ -51,11 +56,16 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).toContain("Daily Total Logic");
     expect(source).toContain("Interval Curve Logic");
     expect(source).toContain("How Weather Changes The Result");
+    expect(source).toContain("active driver");
+    expect(source).toContain("modeled-subset-only");
+    expect(source).toContain("context only");
+    expect(source).toContain("inactive");
     expect(source).toContain("Calculation Flow By Layer");
     expect(source).toContain("Influence / Priority Hierarchy");
     expect(source).toContain("Exclusions / Disqualifiers");
     expect(source).toContain("Main Tuning Levers");
     expect(source).toContain("Current Artifact Decision Summary");
+    expect(source).toContain("What Changed The Result Most In This Run");
     expect(source).toContain("Fingerprint Curve Shape Summary");
     expect(source).toContain("Raw Diagnostics");
   });

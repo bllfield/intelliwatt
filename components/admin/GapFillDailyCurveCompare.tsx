@@ -28,6 +28,43 @@ function buildPolyline(values: number[], height: number, width: number): string 
     .join(" ");
 }
 
+function normalizeSeries(values: number[]): number[] {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 1e-9) return values.map(() => 0);
+  return values.map((value) => value / total);
+}
+
+function NormalizedCurveOverlay(props: {
+  title: string;
+  actualValues: number[];
+  simulatedValues: number[];
+  correlation: number | null;
+}) {
+  const actualLine = buildPolyline(props.actualValues, 180, 760);
+  const simulatedLine = buildPolyline(props.simulatedValues, 180, 760);
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
+          <div className="mt-1 text-xs text-brand-navy/70">
+            Normalized shape compare only. Each curve is scaled to a total share of 1.0 before comparison.
+          </div>
+        </div>
+        <div className="text-xs text-brand-navy/70">
+          Shape correlation: <span className="font-semibold text-brand-navy">{round(props.correlation, 3)}</span>
+        </div>
+      </div>
+      <div className="mt-4 overflow-x-auto">
+        <svg viewBox="0 0 760 180" className="min-w-[760px]">
+          <polyline fill="none" stroke="#1d4ed8" strokeWidth="3" points={actualLine} />
+          <polyline fill="none" stroke="#7c3aed" strokeWidth="3" points={simulatedLine} />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function CurveOverlay(props: { title: string; day: DailyCurveCompareDay }) {
   const actualValues = props.day.slots.map((slot) => slot.actualKwh);
   const simulatedValues = props.day.slots.map((slot) => slot.simulatedKwh);
@@ -84,6 +121,46 @@ function CurveOverlay(props: { title: string; day: DailyCurveCompareDay }) {
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
           <div className="font-semibold text-brand-navy">Curve correlation</div>
           <div className="mt-1 text-base">{round(props.day.curveCorrelation, 3)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DayDecisionPanel(props: { day: DailyCurveCompareDay }) {
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-brand-navy">Why this day looks the way it does</div>
+      <div className="mt-1 text-xs text-brand-navy/70">
+        Run-specific decision details tied to the selected scored/test day.
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3 text-xs text-brand-navy/80">
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Passthrough vs modeled</div>
+          <div className="mt-1">{props.day.passthroughStatus}</div>
+          <div className="text-brand-navy/60">{props.day.sourceDetail ?? "source detail not attached"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Modeled reason code</div>
+          <div className="mt-1">{props.day.modeledReasonCode ?? "not attached"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Daily fallback level</div>
+          <div className="mt-1">{props.day.fallbackLevel ?? "not attached"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Shape variant</div>
+          <div className="mt-1">{props.day.shapeVariantUsed ?? "not attached"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Weather classification</div>
+          <div className="mt-1">{props.day.weatherClassification ?? "not attached"}</div>
+          <div className="text-brand-navy/60">{props.day.weatherModeUsed ?? "weather mode not attached"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Raw-vs-compare parity</div>
+          <div className="mt-1">Actual delta: {round(props.day.actualCompareParityDeltaKwh, 3)} kWh</div>
+          <div>Sim delta: {round(props.day.simulatedCompareParityDeltaKwh, 3)} kWh</div>
         </div>
       </div>
     </div>
@@ -172,9 +249,11 @@ function AggregateOverlay(props: { aggregate: DailyCurveCompareAggregate | null 
 
 export function GapFillDailyCurveCompare(props: {
   summary: DailyCurveCompareSummary | null;
+  rawReadStatus?: string | null;
 }) {
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedAggregateKey, setSelectedAggregateKey] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"raw" | "normalized">("raw");
 
   useEffect(() => {
     const summary = props.summary;
@@ -210,11 +289,28 @@ export function GapFillDailyCurveCompare(props: {
     () => props.summary?.aggregates.find((aggregate) => aggregate.key === selectedAggregateKey) ?? null,
     [props.summary, selectedAggregateKey]
   );
+  const normalizedSelectedDay = useMemo(() => {
+    if (!selectedDay) return null;
+    return {
+      actual: normalizeSeries(selectedDay.slots.map((slot) => slot.actualKwh)),
+      simulated: normalizeSeries(selectedDay.slots.map((slot) => slot.simulatedKwh)),
+      correlation: selectedDay.curveCorrelation,
+    };
+  }, [selectedDay]);
+  const normalizedSelectedAggregate = useMemo(() => {
+    if (!selectedAggregate) return null;
+    return {
+      actual: normalizeSeries(selectedAggregate.slotSummary.map((slot) => slot.actualMeanKwh)),
+      simulated: normalizeSeries(selectedAggregate.slotSummary.map((slot) => slot.simulatedMeanKwh)),
+      correlation: selectedAggregate.meanCurveCorrelation,
+    };
+  }, [selectedAggregate]);
 
   if (!props.summary) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
         Daily Curve Compare appears only when GapFill already has persisted actual-vs-sim compare days plus both artifact-backed interval datasets to overlay.
+        {props.rawReadStatus ? ` Raw compare read status: ${props.rawReadStatus}.` : ""}
       </div>
     );
   }
@@ -224,34 +320,60 @@ export function GapFillDailyCurveCompare(props: {
       <div>
         <h3 className="text-lg font-semibold text-brand-navy">Daily Curve Compare</h3>
         <p className="mt-1 text-sm text-brand-navy/70">
-          Admin-only, read-only interval-shape diagnostic built from the same scored/test days already attached to the persisted GapFill compare surface.
+          Admin-only, read-only interval-shape diagnostic built from actual-house interval truth plus raw test-house artifact intervals for the same scored/test days.
         </p>
       </div>
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
-          <div className="font-semibold text-brand-navy">Selected compare days</div>
-          <div className="mt-1 text-base">{props.summary.metrics.selectedDayCount}</div>
-        </div>
-        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
-          <div className="font-semibold text-brand-navy">Mean peak timing error</div>
-          <div className="mt-1 text-base">{round(props.summary.metrics.meanPeakTimingErrorSlots, 2)} slots</div>
-        </div>
-        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
-          <div className="font-semibold text-brand-navy">Mean peak magnitude error</div>
-          <div className="mt-1 text-base">{round(props.summary.metrics.meanPeakMagnitudeErrorKwh, 3)} kWh</div>
-        </div>
-        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
-          <div className="font-semibold text-brand-navy">Mean curve correlation</div>
-          <div className="mt-1 text-base">{round(props.summary.metrics.meanCurveCorrelation, 3)}</div>
-        </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setViewMode("raw")}
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+            viewMode === "raw" ? "bg-brand-blue text-white" : "border border-brand-blue/20 bg-white text-brand-navy"
+          }`}
+        >
+          Raw Interval kWh Compare
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("normalized")}
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+            viewMode === "normalized" ? "bg-brand-blue text-white" : "border border-brand-blue/20 bg-white text-brand-navy"
+          }`}
+        >
+          Normalized Shape Compare
+        </button>
       </div>
+
+      {viewMode === "raw" ? (
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
+            <div className="font-semibold text-brand-navy">Selected compare days</div>
+            <div className="mt-1 text-base">{props.summary.metrics.selectedDayCount}</div>
+          </div>
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
+            <div className="font-semibold text-brand-navy">Mean peak timing error</div>
+            <div className="mt-1 text-base">{round(props.summary.metrics.meanPeakTimingErrorSlots, 2)} slots</div>
+          </div>
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
+            <div className="font-semibold text-brand-navy">Mean peak magnitude error</div>
+            <div className="mt-1 text-base">{round(props.summary.metrics.meanPeakMagnitudeErrorKwh, 3)} kWh</div>
+          </div>
+          <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs text-brand-navy/80">
+            <div className="font-semibold text-brand-navy">Mean curve correlation</div>
+            <div className="mt-1 text-base">{round(props.summary.metrics.meanCurveCorrelation, 3)}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded border border-brand-blue/10 bg-brand-blue/5 p-3 text-sm text-brand-navy/80">
+          Normalized shape mode intentionally strips day-kWh scale. Use the raw tab for peak timing error, peak magnitude error, MAE/RMSE/Bias, and hour-block bias in kWh.
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
           <div className="text-sm font-semibold text-brand-navy">Per-day curve overlay</div>
           <div className="mt-1 text-xs text-brand-navy/70">
-            Pick a scored/test day to compare actual vs simulated 15-minute shape directly.
+            Pick a scored/test day to compare actual vs simulated 15-minute intervals directly, or switch to normalized shape-only view.
           </div>
           <select
             className="mt-3 w-full rounded border border-brand-blue/20 bg-white px-3 py-2 text-sm text-brand-navy"
@@ -273,8 +395,18 @@ export function GapFillDailyCurveCompare(props: {
             </div>
           ) : null}
         </div>
-        {selectedDay ? <CurveOverlay title={`${selectedDay.localDate} curve overlay`} day={selectedDay} /> : null}
+        {selectedDay && viewMode === "raw" ? <CurveOverlay title={`${selectedDay.localDate} raw kWh curve overlay`} day={selectedDay} /> : null}
+        {selectedDay && viewMode === "normalized" && normalizedSelectedDay ? (
+          <NormalizedCurveOverlay
+            title={`${selectedDay.localDate} normalized shape overlay`}
+            actualValues={normalizedSelectedDay.actual}
+            simulatedValues={normalizedSelectedDay.simulated}
+            correlation={normalizedSelectedDay.correlation}
+          />
+        ) : null}
       </div>
+
+      {selectedDay ? <DayDecisionPanel day={selectedDay} /> : null}
 
       <div className="space-y-3">
         <div>
@@ -293,9 +425,18 @@ export function GapFillDailyCurveCompare(props: {
             />
           ))}
         </div>
-        <AggregateOverlay aggregate={selectedAggregate} />
+        {viewMode === "raw" ? <AggregateOverlay aggregate={selectedAggregate} /> : null}
+        {viewMode === "normalized" && selectedAggregate && normalizedSelectedAggregate ? (
+          <NormalizedCurveOverlay
+            title={`${selectedAggregate.label} normalized representative shape`}
+            actualValues={normalizedSelectedAggregate.actual}
+            simulatedValues={normalizedSelectedAggregate.simulated}
+            correlation={normalizedSelectedAggregate.correlation}
+          />
+        ) : null}
       </div>
 
+      {viewMode === "raw" ? (
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
           <div className="text-sm font-semibold text-brand-navy">Slot-level metrics</div>
@@ -349,6 +490,11 @@ export function GapFillDailyCurveCompare(props: {
           </div>
         </div>
       </div>
+      ) : (
+        <div className="rounded-xl border border-brand-blue/10 bg-white p-4 text-sm text-brand-navy/75 shadow-sm">
+          Normalized shape mode is intentionally separate from raw kWh truth. It helps compare timing and shape without conflating it with the raw interval-kWh metrics above.
+        </div>
+      )}
     </section>
   );
 }

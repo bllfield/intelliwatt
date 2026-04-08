@@ -1497,6 +1497,48 @@ export async function POST(req: NextRequest) {
       : [];
     const effectiveValidationOnlyDateKeysLocal =
       selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
+    const effectiveValidationDateKeySet = new Set<string>(effectiveValidationOnlyDateKeysLocal);
+    let rawCurveCompareDataset: any = null;
+    let rawCurveCompareReadStatus: string | null = null;
+    try {
+      const rawCurveCompareRead = await withTimeout(
+        getSimulatedUsageForHouseScenario({
+          userId: labOwnerUser.id,
+          houseId: testHomeHouse.id,
+          scenarioId: String(pastScenario.id),
+          readMode: "artifact_only",
+          exactArtifactInputHash:
+            typeof recalcOut.canonicalArtifactInputHash === "string" &&
+            recalcOut.canonicalArtifactInputHash.trim()
+              ? recalcOut.canonicalArtifactInputHash
+              : undefined,
+          requireExactArtifactMatch: Boolean(
+            typeof recalcOut.canonicalArtifactInputHash === "string" &&
+              recalcOut.canonicalArtifactInputHash.trim()
+          ),
+          projectionMode: "raw",
+          correlationId: labCorrelationId,
+          readContext: {
+            artifactReadMode: "artifact_only",
+            projectionMode: "raw",
+            compareSidecarRequest: false,
+          },
+        }),
+        ROUTE_CANONICAL_READ_AFTER_RECALC_TIMEOUT_MS,
+        "canonical_curve_compare_raw_read_timeout"
+      );
+      if (rawCurveCompareRead.ok) {
+        rawCurveCompareDataset = rawCurveCompareRead.dataset as any;
+        rawCurveCompareReadStatus = "available";
+      } else {
+        rawCurveCompareReadStatus = rawCurveCompareRead.message ?? "raw_curve_compare_read_failed";
+      }
+    } catch (rawCurveCompareReadError: unknown) {
+      rawCurveCompareReadStatus =
+        rawCurveCompareReadError instanceof Error
+          ? rawCurveCompareReadError.message
+          : "raw_curve_compare_read_failed";
+    }
     const compareProjectionRead =
       baselineRead &&
       typeof baselineRead === "object" &&
@@ -1513,8 +1555,30 @@ export async function POST(req: NextRequest) {
       const source = String((row as any)?.source ?? "").toUpperCase();
       return source === "SIMULATED" ? count + 1 : count;
     }, 0);
+    const rawCurveCompareSimulatedIntervals15 = Array.isArray(rawCurveCompareDataset?.series?.intervals15)
+      ? (rawCurveCompareDataset.series.intervals15 as Array<Record<string, unknown>>)
+          .filter((row) =>
+            effectiveValidationDateKeySet.has(dateKeyInTimezone(String(row?.timestamp ?? ""), timezone))
+          )
+          .map((row) => ({
+            timestamp: String(row.timestamp ?? ""),
+            kwh: Number(row.kwh ?? 0) || 0,
+          }))
+      : [];
+    const rawCurveCompareDailyRows = Array.isArray(rawCurveCompareDataset?.daily)
+      ? (rawCurveCompareDataset.daily as Array<Record<string, unknown>>)
+          .filter((row) =>
+            effectiveValidationDateKeySet.has(String(row?.date ?? "").slice(0, 10))
+          )
+          .map((row) => ({
+            date: String(row.date ?? "").slice(0, 10),
+            kwh: Number(row.kwh ?? 0) || 0,
+            source: typeof row.source === "string" ? row.source : null,
+            sourceDetail: typeof row.sourceDetail === "string" ? row.sourceDetail : null,
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+      : [];
     // Single source of truth for this response: scored rows and summaries must use the same effective date set.
-    const effectiveValidationDateKeySet = new Set<string>(effectiveValidationOnlyDateKeysLocal);
     const compareProjectionRows = Array.isArray((compareProjectionRead as any)?.rows)
       ? (((compareProjectionRead as any).rows as Array<Record<string, unknown>>) ?? []).map((row) => ({ ...row }))
       : [];
@@ -1838,6 +1902,9 @@ export async function POST(req: NextRequest) {
       pipelineDiagnosticsSummary,
       diagnosticsVerdict,
       sharedDiagnostics,
+      curveCompareSimulatedIntervals15: rawCurveCompareSimulatedIntervals15,
+      curveCompareSimulatedDailyRows: rawCurveCompareDailyRows,
+      curveCompareRawReadStatus: rawCurveCompareReadStatus,
       modelAssumptions: {
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",
         projectionMode: "baseline_vs_accuracy",

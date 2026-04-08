@@ -101,6 +101,14 @@ type RunResult = {
     }>;
     metrics?: Record<string, unknown>;
   };
+  curveCompareSimulatedIntervals15?: Array<{ timestamp: string; kwh: number }>;
+  curveCompareSimulatedDailyRows?: Array<{
+    date: string;
+    kwh: number;
+    source?: string | null;
+    sourceDetail?: string | null;
+  }>;
+  curveCompareRawReadStatus?: string | null;
   canonicalReadResultSummary?: Record<string, unknown>;
   baselineProjectionSummary?: Record<string, unknown>;
   compareProjectionSummary?: Record<string, unknown>;
@@ -963,6 +971,7 @@ export default function GapFillLabCanonicalClient() {
             testHomeTravelRanges: travelRanges,
             effectiveTravelRanges: effectiveTravelRanges ?? undefined,
             effectiveTravelRangesSource,
+            rawCompareDailyRows: result.curveCompareSimulatedDailyRows ?? [],
           })
         : null,
     [
@@ -984,17 +993,19 @@ export default function GapFillLabCanonicalClient() {
     () =>
       result?.ok && actualHouseBaselineDataset && testHouseBaselineDataset
         ? buildDailyCurveCompareSummary({
-            actualDataset: actualHouseBaselineDataset,
-            simulatedDataset: testHouseBaselineDataset,
+            actualIntervals: actualHouseBaselineDataset?.series?.intervals15 ?? [],
+            simulatedIntervals: result.curveCompareSimulatedIntervals15 ?? [],
             compareRows: testHouseCompareProjection.rows,
             timezone,
+            perDayTrace: (testHouseBaselineDataset as any)?.meta?.lockboxPerDayTrace ?? [],
+            rawDailyRows: result.curveCompareSimulatedDailyRows ?? [],
           })
         : null,
     [
       actualHouseBaselineDataset,
       result,
-      testHouseBaselineDataset,
       testHouseCompareProjection.rows,
+      testHouseBaselineDataset,
       timezone,
     ]
   );
@@ -1910,7 +1921,10 @@ export default function GapFillLabCanonicalClient() {
             />
           </div>
         </div>
-        <GapFillDailyCurveCompare summary={dailyCurveCompareSummary} />
+        <GapFillDailyCurveCompare
+          summary={dailyCurveCompareSummary}
+          rawReadStatus={result?.ok ? result.curveCompareRawReadStatus ?? null : null}
+        />
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
             <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>

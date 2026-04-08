@@ -8,6 +8,7 @@ import type {
   CalculationLogicInputGroup,
   CalculationLogicLayer,
   CalculationLogicPriorityItem,
+  CalculationLogicRunImpactItem,
   CalculationLogicShapeBucketSummary,
   CalculationLogicTuningLever,
   CalculationLogicWeatherRow,
@@ -65,16 +66,43 @@ function InputCard(props: { item: CalculationLogicInputGroup }) {
           <div className="mt-1 text-xs text-brand-navy/70">{props.item.role}</div>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${props.item.used ? "bg-brand-blue/10 text-brand-navy" : "bg-slate-100 text-slate-600"}`}>
-            {props.item.used ? "Used" : "Not used"}
+          <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+            props.item.status === "inactive"
+              ? "bg-slate-100 text-slate-600"
+              : props.item.status === "context only"
+                ? "bg-sky-100 text-sky-900"
+                : props.item.status === "modeled-subset-only"
+                  ? "bg-violet-100 text-violet-900"
+                  : "bg-brand-blue/10 text-brand-navy"
+          }`}>
+            {props.item.status}
           </span>
           <BandChip band={props.item.priorityBand} />
         </div>
       </div>
+      {props.item.whereEntered.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {props.item.whereEntered.map((value) => (
+            <span key={value} className="rounded-full bg-brand-blue/5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-navy">
+              {value}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-3 rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
         <div className="text-[10px] font-semibold uppercase tracking-wide text-brand-navy/55">Source of truth</div>
         <div className="mt-1 text-xs text-brand-navy/85">{props.item.sourceOfTruth}</div>
       </div>
+      {props.item.evidence.length > 0 ? (
+        <div className="mt-3 rounded border border-brand-blue/10 bg-brand-blue/5 p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-brand-navy/55">Artifact evidence</div>
+          <ul className="mt-2 space-y-1 text-xs text-brand-navy/85">
+            {props.item.evidence.map((detail) => (
+              <li key={detail}>- {detail}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {props.item.details.length > 0 ? (
         <ul className="mt-3 space-y-1 text-xs text-brand-navy/80">
           {props.item.details.map((detail) => (
@@ -252,6 +280,18 @@ function ArtifactDecisionCard(props: { item: CalculationLogicArtifactDecision })
   );
 }
 
+function RunImpactCard(props: { item: CalculationLogicRunImpactItem }) {
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-brand-navy">{props.item.label}</div>
+      <div className="mt-3 rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs font-mono text-brand-navy/90">
+        {props.item.value}
+      </div>
+      <p className="mt-2 text-xs text-brand-navy/80">{props.item.explanation}</p>
+    </div>
+  );
+}
+
 function ShapeBucketCard(props: { bucket: CalculationLogicShapeBucketSummary }) {
   const segments = [
     { label: "Overnight", value: props.bucket.overnight },
@@ -380,7 +420,7 @@ export function GapFillCalculationLogicModal(props: {
               <section className="space-y-4">
                 <SectionTitle
                   title="Inputs / Variables Used"
-                  subtitle="Each input group shows whether the mode used it, where the truth came from, and whether it acts as a hard constraint, driver, exclusion, or fallback."
+                  subtitle="Each input group now states whether it was hard truth, an active driver, modeled-subset-only, context only, or inactive for this artifact, plus where it entered the flow and what evidence supports that label."
                 />
                 <div className="grid gap-4 xl:grid-cols-2">
                   {props.summary.inputGroups.map((item) => (
@@ -474,6 +514,18 @@ export function GapFillCalculationLogicModal(props: {
                 <div className="grid gap-4 xl:grid-cols-2">
                   {props.summary.artifactDecisionSummary.map((item) => (
                     <ArtifactDecisionCard key={item.label} item={item} />
+                  ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <SectionTitle
+                  title="What Changed The Result Most In This Run"
+                  subtitle="Run-specific materiality summary only. This is not generic simulator prose."
+                />
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {props.summary.runImpactSummary.map((item) => (
+                    <RunImpactCard key={item.label} item={item} />
                   ))}
                 </div>
               </section>
