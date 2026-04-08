@@ -5,6 +5,13 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
   return {
     selectedMode: args?.selectedMode ?? "MONTHLY_FROM_SOURCE_INTERVALS",
     dataset: {
+      daily: [
+        { date: "2025-06-14", kwh: 30, sourceDetail: "ACTUAL" },
+        { date: "2025-06-15", kwh: 28, sourceDetail: "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" },
+        { date: "2025-06-16", kwh: 26, sourceDetail: "SIMULATED_INCOMPLETE_METER" },
+        { date: "2025-07-04", kwh: 32, sourceDetail: "ACTUAL_VALIDATION_TEST_DAY" },
+        { date: "2025-07-05", kwh: 34, sourceDetail: "SIMULATED_TEST_DAY" },
+      ],
       meta: {
         sharedProducerPathUsed: true,
         weatherSourceSummary: "actual_only",
@@ -102,6 +109,15 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
           simulated_vacant_day: 1,
           modeled_keep_ref: 2,
         },
+        selectedValidationRows: [
+          { localDate: "2025-07-04", dayType: "weekday", weather: { hdd65: 0, cdd65: 4 } },
+          { localDate: "2025-07-05", dayType: "weekend", weather: { hdd65: 0, cdd65: 0 } },
+        ],
+        fingerprintShapeSummaryByMonthDayType: {
+          "2025-06": {
+            weekday: { overnight: 0.18, morning: 0.2, afternoon: 0.31, evening: 0.31 },
+          },
+        },
       },
     },
     compareProjection: {
@@ -127,6 +143,11 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.used).toBe(true);
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.details.join(" ")).toContain("Bill-range semantics");
     expect(summary.layers.find((layer) => layer.key === "monthly-target-layer")?.summary).toContain("Monthly totals are fixed first");
+    expect(summary.dailyTotalLogic.ladder[0]).toMatchObject({
+      key: "month_daytype_neighbor",
+      observedCount: 1,
+    });
+    expect(summary.intervalCurveLogic.ladder[0]?.label).toContain("Month + day-type + weather regime");
     expect(summary.sharedProducerPathUsed).toBe(true);
   });
 
@@ -145,6 +166,7 @@ describe("buildGapfillCalculationLogicSummary", () => {
     const monthlyLayer = summary.layers.find((layer) => layer.key === "monthly-target-layer");
     expect(monthlyLayer?.summary).toContain("annual total is fixed first");
     expect(monthlyLayer?.modeSpecificRules.join(" ")).not.toContain("Bill-range");
+    expect(summary.modeOverview).toContain("annual total stays fixed");
   });
 
   it("explains actual-backed modes around trusted reference truth and compare scope", () => {
@@ -160,6 +182,7 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.priorityBand).toBe("Reference Truth Pool");
     expect(summary.layers.find((layer) => layer.key === "compare-layer")?.summary).toContain("artifact-backed");
     expect(summary.priorityItems.some((item) => item.label === "Actual interval pool")).toBe(true);
+    expect(summary.compositionSections[0]?.title).toContain("Final stitched output");
   });
 
   it("uses shared diagnostics identities and counts as the source of truth", () => {
@@ -172,6 +195,29 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.rawDiagnostics.sourceTruthContext).toMatchObject({
       intervalSourceIdentity: "ifp-lockbox-1",
       weatherDatasetIdentity: "wx-lockbox-1",
+    });
+    expect(summary.compositionSections.find((section) => section.key === "final-output")?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "ACTUAL", dayCount: 1 }),
+        expect.objectContaining({ label: "SIMULATED_TEST_DAY", dayCount: 1 }),
+      ])
+    );
+    expect(summary.compositionSections.find((section) => section.key === "compare-output")?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "ACTUAL_VALIDATION_TEST_DAY", dayCount: 1 }),
+        expect.objectContaining({ label: "SIMULATED_TEST_DAY", dayCount: 1 }),
+      ])
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Normal vs weather-scaled counts")?.value).toContain(
+      "weather_scaled_day: 1"
+    );
+    expect(summary.artifactDecisionSummary.find((item) => item.label === "Most common shape variants")?.value).toContain(
+      "month_weekday_weather_cooling: 1"
+    );
+    expect(summary.shapeBucketSummaries[0]).toMatchObject({
+      monthKey: "2025-06",
+      dayType: "weekday",
+      evening: 0.31,
     });
     expect(summary.inputGroups.find((group) => group.key === "travel-validation")?.details.join(" ")).toContain(
       "Latest effective travel source: test_home_saved"

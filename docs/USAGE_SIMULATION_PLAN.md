@@ -115,6 +115,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - Shared Stage 1/pre-lockbox helper ownership for both monthly and annual manual modes now lives in `modules/manualUsage/prefill.ts`.
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must call that same shared helper family before entering the shared lockbox/sim/artifact path.
 - GapFill admin-only calculation-logic explanation UI now summarizes that persisted lockbox/artifact/diagnostics truth through `modules/usageSimulator/calculationLogicSummary.ts`; it is read-side only and does not create a second simulator path.
+- GapFill admin-only daily curve compare UI now summarizes scored/test-day 96-slot overlays, grouped representative curves, and slot metrics through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it is read-side only and does not create a second compare path.
 - Stage 1 preview supports both manual payload modes:
   - monthly preview = bill-period totals only
   - annual preview = billing-date context plus annual total only

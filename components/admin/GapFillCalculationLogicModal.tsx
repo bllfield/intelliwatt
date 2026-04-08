@@ -1,10 +1,16 @@
 import React from "react";
 import type {
+  CalculationLogicArtifactDecision,
+  CalculationLogicCompositionItem,
+  CalculationLogicCompositionSection,
+  CalculationLogicDecisionStep,
   CalculationLogicExclusionItem,
   CalculationLogicInputGroup,
   CalculationLogicLayer,
   CalculationLogicPriorityItem,
+  CalculationLogicShapeBucketSummary,
   CalculationLogicTuningLever,
+  CalculationLogicWeatherRow,
   GapfillCalculationLogicSummary,
 } from "@/modules/usageSimulator/calculationLogicSummary";
 
@@ -12,6 +18,8 @@ export const GAPFILL_CALCULATION_LOGIC_TRIGGER_LABEL = "View Calculation Logic";
 
 function bandClasses(band: string): string {
   switch (band) {
+    case "Hard Truth":
+      return "bg-emerald-200 text-emerald-950 border-emerald-300";
     case "Hard Constraint":
       return "bg-emerald-100 text-emerald-900 border-emerald-200";
     case "Reference Truth Pool":
@@ -24,7 +32,7 @@ function bandClasses(band: string): string {
       return "bg-amber-100 text-amber-900 border-amber-200";
     case "Exclusion":
       return "bg-rose-100 text-rose-900 border-rose-200";
-    case "Fallback":
+    case "Fallback Only":
       return "bg-slate-100 text-slate-900 border-slate-200";
     default:
       return "bg-slate-50 text-slate-700 border-slate-200";
@@ -145,6 +153,140 @@ function PriorityCard(props: { item: CalculationLogicPriorityItem | CalculationL
   );
 }
 
+function CompositionRow(props: { item: CalculationLogicCompositionItem }) {
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-brand-navy">{props.item.label}</div>
+        <BandChip band={props.item.priorityBand} />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-4 text-xs text-brand-navy/80">
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Days</div>
+          <div className="mt-1">{props.item.dayCount ?? "n/a"}</div>
+          <div className="text-brand-navy/60">{props.item.dayShare != null ? `${(props.item.dayShare * 100).toFixed(1)}% share` : "share n/a"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">kWh</div>
+          <div className="mt-1">{props.item.kwh != null ? props.item.kwh.toFixed(2) : "n/a"}</div>
+          <div className="text-brand-navy/60">{props.item.kwhShare != null ? `${(props.item.kwhShare * 100).toFixed(1)}% share` : "share n/a"}</div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3 md:col-span-2">
+          <div className="font-semibold text-brand-navy">Why it matters</div>
+          <div className="mt-1">{props.item.explanation}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompositionSectionCard(props: { section: CalculationLogicCompositionSection }) {
+  return (
+    <section className="space-y-4">
+      <SectionTitle title={props.section.title} subtitle={props.section.summary} />
+      <div className="grid gap-4 xl:grid-cols-2">
+        {props.section.items.length > 0 ? (
+          props.section.items.map((item) => <CompositionRow key={item.label} item={item} />)
+        ) : (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            No artifact-backed rows were attached for this composition slice.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DecisionLadderCard(props: { title: string; subtitle: string; summary: string; steps: CalculationLogicDecisionStep[] }) {
+  return (
+    <section className="space-y-4">
+      <SectionTitle title={props.title} subtitle={props.subtitle} />
+      <div className="rounded-2xl border border-brand-blue/10 bg-white p-5 shadow-sm">
+        <p className="text-xs text-brand-navy/75">{props.summary}</p>
+        <div className="mt-4 space-y-3">
+          {props.steps.map((step) => (
+            <div key={step.key} className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-brand-navy">
+                  {step.rank}. {step.label}
+                </div>
+                <div className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-navy">
+                  observed {step.observedCount ?? 0}
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-brand-navy/80">{step.explanation}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WeatherRowCard(props: { row: CalculationLogicWeatherRow }) {
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-brand-navy">{props.row.label}</div>
+      <div className="mt-2 rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs font-mono text-brand-navy/90">
+        {props.row.value}
+      </div>
+      <p className="mt-2 text-xs text-brand-navy/80">{props.row.explanation}</p>
+    </div>
+  );
+}
+
+function ArtifactDecisionCard(props: { item: CalculationLogicArtifactDecision }) {
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-brand-navy">{props.item.label}</div>
+        <div className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-navy">
+          current run
+        </div>
+      </div>
+      <div className="mt-3 rounded border border-brand-blue/10 bg-brand-navy/5 p-3 text-xs font-mono text-brand-navy/90">
+        {props.item.value}
+      </div>
+      <p className="mt-2 text-xs text-brand-navy/80">{props.item.explanation}</p>
+    </div>
+  );
+}
+
+function ShapeBucketCard(props: { bucket: CalculationLogicShapeBucketSummary }) {
+  const segments = [
+    { label: "Overnight", value: props.bucket.overnight },
+    { label: "Morning", value: props.bucket.morning },
+    { label: "Afternoon", value: props.bucket.afternoon },
+    { label: "Evening", value: props.bucket.evening },
+  ];
+  return (
+    <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-brand-navy">{props.bucket.monthKey}</div>
+        <div className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-navy">
+          {props.bucket.dayType}
+        </div>
+      </div>
+      <div className="mt-3 space-y-2">
+        {segments.map((segment) => (
+          <div key={segment.label}>
+            <div className="flex items-center justify-between text-[11px] text-brand-navy/75">
+              <span>{segment.label}</span>
+              <span>{(segment.value * 100).toFixed(1)}%</span>
+            </div>
+            <div className="mt-1 h-2 rounded bg-brand-blue/10">
+              <div
+                className="h-2 rounded bg-brand-blue"
+                style={{ width: `${Math.max(3, segment.value * 100)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ExclusionCard(props: { item: CalculationLogicExclusionItem }) {
   return (
     <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
@@ -225,6 +367,18 @@ export function GapFillCalculationLogicModal(props: {
 
               <section className="space-y-4">
                 <SectionTitle
+                  title="What Is Actual Vs What Is Simulated"
+                  subtitle="This comes first so the current mode immediately explains how much of the final output is hard truth, how much is modeled, what the compare/test window contains, and how large the trusted reference pool stayed."
+                />
+                <div className="space-y-6">
+                  {props.summary.compositionSections.map((section) => (
+                    <CompositionSectionCard key={section.key} section={section} />
+                  ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <SectionTitle
                   title="Inputs / Variables Used"
                   subtitle="Each input group shows whether the mode used it, where the truth came from, and whether it acts as a hard constraint, driver, exclusion, or fallback."
                 />
@@ -235,10 +389,39 @@ export function GapFillCalculationLogicModal(props: {
                 </div>
               </section>
 
+              <DecisionLadderCard
+                title="Daily Total Logic"
+                subtitle="This section answers where the day's total kWh came from."
+                summary={props.summary.dailyTotalLogic.summary}
+                steps={props.summary.dailyTotalLogic.ladder}
+              />
+
+              <DecisionLadderCard
+                title="Interval Curve Logic"
+                subtitle="This section answers where the 96-slot interval shape came from after the day total was chosen."
+                summary={props.summary.intervalCurveLogic.summary}
+                steps={props.summary.intervalCurveLogic.ladder}
+              />
+
+              <section className="space-y-4">
+                <SectionTitle
+                  title="How Weather Changes The Result"
+                  subtitle="Weather is shown as a post-selection daily adjustment plus a weather-regime shape influence. No fake weighting math is introduced."
+                />
+                <div className="rounded-2xl border border-brand-blue/10 bg-white p-5 shadow-sm">
+                  <p className="text-xs text-brand-navy/75">{props.summary.weatherExplanation.summary}</p>
+                  <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                    {props.summary.weatherExplanation.rows.map((row) => (
+                      <WeatherRowCard key={row.label} row={row} />
+                    ))}
+                  </div>
+                </div>
+              </section>
+
               <section className="space-y-4">
                 <SectionTitle
                   title="Calculation Flow By Layer"
-                  subtitle="This follows the persisted shared pipeline from inputs and constraints down through monthly targeting, daily totals, weather, interval shape, final artifact output, and compare scoring."
+                  subtitle="Full persisted pipeline context after the top-level composition, daily-total ladder, interval-shape ladder, and weather behavior are understood."
                 />
                 <div className="space-y-4">
                   {props.summary.layers.map((layer) => (
@@ -249,8 +432,8 @@ export function GapFillCalculationLogicModal(props: {
 
               <section className="space-y-4">
                 <SectionTitle
-                  title="Priority / Weighting / Fallback Visuals"
-                  subtitle="Truthful priority bands only. No made-up percentages are shown where the runtime does not expose numeric weighting."
+                  title="Influence / Priority Hierarchy"
+                  subtitle="Truthful influence classes only: hard truth, hard constraint, reference truth pool, primary driver, conditional adjustment, secondary driver, exclusion, and fallback only."
                 />
                 <div className="grid gap-4 xl:grid-cols-2">
                   {props.summary.priorityItems.map((item) => (
@@ -280,6 +463,36 @@ export function GapFillCalculationLogicModal(props: {
                   {props.summary.tuningLevers.map((item) => (
                     <PriorityCard key={item.label} item={item} />
                   ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <SectionTitle
+                  title="Current Artifact Decision Summary"
+                  subtitle="This is the run-specific answer to 'what actually happened in this artifact?'"
+                />
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {props.summary.artifactDecisionSummary.map((item) => (
+                    <ArtifactDecisionCard key={item.label} item={item} />
+                  ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <SectionTitle
+                  title="Fingerprint Curve Shape Summary"
+                  subtitle="Readable month/day-type curve-shape shares promoted from artifact-backed fingerprint diagnostics so interval-shape tuning is easier to reason about."
+                />
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {props.summary.shapeBucketSummaries.length > 0 ? (
+                    props.summary.shapeBucketSummaries.map((bucket) => (
+                      <ShapeBucketCard key={bucket.bucketKey} bucket={bucket} />
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                      No readable fingerprint curve-shape summaries were attached to this artifact.
+                    </div>
+                  )}
                 </div>
               </section>
 

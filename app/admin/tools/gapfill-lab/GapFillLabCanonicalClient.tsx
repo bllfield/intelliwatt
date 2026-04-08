@@ -16,6 +16,8 @@ import {
   GapFillCalculationLogicModal,
 } from "@/components/admin/GapFillCalculationLogicModal";
 import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/calculationLogicSummary";
+import { GapFillDailyCurveCompare } from "@/components/admin/GapFillDailyCurveCompare";
+import { buildDailyCurveCompareSummary } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdminSerialization";
 import {
   buildActualDiagnosticsHeaderReadout,
@@ -978,6 +980,24 @@ export default function GapFillLabCanonicalClient() {
       visibilityFromResult?.treatmentMode,
     ]
   );
+  const dailyCurveCompareSummary = useMemo(
+    () =>
+      result?.ok && actualHouseBaselineDataset && testHouseBaselineDataset
+        ? buildDailyCurveCompareSummary({
+            actualDataset: actualHouseBaselineDataset,
+            simulatedDataset: testHouseBaselineDataset,
+            compareRows: testHouseCompareProjection.rows,
+            timezone,
+          })
+        : null,
+    [
+      actualHouseBaselineDataset,
+      result,
+      testHouseBaselineDataset,
+      testHouseCompareProjection.rows,
+      timezone,
+    ]
+  );
   const exportPayloadBase = useMemo(
     () => ({
       workspace: "gapfill-lab-canonical-client",
@@ -1890,6 +1910,7 @@ export default function GapFillLabCanonicalClient() {
             />
           </div>
         </div>
+        <GapFillDailyCurveCompare summary={dailyCurveCompareSummary} />
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
             <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>

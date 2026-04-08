@@ -214,6 +214,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `lib/admin/gapfillLabPrime.ts`
 - `lib/admin/simulatorDiagnostic.ts`
 - `modules/usageSimulator/calculationLogicSummary.ts`
+- `modules/usageSimulator/dailyCurveCompareSummary.ts`
 - `modules/usageSimulator/profileDisplay.ts`
 - `modules/usageSimulator/simulationDataAlerts.ts`
 - `modules/usageSimulator/repo.ts`
@@ -237,6 +238,7 @@ Mandatory enforcement rules:
 - GapFill core/default scoring mode is selected-day fresh shared execution (`compareFreshMode=selected_days`) while chart/table display stays artifact-backed.
 - GapFill full-window fresh shared scoring (`compareFreshMode=full_window`) is retained as an explicit heavy proof path only.
 - GapFill admin-only calculation-logic explanations are read-side summaries of persisted shared diagnostics / lockbox metadata / artifact context through `modules/usageSimulator/calculationLogicSummary.ts`; they must not introduce a second truth path.
+- GapFill admin-only daily curve compare is a read-side summary of persisted actual/test-house interval artifacts plus compare-day selections through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it must not introduce a second compare or simulator path.
 - Artifact fingerprint ownership and usage-shape profile identity rules are unchanged here; deferred identity/profile contract changes remain out of scope.
 - Shared weather truth is owned by `loadWeatherForPastWindow`, which must read saved non-stub daily actual weather first and only backfill missing or `STUB_V1` dates.
 - Weather provenance from that shared loader is part of the contract for both Past Sim and GapFill; docs and callers must not imply a fresh weather pull when persisted actual weather already covers the requested window.

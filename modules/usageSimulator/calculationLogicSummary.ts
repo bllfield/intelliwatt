@@ -1,11 +1,12 @@
 type PriorityBand =
+  | "Hard Truth"
   | "Hard Constraint"
   | "Reference Truth Pool"
   | "Primary Driver"
   | "Secondary Driver"
   | "Conditional Adjustment"
   | "Exclusion"
-  | "Fallback"
+  | "Fallback Only"
   | "Not Used";
 
 type LogicModeFamily = "actual_backed" | "manual_monthly" | "manual_annual" | "profile_only" | "other";
@@ -49,6 +50,53 @@ export type CalculationLogicTuningLever = {
   explanation: string;
 };
 
+export type CalculationLogicCompositionItem = {
+  label: string;
+  priorityBand: Exclude<PriorityBand, "Not Used">;
+  dayCount: number | null;
+  dayShare: number | null;
+  kwh: number | null;
+  kwhShare: number | null;
+  explanation: string;
+};
+
+export type CalculationLogicCompositionSection = {
+  key: string;
+  title: string;
+  summary: string;
+  items: CalculationLogicCompositionItem[];
+};
+
+export type CalculationLogicDecisionStep = {
+  rank: number;
+  key: string;
+  label: string;
+  explanation: string;
+  observedCount: number | null;
+};
+
+export type CalculationLogicWeatherRow = {
+  label: string;
+  value: string;
+  explanation: string;
+};
+
+export type CalculationLogicArtifactDecision = {
+  label: string;
+  value: string;
+  explanation: string;
+};
+
+export type CalculationLogicShapeBucketSummary = {
+  bucketKey: string;
+  monthKey: string;
+  dayType: string;
+  overnight: number;
+  morning: number;
+  afternoon: number;
+  evening: number;
+};
+
 export type GapfillCalculationLogicSummary = {
   selectedMode: string;
   modeLabel: string;
@@ -61,9 +109,24 @@ export type GapfillCalculationLogicSummary = {
   testHomeId: string | null;
   inputGroups: CalculationLogicInputGroup[];
   layers: CalculationLogicLayer[];
+  compositionSections: CalculationLogicCompositionSection[];
+  dailyTotalLogic: {
+    summary: string;
+    ladder: CalculationLogicDecisionStep[];
+  };
+  intervalCurveLogic: {
+    summary: string;
+    ladder: CalculationLogicDecisionStep[];
+  };
+  weatherExplanation: {
+    summary: string;
+    rows: CalculationLogicWeatherRow[];
+  };
   priorityItems: CalculationLogicPriorityItem[];
   exclusions: CalculationLogicExclusionItem[];
   tuningLevers: CalculationLogicTuningLever[];
+  artifactDecisionSummary: CalculationLogicArtifactDecision[];
+  shapeBucketSummaries: CalculationLogicShapeBucketSummary[];
   rawDiagnostics: Record<string, unknown>;
 };
 
@@ -107,6 +170,95 @@ function formatMaybeNumber(value: unknown, digits = 2): string {
 
 function formatMaybeCount(value: unknown): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "not attached";
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+function prettyLabel(value: string): string {
+  return value
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function bandForSourceDetail(detail: string): Exclude<PriorityBand, "Not Used"> {
+  if (detail === "ACTUAL" || detail === "ACTUAL_VALIDATION_TEST_DAY") return "Hard Truth";
+  if (detail === "SIMULATED_TEST_DAY") return "Primary Driver";
+  if (detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL") return "Hard Constraint";
+  if (detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING") {
+    return "Exclusion";
+  }
+  return "Fallback Only";
+}
+
+function explanationForSourceDetail(detail: string): string {
+  switch (detail) {
+    case "ACTUAL":
+      return "Passed through as trusted actual output in the final stitched artifact.";
+    case "ACTUAL_VALIDATION_TEST_DAY":
+      return "Actual day kept visible in compare scope so the scored/test-day truth remains inspectable.";
+    case "SIMULATED_TEST_DAY":
+      return "Modeled output produced specifically for selected validation/test-day compare behavior.";
+    case "SIMULATED_TRAVEL_VACANT":
+      return "Modeled because travel/vacant exclusions removed the day from the trusted fingerprint pool.";
+    case "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL":
+      return "Modeled underneath a monthly constraint even though the day is not a travel/vacant exclusion.";
+    case "SIMULATED_INCOMPLETE_METER":
+      return "Modeled because incomplete meter coverage disqualified the day from trusted actual truth.";
+    case "SIMULATED_LEADING_MISSING":
+      return "Modeled because leading missing coverage prevented use as trusted reference truth.";
+    default:
+      return "Modeled by the shared simulator after stronger truth or constraint paths ran out.";
+  }
+}
+
+function normalizeDailyRows(dataset: any): Array<{ date: string; kwh: number; sourceDetail: string }> {
+  return asArray<Record<string, unknown>>(dataset?.daily)
+    .map((row) => ({
+      date: String(row.date ?? "").slice(0, 10),
+      kwh: Number(row.kwh ?? 0) || 0,
+      sourceDetail: String(row.sourceDetail ?? row.source ?? "unknown").trim() || "unknown",
+    }))
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date));
+}
+
+function buildCompositionItems(
+  rows: Array<{ date: string; kwh: number; sourceDetail: string }>
+): CalculationLogicCompositionItem[] {
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.dayCount += 1;
+      acc.kwh += row.kwh;
+      return acc;
+    },
+    { dayCount: 0, kwh: 0 }
+  );
+  const grouped = new Map<string, { dayCount: number; kwh: number }>();
+  rows.forEach((row) => {
+    const bucket = grouped.get(row.sourceDetail) ?? { dayCount: 0, kwh: 0 };
+    bucket.dayCount += 1;
+    bucket.kwh += row.kwh;
+    grouped.set(row.sourceDetail, bucket);
+  });
+  return Array.from(grouped.entries())
+    .map(([detail, summary]) => ({
+      label: detail,
+      priorityBand: bandForSourceDetail(detail),
+      dayCount: summary.dayCount,
+      dayShare: totals.dayCount > 0 ? round4(summary.dayCount / totals.dayCount) : null,
+      kwh: round4(summary.kwh),
+      kwhShare: totals.kwh > 0 ? round4(summary.kwh / totals.kwh) : null,
+      explanation: explanationForSourceDetail(detail),
+    }))
+    .sort((a, b) => (b.dayCount ?? 0) - (a.dayCount ?? 0) || a.label.localeCompare(b.label));
+}
+
+function countForKeys(counts: Record<string, number>, keys: string[]): number | null {
+  const total = keys.reduce((sum, key) => sum + (Number(counts[key] ?? 0) || 0), 0);
+  return total > 0 ? total : null;
 }
 
 function inferModeInfo(selectedMode: string, lockboxMode: string): {
@@ -296,6 +448,31 @@ export function buildGapfillCalculationLogicSummary(args: {
   const keepRefUtcDateKeyCount = lockboxExecutionSummary.keepRefUtcDateKeyCount;
   const dailySourceClassificationsSummary = asRecord(tuningSummary.dailySourceClassificationsSummary);
   const monthlyLayer = monthlyLayerSummary(modeInfo.modeFamily);
+  const dailyRows = normalizeDailyRows(dataset);
+  const selectedValidationDateSet = new Set(
+    asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows)
+      .map((row) => String(row.localDate ?? "").slice(0, 10))
+      .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+  );
+  const selectedCompareRows = dailyRows.filter((row) => selectedValidationDateSet.has(row.date));
+  const fingerprintShapeSummaryByMonthDayType = asRecord(tuningSummary.fingerprintShapeSummaryByMonthDayType);
+  const shapeBucketSummaries: CalculationLogicShapeBucketSummary[] = Object.entries(fingerprintShapeSummaryByMonthDayType)
+    .flatMap(([monthKey, dayTypeBuckets]) => {
+      const dayTypeRecord = asRecord(dayTypeBuckets);
+      return Object.entries(dayTypeRecord).map(([dayType, distribution]) => {
+        const normalized = asRecord(distribution);
+        return {
+          bucketKey: `${monthKey}:${dayType}`,
+          monthKey,
+          dayType,
+          overnight: Number(normalized.overnight ?? 0) || 0,
+          morning: Number(normalized.morning ?? 0) || 0,
+          afternoon: Number(normalized.afternoon ?? 0) || 0,
+          evening: Number(normalized.evening ?? 0) || 0,
+        };
+      });
+    })
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey) || a.dayType.localeCompare(b.dayType));
 
   const inputGroups: CalculationLogicInputGroup[] = [
     {
@@ -432,7 +609,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       used: modeInfo.modeFamily !== "actual_backed",
       sourceOfTruth: "Shared simulator fallback ladder",
       role: "Used only when stronger monthly/day-shape evidence is missing",
-      priorityBand: modeInfo.modeFamily === "actual_backed" ? "Not Used" : "Fallback",
+      priorityBand: modeInfo.modeFamily === "actual_backed" ? "Not Used" : "Fallback Only",
       details: [
         `Observed daily fallback levels: ${describeCountMap(perDayFallbackCounts)}`,
       ],
@@ -612,6 +789,252 @@ export function buildGapfillCalculationLogicSummary(args: {
     },
   ];
 
+  const compositionSections: CalculationLogicCompositionSection[] = [
+    {
+      key: "final-output",
+      title: "Final stitched output composition",
+      summary:
+        "This shows what the final persisted artifact is made of by day count and kWh share, separating passed-through actual truth from modeled categories.",
+      items: buildCompositionItems(dailyRows),
+    },
+    {
+      key: "compare-output",
+      title: "Compare / test-day composition",
+      summary:
+        "This isolates the selected scored/test days only, so you can see whether the compare window is mostly actual, mostly modeled, or driven by specific exclusion classes.",
+      items: buildCompositionItems(selectedCompareRows),
+    },
+    {
+      key: "reference-pool",
+      title: "Trusted reference-pool composition",
+      summary:
+        "Reference-pool rows come from persisted fingerprint diagnostics only. These counts show how much trusted history survived exclusions before daily and interval-shape selection ran.",
+      items: [
+        {
+          label: "TRUSTED_INTERVAL_FINGERPRINT_DAYS",
+          priorityBand: "Reference Truth Pool" as const,
+          dayCount: Number(fingerprintDiagnostics.trustedIntervalFingerprintDayCount ?? 0) || 0,
+          dayShare: null,
+          kwh: null,
+          kwhShare: null,
+          explanation: "Clean source-history days that remained eligible to drive daily-total and shape selection.",
+        },
+        {
+          label: "EXCLUDED_TRAVEL_VACANT",
+          priorityBand: "Exclusion" as const,
+          dayCount: Number(fingerprintDiagnostics.excludedTravelVacantFingerprintDayCount ?? 0) || 0,
+          dayShare: null,
+          kwh: null,
+          kwhShare: null,
+          explanation: "Travel/vacant exclusions shrink the trusted pool and force those days onto the modeled path.",
+        },
+        {
+          label: "EXCLUDED_INCOMPLETE_METER",
+          priorityBand: "Exclusion" as const,
+          dayCount: Number(fingerprintDiagnostics.excludedIncompleteMeterFingerprintDayCount ?? 0) || 0,
+          dayShare: null,
+          kwh: null,
+          kwhShare: null,
+          explanation: "Incomplete-meter days were removed before they could bias the reference pool.",
+        },
+        {
+          label: "EXCLUDED_LEADING_MISSING",
+          priorityBand: "Exclusion" as const,
+          dayCount: Number(fingerprintDiagnostics.excludedLeadingMissingFingerprintDayCount ?? 0) || 0,
+          dayShare: null,
+          kwh: null,
+          kwhShare: null,
+          explanation: "Leading-missing coverage was excluded from trusted fingerprint truth.",
+        },
+      ].filter((item) => (item.dayCount ?? 0) > 0),
+    },
+  ];
+
+  const dailyTotalLogic = {
+    summary:
+      "This layer chooses the day's kWh target first. The shared day selector starts with the narrowest same-month evidence and only falls back toward broader priors when local evidence is weak.",
+    ladder: [
+      {
+        rank: 1,
+        key: "month_daytype_neighbor",
+        label: "Same-month nearest day-of-month neighbor",
+        explanation: "Highest-priority same-month day-type neighbor before the ladder broadens.",
+        observedCount: countForKeys(perDayFallbackCounts, ["month_daytype_neighbor"]),
+      },
+      {
+        rank: 2,
+        key: "month_daytype",
+        label: "Same-month weekday/weekend average",
+        explanation: "Same-month day-type average when a strong neighbor is unavailable.",
+        observedCount: countForKeys(perDayFallbackCounts, ["month_daytype"]),
+      },
+      {
+        rank: 3,
+        key: "adjacent_month_daytype",
+        label: "Adjacent-month weekday/weekend average",
+        explanation: "Brings in nearby-month seasonality while preserving weekday/weekend structure.",
+        observedCount: countForKeys(perDayFallbackCounts, ["adjacent_month_daytype"]),
+      },
+      {
+        rank: 4,
+        key: "month_overall",
+        label: "Same-month overall average",
+        explanation: "Drops day-type specificity but stays inside the current month.",
+        observedCount: countForKeys(perDayFallbackCounts, ["month_overall"]),
+      },
+      {
+        rank: 5,
+        key: "season_overall",
+        label: "Season overall average",
+        explanation: "Uses broader seasonal evidence when month-specific history is thin.",
+        observedCount: countForKeys(perDayFallbackCounts, ["season_overall"]),
+      },
+      {
+        rank: 6,
+        key: "global_daytype",
+        label: "Global weekday/weekend average",
+        explanation: "Uses global day-type priors once local month/season evidence is exhausted.",
+        observedCount: countForKeys(perDayFallbackCounts, ["global_daytype", "global_weekdayweekend"]),
+      },
+      {
+        rank: 7,
+        key: "global_overall",
+        label: "Global overall average",
+        explanation: "Broadest daily-total fallback and the weakest evidence class in the ladder.",
+        observedCount: countForKeys(perDayFallbackCounts, ["global_overall"]),
+      },
+    ],
+  };
+
+  const intervalCurveLogic = {
+    summary:
+      "After the daily target is chosen, the shared shape selector chooses the 96-slot interval profile. It starts with month/day-type/weather buckets and falls back toward flatter shapes only when needed.",
+    ladder: [
+      {
+        rank: 1,
+        key: "month_daytype_weather",
+        label: "Month + day-type + weather regime",
+        explanation: "Most specific shape bucket for timing, ramp, and peak behavior.",
+        observedCount: countForKeys(perDayShapeVariantCounts, ["month_weekday_weather_heating", "month_weekday_weather_cooling", "month_weekday_weather_neutral", "month_weekend_weather_heating", "month_weekend_weather_cooling", "month_weekend_weather_neutral"]),
+      },
+      {
+        rank: 2,
+        key: "month_daytype",
+        label: "Month + day-type",
+        explanation: "Keeps month and weekday/weekend structure when weather-specific shape evidence is unavailable.",
+        observedCount: countForKeys(perDayShapeVariantCounts, ["month_weekday", "month_weekend"]),
+      },
+      {
+        rank: 3,
+        key: "month",
+        label: "Month flat shape",
+        explanation: "Keeps month seasonality but drops day-type detail.",
+        observedCount: countForKeys(perDayShapeVariantCounts, ["month"]),
+      },
+      {
+        rank: 4,
+        key: "weekdayweekend_weather",
+        label: "Weekday/weekend + weather regime",
+        explanation: "Uses broad weekday/weekend weather-aware shapes outside the current month bucket.",
+        observedCount: countForKeys(perDayShapeVariantCounts, ["weekdayweekend_weather_weekday_heating", "weekdayweekend_weather_weekday_cooling", "weekdayweekend_weather_weekday_neutral", "weekdayweekend_weather_weekend_heating", "weekdayweekend_weather_weekend_cooling", "weekdayweekend_weather_weekend_neutral"]),
+      },
+      {
+        rank: 5,
+        key: "weekdayweekend",
+        label: "Weekday/weekend flat shape",
+        explanation: "Retains only broad weekday/weekend shape structure.",
+        observedCount: countForKeys(perDayShapeVariantCounts, ["weekdayweekend_weekday", "weekdayweekend_weekend"]),
+      },
+      {
+        rank: 6,
+        key: "uniform_fallback",
+        label: "Uniform fallback",
+        explanation: "Flattest possible shape when no stronger bucket exists.",
+        observedCount: countForKeys(perDayShapeVariantCounts, ["uniform_fallback"]),
+      },
+    ],
+  };
+
+  const weatherExplanation = {
+    summary:
+      "Weather does not create the whole day from scratch. The shared simulator first chooses a base daily kWh target, then weather can scale that day total and can also change which weather-regime shape bucket is selected.",
+    rows: [
+      {
+        label: "Weather provenance / mode",
+        value: joinNonEmpty([
+          String(identityContext.weatherLogicMode ?? sourceContext.weatherLogicMode ?? ""),
+          String(sourceTruthContext.weatherDatasetIdentity ?? ""),
+          String(sourceTruthContext.weatherSourceIdentity ?? meta.weatherSourceSummary ?? ""),
+        ]) || "not attached",
+        explanation: "Shows which persisted weather mode and provenance were attached to the artifact.",
+      },
+      {
+        label: "Heating / cooling / neutral counts",
+        value: describeCountMap(perDayWeatherModeCounts),
+        explanation: "These counts show how often weather pushed the day into heating, cooling, or neutral treatment.",
+      },
+      {
+        label: "Normal vs weather-scaled counts",
+        value: describeCountMap({
+          normal_day: Number(perDayClassificationCounts.normal_day ?? 0),
+          weather_scaled_day: Number(perDayClassificationCounts.weather_scaled_day ?? 0),
+        }),
+        explanation: "Normal days largely preserve the base-day target. Weather-scaled days adjust that base target toward weather severity.",
+      },
+      {
+        label: "Event-day classifications",
+        value: describeCountMap({
+          extreme_cold_event_day: Number(perDayClassificationCounts.extreme_cold_event_day ?? 0),
+          freeze_protect_day: Number(perDayClassificationCounts.freeze_protect_day ?? 0),
+        }),
+        explanation: "Extreme cold and freeze-protect classifications reflect stronger event behavior layered after the base day is selected.",
+      },
+    ],
+  };
+
+  const artifactDecisionSummary: CalculationLogicArtifactDecision[] = [
+    {
+      label: "Trusted fingerprint days",
+      value: formatMaybeCount(fingerprintDiagnostics.trustedIntervalFingerprintDayCount),
+      explanation: "How much clean source history survived to anchor the reference pool.",
+    },
+    {
+      label: "Travel/vacant excluded",
+      value: formatMaybeCount(fingerprintDiagnostics.excludedTravelVacantFingerprintDayCount),
+      explanation: "Days excluded from trusted fingerprint truth because of travel/vacant ranges.",
+    },
+    {
+      label: "Incomplete meter excluded",
+      value: formatMaybeCount(fingerprintDiagnostics.excludedIncompleteMeterFingerprintDayCount),
+      explanation: "Days removed from the trusted pool due to missing or incomplete meter coverage.",
+    },
+    {
+      label: "Validation keep-ref count",
+      value: formatMaybeCount(keepRefUtcDateKeyCount),
+      explanation: "How many selected validation/test days remained in the reference pool while still producing modeled compare output.",
+    },
+    {
+      label: "Most common daily fallback levels",
+      value: describeCountMap(perDayFallbackCounts),
+      explanation: "Shows which daily-total fallback levels actually dominated this run.",
+    },
+    {
+      label: "Most common shape variants",
+      value: describeCountMap(perDayShapeVariantCounts),
+      explanation: "Shows which interval-shape buckets the shared selector used most often.",
+    },
+    {
+      label: "Weather-scaled vs normal days",
+      value: describeCountMap({
+        normal_day: Number(perDayClassificationCounts.normal_day ?? 0),
+        weather_scaled_day: Number(perDayClassificationCounts.weather_scaled_day ?? 0),
+        extreme_cold_event_day: Number(perDayClassificationCounts.extreme_cold_event_day ?? 0),
+        freeze_protect_day: Number(perDayClassificationCounts.freeze_protect_day ?? 0),
+      }),
+      explanation: "Operational summary of how weather actually changed day classification in this artifact.",
+    },
+  ];
+
   const priorityItems: CalculationLogicPriorityItem[] = [
     ...(modeInfo.modeFamily === "manual_monthly"
       ? [
@@ -663,7 +1086,7 @@ export function buildGapfillCalculationLogicSummary(args: {
     },
     {
       label: "Fallback path frequency",
-      priorityBand: "Fallback",
+      priorityBand: "Fallback Only",
       explanation: "More fallback usage means weaker same-month/day-type evidence was available for this run.",
     },
   ];
@@ -750,7 +1173,7 @@ export function buildGapfillCalculationLogicSummary(args: {
     },
     {
       label: "Fallback frequency",
-      priorityBand: "Fallback",
+      priorityBand: "Fallback Only",
       explanation: "When more days fall through to adjacent/global fallbacks, the run is relying more on broad priors and less on strong local evidence.",
     },
   ];
@@ -768,9 +1191,15 @@ export function buildGapfillCalculationLogicSummary(args: {
     testHomeId,
     inputGroups,
     layers,
+    compositionSections,
+    dailyTotalLogic,
+    intervalCurveLogic,
+    weatherExplanation,
     priorityItems,
     exclusions,
     tuningLevers,
+    artifactDecisionSummary,
+    shapeBucketSummaries,
     rawDiagnostics: {
       identityContext,
       sourceTruthContext,
@@ -784,6 +1213,12 @@ export function buildGapfillCalculationLogicSummary(args: {
       testHomeTravelRanges: testHomeTravelRangeList,
       effectiveTravelRanges: effectiveTravelRangeList,
       effectiveTravelRangesSource: args.effectiveTravelRangesSource ?? null,
+      compositionSections,
+      dailyTotalLogic,
+      intervalCurveLogic,
+      weatherExplanation,
+      artifactDecisionSummary,
+      shapeBucketSummaries,
     },
   };
 }

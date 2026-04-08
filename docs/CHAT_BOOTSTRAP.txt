@@ -114,6 +114,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `lib/admin/gapfillLabPrime.ts`
 - `lib/admin/simulatorDiagnostic.ts`
 - `modules/usageSimulator/calculationLogicSummary.ts`
+- `modules/usageSimulator/dailyCurveCompareSummary.ts`
 - `modules/usageSimulator/profileDisplay.ts`
 - `modules/usageSimulator/simulationDataAlerts.ts`
 - `modules/usageSimulator/repo.ts`
@@ -137,6 +138,7 @@ Shared simulation architecture authority:
 - GapFill actual-house and test-house result panels must reuse the same shared Past presentation modules as the user page; do not duplicate Past chart/table/compare display logic inside GapFill.
 - GapFill lockbox flow, mode explanation, and levers visibility are read-only explanatory surfaces unless a control is already part of the allowed normal admin workflow.
 - GapFill admin-only calculation-logic popups are also read-only explanatory surfaces; they must summarize persisted diagnostics/lockbox/artifact truth through `modules/usageSimulator/calculationLogicSummary.ts`, not a new simulator path.
+- GapFill admin-only Daily Curve Compare is a read-only tuning surface; it must summarize persisted actual/test-house interval artifacts and compare-day selections through `modules/usageSimulator/dailyCurveCompareSummary.ts`, not a new compare path.
 - Artifact fingerprint ownership and usage-shape profile identity behavior stay unchanged in this step; deferred identity/profile changes remain out of scope.
 - Shared weather truth is owned by `loadWeatherForPastWindow`.
 - `loadWeatherForPastWindow` must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily weather rows when the canonical date window is already covered; do not trigger redundant weather backfill/API work in that case.
