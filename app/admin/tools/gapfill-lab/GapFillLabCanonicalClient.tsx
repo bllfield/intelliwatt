@@ -25,7 +25,6 @@ import {
   buildStageTimingReadout,
   formatIdentityReadout,
 } from "./readoutTruth";
-import { mergeActualHouseDiagnosticsSnapshot } from "./actualHouseDiagnosticsMerge";
 import { buildGapfillExportPayload } from "./exportPayload";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
@@ -777,9 +776,7 @@ export default function GapFillLabCanonicalClient() {
         return;
       }
       if (json.pastSimSnapshot && typeof json.pastSimSnapshot === "object") {
-        setPastSimSnapshot((prev) =>
-          mergeActualHouseDiagnosticsSnapshot(prev, json.pastSimSnapshot as Record<string, unknown>)
-        );
+        setPastSimSnapshot(json.pastSimSnapshot as Record<string, unknown>);
       }
     } catch (err: unknown) {
       setActualEngineDiagnosticsError(

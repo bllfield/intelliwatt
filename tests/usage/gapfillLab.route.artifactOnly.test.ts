@@ -888,48 +888,17 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.action).toBe("run_source_home_past_sim_snapshot");
     expect(body.sourceHouseId).toBe("h1");
     expect(body.scenarioId).toBe("past-s1");
-    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
-    expect(dispatchPastSimRecalc.mock.calls[0]?.[0]).toMatchObject({
-      houseId: "h1",
-      scenarioId: "past-s1",
-      mode: "SMT_BASELINE",
-      weatherPreference: "LAST_YEAR_WEATHER",
-      persistPastSimBaseline: true,
-      validationDayCount: 21,
-      runContext: {
-        callerLabel: "user_recalc",
-        buildPathKind: "recalc",
-        persistRequested: true,
-      },
-    });
+    expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
-    expect(readModes).toEqual(["artifact_only", "artifact_only", "artifact_only"]);
+    expect(readModes).toEqual(["allow_rebuild"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
-    expect(projectionModes).toEqual([undefined, "baseline", "raw"]);
-    expect(getSimulatedUsageForHouseScenario.mock.calls[0]?.[0]).toMatchObject({
-      exactArtifactInputHash: "source-canonical-hash-1",
-      requireExactArtifactMatch: true,
-    });
-    expect(getSimulatedUsageForHouseScenario.mock.calls[1]?.[0]).toMatchObject({
-      exactArtifactInputHash: "source-canonical-hash-1",
-      requireExactArtifactMatch: true,
-    });
-    expect(getSimulatedUsageForHouseScenario.mock.calls[2]?.[0]).toMatchObject({
-      exactArtifactInputHash: "source-canonical-hash-1",
-      requireExactArtifactMatch: true,
-    });
-    expect(body.pastSimSnapshot?.reads?.defaultProjection?.ok).toBe(true);
+    expect(projectionModes).toEqual(["baseline"]);
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
-    expect(body.pastSimSnapshot?.reads?.rawProjection?.ok).toBe(true);
     expect(body.pastSimSnapshot?.canonicalWindow?.startDate).toBe("2025-03-01");
     expect(Array.isArray(body.pastSimSnapshot?.travelRangesFromDb)).toBe(true);
     expect(body.validationPolicyOwner).toBe("userValidationPolicy");
     expect(body.pastSimSnapshot?.validationPolicyOwner).toBe("userValidationPolicy");
-    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
-    expect(body.pastSimSnapshot?.reads?.defaultProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
-      "2025-03-01,2025-03-02"
-    );
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.excludedDateKeysCount).toBe(2);
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.excludedDateKeysFingerprint).toBe(
       "2025-03-01,2025-03-02"
@@ -939,13 +908,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxPerRunTrace?.inputHash).toBe("input-1");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.fullChainHash).toBe("chain-1");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.metrics?.wape).toBe(5);
-    expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
+    expect(runSimulatorDiagnostic).not.toHaveBeenCalled();
     expect(body.pastSimSnapshot?.build?.buildInputsHash).toBe("hash-from-build-row");
     expect(body.pastSimSnapshot?.profiles?.homeProfileLive).toEqual({ hvac: {} });
-    expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
-    expect(body.pastSimSnapshot?.engineContext?.rawActualIntervalsMeta?.intervalCount).toBe(96);
+    expect(body.pastSimSnapshot?.engineContext).toBeNull();
     expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_actual");
-    expect(body.pastSimSnapshot?.sharedDiagnostics?.identityContext?.weatherLogicMode).toBe("LAST_YEAR_ACTUAL_WEATHER");
+    expect(body.pastSimSnapshot?.sharedDiagnostics?.projectionReadSummary?.readMode).toBe("allow_rebuild");
   });
 
   it("runs source-home Past Sim snapshot through the thin actual-home route", async () => {
@@ -963,10 +931,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.action).toBe("run_source_home_past_sim_snapshot");
-    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
+    expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     expect(getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode)).toEqual([
-      "artifact_only",
+      "allow_rebuild",
     ]);
     expect(runSimulatorDiagnostic).not.toHaveBeenCalled();
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
@@ -993,10 +961,92 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
-    expect(getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
+    expect(getSimulatedUsageForHouseScenario).toHaveBeenCalledTimes(1);
     expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
     expect(body.pastSimSnapshot?.recalc?.executionMode).toBe("not_run");
     expect(body.pastSimSnapshot?.engineContext?.identity?.intervalDataFingerprint).toBe("ifp-1");
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.ok).toBe(true);
+  });
+
+  it("refreshes the full Actual Home snapshot when diagnostics are requested later", async () => {
+    getSimulatedUsageForHouseScenario
+      .mockImplementationOnce(async (args: any) => ({
+        ok: true,
+        houseId: "h1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+          daily: [{ date: "2025-04-10", kwh: 9.5, source: "ACTUAL" }],
+          monthly: [{ month: "2025-04", kwh: 9.5 }],
+          series: { intervals15: [{ timestamp: "2025-04-10T00:00:00.000Z", kwh: 1.2 }] },
+          meta: {
+            validationOnlyDateKeysLocal: ["2025-04-10"],
+            lockboxInput: { sourceContext: { sourceHouseId: "h1" } },
+            lockboxPerRunTrace: { inputHash: "input-old", fullChainHash: "chain-old", sourceHouseId: "h1" },
+          },
+        },
+      }))
+      .mockImplementationOnce(async (args: any) => ({
+        ok: true,
+        houseId: "h1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: { source: "SIMULATED", totalKwh: 14272, intervalsCount: 2, start: "2025-03-01", end: "2026-02-28" },
+          daily: [{ date: "2025-06-05", kwh: 40.21, source: "ACTUAL" }],
+          monthly: [{ month: "2025-06", kwh: 40.21 }],
+          series: { intervals15: [{ timestamp: "2025-06-05T00:00:00.000Z", kwh: 1.8 }] },
+          meta: {
+            validationOnlyDateKeysLocal: ["2025-06-05"],
+            validationCompareRows: [
+              {
+                localDate: "2025-06-05",
+                dayType: "weekday",
+                actualDayKwh: 42,
+                simulatedDayKwh: 40.21,
+                errorKwh: -1.79,
+                percentError: 4.26,
+              },
+            ],
+            validationCompareMetrics: { wape: 7.46, mae: 1.79 },
+            lockboxInput: { sourceContext: { sourceHouseId: "h1" } },
+            lockboxPerRunTrace: { inputHash: "XVfk", fullChainHash: "r_s9", sourceHouseId: "h1" },
+          },
+        },
+      }));
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/source-home-past-sim/route");
+
+    const initialRes = await POST(
+      buildRequest({
+        action: "run_source_home_past_sim_snapshot",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        includeUsage365: false,
+      })
+    );
+    const initialBody = await initialRes.json();
+
+    const refreshedRes = await POST(
+      buildRequest({
+        action: "run_source_home_past_sim_snapshot",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        includeUsage365: false,
+        includeDiagnostics: true,
+        diagnosticsOnly: true,
+      })
+    );
+    const refreshedBody = await refreshedRes.json();
+
+    expect(initialBody.pastSimSnapshot?.reads?.baselineProjection?.dataset?.summary?.totalKwh).toBe(100);
+    expect(refreshedBody.pastSimSnapshot?.reads?.baselineProjection?.dataset?.summary?.totalKwh).toBe(14272);
+    expect(refreshedBody.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxPerRunTrace?.inputHash).toBe("XVfk");
+    expect(refreshedBody.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.metrics?.wape).toBe(7.46);
+    expect(runSimulatorDiagnostic).toHaveBeenCalledTimes(1);
   });
 
   it("preserves untouched parity outputs while surfacing persisted actual-house diagnostics fields", async () => {
@@ -1101,13 +1151,13 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(arg.preLockboxTravelRanges).toEqual([]);
     expect(Array.from(arg.validationOnlyDateKeysLocal as Set<string>).sort()).toEqual(["2025-04-10"]);
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
-    expect(projectionModes).toEqual(["baseline"]);
+    expect(projectionModes).toEqual(["baseline", "raw"]);
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
-    expect(readModes).toEqual(["artifact_only"]);
+    expect(readModes).toEqual(["artifact_only", "artifact_only"]);
     const exactHashes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.exactArtifactInputHash);
-    expect(exactHashes).toEqual(["canonical-hash-1"]);
+    expect(exactHashes).toEqual(["canonical-hash-1", "canonical-hash-1"]);
     const exactRequired = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.requireExactArtifactMatch);
-    expect(exactRequired).toEqual([true]);
+    expect(exactRequired).toEqual([true, true]);
     expect(body.sourceHouseId).toBe("h1");
     expect(body.scenarioId).toBe("past-s1");
     expect(body.testHomeId).toBe("test-home-1");
@@ -1166,7 +1216,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(Array.isArray(compareInput?.meta?.validationOnlyDateKeysLocal)).toBe(true);
   });
 
-  it("uses the same selected gapfill weather mode for Actual Home and Test Home runs", async () => {
+  it("does not let gapfill weather controls create a separate Actual Home artifact path", async () => {
     const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
 
     const actualReq = buildRequest({
@@ -1196,9 +1246,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
 
     expect(actualRes.status).toBe(200);
     expect(testRes.status).toBe(200);
-    expect(dispatchPastSimRecalc.mock.calls[0]?.[0]?.weatherPreference).toBe("LONG_TERM_AVERAGE");
+    expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
+    expect(getSimulatedUsageForHouseScenario.mock.calls[0]?.[0]).toMatchObject({
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+      projectionMode: "baseline",
+    });
     expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.weatherPreference).toBe("LONG_TERM_AVERAGE");
-    expect(actualBody.pastSimSnapshot?.weatherLogicMode).toBe("LONG_TERM_AVERAGE_WEATHER");
+    expect(actualBody.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxPerRunTrace?.inputHash).toBe("input-1");
     expect(testBody.weatherLogicMode).toBe("LONG_TERM_AVERAGE_WEATHER");
   });
 
@@ -1319,8 +1375,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcArg.actualContextHouseId).toBe("h1");
     const projectionModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.projectionMode);
     const readModes = getSimulatedUsageForHouseScenario.mock.calls.map((c) => c?.[0]?.readMode);
-    expect(projectionModes).toEqual(["baseline"]);
-    expect(readModes).toEqual(["artifact_only"]);
+    expect(projectionModes).toEqual(["baseline", "raw"]);
+    expect(readModes).toEqual(["artifact_only", "artifact_only"]);
   });
 
   it("returns compare rows from same stored sidecar shape used by user-facing past", async () => {
