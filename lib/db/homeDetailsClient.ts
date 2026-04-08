@@ -1,4 +1,4 @@
-import { PrismaClient as HomeDetailsPrismaClient } from '../../.prisma/home-details-client';
+import { PrismaClient as HomeDetailsPrismaClient } from "../../.prisma/home-details-client";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -8,10 +8,10 @@ declare global {
 const homeDetailsClient =
   globalThis.homeDetailsPrisma ??
   new HomeDetailsPrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
   globalThis.homeDetailsPrisma = homeDetailsClient;
 }
 

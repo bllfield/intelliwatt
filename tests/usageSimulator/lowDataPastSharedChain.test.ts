@@ -171,12 +171,16 @@ describe("low-data Past shared chain (Slice 14)", () => {
     const wxArg = firstCall?.actualWxByDateKey as Map<string, { source?: string }>;
     expect(wxArg?.get("2026-01-05")?.source).toBe("OPEN_METEO");
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
-    expect(keepRef?.size).toBe(5);
+    expect(keepRef == null || keepRef.size === 0).toBe(true);
     expect(firstCall?.modeledKeepRefReasonCode).toBe("MONTHLY_CONSTRAINED_NON_TRAVEL_DAY");
+    expect(firstCall?.lowDataSyntheticContext).toMatchObject({
+      mode: "MANUAL_TOTALS",
+      canonicalMonthKeys: baseBuildInputs.canonicalMonths,
+    });
     const meta = out.dataset?.meta as Record<string, unknown> | undefined;
     expect(meta?.sharedWeatherTimelineContract).toBe("last365_actual_with_normal_gapfill");
     expect(meta?.lowDataSharedPastAdapter).toBe(true);
-    expect(meta?.lowDataKeepRefModeledDays).toBe(true);
+    expect(meta?.lowDataKeepRefModeledDays).toBeUndefined();
   });
 
   it("MANUAL_TOTALS whole-home-only constrained path skips synthetic interval materialization and keep-ref expansion", async () => {
@@ -232,7 +236,39 @@ describe("low-data Past shared chain (Slice 14)", () => {
     const keepRef = buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceModeledOutputKeepReferencePoolDateKeys as
       | Set<string>
       | undefined;
-    expect(keepRef?.size).toBe(2);
+    expect(keepRef == null || keepRef.size === 0).toBe(true);
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.lowDataSyntheticContext).toMatchObject({
+      mode: "NEW_BUILD_ESTIMATE",
+    });
+  });
+
+  it("preserves explicitly requested keep-ref days without expanding the full manual window", async () => {
+    buildPastSimulatedBaselineV1.mockClear();
+    await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "h1",
+      esiid: null,
+      startDate: "2026-01-01",
+      endDate: "2026-01-05",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "MANUAL_TOTALS",
+        resolvedSimFingerprint: {
+          manualTotalsConstraint: "monthly",
+        },
+      } as any,
+      buildPathKind: "lab_validation",
+      includeSimulatedDayResults: false,
+      forceModeledOutputKeepReferencePoolDateKeysLocal: new Set(["2026-01-03"]),
+    });
+
+    const keepRef = buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.forceModeledOutputKeepReferencePoolDateKeys as
+      | Set<string>
+      | undefined;
+    expect(Array.from(keepRef ?? [])).toEqual(["2026-01-03"]);
   });
 
   it("SMT_BASELINE fails when actual weather coverage is still missing after backfill", async () => {

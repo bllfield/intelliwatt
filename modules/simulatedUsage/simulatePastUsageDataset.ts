@@ -992,6 +992,7 @@ export async function simulatePastUsageDataset(
       resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
     const useWholeHomeOnlyLowDataFastPath = isLowDataSharedPastMode && usesWholeHomeOnlyPrior;
     const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
+    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     const fetchedActualIntervals = preloadedIntervals
       ? null
       : isLowDataSharedPastMode
@@ -1039,39 +1040,21 @@ export async function simulatePastUsageDataset(
     );
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
 
-    /**
-     * MANUAL_TOTALS / NEW_BUILD_ESTIMATE: synthetic intervals are complete for every day, so the shared
-     * engine would otherwise treat most days as reference/passthrough. Union Gap-Fill keep-ref keys with
-     * every non-travel day in the window so each day is modeled via simulatePastDay while synthetic
-     * intervals remain in the reference pool (same mechanism as Gap-Fill graded test days).
-     */
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
-    if (isLowDataSharedPastMode && !useWholeHomeOnlyLowDataFastPath) {
-      if (buildInputs.mode === "MANUAL_TOTALS" && eligibleManualBillPeriods.length > 0) {
-        for (const period of eligibleManualBillPeriods) {
-          const startMs = new Date(`${period.startDate}T00:00:00.000Z`).getTime();
-          const endMs = new Date(`${period.endDate}T00:00:00.000Z`).getTime();
-          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) continue;
-          for (let cursor = startMs; cursor <= endMs; cursor += 24 * 60 * 60 * 1000) {
-            const localKey = new Date(cursor).toISOString().slice(0, 10);
-            if (!excludedDateKeys.has(localKey)) mergedKeepRefLocalDateKeys.add(localKey);
+    const lowDataSyntheticContext: {
+      mode: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE";
+      canonicalMonthKeys: string[];
+      intradayShape96: number[] | null;
+      weekdayWeekendShape96: { weekday: number[]; weekend: number[] } | null;
+    } | null =
+      isLowDataSharedPastMode && !useWholeHomeOnlyLowDataFastPath
+        ? {
+            mode: buildInputs.mode as "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE",
+            canonicalMonthKeys: canonicalMonths,
+            intradayShape96: (buildInputs as SimulatorBuildInputsV1).intradayShape96 ?? null,
+            weekdayWeekendShape96: (buildInputs as SimulatorBuildInputsV1).weekdayWeekendShape96 ?? null,
           }
-        }
-      } else {
-        const tzForKeepRef = String(timezone ?? "").trim();
-        for (const dayStartMs of canonicalDayStartsMs) {
-          const gridTs = getDayGridTimestamps(dayStartMs);
-          if (!gridTs.length) continue;
-          const localKey = tzForKeepRef
-            ? dateKeyInTimezone(gridTs[0], tzForKeepRef)
-            : dateKeyFromTimestamp(gridTs[0]);
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(localKey)) continue;
-          if (!excludedDateKeys.has(localKey)) {
-            mergedKeepRefLocalDateKeys.add(localKey);
-          }
-        }
-      }
-    }
+        : null;
     logSimPipelineEvent("day_simulation_input_prep_success", {
       correlationId,
       houseId,
@@ -1080,6 +1063,11 @@ export async function simulatePastUsageDataset(
       actualIntervalsCount: actualIntervals.length,
       canonicalDateKeyCount: canonicalDateKeys.length,
       excludedDateKeyCount: excludedDateKeys.size,
+      explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+      effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
+      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+      lowDataSyntheticMode: lowDataSyntheticContext?.mode,
+      actualBackedReferencePoolExpected: !lowDataSyntheticContext,
       durationMs: Date.now() - inputPrepStartedAt,
       source: "simulatePastUsageDataset",
       memoryRssMb: getMemoryRssMb(),
@@ -1188,7 +1176,6 @@ export async function simulatePastUsageDataset(
         ? selectedWeatherByDateKey
         : mergedActualWxByDateKey;
 
-    const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     let homeProfileForPast = (buildInputs as any)?.snapshots?.homeProfile ?? null;
     let applianceProfileForPast = normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
     let ensuredUsageShape: Awaited<ReturnType<typeof ensureUsageShapeProfileForSharedSimulation>> = {
@@ -1317,6 +1304,9 @@ export async function simulatePastUsageDataset(
       leadingMissingDays?: number;
       simulatedDays?: number;
       referenceDaysUsed?: number;
+      lowDataSyntheticContextUsed?: boolean;
+      lowDataSyntheticMode?: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | null;
+      actualBackedReferencePoolUsed?: boolean;
       intervalUsageFingerprintIdentity?: string;
       trustedIntervalFingerprintDayCount?: number;
       excludedTravelVacantFingerprintDayCount?: number;
@@ -1337,6 +1327,11 @@ export async function simulatePastUsageDataset(
       sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
       userId,
       buildPathKind,
+      actualIntervalsCount: actualIntervals.length,
+      explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+      effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
+      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+      lowDataSyntheticMode: lowDataSyntheticContext?.mode,
       source: "simulatePastUsageDataset",
       memoryRssMb: getMemoryRssMb(),
     });
@@ -1346,6 +1341,11 @@ export async function simulatePastUsageDataset(
       sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
       userId,
       buildPathKind,
+      actualIntervalsCount: actualIntervals.length,
+      explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+      effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
+      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+      lowDataSyntheticMode: lowDataSyntheticContext?.mode,
       source: "simulatePastUsageDataset",
       memoryRssMb: getMemoryRssMb(),
     });
@@ -1377,6 +1377,7 @@ export async function simulatePastUsageDataset(
         modeledDaySelectionStrategy: buildInputs.mode === "SMT_BASELINE" ? "weather_donor_first" : "calendar_first",
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
+        lowDataSyntheticContext,
       });
       patchedIntervals = baselineBuild.intervals;
       dayResults = baselineBuild.dayResults;
@@ -1397,6 +1398,12 @@ export async function simulatePastUsageDataset(
         buildPathKind,
         intervalCount: patchedIntervals.length,
         simulatedDayResultsCount: dayResults.length,
+        referenceDaysUsed: pastDayCounts.referenceDaysUsed,
+        lowDataSyntheticContextUsed:
+          pastDayCounts.lowDataSyntheticContextUsed ?? Boolean(lowDataSyntheticContext) ?? undefined,
+        lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode ?? lowDataSyntheticContext?.mode ?? undefined,
+        actualBackedReferencePoolUsed:
+          pastDayCounts.actualBackedReferencePoolUsed ?? (lowDataSyntheticContext ? false : undefined),
         durationMs: Date.now() - baselinePhaseStartedAt,
         source: "simulatePastUsageDataset",
         memoryRssMb: getMemoryRssMb(),
@@ -1409,6 +1416,10 @@ export async function simulatePastUsageDataset(
         buildPathKind,
         intervalCount: patchedIntervals.length,
         simulatedDayResultsCount: dayResults.length,
+        referenceDaysUsed: pastDayCounts.referenceDaysUsed,
+        lowDataSyntheticContextUsed: pastDayCounts.lowDataSyntheticContextUsed,
+        lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode,
+        actualBackedReferencePoolUsed: pastDayCounts.actualBackedReferencePoolUsed,
         durationMs: Date.now() - baselinePhaseStartedAt,
         source: "simulatePastUsageDataset",
         memoryRssMb: getMemoryRssMb(),
@@ -1422,6 +1433,11 @@ export async function simulatePastUsageDataset(
         userId,
         buildPathKind,
         failureMessage: baselineErr.message,
+        actualIntervalsCount: actualIntervals.length,
+        explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+        effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
+        lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+        lowDataSyntheticMode: lowDataSyntheticContext?.mode,
         durationMs: Date.now() - baselinePhaseStartedAt,
         source: "simulatePastUsageDataset",
         memoryRssMb: getMemoryRssMb(),
@@ -1433,6 +1449,11 @@ export async function simulatePastUsageDataset(
         userId,
         buildPathKind,
         failureMessage: baselineErr.message,
+        actualIntervalsCount: actualIntervals.length,
+        explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+        effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
+        lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+        lowDataSyntheticMode: lowDataSyntheticContext?.mode,
         durationMs: Date.now() - baselinePhaseStartedAt,
         source: "simulatePastUsageDataset",
         memoryRssMb: getMemoryRssMb(),
@@ -1624,7 +1645,7 @@ export async function simulatePastUsageDataset(
       throw stitchDatasetErr;
     }
 
-    if (dataset && typeof dataset.meta === "object") {
+    if (dataset && typeof dataset === "object") {
       const simulatedDayDiagnosticsSample = dayResults.slice(0, 40).map((r) => ({
         localDate: String(r.localDate ?? "").slice(0, 10),
         targetDayKwhBeforeWeather: Number(r.targetDayKwhBeforeWeather ?? r.rawDayKwh ?? 0) || 0,
@@ -1648,8 +1669,8 @@ export async function simulatePastUsageDataset(
         weatherNormalGapFillDateKeyCount: smtBaselineStrictWeather ? undefined : normalFilledDateKeyCount,
         lowDataSharedPastAdapter: isLowDataSharedPastMode ? true : undefined,
         lowDataShapeAdapterUsed: lowDataShapeAdapterUsed ? true : undefined,
-        /** Full-window keep-ref: synthetic seed stays in reference pool; day totals come from simulatePastDay. */
-        lowDataKeepRefModeledDays: isLowDataSharedPastMode ? true : undefined,
+        /** Low-data modes can still score explicit keep-ref days, but no longer auto-expand the entire window. */
+        lowDataKeepRefModeledDays: keepRefUtcDateKeys.size > 0 ? true : undefined,
         sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
         derivationVersion: PAST_ENGINE_VERSION,
         simVersion: PAST_ENGINE_VERSION,
@@ -1671,6 +1692,11 @@ export async function simulatePastUsageDataset(
         stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
         actualIntervalsCount: actualIntervals.length,
         referenceDaysCount,
+        lowDataSyntheticContextUsed: pastDayCounts.lowDataSyntheticContextUsed,
+        lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode,
+        actualBackedReferencePoolUsed: pastDayCounts.actualBackedReferencePoolUsed,
+        explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+        effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
         shapeMonthsPresent,
         excludedDateKeysCount: excludedDateKeys.size,
         excludedDateKeysFingerprint,

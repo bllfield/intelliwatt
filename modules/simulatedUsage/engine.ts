@@ -731,6 +731,9 @@ export type PastSimulationDebug = {
   leadingMissingDays: number;
   referenceDaysUsed: number;
   simulatedDays: number;
+  lowDataSyntheticContextUsed?: boolean;
+  lowDataSyntheticMode?: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | null;
+  actualBackedReferencePoolUsed?: boolean;
   intervalUsageFingerprintIdentity?: string;
   trustedIntervalFingerprintDayCount?: number;
   excludedTravelVacantFingerprintDayCount?: number;
@@ -1042,6 +1045,65 @@ function syntheticWholeHomePastDayProfileLite(args: {
   };
 }
 
+function buildLowDataSyntheticShapeVariants(args: {
+  monthKeys: string[];
+  intradayShape96?: number[] | null;
+  weekdayWeekendShape96?: { weekday?: number[] | null; weekend?: number[] | null } | null;
+}): PastShapeVariants {
+  const monthKeys = args.monthKeys.length > 0 ? args.monthKeys : ["2000-01"];
+  const fallback =
+    normalizeShape96OrNull(args.intradayShape96 ?? undefined) ??
+    Array.from({ length: INTERVALS_PER_DAY }, () => 1 / INTERVALS_PER_DAY);
+  const weekday = normalizeShape96OrNull(args.weekdayWeekendShape96?.weekday ?? undefined) ?? fallback;
+  const weekend = normalizeShape96OrNull(args.weekdayWeekendShape96?.weekend ?? undefined) ?? fallback;
+  const byMonth96: Record<string, number[]> = {};
+  const byMonthDayType96: Record<string, Record<PastDayTypeKey, number[] | null>> = {};
+  const byMonthWeatherDayType96: Record<
+    string,
+    Record<PastDayTypeKey, Record<PastWeatherRegimeKey, number[] | null>>
+  > = {};
+  for (const monthKey of monthKeys) {
+    byMonth96[monthKey] = [...fallback];
+    byMonthDayType96[monthKey] = {
+      weekday: [...weekday],
+      weekend: [...weekend],
+    };
+    byMonthWeatherDayType96[monthKey] = {
+      weekday: {
+        heating: [...weekday],
+        cooling: [...weekday],
+        neutral: [...weekday],
+      },
+      weekend: {
+        heating: [...weekend],
+        cooling: [...weekend],
+        neutral: [...weekend],
+      },
+    };
+  }
+  return {
+    byMonth96,
+    byMonthDayType96,
+    byMonthWeatherDayType96,
+    weekdayWeekend96: {
+      weekday: [...weekday],
+      weekend: [...weekend],
+    },
+    weekdayWeekendWeather96: {
+      weekday: {
+        heating: [...weekday],
+        cooling: [...weekday],
+        neutral: [...weekday],
+      },
+      weekend: {
+        heating: [...weekend],
+        cooling: [...weekend],
+        neutral: [...weekend],
+      },
+    },
+  };
+}
+
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
@@ -1110,6 +1172,12 @@ export function buildPastSimulatedBaselineV1(args: {
    */
   resolvedSimFingerprint?: ResolvedSimFingerprint | null;
   modeledDaySelectionStrategy?: "calendar_first" | "weather_donor_first";
+  lowDataSyntheticContext?: {
+    mode: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE";
+    canonicalMonthKeys?: string[];
+    intradayShape96?: number[] | null;
+    weekdayWeekendShape96?: { weekday?: number[] | null; weekend?: number[] | null } | null;
+  } | null;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -1118,6 +1186,8 @@ export function buildPastSimulatedBaselineV1(args: {
   const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
   const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
+  const lowDataSyntheticContext = args.lowDataSyntheticContext ?? null;
+  const useLowDataSyntheticContext = Boolean(lowDataSyntheticContext);
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
   for (const p of args.actualIntervals ?? []) {
     const ts = String(p?.timestamp ?? "");
@@ -1180,7 +1250,7 @@ export function buildPastSimulatedBaselineV1(args: {
   let excludedIncompleteMeterFingerprintDayCount = 0;
   let excludedLeadingMissingFingerprintDayCount = 0;
   let excludedOtherUntrustedFingerprintDayCount = 0;
-  if (!wholeHomeOnlyPrior) {
+  if (!wholeHomeOnlyPrior && !useLowDataSyntheticContext) {
     for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
       if (!Number.isFinite(dayStartMs)) continue;
       const day = analyzeDay(dayStartMs);
@@ -1484,7 +1554,7 @@ export function buildPastSimulatedBaselineV1(args: {
     return r ? r.dow === 0 || r.dow === 6 : false;
   };
   const trainingWeatherStatsPast =
-    referenceDays.length > 0 && weatherByDateKeyPast.size > 0
+    !useLowDataSyntheticContext && referenceDays.length > 0 && weatherByDateKeyPast.size > 0
       ? (buildTrainingWeatherStats({
           trainingDateKeys: referenceDays.map((d) => d.dateKey),
           trainingDayKwhByDate,
@@ -1652,12 +1722,24 @@ export function buildPastSimulatedBaselineV1(args: {
           .digest("base64url")
           .slice(0, 24)
       : null;
+  const lowDataShapeMonthKeys =
+    lowDataSyntheticContext?.canonicalMonthKeys && lowDataSyntheticContext.canonicalMonthKeys.length > 0
+      ? lowDataSyntheticContext.canonicalMonthKeys
+      : finalProfile.monthKeys.length > 0
+        ? finalProfile.monthKeys
+        : monthKeysFromCanonical;
   const shapeVariantsForContext = wholeHomeOnlyPrior
     ? syntheticWholeHomeShapeVariants(
         finalProfile.monthKeys.length > 0 ? finalProfile.monthKeys : monthKeysRef
       )
-    : shapeVariants;
-  const weatherDonorSamples: PastWeatherDonorSample[] = wholeHomeOnlyPrior
+    : useLowDataSyntheticContext
+      ? buildLowDataSyntheticShapeVariants({
+          monthKeys: lowDataShapeMonthKeys,
+          intradayShape96: lowDataSyntheticContext?.intradayShape96 ?? null,
+          weekdayWeekendShape96: lowDataSyntheticContext?.weekdayWeekendShape96 ?? null,
+        })
+      : shapeVariants;
+  const weatherDonorSamples: PastWeatherDonorSample[] = wholeHomeOnlyPrior || useLowDataSyntheticContext
     ? []
     : referenceDays
         .map((day) => {
@@ -1684,10 +1766,10 @@ export function buildPastSimulatedBaselineV1(args: {
         .filter((sample): sample is PastWeatherDonorSample => sample != null);
   const pastContext = buildPastDaySimulationContext({
     profile: finalProfile,
-    trainingWeatherStats: wholeHomeOnlyPrior ? null : trainingWeatherStatsPast,
+    trainingWeatherStats: wholeHomeOnlyPrior || useLowDataSyntheticContext ? null : trainingWeatherStatsPast,
     weatherByDateKey: weatherByDateKeyPast,
-    neighborDayTotals: wholeHomeOnlyPrior ? null : neighborDayTotals,
-    weatherDonorSamples: wholeHomeOnlyPrior ? null : weatherDonorSamples,
+    neighborDayTotals: wholeHomeOnlyPrior || useLowDataSyntheticContext ? null : neighborDayTotals,
+    weatherDonorSamples: wholeHomeOnlyPrior || useLowDataSyntheticContext ? null : weatherDonorSamples,
     modeledDaySelectionStrategy: args.modeledDaySelectionStrategy ?? "calendar_first",
     shapeVariants: shapeVariantsForContext,
   });
@@ -1813,6 +1895,7 @@ export function buildPastSimulatedBaselineV1(args: {
     dayType: PastDayTypeKey,
     weatherRegime: PastWeatherRegimeKey
   ): number | null => {
+    if (useLowDataSyntheticContext) return null;
     if (shapeVariantUsed.startsWith("month_") && shapeVariantUsed.includes("_weather_")) {
       return monthWeatherDayTypeAcc[monthKey]?.[dayType]?.[weatherRegime]?.count ?? null;
     }
@@ -2109,6 +2192,9 @@ export function buildPastSimulatedBaselineV1(args: {
     args.debug.out.leadingMissingDays = leadingMissingDays;
     args.debug.out.referenceDaysUsed = referenceDays.length;
     args.debug.out.simulatedDays = simulatedDays;
+    args.debug.out.lowDataSyntheticContextUsed = useLowDataSyntheticContext;
+    args.debug.out.lowDataSyntheticMode = lowDataSyntheticContext?.mode ?? null;
+    args.debug.out.actualBackedReferencePoolUsed = !useLowDataSyntheticContext && !wholeHomeOnlyPrior;
     args.debug.out.intervalUsageFingerprintIdentity = intervalUsageFingerprintIdentity ?? undefined;
     args.debug.out.trustedIntervalFingerprintDayCount = referenceDays.length;
     args.debug.out.excludedTravelVacantFingerprintDayCount = excludedTravelVacantFingerprintDayCount;
@@ -2132,6 +2218,8 @@ export function buildPastSimulatedBaselineV1(args: {
         leadingMissingDays,
         referenceDaysUsed: referenceDays.length,
         simulatedDays,
+        lowDataSyntheticContextUsed: useLowDataSyntheticContext,
+        lowDataSyntheticMode: lowDataSyntheticContext?.mode ?? null,
       })
     );
   }
