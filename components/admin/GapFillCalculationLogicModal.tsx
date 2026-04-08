@@ -347,7 +347,7 @@ export function GapFillCalculationLogicLauncher(props: { onOpen: () => void; dis
       type="button"
       onClick={props.onOpen}
       disabled={props.disabled}
-      className="rounded-full border border-brand-blue/20 bg-white px-4 py-2 text-sm font-semibold text-brand-navy shadow-sm hover:bg-brand-blue/5 disabled:cursor-not-allowed disabled:opacity-60"
+      className="rounded-full border border-cyan-300/80 bg-brand-navy px-5 py-2.5 text-sm font-semibold tracking-wide text-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.22)] transition hover:bg-[#061f4a] hover:text-cyan-200 hover:shadow-[0_0_22px_rgba(34,211,238,0.32)] disabled:cursor-not-allowed disabled:border-brand-blue/20 disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none"
     >
       {GAPFILL_CALCULATION_LOGIC_TRIGGER_LABEL}
     </button>
