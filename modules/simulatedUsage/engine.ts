@@ -18,6 +18,7 @@ import type {
   PastNeighborDayTotals,
   PastDayTypeKey,
   PastWeatherRegimeKey,
+  PastWeatherDonorSample,
 } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
 import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
@@ -26,6 +27,8 @@ import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSi
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
   const map: Record<PastDayFallbackLevel, PastFallbackLevel> = {
+    weather_nearest_daytype_regime: "NEAREST_WEATHER",
+    weather_nearest_daytype: "NEAREST_WEATHER",
     month_daytype_neighbor: "MONTH_DOW",
     month_daytype: "MONTH_DOW",
     adjacent_month_daytype: "MONTH_DOW",
@@ -704,6 +707,11 @@ export type PastSimulatedDayDiagnostic = {
   finalDayKwh?: number | null;
   displayDayKwh?: number | null;
   intervalSumKwh?: number | null;
+  donorSelectionModeUsed?: string | null;
+  selectedDonorLocalDates?: string[] | null;
+  donorWeatherRegimeUsed?: string | null;
+  broadFallbackUsed?: boolean | null;
+  weatherAdjustmentModeUsed?: string | null;
 };
 
 export type PastSimulationDebug = {
@@ -1090,6 +1098,7 @@ export function buildPastSimulatedBaselineV1(args: {
    * selection, and uses synthetic uniform intraday shapes (no reference-interval shape aggregation).
    */
   resolvedSimFingerprint?: ResolvedSimFingerprint | null;
+  modeledDaySelectionStrategy?: "calendar_first" | "weather_donor_first";
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -1637,11 +1646,38 @@ export function buildPastSimulatedBaselineV1(args: {
         finalProfile.monthKeys.length > 0 ? finalProfile.monthKeys : monthKeysRef
       )
     : shapeVariants;
+  const weatherDonorSamples: PastWeatherDonorSample[] = wholeHomeOnlyPrior
+    ? []
+    : referenceDays
+        .map((day) => {
+          const wxRaw = args.actualWxByDateKey?.get(day.dateKey) ?? null;
+          const weather = wxRaw ? engineWxToPastDayWeather(wxRaw) : null;
+          if (!weather) return null;
+          return {
+            localDate: day.dateKey,
+            monthKey: day.monthKey,
+            dayType: day.dow === 0 || day.dow === 6 ? "weekend" : "weekday",
+            weatherRegime: weatherRegimeForShape(day.wx),
+            dayKwh: day.total,
+            dailyAvgTempC: weather.dailyAvgTempC,
+            dailyMinTempC: weather.dailyMinTempC,
+            dailyMaxTempC: weather.dailyMaxTempC,
+            tempSpreadC:
+              weather.dailyMinTempC != null && weather.dailyMaxTempC != null
+                ? weather.dailyMaxTempC - weather.dailyMinTempC
+                : null,
+            heatingDegreeSeverity: weather.heatingDegreeSeverity,
+            coolingDegreeSeverity: weather.coolingDegreeSeverity,
+          } satisfies PastWeatherDonorSample;
+        })
+        .filter((sample): sample is PastWeatherDonorSample => sample != null);
   const pastContext = buildPastDaySimulationContext({
     profile: finalProfile,
     trainingWeatherStats: wholeHomeOnlyPrior ? null : trainingWeatherStatsPast,
     weatherByDateKey: weatherByDateKeyPast,
     neighborDayTotals: wholeHomeOnlyPrior ? null : neighborDayTotals,
+    weatherDonorSamples: wholeHomeOnlyPrior ? null : weatherDonorSamples,
+    modeledDaySelectionStrategy: args.modeledDaySelectionStrategy ?? "calendar_first",
     shapeVariants: shapeVariantsForContext,
   });
 
@@ -1879,7 +1915,7 @@ export function buildPastSimulatedBaselineV1(args: {
               : simulatedReasonCode === "TEST_MODELED_KEEP_REF"
                 ? "validation_keep_ref_shared_day_template"
                 : "shared_day_template",
-        selectedFingerprintBucketMonth: ym,
+        selectedFingerprintBucketMonth: blendedResult.selectedFingerprintBucketMonth ?? ym,
         selectedFingerprintBucketDayType: blendedResult.dayTypeUsed,
         selectedFingerprintWeatherBucket: blendedResult.weatherRegimeUsed,
         selectedFingerprintIdentity: intervalUsageFingerprintIdentity ?? undefined,
@@ -1887,7 +1923,7 @@ export function buildPastSimulatedBaselineV1(args: {
           blendedResult.dayTypeUsed && blendedResult.weatherRegimeUsed
             ? selectedReferencePoolCountForVariant(
                 blendedResult.shapeVariantUsed ?? "uniform_fallback",
-                ym,
+                blendedResult.selectedFingerprintBucketMonth ?? ym,
                 blendedResult.dayTypeUsed,
                 blendedResult.weatherRegimeUsed
               ) ?? undefined
@@ -1921,6 +1957,14 @@ export function buildPastSimulatedBaselineV1(args: {
                 shapeVariantUsed: classifiedResult.shapeVariantUsed,
                 weatherRegimeUsed: classifiedResult.weatherRegimeUsed,
                 targetDayKwhBeforeWeather: classifiedResult.targetDayKwhBeforeWeather,
+                donorSelectionModeUsed: classifiedResult.donorSelectionModeUsed,
+                donorCandidatePoolSize: classifiedResult.donorCandidatePoolSize,
+                selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates,
+                donorWeatherRegimeUsed: classifiedResult.donorWeatherRegimeUsed,
+                donorMonthKeyUsed: classifiedResult.donorMonthKeyUsed,
+                thermalDistanceScore: classifiedResult.thermalDistanceScore,
+                broadFallbackUsed: classifiedResult.broadFallbackUsed,
+                weatherAdjustmentModeUsed: classifiedResult.weatherAdjustmentModeUsed,
                 templateSelectionKind: classifiedResult.templateSelectionKind,
                 selectedFingerprintBucketMonth: classifiedResult.selectedFingerprintBucketMonth,
                 selectedFingerprintBucketDayType: classifiedResult.selectedFingerprintBucketDayType,
@@ -1956,9 +2000,9 @@ export function buildPastSimulatedBaselineV1(args: {
             : null,
           hourFallbackLevel: mappedFallback,
           totalFallbackLevel: mappedFallback,
-          referenceCandidateCount: 0,
-          referencePickedCount: 0,
-          weatherDistanceAvg: null,
+          referenceCandidateCount: classifiedResult.donorCandidatePoolSize ?? 0,
+          referencePickedCount: classifiedResult.selectedDonorLocalDates?.length ?? 0,
+          weatherDistanceAvg: classifiedResult.thermalDistanceScore ?? null,
           poolApplied: classifiedResult.poolFreezeProtectKwhAdder > 0,
           poolKwh: classifiedResult.poolFreezeProtectKwhAdder > 0 ? classifiedResult.poolFreezeProtectKwhAdder : 0,
           baseNonHvacKwh: classifiedResult.profileSelectedDayKwh,
@@ -1973,6 +2017,11 @@ export function buildPastSimulatedBaselineV1(args: {
           finalDayKwh: classifiedResult.finalDayKwh,
           displayDayKwh: classifiedResult.displayDayKwh,
           intervalSumKwh: classifiedResult.intervalSumKwh,
+          donorSelectionModeUsed: classifiedResult.donorSelectionModeUsed ?? null,
+          selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates ?? null,
+          donorWeatherRegimeUsed: classifiedResult.donorWeatherRegimeUsed ?? null,
+          broadFallbackUsed: classifiedResult.broadFallbackUsed ?? null,
+          weatherAdjustmentModeUsed: classifiedResult.weatherAdjustmentModeUsed ?? null,
         });
       }
     } else {

@@ -47,10 +47,18 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
           {
             localDate: "2025-06-15",
             simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
-            fallbackLevel: "month_daytype_neighbor",
+            fallbackLevel: "weather_nearest_daytype_regime",
             dayClassification: "weather_scaled_day",
             weatherModeUsed: "cooling",
             shapeVariantUsed: "month_weekday_weather_cooling",
+            donorSelectionModeUsed: "weather_nearest_daytype_regime",
+            donorCandidatePoolSize: 6,
+            selectedDonorLocalDates: ["2025-06-10", "2025-06-13"],
+            donorWeatherRegimeUsed: "cooling",
+            donorMonthKeyUsed: "2025-06",
+            thermalDistanceScore: 1.8,
+            broadFallbackUsed: false,
+            weatherAdjustmentModeUsed: "bounded_post_donor",
           },
           {
             localDate: "2025-06-16",
@@ -59,6 +67,14 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
             dayClassification: "normal_day",
             weatherModeUsed: "neutral",
             shapeVariantUsed: "weekdayweekend_weekday",
+            donorSelectionModeUsed: "calendar_fallback",
+            donorCandidatePoolSize: 0,
+            selectedDonorLocalDates: [],
+            donorWeatherRegimeUsed: null,
+            donorMonthKeyUsed: null,
+            thermalDistanceScore: null,
+            broadFallbackUsed: true,
+            weatherAdjustmentModeUsed: "legacy_training_stats",
           },
         ],
       },
@@ -150,7 +166,11 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.layers.find((layer) => layer.key === "monthly-target-layer")?.summary).toContain("Monthly totals are fixed first");
     expect(summary.dailyTotalLogic.ladder[0]).toMatchObject({
       key: "month_daytype_neighbor",
-      observedCount: 1,
+      observedCount: null,
+    });
+    expect(summary.dailyTotalLogic.ladder[1]).toMatchObject({
+      key: "month_daytype",
+      observedCount: null,
     });
     expect(summary.intervalCurveLogic.ladder[0]?.label).toContain("Month + day-type + weather regime");
     expect(summary.sharedProducerPathUsed).toBe(true);
@@ -189,6 +209,16 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.priorityItems.some((item) => item.label === "Actual interval pool")).toBe(true);
     expect(summary.compositionSections[0]?.title).toContain("Final stitched output");
     expect(summary.inputGroups.find((group) => group.key === "usage-shape-profile")?.status).toBe("modeled-subset-only");
+    expect(summary.inputGroups.find((group) => group.key === "home-profile")).toMatchObject({
+      status: "context only",
+    });
+    expect(summary.dailyTotalLogic.ladder[0]).toMatchObject({
+      key: "weather_nearest_daytype_regime",
+      observedCount: 1,
+    });
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Nearest-weather donor selections")?.value).toContain(
+      "weather_nearest_daytype_regime: 1"
+    );
   });
 
   it("uses shared diagnostics identities and counts as the source of truth", () => {
@@ -222,6 +252,9 @@ describe("buildGapfillCalculationLogicSummary", () => {
     );
     expect(summary.runImpactSummary.find((item) => item.label === "Profile-input materiality")?.value).toContain(
       "modeled-subset-only"
+    );
+    expect(summary.artifactDecisionSummary.find((item) => item.label === "Nearest-weather donor usage")?.value).toContain(
+      "weather_nearest_daytype_regime: 1"
     );
     expect(summary.artifactDecisionSummary.find((item) => item.label === "Most common shape variants")?.value).toContain(
       "month_weekday_weather_cooling: 1"

@@ -152,6 +152,7 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 - GapFill actual-house and test-house result sections must reuse the same shared Past presentation module family as the user page (`UsageDashboard` / shared compare display helpers / shared compare table), not bespoke chart/table logic inside GapFill.
 - GapFill mode/levers visibility is explanatory/read-only: it may group fixed source truth, fixed profile truth, mode-selected constraints, adjustable controls already allowed in normal admin flow, and forbidden controls, but it must not create new truth-setting powers.
 - GapFill admin-only calculation-logic explainers must stay read-only and summarize shared diagnostics / lockbox metadata / persisted artifact context through `modules/usageSimulator/calculationLogicSummary.ts`, not a second simulator or compare path.
+- Exact-interval / actual-backed modeled-day reconstruction now uses weather-similar donor-day matching inside the trusted reference pool as the primary daily-target selector; broad calendar ladders are fallback-only, post-donor weather adjustment is bounded fine-tuning, and home/appliance profiles remain secondary context in that observed-history mode.
 - GapFill admin-only daily-curve compare diagnostics must stay read-only and derive per-day/aggregate 96-slot overlays plus slot metrics from persisted actual/test-house interval artifacts and compare-day selections through `modules/usageSimulator/dailyCurveCompareSummary.ts`, not a second compare engine.
 - Artifact fingerprint ownership and usage-shape identity behavior remain unchanged by this step; deferred identity/profile changes stay out of scope.
 - Current branch caveat: `buildGapfillCompareSimShared()` may remain in service-level test coverage as legacy/shared helper code, but the canonical GapFill lab route no longer uses it for compare truth ownership. The active path is `recalcSimulatorBuild -> getSimulatedUsageForHouseScenario(artifact_only)` plus post-persist analysis.
@@ -216,6 +217,7 @@ Checklist for stabilization follow-up (narrow scope, only if still needed):
 ### Simulation Modeling Modes (authoritative summary)
 
 - **Observed-history reconstruction mode** (Past Sim + GapFill compare): prioritize actual intervals, weather, weekday/weekend, time-of-day, and similar-day empirical behavior.
+- In exact-interval observed-history runs, "similar-day empirical behavior" specifically means weekday/weekend-safe, weather-similar donor matching first, then broader calendar fallbacks only when donor evidence is weak.
 - **Overlay/delta mode**: apply structured deltas from home/appliance/occupancy/HVAC/thermostat/pool/EV/envelope factors.
 - **Synthetic/sparse-data mode** (manual/new-build/low-history): prioritize declared home/appliance/occupancy details + weather + learned priors.
 - Home details are required and normalized for all homes; in observed-history reconstruction they are supportive context/priors/fallback, not the primary truth source when strong interval history exists.

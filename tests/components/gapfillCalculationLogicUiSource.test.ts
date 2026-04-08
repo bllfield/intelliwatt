@@ -33,6 +33,9 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(componentSource).toContain("Slot-level metrics");
     expect(componentSource).toContain("Hour-block bias summary");
     expect(componentSource).toContain("Why this day looks the way it does");
+    expect(componentSource).toContain("Donor selection mode");
+    expect(componentSource).toContain("Selected donor day(s)");
+    expect(componentSource).toContain("Thermal similarity + adjustment");
     expect(manualMonthlySource).not.toContain("Daily Curve Compare");
   });
 

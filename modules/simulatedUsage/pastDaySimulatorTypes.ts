@@ -66,6 +66,22 @@ export type PastNeighborDayTotals = {
   weekendByMonth?: Record<string, PastNeighborDaySample[]> | null;
 };
 
+export type PastWeatherDonorSample = {
+  localDate: string;
+  monthKey: string;
+  dayType: PastDayTypeKey;
+  weatherRegime: PastWeatherRegimeKey;
+  dayKwh: number;
+  dailyAvgTempC: number | null;
+  dailyMinTempC: number | null;
+  dailyMaxTempC: number | null;
+  tempSpreadC: number | null;
+  heatingDegreeSeverity: number;
+  coolingDegreeSeverity: number;
+};
+
+export type PastModeledDaySelectionStrategy = "calendar_first" | "weather_donor_first";
+
 /** Training weather aggregates by bucket (month+daytype, season+daytype, global). */
 export type PastDayTrainingWeatherStats = {
   byMonthDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
@@ -88,6 +104,8 @@ export type PastDaySimulationContext = {
   trainingWeatherStats: PastDayTrainingWeatherStats | null;
   weatherByDateKey: Map<string, PastDayWeatherFeatures>;
   neighborDayTotals?: PastNeighborDayTotals | null;
+  weatherDonorSamples?: PastWeatherDonorSample[] | null;
+  modeledDaySelectionStrategy?: PastModeledDaySelectionStrategy;
   shapeVariants?: PastShapeVariants | null;
 };
 
@@ -136,6 +154,14 @@ export type SimulatedDayResult = {
   shapeVariantUsed?: string;
   weatherRegimeUsed?: PastWeatherRegimeKey;
   targetDayKwhBeforeWeather?: number;
+  donorSelectionModeUsed?: string;
+  donorCandidatePoolSize?: number;
+  selectedDonorLocalDates?: string[];
+  donorWeatherRegimeUsed?: PastWeatherRegimeKey | null;
+  donorMonthKeyUsed?: string | null;
+  thermalDistanceScore?: number | null;
+  broadFallbackUsed?: boolean;
+  weatherAdjustmentModeUsed?: "legacy_training_stats" | "bounded_post_donor";
   templateSelectionKind?: string;
   selectedFingerprintBucketMonth?: string;
   selectedFingerprintBucketDayType?: PastDayTypeKey;
@@ -168,6 +194,8 @@ export type PastDayWeatherClassification =
   | "freeze_protect_day";
 
 export type PastDayFallbackLevel =
+  | "weather_nearest_daytype_regime"
+  | "weather_nearest_daytype"
   | "month_daytype_neighbor"
   | "month_daytype"
   | "adjacent_month_daytype"

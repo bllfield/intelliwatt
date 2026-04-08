@@ -1334,6 +1334,7 @@ export async function simulatePastUsageDataset(
         modeledKeepRefReasonCode: isMonthlyConstrainedManualTotals
           ? "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
           : "TEST_MODELED_KEEP_REF",
+        modeledDaySelectionStrategy: buildInputs.mode === "SMT_BASELINE" ? "weather_donor_first" : "calendar_first",
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
       });

@@ -457,6 +457,12 @@ export function buildGapfillCalculationLogicSummary(args: {
   const perDayShapeVariantCounts = countBy(perDayTrace, (row) => String(row.shapeVariantUsed ?? "").trim());
   const perDayWeatherModeCounts = countBy(perDayTrace, (row) => String(row.weatherModeUsed ?? "").trim());
   const perDayClassificationCounts = countBy(perDayTrace, (row) => String(row.dayClassification ?? "").trim());
+  const perDayDonorSelectionCounts = countBy(perDayTrace, (row) => String((row as any).donorSelectionModeUsed ?? "").trim());
+  const perDayDonorRegimeCounts = countBy(perDayTrace, (row) => String((row as any).donorWeatherRegimeUsed ?? "").trim());
+  const perDayWeatherAdjustmentModeCounts = countBy(
+    perDayTrace,
+    (row) => String((row as any).weatherAdjustmentModeUsed ?? "").trim()
+  );
   const keepRefUtcDateKeyCount = lockboxExecutionSummary.keepRefUtcDateKeyCount;
   const dailySourceClassificationsSummary = asRecord(tuningSummary.dailySourceClassificationsSummary);
   const monthlyLayer = monthlyLayerSummary(modeInfo.modeFamily);
@@ -495,6 +501,10 @@ export function buildGapfillCalculationLogicSummary(args: {
     .sort((a, b) => a.monthKey.localeCompare(b.monthKey) || a.dayType.localeCompare(b.dayType));
   const modeledFinalDayCount = dailyRows.filter((row) => /^SIMULATED/.test(row.sourceDetail)).length;
   const modeledCompareDayCount = selectedCompareRows.filter((row) => /^SIMULATED/.test(row.sourceDetail)).length;
+  const weatherFirstDonorCount = countForKeys(perDayFallbackCounts, [
+    "weather_nearest_daytype_regime",
+    "weather_nearest_daytype",
+  ]) ?? 0;
   const weatherAdjustedDayCount =
     Number(perDayClassificationCounts.weather_scaled_day ?? 0) +
     Number(perDayClassificationCounts.extreme_cold_event_day ?? 0) +
@@ -538,6 +548,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       details: [
         `Trusted fingerprint days: ${formatMaybeCount(fingerprintDiagnostics.trustedIntervalFingerprintDayCount)}`,
         `Interval fingerprint: ${String(sourceTruthContext.intervalSourceIdentity ?? "not attached")}`,
+        `Nearest-weather donor selections: ${weatherFirstDonorCount}`,
       ],
       evidence: [
         `Modeled final-output days: ${modeledFinalDayCount}`,
@@ -598,6 +609,10 @@ export function buildGapfillCalculationLogicSummary(args: {
       status:
         modeInfo.modeFamily === "profile_only"
           ? "active driver"
+          : modeInfo.modeFamily === "actual_backed"
+            ? profileContext.profileHouseId != null
+              ? "context only"
+              : "inactive"
           : modeledFinalDayCount > 0
             ? "modeled-subset-only"
             : profileContext.profileHouseId != null
@@ -606,6 +621,10 @@ export function buildGapfillCalculationLogicSummary(args: {
       whereEntered:
         modeInfo.modeFamily === "profile_only"
           ? ["daily-total selection", "weather adjustment", "interval-shape selection"]
+          : modeInfo.modeFamily === "actual_backed"
+            ? weatherAdjustedDayCount > 0
+              ? ["weather adjustment"]
+              : []
           : modeledFinalDayCount > 0
             ? ["weather adjustment"]
             : [],
@@ -618,6 +637,8 @@ export function buildGapfillCalculationLogicSummary(args: {
       evidence: [
         modeInfo.modeFamily === "profile_only"
           ? "Profile-only mode elevates home context into an active synthetic driver."
+          : modeInfo.modeFamily === "actual_backed"
+            ? "Exact-interval actual-backed runs keep empirical donor history and weather similarity ahead of home-profile priors."
           : modeledFinalDayCount > 0
             ? `Modeled subset size: ${modeledFinalDayCount} day(s); home profile context can affect weather/event behavior on those modeled days.`
             : "This artifact did not expose evidence that home profile inputs materially moved the final output.",
@@ -630,6 +651,10 @@ export function buildGapfillCalculationLogicSummary(args: {
       status:
         modeInfo.modeFamily === "profile_only"
           ? "active driver"
+          : modeInfo.modeFamily === "actual_backed"
+            ? profileContext.profileHouseId != null
+              ? "context only"
+              : "inactive"
           : modeledFinalDayCount > 0
             ? "modeled-subset-only"
             : profileContext.profileHouseId != null
@@ -638,6 +663,10 @@ export function buildGapfillCalculationLogicSummary(args: {
       whereEntered:
         modeInfo.modeFamily === "profile_only"
           ? ["daily-total selection", "weather adjustment", "interval-shape selection"]
+          : modeInfo.modeFamily === "actual_backed"
+            ? weatherAdjustedDayCount > 0
+              ? ["weather adjustment"]
+              : []
           : modeledFinalDayCount > 0
             ? ["weather adjustment"]
             : [],
@@ -650,6 +679,8 @@ export function buildGapfillCalculationLogicSummary(args: {
       evidence: [
         modeInfo.modeFamily === "profile_only"
           ? "Profile-only mode elevates appliance context into an active synthetic driver."
+          : modeInfo.modeFamily === "actual_backed"
+            ? "Exact-interval actual-backed runs treat appliance context as a secondary weather/event aid, not the primary donor selector."
           : modeledFinalDayCount > 0
             ? `Modeled subset size: ${modeledFinalDayCount} day(s); appliance context mostly matters on modeled weather/event days, not passthrough actual days.`
             : "This artifact did not expose evidence that appliance profile inputs materially moved the final output.",
@@ -676,11 +707,15 @@ export function buildGapfillCalculationLogicSummary(args: {
         String(sourceTruthContext.weatherDatasetIdentity ?? sourceContext.weatherIdentity ?? "weather identity not attached"),
         String(sourceTruthContext.weatherSourceIdentity ?? meta.weatherSourceSummary ?? "weather provenance not attached"),
       ]),
-      role: "Daily-total adjustment and weather-regime shape selection",
+      role:
+        modeInfo.modeFamily === "actual_backed"
+          ? "Primary donor-day matching, bounded post-donor tuning, and weather-regime shape selection"
+          : "Daily-total adjustment and weather-regime shape selection",
       priorityBand: "Conditional Adjustment",
       details: [
         `Weather mode counts: ${describeCountMap(perDayWeatherModeCounts)}`,
         `Weather classifications: ${describeCountMap(perDayClassificationCounts)}`,
+        `Donor selection modes: ${describeCountMap(perDayDonorSelectionCounts)}`,
       ],
       evidence: [
         `Weather-adjusted or event-day count: ${weatherAdjustedDayCount}`,
@@ -856,17 +891,24 @@ export function buildGapfillCalculationLogicSummary(args: {
       key: "daily-total-layer",
       title: "4. Daily Total Selection Layer",
       summary:
-        "The shared day selector chooses a target daily kWh from the strongest available same-shape history, then falls back step-by-step when that evidence is weak.",
+        modeInfo.modeFamily === "actual_backed"
+          ? "The shared day selector now starts from trusted weather-similar donor days inside the reference pool. Broader calendar averages only appear when donor evidence is weak."
+          : "The shared day selector chooses a target daily kWh from the strongest available same-shape history, then falls back step-by-step when that evidence is weak.",
       variablesUsed: [
-        "Month/day-type history",
-        "Neighbor day-of-month samples",
-        "Adjacent-month day-type averages",
+        modeInfo.modeFamily === "actual_backed" ? "Trusted donor-day weather similarity" : "Month/day-type history",
+        modeInfo.modeFamily === "actual_backed" ? "Weekday/weekend donor separation" : "Neighbor day-of-month samples",
+        modeInfo.modeFamily === "actual_backed" ? "Same-regime heating/cooling/neutral preference" : "Adjacent-month day-type averages",
         "Global fallback averages",
       ],
       preservedOrLocked: ["Hard monthly or annual constraints remain intact above this layer"],
       simulatedOrDerived: ["Per-day kWh targets"],
       fallbackOrder: [
-        "Same-month nearest day-of-month neighbor",
+        ...(modeInfo.modeFamily === "actual_backed"
+          ? [
+              "Nearest-weather donor inside same day-type and same heating/cooling/neutral regime",
+              "Nearest-weather donor inside same day-type when same-regime evidence is thin",
+            ]
+          : ["Same-month nearest day-of-month neighbor"]),
         "Same-month weekday/weekend average",
         "Adjacent-month weekday/weekend average",
         "Same-month overall average",
@@ -876,31 +918,43 @@ export function buildGapfillCalculationLogicSummary(args: {
       ],
       modeSpecificRules: [
         `Observed fallback levels in this artifact: ${describeCountMap(perDayFallbackCounts)}`,
+        modeInfo.modeFamily === "actual_backed"
+          ? `Observed donor selection modes: ${describeCountMap(perDayDonorSelectionCounts)}`
+          : "Weather-nearest donor diagnostics are not the primary selector in this mode.",
       ],
     },
     {
       key: "weather-layer",
       title: "5. Weather Adjustment Layer",
       summary:
-        "Weather adjusts the selected day total after the base day is chosen. Heating/cooling days can scale the target, and event days can add stronger freeze or aux-heat behavior.",
+        modeInfo.modeFamily === "actual_backed"
+          ? "In exact-interval actual-backed mode, weather first helps choose the donor cohort, then bounded post-donor adjustment fine-tunes the day total. Event-day adders still apply afterward."
+          : "Weather adjusts the selected day total after the base day is chosen. Heating/cooling days can scale the target, and event days can add stronger freeze or aux-heat behavior.",
       variablesUsed: ["Weather logic mode", "Weather identity/provenance", "Day classification", "Weather severity multiplier"],
       preservedOrLocked: ["Base day total remains the anchor for normal days"],
       simulatedOrDerived: ["Weather-scaled day totals", "Event-day adders and classifications"],
       fallbackOrder: [
-        "Normal day: keep base day total",
-        "Weather-scaled day: blend weather-adjusted total back toward the profile anchor",
+        modeInfo.modeFamily === "actual_backed"
+          ? "Nearest-weather donor first, then bounded post-donor thermal fine-tuning"
+          : "Normal day: keep base day total",
+        modeInfo.modeFamily === "actual_backed"
+          ? "If donor evidence is weak, broaden to calendar fallback and then apply weather"
+          : "Weather-scaled day: blend weather-adjusted total back toward the profile anchor",
         "Extreme cold / freeze-protect day: use full event energy",
       ],
       modeSpecificRules: [
         `Weather provenance: ${String(sourceTruthContext.weatherSourceIdentity ?? meta.weatherSourceSummary ?? "not attached")}`,
         `Weather mode/classification counts: ${describeCountMap({ ...perDayWeatherModeCounts, ...perDayClassificationCounts })}`,
+        `Weather adjustment modes: ${describeCountMap(perDayWeatherAdjustmentModeCounts)}`,
       ],
     },
     {
       key: "shape-layer",
       title: "6. Interval Shape Layer",
       summary:
-        "Once the day total is set, the shared shape selector chooses the strongest available 96-slot profile for that month/day-type/weather regime combination.",
+        modeInfo.modeFamily === "actual_backed"
+          ? "Once the donor-led day total is set, the shared shape selector stays on the same shared bucket path but can prefer the donor month bucket before broadening."
+          : "Once the day total is set, the shared shape selector chooses the strongest available 96-slot profile for that month/day-type/weather regime combination.",
       variablesUsed: ["Usage shape profile identity", "Month/day-type/weather buckets", "Per-day shape variant selection"],
       preservedOrLocked: ["Daily total chosen in the previous layer"],
       simulatedOrDerived: ["96-slot interval shape", "Per-interval kWh allocation"],
@@ -914,6 +968,9 @@ export function buildGapfillCalculationLogicSummary(args: {
       ],
       modeSpecificRules: [
         `Observed shape variants: ${describeCountMap(perDayShapeVariantCounts)}`,
+        modeInfo.modeFamily === "actual_backed"
+          ? `Donor weather buckets used: ${describeCountMap(perDayDonorRegimeCounts)}`
+          : "Donor-month preference only applies to actual-backed donor-led runs.",
       ],
     },
     {
@@ -1015,52 +1072,78 @@ export function buildGapfillCalculationLogicSummary(args: {
 
   const dailyTotalLogic = {
     summary:
-      "This layer chooses the day's kWh target first. The shared day selector starts with the narrowest same-month evidence and only falls back toward broader priors when local evidence is weak.",
+      modeInfo.modeFamily === "actual_backed"
+        ? "This layer chooses the day's kWh target from trusted weather-similar donors first. Calendar ladders remain available, but only after donor evidence weakens."
+        : "This layer chooses the day's kWh target first. The shared day selector starts with the narrowest same-month evidence and only falls back toward broader priors when local evidence is weak.",
     ladder: [
+      ...(modeInfo.modeFamily === "actual_backed"
+        ? [
+            {
+              rank: 1,
+              key: "weather_nearest_daytype_regime",
+              label: "Nearest-weather donor, same day-type and same regime",
+              explanation: "Heating/cooling/neutral-matched donor pool ranked by thermal similarity inside the trusted reference pool.",
+              observedCount: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype_regime"]),
+            },
+            {
+              rank: 2,
+              key: "weather_nearest_daytype",
+              label: "Nearest-weather donor, same day-type broad regime fallback",
+              explanation: "Still weather-first and day-type-safe, but allowed to broaden beyond the primary heating/cooling/neutral bucket.",
+              observedCount: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype"]),
+            },
+          ]
+        : []),
       {
-        rank: 1,
+        rank: modeInfo.modeFamily === "actual_backed" ? 3 : 1,
         key: "month_daytype_neighbor",
         label: "Same-month nearest day-of-month neighbor",
-        explanation: "Highest-priority same-month day-type neighbor before the ladder broadens.",
+        explanation:
+          modeInfo.modeFamily === "actual_backed"
+            ? "Calendar-first fallback when weather donor evidence is too thin to trust."
+            : "Highest-priority same-month day-type neighbor before the ladder broadens.",
         observedCount: countForKeys(perDayFallbackCounts, ["month_daytype_neighbor"]),
       },
       {
-        rank: 2,
+        rank: modeInfo.modeFamily === "actual_backed" ? 4 : 2,
         key: "month_daytype",
         label: "Same-month weekday/weekend average",
-        explanation: "Same-month day-type average when a strong neighbor is unavailable.",
+        explanation:
+          modeInfo.modeFamily === "actual_backed"
+            ? "Same-month day-type average when specific donor evidence is unavailable."
+            : "Same-month day-type average when a strong neighbor is unavailable.",
         observedCount: countForKeys(perDayFallbackCounts, ["month_daytype"]),
       },
       {
-        rank: 3,
+        rank: modeInfo.modeFamily === "actual_backed" ? 5 : 3,
         key: "adjacent_month_daytype",
         label: "Adjacent-month weekday/weekend average",
         explanation: "Brings in nearby-month seasonality while preserving weekday/weekend structure.",
         observedCount: countForKeys(perDayFallbackCounts, ["adjacent_month_daytype"]),
       },
       {
-        rank: 4,
+        rank: modeInfo.modeFamily === "actual_backed" ? 6 : 4,
         key: "month_overall",
         label: "Same-month overall average",
         explanation: "Drops day-type specificity but stays inside the current month.",
         observedCount: countForKeys(perDayFallbackCounts, ["month_overall"]),
       },
       {
-        rank: 5,
+        rank: modeInfo.modeFamily === "actual_backed" ? 7 : 5,
         key: "season_overall",
         label: "Season overall average",
         explanation: "Uses broader seasonal evidence when month-specific history is thin.",
         observedCount: countForKeys(perDayFallbackCounts, ["season_overall"]),
       },
       {
-        rank: 6,
+        rank: modeInfo.modeFamily === "actual_backed" ? 8 : 6,
         key: "global_daytype",
         label: "Global weekday/weekend average",
         explanation: "Uses global day-type priors once local month/season evidence is exhausted.",
         observedCount: countForKeys(perDayFallbackCounts, ["global_daytype", "global_weekdayweekend"]),
       },
       {
-        rank: 7,
+        rank: modeInfo.modeFamily === "actual_backed" ? 9 : 7,
         key: "global_overall",
         label: "Global overall average",
         explanation: "Broadest daily-total fallback and the weakest evidence class in the ladder.",
@@ -1120,8 +1203,20 @@ export function buildGapfillCalculationLogicSummary(args: {
 
   const weatherExplanation = {
     summary:
-      "Weather does not create the whole day from scratch. The shared simulator first chooses a base daily kWh target, then weather can scale that day total and can also change which weather-regime shape bucket is selected.",
+      modeInfo.modeFamily === "actual_backed"
+        ? "In exact-interval actual-backed runs, weather now does two jobs: it leads donor selection inside the trusted pool, then it applies only bounded post-donor fine-tuning plus any event-day adders."
+        : "Weather does not create the whole day from scratch. The shared simulator first chooses a base daily kWh target, then weather can scale that day total and can also change which weather-regime shape bucket is selected.",
     rows: [
+      {
+        label: "Nearest-weather donor selections",
+        value: describeCountMap(perDayDonorSelectionCounts),
+        explanation: "Shows how often modeled days were anchored by same-regime nearest-weather donors versus broader weather-first day-type matching.",
+      },
+      {
+        label: "Donor regime dominance",
+        value: describeCountMap(perDayDonorRegimeCounts),
+        explanation: "Heating/cooling/neutral donor-bucket counts reveal which thermal cohorts dominated donor selection.",
+      },
       {
         label: "Weather provenance / mode",
         value: joinNonEmpty([
@@ -1142,7 +1237,10 @@ export function buildGapfillCalculationLogicSummary(args: {
           normal_day: Number(perDayClassificationCounts.normal_day ?? 0),
           weather_scaled_day: Number(perDayClassificationCounts.weather_scaled_day ?? 0),
         }),
-        explanation: "Normal days largely preserve the base-day target. Weather-scaled days adjust that base target toward weather severity.",
+        explanation:
+          modeInfo.modeFamily === "actual_backed"
+            ? "Normal days keep the donor-led target. Weather-scaled days show bounded post-donor tuning rather than broad rescue scaling."
+            : "Normal days largely preserve the base-day target. Weather-scaled days adjust that base target toward weather severity.",
       },
       {
         label: "Event-day classifications",
@@ -1177,6 +1275,14 @@ export function buildGapfillCalculationLogicSummary(args: {
       explanation: "How many selected validation/test days remained in the reference pool while still producing modeled compare output.",
     },
     {
+      label: "Nearest-weather donor usage",
+      value: describeCountMap({
+        weather_nearest_daytype_regime: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype_regime"]) ?? 0,
+        weather_nearest_daytype: countForKeys(perDayFallbackCounts, ["weather_nearest_daytype"]) ?? 0,
+      }),
+      explanation: "How many modeled days were resolved by weather-first donor logic before any broad calendar fallback was needed.",
+    },
+    {
       label: "Most common daily fallback levels",
       value: describeCountMap(perDayFallbackCounts),
       explanation: "Shows which daily-total fallback levels actually dominated this run.",
@@ -1185,6 +1291,11 @@ export function buildGapfillCalculationLogicSummary(args: {
       label: "Most common shape variants",
       value: describeCountMap(perDayShapeVariantCounts),
       explanation: "Shows which interval-shape buckets the shared selector used most often.",
+    },
+    {
+      label: "Donor weather buckets",
+      value: describeCountMap(perDayDonorRegimeCounts),
+      explanation: "Heating/cooling/neutral donor-bucket counts show which thermal cohorts drove the run.",
     },
     {
       label: "Weather-scaled vs normal days",
@@ -1226,11 +1337,22 @@ export function buildGapfillCalculationLogicSummary(args: {
           : "No selected compare-day ownership rows were attached.",
     },
     {
+      label: "Weather-first donor adoption",
+      value:
+        weatherFirstDonorCount > 0
+          ? `${weatherFirstDonorCount} modeled day(s) used nearest-weather donor selection`
+          : "calendar fallback dominated",
+      explanation:
+        weatherFirstDonorCount > 0
+          ? "This run was materially anchored by weather-similar donor-day matching inside the trusted pool."
+          : "Observed diagnostics did not show successful weather-first donor anchoring on modeled days.",
+    },
+    {
       label: "Dominant daily fallback levels",
       value: describeCountMap(perDayFallbackCounts),
       explanation:
         Object.keys(perDayFallbackCounts).length > 0
-          ? "Frequent broad fallbacks indicate weaker local daily evidence."
+          ? "Broad calendar fallback counts indicate where weather-similar donor evidence ran thin."
           : "This artifact did not record observed daily fallbacks.",
     },
     {
@@ -1246,12 +1368,16 @@ export function buildGapfillCalculationLogicSummary(args: {
       value:
         modeInfo.modeFamily === "profile_only"
           ? "primary synthetic driver"
+          : modeInfo.modeFamily === "actual_backed"
+            ? "secondary context only"
           : modeledFinalDayCount > 0
             ? "modeled-subset-only context"
             : "mostly passive context",
       explanation:
         modeInfo.modeFamily === "profile_only"
           ? "Home and appliance profiles actively drive the synthetic run."
+          : modeInfo.modeFamily === "actual_backed"
+            ? "Actual-backed exact-interval runs prioritize empirical donor history and weather similarity ahead of profile priors."
           : modeledFinalDayCount > 0
             ? "Home/appliance inputs mainly matter on modeled subsets, not passthrough actual days."
             : "This run did not show strong evidence that profile inputs materially changed the final result.",
@@ -1264,7 +1390,9 @@ export function buildGapfillCalculationLogicSummary(args: {
           : "mostly passive weather context",
       explanation:
         weatherAdjustedDayCount > 0
-          ? "Weather moved this run on enough days to matter materially for tuning."
+          ? modeInfo.modeFamily === "actual_backed"
+            ? "Weather materially influenced donor matching and then bounded post-donor tuning on modeled days."
+            : "Weather moved this run on enough days to matter materially for tuning."
           : "Weather provenance was attached, but attached diagnostics do not show frequent weather-driven changes.",
     },
   ];

@@ -198,6 +198,85 @@ describe("pastDaySimulator Phase 1 temperature-primary day totals (Section 21)",
     );
     expect(result.intervalSumKwh).toBeCloseTo(result.finalDayKwh, 8);
   });
+
+  it("uses bounded post-donor weather fine-tuning after weather-first donor selection", () => {
+    const context = buildPastDaySimulationContext({
+      profile: {
+        monthKeys: ["2026-01", "2026-02"],
+        avgKwhPerDayWeekdayByMonth: [14, 14],
+        avgKwhPerDayWeekendByMonth: [12, 12],
+        weekdayCountByMonth: { "2026-01": 20, "2026-02": 20 },
+        weekendCountByMonth: { "2026-01": 8, "2026-02": 8 },
+        monthOverallAvgByMonth: { "2026-01": 13.5, "2026-02": 13.5 },
+        monthOverallCountByMonth: { "2026-01": 28, "2026-02": 28 },
+      },
+      trainingWeatherStats: trainingStats(),
+      weatherByDateKey: new Map(),
+      modeledDaySelectionStrategy: "weather_donor_first",
+      weatherDonorSamples: [
+        {
+          localDate: "2026-02-01",
+          monthKey: "2026-02",
+          dayType: "weekday",
+          weatherRegime: "heating",
+          dayKwh: 30,
+          dailyAvgTempC: -1,
+          dailyMinTempC: -6,
+          dailyMaxTempC: 4,
+          tempSpreadC: 10,
+          heatingDegreeSeverity: 20,
+          coolingDegreeSeverity: 0,
+        },
+        {
+          localDate: "2026-01-22",
+          monthKey: "2026-01",
+          dayType: "weekday",
+          weatherRegime: "heating",
+          dayKwh: 28,
+          dailyAvgTempC: 1,
+          dailyMinTempC: -4,
+          dailyMaxTempC: 6,
+          tempSpreadC: 10,
+          heatingDegreeSeverity: 18,
+          coolingDegreeSeverity: 0,
+        },
+        {
+          localDate: "2026-01-24",
+          monthKey: "2026-01",
+          dayType: "weekday",
+          weatherRegime: "heating",
+          dayKwh: 27,
+          dailyAvgTempC: 2,
+          dailyMinTempC: -3,
+          dailyMaxTempC: 7,
+          tempSpreadC: 10,
+          heatingDegreeSeverity: 17,
+          coolingDegreeSeverity: 0,
+        },
+      ],
+    });
+    const result = simulatePastDay(
+      {
+        localDate: "2026-02-08",
+        isWeekend: false,
+        gridTimestamps: fixedGrid("2026-02-08"),
+        weatherForDay: {
+          dailyAvgTempC: -3,
+          dailyMinTempC: -8,
+          dailyMaxTempC: 2,
+          heatingDegreeSeverity: 24,
+          coolingDegreeSeverity: 0,
+          freezeHoursCount: 2,
+        },
+      },
+      context
+    );
+    const multiplier = result.finalDayKwh / Math.max(result.targetDayKwhBeforeWeather ?? 1, 1);
+    expect(result.donorSelectionModeUsed).toBe("weather_nearest_daytype_regime");
+    expect(result.weatherAdjustmentModeUsed).toBe("bounded_post_donor");
+    expect(multiplier).toBeGreaterThan(0.92);
+    expect(multiplier).toBeLessThan(1.1);
+  });
 });
 
 describe("buildPastSimulatedBaselineV1 shared simulatePastDay for travel vs keep-ref modeled days", () => {

@@ -32,6 +32,7 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 - **Weather read rule:** shared weather remains DB-first for the canonical coverage window. When rows are missing, the shared resolver fills only the missing dates and persists the result before later reads. GapFill must not own a second weather fetch or weather hydration path.
 - **Never silently fabricate “real” usage**: simulated usage must be tagged and surfaced via a clear disclaimer in the UI.
 - **Mode-weighted evidence**: observed-history reconstruction prioritizes measured interval behavior + weather response; home details/appliances act as context/priors/fallback there, and become primary in overlay/synthetic/sparse-data modes.
+- **Exact-interval donor rule**: in observed-history exact-interval / actual-backed modeled-day reconstruction, the primary daily-target selector is weather-similar donor matching inside the trusted reference pool with strict weekday/weekend separation and same-regime preference first. Calendar/day-type averages remain explicit fallback behavior, and post-donor weather adjustment is bounded fine-tuning rather than the main rescue mechanism.
 - **Deterministic + auditable**: given the same inputs, we should regenerate the same simulated series (or store the generated series + an inputs hash).
 - **Compatibility with the plan engine**: the generated data must obey the plan engine invariants (e.g., monthly totals match the sum of required period buckets → no `USAGE_BUCKET_SUM_MISMATCH`).
 

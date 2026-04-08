@@ -98,6 +98,14 @@ export type PastSimPerDayTrace = {
   displayDayKwh: number | null;
   intervalSumKwh: number | null;
   shapeVariantUsed: string | null;
+  donorSelectionModeUsed: string | null;
+  donorCandidatePoolSize: number | null;
+  selectedDonorLocalDates: string[];
+  donorWeatherRegimeUsed: string | null;
+  donorMonthKeyUsed: string | null;
+  thermalDistanceScore: number | null;
+  broadFallbackUsed: boolean;
+  weatherAdjustmentModeUsed: string | null;
   shape96Hash: string | null;
   templateSelectionKind: string | null;
   selectedFingerprintBucketMonth: string | null;
@@ -326,6 +334,16 @@ export function buildPastSimPerDayTrace(results: SimulatedDayResult[] | undefine
     displayDayKwh: typeof result.displayDayKwh === "number" ? result.displayDayKwh : null,
     intervalSumKwh: typeof result.intervalSumKwh === "number" ? result.intervalSumKwh : null,
     shapeVariantUsed: result.shapeVariantUsed ?? null,
+    donorSelectionModeUsed: result.donorSelectionModeUsed ?? null,
+    donorCandidatePoolSize: typeof result.donorCandidatePoolSize === "number" ? result.donorCandidatePoolSize : null,
+    selectedDonorLocalDates: Array.isArray(result.selectedDonorLocalDates)
+      ? result.selectedDonorLocalDates.map((value) => String(value ?? "").slice(0, 10)).filter((value) => value.length > 0)
+      : [],
+    donorWeatherRegimeUsed: result.donorWeatherRegimeUsed ?? null,
+    donorMonthKeyUsed: result.donorMonthKeyUsed ?? null,
+    thermalDistanceScore: typeof result.thermalDistanceScore === "number" ? result.thermalDistanceScore : null,
+    broadFallbackUsed: result.broadFallbackUsed === true,
+    weatherAdjustmentModeUsed: result.weatherAdjustmentModeUsed ?? null,
     shape96Hash: Array.isArray(result.shape96Used)
       ? createHash("sha256")
           .update(JSON.stringify(result.shape96Used), "utf8")

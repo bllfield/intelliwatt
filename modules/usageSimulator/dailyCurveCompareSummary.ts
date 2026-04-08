@@ -29,6 +29,14 @@ type DailyDecisionTrace = {
   shapeVariantUsed: string | null;
   weatherClassification: string | null;
   weatherModeUsed: string | null;
+  donorSelectionModeUsed: string | null;
+  donorCandidatePoolSize: number | null;
+  selectedDonorLocalDates: string[];
+  donorWeatherRegimeUsed: string | null;
+  donorMonthKeyUsed: string | null;
+  thermalDistanceScore: number | null;
+  broadFallbackUsed: boolean;
+  weatherAdjustmentModeUsed: string | null;
 };
 
 type DailyRowSummary = {
@@ -71,6 +79,14 @@ export type DailyCurveCompareDay = {
   shapeVariantUsed: string | null;
   weatherClassification: string | null;
   weatherModeUsed: string | null;
+  donorSelectionModeUsed: string | null;
+  donorCandidatePoolSize: number | null;
+  selectedDonorLocalDates: string[];
+  donorWeatherRegimeUsed: string | null;
+  donorMonthKeyUsed: string | null;
+  thermalDistanceScore: number | null;
+  broadFallbackUsed: boolean;
+  weatherAdjustmentModeUsed: string | null;
   slots: DailyCurveCompareSlot[];
 };
 
@@ -200,6 +216,20 @@ function normalizeDecisionTraceRows(traceRows: unknown): Map<string, DailyDecisi
       shapeVariantUsed: String(row.shapeVariantUsed ?? "").trim() || null,
       weatherClassification: String(row.dayClassification ?? "").trim() || null,
       weatherModeUsed: String(row.weatherModeUsed ?? "").trim() || null,
+      donorSelectionModeUsed: String((row as any).donorSelectionModeUsed ?? "").trim() || null,
+      donorCandidatePoolSize:
+        typeof (row as any).donorCandidatePoolSize === "number" ? Number((row as any).donorCandidatePoolSize) : null,
+      selectedDonorLocalDates: Array.isArray((row as any).selectedDonorLocalDates)
+        ? (row as any).selectedDonorLocalDates
+            .map((value: unknown) => String(value ?? "").slice(0, 10))
+            .filter((value: string) => value.length > 0)
+        : [],
+      donorWeatherRegimeUsed: String((row as any).donorWeatherRegimeUsed ?? "").trim() || null,
+      donorMonthKeyUsed: String((row as any).donorMonthKeyUsed ?? "").trim() || null,
+      thermalDistanceScore:
+        typeof (row as any).thermalDistanceScore === "number" ? Number((row as any).thermalDistanceScore) : null,
+      broadFallbackUsed: (row as any).broadFallbackUsed === true,
+      weatherAdjustmentModeUsed: String((row as any).weatherAdjustmentModeUsed ?? "").trim() || null,
     });
   }
   return byDate;
@@ -392,6 +422,14 @@ export function buildDailyCurveCompareSummary(args: {
         shapeVariantUsed: decisionTrace?.shapeVariantUsed ?? null,
         weatherClassification: decisionTrace?.weatherClassification ?? null,
         weatherModeUsed: decisionTrace?.weatherModeUsed ?? null,
+        donorSelectionModeUsed: decisionTrace?.donorSelectionModeUsed ?? null,
+        donorCandidatePoolSize: decisionTrace?.donorCandidatePoolSize ?? null,
+        selectedDonorLocalDates: decisionTrace?.selectedDonorLocalDates ?? [],
+        donorWeatherRegimeUsed: decisionTrace?.donorWeatherRegimeUsed ?? null,
+        donorMonthKeyUsed: decisionTrace?.donorMonthKeyUsed ?? null,
+        thermalDistanceScore: decisionTrace?.thermalDistanceScore ?? null,
+        broadFallbackUsed: decisionTrace?.broadFallbackUsed ?? false,
+        weatherAdjustmentModeUsed: decisionTrace?.weatherAdjustmentModeUsed ?? null,
         slots,
       };
     })

@@ -691,6 +691,8 @@ export function buildFullReport(args: {
   weatherNote?: string;
   simulatedDayDiagnosticsSample?: Array<{
     localDate: string;
+    donorSelectionModeUsed?: string | null;
+    donorCandidatePoolSize?: number | null;
     targetDayKwhBeforeWeather: number;
     weatherAdjustedDayKwh: number;
     dayTypeUsed: "weekday" | "weekend" | null;
@@ -1180,10 +1182,10 @@ export function buildFullReport(args: {
     kv("weatherUsed", weatherUsedMapped);
     lines.push("weatherNote: " + weatherNoteMapped);
     if (Array.isArray(j.simulatedDayDiagnosticsSample) && j.simulatedDayDiagnosticsSample.length > 0) {
-      lines.push("sharedSimulatedDayDiagnosticsSample (first 10): localDate | targetDayKwhBeforeWeather | weatherAdjustedDayKwh | dayTypeUsed | shapeVariantUsed | finalDayKwh | intervalSumKwh | fallbackLevel");
+      lines.push("sharedSimulatedDayDiagnosticsSample (first 10): localDate | donorSelectionModeUsed | donorCount | targetDayKwhBeforeWeather | weatherAdjustedDayKwh | dayTypeUsed | shapeVariantUsed | finalDayKwh | intervalSumKwh | fallbackLevel");
       j.simulatedDayDiagnosticsSample.slice(0, 10).forEach((r) =>
         lines.push(
-          `  ${r.localDate} | ${r.targetDayKwhBeforeWeather} | ${r.weatherAdjustedDayKwh} | ${r.dayTypeUsed ?? "—"} | ${r.shapeVariantUsed ?? "—"} | ${r.finalDayKwh} | ${r.intervalSumKwh} | ${r.fallbackLevel ?? "—"}`
+          `  ${r.localDate} | ${r.donorSelectionModeUsed ?? "—"} | ${r.donorCandidatePoolSize ?? "—"} | ${r.targetDayKwhBeforeWeather} | ${r.weatherAdjustedDayKwh} | ${r.dayTypeUsed ?? "—"} | ${r.shapeVariantUsed ?? "—"} | ${r.finalDayKwh} | ${r.intervalSumKwh} | ${r.fallbackLevel ?? "—"}`
         )
       );
     }

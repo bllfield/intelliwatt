@@ -158,6 +158,33 @@ function DayDecisionPanel(props: { day: DailyCurveCompareDay }) {
           <div className="text-brand-navy/60">{props.day.weatherModeUsed ?? "weather mode not attached"}</div>
         </div>
         <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Donor selection mode</div>
+          <div className="mt-1">{props.day.donorSelectionModeUsed ?? "not attached"}</div>
+          <div className="text-brand-navy/60">
+            Pool: {props.day.donorCandidatePoolSize ?? 0} candidate day(s)
+          </div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Selected donor day(s)</div>
+          <div className="mt-1">
+            {props.day.selectedDonorLocalDates.length > 0
+              ? props.day.selectedDonorLocalDates.join(", ")
+              : "not attached"}
+          </div>
+          <div className="text-brand-navy/60">
+            Regime: {props.day.donorWeatherRegimeUsed ?? "not attached"} | Bucket month:{" "}
+            {props.day.donorMonthKeyUsed ?? "not attached"}
+          </div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+          <div className="font-semibold text-brand-navy">Thermal similarity + adjustment</div>
+          <div className="mt-1">Distance: {round(props.day.thermalDistanceScore, 3)}</div>
+          <div className="text-brand-navy/60">
+            Broad fallback: {props.day.broadFallbackUsed ? "yes" : "no"} | Adjustment:{" "}
+            {props.day.weatherAdjustmentModeUsed ?? "not attached"}
+          </div>
+        </div>
+        <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
           <div className="font-semibold text-brand-navy">Raw-vs-compare parity</div>
           <div className="mt-1">Actual delta: {round(props.day.actualCompareParityDeltaKwh, 3)} kWh</div>
           <div>Sim delta: {round(props.day.simulatedCompareParityDeltaKwh, 3)} kWh</div>
