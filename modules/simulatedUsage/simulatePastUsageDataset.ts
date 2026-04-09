@@ -321,40 +321,71 @@ export function renormalizeManualBillPeriodIntervals(args: {
   manualBillPeriods: Array<{ id: string; startDate: string; endDate: string; eligibleForConstraint?: boolean }>;
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   timezone: string;
+  correlationId?: string;
 }) {
+  const emitStep = (
+    step: string,
+    phase: "start" | "success" | "failure",
+    startedAt: number,
+    extra: Record<string, unknown> = {}
+  ) => {
+    if (!args.correlationId) return;
+    logSimPipelineEvent(`day_simulation_manual_bill_period_renormalization_${step}_${phase}`, {
+      correlationId: args.correlationId,
+      durationMs: Date.now() - startedAt,
+      memoryRssMb: getMemoryRssMb(),
+      intervalCount: args.patchedIntervals.length,
+      dayResultCount: args.dayResults.length,
+      source: "renormalizeManualBillPeriodIntervals",
+      ...extra,
+    });
+  };
+  const listUtcDateKeysInclusive = (startDate: string, endDate: string): string[] => {
+    const out: string[] = [];
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${endDate}T00:00:00.000Z`);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) return out;
+    for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 24 * 60 * 60 * 1000) {
+      out.push(new Date(cursor).toISOString().slice(0, 10));
+    }
+    return out;
+  };
   const eligiblePeriods = args.manualBillPeriods.filter((period) => period.eligibleForConstraint !== false);
   if (eligiblePeriods.length === 0 || !args.patchedIntervals.length) return;
 
-  const intervalRows = args.patchedIntervals.map((interval) => ({
-    interval,
-    timestamp: String(interval.timestamp ?? ""),
-    dateKey: dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone),
-  }));
-  const timestampToKwh = new Map<string, number>();
-  const intervalRowsByDateKey = new Map<string, typeof intervalRows>();
+  const indexStartedAt = Date.now();
+  emitStep("index", "start", indexStartedAt, {
+    eligibleBillPeriodCount: eligiblePeriods.length,
+  });
   const summedDayTotalsByDate = new Map<string, number>();
-  for (const row of intervalRows) {
-    const kwh = Number(row.interval.kwh) || 0;
-    timestampToKwh.set(row.timestamp, kwh);
-    const bucket = intervalRowsByDateKey.get(row.dateKey) ?? [];
-    bucket.push(row);
-    intervalRowsByDateKey.set(row.dateKey, bucket);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(row.dateKey)) {
-      summedDayTotalsByDate.set(row.dateKey, (summedDayTotalsByDate.get(row.dateKey) ?? 0) + kwh);
+  const patchedIntervalDateKeyByRef = new WeakMap<object, string>();
+  for (const interval of args.patchedIntervals) {
+    const dateKey = dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone);
+    patchedIntervalDateKeyByRef.set(interval, dateKey);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      summedDayTotalsByDate.set(dateKey, (summedDayTotalsByDate.get(dateKey) ?? 0) + (Number(interval.kwh) || 0));
     }
   }
-  const sortedIntervalDateKeys = Array.from(intervalRowsByDateKey.keys()).sort();
+  emitStep("index", "success", indexStartedAt, {
+    indexedDateKeyCount: summedDayTotalsByDate.size,
+  });
 
+  const factorPlanStartedAt = Date.now();
+  emitStep("factor_plan", "start", factorPlanStartedAt, {
+    eligibleBillPeriodCount: eligiblePeriods.length,
+  });
+  const scaleMultiplierByDateKey = new Map<string, number>();
+  let scaledDateMembershipCount = 0;
   for (const period of eligiblePeriods) {
     const targetTotal = Number(args.manualBillPeriodTotalsKwhById?.[period.id] ?? NaN);
     if (!Number.isFinite(targetTotal) || targetTotal < 0) continue;
 
     let actualTotal = 0;
     const affectedDateKeys: string[] = [];
-    for (const dateKey of sortedIntervalDateKeys) {
-      if (dateKey < period.startDate || dateKey > period.endDate) continue;
-      if (!intervalRowsByDateKey.has(dateKey)) continue;
-      actualTotal += summedDayTotalsByDate.get(dateKey) ?? 0;
+    for (const dateKey of listUtcDateKeysInclusive(period.startDate, period.endDate)) {
+      const dayTotal = summedDayTotalsByDate.get(dateKey);
+      if (dayTotal == null) continue;
+      actualTotal += dayTotal;
       affectedDateKeys.push(dateKey);
     }
     if (!Number.isFinite(actualTotal) || actualTotal <= 0) continue;
@@ -363,37 +394,80 @@ export function renormalizeManualBillPeriodIntervals(args: {
     if (!Number.isFinite(factor) || Math.abs(factor - 1) <= 1e-9) continue;
 
     for (const dateKey of affectedDateKeys) {
-      const dateRows = intervalRowsByDateKey.get(dateKey) ?? [];
-      for (const row of dateRows) {
-        const scaledKwh = (Number(row.interval.kwh) || 0) * factor;
-        row.interval.kwh = scaledKwh;
-        timestampToKwh.set(row.timestamp, scaledKwh);
-      }
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
-        summedDayTotalsByDate.set(dateKey, (summedDayTotalsByDate.get(dateKey) ?? 0) * factor);
-      }
+      const dayTotal = summedDayTotalsByDate.get(dateKey);
+      if (dayTotal == null) continue;
+      summedDayTotalsByDate.set(dateKey, dayTotal * factor);
+      scaleMultiplierByDateKey.set(dateKey, (scaleMultiplierByDateKey.get(dateKey) ?? 1) * factor);
+      scaledDateMembershipCount += 1;
     }
   }
+  emitStep("factor_plan", "success", factorPlanStartedAt, {
+    scaledDateMembershipCount,
+    uniqueScaledDateKeyCount: scaleMultiplierByDateKey.size,
+  });
 
+  const intervalApplyStartedAt = Date.now();
+  emitStep("interval_apply", "start", intervalApplyStartedAt, {
+    scaledDateKeyCount: scaleMultiplierByDateKey.size,
+  });
+  let scaledIntervalCount = 0;
+  for (const interval of args.patchedIntervals) {
+    const factorValue = scaleMultiplierByDateKey.get(
+      patchedIntervalDateKeyByRef.get(interval) ?? dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone)
+    ) ?? 1;
+    if (!Number.isFinite(factorValue) || Math.abs(factorValue - 1) <= 1e-9) continue;
+    interval.kwh = (Number(interval.kwh) || 0) * factorValue;
+    scaledIntervalCount += 1;
+  }
+  emitStep("interval_apply", "success", intervalApplyStartedAt, {
+    scaledIntervalCount,
+  });
+
+  const dayResultApplyStartedAt = Date.now();
+  emitStep("day_result_apply", "start", dayResultApplyStartedAt, {
+    scaledDateKeyCount: scaleMultiplierByDateKey.size,
+  });
+  let scaledDayResultCount = 0;
   for (const result of args.dayResults) {
     const dateKey = String(result.localDate ?? "").slice(0, 10);
-    const scaledSum = summedDayTotalsByDate.has(dateKey)
-      ? summedDayTotalsByDate.get(dateKey) ?? 0
-      : (Number(result.intervalSumKwh) || 0);
-    if (Array.isArray(result.intervals) && result.intervals.length > 0) {
-      const scaledIntervals = result.intervals.map((interval) => ({
-        ...interval,
-        kwh: timestampToKwh.get(String(interval.timestamp ?? "")) ?? (Number(interval.kwh) || 0),
-      }));
-      result.intervals = scaledIntervals;
-      result.intervals15 = scaledIntervals.map((interval) => Number(interval.kwh) || 0);
+    const intervalList = Array.isArray(result.intervals) ? result.intervals : [];
+    let scaledSum = 0;
+    let resultTouched = false;
+    if (intervalList.length > 0) {
+      if (!Array.isArray(result.intervals15) || result.intervals15.length !== intervalList.length) {
+        result.intervals15 = new Array(intervalList.length);
+      }
+      for (let index = 0; index < intervalList.length; index += 1) {
+        const interval = intervalList[index]!;
+        const cachedDateKey =
+          typeof interval === "object" && interval != null
+            ? patchedIntervalDateKeyByRef.get(interval as object)
+            : undefined;
+        const factorValue = scaleMultiplierByDateKey.get(
+          cachedDateKey ?? dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone)
+        ) ?? 1;
+        const sharesPatchedRef = cachedDateKey != null;
+        if (!sharesPatchedRef && Number.isFinite(factorValue) && Math.abs(factorValue - 1) > 1e-9) {
+          interval.kwh = (Number(interval.kwh) || 0) * factorValue;
+          resultTouched = true;
+        }
+        const scaledKwh = Number(interval.kwh) || 0;
+        result.intervals15[index] = scaledKwh;
+        scaledSum += scaledKwh;
+      }
+    } else {
+      scaledSum = summedDayTotalsByDate.has(dateKey) ? (summedDayTotalsByDate.get(dateKey) ?? 0) : (Number(result.intervalSumKwh) || 0);
     }
+    if (resultTouched || scaleMultiplierByDateKey.has(dateKey)) scaledDayResultCount += 1;
     result.intervalSumKwh = scaledSum;
     result.displayDayKwh = round2CanonicalSimDayTotal(scaledSum);
     result.finalDayKwh = scaledSum;
     result.weatherAdjustedDayKwh = scaledSum;
     result.dayTotalAfterWeatherScale = scaledSum;
   }
+  emitStep("day_result_apply", "success", dayResultApplyStartedAt, {
+    scaledDayResultCount,
+  });
 }
 
 /**
@@ -1649,6 +1723,7 @@ export async function simulatePastUsageDataset(
             manualBillPeriods: eligibleManualBillPeriods,
             manualBillPeriodTotalsKwhById: buildInputs.manualBillPeriodTotalsKwhById ?? null,
             timezone: timezoneResolved || "UTC",
+            correlationId,
           });
           logSimPipelineEvent("day_simulation_manual_bill_period_renormalization_success", {
             correlationId,

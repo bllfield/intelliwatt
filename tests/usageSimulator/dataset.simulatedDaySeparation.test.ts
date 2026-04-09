@@ -122,4 +122,51 @@ describe("dataset simulated day separation", () => {
     expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual([]);
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
   });
+
+  it("maps MANUAL_CONSTRAINED_DAY without leaking into travel or incomplete-meter ownership", () => {
+    const intervals = [...makeUtcDayIntervals("2025-11-01", 0.1)];
+    const curve: SimulatedCurve = {
+      start: "2025-11-01",
+      end: "2025-11-01",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      curve,
+      { baseKind: "MANUAL", mode: "MANUAL_TOTALS", canonicalEndMonth: "2025-11" },
+      {
+        simulatedDayResults: [
+          { localDate: "2025-11-01", displayDayKwh: 9.6, simulatedReasonCode: "MANUAL_CONSTRAINED_DAY" } as any,
+        ],
+      }
+    );
+    expect(dataset.daily[0]).toMatchObject({
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_MANUAL_CONSTRAINED",
+    });
+    expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
+    expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual(["2025-11-01"]);
+    expect(dataset.meta.simulatedSourceDetailByDate?.["2025-11-01"]).toBe("SIMULATED_MANUAL_CONSTRAINED");
+  });
+
+  it("reuses the stitched interval payload instead of cloning a second 15-minute object array", () => {
+    const intervals = [...makeUtcDayIntervals("2025-12-01", 0.1)];
+    const curve: SimulatedCurve = {
+      start: "2025-12-01",
+      end: "2025-12-01",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      curve,
+      { baseKind: "MANUAL", mode: "MANUAL_TOTALS", canonicalEndMonth: "2025-12" },
+      {}
+    );
+    expect(dataset.series.intervals15).toBe(curve.intervals as any);
+    expect((dataset.series.intervals15?.[0] as any)?.kwh).toBe(intervals[0]!.consumption_kwh);
+  });
 });

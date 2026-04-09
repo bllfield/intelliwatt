@@ -461,6 +461,10 @@ describe("shared sim usage-shape ensure path", () => {
     const curveBuildSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "buildCurveFromPatchedIntervals_success");
     const datasetBuildStartEv = logPipeline.mock.calls.find((c) => c[0] === "buildSimulatedUsageDatasetFromCurve_start");
     const datasetBuildSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "buildSimulatedUsageDatasetFromCurve_success");
+    const datasetIntervalProjectionStartEv = logPipeline.mock.calls.find((c) => c[0] === "stitch_dataset_interval_projection_start");
+    const datasetIntervalProjectionSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "stitch_dataset_interval_projection_success");
+    const datasetDailyMaterializationSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "stitch_dataset_daily_materialization_success");
+    const datasetInsightsSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "stitch_dataset_insights_success");
     expect(startEv?.[1]).toMatchObject({ correlationId: cid, houseId: "h1" });
     expect(successEv?.[1]).toMatchObject({ correlationId: cid });
     expect(typeof (successEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
@@ -493,6 +497,10 @@ describe("shared sim usage-shape ensure path", () => {
     expect(datasetBuildStartEv?.[1]).toMatchObject({ correlationId: cid });
     expect(datasetBuildSuccessEv?.[1]).toMatchObject({ correlationId: cid });
     expect(typeof (datasetBuildSuccessEv?.[1] as { durationMs?: unknown })?.durationMs).toBe("number");
+    expect(datasetIntervalProjectionStartEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(datasetIntervalProjectionSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(datasetDailyMaterializationSuccessEv?.[1]).toMatchObject({ correlationId: cid });
+    expect(datasetInsightsSuccessEv?.[1]).toMatchObject({ correlationId: cid });
     expect(successEv?.[1]).toHaveProperty("memoryRssMb");
   });
 

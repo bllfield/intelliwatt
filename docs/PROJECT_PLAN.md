@@ -496,6 +496,12 @@ This section is authoritative for future manual-usage implementation work.
 - Legacy/queued GapFill compare wording is not the canonical ownership path for manual compare. Manual compare ownership now comes from shared recalc plus shared artifact-backed readback.
 - Stronger monthly weather evidence, stronger baseload inference, and stronger HVAC-share inference remain follow-up work after this architecture pass.
 
+### Plan Change (2026-04) — Manual Monthly Low-Data Runtime Perf Stabilization
+- The stronger Manual Monthly evidence branch required a narrow shared-runtime stabilization follow-up in the same producer path.
+- Shared low-data manual bill-period renormalization now uses bounded date-key scaling instead of repeated full-window interval cloning/filtering.
+- `buildSimulatedUsageDatasetFromCurve()` now logs a few internal stitch/materialization substeps and avoids unnecessary large temporary copies during low-data manual dataset assembly.
+- This perf stabilization does not change ownership semantics, statement-range semantics, or EXACT_INTERVALS truth-producing behavior.
+
 ### Architecture Notes
 - New modules added under /modules (additive, isolated): manualUsage, simulatedUsage, homeProfile, applianceProfile, usageScenario.
 - New additive prisma models/tables were added for simulated-layer persistence (manual inputs, home profile, appliances, scenarios). Existing real-usage tables are unchanged.

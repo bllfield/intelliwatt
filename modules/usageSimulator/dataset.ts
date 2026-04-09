@@ -1,4 +1,4 @@
-import { logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
 import type {
@@ -129,6 +129,81 @@ function computeNormalLifeBaseloadKw(
   const pool = p10 == null ? [] : filteredKwSamples.filter((kw) => kw <= p10);
   const avg = pool.length > 0 ? pool.reduce((a, b) => a + b, 0) / pool.length : null;
   return { baseloadKw: avg == null ? null : round2(avg), fallbackUsed: false, debugNote: null };
+}
+
+function computeNormalLifeBaseloadKwFromCurveIntervals(
+  intervals: Array<{ timestamp: string; consumption_kwh: number }>,
+  options: BaseloadOptions = {}
+): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
+  const minDayKwhFloor = Number.isFinite(options.minDayKwhFloor) ? Number(options.minDayKwhFloor) : 4;
+  const baseloadDayMultiplier = Number.isFinite(options.baseloadDayMultiplier)
+    ? Number(options.baseloadDayMultiplier)
+    : 1.3;
+  const percentile = Number.isFinite(options.percentile) ? Number(options.percentile) : 0.1;
+  const excluded = options.excludedDateKeys;
+
+  const dayTotals = new Map<string, number>();
+  for (const row of intervals ?? []) {
+    const tsIso = String(row?.timestamp ?? "");
+    const kwh = Number(row?.consumption_kwh);
+    if (!tsIso || !Number.isFinite(kwh)) continue;
+    const dayKey = dateKeyUtcFromIso(tsIso);
+    if (excluded?.has(dayKey)) continue;
+    dayTotals.set(dayKey, (dayTotals.get(dayKey) ?? 0) + kwh);
+  }
+  const positiveDayTotals = Array.from(dayTotals.values())
+    .filter((v) => Number.isFinite(v) && v > 1e-6)
+    .sort((a, b) => a - b);
+  const lowCount = Math.max(1, Math.floor(positiveDayTotals.length * 0.2));
+  const lowSlice = positiveDayTotals.slice(0, lowCount);
+  const avgLowDayKwh =
+    lowSlice.length > 0 ? lowSlice.reduce((a, b) => a + b, 0) / lowSlice.length : null;
+  const baseloadKwhPerDayCandidate = avgLowDayKwh ?? 0;
+  const minDayKwh = Math.max(minDayKwhFloor, baseloadKwhPerDayCandidate * baseloadDayMultiplier);
+
+  const qualityDays = new Set<string>();
+  dayTotals.forEach((total, dayKey) => {
+    if ((Number(total) || 0) >= minDayKwh) qualityDays.add(dayKey);
+  });
+
+  const filteredKwSamples: number[] = [];
+  const fallbackKwSamples: number[] = [];
+  for (const row of intervals ?? []) {
+    const tsIso = String(row?.timestamp ?? "");
+    const kwh = Number(row?.consumption_kwh);
+    if (!tsIso || !Number.isFinite(kwh)) continue;
+    const dayKey = dateKeyUtcFromIso(tsIso);
+    if (excluded?.has(dayKey)) continue;
+    const kw = kwh * 4;
+    if (!Number.isFinite(kw) || kw <= 1e-6) continue;
+    fallbackKwSamples.push(kw);
+    if (qualityDays.has(dayKey)) filteredKwSamples.push(kw);
+  }
+  filteredKwSamples.sort((a, b) => a - b);
+
+  if (filteredKwSamples.length < 500) {
+    fallbackKwSamples.sort((a, b) => a - b);
+    const p10Fallback = percentileCont(fallbackKwSamples, percentile);
+    const fallbackSlice = p10Fallback == null ? [] : fallbackKwSamples.filter((kw) => kw <= p10Fallback);
+    const fallbackAvg =
+      fallbackSlice.length > 0
+        ? fallbackSlice.reduce((a, b) => a + b, 0) / fallbackSlice.length
+        : null;
+    return {
+      baseloadKw: fallbackAvg == null ? null : round2(fallbackAvg),
+      fallbackUsed: true,
+      debugNote: "insufficient_filtered_samples",
+    };
+  }
+
+  const p10 = percentileCont(filteredKwSamples, percentile);
+  const lowKwSlice = p10 == null ? [] : filteredKwSamples.filter((kw) => kw <= p10);
+  const avgKw = lowKwSlice.length > 0 ? lowKwSlice.reduce((a, b) => a + b, 0) / lowKwSlice.length : null;
+  return {
+    baseloadKw: avgKw == null ? null : round2(avgKw),
+    fallbackUsed: false,
+    debugNote: null,
+  };
 }
 
 function toDateKey(tsIso: string): string {
@@ -1265,111 +1340,243 @@ export function buildSimulatedUsageDatasetFromCurve(
       source: "buildSimulatedUsageDatasetFromCurve",
     });
   }
-  const dailyMap = new Map<string, number>();
-  for (let j = 0; j < curve.intervals.length; j++) {
-    const dk = toDateKey(curve.intervals[j].timestamp);
-    dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + (Number(curve.intervals[j].consumption_kwh) || 0));
-  }
-  const simulatedDisplayByDate = new Map<string, number>();
-  const simulatedSourceByDate = new Set<string>();
-  const simulatedSourceDetailByDate = new Map<string, PastSimulatedDaySourceDetail>();
-  for (const row of options?.simulatedDayResults ?? []) {
-    const dk = String(row?.localDate ?? "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-    simulatedDisplayByDate.set(
-      dk,
-      Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0
-    );
-    simulatedSourceByDate.add(dk);
-    const reason = String((row as any)?.simulatedReasonCode ?? "");
-    // TRAVEL_VACANT vs TEST (compare) vs incomplete/leading-missing vs generic OTHER.
-    const detail: PastSimulatedDaySourceDetail =
-      reason === "TRAVEL_VACANT"
-        ? "SIMULATED_TRAVEL_VACANT"
-        : reason === "MANUAL_CONSTRAINED_DAY"
-          ? "SIMULATED_MANUAL_CONSTRAINED"
-        : reason === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
-          ? "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
-        : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
-          ? "SIMULATED_TEST_DAY"
-          : reason === "INCOMPLETE_METER_DAY"
-            ? "SIMULATED_INCOMPLETE_METER"
-            : reason === "LEADING_MISSING_DAY"
-              ? "SIMULATED_LEADING_MISSING"
-              : "SIMULATED_OTHER";
-    simulatedSourceDetailByDate.set(dk, detail);
-  }
-  // Daily display values for simulated days come from shared core SimulatedDayResult.
-  const daily = Array.from(dailyMap.entries())
-    .map(([date, kwh]) => ({
-      date,
-      kwh: round2(simulatedDisplayByDate.has(date) ? simulatedDisplayByDate.get(date)! : kwh),
-      source: simulatedSourceByDate.has(date) ? ("SIMULATED" as const) : ("ACTUAL" as const),
-      sourceDetail: simulatedSourceByDate.has(date)
-        ? simulatedSourceDetailByDate.get(date) ?? "SIMULATED_OTHER"
-        : ("ACTUAL" as const),
-    }))
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const canonicalArtifactSimulatedDayTotalsByDate = Object.fromEntries(
-    daily
-      .filter((row) => simulatedSourceByDate.has(row.date))
-      .map((row) => [row.date, round2(Number(row.kwh) || 0)] as const)
+  const runLoggedStep = <T,>(step: string, extra: Record<string, unknown>, fn: () => T): T => {
+    const startedAt = Date.now();
+    if (options?.correlationId) {
+      logSimPipelineEvent(`stitch_dataset_${step}_start`, {
+        correlationId: options.correlationId,
+        memoryRssMb: getMemoryRssMb(),
+        source: "buildSimulatedUsageDatasetFromCurve",
+        ...extra,
+      });
+    }
+    try {
+      const value = fn();
+      if (options?.correlationId) {
+        const summary =
+          value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+        logSimPipelineEvent(`stitch_dataset_${step}_success`, {
+          correlationId: options.correlationId,
+          durationMs: Date.now() - startedAt,
+          memoryRssMb: getMemoryRssMb(),
+          source: "buildSimulatedUsageDatasetFromCurve",
+          ...extra,
+          ...summary,
+        });
+      }
+      return value;
+    } catch (error) {
+      if (options?.correlationId) {
+        logSimPipelineEvent(`stitch_dataset_${step}_failure`, {
+          correlationId: options.correlationId,
+          durationMs: Date.now() - startedAt,
+          memoryRssMb: getMemoryRssMb(),
+          failureMessage: error instanceof Error ? error.message : String(error),
+          source: "buildSimulatedUsageDatasetFromCurve",
+          ...extra,
+        });
+      }
+      throw error;
+    }
+  };
+  const {
+    dailyMap,
+    seriesIntervals15,
+    totalFromIntervals,
+  } = runLoggedStep(
+    "interval_projection",
+    { intervalCount: curve.intervals.length },
+    () => {
+      const nextDailyMap = new Map<string, number>();
+      let nextTotalFromIntervals = 0;
+      for (let j = 0; j < curve.intervals.length; j += 1) {
+        const interval = curve.intervals[j]!;
+        const kwh = Number(interval.consumption_kwh) || 0;
+        (interval as any).kwh = kwh;
+        nextTotalFromIntervals += kwh;
+        const dk = toDateKey(interval.timestamp);
+        nextDailyMap.set(dk, (nextDailyMap.get(dk) ?? 0) + kwh);
+      }
+      return {
+        dailyMap: nextDailyMap,
+        seriesIntervals15: curve.intervals as unknown as UsageSeriesPoint[],
+        totalFromIntervals: round2(nextTotalFromIntervals),
+        dailyKeyCount: nextDailyMap.size,
+      };
+    }
   );
-
-  const monthlyBuild = buildDisplayMonthlyFromIntervals({
-    intervals: curve.intervals,
-    endDate: curve.end,
-    timezone: options?.timezone,
-    useUtcMonth: options?.useUtcMonth,
-  });
-  // Use stitched display-monthly output so boundary month windows don't show duplicate current month rows.
-  const monthly = monthlyBuild.monthly;
-  const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
-
-  const seriesDaily: SimulatedUsageDataset["series"]["daily"] = daily.map((d) => ({
-    timestamp: `${d.date}T00:00:00.000Z`,
-    kwh: d.kwh,
-    source: d.source,
-    sourceDetail: d.sourceDetail,
-  }));
-  const seriesMonthly: UsageSeriesPoint[] = monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: m.kwh }));
+  const {
+    simulatedDisplayByDate,
+    simulatedSourceDetailByDate,
+  } = runLoggedStep(
+    "simulated_source_index",
+    { simulatedDayResultCount: options?.simulatedDayResults?.length ?? 0 },
+    () => {
+      const nextSimulatedDisplayByDate = new Map<string, number>();
+      const nextSimulatedSourceDetailByDate = new Map<string, PastSimulatedDaySourceDetail>();
+      for (const row of options?.simulatedDayResults ?? []) {
+        const dk = String(row?.localDate ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+        nextSimulatedDisplayByDate.set(
+          dk,
+          Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0
+        );
+        const reason = String((row as any)?.simulatedReasonCode ?? "");
+        const detail: PastSimulatedDaySourceDetail =
+          reason === "TRAVEL_VACANT"
+            ? "SIMULATED_TRAVEL_VACANT"
+            : reason === "MANUAL_CONSTRAINED_DAY"
+              ? "SIMULATED_MANUAL_CONSTRAINED"
+            : reason === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+              ? "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
+            : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
+              ? "SIMULATED_TEST_DAY"
+              : reason === "INCOMPLETE_METER_DAY"
+                ? "SIMULATED_INCOMPLETE_METER"
+                : reason === "LEADING_MISSING_DAY"
+                  ? "SIMULATED_LEADING_MISSING"
+                  : "SIMULATED_OTHER";
+        nextSimulatedSourceDetailByDate.set(dk, detail);
+      }
+      return {
+        simulatedDisplayByDate: nextSimulatedDisplayByDate,
+        simulatedSourceDetailByDate: nextSimulatedSourceDetailByDate,
+        simulatedDateKeyCount: nextSimulatedSourceDetailByDate.size,
+      };
+    }
+  );
+  const {
+    daily,
+    seriesDaily,
+    canonicalArtifactSimulatedDayTotalsByDate,
+    simulatedTravelVacantDateKeysLocal,
+    simulatedTestModeledDateKeysLocal,
+    simulatedSourceDetailByDateRecord,
+    peakDay,
+    weekdaySum,
+    weekendSum,
+  } = runLoggedStep(
+    "daily_materialization",
+    { dailyKeyCount: dailyMap.size },
+    () => {
+      const nextDaily = new Array<SimulatedUsageDataset["daily"][number]>(dailyMap.size);
+      const nextSeriesDaily = new Array<SimulatedUsageDataset["series"]["daily"][number]>(dailyMap.size);
+      const nextCanonicalArtifactSimulatedDayTotalsByDate: Record<string, number> = {};
+      const nextSimulatedTravelVacantDateKeysLocal: string[] = [];
+      const nextSimulatedTestModeledDateKeysLocal: string[] = [];
+      const nextSimulatedSourceDetailByDateRecord: Record<string, PastSimulatedDaySourceDetail> = {};
+      let nextWeekdaySum = 0;
+      let nextWeekendSum = 0;
+      let nextPeakDay: { date: string; kwh: number } | null = null;
+      const sortedEntries = Array.from(dailyMap.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+      for (let index = 0; index < sortedEntries.length; index += 1) {
+        const [date, actualKwh] = sortedEntries[index]!;
+        const sourceDetail = simulatedSourceDetailByDate.get(date);
+        const isSimulated = sourceDetail != null;
+        const dailyKwh = round2(isSimulated ? simulatedDisplayByDate.get(date) ?? actualKwh : actualKwh);
+        const dailyRow = {
+          date,
+          kwh: dailyKwh,
+          source: isSimulated ? ("SIMULATED" as const) : ("ACTUAL" as const),
+          sourceDetail: isSimulated ? sourceDetail : ("ACTUAL" as const),
+        };
+        nextDaily[index] = dailyRow;
+        nextSeriesDaily[index] = {
+          timestamp: `${date}T00:00:00.000Z`,
+          kwh: dailyKwh,
+          source: dailyRow.source,
+          sourceDetail: dailyRow.sourceDetail,
+        };
+        if (isSimulated) {
+          nextCanonicalArtifactSimulatedDayTotalsByDate[date] = round2(Number(dailyKwh) || 0);
+          nextSimulatedSourceDetailByDateRecord[date] = sourceDetail;
+          if (sourceDetail === "SIMULATED_TRAVEL_VACANT") nextSimulatedTravelVacantDateKeysLocal.push(date);
+          if (
+            sourceDetail === "SIMULATED_TEST_DAY" ||
+            sourceDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
+            sourceDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
+          ) {
+            nextSimulatedTestModeledDateKeysLocal.push(date);
+          }
+        }
+        const dow = dayOfWeekUtc(date);
+        if (dow === 0 || dow === 6) nextWeekendSum += dailyKwh;
+        else nextWeekdaySum += dailyKwh;
+        if (!nextPeakDay || dailyKwh > nextPeakDay.kwh) nextPeakDay = { date, kwh: dailyKwh };
+      }
+      return {
+        daily: nextDaily,
+        seriesDaily: nextSeriesDaily,
+        canonicalArtifactSimulatedDayTotalsByDate: nextCanonicalArtifactSimulatedDayTotalsByDate,
+        simulatedTravelVacantDateKeysLocal: nextSimulatedTravelVacantDateKeysLocal,
+        simulatedTestModeledDateKeysLocal: nextSimulatedTestModeledDateKeysLocal,
+        simulatedSourceDetailByDateRecord: nextSimulatedSourceDetailByDateRecord,
+        peakDay: nextPeakDay,
+        weekdaySum: nextWeekdaySum,
+        weekendSum: nextWeekendSum,
+        dailyRowCount: nextDaily.length,
+      };
+    }
+  );
+  const { monthlyBuild, monthly, totalFromMonthly, seriesMonthly, usageBucketsByMonth } = runLoggedStep(
+    "monthly_materialization",
+    { intervalCount: curve.intervals.length },
+    () => {
+      const nextMonthlyBuild = buildDisplayMonthlyFromIntervals({
+        intervals: curve.intervals,
+        endDate: curve.end,
+        timezone: options?.timezone,
+        useUtcMonth: options?.useUtcMonth,
+      });
+      const nextMonthly = nextMonthlyBuild.monthly;
+      const nextSeriesMonthly = new Array<UsageSeriesPoint>(nextMonthly.length);
+      let nextTotalFromMonthly = 0;
+      for (let index = 0; index < nextMonthly.length; index += 1) {
+        const row = nextMonthly[index]!;
+        nextSeriesMonthly[index] = { timestamp: `${row.month}-01T00:00:00.000Z`, kwh: row.kwh };
+        nextTotalFromMonthly += Number(row.kwh) || 0;
+      }
+      return {
+        monthlyBuild: nextMonthlyBuild,
+        monthly: nextMonthly,
+        totalFromMonthly: round2(nextTotalFromMonthly),
+        seriesMonthly: nextSeriesMonthly,
+        usageBucketsByMonth: usageBucketsByMonthFromSimulatedMonthly(nextMonthly),
+        monthlyRowCount: nextMonthly.length,
+      };
+    }
+  );
   const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: totalFromMonthly }];
-  const seriesIntervals15: UsageSeriesPoint[] = curve.intervals.map((i) => ({
-    timestamp: i.timestamp,
-    kwh: Number(i.consumption_kwh) || 0,
-  }));
-  // Summary must reflect the exact post-patch intervals returned to clients.
-  const totalFromIntervals = round2(seriesIntervals15.reduce((s, r) => s + (Number(r.kwh) || 0), 0));
 
   const skipHeavyInsights = options?.skipHeavyInsights === true;
-  const fifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
-  const timeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
-
-  let weekdaySum = 0;
-  let weekendSum = 0;
-  for (let j = 0; j < daily.length; j++) {
-    const dow = dayOfWeekUtc(daily[j].date);
-    if (dow === 0 || dow === 6) weekendSum += daily[j].kwh;
-    else weekdaySum += daily[j].kwh;
-  }
-
-  const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
-
-  const baseloadComputed = skipHeavyInsights
-    ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
-    : computeNormalLifeBaseloadKw(
-        curve.intervals.map((i) => ({ tsIso: String(i.timestamp ?? ""), kwh: Number(i.consumption_kwh) || 0 })),
-        { excludedDateKeys: options?.excludedDateKeys }
-      );
+  const {
+    fifteenMinuteAverages,
+    timeOfDayBuckets,
+    baseloadComputed,
+    baseloadDaily,
+    baseloadMonthly,
+  } = runLoggedStep(
+    "insights",
+    { skipHeavyInsights, intervalCount: curve.intervals.length },
+    () => {
+      const nextFifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
+      const nextTimeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
+      const nextBaseloadComputed = skipHeavyInsights
+        ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
+        : computeNormalLifeBaseloadKwFromCurveIntervals(curve.intervals, { excludedDateKeys: options?.excludedDateKeys });
+      return {
+        fifteenMinuteAverages: nextFifteenMinuteAverages,
+        timeOfDayBuckets: nextTimeOfDayBuckets,
+        baseloadComputed: nextBaseloadComputed,
+        baseloadDaily: skipHeavyInsights ? 0 : low10Average(daily.map((d) => Number(d.kwh) || 0)),
+        baseloadMonthly: skipHeavyInsights ? 0 : low10Average(monthly.map((m) => Number(m.kwh) || 0)),
+      };
+    }
+  );
   const baseload = baseloadComputed.baseloadKw;
-  const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = baseloadComputed
-    .fallbackUsed
+  const baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = baseloadComputed.fallbackUsed
     ? "FALLBACK_V1"
     : "FILTERED_NORMAL_LIFE_V1";
-  const baseloadDaily = skipHeavyInsights ? 0 : low10Average(daily.map((d) => Number(d.kwh) || 0));
-  const baseloadMonthly = skipHeavyInsights ? 0 : low10Average(monthly.map((m) => Number(m.kwh) || 0));
-
-  const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
 
   const startDateOnly = curve.start.slice(0, 10);
   const endDateOnly = curve.end.slice(0, 10);
@@ -1436,32 +1643,9 @@ export function buildSimulatedUsageDatasetFromCurve(
       renormalized: curve.meta.renormalized,
       sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
       canonicalArtifactSimulatedDayTotalsByDate,
-      simulatedTravelVacantDateKeysLocal: daily
-        .filter((row) => row.sourceDetail === "SIMULATED_TRAVEL_VACANT")
-        .map((row) => row.date),
-      simulatedTestModeledDateKeysLocal: daily
-        .filter(
-          (row) =>
-            row.sourceDetail === "SIMULATED_TEST_DAY" ||
-            row.sourceDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
-            row.sourceDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
-        )
-        .map((row) => row.date),
-      simulatedSourceDetailByDate: daily.reduce<Record<string, PastSimulatedDaySourceDetail>>((acc, row) => {
-        if (row.source !== "SIMULATED") return acc;
-        const d = row.sourceDetail;
-        acc[row.date] =
-          d === "SIMULATED_TRAVEL_VACANT" ||
-          d === "SIMULATED_TEST_DAY" ||
-          d === "SIMULATED_MANUAL_CONSTRAINED" ||
-          d === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
-          d === "SIMULATED_INCOMPLETE_METER" ||
-          d === "SIMULATED_LEADING_MISSING" ||
-          d === "SIMULATED_OTHER"
-            ? d
-            : "SIMULATED_OTHER";
-        return acc;
-      }, {}),
+      simulatedTravelVacantDateKeysLocal,
+      simulatedTestModeledDateKeysLocal,
+      simulatedSourceDetailByDate: simulatedSourceDetailByDateRecord,
     },
     usageBucketsByMonth,
   };

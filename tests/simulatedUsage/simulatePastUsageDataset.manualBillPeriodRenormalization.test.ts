@@ -59,6 +59,9 @@ describe("manual bill-period renormalization", () => {
         shape96Used: Array.from({ length: 96 }, () => 1 / 96),
       },
     ];
+    const firstDayIntervalsRef = dayResults[0]!.intervals;
+    const firstDayInterval0Ref = dayResults[0]!.intervals[0];
+    const firstDayIntervals15Ref = dayResults[0]!.intervals15;
 
     renormalizeManualBillPeriodIntervals({
       patchedIntervals,
@@ -79,5 +82,8 @@ describe("manual bill-period renormalization", () => {
     expect(total).toBeCloseTo(100, 6);
     expect(dayResults.map((row) => Number(row.finalDayKwh))).toSatisfy((values: number[]) => values.every((value) => Math.abs(value - 50) < 1e-6));
     expect(dayResults.map((row) => Number(row.displayDayKwh))).toEqual([50, 50]);
+    expect(dayResults[0]!.intervals).toBe(firstDayIntervalsRef);
+    expect(dayResults[0]!.intervals[0]).toBe(firstDayInterval0Ref);
+    expect(dayResults[0]!.intervals15).toBe(firstDayIntervals15Ref);
   });
 });
