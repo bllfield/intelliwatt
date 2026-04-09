@@ -589,7 +589,7 @@ export async function POST(req: NextRequest) {
           memoryRssMb: getMemoryRssMb(),
           source: "admin_manual_monthly_route",
         });
-        return NextResponse.json({
+        const response = NextResponse.json({
           ok: true,
           action,
           email: sourceResolved.email,
@@ -607,6 +607,19 @@ export async function POST(req: NextRequest) {
           result: inlineResult,
           readResult: null,
         });
+        logSimPipelineEvent("admin_manual_monthly_recalc_response_sent", {
+          correlationId: dispatched.correlationId,
+          houseId: labHome.id,
+          sourceHouseId: sourceResolved.selectedHouse.id,
+          scenarioId,
+          executionMode: "inline",
+          readbackPending: true,
+          artifactInputHash: canonicalArtifactInputHash,
+          httpStatus: response.status,
+          memoryRssMb: getMemoryRssMb(),
+          source: "admin_manual_monthly_route",
+        });
+        return response;
       }
       logSimPipelineEvent("admin_manual_monthly_recalc_response_ready", {
         correlationId: dispatched.correlationId,
@@ -619,7 +632,7 @@ export async function POST(req: NextRequest) {
         memoryRssMb: getMemoryRssMb(),
         source: "admin_manual_monthly_route",
       });
-      return NextResponse.json({
+      const response = NextResponse.json({
         ok: true,
         action,
         email: sourceResolved.email,
@@ -634,6 +647,19 @@ export async function POST(req: NextRequest) {
         jobId: dispatched.jobId,
         result: null,
       });
+      logSimPipelineEvent("admin_manual_monthly_recalc_response_sent", {
+        correlationId: dispatched.correlationId,
+        houseId: labHome.id,
+        sourceHouseId: sourceResolved.selectedHouse.id,
+        scenarioId,
+        executionMode: "droplet_async",
+        readbackPending: true,
+        jobId: dispatched.jobId,
+        httpStatus: response.status,
+        memoryRssMb: getMemoryRssMb(),
+        source: "admin_manual_monthly_route",
+      });
+      return response;
     }
 
     if (action === "read_result") {
@@ -676,7 +702,7 @@ export async function POST(req: NextRequest) {
           memoryRssMb: getMemoryRssMb(),
           source: "admin_manual_monthly_route",
         });
-        return NextResponse.json({
+        const response = NextResponse.json({
           ok: true,
           action,
           email: sourceResolved.email,
@@ -688,6 +714,17 @@ export async function POST(req: NextRequest) {
           scenarioId,
           readResult,
         });
+        logSimPipelineEvent("admin_manual_monthly_read_result_response_sent", {
+          correlationId,
+          houseId: labHome.id,
+          sourceHouseId: sourceResolved.selectedHouse.id,
+          scenarioId,
+          artifactInputHash: exactArtifactInputHash,
+          httpStatus: response.status,
+          memoryRssMb: getMemoryRssMb(),
+          source: "admin_manual_monthly_route",
+        });
+        return response;
       }
       logSimPipelineEvent("admin_manual_monthly_read_result_failure", {
         correlationId,
@@ -700,7 +737,7 @@ export async function POST(req: NextRequest) {
         memoryRssMb: getMemoryRssMb(),
         source: "admin_manual_monthly_route",
       });
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           action,
           email: sourceResolved.email,
@@ -714,6 +751,18 @@ export async function POST(req: NextRequest) {
         },
         { status: statusForReadResultFailure(readResult) }
       );
+      logSimPipelineEvent("admin_manual_monthly_read_result_response_sent", {
+        correlationId,
+        houseId: labHome.id,
+        sourceHouseId: sourceResolved.selectedHouse.id,
+        scenarioId,
+        artifactInputHash: exactArtifactInputHash,
+        failureCode: readResult.failureCode ?? readResult.error ?? null,
+        httpStatus: response.status,
+        memoryRssMb: getMemoryRssMb(),
+        source: "admin_manual_monthly_route",
+      });
+      return response;
     }
 
     return NextResponse.json({ ok: false, error: "action_invalid" }, { status: 400 });

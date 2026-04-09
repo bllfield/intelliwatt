@@ -4929,6 +4929,23 @@ async function recalcSimulatorBuildImpl(args: {
         });
       }
       if (result.dataset !== null && result.stitchedCurve) {
+        logSimPipelineEvent("recalc_shared_post_baseline_handoff_complete", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          scenarioId,
+          mode: simMode,
+          buildPathKind: producerBuildPathKind,
+          intervalCount: Array.isArray((result.dataset as any)?.series?.intervals15)
+            ? (result.dataset as any).series.intervals15.length
+            : 0,
+          dayCount: Array.isArray((result.dataset as any)?.daily) ? (result.dataset as any).daily.length : 0,
+          monthCount: Array.isArray((result.dataset as any)?.monthly) ? (result.dataset as any).monthly.length : 0,
+          simulatedDayResultsCount: Array.isArray(result.simulatedDayResults) ? result.simulatedDayResults.length : 0,
+          canonicalMonthCount: Array.isArray(recalcBuildInputs.canonicalMonths) ? recalcBuildInputs.canonicalMonths.length : 0,
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
         pastPatchedDataset = result.dataset as ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs>;
         pastPatchedCurve = result.stitchedCurve;
         pastSimulatedDayResults = result.simulatedDayResults;
@@ -5064,29 +5081,75 @@ async function recalcSimulatorBuildImpl(args: {
     versions,
   });
 
-  const dataset =
-    pastPatchedDataset != null
-      ? pastPatchedDataset
-      : pastPatchedCurve != null
-      ? buildSimulatedUsageDatasetFromCurve(pastPatchedCurve, {
-          baseKind: buildInputs.baseKind,
-          mode: buildInputs.mode,
-          canonicalEndMonth: buildInputs.canonicalEndMonth,
-          notes: buildInputs.notes,
-          filledMonths: buildInputs.filledMonths,
-          monthlyTargetConstructionDiagnostics: buildInputs.monthlyTargetConstructionDiagnostics ?? null,
-          manualMonthlyInputState: buildInputs.manualMonthlyInputState ?? null,
-          sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
-        }, {
-          timezone: (buildInputs as any).timezone ?? undefined,
-          useUtcMonth: true,
-          simulatedDayResults: pastSimulatedDayResults,
-        })
-      : shouldUseSharedPastProducer && simMode === "MANUAL_TOTALS"
-        ? (() => {
-            throw new Error("manual_monthly_direct_builder_disabled_for_truth_path");
-          })()
-        : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+  const datasetPackagingStartedAt = Date.now();
+  logSimPipelineEvent("recalc_post_baseline_dataset_packaging_start", {
+    correlationId: args.correlationId,
+    houseId,
+    sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+    scenarioId,
+    mode: simMode,
+    buildInputsHash,
+    reusedSharedDataset: pastPatchedDataset != null,
+    reusedSharedCurve: pastPatchedDataset == null && pastPatchedCurve != null,
+    source: "recalcSimulatorBuildImpl",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  let dataset:
+    | ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs>
+    | ReturnType<typeof buildSimulatedUsageDatasetFromCurve>;
+  try {
+    dataset =
+      pastPatchedDataset != null
+        ? pastPatchedDataset
+        : pastPatchedCurve != null
+        ? buildSimulatedUsageDatasetFromCurve(pastPatchedCurve, {
+            baseKind: buildInputs.baseKind,
+            mode: buildInputs.mode,
+            canonicalEndMonth: buildInputs.canonicalEndMonth,
+            notes: buildInputs.notes,
+            filledMonths: buildInputs.filledMonths,
+            monthlyTargetConstructionDiagnostics: buildInputs.monthlyTargetConstructionDiagnostics ?? null,
+            manualMonthlyInputState: buildInputs.manualMonthlyInputState ?? null,
+            sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
+          }, {
+            timezone: (buildInputs as any).timezone ?? undefined,
+            useUtcMonth: true,
+            simulatedDayResults: pastSimulatedDayResults,
+          })
+        : shouldUseSharedPastProducer && simMode === "MANUAL_TOTALS"
+          ? (() => {
+              throw new Error("manual_monthly_direct_builder_disabled_for_truth_path");
+            })()
+          : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+    logSimPipelineEvent("recalc_post_baseline_dataset_packaging_success", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      buildInputsHash,
+      durationMs: Date.now() - datasetPackagingStartedAt,
+      intervalCount: Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15.length : 0,
+      dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
+      monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+  } catch (e) {
+    logSimPipelineEvent("recalc_post_baseline_dataset_packaging_failure", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      buildInputsHash,
+      durationMs: Date.now() - datasetPackagingStartedAt,
+      failureMessage: e instanceof Error ? e.message : String(e),
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    throw e;
+  }
   const sourceDerivedMonthlyTotalsKwhByMonth =
     built.source?.actualMonthlyAnchorsByMonth && typeof built.source.actualMonthlyAnchorsByMonth === "object"
       ? (built.source.actualMonthlyAnchorsByMonth as Record<string, number>)
@@ -5487,6 +5550,19 @@ async function recalcSimulatorBuildImpl(args: {
         source: "recalcSimulatorBuildImpl",
         memoryRssMb: getMemoryRssMb(),
       });
+      logSimPipelineEvent("recalc_artifact_ready_for_response", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash,
+        intervalCount: intervals15.length,
+        dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
+        monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
     } catch (e) {
       logSimPipelineEvent("recalc_artifact_persist_failure", {
         correlationId: args.correlationId,
@@ -5508,12 +5584,14 @@ async function recalcSimulatorBuildImpl(args: {
     }
   }
 
-  // Persist usage buckets for Past/Future so plan costing can use simulated usage.
-  if (
-    scenarioKey !== "BASELINE" &&
-    dataset?.usageBucketsByMonth &&
-    Object.keys(dataset.usageBucketsByMonth).length > 0
-  ) {
+  const runUsageBucketsPersistence = async () => {
+    if (
+      scenarioKey === "BASELINE" ||
+      !dataset?.usageBucketsByMonth ||
+      Object.keys(dataset.usageBucketsByMonth).length === 0
+    ) {
+      return;
+    }
     const usageBucketsStartedAt = Date.now();
     logSimPipelineEvent("recalc_usage_buckets_persist_start", {
       correlationId: args.correlationId,
@@ -5555,96 +5633,157 @@ async function recalcSimulatorBuildImpl(args: {
           memoryRssMb: getMemoryRssMb(),
         });
       });
-  }
+  };
 
+  const runIntervalSeriesPersistence = async () => {
+    const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+    if (intervals15.length === 0) return;
+    const validIntervals = intervals15
+      .map((row: any) => {
+        const tsUtc = String(row?.timestamp ?? "");
+        const tsDate = new Date(tsUtc);
+        if (!Number.isFinite(tsDate.getTime())) return null;
+        return {
+          tsUtc,
+          tsDate,
+          kwh: Number(row?.kwh ?? 0),
+        };
+      })
+      .filter((row: { tsUtc: string; tsDate: Date; kwh: number } | null): row is { tsUtc: string; tsDate: Date; kwh: number } => row != null)
+      .sort((a, b) => a.tsDate.getTime() - b.tsDate.getTime());
+    if (validIntervals.length === 0) return;
+    const derivationVersion = String(
+      (buildInputs as any)?.versions?.smtShapeDerivationVersion ??
+        (buildInputs as any)?.versions?.intradayTemplateVersion ??
+        "v1"
+    );
+    const intervalSeriesStartedAt = Date.now();
+    logSimPipelineEvent("recalc_interval_series_persist_start", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      buildInputsHash,
+      intervalCount: validIntervals.length,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    try {
+      await saveIntervalSeries15m({
+        userId,
+        houseId,
+        kind: IntervalSeriesKind.PAST_SIM_BASELINE,
+        scenarioId,
+        anchorStartUtc: validIntervals[0].tsDate,
+        anchorEndUtc: validIntervals[validIntervals.length - 1].tsDate,
+        derivationVersion,
+        buildInputsHash,
+        intervals15: validIntervals.map((row) => ({ tsUtc: row.tsUtc, kwh: row.kwh })),
+      });
+      logSimPipelineEvent("recalc_interval_series_persist_success", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        buildInputsHash,
+        intervalCount: validIntervals.length,
+        durationMs: Date.now() - intervalSeriesStartedAt,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
+    } catch (e) {
+      logSimPipelineEvent("recalc_interval_series_persist_failure", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        buildInputsHash,
+        intervalCount: validIntervals.length,
+        durationMs: Date.now() - intervalSeriesStartedAt,
+        failureMessage: e instanceof Error ? e.message : String(e),
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      console.error("[usageSimulator/service] failed to persist PAST_SIM_BASELINE interval series", {
+        userId,
+        houseId,
+        scenarioId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
+  // Persist usage buckets for Past/Future so plan costing can use simulated usage.
   const shouldPersistPastSeries =
     args.persistPastSimBaseline === true &&
     scenario?.name === WORKSPACE_PAST_NAME &&
     (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS");
-  if (shouldPersistPastSeries) {
-    const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
-    if (intervals15.length > 0) {
-      const validIntervals = intervals15
-        .map((row: any) => {
-          const tsUtc = String(row?.timestamp ?? "");
-          const tsDate = new Date(tsUtc);
-          if (!Number.isFinite(tsDate.getTime())) return null;
-          return {
-            tsUtc,
-            tsDate,
-            kwh: Number(row?.kwh ?? 0),
-          };
-        })
-        .filter((row: { tsUtc: string; tsDate: Date; kwh: number } | null): row is { tsUtc: string; tsDate: Date; kwh: number } => row != null)
-        .sort((a, b) => a.tsDate.getTime() - b.tsDate.getTime());
-      if (validIntervals.length > 0) {
-        const derivationVersion = String(
-          (buildInputs as any)?.versions?.smtShapeDerivationVersion ??
-            (buildInputs as any)?.versions?.intradayTemplateVersion ??
-            "v1"
-        );
-        const intervalSeriesStartedAt = Date.now();
-        logSimPipelineEvent("recalc_interval_series_persist_start", {
-          correlationId: args.correlationId,
-          houseId,
-          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
-          scenarioId,
-          mode: simMode,
-          buildInputsHash,
-          intervalCount: validIntervals.length,
-          source: "recalcSimulatorBuildImpl",
-          memoryRssMb: getMemoryRssMb(),
-        });
-        try {
-          await saveIntervalSeries15m({
-            userId,
-            houseId,
-            kind: IntervalSeriesKind.PAST_SIM_BASELINE,
-            scenarioId,
-            anchorStartUtc: validIntervals[0].tsDate,
-            anchorEndUtc: validIntervals[validIntervals.length - 1].tsDate,
-            derivationVersion,
-            buildInputsHash,
-            intervals15: validIntervals.map((row) => ({ tsUtc: row.tsUtc, kwh: row.kwh })),
-          });
-          logSimPipelineEvent("recalc_interval_series_persist_success", {
-            correlationId: args.correlationId,
-            houseId,
-            sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
-            scenarioId,
-            mode: simMode,
-            buildInputsHash,
-            intervalCount: validIntervals.length,
-            durationMs: Date.now() - intervalSeriesStartedAt,
-            source: "recalcSimulatorBuildImpl",
-            memoryRssMb: getMemoryRssMb(),
-          });
-        } catch (e) {
-          logSimPipelineEvent("recalc_interval_series_persist_failure", {
-            correlationId: args.correlationId,
-            houseId,
-            sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
-            scenarioId,
-            mode: simMode,
-            buildInputsHash,
-            intervalCount: validIntervals.length,
-            durationMs: Date.now() - intervalSeriesStartedAt,
-            failureMessage: e instanceof Error ? e.message : String(e),
-            source: "recalcSimulatorBuildImpl",
-            memoryRssMb: getMemoryRssMb(),
-          });
-          // Persistence of derived interval artifacts must not block recalc responses.
-          console.error("[usageSimulator/service] failed to persist PAST_SIM_BASELINE interval series", {
-            userId,
-            houseId,
-            scenarioId,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      }
+  const shouldDeferManualPostArtifactPersistence =
+    isLeanManualTotalsMode(simMode) && canonicalArtifactInputHash != null;
+  if (shouldDeferManualPostArtifactPersistence) {
+    if (scenarioKey !== "BASELINE" && dataset?.usageBucketsByMonth && Object.keys(dataset.usageBucketsByMonth).length > 0) {
+      logSimPipelineEvent("recalc_usage_buckets_persist_deferred", {
+        correlationId: args.correlationId,
+        houseId,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash: canonicalArtifactInputHash,
+        bucketMonthCount: Object.keys(dataset.usageBucketsByMonth).length,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      void runUsageBucketsPersistence();
+    }
+    if (shouldPersistPastSeries) {
+      logSimPipelineEvent("recalc_interval_series_persist_deferred", {
+        correlationId: args.correlationId,
+        houseId,
+        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+        scenarioId,
+        mode: simMode,
+        artifactInputHash: canonicalArtifactInputHash,
+        source: "recalcSimulatorBuildImpl",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      void runIntervalSeriesPersistence();
+    }
+  } else {
+    await runUsageBucketsPersistence();
+    if (shouldPersistPastSeries) {
+      await runIntervalSeriesPersistence();
     }
   }
 
+  logSimPipelineEvent("recalc_result_packaging_start", {
+    correlationId: args.correlationId,
+    houseId,
+    sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+    scenarioId,
+    mode: simMode,
+    buildInputsHash,
+    artifactInputHash: canonicalArtifactInputHash,
+    readbackPending: shouldDeferManualPostArtifactPersistence,
+    source: "recalcSimulatorBuildImpl",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  logSimPipelineEvent("recalc_result_packaging_success", {
+    correlationId: args.correlationId,
+    houseId,
+    sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+    scenarioId,
+    mode: simMode,
+    buildInputsHash,
+    artifactInputHash: canonicalArtifactInputHash,
+    readbackPending: shouldDeferManualPostArtifactPersistence,
+    intervalCount: Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15.length : 0,
+    dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
+    monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
+    source: "recalcSimulatorBuildImpl",
+    memoryRssMb: getMemoryRssMb(),
+  });
   return {
     ok: true,
     houseId,

@@ -366,15 +366,28 @@ export default function ManualMonthlyLab() {
           });
           while (Date.now() - started < LAB_RUN_MAX_WAIT_MS) {
             await sleep(LAB_RUN_POLL_MS);
+            console.info("[ManualMonthlyLab] manual readback poll tick", {
+              correlationId: pollPlan.correlationId,
+              exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+              elapsedMs: Date.now() - started,
+            });
             const readAttempt = await callRouteResult("read_result", {
               correlationId: pollPlan.correlationId ?? undefined,
               exactArtifactInputHash: pollPlan.exactArtifactInputHash ?? undefined,
             });
             if (readAttempt.ok) {
+              console.info("[ManualMonthlyLab] manual readback artifact ready", {
+                correlationId: pollPlan.correlationId,
+                exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+              });
               setResultJson(readAttempt.json);
               latestMessage = "Past Sim completed and Stage 2 refreshed.";
               setStatus(latestMessage);
               console.info("[ManualMonthlyLab] manual readback poll success", {
+                correlationId: pollPlan.correlationId,
+                exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+              });
+              console.info("[ManualMonthlyLab] manual readback ui ready", {
                 correlationId: pollPlan.correlationId,
                 exactArtifactInputHash: pollPlan.exactArtifactInputHash,
               });
@@ -402,7 +415,14 @@ export default function ManualMonthlyLab() {
           }
         }
       }
-      if (json.executionMode === "inline") setStatus("Past Sim completed and Stage 2 refreshed.");
+      if (json.executionMode === "inline") {
+        setStatus("Past Sim completed and Stage 2 refreshed.");
+        console.info("[ManualMonthlyLab] manual recalc inline terminal state", {
+          correlationId: json.correlationId ?? null,
+          exactArtifactInputHash: json.canonicalArtifactInputHash ?? null,
+          readbackPending: json.readbackPending ?? null,
+        });
+      }
     } catch (err: any) {
       setError(err?.message ?? "Recalc failed.");
     } finally {

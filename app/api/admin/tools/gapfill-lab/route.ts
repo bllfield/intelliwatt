@@ -1703,7 +1703,7 @@ export async function POST(req: NextRequest) {
           jobId: dispatched.jobId,
           memoryRssMb: getMemoryRssMb(),
         });
-        return NextResponse.json({
+        const response = NextResponse.json({
           ok: true,
           action: "run_test_home_canonical_recalc",
           mode: "canonical_test_home_lab",
@@ -1719,6 +1719,21 @@ export async function POST(req: NextRequest) {
           effectiveTravelRangesSource:
             usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
         });
+        logSimPipelineEvent("admin_lab_manual_recalc_response_sent", {
+          correlationId: dispatched.correlationId,
+          source: "gapfill_lab",
+          action: "run_test_home_canonical_recalc",
+          userId: labOwnerUser.id,
+          sourceHouseId: sourceHouse.id,
+          testHomeId: testHomeHouse.id,
+          scenarioId: String(pastScenario.id),
+          executionMode: "droplet_async",
+          readbackPending: true,
+          jobId: dispatched.jobId,
+          httpStatus: response.status,
+          memoryRssMb: getMemoryRssMb(),
+        });
+        return response;
       }
       const canonicalArtifactInputHash =
         dispatched.result.ok &&
@@ -1739,7 +1754,7 @@ export async function POST(req: NextRequest) {
         artifactInputHash: canonicalArtifactInputHash,
         memoryRssMb: getMemoryRssMb(),
       });
-      return NextResponse.json({
+      const response = NextResponse.json({
         ok: true,
         action: "run_test_home_canonical_recalc",
         mode: "canonical_test_home_lab",
@@ -1758,6 +1773,21 @@ export async function POST(req: NextRequest) {
           usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
         result: dispatched.result,
       });
+      logSimPipelineEvent("admin_lab_manual_recalc_response_sent", {
+        correlationId: dispatched.correlationId,
+        source: "gapfill_lab",
+        action: "run_test_home_canonical_recalc",
+        userId: labOwnerUser.id,
+        sourceHouseId: sourceHouse.id,
+        testHomeId: testHomeHouse.id,
+        scenarioId: String(pastScenario.id),
+        executionMode: "inline",
+        readbackPending: true,
+        artifactInputHash: canonicalArtifactInputHash,
+        httpStatus: response.status,
+        memoryRssMb: getMemoryRssMb(),
+      });
+      return response;
     }
 
     let recalcOut: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
@@ -2533,7 +2563,7 @@ export async function POST(req: NextRequest) {
       sourceUserId: String(sourceHouse.userId ?? link.sourceUserId),
       testHomeHouse,
       scenarioId: String(pastScenario?.id ?? ""),
-      correlationId: null,
+      correlationId,
       testUsageInputMode,
       weatherKind,
       gapfillWeatherLogic,
@@ -2570,6 +2600,18 @@ export async function POST(req: NextRequest) {
         memoryRssMb: getMemoryRssMb(),
       }
     );
+    logSimPipelineEvent("admin_lab_manual_readback_response_sent", {
+      correlationId,
+      source: "gapfill_lab",
+      action: "read_test_home_canonical_result",
+      userId: labOwnerUser.id,
+      sourceHouseId: sourceHouse.id,
+      testHomeId: testHomeHouse.id,
+      scenarioId: String(pastScenario?.id ?? ""),
+      artifactInputHash: exactArtifactInputHash,
+      httpStatus: response.status,
+      memoryRssMb: getMemoryRssMb(),
+    });
     return response;
   }
 

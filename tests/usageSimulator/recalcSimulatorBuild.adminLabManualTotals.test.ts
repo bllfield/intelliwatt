@@ -26,6 +26,7 @@ const saveCachedPastDataset = vi.fn();
 const getCachedPastDataset = vi.fn();
 const deleteCachedPastDatasetsForScenario = vi.fn();
 const saveIntervalSeries15m = vi.fn();
+const upsertSimulatedUsageBuckets = vi.fn();
 const computePastInputHash = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const computePastWeatherIdentity = vi.fn();
@@ -113,6 +114,10 @@ vi.mock("@/modules/usageSimulator/pastCache", () => ({
 
 vi.mock("@/lib/usage/intervalSeriesRepo", () => ({
   saveIntervalSeries15m: (...args: any[]) => saveIntervalSeries15m(...args),
+}));
+
+vi.mock("@/lib/usage/simulatedUsageBuckets", () => ({
+  upsertSimulatedUsageBuckets: (...args: any[]) => upsertSimulatedUsageBuckets(...args),
 }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
@@ -215,6 +220,7 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     getCachedPastDataset.mockResolvedValue(null);
     deleteCachedPastDatasetsForScenario.mockResolvedValue(0);
     saveIntervalSeries15m.mockResolvedValue({ seriesId: "series-1" });
+    upsertSimulatedUsageBuckets.mockResolvedValue(undefined);
     computePastInputHash.mockReturnValue("input-hash-1");
     getIntervalDataFingerprint.mockResolvedValue("interval-fingerprint-1");
     computePastWeatherIdentity.mockResolvedValue("weather-identity-1");
@@ -236,6 +242,7 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       meta: {},
       daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
       monthly: [{ month: "2025-03", kwh: 1.5 }],
+      usageBucketsByMonth: { "2025-03": { "kwh.m.all.total": 1.5 } },
       series: {
         intervals15: [
           { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
@@ -751,5 +758,72 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
       scenarioId: "past-s1",
       excludeInputHash: "input-hash-1",
     });
+  }, 15000);
+
+  it("returns MANUAL_TOTALS recalc success without waiting on post-artifact bucket or interval persistence", async () => {
+    upsertSimulatedUsageBuckets.mockImplementationOnce(() => new Promise(() => {}));
+    saveIntervalSeries15m.mockImplementationOnce(() => new Promise(() => {}));
+    manualUsageInputFindUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "ANNUAL",
+        annualKwh: 1200,
+      },
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1.5,
+          start: "2025-03-30",
+          end: "2026-03-29",
+        },
+        meta: {},
+        daily: [{ date: "2025-03-30", kwh: 1.5, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 1.5 }],
+        usageBucketsByMonth: { "2025-03": { "kwh.m.all.total": 1.5 } },
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-30T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2025-03-30T00:15:00.000Z", kwh: 0.75 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        monthlyTotals: [{ month: "2025-03", kwh: 1.5 }],
+      },
+      simulatedDayResults: [],
+    });
+    getCachedPastDataset.mockResolvedValueOnce({
+      intervalsCodec: "v1_delta_varint",
+    });
+
+    const out = await Promise.race([
+      recalcSimulatorBuild({
+        userId: "u1",
+        houseId: "test-home-1",
+        actualContextHouseId: "source-home-1",
+        esiid: "E1",
+        mode: "MANUAL_TOTALS",
+        scenarioId: "past-s1",
+        persistPastSimBaseline: true,
+        correlationId: "cid-manual-fast-return",
+        runContext: {
+          callerLabel: "admin_manual_monthly_lab",
+          buildPathKind: "recalc",
+          persistRequested: true,
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("MANUAL_TOTALS waited on post-artifact persistence")), 100)
+      ),
+    ]);
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.canonicalArtifactInputHash).toBe("input-hash-1");
+    }
+    expect(upsertSimulatedUsageBuckets).toHaveBeenCalledTimes(1);
+    expect(saveIntervalSeries15m).toHaveBeenCalledTimes(1);
   }, 15000);
 });

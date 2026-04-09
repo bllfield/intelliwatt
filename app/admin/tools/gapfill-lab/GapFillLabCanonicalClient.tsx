@@ -728,6 +728,10 @@ export default function GapFillLabCanonicalClient() {
   async function pollForCanonicalManualUsageReadback(extra: Record<string, unknown>): Promise<RunResult> {
     for (;;) {
       await new Promise((resolve) => window.setTimeout(resolve, GAPFILL_LAB_READBACK_POLL_MS));
+      console.info("[GapFillLabCanonicalClient] manual readback poll tick", {
+        correlationId: typeof extra.correlationId === "string" ? extra.correlationId : null,
+        exactArtifactInputHash: typeof extra.exactArtifactInputHash === "string" ? extra.exactArtifactInputHash : null,
+      });
       const readback = await runAction(
         "read_test_home_canonical_result",
         extra,
@@ -761,13 +765,26 @@ export default function GapFillLabCanonicalClient() {
         exactArtifactInputHash: pollPlan.exactArtifactInputHash,
         executionMode: trigger.executionMode ?? null,
       });
+      console.info("[GapFillLabCanonicalClient] manual readback poll artifact-ready contract", {
+        correlationId: pollPlan.correlationId,
+        exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+        readbackPending: trigger.readbackPending ?? null,
+      });
       const readback = await pollForCanonicalManualUsageReadback({
         ...extra,
         correlationId: pollPlan.correlationId ?? undefined,
         exactArtifactInputHash: pollPlan.exactArtifactInputHash ?? undefined,
       });
       if (readback.ok) {
+        console.info("[GapFillLabCanonicalClient] manual readback artifact ready", {
+          correlationId: pollPlan.correlationId,
+          exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+        });
         console.info("[GapFillLabCanonicalClient] manual readback poll success", {
+          correlationId: pollPlan.correlationId,
+          exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+        });
+        console.info("[GapFillLabCanonicalClient] manual readback ui ready", {
           correlationId: pollPlan.correlationId,
           exactArtifactInputHash: pollPlan.exactArtifactInputHash,
         });
