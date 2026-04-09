@@ -491,6 +491,31 @@ export function renormalizeManualBillPeriodIntervals(args: {
     }
     return out;
   };
+  const timezoneLabel = String(args.timezone ?? "").trim() || "UTC";
+  const useUtcFastPath = timezoneLabel.toUpperCase() === "UTC" || timezoneLabel === "Etc/UTC";
+  const dateKeyFormatter = useUtcFastPath
+    ? null
+    : new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezoneLabel,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+  const resolveDateKey = (timestamp: string): string => {
+    const ts = String(timestamp ?? "").trim();
+    if (useUtcFastPath) return ts.slice(0, 10);
+    try {
+      const d = new Date(ts);
+      if (!Number.isFinite(d.getTime()) || !dateKeyFormatter) return ts.slice(0, 10);
+      const parts = dateKeyFormatter.formatToParts(d);
+      const year = parts.find((part) => part.type === "year")?.value ?? "";
+      const month = parts.find((part) => part.type === "month")?.value ?? "";
+      const day = parts.find((part) => part.type === "day")?.value ?? "";
+      return `${year}-${month}-${day}`;
+    } catch {
+      return ts.slice(0, 10);
+    }
+  };
   const eligiblePeriods = args.manualBillPeriods.filter((period) => period.eligibleForConstraint !== false);
   if (eligiblePeriods.length === 0 || !args.patchedIntervals.length) return;
 
@@ -499,10 +524,8 @@ export function renormalizeManualBillPeriodIntervals(args: {
     eligibleBillPeriodCount: eligiblePeriods.length,
   });
   const summedDayTotalsByDate = new Map<string, number>();
-  const patchedIntervalDateKeyByRef = new WeakMap<object, string>();
   for (const interval of args.patchedIntervals) {
-    const dateKey = dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone);
-    patchedIntervalDateKeyByRef.set(interval, dateKey);
+    const dateKey = resolveDateKey(String(interval.timestamp ?? ""));
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
       summedDayTotalsByDate.set(dateKey, (summedDayTotalsByDate.get(dateKey) ?? 0) + (Number(interval.kwh) || 0));
     }
@@ -553,9 +576,7 @@ export function renormalizeManualBillPeriodIntervals(args: {
   });
   let scaledIntervalCount = 0;
   for (const interval of args.patchedIntervals) {
-    const factorValue = scaleMultiplierByDateKey.get(
-      patchedIntervalDateKeyByRef.get(interval) ?? dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone)
-    ) ?? 1;
+    const factorValue = scaleMultiplierByDateKey.get(resolveDateKey(String(interval.timestamp ?? ""))) ?? 1;
     if (!Number.isFinite(factorValue) || Math.abs(factorValue - 1) <= 1e-9) continue;
     interval.kwh = (Number(interval.kwh) || 0) * factorValue;
     scaledIntervalCount += 1;
@@ -569,6 +590,7 @@ export function renormalizeManualBillPeriodIntervals(args: {
     scaledDateKeyCount: scaleMultiplierByDateKey.size,
   });
   let scaledDayResultCount = 0;
+  const patchedIntervalRefSet = new Set<object>(args.patchedIntervals as object[]);
   for (const result of args.dayResults) {
     const dateKey = String(result.localDate ?? "").slice(0, 10);
     const intervalList = Array.isArray(result.intervals) ? result.intervals : [];
@@ -580,14 +602,9 @@ export function renormalizeManualBillPeriodIntervals(args: {
       }
       for (let index = 0; index < intervalList.length; index += 1) {
         const interval = intervalList[index]!;
-        const cachedDateKey =
-          typeof interval === "object" && interval != null
-            ? patchedIntervalDateKeyByRef.get(interval as object)
-            : undefined;
-        const factorValue = scaleMultiplierByDateKey.get(
-          cachedDateKey ?? dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone)
-        ) ?? 1;
-        const sharesPatchedRef = cachedDateKey != null;
+        const intervalDateKey = resolveDateKey(String(interval.timestamp ?? ""));
+        const factorValue = scaleMultiplierByDateKey.get(intervalDateKey) ?? 1;
+        const sharesPatchedRef = typeof interval === "object" && interval != null && patchedIntervalRefSet.has(interval as object);
         if (!sharesPatchedRef && Number.isFinite(factorValue) && Math.abs(factorValue - 1) > 1e-9) {
           interval.kwh = (Number(interval.kwh) || 0) * factorValue;
           resultTouched = true;

@@ -1233,6 +1233,25 @@ function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: any): CanonicalA
   return out;
 }
 
+export function releaseSimulatedDayResultBuffers(results: SimulatedDayResult[] | undefined): {
+  releasedDayCount: number;
+  releasedIntervalCount: number;
+} {
+  let releasedDayCount = 0;
+  let releasedIntervalCount = 0;
+  for (const result of results ?? []) {
+    const intervals = Array.isArray(result?.intervals) ? result.intervals : [];
+    const intervals15 = Array.isArray(result?.intervals15) ? result.intervals15 : [];
+    const shape96Used = Array.isArray((result as any)?.shape96Used) ? (result as any).shape96Used : [];
+    if (intervals.length > 0 || intervals15.length > 0 || shape96Used.length > 0) releasedDayCount += 1;
+    releasedIntervalCount += intervals.length;
+    if (intervals.length > 0) intervals.length = 0;
+    if (intervals15.length > 0) intervals15.length = 0;
+    if (shape96Used.length > 0) shape96Used.length = 0;
+  }
+  return { releasedDayCount, releasedIntervalCount };
+}
+
 /** Meta read scoped to explicit date keys only (compact compare_core: avoid building a full-year output map). */
 function readCanonicalArtifactSimulatedDayTotalsByDateForDateKeys(
   dataset: any,
@@ -5246,6 +5265,19 @@ async function recalcSimulatorBuildImpl(args: {
     lockboxRunContext: runContext,
     lockboxPerDayTrace: perDayTrace,
   };
+  const releasedSimulatedDayBuffers = releaseSimulatedDayResultBuffers(pastSimulatedDayResults);
+  pastSimulatedDayResults = undefined;
+  logSimPipelineEvent("recalc_simulated_day_buffer_release", {
+    correlationId: args.correlationId,
+    houseId,
+    sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+    scenarioId,
+    mode: simMode,
+    releasedDayCount: releasedSimulatedDayBuffers.releasedDayCount,
+    releasedIntervalCount: releasedSimulatedDayBuffers.releasedIntervalCount,
+    source: "recalcSimulatorBuildImpl",
+    memoryRssMb: getMemoryRssMb(),
+  });
 
   const persistBuildStartedAt = Date.now();
   logSimPipelineEvent("recalc_persist_build_start", {

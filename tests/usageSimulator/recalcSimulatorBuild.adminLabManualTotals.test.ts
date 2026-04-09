@@ -894,4 +894,87 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     expect(upsertSimulatedUsageBuckets).toHaveBeenCalledTimes(1);
     expect(saveIntervalSeries15m).toHaveBeenCalledTimes(1);
   }, 15000);
+
+  it("releases simulated day interval buffers before artifact persistence", async () => {
+    manualUsageInputFindUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-02-28",
+        monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+        statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+        travelRanges: [],
+      },
+    });
+    const simulatedDayResults = [
+      {
+        localDate: "2026-02-10",
+        simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" as const,
+        intervals: [
+          { timestamp: "2026-02-10T00:00:00.000Z", kwh: 0.4 },
+          { timestamp: "2026-02-10T00:15:00.000Z", kwh: 0.6 },
+        ],
+        intervals15: [0.4, 0.6],
+        intervalSumKwh: 1,
+        displayDayKwh: 1,
+        finalDayKwh: 1,
+        weatherAdjustedDayKwh: 1,
+        rawDayKwh: 1,
+        shape96Used: Array.from({ length: 96 }, () => 1 / 96),
+      },
+    ];
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 1,
+          start: "2026-02-10",
+          end: "2026-02-10",
+        },
+        meta: {
+          sharedProducerPathUsed: true,
+        },
+        daily: [{ date: "2026-02-10", kwh: 1, source: "SIMULATED" }],
+        monthly: [{ month: "2026-02", kwh: 1 }],
+        usageBucketsByMonth: { "2026-02": { "kwh.m.all.total": 1 } },
+        series: {
+          intervals15: [
+            { timestamp: "2026-02-10T00:00:00.000Z", kwh: 0.4 },
+            { timestamp: "2026-02-10T00:15:00.000Z", kwh: 0.6 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        monthlyTotals: [{ month: "2026-02", kwh: 1 }],
+      },
+      simulatedDayResults,
+    });
+    getCachedPastDataset.mockResolvedValueOnce({
+      intervalsCodec: "v1_delta_varint",
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "cid-manual-release-buffers",
+      runContext: {
+        callerLabel: "admin_manual_monthly_lab",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    expect(saveCachedPastDataset).toHaveBeenCalledTimes(1);
+    expect(simulatedDayResults[0]?.intervals).toHaveLength(0);
+    expect(simulatedDayResults[0]?.intervals15).toHaveLength(0);
+    expect(simulatedDayResults[0]?.shape96Used).toHaveLength(0);
+    expect(simulatedDayResults[0]?.finalDayKwh).toBe(1);
+    expect(simulatedDayResults[0]?.displayDayKwh).toBe(1);
+  });
 });

@@ -15,6 +15,50 @@ import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSi
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
 
+function summarizeObservabilityValue(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      entry == null ||
+      typeof entry === "string" ||
+      typeof entry === "number" ||
+      typeof entry === "boolean"
+    ) {
+      out[key] = entry;
+      continue;
+    }
+    if (Array.isArray(entry)) {
+      out[`${key}Count`] = entry.length;
+      if (entry.length > 0 && key.toLowerCase().includes("interval")) {
+        const first = entry[0] as Record<string, unknown> | undefined;
+        const last = entry[entry.length - 1] as Record<string, unknown> | undefined;
+        out[`${key}FirstTimestamp`] = typeof first?.timestamp === "string" ? first.timestamp : null;
+        out[`${key}LastTimestamp`] = typeof last?.timestamp === "string" ? last.timestamp : null;
+      }
+      continue;
+    }
+    if (entry instanceof Map) {
+      out[`${key}Count`] = entry.size;
+      continue;
+    }
+    if (typeof entry === "object") {
+      const nestedEntries = Object.entries(entry as Record<string, unknown>);
+      const allScalar =
+        nestedEntries.length > 0 &&
+        nestedEntries.every(([, nested]) =>
+          nested == null || typeof nested === "string" || typeof nested === "number" || typeof nested === "boolean"
+        );
+      if (allScalar && nestedEntries.length <= 6) {
+        out[key] = entry;
+      } else {
+        out[`${key}KeyCount`] = nestedEntries.length;
+      }
+    }
+  }
+  return out;
+}
+
 /** Per-day Past display: stitch/simulator-owned reasons (not GapFill compare). */
 export type PastSimulatedDaySourceDetail =
   | "SIMULATED_TRAVEL_VACANT"
@@ -1353,15 +1397,13 @@ export function buildSimulatedUsageDatasetFromCurve(
     try {
       const value = fn();
       if (options?.correlationId) {
-        const summary =
-          value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
         logSimPipelineEvent(`stitch_dataset_${step}_success`, {
           correlationId: options.correlationId,
           durationMs: Date.now() - startedAt,
           memoryRssMb: getMemoryRssMb(),
           source: "buildSimulatedUsageDatasetFromCurve",
           ...extra,
-          ...summary,
+          ...summarizeObservabilityValue(value),
         });
       }
       return value;
@@ -1402,6 +1444,8 @@ export function buildSimulatedUsageDatasetFromCurve(
         seriesIntervals15: curve.intervals as unknown as UsageSeriesPoint[],
         totalFromIntervals: round2(nextTotalFromIntervals),
         dailyKeyCount: nextDailyMap.size,
+        firstIntervalTimestamp: curve.intervals[0]?.timestamp ?? null,
+        lastIntervalTimestamp: curve.intervals[curve.intervals.length - 1]?.timestamp ?? null,
       };
     }
   );
