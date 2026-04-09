@@ -134,7 +134,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - The shared Stage 2 producer/artifact owner does not change for manual work, and the exact-interval donor-tuning path remains the authoritative shared path for `EXACT_INTERVALS`.
 - Admin-only manual-mode failures may include root-cause infrastructure detail such as Prisma pool exhaustion (`P2024`) so operators can tell pool starvation from a manual producer/data failure.
 - GapFill admin-only calculation-logic explanation UI now summarizes that persisted lockbox/artifact/diagnostics truth through `modules/usageSimulator/calculationLogicSummary.ts`; it is read-side only and does not create a second simulator path.
-- Manual low-data weather evidence wiring now exists in runtime, including daily weather classification, weather-scaled-day activation, daily totals, and curve amplitude response, but it is still too coarse for the full production target. Stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work, and `whole_home_only` remains a constrained manual path rather than alternate ownership semantics.
+- Manual low-data weather evidence wiring now exists in runtime, including daily weather classification, weather-scaled-day activation, daily totals, and curve amplitude response. Travel/vacant-touched bill periods are excluded from that evidence fitting and from totals-to-match shaping; only eligible non-travel bill periods drive the shared monthly evidence summary. Stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work, and `whole_home_only` remains a constrained manual path rather than alternate ownership semantics.
 - GapFill admin-only daily curve compare UI now summarizes scored/test-day 96-slot overlays, grouped representative curves, and slot metrics through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it is read-side only and does not create a second compare path.
 - Stage 1 preview supports both manual payload modes:
   - monthly preview = bill-period totals only
@@ -226,7 +226,7 @@ Current runtime note:
 - `MANUAL_TOTALS` now uses a lean low-data/manual branch inside the same shared engine.
 - It does not carry full actual interval payloads into the low-data baseline builder.
 - It does not auto-expand exact-interval-style keep-ref behavior across the manual window.
-- For manual monthly, the shared producer now computes `manualMonthlyWeatherEvidenceSummary` from Stage 1 monthly targets plus actual monthly weather pressure and uses that evidence for low-data daily weather response and curve-amplitude shaping.
+- For manual monthly, the shared producer now computes `manualMonthlyWeatherEvidenceSummary` from eligible non-travel Stage 1 bill-period targets plus actual weather pressure, excludes travel-touched bill periods from evidence fitting, and uses the resulting summary for low-data daily weather response, daily totals, and curve-amplitude shaping. The summary also records excluded travel bill periods, the driving weather inputs, and whole-home/prior fallback weight for shared diagnostics.
 - This is implemented for current manual-monthly runs. Further tuning of the evidence model remains open work.
 
 ## Home Details Intake and Usage (Authoritative)

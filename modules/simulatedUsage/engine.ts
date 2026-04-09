@@ -1123,6 +1123,85 @@ function buildLowDataSyntheticDayKwhByMonthDayType(profile: PastDayProfileLite):
   return out;
 }
 
+function applyLowDataWeatherEvidenceToProfile(args: {
+  profile: PastDayProfileLite;
+  weatherEvidenceSummary?: import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastLowDataWeatherEvidenceSummary | null;
+}): PastDayProfileLite {
+  const evidence = args.weatherEvidenceSummary ?? null;
+  if (!evidence || typeof evidence.byMonth !== "object" || evidence.byMonth == null) return args.profile;
+  const evidenceMonthKeys = Object.keys(evidence.byMonth).filter((value) => /^\d{4}-\d{2}$/.test(value));
+  if (evidenceMonthKeys.length === 0) return args.profile;
+  const monthKeys = Array.from(new Set([...args.profile.monthKeys, ...evidenceMonthKeys])).sort();
+  const nextWeekday: number[] = [];
+  const nextWeekend: number[] = [];
+  const nextWeekdayCount: Record<string, number> = {};
+  const nextWeekendCount: Record<string, number> = {};
+  const nextMonthOverallAvg: Record<string, number> = {};
+  const nextMonthOverallCount: Record<string, number> = {};
+  const idxOf = (monthKey: string) => args.profile.monthKeys.indexOf(monthKey);
+  for (let i = 0; i < monthKeys.length; i += 1) {
+    const monthKey = monthKeys[i]!;
+    const profileIdx = idxOf(monthKey);
+    const evidenceMonth = evidence.byMonth[monthKey] ?? null;
+    const weekdayCount =
+      args.profile.weekdayCountByMonth[monthKey] ??
+      (profileIdx >= 0 ? Number(args.profile.weekdayCountByMonth[monthKey] ?? 0) : 0) ??
+      WHOLE_HOME_SYNTHETIC_MIN_DAYS;
+    const weekendCount =
+      args.profile.weekendCountByMonth[monthKey] ??
+      (profileIdx >= 0 ? Number(args.profile.weekendCountByMonth[monthKey] ?? 0) : 0) ??
+      WHOLE_HOME_SYNTHETIC_MIN_DAYS;
+    const safeWeekdayCount = Math.max(1, Number(weekdayCount) || WHOLE_HOME_SYNTHETIC_MIN_DAYS);
+    const safeWeekendCount = Math.max(1, Number(weekendCount) || WHOLE_HOME_SYNTHETIC_MIN_DAYS);
+    const weekdayBase =
+      profileIdx >= 0
+        ? Number(
+            args.profile.avgKwhPerDayWeekdayByMonth[profileIdx] ??
+              args.profile.monthOverallAvgByMonth[monthKey] ??
+              0
+          ) || 0
+        : Number(args.profile.monthOverallAvgByMonth[monthKey] ?? 0) || 0;
+    const weekendBase =
+      profileIdx >= 0
+        ? Number(
+            args.profile.avgKwhPerDayWeekendByMonth[profileIdx] ??
+              args.profile.monthOverallAvgByMonth[monthKey] ??
+              0
+          ) || 0
+        : Number(args.profile.monthOverallAvgByMonth[monthKey] ?? 0) || 0;
+    const weightedBaseAvg =
+      (weekdayBase * safeWeekdayCount + weekendBase * safeWeekendCount) / Math.max(1, safeWeekdayCount + safeWeekendCount);
+    const baseAvg = weightedBaseAvg > 0 ? weightedBaseAvg : Math.max(weekdayBase, weekendBase, 0.01);
+    const targetAvgDailyKwh =
+      evidenceMonth && Number.isFinite(Number(evidenceMonth.targetAvgDailyKwh))
+        ? Math.max(0, Number(evidenceMonth.targetAvgDailyKwh) || 0)
+        : baseAvg;
+    const weekdayRatio = Math.min(1.18, Math.max(0.82, weekdayBase / Math.max(baseAvg, 1e-6)));
+    const weekendRatio = Math.min(1.18, Math.max(0.82, weekendBase / Math.max(baseAvg, 1e-6)));
+    const weightedRatioAvg =
+      (weekdayRatio * safeWeekdayCount + weekendRatio * safeWeekendCount) / Math.max(1, safeWeekdayCount + safeWeekendCount);
+    const normalizationScale = targetAvgDailyKwh / Math.max(weightedRatioAvg, 1e-6);
+    const weekdayValue = Math.max(0, weekdayRatio * normalizationScale);
+    const weekendValue = Math.max(0, weekendRatio * normalizationScale);
+    nextWeekday[i] = weekdayValue;
+    nextWeekend[i] = weekendValue;
+    nextWeekdayCount[monthKey] = safeWeekdayCount;
+    nextWeekendCount[monthKey] = safeWeekendCount;
+    nextMonthOverallCount[monthKey] = safeWeekdayCount + safeWeekendCount;
+    nextMonthOverallAvg[monthKey] =
+      (weekdayValue * safeWeekdayCount + weekendValue * safeWeekendCount) / Math.max(1, nextMonthOverallCount[monthKey]!);
+  }
+  return {
+    monthKeys,
+    avgKwhPerDayWeekdayByMonth: nextWeekday,
+    avgKwhPerDayWeekendByMonth: nextWeekend,
+    weekdayCountByMonth: nextWeekdayCount,
+    weekendCountByMonth: nextWeekendCount,
+    monthOverallAvgByMonth: nextMonthOverallAvg,
+    monthOverallCountByMonth: nextMonthOverallCount,
+  };
+}
+
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
@@ -1635,6 +1714,12 @@ export function buildPastSimulatedBaselineV1(args: {
       applianceProfile: args.applianceProfile,
     });
   }
+  if (useLowDataSyntheticContext && lowDataSyntheticContext?.weatherEvidenceSummary) {
+    finalProfile = applyLowDataWeatherEvidenceToProfile({
+      profile: finalProfile,
+      weatherEvidenceSummary: lowDataSyntheticContext.weatherEvidenceSummary,
+    });
+  }
   const lowDataSyntheticDayKwhByMonthDayType = useLowDataSyntheticContext
     ? buildLowDataSyntheticDayKwhByMonthDayType(finalProfile)
     : null;
@@ -1826,16 +1911,16 @@ export function buildPastSimulatedBaselineV1(args: {
       : finalProfile.monthKeys.length > 0
         ? finalProfile.monthKeys
         : monthKeysFromCanonical;
-  const shapeVariantsForContext = wholeHomeOnlyPrior
-    ? syntheticWholeHomeShapeVariants(
-        finalProfile.monthKeys.length > 0 ? finalProfile.monthKeys : monthKeysRef
-      )
-    : useLowDataSyntheticContext
-      ? buildLowDataSyntheticShapeVariants({
-          monthKeys: lowDataShapeMonthKeys,
-          intradayShape96: lowDataSyntheticContext?.intradayShape96 ?? null,
-          weekdayWeekendShape96: lowDataSyntheticContext?.weekdayWeekendShape96 ?? null,
-        })
+  const shapeVariantsForContext = useLowDataSyntheticContext
+    ? buildLowDataSyntheticShapeVariants({
+        monthKeys: lowDataShapeMonthKeys,
+        intradayShape96: lowDataSyntheticContext?.intradayShape96 ?? null,
+        weekdayWeekendShape96: lowDataSyntheticContext?.weekdayWeekendShape96 ?? null,
+      })
+    : wholeHomeOnlyPrior
+      ? syntheticWholeHomeShapeVariants(
+          finalProfile.monthKeys.length > 0 ? finalProfile.monthKeys : monthKeysRef
+        )
       : shapeVariants;
   const weatherDonorSamples: PastWeatherDonorSample[] = wholeHomeOnlyPrior || useLowDataSyntheticContext
     ? []

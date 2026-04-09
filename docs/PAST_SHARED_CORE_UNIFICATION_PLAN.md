@@ -22,6 +22,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - Shared Past Sim now derives shared bill-period targets before shaping:
   - non-excluded bill periods stay eligible parity constraints
   - travel-touched bill periods stay visible but non-scored
+  - for Manual Monthly, those travel-touched bill periods are also excluded from shared weather-evidence fitting and totals-to-match shaping; only eligible non-travel bill periods drive low-data manual evidence
 - Statement/bill ranges remain Stage 1 bill-period constraint inputs plus reconciliation metadata. They may shape Stage 2 constraints, but they are not promoted into travel-vacant ownership, incomplete-meter ownership, or silent exclusions.
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
 - Manual monthly user Past and admin manual-monthly lab are required to stay identical from normalized input submission through chart rendering.
@@ -60,7 +61,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Travel-touched bill periods are excluded from parity shaping rather than aborting the build.
   - Lean manual/low-data runs suppress full actual-interval carry-through, avoid exact-interval-style keep-ref expansion, and renormalize manual bill periods with a bounded indexed pass after baseline return.
   - Constrained manual non-travel modeled days now stay on manual-constrained ownership semantics even when the resolved constrained path lands on `whole_home_only`; explicit travel ranges remain the only travel/vacant ownership source.
-  - Manual-monthly runs now attach `manualMonthlyWeatherEvidenceSummary`, derived from Stage 1 monthly targets plus actual monthly weather pressure, to the shared artifact metadata.
+- Manual-monthly runs now attach `manualMonthlyWeatherEvidenceSummary`, derived from eligible non-travel Stage 1 bill-period targets plus actual weather pressure, to the shared artifact metadata. That summary also records excluded travel-touched bill periods, the weather inputs used, and whole-home/prior fallback weight.
 - **UsageDashboard / ManualMonthlyLab**
   - Stage 1 monthly surfaces render bill-period rows only.
   - Stage 1 annual surfaces render billing-date context plus annual total only, with no pre-sim chart.

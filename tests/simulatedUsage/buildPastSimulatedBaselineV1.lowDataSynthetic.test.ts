@@ -136,6 +136,28 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
           inputMonthKeys: ["2026-01"],
           missingMonthKeys: [],
           explicitTravelRangesUsed: [],
+          eligibleBillPeriodsUsed: [
+            {
+              id: "2026-01",
+              monthKey: "2026-01",
+              startDate: "2026-01-01",
+              endDate: "2026-01-31",
+              targetKwh: 620,
+            },
+          ],
+          excludedTravelTouchedBillPeriods: [],
+          monthlyWeatherPressureInputsUsed: [
+            {
+              billPeriodId: "2026-01",
+              monthKey: "2026-01",
+              avgDailyTargetKwh: 20,
+              avgHdd: 10,
+              avgCdd: 4,
+              avgTempC: 18,
+            },
+          ],
+          evidenceWeight: 0.7,
+          wholeHomePriorFallbackWeight: 0.3,
           baseloadShare: 0.35,
           hvacShare: 0.65,
           heatingSensitivity: 1.1,
@@ -144,6 +166,9 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
           byMonth: {
             "2026-01": {
               monthKey: "2026-01",
+              targetAvgDailyKwh: 20,
+              evidenceSource: "eligible_bill_period",
+              drivingBillPeriodIds: ["2026-01"],
               baseloadShare: 0.35,
               hvacShare: 0.65,
               heatingSensitivity: 1.1,
@@ -164,5 +189,121 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
     expect(out.dayResults[0]?.weatherModeUsed).toBe("heating");
     expect(out.dayResults[1]?.weatherModeUsed).toBe("cooling");
     expect(out.dayResults[0]?.finalDayKwh).not.toBeCloseTo(out.dayResults[1]?.finalDayKwh ?? 0, 6);
+  });
+
+  it("whole_home_only still honors low-data manual evidence month targets instead of falling back to prior-only plateaus", () => {
+    const janStartMs = new Date("2026-01-05T00:00:00.000Z").getTime();
+    const febStartMs = new Date("2026-02-05T00:00:00.000Z").getTime();
+    const janGrid = getDayGridTimestamps(janStartMs);
+    const febGrid = getDayGridTimestamps(febStartMs);
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals: [],
+      canonicalDayStartsMs: [janStartMs, febStartMs],
+      excludedDateKeys: new Set<string>([
+        dateKeyFromTimestamp(janGrid[0]!),
+        dateKeyFromTimestamp(febGrid[0]!),
+      ]),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map([
+        [dateKeyFromTimestamp(janGrid[0]!), { tAvgF: 38, tMinF: 30, tMaxF: 46, hdd65: 20, cdd65: 0 }],
+        [dateKeyFromTimestamp(febGrid[0]!), { tAvgF: 78, tMinF: 70, tMaxF: 86, hdd65: 0, cdd65: 12 }],
+      ]),
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-01": 24, "2026-02": 24 },
+        weekendAvgByMonthKey: { "2026-01": 18, "2026-02": 18 },
+      },
+      resolvedSimFingerprint: {
+        blendMode: "whole_home_only",
+        underlyingSourceMix: "whole_home_only",
+      } as any,
+      lowDataSyntheticContext: {
+        mode: "MANUAL_TOTALS",
+        canonicalMonthKeys: ["2026-01", "2026-02"],
+        intradayShape96: Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 2 : 1)),
+        weekdayWeekendShape96: {
+          weekday: Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 2 : 1)),
+          weekend: Array.from({ length: 96 }, () => 1),
+        },
+        weatherEvidenceSummary: {
+          inputMonthKeys: ["2026-01", "2026-02"],
+          missingMonthKeys: [],
+          explicitTravelRangesUsed: [{ startDate: "2026-01-10", endDate: "2026-01-12" }],
+          eligibleBillPeriodsUsed: [
+            {
+              id: "2026-02",
+              monthKey: "2026-02",
+              startDate: "2026-02-01",
+              endDate: "2026-02-28",
+              targetKwh: 560,
+            },
+          ],
+          excludedTravelTouchedBillPeriods: [
+            {
+              id: "2026-01",
+              monthKey: "2026-01",
+              startDate: "2026-01-01",
+              endDate: "2026-01-31",
+              targetKwh: 620,
+            },
+          ],
+          monthlyWeatherPressureInputsUsed: [
+            {
+              billPeriodId: "2026-02",
+              monthKey: "2026-02",
+              avgDailyTargetKwh: 20,
+              avgHdd: 0,
+              avgCdd: 12,
+              avgTempC: 24,
+            },
+          ],
+          evidenceWeight: 0.45,
+          wholeHomePriorFallbackWeight: 0.55,
+          baseloadShare: 0.38,
+          hvacShare: 0.62,
+          heatingSensitivity: 1.05,
+          coolingSensitivity: 1.1,
+          dailyWeatherResponsiveness: "weather_driven",
+          byMonth: {
+            "2026-01": {
+              monthKey: "2026-01",
+              targetAvgDailyKwh: 11,
+              evidenceSource: "inferred_from_eligible_periods",
+              drivingBillPeriodIds: [],
+              baseloadShare: 0.38,
+              hvacShare: 0.62,
+              heatingSensitivity: 1.05,
+              coolingSensitivity: 1.1,
+              referenceDailyHdd: 18,
+              referenceDailyCdd: 0,
+              referenceAvgTempC: 4,
+            },
+            "2026-02": {
+              monthKey: "2026-02",
+              targetAvgDailyKwh: 20,
+              evidenceSource: "eligible_bill_period",
+              drivingBillPeriodIds: ["2026-02"],
+              baseloadShare: 0.38,
+              hvacShare: 0.62,
+              heatingSensitivity: 1.05,
+              coolingSensitivity: 1.1,
+              referenceDailyHdd: 0,
+              referenceDailyCdd: 12,
+              referenceAvgTempC: 24,
+            },
+          },
+        },
+      },
+    });
+
+    const janDay = out.dayResults.find((row) => row.localDate === "2026-01-05");
+    const febDay = out.dayResults.find((row) => row.localDate === "2026-02-05");
+    expect(janDay?.targetDayKwhBeforeWeather).toBeDefined();
+    expect(febDay?.targetDayKwhBeforeWeather).toBeDefined();
+    expect(febDay!.targetDayKwhBeforeWeather).toBeGreaterThan(janDay!.targetDayKwhBeforeWeather!);
+    expect(janDay?.shapeVariantUsed).not.toBe("uniform_fallback");
+    expect(febDay?.shapeVariantUsed).not.toBe("uniform_fallback");
   });
 });

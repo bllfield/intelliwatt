@@ -93,6 +93,9 @@ export type PastModeledDaySelectionStrategy = "calendar_first" | "weather_donor_
 
 export type PastLowDataWeatherEvidenceMonth = {
   monthKey: string;
+  targetAvgDailyKwh: number;
+  evidenceSource: "eligible_bill_period" | "inferred_from_eligible_periods";
+  drivingBillPeriodIds: string[];
   baseloadShare: number;
   hvacShare: number;
   heatingSensitivity: number;
@@ -106,6 +109,30 @@ export type PastLowDataWeatherEvidenceSummary = {
   inputMonthKeys: string[];
   missingMonthKeys: string[];
   explicitTravelRangesUsed: Array<{ startDate: string; endDate: string }>;
+  eligibleBillPeriodsUsed: Array<{
+    id: string;
+    monthKey: string;
+    startDate: string;
+    endDate: string;
+    targetKwh: number;
+  }>;
+  excludedTravelTouchedBillPeriods: Array<{
+    id: string;
+    monthKey: string;
+    startDate: string;
+    endDate: string;
+    targetKwh: number | null;
+  }>;
+  monthlyWeatherPressureInputsUsed: Array<{
+    billPeriodId: string;
+    monthKey: string;
+    avgDailyTargetKwh: number;
+    avgHdd: number;
+    avgCdd: number;
+    avgTempC: number | null;
+  }>;
+  evidenceWeight: number;
+  wholeHomePriorFallbackWeight: number;
   baseloadShare: number;
   hvacShare: number;
   heatingSensitivity: number;

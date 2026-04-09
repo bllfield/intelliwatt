@@ -171,8 +171,12 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   homeProfile: Record<string, unknown> | null;
   applianceProfile: Record<string, unknown> | null;
 }): PastLowDataWeatherEvidenceSummary | null {
-  type MonthlyWeatherEvidenceRow = {
-    month: string;
+  type BillPeriodWeatherEvidenceRow = {
+    id: string;
+    monthKey: string;
+    startDate: string;
+    endDate: string;
+    targetKwh: number;
     avgDailyTarget: number;
     avgHdd: number;
     avgCdd: number;
@@ -180,45 +184,95 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   };
   if (args.buildInputs.mode !== "MANUAL_TOTALS") return null;
   if (String((args.manualUsagePayload as any)?.mode ?? "").trim() !== "MONTHLY") return null;
-
-  const diagnostics = Array.isArray((args.buildInputs as any)?.monthlyTargetConstructionDiagnostics)
-    ? (args.buildInputs as any).monthlyTargetConstructionDiagnostics
-    : [];
   const inputState = ((args.buildInputs as any)?.manualMonthlyInputState ?? null) as
     | { enteredMonthKeys?: string[]; missingMonthKeys?: string[] }
     | null;
-  const rows: MonthlyWeatherEvidenceRow[] = diagnostics
-    .map((row: any) => {
-      const month = String(row?.month ?? "").trim();
-      const normalizedMonthTarget = Number(row?.normalizedMonthTarget);
-      if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(normalizedMonthTarget)) return null;
-      if (String(row?.monthlyTargetBuildMethod ?? "") === "missing_user_manual_month_fill_later") return null;
-      const monthDateKeys = Array.from(args.weatherByDateKey.keys()).filter((dateKey) => dateKey.startsWith(`${month}-`));
-      const daysInMonth = daysInMonthFromYearMonth(month);
-      const monthRows = monthDateKeys
-        .map((dateKey) => args.weatherByDateKey.get(dateKey))
-        .filter((value): value is NonNullable<typeof value> => Boolean(value));
-      const avgHdd =
-        monthRows.length > 0
-          ? monthRows.reduce((sum, value) => sum + (Number(value?.hdd65) || 0), 0) / monthRows.length
-          : 0;
-      const avgCdd =
-        monthRows.length > 0
-          ? monthRows.reduce((sum, value) => sum + (Number(value?.cdd65) || 0), 0) / monthRows.length
-          : 0;
-      const avgTempC =
-        monthRows.length > 0
-          ? monthRows.reduce((sum, value) => sum + (((Number(value?.tAvgF) || 0) - 32) * (5 / 9)), 0) / monthRows.length
-          : null;
+
+  const manualBillPeriods = Array.isArray((args.buildInputs as any)?.manualBillPeriods)
+    ? ((args.buildInputs as any).manualBillPeriods as Array<{
+        id?: unknown;
+        month?: unknown;
+        startDate?: unknown;
+        endDate?: unknown;
+        enteredKwh?: unknown;
+        eligibleForConstraint?: unknown;
+        exclusionReason?: unknown;
+      }>)
+    : [];
+  const manualBillPeriodTotalsKwhById =
+    (((args.buildInputs as any)?.manualBillPeriodTotalsKwhById ?? null) as Record<string, number> | null) ?? {};
+  const canonicalMonths = Array.isArray((args.buildInputs as any)?.canonicalMonths)
+    ? ((args.buildInputs as any).canonicalMonths as unknown[]).map((value) => String(value))
+    : [];
+  const listUtcDateKeysInclusive = (startDate: string, endDate: string): string[] => {
+    const out: string[] = [];
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${endDate}T00:00:00.000Z`);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) return out;
+    for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 24 * 60 * 60 * 1000) {
+      out.push(new Date(cursor).toISOString().slice(0, 10));
+    }
+    return out;
+  };
+  const aggregateWeatherForDateKeys = (dateKeys: string[]) => {
+    let count = 0;
+    let hddSum = 0;
+    let cddSum = 0;
+    let tempCSum = 0;
+    for (const dateKey of dateKeys) {
+      const row = args.weatherByDateKey.get(dateKey);
+      if (!row) continue;
+      count += 1;
+      hddSum += Number(row?.hdd65) || 0;
+      cddSum += Number(row?.cdd65) || 0;
+      tempCSum += ((Number(row?.tAvgF) || 0) - 32) * (5 / 9);
+    }
+    if (count <= 0) return null;
+    return {
+      avgHdd: hddSum / count,
+      avgCdd: cddSum / count,
+      avgTempC: tempCSum / count,
+      dayCount: count,
+    };
+  };
+  const monthWeatherAggregateByMonth = new Map<
+    string,
+    { avgHdd: number; avgCdd: number; avgTempC: number | null; dayCount: number }
+  >();
+  for (const month of canonicalMonths) {
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const monthDateKeys = Array.from(args.weatherByDateKey.keys()).filter((dateKey) => dateKey.startsWith(`${month}-`));
+    const aggregate = aggregateWeatherForDateKeys(monthDateKeys);
+    if (aggregate) monthWeatherAggregateByMonth.set(month, aggregate);
+  }
+
+  const rows = manualBillPeriods
+    .map((period) => {
+      const id = String(period?.id ?? "").trim();
+      const startDate = String(period?.startDate ?? "").slice(0, 10);
+      const endDate = String(period?.endDate ?? "").slice(0, 10);
+      const monthKey = String(period?.month ?? "").trim() || endDate.slice(0, 7);
+      if (!id || !/^\d{4}-\d{2}$/.test(monthKey) || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        return null;
+      }
+      if (period?.eligibleForConstraint === false) return null;
+      const targetKwhRaw = Number(manualBillPeriodTotalsKwhById[id] ?? period?.enteredKwh);
+      if (!Number.isFinite(targetKwhRaw)) return null;
+      const aggregate = aggregateWeatherForDateKeys(listUtcDateKeysInclusive(startDate, endDate));
+      if (!aggregate) return null;
       return {
-        month,
-        avgDailyTarget: normalizedMonthTarget / Math.max(1, daysInMonth),
-        avgHdd,
-        avgCdd,
-        avgTempC,
+        id,
+        monthKey,
+        startDate,
+        endDate,
+        targetKwh: Math.max(0, targetKwhRaw),
+        avgDailyTarget: Math.max(0, targetKwhRaw) / Math.max(1, aggregate.dayCount),
+        avgHdd: aggregate.avgHdd,
+        avgCdd: aggregate.avgCdd,
+        avgTempC: aggregate.avgTempC,
       };
     })
-    .filter((row: MonthlyWeatherEvidenceRow | null): row is MonthlyWeatherEvidenceRow => Boolean(row));
+    .filter((row: BillPeriodWeatherEvidenceRow | null): row is BillPeriodWeatherEvidenceRow => Boolean(row)) as BillPeriodWeatherEvidenceRow[];
   if (rows.length === 0) return null;
 
   const xtx = [
@@ -248,6 +302,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     fuelConfiguration === "all_electric" || heatingType === "electric" ? 0.95 : 0.45;
   const coolingPriorSensitivity = hasCoolingPriors ? 0.75 : 0.45;
   const evidenceWeight = rows.length >= 5 ? 0.9 : rows.length >= 3 ? 0.7 : 0.45;
+  const wholeHomePriorFallbackWeight = 1 - evidenceWeight;
 
   const baseloadDaily = clampNumberForEvidence(Number(solved[0]) || meanTarget * 0.55, meanTarget * 0.18, meanTarget * 0.92);
   const hvacDaily = Math.max(0, meanTarget - baseloadDaily);
@@ -265,11 +320,93 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   );
   const baseloadShare = clampNumberForEvidence(baseloadDaily / Math.max(meanTarget, 1e-6), 0.18, 0.9);
   const hvacShare = clampNumberForEvidence(1 - baseloadShare, 0.1, 0.82);
+  const eligibleBillPeriodsUsed = rows.map((row) => ({
+    id: row.id,
+    monthKey: row.monthKey,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    targetKwh: row.targetKwh,
+  }));
+  const excludedTravelTouchedBillPeriods = manualBillPeriods
+    .filter((period) => String(period?.exclusionReason ?? "").trim() === "travel_overlap")
+    .map((period) => ({
+      id: String(period?.id ?? "").trim(),
+      monthKey: String(period?.month ?? "").trim() || String(period?.endDate ?? "").slice(0, 7),
+      startDate: String(period?.startDate ?? "").slice(0, 10),
+      endDate: String(period?.endDate ?? "").slice(0, 10),
+      targetKwh: Number.isFinite(Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
+        ? Math.max(0, Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
+        : null,
+    }))
+    .filter((period) => period.id && /^\d{4}-\d{2}$/.test(period.monthKey));
+  const inputMonthKeys =
+    Array.isArray(inputState?.enteredMonthKeys) && inputState!.enteredMonthKeys.length > 0
+      ? inputState!.enteredMonthKeys.map((value) => String(value))
+      : Array.from(new Set([...rows.map((row) => row.monthKey), ...canonicalMonths])).sort();
+  const targetMonthKeys = Array.from(new Set([...inputMonthKeys, ...canonicalMonths, ...rows.map((row) => row.monthKey)])).filter(
+    (value) => /^\d{4}-\d{2}$/.test(value)
+  );
+  const byMonth = Object.fromEntries(
+    targetMonthKeys
+      .map((monthKey) => {
+        const drivingRows = rows.filter((row) => row.monthKey === monthKey);
+        const aggregate = monthWeatherAggregateByMonth.get(monthKey);
+        if (!aggregate && drivingRows.length === 0) return null;
+        const reference = drivingRows[0] ?? null;
+        const predictedDailyTargetRaw =
+          aggregate != null ? (Number(solved[0]) || 0) + (Number(solved[1]) || 0) * aggregate.avgHdd + (Number(solved[2]) || 0) * aggregate.avgCdd : meanTarget;
+        const inferredDailyTarget = clampNumberForEvidence(
+          predictedDailyTargetRaw * evidenceWeight + meanTarget * wholeHomePriorFallbackWeight,
+          meanTarget * 0.35,
+          meanTarget * 1.85
+        );
+        const targetAvgDailyKwh = reference ? reference.avgDailyTarget : inferredDailyTarget;
+        const referenceDailyHdd = reference?.avgHdd ?? aggregate?.avgHdd ?? meanHdd;
+        const referenceDailyCdd = reference?.avgCdd ?? aggregate?.avgCdd ?? meanCdd;
+        const referenceAvgTempC = reference?.avgTempC ?? aggregate?.avgTempC ?? null;
+        return [
+          monthKey,
+          {
+            monthKey,
+            targetAvgDailyKwh,
+            evidenceSource: reference ? ("eligible_bill_period" as const) : ("inferred_from_eligible_periods" as const),
+            drivingBillPeriodIds: drivingRows.map((row) => row.id),
+            baseloadShare,
+            hvacShare,
+            heatingSensitivity,
+            coolingSensitivity,
+            referenceDailyHdd,
+            referenceDailyCdd,
+            referenceAvgTempC,
+          },
+        ] as const;
+      })
+      .filter(
+        (
+          entry
+        ): entry is readonly [
+          string,
+          PastLowDataWeatherEvidenceSummary["byMonth"][string]
+        ] => Boolean(entry)
+      )
+  );
 
   return {
-    inputMonthKeys: Array.isArray(inputState?.enteredMonthKeys) ? inputState!.enteredMonthKeys.map((value) => String(value)) : rows.map((row) => row.month),
+    inputMonthKeys,
     missingMonthKeys: Array.isArray(inputState?.missingMonthKeys) ? inputState!.missingMonthKeys.map((value) => String(value)) : [],
     explicitTravelRangesUsed: normalizeTravelRangeSummary((args.manualUsagePayload as any)?.travelRanges),
+    eligibleBillPeriodsUsed,
+    excludedTravelTouchedBillPeriods,
+    monthlyWeatherPressureInputsUsed: rows.map((row) => ({
+      billPeriodId: row.id,
+      monthKey: row.monthKey,
+      avgDailyTargetKwh: row.avgDailyTarget,
+      avgHdd: row.avgHdd,
+      avgCdd: row.avgCdd,
+      avgTempC: row.avgTempC,
+    })),
+    evidenceWeight,
+    wholeHomePriorFallbackWeight,
     baseloadShare,
     hvacShare,
     heatingSensitivity,
@@ -280,21 +417,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
         : hvacShare <= 0.24
           ? "mostly_baseload_driven"
           : "mixed",
-    byMonth: Object.fromEntries(
-      rows.map((row) => [
-        row.month,
-        {
-          monthKey: row.month,
-          baseloadShare,
-          hvacShare,
-          heatingSensitivity,
-          coolingSensitivity,
-          referenceDailyHdd: row.avgHdd,
-          referenceDailyCdd: row.avgCdd,
-          referenceAvgTempC: row.avgTempC,
-        },
-      ])
-    ),
+    byMonth,
   };
 }
 
@@ -1259,7 +1382,7 @@ export async function simulatePastUsageDataset(
       intradayShape96: number[] | null;
       weekdayWeekendShape96: { weekday: number[]; weekend: number[] } | null;
     } | null =
-      isLowDataSharedPastMode && !useWholeHomeOnlyLowDataFastPath
+      isLowDataSharedPastMode
         ? {
             mode: buildInputs.mode as "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE",
             canonicalMonthKeys: canonicalMonths,

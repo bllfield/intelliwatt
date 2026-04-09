@@ -235,6 +235,10 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(keepRef == null || keepRef.size === 0).toBe(true);
     expect(firstCall?.modeledKeepRefReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
     expect(firstCall?.defaultModeledReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
+    expect(firstCall?.lowDataSyntheticContext).toMatchObject({
+      mode: "MANUAL_TOTALS",
+      canonicalMonthKeys: baseBuildInputs.canonicalMonths,
+    });
   });
 
   it("threads manual monthly weather evidence into the low-data shared path", async () => {
@@ -268,6 +272,29 @@ describe("low-data Past shared chain (Slice 14)", () => {
       buildInputs: {
         ...baseBuildInputs,
         mode: "MANUAL_TOTALS",
+        manualBillPeriods: [
+          {
+            id: "2026-01",
+            month: "2026-01",
+            startDate: "2026-01-01",
+            endDate: "2026-01-31",
+            eligibleForConstraint: false,
+            exclusionReason: "travel_overlap",
+            enteredKwh: 620,
+          },
+          {
+            id: "2026-02",
+            month: "2026-02",
+            startDate: "2026-02-01",
+            endDate: "2026-02-28",
+            eligibleForConstraint: true,
+            exclusionReason: null,
+            enteredKwh: 340,
+          },
+        ],
+        manualBillPeriodTotalsKwhById: {
+          "2026-02": 340,
+        },
         monthlyTargetConstructionDiagnostics: [
           { month: "2026-01", normalizedMonthTarget: 620, monthlyTargetBuildMethod: "user_manual_month_value" },
           { month: "2026-02", normalizedMonthTarget: 340, monthlyTargetBuildMethod: "user_manual_month_value" },
@@ -307,8 +334,41 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary).toMatchObject({
       inputMonthKeys: ["2026-01", "2026-02"],
       explicitTravelRangesUsed: [{ startDate: "2026-01-10", endDate: "2026-01-12" }],
+      eligibleBillPeriodsUsed: [
+        {
+          id: "2026-02",
+          monthKey: "2026-02",
+          startDate: "2026-02-01",
+          endDate: "2026-02-28",
+          targetKwh: 340,
+        },
+      ],
+      excludedTravelTouchedBillPeriods: [
+        {
+          id: "2026-01",
+          monthKey: "2026-01",
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          targetKwh: 620,
+        },
+      ],
       dailyWeatherResponsiveness: expect.any(String),
     });
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.monthlyWeatherPressureInputsUsed).toHaveLength(1);
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.monthlyWeatherPressureInputsUsed?.[0]).toMatchObject({
+      billPeriodId: "2026-02",
+      monthKey: "2026-02",
+    });
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-02"]?.evidenceSource).toBe(
+      "eligible_bill_period"
+    );
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-01"]?.evidenceSource).toBe(
+      "inferred_from_eligible_periods"
+    );
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-01"]?.drivingBillPeriodIds ?? []).toEqual([]);
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-02"]?.drivingBillPeriodIds ?? []).toEqual([
+      "2026-02",
+    ]);
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.heatingSensitivity).toBeGreaterThan(0);
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.coolingSensitivity).toBeGreaterThan(0);
   });

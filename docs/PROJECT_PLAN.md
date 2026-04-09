@@ -469,7 +469,9 @@ This section is authoritative for future manual-usage implementation work.
   - statement/bill ranges remain Stage 1 / bill-period constraint inputs plus reconciliation metadata; they may shape Stage 2 constraints but must not become travel/vacant ownership or incomplete-meter ownership
 - Manual-monthly low-data weather evidence is now implemented in the shared producer:
   - Stage 1 monthly targets plus actual monthly weather pressure are analyzed into a `manualMonthlyWeatherEvidenceSummary`
-  - that evidence drives daily weather classification, weather-scaled-day activation, and low-data curve-amplitude response
+  - travel/vacant-touched bill periods are excluded from evidence fitting and totals-to-match shaping; only eligible non-travel bill periods drive that summary
+  - that evidence drives daily weather classification, weather-scaled-day activation, daily totals, and low-data curve-amplitude response
+  - the summary now records eligible driving bill periods, excluded travel-touched bill periods, weather pressure inputs used, and whole-home/prior fallback weight for shared diagnostics/readback
   - this wiring exists today, but stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only
