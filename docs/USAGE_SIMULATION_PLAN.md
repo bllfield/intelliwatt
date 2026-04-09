@@ -226,7 +226,7 @@ Current runtime note:
 - `MANUAL_TOTALS` now uses a lean low-data/manual branch inside the same shared engine.
 - It does not carry full actual interval payloads into the low-data baseline builder.
 - It does not auto-expand exact-interval-style keep-ref behavior across the manual window.
-- For manual monthly, the shared producer now computes `manualMonthlyWeatherEvidenceSummary` from eligible non-travel Stage 1 bill-period targets plus actual weather pressure, excludes travel-touched bill periods from evidence fitting, and uses the resulting summary for low-data daily weather response, daily totals, and curve-amplitude shaping. The summary also records excluded travel bill periods, the driving weather inputs, and whole-home/prior fallback weight for shared diagnostics.
+- For manual monthly, the shared producer now computes `manualMonthlyWeatherEvidenceSummary` from eligible non-travel Stage 1 bill-period targets plus actual weather pressure, excludes travel-touched bill periods from evidence fitting, and uses the resulting summary for low-data daily weather response, daily totals, and curve-amplitude shaping. The summary also records excluded travel bill periods, eligible/travel day counts, the driving weather inputs, and whole-home/prior fallback weight for shared diagnostics. Shared artifact diagnostics must retain the bill-period-first contract (`manualBillPeriods`, `manualBillPeriodTotalsKwhById`) plus attached source-derived monthly anchors when GapFill monthly-from-source semantics are active.
 - This is implemented for current manual-monthly runs. Further tuning of the evidence model remains open work.
 
 ## Home Details Intake and Usage (Authoritative)

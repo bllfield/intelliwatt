@@ -61,7 +61,8 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Travel-touched bill periods are excluded from parity shaping rather than aborting the build.
   - Lean manual/low-data runs suppress full actual-interval carry-through, avoid exact-interval-style keep-ref expansion, and renormalize manual bill periods with a bounded indexed pass after baseline return.
   - Constrained manual non-travel modeled days now stay on manual-constrained ownership semantics even when the resolved constrained path lands on `whole_home_only`; explicit travel ranges remain the only travel/vacant ownership source.
-- Manual-monthly runs now attach `manualMonthlyWeatherEvidenceSummary`, derived from eligible non-travel Stage 1 bill-period targets plus actual weather pressure, to the shared artifact metadata. That summary also records excluded travel-touched bill periods, the weather inputs used, and whole-home/prior fallback weight.
+- Manual-monthly runs now attach `manualMonthlyWeatherEvidenceSummary`, derived from eligible non-travel Stage 1 bill-period targets plus actual weather pressure, to the shared artifact metadata. That summary also records excluded travel-touched bill periods, eligible/travel day counts, the weather inputs used, and whole-home/prior fallback weight.
+- Shared constrained artifact diagnostics must also retain the bill-period-first contract (`manualBillPeriods`, `manualBillPeriodTotalsKwhById`) and any attached source-derived monthly anchors for GapFill monthly-from-source readback/explainer surfaces.
 - **UsageDashboard / ManualMonthlyLab**
   - Stage 1 monthly surfaces render bill-period rows only.
   - Stage 1 annual surfaces render billing-date context plus annual total only, with no pre-sim chart.

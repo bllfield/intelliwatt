@@ -122,11 +122,59 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
           hvacShare: 0.59,
           heatingSensitivity: 0.88,
           coolingSensitivity: 1.14,
+          evidenceWeight: 0.7,
+          wholeHomePriorFallbackWeight: 0.3,
+          eligibleBillPeriodsUsed: [
+            {
+              id: "2025-06",
+              monthKey: "2025-06",
+              startDate: "2025-05-15",
+              endDate: "2025-06-14",
+              targetKwh: 312.5,
+              eligibleNonTravelDayCount: 27,
+            },
+          ],
+          excludedTravelTouchedBillPeriods: [
+            {
+              id: "2025-07",
+              monthKey: "2025-07",
+              startDate: "2025-06-15",
+              endDate: "2025-07-14",
+              targetKwh: 330,
+              travelVacantDayCount: 3,
+            },
+          ],
+        },
+        sourceDerivedMonthlyTotalsKwhByMonth: {
+          "2025-06": 312.5,
+          "2025-07": 330,
+        },
+        manualBillPeriods: [
+          {
+            id: "2025-06",
+            month: "2025-06",
+            startDate: "2025-05-15",
+            endDate: "2025-06-14",
+            eligibleForConstraint: true,
+          },
+          {
+            id: "2025-07",
+            month: "2025-07",
+            startDate: "2025-06-15",
+            endDate: "2025-07-14",
+            eligibleForConstraint: false,
+            exclusionReason: "travel_overlap",
+          },
+        ],
+        manualBillPeriodTotalsKwhById: {
+          "2025-06": 312.5,
         },
         monthlyTargetConstructionDiagnostics: [
           {
             month: "2025-06",
             normalizedMonthTarget: 312.5,
+            eligibleNonTravelDayCount: 27,
+            travelVacantDayCountInMonth: 3,
             monthlyTargetBuildMethod: "normalized_from_non_travel_days",
           },
         ],
@@ -195,6 +243,10 @@ describe("buildGapfillCalculationLogicSummary", () => {
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.used).toBe(true);
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.details.join(" ")).toContain("Bill-range semantics");
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.status).toBe("hard truth");
+    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.status).toBe("context only");
+    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.details.join(" ")).toContain(
+      "Source-derived monthly anchors: 2"
+    );
     expect(summary.layers.find((layer) => layer.key === "monthly-target-layer")?.summary).toContain("Monthly totals are fixed first");
     expect(summary.dailyTotalLogic.ladder[0]).toMatchObject({
       key: "month_daytype_neighbor",
@@ -214,6 +266,12 @@ describe("buildGapfillCalculationLogicSummary", () => {
     ).toContain("2025-06: 312.50");
     expect(summary.weatherExplanation.rows.find((row) => row.label === "Manual monthly weather evidence")?.value).toContain(
       "Responsiveness: weather_driven"
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Manual monthly weather evidence")?.value).toContain(
+      "Eligible bill periods: 1"
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Whole-home prior blend")?.value).toContain(
+      "Prior fallback weight: 0.30"
     );
   });
 

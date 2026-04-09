@@ -118,7 +118,9 @@ export function buildSharedPastSimDiagnostics(args: {
       weatherDatasetIdentity:
         sourceContext.weatherIdentity ?? meta.weatherDatasetIdentity ?? null,
       sourceDerivedMonthlyTotalsKwhByMonth:
-        sourceContext.sourceDerivedMonthlyTotalsKwhByMonth ?? null,
+        sourceContext.sourceDerivedMonthlyTotalsKwhByMonth ??
+        asRecord(meta.sourceDerivedMonthlyTotalsKwhByMonth) ??
+        null,
       sourceDerivedAnnualTotalKwh:
         sourceContext.sourceDerivedAnnualTotalKwh ?? null,
       intervalUsageFingerprintIdentity:
@@ -146,6 +148,8 @@ export function buildSharedPastSimDiagnostics(args: {
         : null,
       manualMonthlyInputState: asRecord(meta.manualMonthlyInputState),
       manualMonthlyWeatherEvidenceSummary: asRecord(meta.manualMonthlyWeatherEvidenceSummary),
+      manualBillPeriods: Array.isArray(meta.manualBillPeriods) ? meta.manualBillPeriods : [],
+      manualBillPeriodTotalsKwhById: asRecord(meta.manualBillPeriodTotalsKwhById),
       travelRangesUsed: asRecord(lockboxInput.travelRanges).ranges ?? [],
       validationTestKeysUsed: validationKeys.localDateKeys ?? [],
       exclusionDrivingCanonicalInputsSummary: {

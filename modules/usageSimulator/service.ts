@@ -197,6 +197,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
   }
 }
 import {
+  buildSourceDerivedMonthlyTargetResolution,
   resolveManualMonthlyAnchorEndDateKey,
   type SourceDerivedMonthlyTargetResolution,
 } from "@/modules/usageSimulator/monthlyTargetConstruction";
@@ -4225,7 +4226,38 @@ async function recalcSimulatorBuildImpl(args: {
         seedSet,
       });
       manualUsagePayload = resolvedManualStageOne.payload;
-      manualMonthlySourceDerivedResolution = null;
+      manualMonthlySourceDerivedResolution =
+        desiredManualStageOneMode === "MONTHLY" && resolvedManualStageOne.payload?.mode === "MONTHLY"
+          ? (() => {
+              const anchorEndDate = resolveManualMonthlyAnchorEndDateKey(resolvedManualStageOne.payload);
+              const sourceDailyRows = Array.isArray(sourceUsageDataset?.dataset?.daily)
+                ? (sourceUsageDataset.dataset.daily as Array<Record<string, unknown>>)
+                : [];
+              const dailyKwhByDateKey = sourceDailyRows.reduce<Record<string, number>>((acc, row) => {
+                const dateKey = String(row?.date ?? "").slice(0, 10);
+                const kwh = Number(row?.kwh);
+                if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey) && Number.isFinite(kwh)) acc[dateKey] = kwh;
+                return acc;
+              }, {});
+              const fallbackMonthlyKwhByMonth = Array.isArray(resolvedManualStageOne.payload.monthlyKwh)
+                ? resolvedManualStageOne.payload.monthlyKwh.reduce<Record<string, number>>((acc, row) => {
+                    const month = String(row?.month ?? "").trim();
+                    const kwh = Number(row?.kwh);
+                    if (/^\d{4}-\d{2}$/.test(month) && Number.isFinite(kwh)) acc[month] = kwh;
+                    return acc;
+                  }, {})
+                : {};
+              return anchorEndDate && Object.keys(dailyKwhByDateKey).length > 0
+                ? buildSourceDerivedMonthlyTargetResolution({
+                    canonicalMonths: canonicalForBuild.months,
+                    anchorEndDate,
+                    dailyKwhByDateKey,
+                    travelRanges: travelRangesForBuild ?? [],
+                    fallbackMonthlyKwhByMonth,
+                  })
+                : null;
+            })()
+          : null;
     } catch (e) {
       emitRecalcPreIntervalStageEvent({
         event: "recalc_pre_interval_admin_treatment_adaptation_failure",
@@ -4859,7 +4891,7 @@ async function recalcSimulatorBuildImpl(args: {
         validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
         actualContextHouseId,
         sharedProducerPathUsed: true,
-        snapshots: { homeProfile, applianceProfile },
+        snapshots: { homeProfile, applianceProfile, manualUsagePayload },
         ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
       };
       let preloadedActualIntervalsForSim: Array<{ timestamp: string; kwh: number }> | undefined;
@@ -5205,6 +5237,9 @@ async function recalcSimulatorBuildImpl(args: {
       : [],
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+    manualBillPeriods: built.manualBillPeriods ?? [],
+    manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
+    sourceDerivedMonthlyTotalsKwhByMonth,
     sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
     lockboxInput: normalizedLockboxInput,
     lockboxRunContext: runContext,

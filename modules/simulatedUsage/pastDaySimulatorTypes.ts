@@ -96,6 +96,10 @@ export type PastLowDataWeatherEvidenceMonth = {
   targetAvgDailyKwh: number;
   evidenceSource: "eligible_bill_period" | "inferred_from_eligible_periods";
   drivingBillPeriodIds: string[];
+  eligibleNonTravelDayCount: number;
+  excludedTravelDayCount: number;
+  eligibleBillPeriodCount: number;
+  excludedTravelTouchedBillPeriodCount: number;
   baseloadShare: number;
   hvacShare: number;
   heatingSensitivity: number;
@@ -115,6 +119,7 @@ export type PastLowDataWeatherEvidenceSummary = {
     startDate: string;
     endDate: string;
     targetKwh: number;
+    eligibleNonTravelDayCount: number;
   }>;
   excludedTravelTouchedBillPeriods: Array<{
     id: string;
@@ -122,6 +127,7 @@ export type PastLowDataWeatherEvidenceSummary = {
     startDate: string;
     endDate: string;
     targetKwh: number | null;
+    travelVacantDayCount: number;
   }>;
   monthlyWeatherPressureInputsUsed: Array<{
     billPeriodId: string;

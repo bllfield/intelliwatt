@@ -506,6 +506,29 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     );
   }
 
+  const validationOnlyDateKeysLocal = Array.isArray((readResultWithManualPayload.dataset as any)?.meta?.validationOnlyDateKeysLocal)
+    ? ((readResultWithManualPayload.dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+        .map((value) => String(value ?? "").slice(0, 10))
+        .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    : [];
+  const compareRowCount = Array.isArray(readResultWithManualPayload.compareProjection?.rows)
+    ? readResultWithManualPayload.compareProjection.rows.length
+    : 0;
+  if (validationOnlyDateKeysLocal.length > 0 && compareRowCount === 0) {
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "compare_truth_incomplete",
+        message:
+          "Canonical GapFill manual readback expected artifact-backed compare rows for the selected validation dates, but none were attached.",
+        reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+        missingDateKeysLocal: validationOnlyDateKeysLocal,
+        correlationId: args.correlationId ?? null,
+      }),
+      { status: 409 }
+    );
+  }
+
   const { effectiveValidationSelectionMode, fromBuildInputs: effectiveValidationFromBuild } =
     readEffectiveValidationFromBuildInputs(
       buildRow?.buildInputs as Record<string, unknown> | undefined,

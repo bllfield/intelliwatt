@@ -178,6 +178,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     endDate: string;
     targetKwh: number;
     avgDailyTarget: number;
+    eligibleNonTravelDayCount: number;
     avgHdd: number;
     avgCdd: number;
     avgTempC: number | null;
@@ -214,6 +215,12 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     }
     return out;
   };
+  const travelDateKeys = new Set<string>();
+  for (const range of normalizeTravelRangeSummary((args.manualUsagePayload as any)?.travelRanges)) {
+    for (const dateKey of listUtcDateKeysInclusive(range.startDate, range.endDate)) {
+      travelDateKeys.add(dateKey);
+    }
+  }
   const aggregateWeatherForDateKeys = (dateKeys: string[]) => {
     let count = 0;
     let hddSum = 0;
@@ -267,6 +274,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
         endDate,
         targetKwh: Math.max(0, targetKwhRaw),
         avgDailyTarget: Math.max(0, targetKwhRaw) / Math.max(1, aggregate.dayCount),
+        eligibleNonTravelDayCount: aggregate.dayCount,
         avgHdd: aggregate.avgHdd,
         avgCdd: aggregate.avgCdd,
         avgTempC: aggregate.avgTempC,
@@ -326,6 +334,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     startDate: row.startDate,
     endDate: row.endDate,
     targetKwh: row.targetKwh,
+    eligibleNonTravelDayCount: row.eligibleNonTravelDayCount,
   }));
   const excludedTravelTouchedBillPeriods = manualBillPeriods
     .filter((period) => String(period?.exclusionReason ?? "").trim() === "travel_overlap")
@@ -337,6 +346,10 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
       targetKwh: Number.isFinite(Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
         ? Math.max(0, Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
         : null,
+      travelVacantDayCount: listUtcDateKeysInclusive(
+        String(period?.startDate ?? "").slice(0, 10),
+        String(period?.endDate ?? "").slice(0, 10)
+      ).filter((dateKey) => travelDateKeys.has(dateKey)).length,
     }))
     .filter((period) => period.id && /^\d{4}-\d{2}$/.test(period.monthKey));
   const inputMonthKeys =
@@ -364,6 +377,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
         const referenceDailyHdd = reference?.avgHdd ?? aggregate?.avgHdd ?? meanHdd;
         const referenceDailyCdd = reference?.avgCdd ?? aggregate?.avgCdd ?? meanCdd;
         const referenceAvgTempC = reference?.avgTempC ?? aggregate?.avgTempC ?? null;
+        const excludedTravelTouchedForMonth = excludedTravelTouchedBillPeriods.filter((period) => period.monthKey === monthKey);
         return [
           monthKey,
           {
@@ -371,6 +385,10 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
             targetAvgDailyKwh,
             evidenceSource: reference ? ("eligible_bill_period" as const) : ("inferred_from_eligible_periods" as const),
             drivingBillPeriodIds: drivingRows.map((row) => row.id),
+            eligibleNonTravelDayCount: drivingRows.reduce((sum, row) => sum + row.eligibleNonTravelDayCount, 0),
+            excludedTravelDayCount: excludedTravelTouchedForMonth.reduce((sum, period) => sum + period.travelVacantDayCount, 0),
+            eligibleBillPeriodCount: drivingRows.length,
+            excludedTravelTouchedBillPeriodCount: excludedTravelTouchedForMonth.length,
             baseloadShare,
             hvacShare,
             heatingSensitivity,

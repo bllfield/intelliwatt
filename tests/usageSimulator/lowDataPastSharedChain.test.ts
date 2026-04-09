@@ -341,6 +341,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
           startDate: "2026-02-01",
           endDate: "2026-02-28",
           targetKwh: 340,
+          eligibleNonTravelDayCount: 5,
         },
       ],
       excludedTravelTouchedBillPeriods: [
@@ -350,6 +351,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
           startDate: "2026-01-01",
           endDate: "2026-01-31",
           targetKwh: 620,
+          travelVacantDayCount: 3,
         },
       ],
       dailyWeatherResponsiveness: expect.any(String),
@@ -365,6 +367,8 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-01"]?.evidenceSource).toBe(
       "inferred_from_eligible_periods"
     );
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-02"]?.eligibleNonTravelDayCount).toBe(5);
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-01"]?.excludedTravelDayCount).toBe(3);
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-01"]?.drivingBillPeriodIds ?? []).toEqual([]);
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-02"]?.drivingBillPeriodIds ?? []).toEqual([
       "2026-02",

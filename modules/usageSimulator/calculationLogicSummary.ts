@@ -478,6 +478,9 @@ export function buildGapfillCalculationLogicSummary(args: {
   const monthlyDiagnostics = asArray<Record<string, unknown>>(sourceTruthContext.monthlyTargetConstructionDiagnostics);
   const manualMonthlyInputState = asRecord(sourceTruthContext.manualMonthlyInputState);
   const manualMonthlyWeatherEvidence = asRecord(sourceTruthContext.manualMonthlyWeatherEvidenceSummary);
+  const manualBillPeriods = asArray<Record<string, unknown>>(sourceTruthContext.manualBillPeriods);
+  const manualBillPeriodTotalsById = asRecord(sourceTruthContext.manualBillPeriodTotalsKwhById);
+  const sourceDerivedMonthlyTotals = asRecord(sourceTruthContext.sourceDerivedMonthlyTotalsKwhByMonth);
   const fingerprintDiagnostics = asRecord(sourceTruthContext.intervalUsageFingerprintDiagnostics);
   const perDayReasonCounts = countBy(perDayTrace, (row) => String(row.simulatedReasonCode ?? "").trim());
   const perDayFallbackCounts = countBy(perDayTrace, (row) => String(row.fallbackLevel ?? "").trim());
@@ -567,11 +570,15 @@ export function buildGapfillCalculationLogicSummary(args: {
           ? "inactive"
           : modeInfo.modeFamily === "actual_backed"
             ? "hard truth"
-            : "active driver",
+            : modeInfo.modeFamily === "manual_monthly" || modeInfo.modeFamily === "manual_annual"
+              ? "context only"
+              : "active driver",
       whereEntered:
         modeInfo.modeFamily === "profile_only"
           ? []
-          : ["daily-total selection", "interval-shape selection", "compare only"],
+          : modeInfo.modeFamily === "manual_monthly" || modeInfo.modeFamily === "manual_annual"
+            ? ["source-derived monthly fitting", "compare only"]
+            : ["daily-total selection", "interval-shape selection", "compare only"],
       sourceOfTruth:
         sourceHouseId != null
           ? `Persisted source-house interval identity (${String(sourceTruthContext.intervalSourceIdentity ?? "identity not attached")})`
@@ -579,11 +586,25 @@ export function buildGapfillCalculationLogicSummary(args: {
       role:
         modeInfo.modeFamily === "actual_backed"
           ? "Main baseline truth"
-          : "Trusted reference pool and source-derived seed context",
-      priorityBand: modeInfo.modeFamily === "profile_only" ? "Not Used" : modeInfo.modeFamily === "actual_backed" ? "Reference Truth Pool" : "Primary Driver",
+          : modeInfo.modeFamily === "manual_monthly" || modeInfo.modeFamily === "manual_annual"
+            ? "Source-derived seed context and compare backing"
+            : "Trusted reference pool and source-derived seed context",
+      priorityBand:
+        modeInfo.modeFamily === "profile_only"
+          ? "Not Used"
+          : modeInfo.modeFamily === "actual_backed"
+            ? "Reference Truth Pool"
+            : modeInfo.modeFamily === "manual_monthly" || modeInfo.modeFamily === "manual_annual"
+              ? "Secondary Driver"
+              : "Primary Driver",
       details: [
         `Trusted fingerprint days: ${formatMaybeCount(fingerprintDiagnostics.trustedIntervalFingerprintDayCount)}`,
         `Interval fingerprint: ${String(sourceTruthContext.intervalSourceIdentity ?? "not attached")}`,
+        `Source-derived monthly anchors: ${
+          Object.keys(sourceDerivedMonthlyTotals).length > 0
+            ? Object.keys(sourceDerivedMonthlyTotals).length
+            : "not attached"
+        }`,
         `Donor-path selections: ${donorPathUsageCount}`,
       ],
       evidence: [
@@ -607,6 +628,9 @@ export function buildGapfillCalculationLogicSummary(args: {
         monthlyDiagnostics.length > 0
           ? `Monthly target diagnostics attached for ${monthlyDiagnostics.length} month(s)`
           : "No monthly target diagnostics attached",
+        manualBillPeriods.length > 0
+          ? `Bill-period contract attached for ${manualBillPeriods.length} range(s); ${Object.keys(manualBillPeriodTotalsById).length} eligible totals preserved.`
+          : "No bill-period contract was attached to artifact diagnostics.",
         modeInfo.modeFamily === "manual_monthly"
           ? "Bill-range semantics stay relevant for reconciliation."
           : "No monthly bill-range constraint path is active.",
@@ -615,6 +639,9 @@ export function buildGapfillCalculationLogicSummary(args: {
         monthlyDiagnostics.length > 0
           ? `Monthly target diagnostics present for ${monthlyDiagnostics.length} month bucket(s).`
           : "No monthly target diagnostics were attached to this artifact.",
+        Object.keys(sourceDerivedMonthlyTotals).length > 0
+          ? `Source-derived month anchors survived for ${Object.keys(sourceDerivedMonthlyTotals).length} month(s).`
+          : "No source-derived month anchors were attached to this artifact.",
       ],
     },
     {
@@ -1322,6 +1349,8 @@ export function buildGapfillCalculationLogicSummary(args: {
                 `Responsiveness: ${String(manualMonthlyWeatherEvidence.dailyWeatherResponsiveness ?? "not attached")}`,
                 `Baseload share: ${formatMaybeNumber(manualMonthlyWeatherEvidence.baseloadShare, 2)}`,
                 `HVAC share: ${formatMaybeNumber(manualMonthlyWeatherEvidence.hvacShare, 2)}`,
+                `Eligible bill periods: ${formatMaybeCount(asArray(manualMonthlyWeatherEvidence.eligibleBillPeriodsUsed).length || null)}`,
+                `Excluded travel bill periods: ${formatMaybeCount(asArray(manualMonthlyWeatherEvidence.excludedTravelTouchedBillPeriods).length || null)}`,
               ]),
               explanation: "Derived from Stage 1 monthly targets versus actual monthly weather pressure; home details act only as stabilizing priors.",
             },
@@ -1332,6 +1361,14 @@ export function buildGapfillCalculationLogicSummary(args: {
                 `Cooling: ${formatMaybeNumber(manualMonthlyWeatherEvidence.coolingSensitivity, 2)}`,
               ]),
               explanation: "Shows the inferred weather elasticity used by the low-data manual-monthly fast path for daily totals and curve amplitude.",
+            },
+            {
+              label: "Whole-home prior blend",
+              value: joinNonEmpty([
+                `Evidence weight: ${formatMaybeNumber(manualMonthlyWeatherEvidence.evidenceWeight, 2)}`,
+                `Prior fallback weight: ${formatMaybeNumber(manualMonthlyWeatherEvidence.wholeHomePriorFallbackWeight, 2)}`,
+              ]),
+              explanation: "Shows how much of the low-data manual-monthly response came from eligible bill-period evidence versus whole-home stabilizing priors.",
             },
           ]
         : []),
