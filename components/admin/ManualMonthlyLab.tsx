@@ -317,7 +317,7 @@ export default function ManualMonthlyLab() {
       setSelectedHouseId(nextHouseId);
       setScenarioId(json.scenarioId ?? null);
       setShowManualEditor(false);
-      setStatus("Lookup complete. Source house context loaded.");
+      setStatus("Lookup complete. Source house selected. Use Load to copy and prefill the isolated lab home.");
     } catch (err: any) {
       setError(err?.message ?? "Lookup failed.");
     } finally {

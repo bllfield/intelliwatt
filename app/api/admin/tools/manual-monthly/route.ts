@@ -344,30 +344,8 @@ export async function POST(req: NextRequest) {
       preferredScenarioId: body?.scenarioId,
     });
     const scenarioId = preferredScenarioId ?? (await ensurePastScenarioId({ userId: ownerUserId, houseId: labHome.id }));
-    const [sourcePayloadRecord, sourceHomeProfile, sourceApplianceProfile, sourceUsageHouse] = await Promise.all([
-      getManualUsageInputForUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
-      getHomeProfileSimulatedByUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
-      getApplianceProfileSimulatedByUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
-      buildSourceUsageHouse(sourceResolved.selectedHouse),
-    ]);
-    const sourceUsageHouseResponse = buildSourceUsageHouseResponse(sourceUsageHouse);
 
     if (action === "lookup") {
-      const sourceSeed = await buildLabPrefill({
-        sourcePayload: sourcePayloadRecord.payload,
-        sourceUsageHouse,
-      });
-      const [payload, labHomeProfile, labApplianceProfile, currentResult] = await Promise.all([
-        getManualUsageInputForUserHouse({ userId: ownerUserId, houseId: labHome.id }),
-        getHomeProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }),
-        getApplianceProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }),
-        buildReadResult({
-          userId: ownerUserId,
-          houseId: labHome.id,
-          scenarioId,
-          readMode: "artifact_only",
-        }),
-      ]);
       return NextResponse.json({
         ok: true,
         action,
@@ -379,19 +357,16 @@ export async function POST(req: NextRequest) {
         selectedSourceHouse: sourceResolved.selectedHouse,
         labHome,
         scenarioId,
-        payload: payload.payload,
-        updatedAt: payload.updatedAt,
-        sourcePayload: sourcePayloadRecord.payload,
-        sourceUpdatedAt: sourcePayloadRecord.updatedAt,
-        sourceSeed: sourceSeed.seed,
-        sourceUsageHouse: sourceUsageHouseResponse,
-        sourceHomeProfile,
-        sourceApplianceProfile,
-        labHomeProfile,
-        labApplianceProfile,
-        currentResult: summarizeReadResultForLabResponse(currentResult),
       });
     }
+
+    const [sourcePayloadRecord, sourceHomeProfile, sourceApplianceProfile, sourceUsageHouse] = await Promise.all([
+      getManualUsageInputForUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
+      getHomeProfileSimulatedByUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
+      getApplianceProfileSimulatedByUserHouse({ userId: sourceResolved.userId, houseId: sourceResolved.selectedHouse.id }),
+      buildSourceUsageHouse(sourceResolved.selectedHouse),
+    ]);
+    const sourceUsageHouseResponse = buildSourceUsageHouseResponse(sourceUsageHouse);
 
     if (action === "load") {
       const replaced = await replaceGlobalManualMonthlyLabTestHomeFromSource({

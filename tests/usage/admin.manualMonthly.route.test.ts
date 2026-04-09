@@ -216,7 +216,7 @@ describe("admin manual monthly route", () => {
     });
   });
 
-  it("lookup returns source usage context while reading current result from the isolated lab home", async () => {
+  it("lookup returns source-house selection quickly without loading heavy source or readback context", async () => {
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
     const res = await POST(buildRequest({ action: "lookup", email: "user@example.com" }));
     const body = await res.json();
@@ -224,32 +224,14 @@ describe("admin manual monthly route", () => {
     expect(res.status).toBe(200);
     expect(body.selectedSourceHouse.id).toBe("source-house-1");
     expect(body.labHome.id).toBe("lab-home-1");
-    expect(body.sourceUsageHouse.houseId).toBe("source-house-1");
-    expect(body.sourceUsageHouse.dataset.daily).toEqual([]);
-    expect(body.sourceUsageHouse.dataset.series.hourly).toEqual([]);
-    expect(body.sourceUsageHouse.dataset.series.daily).toEqual([]);
-    expect(body.sourceUsageHouse.dataset.series.monthly).toEqual([{ month: "2025-01", kwh: 310 }]);
-    expect(body.sourceUsageHouse.dataset.dailyWeather).toEqual({
-      redacted: true,
-      count: 2,
-      startDate: "2025-01-01",
-      endDate: "2025-12-31",
-    });
-    expect(body.sourceSeed.monthly.statementRanges[0]).toMatchObject({
-      month: "2025-12",
-      endDate: "2025-12-31",
-    });
-    expect(body.currentResult.ok).toBe(true);
-    expect(body.currentResult.houseId).toBe("lab-home-1");
-    expect(body.currentResult.dataset.daily).toHaveLength(30);
-    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "admin-owner-1",
-        houseId: "lab-home-1",
-        scenarioId: "past-lab-s1",
-        readMode: "artifact_only",
-      })
-    );
+    expect(body.sourceUsageHouse).toBeUndefined();
+    expect(body.sourceSeed).toBeUndefined();
+    expect(body.currentResult).toBeUndefined();
+    expect(mocks.getActualUsageDatasetForHouse).not.toHaveBeenCalled();
+    expect(mocks.getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(mocks.getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(mocks.getManualUsageInputForUserHouse).not.toHaveBeenCalled();
+    expect(mocks.getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
   });
 
   it("load resets and seeds only the isolated lab home", async () => {
@@ -261,6 +243,8 @@ describe("admin manual monthly route", () => {
     expect(body.selectedSourceHouse.id).toBe("source-house-1");
     expect(body.labHome.id).toBe("lab-home-1");
     expect(body.sourceUsageHouse.houseId).toBe("source-house-1");
+    expect(body.sourceHomeProfile).toMatchObject({ squareFeet: 2200, hvacType: "central" });
+    expect(body.sourceApplianceProfile).toMatchObject({ fuelConfiguration: "all_electric" });
     expect(body.sourceUsageHouse.dataset.daily).toEqual([]);
     expect(body.sourceUsageHouse.dataset.series.hourly).toEqual([]);
     expect(body.sourceUsageHouse.dataset.series.daily).toEqual([]);
@@ -297,14 +281,16 @@ describe("admin manual monthly route", () => {
       endDate: "2025-12-31",
     });
     expect(typeof body.seed.annual.annualKwh).toBe("number");
+    expect(body.readResult.ok).toBe(true);
+    expect(body.readResult.dataset.daily).toHaveLength(30);
   });
 
-  it("routes shared Stage 1 monthly/annual seed resolution through manualUsage/prefill", async () => {
+  it("routes shared Stage 1 monthly/annual seed resolution through manualUsage/prefill on load", async () => {
     const prefill = await import("@/modules/manualUsage/prefill");
     const seedSpy = vi.spyOn(prefill, "buildManualUsageStageOneResolvedSeeds");
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
 
-    const res = await POST(buildRequest({ action: "lookup", email: "user@example.com", houseId: "source-house-1" }));
+    const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
     expect(res.status).toBe(200);
     expect(seedSpy).toHaveBeenCalledWith(
       expect.objectContaining({
