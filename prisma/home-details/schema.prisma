@@ -2,7 +2,7 @@
 generator homeDetailsClient {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
-  output        = "../../.prisma/home-details-client"
+  output        = "../../node_modules/@prisma/home-details-client"
 }
 
 datasource homeDetailsDb {

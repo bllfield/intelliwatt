@@ -1,28 +1,23 @@
 /** @type {import('next').NextConfig} */
-const tracedPrismaAssets = ["./.prisma/**/*", "./prisma/**/*"];
-const homeDetailsPrismaRouteKeys = [
-  "/api/user/home-profile",
-  "/api/user/simulator/requirements",
-  "/api/admin/simulation-engines",
-  "/api/admin/tools/gapfill-lab",
-  "/api/admin/tools/gapfill-lab/(.*)",
-  "/api/admin/tools/manual-monthly",
-  "/api/admin/tools/manual-monthly/(.*)",
-  "/api/current-plan",
-  "/api/current-plan/(.*)",
+const tracedPrismaAssets = [
+  "./.prisma/**/*",
+  "./prisma/**/*",
+  "./node_modules/@prisma/home-details-client/**/*",
 ];
-const outputFileTracingIncludes = Object.fromEntries(
-  homeDetailsPrismaRouteKeys.map((routeKey) => [routeKey, tracedPrismaAssets])
-);
+const outputFileTracingIncludes = {
+  // Shared simulator modules import Home Details at module scope, so App Router API handlers
+  // can transitively load the custom Prisma client even when the route does not reference it directly.
+  "/api/(.*)": tracedPrismaAssets,
+};
 
 const nextConfig = {
   reactStrictMode: false,
   swcMinify: true,
   experimental: {
-    serverComponentsExternalPackages: ["@prisma/client"],
+    serverComponentsExternalPackages: ["@prisma/client", "@prisma/home-details-client"],
     // App Router tracing keys must use deployed URL pathnames, not `app/...` filesystem paths.
-    // Verify after `next build` by inspecting the matching `.next/server/app/.../*.nft.json`
-    // entries for `.prisma/home-details-client/libquery_engine-rhel-openssl-3.0.x.so.node`.
+    // Shared simulator modules can transitively load Home Details from many API handlers, so
+    // we trace all App Router API routes and the generated package that now lives in node_modules.
     outputFileTracingIncludes,
   },
 };

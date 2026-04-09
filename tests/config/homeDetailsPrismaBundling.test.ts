@@ -9,36 +9,31 @@ function readRepoFile(relativePath: string): string {
 }
 
 describe("home-details Prisma bundling wiring", () => {
-  it("keeps the custom home-details client output path and Linux engine target", () => {
+  it("keeps the Linux engine target and generates home-details under node_modules", () => {
     const schema = readRepoFile("prisma/home-details/schema.prisma");
 
     expect(schema).toContain('binaryTargets = ["native", "rhel-openssl-3.0.x"]');
-    expect(schema).toContain('output        = "../../.prisma/home-details-client"');
+    expect(schema).toContain('output        = "../../node_modules/@prisma/home-details-client"');
   });
 
-  it("uses App Router URL pathname tracing keys for routes that touch home-details Prisma", () => {
+  it("uses an App Router API tracing rule for transitive home-details Prisma consumers", () => {
     const nextConfig = readRepoFile("next.config.js");
 
-    expect(nextConfig).toContain('const tracedPrismaAssets = ["./.prisma/**/*", "./prisma/**/*"]');
-    expect(nextConfig).toContain('"/api/user/home-profile"');
-    expect(nextConfig).toContain('"/api/user/simulator/requirements"');
-    expect(nextConfig).toContain('"/api/admin/simulation-engines"');
-    expect(nextConfig).toContain('"/api/admin/tools/gapfill-lab"');
-    expect(nextConfig).toContain('"/api/admin/tools/gapfill-lab/(.*)"');
-    expect(nextConfig).toContain('"/api/admin/tools/manual-monthly"');
-    expect(nextConfig).toContain('"/api/admin/tools/manual-monthly/(.*)"');
-    expect(nextConfig).toContain('"/api/current-plan"');
-    expect(nextConfig).toContain('"/api/current-plan/(.*)"');
+    expect(nextConfig).toContain('"./.prisma/**/*"');
+    expect(nextConfig).toContain('"./prisma/**/*"');
+    expect(nextConfig).toContain('"./node_modules/@prisma/home-details-client/**/*"');
+    expect(nextConfig).toContain('"/api/(.*)": tracedPrismaAssets');
+    expect(nextConfig).toContain("transitively load the custom Prisma client");
     expect(nextConfig).not.toContain('"/app/(.*)"');
     expect(nextConfig).not.toContain('"/app/api/(.*)"');
   });
 
-  it("imports the custom client from .prisma and documents nft verification", () => {
+  it("imports the generated node_modules client and keeps the tracing guardrail", () => {
     const nextConfig = readRepoFile("next.config.js");
     const clientSource = readRepoFile("lib/db/homeDetailsClient.ts");
 
-    expect(clientSource).toContain('from "../../.prisma/home-details-client"');
-    expect(nextConfig).toContain(".nft.json");
-    expect(nextConfig).toContain(".prisma/home-details-client/libquery_engine-rhel-openssl-3.0.x.so.node");
+    expect(clientSource).toContain('from "@prisma/home-details-client"');
+    expect(nextConfig).toContain('serverComponentsExternalPackages: ["@prisma/client", "@prisma/home-details-client"]');
+    expect(nextConfig).toContain("node_modules/@prisma/home-details-client");
   });
 });
