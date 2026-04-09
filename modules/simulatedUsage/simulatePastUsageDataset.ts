@@ -1390,6 +1390,14 @@ export async function simulatePastUsageDataset(
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
         lowDataSyntheticContext,
+        observability: {
+          correlationId,
+          houseId,
+          sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+          userId,
+          buildPathKind,
+          source: "simulatePastUsageDataset",
+        },
       });
       patchedIntervals = baselineBuild.intervals;
       dayResults = baselineBuild.dayResults;

@@ -924,6 +924,7 @@ export function buildPastDaySimulationContext(args: {
   weatherDonorSamples?: PastDaySimulationContext["weatherDonorSamples"];
   modeledDaySelectionStrategy?: PastDaySimulationContext["modeledDaySelectionStrategy"];
   shapeVariants?: PastDaySimulationContext["shapeVariants"];
+  lowDataSyntheticDayKwhByMonthDayType?: PastDaySimulationContext["lowDataSyntheticDayKwhByMonthDayType"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
@@ -933,6 +934,7 @@ export function buildPastDaySimulationContext(args: {
     weatherDonorSamples: args.weatherDonorSamples ?? null,
     modeledDaySelectionStrategy: args.modeledDaySelectionStrategy ?? "calendar_first",
     shapeVariants: args.shapeVariants ?? null,
+    lowDataSyntheticDayKwhByMonthDayType: args.lowDataSyntheticDayKwhByMonthDayType ?? null,
   };
 }
 
@@ -948,37 +950,91 @@ export function simulatePastDay(
 ): SimulatedDayResult {
   const { localDate, isWeekend, gridTimestamps, weatherForDay } = request;
   const monthKey = localDate.slice(0, 7);
+  const dayTypeUsed: PastDayTypeKey = isWeekend ? "weekend" : "weekday";
+  const lowDataMonthBucket = context.lowDataSyntheticDayKwhByMonthDayType?.[monthKey] ?? null;
+  const lowDataTargetDayKwh = lowDataMonthBucket
+    ? Number(dayTypeUsed === "weekend" ? lowDataMonthBucket.weekend : lowDataMonthBucket.weekday) || 0
+    : null;
+  const canUseLowDataSyntheticFastPath =
+    lowDataTargetDayKwh != null &&
+    lowDataTargetDayKwh >= 0 &&
+    context.trainingWeatherStats == null &&
+    (!context.weatherDonorSamples || context.weatherDonorSamples.length === 0) &&
+    (!context.neighborDayTotals ||
+      ((context.neighborDayTotals.weekdayByMonth == null ||
+        Object.keys(context.neighborDayTotals.weekdayByMonth).length === 0) &&
+        (context.neighborDayTotals.weekendByMonth == null ||
+          Object.keys(context.neighborDayTotals.weekendByMonth).length === 0)));
 
-  const sel = selectPastDayTotalWithFallback({
-    localDate,
-    monthKey,
-    isWeekend,
-    profile: context.profile,
-    weatherForDay,
-    modeledDaySelectionStrategy: context.modeledDaySelectionStrategy,
-    neighborDayTotals: context.neighborDayTotals,
-    weatherDonorSamples: context.weatherDonorSamples,
-  });
+  const sel = canUseLowDataSyntheticFastPath
+    ? {
+        targetDayKwh: lowDataTargetDayKwh,
+        fallbackLevel: "month_daytype" as PastDayFallbackLevel,
+        rawSelectedDayKwh: lowDataTargetDayKwh,
+        clampApplied: false,
+        donorSelectionModeUsed: "low_data_month_daytype",
+        donorCandidatePoolSize: 0,
+        selectedDonorLocalDates: [] as string[],
+        selectedDonorWeights: [] as PastWeatherDonorContribution[],
+        donorWeatherRegimeUsed: null,
+        donorMonthKeyUsed: monthKey,
+        thermalDistanceScore: null,
+        broadFallbackUsed: false,
+        sameRegimeDonorPoolAvailable: false,
+        donorPoolBlendStrategy: null as "distance_weighted_blend" | "variance_dampened_blend" | null,
+        donorPoolKwhSpread: null,
+        donorPoolKwhVariance: null,
+        donorPoolMedianKwh: null,
+        donorVarianceGuardrailTriggered: false,
+        donorWeatherReference: null as PastDayWeatherFeatures | null,
+      }
+    : selectPastDayTotalWithFallback({
+        localDate,
+        monthKey,
+        isWeekend,
+        profile: context.profile,
+        weatherForDay,
+        modeledDaySelectionStrategy: context.modeledDaySelectionStrategy,
+        neighborDayTotals: context.neighborDayTotals,
+        weatherDonorSamples: context.weatherDonorSamples,
+      });
 
-  const weatherByDateKey = new Map<string, PastDayWeatherFeatures>();
-  if (weatherForDay) weatherByDateKey.set(localDate, weatherForDay);
-
-  const adj = computeWeatherAdjustedDayTotal({
-    baseDayKwh: sel.targetDayKwh,
-    localDate,
-    weatherByDateKey,
-    trainingStats: context.trainingWeatherStats,
-    donorWeatherReference: sel.donorWeatherReference,
-    weatherAdjustmentMode:
-      sel.donorSelectionModeUsed === "calendar_fallback" ? "legacy_training_stats" : "bounded_post_donor",
-    isWeekend,
-    homeProfile: homeProfile ?? null,
-    applianceProfile: applianceProfile ?? null,
-  });
+  const adj = canUseLowDataSyntheticFastPath
+    ? {
+        finalSelectedDayKwh: sel.targetDayKwh,
+        weatherSeverityMultiplier: 1,
+        weatherModeUsed: "neutral" as const,
+        auxHeatKwhAdder: 0,
+        poolFreezeProtectKwhAdder: 0,
+        dayClassification: "normal_day" as const,
+        auxHeatGate_minTempPassed: false,
+        auxHeatGate_freezeHoursPassed: false,
+        auxHeatGate_severityPassed: false,
+        referenceHeatingSeverity: 0,
+        preBlendAdjustedDayKwh: sel.targetDayKwh,
+        blendedBackTowardProfile: false,
+        weatherAdjustmentModeUsed: "legacy_training_stats" as const,
+        postDonorAdjustmentCoefficient: 1,
+      }
+    : (() => {
+        const weatherByDateKey = new Map<string, PastDayWeatherFeatures>();
+        if (weatherForDay) weatherByDateKey.set(localDate, weatherForDay);
+        return computeWeatherAdjustedDayTotal({
+          baseDayKwh: sel.targetDayKwh,
+          localDate,
+          weatherByDateKey,
+          trainingStats: context.trainingWeatherStats,
+          donorWeatherReference: sel.donorWeatherReference,
+          weatherAdjustmentMode:
+            sel.donorSelectionModeUsed === "calendar_fallback" ? "legacy_training_stats" : "bounded_post_donor",
+          isWeekend,
+          homeProfile: homeProfile ?? null,
+          applianceProfile: applianceProfile ?? null,
+        });
+      })();
 
   const weatherRegime: PastWeatherRegimeKey =
     adj.weatherModeUsed === "heating" || adj.weatherModeUsed === "cooling" ? adj.weatherModeUsed : "neutral";
-  const dayTypeUsed: PastDayTypeKey = isWeekend ? "weekend" : "weekday";
   const selectedShape = selectShape96({
     monthKey,
     dayType: dayTypeUsed,

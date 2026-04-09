@@ -116,6 +116,7 @@ export type PastDaySimulationContext = {
   weatherDonorSamples?: PastWeatherDonorSample[] | null;
   modeledDaySelectionStrategy?: PastModeledDaySelectionStrategy;
   shapeVariants?: PastShapeVariants | null;
+  lowDataSyntheticDayKwhByMonthDayType?: Record<string, { weekday: number; weekend: number }> | null;
 };
 
 /** Request to simulate one past day. */

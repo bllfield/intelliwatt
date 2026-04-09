@@ -23,6 +23,7 @@ import type {
 import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
 import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
@@ -1109,6 +1110,18 @@ function buildLowDataSyntheticShapeVariants(args: {
   };
 }
 
+function buildLowDataSyntheticDayKwhByMonthDayType(profile: PastDayProfileLite): Record<string, { weekday: number; weekend: number }> {
+  const out: Record<string, { weekday: number; weekend: number }> = {};
+  for (let i = 0; i < profile.monthKeys.length; i++) {
+    const monthKey = profile.monthKeys[i];
+    if (!monthKey) continue;
+    const weekday = Number(profile.avgKwhPerDayWeekdayByMonth[i] ?? profile.monthOverallAvgByMonth[monthKey] ?? 0) || 0;
+    const weekend = Number(profile.avgKwhPerDayWeekendByMonth[i] ?? profile.monthOverallAvgByMonth[monthKey] ?? 0) || 0;
+    out[monthKey] = { weekday, weekend };
+  }
+  return out;
+}
+
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
@@ -1183,6 +1196,14 @@ export function buildPastSimulatedBaselineV1(args: {
     intradayShape96?: number[] | null;
     weekdayWeekendShape96?: { weekday?: number[] | null; weekend?: number[] | null } | null;
   } | null;
+  observability?: {
+    correlationId?: string;
+    houseId?: string;
+    sourceHouseId?: string;
+    userId?: string;
+    buildPathKind?: string;
+    source?: string;
+  };
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -1196,6 +1217,41 @@ export function buildPastSimulatedBaselineV1(args: {
   const actualIntervals = useLowDataSyntheticContext ? [] : actualIntervalsInput;
   const suppressedActualIntervalPayloadCount = useLowDataSyntheticContext ? actualIntervalsInput.length : 0;
   const actualIntervalPayloadAttached = actualIntervals.length > 0;
+  const observability = args.observability ?? null;
+  const baselineStartedAt = Date.now();
+  const emitStage = (
+    event: string,
+    extra: Record<string, string | number | boolean | null | undefined> = {}
+  ) => {
+    if (!observability?.correlationId) return;
+    logSimPipelineEvent(event, {
+      correlationId: observability.correlationId,
+      houseId: observability.houseId,
+      sourceHouseId: observability.sourceHouseId,
+      userId: observability.userId,
+      buildPathKind: observability.buildPathKind,
+      source: observability.source ?? "buildPastSimulatedBaselineV1",
+      lowDataSyntheticContextUsed: useLowDataSyntheticContext,
+      lowDataSyntheticMode: lowDataSyntheticContext?.mode ?? null,
+      canonicalDayCount: Array.isArray(args.canonicalDayStartsMs) ? args.canonicalDayStartsMs.length : 0,
+      actualIntervalsCount: actualIntervals.length,
+      intervalCount: 0,
+      modeledDayCount: 0,
+      memoryRssMb: getMemoryRssMb(),
+      elapsedMs: Date.now() - baselineStartedAt,
+      ...extra,
+    });
+  };
+  emitStage("buildPastSimulatedBaselineV1_stage_entry", {
+    actualIntervalPayloadAttached,
+    suppressedActualIntervalPayloadCount,
+  });
+  if (useLowDataSyntheticContext) {
+    emitStage("buildPastSimulatedBaselineV1_stage_low_data_branch_selected", {
+      exactIntervalReferencePreparationSkipped: true,
+      lowDataSummarizedSourceTruthUsed: true,
+    });
+  }
   const actualByTs = new Map<string, number>();
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
   for (const p of actualIntervals) {
@@ -1259,6 +1315,7 @@ export function buildPastSimulatedBaselineV1(args: {
   let excludedIncompleteMeterFingerprintDayCount = 0;
   let excludedLeadingMissingFingerprintDayCount = 0;
   let excludedOtherUntrustedFingerprintDayCount = 0;
+  const referencePrepStartedAt = Date.now();
   if (!wholeHomeOnlyPrior && !useLowDataSyntheticContext) {
     for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
       if (!Number.isFinite(dayStartMs)) continue;
@@ -1326,6 +1383,14 @@ export function buildPastSimulatedBaselineV1(args: {
       });
     }
   }
+  emitStage("buildPastSimulatedBaselineV1_stage_reference_pool_ready", {
+    elapsedMs: Date.now() - referencePrepStartedAt,
+    trustedReferenceDayCount: referenceDays.length,
+    excludedTravelVacantFingerprintDayCount,
+    excludedIncompleteMeterFingerprintDayCount,
+    excludedLeadingMissingFingerprintDayCount,
+    excludedOtherUntrustedFingerprintDayCount,
+  });
 
   const avgHourly: Record<string, Record<number, number[]>> = {};
   const avgTotal: Record<string, Record<number, number>> = {};
@@ -1555,6 +1620,15 @@ export function buildPastSimulatedBaselineV1(args: {
       applianceProfile: args.applianceProfile,
     });
   }
+  const lowDataSyntheticDayKwhByMonthDayType = useLowDataSyntheticContext
+    ? buildLowDataSyntheticDayKwhByMonthDayType(finalProfile)
+    : null;
+  emitStage("buildPastSimulatedBaselineV1_stage_synthetic_day_targets_ready", {
+    elapsedMs: Date.now() - baselineStartedAt,
+    syntheticTargetMonthCount: lowDataSyntheticDayKwhByMonthDayType
+      ? Object.keys(lowDataSyntheticDayKwhByMonthDayType).length
+      : 0,
+  });
 
   const trainingDayKwhByDate = new Map<string, number>();
   for (const d of referenceDays) trainingDayKwhByDate.set(d.dateKey, d.total);
@@ -1781,6 +1855,12 @@ export function buildPastSimulatedBaselineV1(args: {
     weatherDonorSamples: wholeHomeOnlyPrior || useLowDataSyntheticContext ? null : weatherDonorSamples,
     modeledDaySelectionStrategy: args.modeledDaySelectionStrategy ?? "calendar_first",
     shapeVariants: shapeVariantsForContext,
+    lowDataSyntheticDayKwhByMonthDayType,
+  });
+  emitStage("buildPastSimulatedBaselineV1_stage_shape_context_ready", {
+    elapsedMs: Date.now() - baselineStartedAt,
+    shapeMonthCount: lowDataShapeMonthKeys.length,
+    weatherDonorSampleCount: weatherDonorSamples.length,
   });
 
   const NEAREST_WEATHER_K = 7;
@@ -1922,6 +2002,11 @@ export function buildPastSimulatedBaselineV1(args: {
     }
     return referenceDays.length;
   };
+  const perDayLoopStartedAt = Date.now();
+  emitStage("buildPastSimulatedBaselineV1_stage_per_day_loop_start", {
+    modeledDayCount: 0,
+    intervalCount: out.length,
+  });
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
@@ -2194,6 +2279,11 @@ export function buildPastSimulatedBaselineV1(args: {
       }
     }
   }
+  emitStage("buildPastSimulatedBaselineV1_stage_per_day_loop_success", {
+    elapsedMs: Date.now() - perDayLoopStartedAt,
+    modeledDayCount: simulatedDays,
+    intervalCount: out.length,
+  });
 
   if (args.debug?.out) {
     args.debug.out.totalDays = totalDays;
@@ -2241,6 +2331,11 @@ export function buildPastSimulatedBaselineV1(args: {
   actualByTs.clear();
   // `canonicalDayStartsMs` and each per-day grid are emitted in chronological order,
   // so re-sorting the full stitched interval list only burns CPU on large annual runs.
+  emitStage("buildPastSimulatedBaselineV1_stage_success", {
+    intervalCount: out.length,
+    modeledDayCount: simulatedDays,
+    totalDayCount: totalDays,
+  });
   return { intervals: out, dayResults };
 }
 
