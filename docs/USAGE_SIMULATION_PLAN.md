@@ -128,6 +128,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - Shared Stage 1/pre-lockbox helper ownership for both monthly and annual manual modes now lives in `modules/manualUsage/prefill.ts`.
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must call that same shared helper family before entering the shared lockbox/sim/artifact path.
 - GapFill manual monthly/manual annual now follow the shared orchestration contract too: trigger the canonical recalc through `dispatchPastSimRecalc`, then load the richer manual compare/diagnostic view from the persisted artifact via a follow-up read, rather than bundling heavy recalc and post-read work into one blocking route pass.
+- Manual Lab remains the reference for manual-entry Stage 1 contract resolution. GapFill manual modes must therefore resolve and persist the same shared manual payload contract before recalc, and `MANUAL_TOTALS` travel ownership comes from that manual payload contract rather than a second route-local DB travel truth owner.
 - On that shared manual path, `MANUAL_TOTALS` recalc should stay lean: it should not depend on exact-interval fingerprint/profile tuning work to produce manual monthly/annual truth, and richer compare/reconciliation diagnostics should load from persisted readback after recalc succeeds.
 - Manual Monthly Lab `lookup` is now intentionally lightweight. The heavier source-dataset/prefill/readback preparation work happens in `load`.
 - For GapFill manual modes, Actual House stays the full interval-backed source reference, while Test Home exposes the constrained shared Past result. GapFill manual compare reads the same shared bill-period-first contract as user/admin manual reconciliation after artifact readback, then overlays Actual House interval truth onto those same bill periods for operator compare views.
@@ -149,6 +150,7 @@ This section is authoritative for future manual-usage implementation and handoff
   - excluded bill periods kept visible as excluded/non-scored rows
 - The admin lab may add diagnostics after the shared Stage 2 result exists, but it must not own a different readback gate, a different chart acceptance rule, or a different display-truth path before the shared Past dashboard renders.
 - Daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab flow/debug page.
+- Manual Lab and GapFill manual readbacks also surface one compact parity summary from shared artifact-backed readback so operators can verify Stage 1 contract parity, travel-range parity, normalized-target parity, shared-path parity, and compare-attachment parity without falling back to giant raw JSON first.
 
 ### Transitional Runtime Contract
 

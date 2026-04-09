@@ -58,6 +58,7 @@ type RunResult = {
   baselineDatasetProjection?: any;
   manualReadModel?: any;
   manualMonthlyReconciliation?: any;
+  manualParitySummary?: any;
   scoredDayTruthRows?: Array<{
     localDate: string;
     actualDayKwh: number;
@@ -1028,6 +1029,7 @@ export default function GapFillLabCanonicalClient() {
       ? ((result as any).sharedDiagnostics as Record<string, unknown>)
       : null;
   const manualReadModel = result?.ok ? (result.manualReadModel ?? null) : null;
+  const manualParitySummary = result?.ok ? ((result as any).manualParitySummary ?? null) : null;
   const manualMonthlyCompareRows = useMemo(
     () =>
       buildGapfillManualMonthlyCompareRows({
@@ -1993,6 +1995,16 @@ export default function GapFillLabCanonicalClient() {
                 treatmentMode={visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode}
               />
             </div>
+            {manualParitySummary ? (
+              <details className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm" open>
+                <summary className="cursor-pointer text-sm font-semibold text-brand-navy">
+                  Shared manual parity summary
+                </summary>
+                <pre className="mt-3 overflow-x-auto rounded bg-brand-navy/5 p-3 text-xs text-brand-navy">
+                  {JSON.stringify(manualParitySummary, null, 2)}
+                </pre>
+              </details>
+            ) : null}
           </>
         ) : (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">

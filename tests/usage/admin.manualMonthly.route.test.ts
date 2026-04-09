@@ -283,17 +283,26 @@ describe("admin manual monthly route", () => {
     expect(typeof body.seed.annual.annualKwh).toBe("number");
     expect(body.readResult.ok).toBe(true);
     expect(body.readResult.dataset.daily).toHaveLength(30);
+    expect(body.readResult.manualParitySummary).toMatchObject({
+      stage1_contract: expect.objectContaining({
+        anchorEndDate: "2025-04-30",
+      }),
+      parity_verdicts: expect.objectContaining({
+        stage2PathParity: true,
+      }),
+    });
   });
 
   it("routes shared Stage 1 monthly/annual seed resolution through manualUsage/prefill on load", async () => {
     const prefill = await import("@/modules/manualUsage/prefill");
-    const seedSpy = vi.spyOn(prefill, "buildManualUsageStageOneResolvedSeeds");
+    const contractSpy = vi.spyOn(prefill, "resolveSharedManualStageOneContract");
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
 
     const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
     expect(res.status).toBe(200);
-    expect(seedSpy).toHaveBeenCalledWith(
+    expect(contractSpy).toHaveBeenCalledWith(
       expect.objectContaining({
+        mode: "MONTHLY",
         sourcePayload: null,
         actualEndDate: "2025-12-31",
         dailyRows: expect.any(Array),

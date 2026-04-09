@@ -4477,12 +4477,13 @@ async function recalcSimulatorBuildImpl(args: {
     simMode === "MANUAL_TOTALS"
       ? normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
       : [];
+  const manualPayloadTravelIsAuthoritative =
+    simMode === "MANUAL_TOTALS" && manualUsagePayload != null;
   const allTravelRanges =
     simMode === "MANUAL_TOTALS"
-      ? normalizePreLockboxTravelRanges([
-          ...manualPayloadTravelRanges,
-          ...scenarioMergedTravelRanges,
-        ])
+      ? manualPayloadTravelIsAuthoritative
+        ? manualPayloadTravelRanges
+        : scenarioMergedTravelRanges
       : simMode === "NEW_BUILD_ESTIMATE"
         ? []
         : scenarioMergedTravelRanges;

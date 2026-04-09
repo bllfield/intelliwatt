@@ -6,7 +6,7 @@ import { gateManualMonthlyLabAdmin, resolveManualMonthlyLabOwnerUserId } from ".
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
-  buildManualUsageStageOneResolvedSeeds,
+  resolveSharedManualStageOneContract,
 } from "@/modules/manualUsage/prefill";
 import { normalizeTravelRanges as normalizeManualTravelRanges } from "@/modules/manualUsage/statementRanges";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
@@ -282,35 +282,29 @@ async function buildLabPrefill(args: {
   sourcePayload: ManualUsagePayload | null;
   sourceUsageHouse: Awaited<ReturnType<typeof buildSourceUsageHouse>>;
 }) {
-  const travelRanges = normalizeTravelRanges(args.sourcePayload);
-  const actualEndDate =
-    String(
-      args.sourceUsageHouse?.dataset?.summary?.end ??
-        ""
-    ).slice(0, 10) || null;
-  const seedSet = buildManualUsageStageOneResolvedSeeds({
+  const resolved = resolveSharedManualStageOneContract({
+    mode: "MONTHLY",
     sourcePayload: args.sourcePayload,
-    actualEndDate,
-    travelRanges,
+    actualEndDate: String(args.sourceUsageHouse?.dataset?.summary?.end ?? "").slice(0, 10) || null,
+    travelRanges: normalizeTravelRanges(args.sourcePayload),
     dailyRows: args.sourceUsageHouse?.dataset?.daily ?? [],
   });
-  const anchorEndDate = seedSet.anchorEndDate;
-  if (!anchorEndDate) {
+  if (!resolved.seedSet.anchorEndDate) {
     return {
       payloadToPersist: null,
       seed: {
-        sourceMode: seedSet.sourceMode,
-        monthly: seedSet.usableSourceMonthlyPayload ?? seedSet.monthlySeed,
-        annual: seedSet.usableSourceAnnualPayload ?? seedSet.annualSeed,
+        sourceMode: resolved.seedSet.sourceMode,
+        monthly: resolved.seedSet.usableSourceMonthlyPayload ?? resolved.seedSet.monthlySeed,
+        annual: resolved.seedSet.usableSourceAnnualPayload ?? resolved.seedSet.annualSeed,
       },
     };
   }
   return {
-    payloadToPersist: seedSet.usableSourceMonthlyPayload ? null : seedSet.monthlySeed,
+    payloadToPersist: resolved.payloadSource === "actual_derived_seed" ? resolved.payload : null,
     seed: {
-      sourceMode: seedSet.sourceMode,
-      monthly: seedSet.usableSourceMonthlyPayload ?? seedSet.monthlySeed,
-      annual: seedSet.usableSourceAnnualPayload ?? seedSet.annualSeed,
+      sourceMode: resolved.seedSet.sourceMode,
+      monthly: resolved.seedSet.usableSourceMonthlyPayload ?? resolved.seedSet.monthlySeed,
+      annual: resolved.seedSet.usableSourceAnnualPayload ?? resolved.seedSet.annualSeed,
     },
   };
 }

@@ -454,6 +454,7 @@ This section is authoritative for future manual-usage implementation work.
   - annual seed derivation
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same shared Stage 1 helper family before entering the shared lockbox/sim/artifact path.
 - GapFill manual monthly/manual annual now dispatch through the shared `dispatchPastSimRecalc` entry with the same Stage 1 seed-resolution family (`modules/manualUsage/prefill.ts`) and then read back the persisted artifact, instead of doing the old inline recalc-plus-heavy-read orchestration in one blocking request.
+- Manual Lab remains the authority for manual-entry Stage 1 semantics, so GapFill manual modes now resolve and persist the same shared manual payload contract before recalc; on `MANUAL_TOTALS`, manual payload travel ranges are the canonical manual travel input, and route-local DB travel state is parity context only.
 - That shared recalc/readback contract is now explicit:
   - recalc returns once the canonical artifact is ready
   - responses may include `readbackPending: true` plus `canonicalArtifactInputHash`
@@ -493,6 +494,7 @@ This section is authoritative for future manual-usage implementation work.
   - `manualBillPeriodTotalsKwhById`
   - shared bill-period compare rows derived from that contract
 - User Manual Monthly, User Manual Annual, Manual Monthly Lab, and GapFill manual compare now consume that shared read-model contract after recalc/readback instead of assembling manual compare truth inline per route.
+- Manual Lab and GapFill manual modes now also expose the same compact artifact-backed parity summary so Stage 1 contract drift, travel-range drift, shared-path drift, and compare-attachment drift are visible without expanding the full raw read payload.
 - Statement/bill ranges are Stage 1 bill-period constraint truth plus reconciliation truth. They may legitimately shape shared Stage 2 constraints, but they are not travel/vacant ownership, not incomplete-meter ownership, and not silent exclusions.
 - Explicit travel ranges remain the only travel/vacant ownership source on constrained manual paths.
 - Constrained manual non-travel modeled days no longer leak into incomplete-meter ownership when low-data/shared manual constraints resolve through `whole_home_only`.

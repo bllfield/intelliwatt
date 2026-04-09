@@ -80,10 +80,10 @@ import {
   resolveUserWeatherLogicSetting,
 } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import {
-  buildManualUsageStageOneResolvedSeeds,
-  resolveManualUsageStageOnePayloadForMode,
+  resolveSharedManualStageOneContract,
+  type ManualUsageStageOneResolvedPayload,
 } from "@/modules/manualUsage/prefill";
-import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
@@ -343,7 +343,7 @@ async function buildGapfillManualConstraintPayload(args: {
   sourceEsiid: string | null;
   travelRangesForRecalc: DateRange[];
   usageInputMode: TestHomeUsageInputMode;
-}): Promise<ManualUsagePayload | null> {
+}): Promise<ManualUsageStageOneResolvedPayload> {
   const [sourceManualRec, testHomeManualRec, sourceUsageDataset] = await Promise.all([
     getManualUsageInputForUserHouse({
       userId: args.sourceHouseUserId,
@@ -357,20 +357,20 @@ async function buildGapfillManualConstraintPayload(args: {
       skipFullYearIntervalFetch: true,
     }).catch(() => ({ dataset: null })),
   ]);
-  const seedSet = buildManualUsageStageOneResolvedSeeds({
+  return resolveSharedManualStageOneContract({
+    mode: args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS" ? "ANNUAL" : "MONTHLY",
     sourcePayload: sourceManualRec.payload,
     actualEndDate:
       String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null,
-    travelRanges: args.travelRangesForRecalc,
+    // Manual Usage Lab is the authority for manual-entry travel semantics, so seed
+    // the shared manual contract from manual payload travel ranges rather than DB-only travel state.
+    travelRanges:
+      Array.isArray(sourceManualRec.payload?.travelRanges)
+        ? sourceManualRec.payload.travelRanges
+        : [],
     dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
+    testHomePayload: testHomeManualRec.payload,
   });
-  return (
-    resolveManualUsageStageOnePayloadForMode({
-      mode: args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS" ? "ANNUAL" : "MONTHLY",
-      testHomePayload: testHomeManualRec.payload,
-      seedSet,
-    }).payload ?? null
-  );
 }
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
@@ -443,7 +443,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
       ? args.exactArtifactInputHash.trim()
       : null;
-  const [buildRow, artifactRow, manualUsagePayload] = await Promise.all([
+  const [buildRow, artifactRow, manualContract] = await Promise.all([
     (prisma as any).usageSimulatorBuild
       .findUnique({
         where: {
@@ -494,7 +494,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactInputHash: artifactRow?.inputHash ?? null,
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
-    manualUsagePayload,
+    manualUsagePayload: manualContract.payload,
   });
   if (!readResultWithManualPayload.ok) {
     return NextResponse.json(
@@ -602,6 +602,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     compareProjection: readResultWithManualPayload.compareProjection,
     manualReadModel: readResultWithManualPayload.manualReadModel,
     manualMonthlyReconciliation: readResultWithManualPayload.manualMonthlyReconciliation,
+    manualParitySummary: readResultWithManualPayload.manualParitySummary,
     buildId: buildRow?.id ?? null,
     buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,
     buildInputsHash: buildRow?.buildInputsHash ?? null,
@@ -1673,6 +1674,40 @@ export async function POST(req: NextRequest) {
     });
 
     if (isManualUsageMode) {
+      const manualContract = await buildGapfillManualConstraintPayload({
+        labOwnerUserId: labOwnerUser.id,
+        testHomeHouseId: testHomeHouse.id,
+        sourceHouseUserId: String(sourceHouse.userId ?? link.sourceUserId),
+        sourceHouseId: sourceHouse.id,
+        sourceEsiid,
+        travelRangesForRecalc,
+        usageInputMode: testUsageInputMode,
+      });
+      if (!manualContract.payload) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "manual_stage_one_payload_unresolved",
+            message: "GapFill manual mode could not resolve the shared Stage 1 contract for this test-home run.",
+            reasonCode: "MANUAL_STAGE_ONE_PAYLOAD_UNRESOLVED",
+            correlationId: labCorrelationId,
+          }),
+          { status: 409 }
+        );
+      }
+      const effectiveManualTravelRanges = Array.isArray(manualContract.payload.travelRanges)
+        ? manualContract.payload.travelRanges
+            .map((range) => ({
+              startDate: String(range?.startDate ?? "").slice(0, 10),
+              endDate: String(range?.endDate ?? "").slice(0, 10),
+            }))
+            .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate))
+        : [];
+      await saveManualUsageInputForUserHouse({
+        userId: labOwnerUser.id,
+        houseId: testHomeHouse.id,
+        payload: manualContract.payload,
+      });
       let dispatched: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
       try {
         dispatched = await dispatchPastSimRecalc({
@@ -1684,7 +1719,7 @@ export async function POST(req: NextRequest) {
           scenarioId: String(pastScenario.id),
           weatherPreference: gapfillWeatherLogic.weatherPreference,
           persistPastSimBaseline: true,
-          preLockboxTravelRanges: travelRangesForRecalc,
+          preLockboxTravelRanges: effectiveManualTravelRanges,
           validationDaySelectionMode: testSelectionMode,
           validationDayCount: validationPolicy.validationDayCount,
           correlationId: labCorrelationId,
@@ -1740,9 +1775,8 @@ export async function POST(req: NextRequest) {
           simulatorMode: "MANUAL_TOTALS",
           testSelectionMode,
           adminValidationMode: testSelectionMode,
-          effectiveTravelRangesForRecalc: travelRangesForRecalc,
-          effectiveTravelRangesSource:
-            usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
+          effectiveTravelRangesForRecalc: effectiveManualTravelRanges,
+          effectiveTravelRangesSource: manualContract.payloadSource,
         });
         logSimPipelineEvent("admin_lab_manual_recalc_response_sent", {
           correlationId: dispatched.correlationId,
@@ -1793,9 +1827,8 @@ export async function POST(req: NextRequest) {
         simulatorMode: "MANUAL_TOTALS",
         testSelectionMode,
         adminValidationMode: testSelectionMode,
-        effectiveTravelRangesForRecalc: travelRangesForRecalc,
-        effectiveTravelRangesSource:
-          usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
+        effectiveTravelRangesForRecalc: effectiveManualTravelRanges,
+        effectiveTravelRangesSource: manualContract.payloadSource,
         result: dispatched.result,
       });
       logSimPipelineEvent("admin_lab_manual_recalc_response_sent", {

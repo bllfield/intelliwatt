@@ -733,6 +733,12 @@ export default function ManualMonthlyLab() {
             />
 
             <SectionJson
+              title="Shared manual parity summary"
+              open
+              value={displayedReadResult?.manualParitySummary ?? null}
+            />
+
+            <SectionJson
               title="Lockbox / shared-producer summary"
               value={{
                 identityContext: runtimeSummary?.identityContext ?? null,

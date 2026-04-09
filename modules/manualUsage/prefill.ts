@@ -337,3 +337,24 @@ export function resolveManualUsageStageOnePayloadForMode(args: {
     seedSet: args.seedSet,
   };
 }
+
+export function resolveSharedManualStageOneContract(args: {
+  mode: "MONTHLY" | "ANNUAL";
+  sourcePayload: ManualUsagePayload | null;
+  testHomePayload?: ManualUsagePayload | null;
+  actualEndDate?: string | null;
+  travelRanges: TravelRange[];
+  dailyRows: unknown;
+}): ManualUsageStageOneResolvedPayload {
+  const seedSet = buildManualUsageStageOneResolvedSeeds({
+    sourcePayload: args.sourcePayload,
+    actualEndDate: args.actualEndDate,
+    travelRanges: args.travelRanges,
+    dailyRows: args.dailyRows,
+  });
+  return resolveManualUsageStageOnePayloadForMode({
+    mode: args.mode,
+    testHomePayload: args.testHomePayload ?? null,
+    seedSet,
+  });
+}
