@@ -734,6 +734,11 @@ export type PastSimulationDebug = {
   lowDataSyntheticContextUsed?: boolean;
   lowDataSyntheticMode?: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | null;
   actualBackedReferencePoolUsed?: boolean;
+  actualIntervalPayloadAttached?: boolean;
+  actualIntervalPayloadCount?: number;
+  suppressedActualIntervalPayloadCount?: number;
+  exactIntervalReferencePreparationSkipped?: boolean;
+  lowDataSummarizedSourceTruthUsed?: boolean;
   intervalUsageFingerprintIdentity?: string;
   trustedIntervalFingerprintDayCount?: number;
   excludedTravelVacantFingerprintDayCount?: number;
@@ -1182,14 +1187,18 @@ export function buildPastSimulatedBaselineV1(args: {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
 } {
-  const actualByTs = new Map<string, number>();
   const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
   const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
   const lowDataSyntheticContext = args.lowDataSyntheticContext ?? null;
   const useLowDataSyntheticContext = Boolean(lowDataSyntheticContext);
+  const actualIntervalsInput = args.actualIntervals ?? [];
+  const actualIntervals = useLowDataSyntheticContext ? [] : actualIntervalsInput;
+  const suppressedActualIntervalPayloadCount = useLowDataSyntheticContext ? actualIntervalsInput.length : 0;
+  const actualIntervalPayloadAttached = actualIntervals.length > 0;
+  const actualByTs = new Map<string, number>();
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
-  for (const p of args.actualIntervals ?? []) {
+  for (const p of actualIntervals) {
     const ts = String(p?.timestamp ?? "");
     if (!ts) continue;
     const ms = new Date(ts).getTime();
@@ -2195,6 +2204,11 @@ export function buildPastSimulatedBaselineV1(args: {
     args.debug.out.lowDataSyntheticContextUsed = useLowDataSyntheticContext;
     args.debug.out.lowDataSyntheticMode = lowDataSyntheticContext?.mode ?? null;
     args.debug.out.actualBackedReferencePoolUsed = !useLowDataSyntheticContext && !wholeHomeOnlyPrior;
+    args.debug.out.actualIntervalPayloadAttached = actualIntervalPayloadAttached;
+    args.debug.out.actualIntervalPayloadCount = actualIntervals.length;
+    args.debug.out.suppressedActualIntervalPayloadCount = suppressedActualIntervalPayloadCount;
+    args.debug.out.exactIntervalReferencePreparationSkipped = useLowDataSyntheticContext;
+    args.debug.out.lowDataSummarizedSourceTruthUsed = useLowDataSyntheticContext;
     args.debug.out.intervalUsageFingerprintIdentity = intervalUsageFingerprintIdentity ?? undefined;
     args.debug.out.trustedIntervalFingerprintDayCount = referenceDays.length;
     args.debug.out.excludedTravelVacantFingerprintDayCount = excludedTravelVacantFingerprintDayCount;

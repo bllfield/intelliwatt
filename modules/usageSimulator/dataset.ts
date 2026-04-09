@@ -885,7 +885,13 @@ export type SimulatedUsageDatasetMeta = {
   simulatedDayCount?: number;
   stitchedDayCount?: number;
   actualIntervalsCount?: number;
+  sourceActualIntervalsCount?: number;
+  actualIntervalPayloadAttached?: boolean;
+  actualIntervalPayloadSuppressed?: boolean;
+  actualIntervalPayloadSuppressedCount?: number;
   referenceDaysCount?: number;
+  exactIntervalReferencePreparationSkipped?: boolean;
+  lowDataSummarizedSourceTruthUsed?: boolean;
   shapeMonthsPresent?: string[];
   excludedDateKeysCount?: number;
   excludedDateKeysFingerprint?: string;

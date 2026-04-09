@@ -98,8 +98,24 @@ function weatherRow(kind: "actual" | "stub") {
   return kind === "actual" ? { ...base, source: "OPEN_METEO" } : { ...base, source: WEATHER_STUB_SOURCE };
 }
 
+function validUsageShapeRow() {
+  return {
+    id: "shape-1",
+    version: "v1",
+    derivedAt: "2026-03-14T00:00:00.000Z",
+    windowStartUtc: "2025-03-14T00:00:00.000Z",
+    windowEndUtc: "2026-03-13T23:59:59.999Z",
+    shapeByMonth96: {
+      "2026-01": Array.from({ length: 96 }, () => 1 / 96),
+    },
+    avgKwhPerDayWeekdayByMonth: Array.from({ length: 12 }, () => 24),
+    avgKwhPerDayWeekendByMonth: Array.from({ length: 12 }, () => 20),
+  };
+}
+
 describe("low-data Past shared chain (Slice 14)", () => {
   beforeEach(() => {
+    logPipeline.mockReset();
     getActualIntervalsForRange.mockReset();
     getHouseWeatherDays.mockReset();
     ensureHouseWeatherBackfill.mockReset();
@@ -168,6 +184,8 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(getActualIntervalsForRange).not.toHaveBeenCalled();
     expect(out.dataset).not.toBeNull();
     const firstCall = buildPastSimulatedBaselineV1.mock.calls[0]?.[0];
+    expect(Array.isArray(firstCall?.actualIntervals)).toBe(true);
+    expect(firstCall?.actualIntervals).toHaveLength(0);
     const wxArg = firstCall?.actualWxByDateKey as Map<string, { source?: string }>;
     expect(wxArg?.get("2026-01-05")?.source).toBe("OPEN_METEO");
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
@@ -240,6 +258,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.lowDataSyntheticContext).toMatchObject({
       mode: "NEW_BUILD_ESTIMATE",
     });
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.actualIntervals).toHaveLength(0);
   });
 
   it("preserves explicitly requested keep-ref days without expanding the full manual window", async () => {
@@ -269,6 +288,80 @@ describe("low-data Past shared chain (Slice 14)", () => {
       | Set<string>
       | undefined;
     expect(Array.from(keepRef ?? [])).toEqual(["2026-01-03"]);
+  });
+
+  it("drops preloaded full actual intervals for MANUAL_TOTALS low-data handoff and logs the suppression", async () => {
+    buildPastSimulatedBaselineV1.mockClear();
+    const preloadedActualIntervals = Array.from({ length: 96 }, (_, i) => ({
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, i * 15)).toISOString(),
+      kwh: 0.2,
+    }));
+
+    await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "h1",
+      esiid: null,
+      startDate: "2026-01-01",
+      endDate: "2026-01-05",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "MANUAL_TOTALS",
+        resolvedSimFingerprint: {
+          manualTotalsConstraint: "monthly",
+        },
+      } as any,
+      buildPathKind: "recalc",
+      actualIntervals: preloadedActualIntervals,
+      includeSimulatedDayResults: false,
+    });
+
+    const firstCall = buildPastSimulatedBaselineV1.mock.calls[0]?.[0];
+    expect(firstCall?.actualIntervals).toEqual([]);
+    const baselineStartEvent = logPipeline.mock.calls.find(
+      ([eventName]) => eventName === "buildPastSimulatedBaselineV1_start"
+    )?.[1] as Record<string, unknown> | undefined;
+    expect(baselineStartEvent?.actualIntervalsCount).toBe(0);
+    expect(baselineStartEvent?.sourceActualIntervalsCount).toBe(96);
+    expect(baselineStartEvent?.actualIntervalPayloadSuppressed).toBe(true);
+    expect(baselineStartEvent?.lowDataUsesSummarizedSourceTruth).toBe(true);
+  });
+
+  it("keeps preloaded actual intervals attached for SMT_BASELINE", async () => {
+    buildPastSimulatedBaselineV1.mockClear();
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+    const actualIntervals = Array.from({ length: 96 }, (_, i) => ({
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, i * 15)).toISOString(),
+      kwh: 0.1,
+    }));
+    getHouseWeatherDays.mockImplementation(async ({ kind }: any) => {
+      const m = new Map();
+      m.set("2026-01-01", kind === "ACTUAL_LAST_YEAR" ? weatherRow("actual") : weatherRow("actual"));
+      return m;
+    });
+
+    await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "h1",
+      esiid: null,
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: "UTC",
+      travelRanges: [],
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "SMT_BASELINE",
+        baseKind: "SMT_ACTUAL_BASELINE",
+      } as any,
+      buildPathKind: "recalc",
+      actualIntervals,
+      includeSimulatedDayResults: false,
+    });
+
+    expect(buildPastSimulatedBaselineV1.mock.calls[0]?.[0]?.actualIntervals).toHaveLength(96);
   });
 
   it("SMT_BASELINE fails when actual weather coverage is still missing after backfill", async () => {
