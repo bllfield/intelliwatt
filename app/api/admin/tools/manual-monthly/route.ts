@@ -571,10 +571,12 @@ export async function POST(req: NextRequest) {
         );
       }
       if (dispatched.executionMode === "inline") {
+        const inlineResult = dispatched.result;
         const canonicalArtifactInputHash =
-          typeof dispatched.result.canonicalArtifactInputHash === "string" &&
-          dispatched.result.canonicalArtifactInputHash.trim()
-            ? dispatched.result.canonicalArtifactInputHash.trim()
+          inlineResult.ok &&
+          typeof inlineResult.canonicalArtifactInputHash === "string" &&
+          inlineResult.canonicalArtifactInputHash.trim()
+            ? inlineResult.canonicalArtifactInputHash.trim()
             : null;
         logSimPipelineEvent("admin_manual_monthly_recalc_response_ready", {
           correlationId: dispatched.correlationId,
@@ -602,7 +604,7 @@ export async function POST(req: NextRequest) {
           readbackPending: true,
           canonicalArtifactInputHash,
           jobId: null,
-          result: dispatched.result,
+          result: inlineResult,
           readResult: null,
         });
       }

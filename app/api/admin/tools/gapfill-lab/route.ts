@@ -799,6 +799,8 @@ export async function POST(req: NextRequest) {
     /** Section 24 admin-only simulation treatment (canonical lab recalc). */
     adminLabTreatmentMode?: unknown;
     testUsageInputMode?: unknown;
+    exactArtifactInputHash?: unknown;
+    correlationId?: unknown;
   };
   try {
     body = await req.json();
