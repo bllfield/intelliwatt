@@ -152,17 +152,15 @@ export async function GET(request: NextRequest) {
       });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
-      return NextResponse.json(
-        {
-          ...out,
-          compareProjection,
-          manualReadModel,
-          manualMonthlyReconciliation,
-          sharedDiagnostics,
-          correlationId,
-        },
-        { headers: okHeaders }
-      });
+      const successBody = {
+        ...out,
+        compareProjection,
+        manualReadModel,
+        manualMonthlyReconciliation,
+        sharedDiagnostics,
+        correlationId,
+      };
+      return NextResponse.json(successBody, { headers: okHeaders });
     }
 
     const failureBody = {

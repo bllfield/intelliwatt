@@ -84,6 +84,7 @@ export type PastSimPerDayTrace = {
   simulatedReasonCode:
     | "TRAVEL_VACANT"
     | "TEST_MODELED_KEEP_REF"
+    | "MANUAL_CONSTRAINED_DAY"
     | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
     | "INCOMPLETE_METER_DAY"

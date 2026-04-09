@@ -171,6 +171,13 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   homeProfile: Record<string, unknown> | null;
   applianceProfile: Record<string, unknown> | null;
 }): PastLowDataWeatherEvidenceSummary | null {
+  type MonthlyWeatherEvidenceRow = {
+    month: string;
+    avgDailyTarget: number;
+    avgHdd: number;
+    avgCdd: number;
+    avgTempC: number | null;
+  };
   if (args.buildInputs.mode !== "MANUAL_TOTALS") return null;
   if (String((args.manualUsagePayload as any)?.mode ?? "").trim() !== "MONTHLY") return null;
 
@@ -180,7 +187,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   const inputState = ((args.buildInputs as any)?.manualMonthlyInputState ?? null) as
     | { enteredMonthKeys?: string[]; missingMonthKeys?: string[] }
     | null;
-  const rows = diagnostics
+  const rows: MonthlyWeatherEvidenceRow[] = diagnostics
     .map((row: any) => {
       const month = String(row?.month ?? "").trim();
       const normalizedMonthTarget = Number(row?.normalizedMonthTarget);
@@ -211,7 +218,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
         avgTempC,
       };
     })
-    .filter((row): row is { month: string; avgDailyTarget: number; avgHdd: number; avgCdd: number; avgTempC: number | null } => Boolean(row));
+    .filter((row: MonthlyWeatherEvidenceRow | null): row is MonthlyWeatherEvidenceRow => Boolean(row));
   if (rows.length === 0) return null;
 
   const xtx = [
@@ -229,9 +236,9 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   }
   const inverse = invert3x3(xtx);
   const solved = inverse ? multiplyMatrixVector(inverse, xty) : [0, 0, 0];
-  const meanTarget = rows.reduce((sum, row) => sum + row.avgDailyTarget, 0) / Math.max(1, rows.length);
-  const meanHdd = rows.reduce((sum, row) => sum + row.avgHdd, 0) / Math.max(1, rows.length);
-  const meanCdd = rows.reduce((sum, row) => sum + row.avgCdd, 0) / Math.max(1, rows.length);
+  const meanTarget = rows.reduce((sum: number, row) => sum + row.avgDailyTarget, 0) / Math.max(1, rows.length);
+  const meanHdd = rows.reduce((sum: number, row) => sum + row.avgHdd, 0) / Math.max(1, rows.length);
+  const meanCdd = rows.reduce((sum: number, row) => sum + row.avgCdd, 0) / Math.max(1, rows.length);
   const fuelConfiguration = String((args.homeProfile as any)?.fuelConfiguration ?? "").trim();
   const heatingType = String((args.homeProfile as any)?.heatingType ?? "").trim();
   const hasCoolingPriors =

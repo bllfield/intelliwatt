@@ -680,6 +680,7 @@ export type PastSimulatedDayDiagnostic = {
   simulatedReason:
     | "EXCLUDED"
     | "LEADING_MISSING"
+    | "LOW_DATA_CONSTRAINED"
     | "INCOMPLETE"
     | "FORCED_SELECTED_DAY"
     | "GAPFILL_MODELED_KEEP_REF"
