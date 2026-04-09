@@ -197,7 +197,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
   }
 }
 import {
-  buildSourceDerivedMonthlyTargetResolution,
+  buildSourceDerivedMonthlyTargetResolutionFromPayload,
   resolveManualMonthlyAnchorEndDateKey,
   type SourceDerivedMonthlyTargetResolution,
 } from "@/modules/usageSimulator/monthlyTargetConstruction";
@@ -4247,35 +4247,10 @@ async function recalcSimulatorBuildImpl(args: {
       manualUsagePayload = resolvedManualStageOne.payload;
       manualMonthlySourceDerivedResolution =
         desiredManualStageOneMode === "MONTHLY" && resolvedManualStageOne.payload?.mode === "MONTHLY"
-          ? (() => {
-              const anchorEndDate = resolveManualMonthlyAnchorEndDateKey(resolvedManualStageOne.payload);
-              const sourceDailyRows = Array.isArray(sourceUsageDataset?.dataset?.daily)
-                ? (sourceUsageDataset.dataset.daily as Array<Record<string, unknown>>)
-                : [];
-              const dailyKwhByDateKey = sourceDailyRows.reduce<Record<string, number>>((acc, row) => {
-                const dateKey = String(row?.date ?? "").slice(0, 10);
-                const kwh = Number(row?.kwh);
-                if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey) && Number.isFinite(kwh)) acc[dateKey] = kwh;
-                return acc;
-              }, {});
-              const fallbackMonthlyKwhByMonth = Array.isArray(resolvedManualStageOne.payload.monthlyKwh)
-                ? resolvedManualStageOne.payload.monthlyKwh.reduce<Record<string, number>>((acc, row) => {
-                    const month = String(row?.month ?? "").trim();
-                    const kwh = Number(row?.kwh);
-                    if (/^\d{4}-\d{2}$/.test(month) && Number.isFinite(kwh)) acc[month] = kwh;
-                    return acc;
-                  }, {})
-                : {};
-              return anchorEndDate && Object.keys(dailyKwhByDateKey).length > 0
-                ? buildSourceDerivedMonthlyTargetResolution({
-                    canonicalMonths: canonicalForBuild.months,
-                    anchorEndDate,
-                    dailyKwhByDateKey,
-                    travelRanges: travelRangesForBuild ?? [],
-                    fallbackMonthlyKwhByMonth,
-                  })
-                : null;
-            })()
+          ? buildSourceDerivedMonthlyTargetResolutionFromPayload({
+              canonicalMonths: canonicalForBuild.months,
+              payload: resolvedManualStageOne.payload,
+            })
           : null;
     } catch (e) {
       emitRecalcPreIntervalStageEvent({
@@ -4897,6 +4872,7 @@ async function recalcSimulatorBuildImpl(args: {
         weatherPreference,
         weatherLogicMode: resolveWeatherLogicModeFromBuildInputs({ weatherPreference }),
         monthlyTotalsKwhByMonth,
+        manualAnnualTotalKwh: built.manualAnnualTotalKwh ?? null,
         intradayShape96: built.intradayShape96,
         weekdayWeekendShape96: built.weekdayWeekendShape96,
         travelRanges: allTravelRanges,
@@ -5077,6 +5053,7 @@ async function recalcSimulatorBuildImpl(args: {
     timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,
+    manualAnnualTotalKwh: built.manualAnnualTotalKwh ?? null,
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
     manualBillPeriods: built.manualBillPeriods ?? [],

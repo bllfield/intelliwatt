@@ -1,6 +1,7 @@
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { buildManualBillPeriodTargets } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
 
 export const MIN_TRUSTED_NON_TRAVEL_DAYS_PER_MONTH = 5;
@@ -171,6 +172,92 @@ export function buildSourceDerivedMonthlyTargetResolution(args: {
   };
 }
 
+export function buildSourceDerivedMonthlyTargetResolutionFromPayload(args: {
+  canonicalMonths: string[];
+  payload: ManualUsagePayload;
+}): SourceDerivedMonthlyTargetResolution | null {
+  if ((args.payload as any)?.mode !== "MONTHLY") return null;
+  const monthlyKwhByMonth: Record<string, number> = {};
+  const trustedMonthlyAnchorsByMonth: Record<string, number> = {};
+  const diagnosticsByMonth = new Map<string, MonthlyTargetConstructionDiagnostic>();
+  const billPeriodsByMonth = new Map(
+    buildManualBillPeriodTargets(args.payload)
+      .map((period) => [String(period.month ?? "").trim(), period] as const)
+      .filter(([month]) => /^\d{4}-\d{2}$/.test(month))
+  );
+  const payloadMonthlyRows = Array.isArray((args.payload as any)?.monthlyKwh)
+    ? ((args.payload as any).monthlyKwh as Array<{ month?: unknown; kwh?: unknown }>)
+    : [];
+
+  for (const row of payloadMonthlyRows) {
+    const month = String(row?.month ?? "").trim();
+    if (!/^\d{4}-\d{2}$/.test(month) || !args.canonicalMonths.includes(month)) continue;
+    const enteredKwh = Number(row?.kwh);
+    if (!Number.isFinite(enteredKwh)) continue;
+    const rounded = round2(Math.max(0, enteredKwh));
+    const period = billPeriodsByMonth.get(month);
+    const travelOverlap = String(period?.exclusionReason ?? "").trim() === "travel_overlap";
+    const travelVacantDayCountInMonth =
+      travelOverlap && period ? enumerateDateKeysInclusive(period.startDate, period.endDate).length : 0;
+    if (!travelOverlap) {
+      monthlyKwhByMonth[month] = rounded;
+      trustedMonthlyAnchorsByMonth[month] = rounded;
+      diagnosticsByMonth.set(month, {
+        month,
+        rawMonthKwhFromSource: rounded,
+        travelVacantDayCountInMonth: 0,
+        eligibleNonTravelDayCount: period ? enumerateDateKeysInclusive(period.startDate, period.endDate).length : 0,
+        eligibleNonTravelKwhTotal: rounded,
+        nonTravelDailyAverage: null,
+        normalizedMonthTarget: rounded,
+        monthlyTargetBuildMethod: "user_manual_month_value",
+        trustedMonthlyAnchorUsed: true,
+      });
+      continue;
+    }
+    diagnosticsByMonth.set(month, {
+      month,
+      rawMonthKwhFromSource: rounded,
+      travelVacantDayCountInMonth,
+      eligibleNonTravelDayCount: 0,
+      eligibleNonTravelKwhTotal: 0,
+      nonTravelDailyAverage: null,
+      normalizedMonthTarget: null,
+      monthlyTargetBuildMethod: "insufficient_non_travel_days_fallback_to_pool_sim",
+      trustedMonthlyAnchorUsed: false,
+    });
+  }
+
+  const diagnostics = args.canonicalMonths.map((month) => {
+    return (
+      diagnosticsByMonth.get(month) ?? {
+        month,
+        rawMonthKwhFromSource: null,
+        travelVacantDayCountInMonth: 0,
+        eligibleNonTravelDayCount: 0,
+        eligibleNonTravelKwhTotal: 0,
+        nonTravelDailyAverage: null,
+        normalizedMonthTarget: null,
+        monthlyTargetBuildMethod: "missing_user_manual_month_fill_later",
+        trustedMonthlyAnchorUsed: false,
+      }
+    );
+  });
+
+  const notes = diagnostics.some((row) => row.monthlyTargetBuildMethod === "insufficient_non_travel_days_fallback_to_pool_sim")
+    ? [
+        "Travel-overlap manual source months are excluded from source-truth ownership and fall back to shared simulation fill.",
+      ]
+    : [];
+
+  return {
+    monthlyKwhByMonth,
+    trustedMonthlyAnchorsByMonth,
+    diagnostics,
+    notes,
+  };
+}
+
 export function resolveManualMonthlyTargetDiagnostics(args: {
   payload: ManualUsagePayload;
   canonicalMonths: string[];
@@ -194,19 +281,48 @@ export function resolveManualMonthlyTargetDiagnostics(args: {
 
   if (args.sourceDerivedResolution) {
     const inputKindByMonth: Record<string, ManualMonthlyInputKind> = {};
+    const enteredMonthKeys: string[] = [];
+    const missingMonthKeys: string[] = [];
     const explicitZeroMonthKeys: string[] = [];
+    const monthlyKwhByMonth: Record<string, number> = {};
     for (const month of args.canonicalMonths) {
+      const hasValue = Object.prototype.hasOwnProperty.call(args.sourceDerivedResolution.monthlyKwhByMonth, month);
       const value = Number(args.sourceDerivedResolution.monthlyKwhByMonth?.[month]);
-      if (Number.isFinite(value) && value === 0) explicitZeroMonthKeys.push(month);
-      inputKindByMonth[month] = Number.isFinite(value) && value === 0 ? "entered_zero" : "entered_nonzero";
+      if (hasValue && Number.isFinite(value)) {
+        monthlyKwhByMonth[month] = value;
+        enteredMonthKeys.push(month);
+        if (value === 0) {
+          explicitZeroMonthKeys.push(month);
+          inputKindByMonth[month] = "entered_zero";
+        } else {
+          inputKindByMonth[month] = "entered_nonzero";
+        }
+      } else {
+        missingMonthKeys.push(month);
+        inputKindByMonth[month] = "missing";
+      }
     }
     return {
-      monthlyKwhByMonth: { ...args.sourceDerivedResolution.monthlyKwhByMonth },
-      diagnostics: args.sourceDerivedResolution.diagnostics.map((row) => ({ ...row })),
+      monthlyKwhByMonth,
+      diagnostics: args.canonicalMonths.map((month) => {
+        return (
+          args.sourceDerivedResolution!.diagnostics.find((row) => row.month === month) ?? {
+            month,
+            rawMonthKwhFromSource: null,
+            travelVacantDayCountInMonth: 0,
+            eligibleNonTravelDayCount: 0,
+            eligibleNonTravelKwhTotal: 0,
+            nonTravelDailyAverage: null,
+            normalizedMonthTarget: null,
+            monthlyTargetBuildMethod: "missing_user_manual_month_fill_later" as const,
+            trustedMonthlyAnchorUsed: false,
+          }
+        );
+      }),
       sourceDerivedTrustedMonthlyAnchorsByMonth: { ...args.sourceDerivedResolution.trustedMonthlyAnchorsByMonth },
       manualMonthlyInputState: {
-        enteredMonthKeys: [...args.canonicalMonths],
-        missingMonthKeys: [],
+        enteredMonthKeys,
+        missingMonthKeys,
         explicitZeroMonthKeys,
         inputKindByMonth,
       },

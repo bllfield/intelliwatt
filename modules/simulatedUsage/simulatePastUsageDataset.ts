@@ -7,7 +7,7 @@
 import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import {
   buildCurveFromPatchedIntervals,
@@ -56,6 +56,20 @@ import {
 
 export type BuildPathKind = PastProducerBuildPathKind;
 export { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
+
+function resolveManualAnnualMonthlyTotalsForSimulation(buildInputs: SimulatorBuildInputsV1): Record<string, number> | null {
+  const payload = (buildInputs.snapshots?.manualUsagePayload ?? null) as
+    | { mode?: unknown; anchorEndDate?: unknown }
+    | null;
+  if (buildInputs.mode !== "MANUAL_TOTALS" || String(payload?.mode ?? "").trim() !== "ANNUAL") return null;
+  const annualKwh = Number(buildInputs.manualAnnualTotalKwh);
+  if (!Number.isFinite(annualKwh) || annualKwh < 0) return null;
+  return buildUniformMonthlyTotalsFromAnnualWindow({
+    annualKwh,
+    anchorEndDate: String(payload?.anchorEndDate ?? "").slice(0, 10),
+    canonicalMonths: buildInputs.canonicalMonths,
+  });
+}
 
 export type WeatherFallbackReason =
   | "missing_lat_lng"
@@ -1656,9 +1670,12 @@ export async function simulatePastUsageDataset(
     let usageShapeProfileSnap = ensuredUsageShape.usageShapeProfileSnap;
     let lowDataShapeAdapterUsed = false;
     if (!usageShapeProfileSnap && isLowDataSharedPastMode) {
+      const effectiveMonthlyTotalsForLowData =
+        resolveManualAnnualMonthlyTotalsForSimulation(buildInputs as SimulatorBuildInputsV1) ??
+        ((buildInputs as SimulatorBuildInputsV1).monthlyTotalsKwhByMonth ?? {});
       usageShapeProfileSnap = buildUsageShapeSnapFromMonthlyTotalsForLowData({
         canonicalMonths,
-        monthlyTotalsKwhByMonth: (buildInputs as SimulatorBuildInputsV1).monthlyTotalsKwhByMonth ?? {},
+        monthlyTotalsKwhByMonth: effectiveMonthlyTotalsForLowData,
       });
       lowDataShapeAdapterUsed = true;
     }

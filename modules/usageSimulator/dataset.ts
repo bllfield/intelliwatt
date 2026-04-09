@@ -10,6 +10,7 @@ import type {
   ManualMonthlyInputState,
   MonthlyTargetConstructionDiagnostic,
 } from "@/modules/usageSimulator/monthlyTargetConstruction";
+import { buildUniformMonthlyTotalsFromAnnualWindow } from "@/modules/usageSimulator/build";
 import type { ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 
@@ -897,6 +898,7 @@ export type SimulatorBuildInputsV1 = {
   weatherLogicMode?: "LAST_YEAR_ACTUAL_WEATHER" | "LONG_TERM_AVERAGE_WEATHER";
   weatherNormalizerVersion?: string;
   monthlyTotalsKwhByMonth: Record<string, number>;
+  manualAnnualTotalKwh?: number | null;
   intradayShape96: number[];
   weekdayWeekendShape96?: { weekday: number[]; weekend: number[] };
   travelRanges?: Array<{ startDate: string; endDate: string }>;
@@ -1177,13 +1179,27 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
           endDate: period.endDate,
         }))
     : [];
+  const annualPayload = (buildInputs.snapshots?.manualUsagePayload ?? null) as
+    | { mode?: unknown; anchorEndDate?: unknown }
+    | null;
+  const annualMonthlyTotalsForSimulation =
+    buildInputs.mode === "MANUAL_TOTALS" &&
+    String(annualPayload?.mode ?? "").trim() === "ANNUAL" &&
+    typeof buildInputs.manualAnnualTotalKwh === "number" &&
+    Number.isFinite(buildInputs.manualAnnualTotalKwh)
+      ? buildUniformMonthlyTotalsFromAnnualWindow({
+          annualKwh: buildInputs.manualAnnualTotalKwh,
+          anchorEndDate: String(annualPayload?.anchorEndDate ?? "").slice(0, 10),
+          canonicalMonths: buildInputs.canonicalMonths,
+        })
+      : null;
   const curve = generateSimulatedCurve({
     canonicalMonths: buildInputs.canonicalMonths,
     periods: eligibleManualBillPeriods.length > 0 ? eligibleManualBillPeriods : (buildInputs as any).canonicalPeriods ?? undefined,
     monthlyTotalsKwhByMonth:
       eligibleManualBillPeriods.length > 0
         ? buildInputs.manualBillPeriodTotalsKwhById ?? {}
-        : buildInputs.monthlyTotalsKwhByMonth,
+        : annualMonthlyTotalsForSimulation ?? buildInputs.monthlyTotalsKwhByMonth,
     intradayShape96: buildInputs.intradayShape96,
     weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
     travelRanges: buildInputs.travelRanges,

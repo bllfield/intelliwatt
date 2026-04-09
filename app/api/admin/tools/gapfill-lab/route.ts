@@ -236,6 +236,75 @@ function resolveCanonicalGapfillSourceHouse<T extends {
   return selectCanonicalGapfillHouseFromGroup(siblings, selectedId);
 }
 
+async function resolveGapfillSourceHouseWithActualData(args: {
+  houses: Array<{
+    id?: unknown;
+    esiid?: unknown;
+    addressLine1?: unknown;
+    addressCity?: unknown;
+    addressState?: unknown;
+    addressZip5?: unknown;
+  }>;
+  linkedSourceHouseId: string;
+  testHomeHouseId: string;
+}) {
+  const canonical = resolveCanonicalGapfillSourceHouse(
+    args.houses,
+    args.linkedSourceHouseId,
+    args.testHomeHouseId
+  );
+  const candidateIds = Array.from(
+    new Set(
+      [String(canonical?.id ?? "").trim(), String(args.linkedSourceHouseId ?? "").trim()].filter(
+        (value) => value.length > 0
+      )
+    )
+  );
+  const candidateRows = await Promise.all(
+    candidateIds.map((id) =>
+      (prisma as any).houseAddress.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          userId: true,
+          addressLine1: true,
+          addressCity: true,
+          addressState: true,
+          esiid: true,
+        },
+      })
+    )
+  );
+  const candidates = candidateRows.filter(Boolean) as Array<{
+    id: string;
+    userId?: string | null;
+    addressLine1?: string | null;
+    addressCity?: string | null;
+    addressState?: string | null;
+    esiid?: string | null;
+  }>;
+  const candidateById = new Map(candidates.map((candidate) => [String(candidate.id), candidate] as const));
+  for (const id of candidateIds) {
+    const candidate = candidateById.get(id);
+    if (!candidate?.id) continue;
+    const esiid = candidate.esiid ? String(candidate.esiid) : null;
+    const source = await chooseActualSource({ houseId: candidate.id, esiid });
+    if (source) {
+      return {
+        sourceHouse: candidate,
+        source,
+        sourceEsiid: esiid,
+      };
+    }
+  }
+  const fallbackHouse = candidateIds.map((id) => candidateById.get(id)).find(Boolean) ?? null;
+  return {
+    sourceHouse: fallbackHouse,
+    source: null,
+    sourceEsiid: fallbackHouse?.esiid ? String(fallbackHouse.esiid) : null,
+  };
+}
+
 function buildSourceCopySelectionDiagnostics(args: {
   selectionMode: ValidationDaySelectionMode;
   selectedDateKeys: string[];
@@ -1373,25 +1442,19 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
-    const canonicalLinkedSourceHouse = resolveCanonicalGapfillSourceHouse(
-      houses,
-      String(link.sourceHouseId ?? ""),
-      String(link.testHomeHouseId ?? "")
-    );
-    const canonicalLinkedSourceHouseId = String(
-      canonicalLinkedSourceHouse?.id ?? link.sourceHouseId ?? ""
-    ).trim();
-    const [labOwnerUser, testHomeHouse, sourceHouse] = await Promise.all([
+    const [labOwnerUser, testHomeHouse, sourceResolution] = await Promise.all([
       prisma.user.findUnique({ where: { id: labOwnerUserId }, select: { id: true, email: true } }),
       (prisma as any).houseAddress.findUnique({
         where: { id: link.testHomeHouseId },
         select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
       }),
-      (prisma as any).houseAddress.findUnique({
-        where: { id: canonicalLinkedSourceHouseId },
-        select: { id: true, userId: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
+      resolveGapfillSourceHouseWithActualData({
+        houses,
+        linkedSourceHouseId: String(link.sourceHouseId ?? ""),
+        testHomeHouseId: String(link.testHomeHouseId ?? ""),
       }),
     ]);
+    const sourceHouse = sourceResolution.sourceHouse;
     if (!labOwnerUser?.id || !testHomeHouse?.id || !sourceHouse?.id) {
       return NextResponse.json(
         attachFailureContract({ ok: false, error: "test_home_context_not_found" }),
@@ -1404,8 +1467,8 @@ export async function POST(req: NextRequest) {
       houseId: testHomeHouse.id,
     });
 
-    const sourceEsiid = sourceHouse.esiid ? String(sourceHouse.esiid) : null;
-    const source = await chooseActualSource({ houseId: sourceHouse.id, esiid: sourceEsiid });
+    const sourceEsiid = sourceResolution.sourceEsiid;
+    const source = sourceResolution.source;
     if (!source) {
       return NextResponse.json(
         attachFailureContract({
@@ -2458,32 +2521,26 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
-    const canonicalLinkedSourceHouse = resolveCanonicalGapfillSourceHouse(
-      houses,
-      String(link.sourceHouseId ?? ""),
-      String(link.testHomeHouseId ?? "")
-    );
-    const canonicalLinkedSourceHouseId = String(
-      canonicalLinkedSourceHouse?.id ?? link.sourceHouseId ?? ""
-    ).trim();
-    const [labOwnerUser, testHomeHouse, sourceHouse] = await Promise.all([
+    const [labOwnerUser, testHomeHouse, sourceResolution] = await Promise.all([
       prisma.user.findUnique({ where: { id: labOwnerUserId }, select: { id: true, email: true } }),
       (prisma as any).houseAddress.findUnique({
         where: { id: link.testHomeHouseId },
         select: { id: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
       }),
-      (prisma as any).houseAddress.findUnique({
-        where: { id: canonicalLinkedSourceHouseId },
-        select: { id: true, userId: true, addressLine1: true, addressCity: true, addressState: true, esiid: true },
+      resolveGapfillSourceHouseWithActualData({
+        houses,
+        linkedSourceHouseId: String(link.sourceHouseId ?? ""),
+        testHomeHouseId: String(link.testHomeHouseId ?? ""),
       }),
     ]);
+    const sourceHouse = sourceResolution.sourceHouse;
     if (!labOwnerUser?.id || !testHomeHouse?.id || !sourceHouse?.id) {
       return NextResponse.json(
         attachFailureContract({ ok: false, error: "test_home_context_not_found" }),
         { status: 404 }
       );
     }
-    const source = await chooseActualSource({ houseId: sourceHouse.id, esiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null });
+    const source = sourceResolution.source;
     if (!source) {
       return NextResponse.json(
         attachFailureContract({

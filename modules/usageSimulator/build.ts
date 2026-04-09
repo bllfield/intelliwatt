@@ -10,6 +10,7 @@ import {
 } from "@/modules/manualUsage/statementRanges";
 import {
   resolveManualMonthlyTargetDiagnostics,
+  buildSourceDerivedMonthlyTargetResolutionFromPayload,
   type ManualMonthlyInputState,
   type MonthlyTargetConstructionDiagnostic,
   type SourceDerivedMonthlyTargetResolution,
@@ -32,6 +33,7 @@ export type BuildResult = {
   filledMonths: string[];
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   sourceDerivedTrustedMonthlyTotalsKwhByMonth?: Record<string, number> | null;
+  manualAnnualTotalKwh?: number | null;
   manualMonthlyInputState?: ManualMonthlyInputState | null;
   manualBillPeriods?: ManualBillPeriodTarget[];
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
@@ -56,28 +58,27 @@ export function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string;
   return Array.from(set);
 }
 
-function yearMonthToMonthIndex0(ym: string): number | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
-  if (!m) return null;
-  const mo = Number(m[2]);
-  if (!Number.isFinite(mo) || mo < 1 || mo > 12) return null;
-  return mo - 1;
-}
-
-const DEFAULT_SEASONAL_WEIGHTS_TX = [
-  0.070, 0.065, 0.070, 0.075, 0.085, 0.100, 0.115, 0.110, 0.085, 0.075, 0.075, 0.075,
-];
-
-function annualToMonthlyByWeights(annualKwh: number, canonicalMonths: string[]): Record<string, number> {
-  const w = canonicalMonths.map((ym) => {
-    const idx = yearMonthToMonthIndex0(ym);
-    return idx == null ? 1 / 12 : DEFAULT_SEASONAL_WEIGHTS_TX[idx] ?? 1 / 12;
-  });
-  const sum = w.reduce((a, b) => a + b, 0) || 1;
+export function buildUniformMonthlyTotalsFromAnnualWindow(args: {
+  annualKwh: number;
+  anchorEndDate: string;
+  canonicalMonths: string[];
+}): Record<string, number> {
+  const annualKwh = Math.max(0, Number(args.annualKwh) || 0);
+  const anchorEndDate = String(args.anchorEndDate ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorEndDate) || annualKwh <= 0) return {};
+  const end = new Date(`${anchorEndDate}T00:00:00.000Z`);
+  if (!Number.isFinite(end.getTime())) return {};
+  const start = new Date(end.getTime() - 364 * 24 * 60 * 60 * 1000);
+  const dateKeys = enumerateDateKeysInclusive(start.toISOString().slice(0, 10), anchorEndDate);
+  if (dateKeys.length === 0) return {};
+  const perDay = annualKwh / dateKeys.length;
   const out: Record<string, number> = {};
-  for (let i = 0; i < canonicalMonths.length; i++) {
-    out[canonicalMonths[i]] = (annualKwh * w[i]) / sum;
+  for (const dateKey of dateKeys) {
+    const month = dateKey.slice(0, 7);
+    if (!args.canonicalMonths.includes(month)) continue;
+    out[month] = (out[month] ?? 0) + perDay;
   }
+  for (const month of Object.keys(out)) out[month] = Math.round(out[month] * 100) / 100;
   return out;
 }
 
@@ -118,11 +119,11 @@ function manualMonthlyTotals(
     };
   }
 
-  // ANNUAL: distribute across canonical months.
+  // ANNUAL enters the shared sim as annual-only input.
   const annual = typeof (payload as any).annualKwh === "number" && Number.isFinite((payload as any).annualKwh) ? (payload as any).annualKwh : 0;
-  notes.push("Annual manual total distributed across months using a deterministic seasonal profile.");
+  notes.push("Annual manual total enters the simulator as annual-only input; month/day/hour division happens inside the shared simulation path.");
   return {
-    monthly: annualToMonthlyByWeights(Math.max(0, annual), canonicalMonths),
+    monthly: {},
     notes,
     filledMonths: [],
     manualMonthlyInputState: null,
@@ -153,12 +154,18 @@ export async function buildSimulatorInputs(args: {
     if (!args.manualUsagePayload) {
       throw new Error("manual_usage_required");
     }
+    const sourceDerivedResolution =
+      args.manualMonthlySourceDerivedResolution ??
+      buildSourceDerivedMonthlyTargetResolutionFromPayload({
+        canonicalMonths,
+        payload: args.manualUsagePayload,
+      });
     const monthlyResolution =
       (args.manualUsagePayload as any)?.mode === "MONTHLY"
         ? resolveManualMonthlyTargetDiagnostics({
             payload: args.manualUsagePayload,
             canonicalMonths,
-            sourceDerivedResolution: args.manualMonthlySourceDerivedResolution ?? null,
+            sourceDerivedResolution,
           })
         : null;
     const manualFillEstimate = estimateUsageForCanonicalWindow({
@@ -174,7 +181,7 @@ export async function buildSimulatorInputs(args: {
       args.manualUsagePayload,
       canonicalMonths,
       estimateMonthlyKwhByMonth,
-      args.manualMonthlySourceDerivedResolution ?? null
+      sourceDerivedResolution
     );
     const manualBillPeriods = buildManualBillPeriodTargets(args.manualUsagePayload);
     const manualBillPeriodTotalsKwhById = buildManualBillPeriodTotalsById(manualBillPeriods);
@@ -199,6 +206,10 @@ export async function buildSimulatorInputs(args: {
       sourceDerivedTrustedMonthlyTotalsKwhByMonth:
         monthlyResolution && Object.keys(monthlyResolution.sourceDerivedTrustedMonthlyAnchorsByMonth ?? {}).length > 0
           ? monthlyResolution.sourceDerivedTrustedMonthlyAnchorsByMonth
+          : null,
+      manualAnnualTotalKwh:
+        (args.manualUsagePayload as any)?.mode === "ANNUAL"
+          ? Math.max(0, Number((args.manualUsagePayload as any)?.annualKwh ?? 0) || 0)
           : null,
       manualMonthlyInputState,
       manualBillPeriods,

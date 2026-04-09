@@ -352,18 +352,14 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     if (!out.ok) {
       expect(out.error).toBe("artifact_persist_failed");
     }
-    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
-      expect.objectContaining({
-        buildInputs: expect.objectContaining({
-          mode: "MANUAL_TOTALS",
-          monthlyTotalsKwhByMonth: expect.objectContaining({
-            "2025-03": 1000,
-            "2026-02": 25,
-          }),
-          sharedProducerPathUsed: true,
-        }),
-      })
-    );
+    expect(simulatePastUsageDataset.mock.calls[0]?.[0]?.buildInputs).toMatchObject({
+      mode: "MANUAL_TOTALS",
+      monthlyTotalsKwhByMonth: expect.objectContaining({
+        "2025-03": 1000,
+        "2026-02": 25,
+      }),
+      sharedProducerPathUsed: true,
+    });
     expect(ensureSimulatorFingerprintsWithContext).not.toHaveBeenCalled();
     expect(resolveSimFingerprintWithContext).not.toHaveBeenCalled();
     expect(getUsageShapeProfileIdentityForPast).not.toHaveBeenCalled();
@@ -402,6 +398,68 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     expect(simulatePastUsageDataset).not.toHaveBeenCalled();
     expect(upsertSimulatorBuild).toHaveBeenCalledTimes(1);
     expect(upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs?.sharedProducerPathUsed).toBe(false);
+    expect(out).toBeTruthy();
+  }, 15000);
+
+  it("passes annual manual runs into the shared producer as annual-only input", async () => {
+    manualUsageInputFindUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "ANNUAL",
+        anchorEndDate: "2026-02-28",
+        annualKwh: 3650,
+        travelRanges: [],
+      },
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 10,
+          start: "2025-03-01",
+          end: "2026-02-28",
+        },
+        meta: { sharedProducerPathUsed: true },
+        daily: [{ date: "2025-03-01", kwh: 10, source: "SIMULATED" }],
+        monthly: [{ month: "2025-03", kwh: 310 }],
+        series: {
+          intervals15: [
+            { timestamp: "2025-03-01T00:00:00.000Z", kwh: 5 },
+            { timestamp: "2025-03-01T00:15:00.000Z", kwh: 5 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2025-03-01",
+        end: "2026-02-28",
+        intervals: [],
+        monthlyTotals: [{ month: "2025-03", kwh: 310 }],
+        annualTotalKwh: 3650,
+        meta: { excludedDays: 0, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
+
+    const out = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "cid-manual-annual",
+      runContext: {
+        callerLabel: "admin_manual_annual_lab",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    expect(simulatePastUsageDataset.mock.calls[0]?.[0]?.buildInputs).toMatchObject({
+      manualAnnualTotalKwh: 3650,
+      monthlyTotalsKwhByMonth: {},
+    });
     expect(out).toBeTruthy();
   }, 15000);
 

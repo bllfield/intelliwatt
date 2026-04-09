@@ -29,6 +29,7 @@ const logSimPipelineEvent = vi.fn();
 const createSimCorrelationId = vi.fn();
 const getMemoryRssMb = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
+const saveManualUsageInputForUserHouse = vi.fn();
 
 const homeDetailsPrisma: any = {
   homeProfileSimulated: { upsert: vi.fn() },
@@ -124,6 +125,7 @@ vi.mock("@/modules/applianceProfile/validation", () => ({
 
 vi.mock("@/modules/manualUsage/store", () => ({
   getManualUsageInputForUserHouse: (...args: any[]) => getManualUsageInputForUserHouse(...args),
+  saveManualUsageInputForUserHouse: (...args: any[]) => saveManualUsageInputForUserHouse(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/validationSelection", () => ({
@@ -250,6 +252,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       endDate: "2026-02-28",
     });
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: null, updatedAt: null });
+    saveManualUsageInputForUserHouse.mockResolvedValue(undefined);
     getUserDefaultValidationSelectionMode.mockResolvedValue("random_simple");
     setUserDefaultValidationSelectionMode.mockResolvedValue({ ok: true, mode: "random_simple" });
     getAdminLabDefaultValidationSelectionMode.mockReturnValue("stratified_weather_balanced");
@@ -2182,6 +2185,21 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("routes manual monthly mode through shared dispatch and returns a fast readback handoff", async () => {
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
     dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "inline",
       correlationId: "manual-cid-1",
@@ -2242,6 +2260,20 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "ANNUAL",
+            anchorEndDate: "2026-02-28",
+            annualKwh: 1200,
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
     dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "inline",
       correlationId: "manual-cid-annual",
@@ -2297,6 +2329,21 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("returns async handoff for manual monthly mode so the client can poll persisted readback", async () => {
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
     dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "droplet_async",
       correlationId: "manual-cid-async",
@@ -2323,6 +2370,21 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("surfaces Prisma pool exhaustion details for manual shared-producer failures", async () => {
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
     dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "inline",
       correlationId: "manual-cid-pool",
@@ -2534,6 +2596,83 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     ]);
     expect(body.selectedSourceHouseId).toBe("real-house");
     expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-09-01", endDate: "2025-09-03" }]);
+  });
+
+  it("falls back to the linked duplicate source house when that record owns the actual data", async () => {
+    prisma.houseAddress.findMany.mockResolvedValueOnce([
+      {
+        id: "shell-house",
+        addressLine1: "146 Valley View Drive",
+        addressCity: "Lewisville",
+        addressState: "TX",
+        addressZip5: "75067",
+        esiid: null,
+      },
+      {
+        id: "real-house",
+        addressLine1: "146 Valley View Drive",
+        addressCity: "Lewisville",
+        addressState: "TX",
+        addressZip5: "75067",
+        esiid: "10400511114390001",
+      },
+    ]);
+    getLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "u1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "u1",
+      sourceHouseId: "shell-house",
+      status: "ready",
+      statusMessage: null,
+      lastReplacedAt: null,
+    });
+    prisma.houseAddress.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where?.id === "test-home-1") {
+        return { id: "test-home-1", userId: "u1", esiid: null, addressLine1: "Lab Home", addressCity: "Austin", addressState: "TX" };
+      }
+      if (where?.id === "shell-house") {
+        return { id: "shell-house", userId: "u1", esiid: null, addressLine1: "146 Valley View Drive", addressCity: "Lewisville", addressState: "TX" };
+      }
+      if (where?.id === "real-house") {
+        return { id: "real-house", userId: "u1", esiid: "10400511114390001", addressLine1: "146 Valley View Drive", addressCity: "Lewisville", addressState: "TX" };
+      }
+      return null;
+    });
+    chooseActualSource.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "real-house") return null;
+      if (houseId === "shell-house") return "GREEN_BUTTON";
+      return "SMT";
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "shell-house",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(recalcSimulatorBuild).toHaveBeenCalledTimes(1);
+    const arg = recalcSimulatorBuild.mock.calls[0]?.[0];
+    expect(arg.actualContextHouseId).toBe("shell-house");
+    expect(arg.esiid).toBe(null);
+    expect(chooseActualSource).toHaveBeenNthCalledWith(1, {
+      houseId: "real-house",
+      esiid: "10400511114390001",
+    });
+    expect(chooseActualSource).toHaveBeenNthCalledWith(2, {
+      houseId: "shell-house",
+      esiid: null,
+    });
   });
 
   it("saves home/appliance inputs only to test-home house id", async () => {

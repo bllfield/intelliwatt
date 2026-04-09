@@ -455,6 +455,9 @@ This section is authoritative for future manual-usage implementation work.
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same shared Stage 1 helper family before entering the shared lockbox/sim/artifact path.
 - GapFill manual monthly/manual annual now dispatch through the shared `dispatchPastSimRecalc` entry with the same Stage 1 seed-resolution family (`modules/manualUsage/prefill.ts`) and then read back the persisted artifact, instead of doing the old inline recalc-plus-heavy-read orchestration in one blocking request.
 - Manual Lab remains the authority for manual-entry Stage 1 semantics, so GapFill manual modes now resolve and persist the same shared manual payload contract before recalc; on `MANUAL_TOTALS`, manual payload travel ranges are the canonical manual travel input, and route-local DB travel state is parity context only.
+- Manual monthly Stage 2 input is totals-only. Source actual usage may seed month/bill-period totals, but raw intervals, source daily rows, donor-day truth, and actual intraday shapes must not become manual-monthly simulation truth.
+- Manual monthly source-backed periods that overlap travel/vacant dates are excluded from source-truth ownership for simulation and are filled by the shared simulation path instead of reusing actual-derived totals.
+- Manual annual Stage 2 input is annual-only. The simulator receives the annual total plus anchor window and derives month/day/hour allocation internally rather than inheriting a precomputed monthly split.
 - That shared recalc/readback contract is now explicit:
   - recalc returns once the canonical artifact is ready
   - responses may include `readbackPending: true` plus `canonicalArtifactInputHash`
@@ -463,6 +466,7 @@ This section is authoritative for future manual-usage implementation work.
 - GapFill Actual House remains the full interval-backed source-truth view in manual modes and now reads the same shared persisted Past artifact/display path as the user Past page; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
 - GapFill manual compare must derive its Stage 1 target contract from shared bill-period targets/readback, not from a separate month-first truth owner.
 - Admin manual-mode responses may surface root-cause infrastructure failures such as Prisma pool exhaustion (`P2024`) so GapFill and Manual Monthly Lab can distinguish producer failure from a generic timeout.
+- New Build launch remains intentionally delayed. Before launch, real-house home/appliance/detail data plus actual interval usage should be studied in GapFill to calibrate fingerprint logic and to measure how close home-details-plus-weather logic can get to actual usage.
 - The exact-interval donor-tuning path remains locked: weather-first K-nearest donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic diagnostics are preserved and not replaced by manual-usage work.
 - Manual-monthly ownership/readback behavior is now more explicit in the shared artifact:
   - non-travel low-data constrained modeled days publish `SIMULATED_MANUAL_CONSTRAINED`, including when the resolved constrained path lands on `whole_home_only`
