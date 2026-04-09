@@ -55,7 +55,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - The user may enter fewer than 12 bills.
 - The user may leave some bill-cycle months missing.
 - On the input chart, entered bill-cycle months are filled and missing bill-cycle months remain blank.
-- Current implementation persists additive `statementRanges[]` metadata in the manual payload so explicit bill ranges survive into reconciliation without changing schemas.
+- Current implementation persists additive `statementRanges[]` bill-period inputs/metadata in the manual payload so explicit bill ranges survive into shared constraint shaping and reconciliation without changing schemas.
 - USER MANUAL ANNUAL starts as a billing-date-context summary plus one annual usage total, not as a pre-sim 12-month chart.
 - Annual Stage 1 should show the derived annual coverage range from `anchorEndDate` plus the saved annual kWh total only.
 - Annual Stage 1 should not render a pre-sim usage chart on the user surface or on the admin lab surface.
@@ -73,7 +73,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - Do not collapse bill-cycle input semantics into the normalized shared Past Sim window semantics.
 - Manual monthly and manual annual now enter a shared bill-period-first pipeline before the Past producer runs.
 - Shared helpers derive normalized `ManualBillPeriodTarget[]` metadata and bill-period totals from the manual payload before Stage 2 shaping.
-- Statement/bill ranges remain Stage 1 / reconciliation metadata. They are not travel ranges and must not become travel-vacant ownership.
+- Statement/bill ranges remain Stage 1 bill-period constraint inputs plus reconciliation metadata. They may shape Stage 2 constraints, but they are not travel ranges, not travel-vacant ownership, and not incomplete-meter ownership.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
 - Manual monthly / annual admin recalc now returns once the canonical artifact is ready. Rich compare/reconciliation stays on persisted readback:
   - recalc may return `readbackPending: true`
@@ -90,6 +90,10 @@ This section is authoritative for future manual-usage implementation and handoff
   - standard calendar-month stitched Past chart
   - normal Stage 2 analytics
 - Bill-period parity/reconciliation belongs to Stage 2 verification and must read back from the shared artifact rather than route-local chart math.
+- Shared manual compare/reconciliation now publishes one canonical bill-period-first contract from persisted readback:
+  - `ManualBillPeriodTarget[]`
+  - `manualBillPeriodTotalsKwhById`
+  - shared bill-period compare rows derived from that contract
 - Missing bill-cycle months are an input-state concept, not the final simulated-output contract.
 - Blank on the input chart does not mean blank forever in the final simulated artifact.
 - Past Sim must fill missing bill-cycle months the user did not provide, excluded travel/vacant days inside the normalized shared sim window, and other missing or simulated days required by the shared Past Sim logic.
@@ -104,6 +108,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - Travel ranges may come from the manual payload for user manual monthly or annual and must drive excluded date keys in the shared simulator after normalization.
 - Explicit travel/vacant ranges are the only travel-vacant ownership source on the constrained manual path.
 - Bill periods touched by travel/vacant dates are excluded from manual parity shaping and compare scoring rather than treated as a fatal build error.
+- Statement/bill ranges must never be silently reinterpreted as travel/vacant exclusions or incomplete-meter ownership.
 - Non-excluded bill periods must still reconcile back to the entered totals.
 - Past Sim must simulate excluded travel/vacant days for user manual modes too.
 
@@ -125,10 +130,11 @@ This section is authoritative for future manual-usage implementation and handoff
 - GapFill manual monthly/manual annual now follow the shared orchestration contract too: trigger the canonical recalc through `dispatchPastSimRecalc`, then load the richer manual compare/diagnostic view from the persisted artifact via a follow-up read, rather than bundling heavy recalc and post-read work into one blocking route pass.
 - On that shared manual path, `MANUAL_TOTALS` recalc should stay lean: it should not depend on exact-interval fingerprint/profile tuning work to produce manual monthly/annual truth, and richer compare/reconciliation diagnostics should load from persisted readback after recalc succeeds.
 - Manual Monthly Lab `lookup` is now intentionally lightweight. The heavier source-dataset/prefill/readback preparation work happens in `load`.
-- For GapFill manual modes, Actual House stays the full interval-backed source reference, while Test Home exposes the constrained shared Past result. Monthly compare shows source interval monthly totals vs shared Stage 1 monthly totals vs final simulated monthly totals; annual compare shows source interval annual total vs shared Stage 1 annual total vs final simulated annual total.
+- For GapFill manual modes, Actual House stays the full interval-backed source reference, while Test Home exposes the constrained shared Past result. GapFill manual compare reads the same shared bill-period-first contract as user/admin manual reconciliation after artifact readback, then overlays Actual House interval truth onto those same bill periods for operator compare views.
 - The shared Stage 2 producer/artifact owner does not change for manual work, and the exact-interval donor-tuning path remains the authoritative shared path for `EXACT_INTERVALS`.
 - Admin-only manual-mode failures may include root-cause infrastructure detail such as Prisma pool exhaustion (`P2024`) so operators can tell pool starvation from a manual producer/data failure.
 - GapFill admin-only calculation-logic explanation UI now summarizes that persisted lockbox/artifact/diagnostics truth through `modules/usageSimulator/calculationLogicSummary.ts`; it is read-side only and does not create a second simulator path.
+- Manual low-data weather evidence wiring now exists in runtime, including daily weather classification, weather-scaled-day activation, daily totals, and curve amplitude response, but it is still too coarse for the full production target. Stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work, and `whole_home_only` remains a constrained manual path rather than alternate ownership semantics.
 - GapFill admin-only daily curve compare UI now summarizes scored/test-day 96-slot overlays, grouped representative curves, and slot metrics through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it is read-side only and does not create a second compare path.
 - Stage 1 preview supports both manual payload modes:
   - monthly preview = bill-period totals only
@@ -147,7 +153,7 @@ This section is authoritative for future manual-usage implementation and handoff
 ### Transitional Runtime Contract
 
 - Current runtime accepts `ManualUsagePayload` in `MONTHLY` or `ANNUAL` mode with shared `anchorEndDate` semantics and travel ranges.
-- Monthly payloads still carry additive `statementRanges[]` metadata for Stage 1 bill-range semantics.
+- Monthly payloads still carry additive `statementRanges[]` bill-period inputs/metadata for Stage 1 bill-range semantics.
 - Shared runtime helpers now derive:
   - `ManualStageOnePresentation`
   - `ManualBillPeriodTarget[]`

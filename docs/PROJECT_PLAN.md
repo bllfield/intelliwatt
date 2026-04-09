@@ -460,17 +460,17 @@ This section is authoritative for future manual-usage implementation work.
   - admin manual clients poll readback using the exact artifact hash so compare/reconciliation stays artifact-backed
 - `MANUAL_TOTALS` recalc on that shared path must stay lean: exact-interval fingerprint resolution, usage-shape profile DB reads/ensures, and bucket-oriented persistence work are not part of manual monthly/annual truth production and should be deferred to readback-only diagnostics when needed.
 - GapFill Actual House remains the full interval-backed source-truth view in manual modes and now reads the same shared persisted Past artifact/display path as the user Past page; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
-- GapFill manual monthly compare must reconcile source actual interval monthly totals, shared Stage 1 monthly targets, and final simulated monthly totals; GapFill manual annual compare must reconcile source actual annual total, shared Stage 1 annual target, and final simulated annual total.
+- GapFill manual compare must derive its Stage 1 target contract from shared bill-period targets/readback, not from a separate month-first truth owner.
 - Admin manual-mode responses may surface root-cause infrastructure failures such as Prisma pool exhaustion (`P2024`) so GapFill and Manual Monthly Lab can distinguish producer failure from a generic timeout.
 - The exact-interval donor-tuning path remains locked: weather-first K-nearest donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic diagnostics are preserved and not replaced by manual-usage work.
 - Manual-monthly ownership/readback behavior is now more explicit in the shared artifact:
-  - non-travel low-data constrained modeled days may surface as `SIMULATED_MANUAL_CONSTRAINED`
+  - non-travel low-data constrained modeled days publish `SIMULATED_MANUAL_CONSTRAINED`, including when the resolved constrained path lands on `whole_home_only`
   - explicit travel ranges remain the only travel/vacant ownership source
-  - statement/bill ranges remain reconciliation metadata and must not be promoted into travel ownership
+  - statement/bill ranges remain Stage 1 / bill-period constraint inputs plus reconciliation metadata; they may shape Stage 2 constraints but must not become travel/vacant ownership or incomplete-meter ownership
 - Manual-monthly low-data weather evidence is now implemented in the shared producer:
   - Stage 1 monthly targets plus actual monthly weather pressure are analyzed into a `manualMonthlyWeatherEvidenceSummary`
   - that evidence drives daily weather classification, weather-scaled-day activation, and low-data curve-amplitude response
-  - this is implemented for current manual-monthly low-data runs; further tuning remains future work
+  - this wiring exists today, but stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only
   - `lookup` is the lightweight source-home selection step
@@ -484,6 +484,18 @@ This section is authoritative for future manual-usage implementation work.
   - derived lab-home seed persistence fails closed
   - Stage 2 shows the full normal Past dashboard plus a bill-period parity compare, and excluded rows stay visible but non-scored
 
+### Plan Change (2026-04) — Manual Monthly Ownership + Shared Read Model Pass
+- Shared manual compare/reconciliation now publishes one canonical bill-period-first contract from persisted artifact readback:
+  - `ManualBillPeriodTarget[]`
+  - `manualBillPeriodTotalsKwhById`
+  - shared bill-period compare rows derived from that contract
+- User Manual Monthly, User Manual Annual, Manual Monthly Lab, and GapFill manual compare now consume that shared read-model contract after recalc/readback instead of assembling manual compare truth inline per route.
+- Statement/bill ranges are Stage 1 bill-period constraint truth plus reconciliation truth. They may legitimately shape shared Stage 2 constraints, but they are not travel/vacant ownership, not incomplete-meter ownership, and not silent exclusions.
+- Explicit travel ranges remain the only travel/vacant ownership source on constrained manual paths.
+- Constrained manual non-travel modeled days no longer leak into incomplete-meter ownership when low-data/shared manual constraints resolve through `whole_home_only`.
+- Legacy/queued GapFill compare wording is not the canonical ownership path for manual compare. Manual compare ownership now comes from shared recalc plus shared artifact-backed readback.
+- Stronger monthly weather evidence, stronger baseload inference, and stronger HVAC-share inference remain follow-up work after this architecture pass.
+
 ### Architecture Notes
 - New modules added under /modules (additive, isolated): manualUsage, simulatedUsage, homeProfile, applianceProfile, usageScenario.
 - New additive prisma models/tables were added for simulated-layer persistence (manual inputs, home profile, appliances, scenarios). Existing real-usage tables are unchanged.
@@ -491,7 +503,8 @@ This section is authoritative for future manual-usage implementation work.
 - Manual-monthly helper ownership now lives in shared module space:
   - `modules/manualUsage/prefill.ts` owns shared Stage 1 source-payload precedence plus monthly/annual seed resolution for Manual Usage Lab and GapFill manual modes
   - `modules/manualUsage/statementRanges.ts` owns Stage 1 presentation, bill-range row construction, and shared bill-period target shaping
-  - `modules/manualUsage/reconciliation.ts` owns shared bill-period parity rows for monthly and annual manual compare
+  - `modules/manualUsage/readModel.ts` owns the shared manual read-model contract, including bill-period-first compare/reconciliation publication for user/admin manual surfaces
+  - `modules/manualUsage/reconciliation.ts` and `modules/manualUsage/gapfillCompare.ts` delegate to that shared read-model instead of owning separate manual compare truth
   - daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab customer-flow/debug surface
   - `modules/manualUsage/prefill.ts` owns source-payload usability checks plus deterministic admin monthly/annual seed derivation
   - shared service/read/projection modules remain the only authority for Stage 2 Past chart rendering on both user and admin manual-monthly surfaces

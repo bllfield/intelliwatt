@@ -1,5 +1,6 @@
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
+import { buildManualUsageReadModel, type ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import {
@@ -19,6 +20,7 @@ export type ManualUsagePastSimReadResult =
         rows?: unknown;
         metrics?: unknown;
       };
+      manualReadModel: ManualUsageReadModel | null;
       manualMonthlyReconciliation: ReturnType<typeof buildManualMonthlyReconciliation>;
       sharedDiagnostics: ReturnType<typeof buildSharedPastSimDiagnostics>;
     }
@@ -47,6 +49,7 @@ export async function buildManualUsagePastSimReadResult(args: {
   artifactEngineVersion?: string | null;
   artifactPersistenceOutcome?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
+  actualDataset?: any;
 }) : Promise<ManualUsagePastSimReadResult> {
   const startedAt = Date.now();
   const emit = (event: string, extra: Record<string, unknown> = {}) => {
@@ -109,23 +112,85 @@ export async function buildManualUsagePastSimReadResult(args: {
     };
   }
 
-  const manualUsageRecord =
-    args.manualUsagePayload !== undefined
-      ? { payload: args.manualUsagePayload }
-      : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
   emit("manual_readback_dataset_ready", {
     intervalCount: Array.isArray((out.dataset as any)?.series?.intervals15) ? (out.dataset as any).series.intervals15.length : 0,
     dayCount: Array.isArray((out.dataset as any)?.daily) ? (out.dataset as any).daily.length : 0,
     monthCount: Array.isArray((out.dataset as any)?.monthly) ? (out.dataset as any).monthly.length : 0,
   });
-  const compareProjection = buildValidationCompareProjectionSidecar(out.dataset);
-  const manualMonthlyReconciliation = buildManualMonthlyReconciliation({
-    payload: manualUsageRecord.payload,
-    dataset: out.dataset,
+  const { compareProjection, manualReadModel, manualMonthlyReconciliation, sharedDiagnostics } =
+    await buildManualUsageReadDecorations({
+      userId: args.userId,
+      houseId: args.houseId,
+      scenarioId: args.scenarioId,
+      dataset: out.dataset,
+      callerType: args.callerType,
+      readMode: args.readMode,
+      correlationId: args.correlationId ?? null,
+      usageInputMode: args.usageInputMode ?? null,
+      validationPolicyOwner: args.validationPolicyOwner ?? null,
+      weatherLogicMode: args.weatherLogicMode ?? null,
+      artifactId: args.artifactId ?? null,
+      artifactInputHash: args.artifactInputHash ?? null,
+      artifactEngineVersion: args.artifactEngineVersion ?? null,
+      artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
+      manualUsagePayload: args.manualUsagePayload,
+      actualDataset: args.actualDataset,
+    });
+  emit("manual_readback_success", {
+    compareRowCount: Array.isArray(compareProjection?.rows) ? compareProjection.rows.length : 0,
+    reconciliationRowCount: Array.isArray((manualMonthlyReconciliation as any)?.rows)
+      ? (manualMonthlyReconciliation as any).rows.length
+      : 0,
   });
+  return {
+    ok: true,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    dataset: out.dataset,
+    compareProjection,
+    manualReadModel,
+    manualMonthlyReconciliation,
+    sharedDiagnostics,
+  };
+}
+
+export async function buildManualUsageReadDecorations(args: {
+  userId: string;
+  houseId: string;
+  scenarioId: string | null;
+  dataset: any;
+  callerType: SharedDiagnosticsCallerType;
+  readMode: "artifact_only" | "allow_rebuild";
+  correlationId?: string | null;
+  usageInputMode?: string | null;
+  validationPolicyOwner?: string | null;
+  weatherLogicMode?: string | null;
+  artifactId?: string | null;
+  artifactInputHash?: string | null;
+  artifactEngineVersion?: string | null;
+  artifactPersistenceOutcome?: string | null;
+  manualUsagePayload?: ManualUsagePayload | null;
+  actualDataset?: any;
+}) {
+  const manualUsageRecord =
+    args.manualUsagePayload !== undefined
+      ? { payload: args.manualUsagePayload }
+      : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
+  const compareProjection = buildValidationCompareProjectionSidecar(args.dataset);
+  const manualReadModel = buildManualUsageReadModel({
+    payload: manualUsageRecord.payload,
+    dataset: args.dataset,
+    actualDataset: args.actualDataset,
+  });
+  const manualMonthlyReconciliation =
+    manualReadModel?.billPeriodCompare ??
+    buildManualMonthlyReconciliation({
+      payload: manualUsageRecord.payload,
+      dataset: args.dataset,
+    });
   const sharedDiagnostics = buildSharedPastSimDiagnostics({
     callerType: args.callerType,
-    dataset: out.dataset,
+    dataset: args.dataset,
     scenarioId: args.scenarioId,
     correlationId: args.correlationId ?? null,
     usageInputMode: args.usageInputMode ?? null,
@@ -140,18 +205,9 @@ export async function buildManualUsagePastSimReadResult(args: {
     artifactEngineVersion: args.artifactEngineVersion ?? null,
     artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
   });
-  emit("manual_readback_success", {
-    compareRowCount: Array.isArray(compareProjection?.rows) ? compareProjection.rows.length : 0,
-    reconciliationRowCount: Array.isArray((manualMonthlyReconciliation as any)?.rows)
-      ? (manualMonthlyReconciliation as any).rows.length
-      : 0,
-  });
   return {
-    ok: true,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
-    dataset: out.dataset,
     compareProjection,
+    manualReadModel,
     manualMonthlyReconciliation,
     sharedDiagnostics,
   };

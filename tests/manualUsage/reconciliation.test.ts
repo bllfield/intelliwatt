@@ -179,7 +179,7 @@ describe("manual monthly reconciliation", () => {
     });
   });
 
-  it("surfaces actual and Stage 1 monthly targets from shared diagnostics", () => {
+  it("keeps bill-period targets authoritative while surfacing source actual totals from shared diagnostics", () => {
     const out = buildManualMonthlyReconciliation({
       payload: {
         mode: "MONTHLY",
@@ -212,9 +212,9 @@ describe("manual monthly reconciliation", () => {
       month: "2025-04",
       actualIntervalTotalKwh: 284,
       enteredStatementTotalKwh: 300,
-      stageOneTargetTotalKwh: 312,
+      stageOneTargetTotalKwh: 300,
       simulatedStatementTotalKwh: 300,
-      deltaKwh: -12,
+      deltaKwh: 0,
     });
   });
 });

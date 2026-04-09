@@ -86,7 +86,7 @@ function formatShortDate(dateKey: string): string {
   return `${Number(month)}/${Number(day)}/${year.slice(2)}`;
 }
 
-function normalizeTravelRanges(ranges: TravelRange[] | undefined): TravelRange[] {
+export function normalizeTravelRanges(ranges: TravelRange[] | undefined): TravelRange[] {
   return Array.isArray(ranges)
     ? ranges
         .map((range) => ({

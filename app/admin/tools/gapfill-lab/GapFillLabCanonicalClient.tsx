@@ -56,6 +56,8 @@ type RunResult = {
   testHomeLink?: any;
   usage365?: any;
   baselineDatasetProjection?: any;
+  manualReadModel?: any;
+  manualMonthlyReconciliation?: any;
   scoredDayTruthRows?: Array<{
     localDate: string;
     actualDayKwh: number;
@@ -1025,38 +1027,22 @@ export default function GapFillLabCanonicalClient() {
     result?.ok && (result as any).sharedDiagnostics && typeof (result as any).sharedDiagnostics === "object"
       ? ((result as any).sharedDiagnostics as Record<string, unknown>)
       : null;
-  const testSourceTruthContext =
-    testSharedDiagnostics?.sourceTruthContext && typeof testSharedDiagnostics.sourceTruthContext === "object"
-      ? (testSharedDiagnostics.sourceTruthContext as Record<string, unknown>)
-      : null;
-  const sourceActualMonthlyForManualCompare =
-    Array.isArray(actualHouseBaselineDataset?.monthly)
-      ? actualHouseBaselineDataset.monthly
-      : Array.isArray((result as any)?.usage365?.monthly)
-        ? (((result as any)?.usage365?.monthly as Array<Record<string, unknown>>) ?? [])
-        : [];
+  const manualReadModel = result?.ok ? (result.manualReadModel ?? null) : null;
   const manualMonthlyCompareRows = useMemo(
     () =>
       buildGapfillManualMonthlyCompareRows({
-        actualMonthlyTotals: sourceActualMonthlyForManualCompare,
-        stageOneMonthlyTotalsKwhByMonth:
-          (testSourceTruthContext?.sourceDerivedMonthlyTotalsKwhByMonth as Record<string, number> | null | undefined) ??
-          null,
-        simulatedMonthlyTotals: testHouseBaselineDataset?.monthly ?? [],
+        manualReadModel,
+        actualDataset: actualHouseBaselineDataset,
       }),
-    [sourceActualMonthlyForManualCompare, testHouseBaselineDataset?.monthly, testSourceTruthContext]
+    [actualHouseBaselineDataset, manualReadModel]
   );
   const manualAnnualCompareSummary = useMemo(
     () =>
       buildGapfillManualAnnualCompareSummary({
-        actualMonthlyTotals: sourceActualMonthlyForManualCompare,
-        stageOneAnnualTotalKwh:
-          typeof testSourceTruthContext?.sourceDerivedAnnualTotalKwh === "number"
-            ? testSourceTruthContext.sourceDerivedAnnualTotalKwh
-            : Number(testSourceTruthContext?.sourceDerivedAnnualTotalKwh ?? 0) || 0,
-        simulatedMonthlyTotals: testHouseBaselineDataset?.monthly ?? [],
+        manualReadModel,
+        actualDataset: actualHouseBaselineDataset,
       }),
-    [sourceActualMonthlyForManualCompare, testHouseBaselineDataset?.monthly, testSourceTruthContext]
+    [actualHouseBaselineDataset, manualReadModel]
   );
   const hasCurveData = Boolean(actualHouseOverride?.length || testHouseOverride?.length);
   const actualDiagnosticsHeader = useMemo(

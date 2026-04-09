@@ -3,15 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
-import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
-import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
-import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
+import { buildManualUsageReadDecorations } from "@/modules/manualUsage/pastSimReadResult";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -139,21 +136,19 @@ export async function GET(request: NextRequest) {
     const cacheControl = scenarioId ? "private, no-store" : "private, max-age=30";
     if (out.ok) {
       const datasetAny = (out as any)?.dataset ?? {};
-      const compareProjection = buildValidationCompareProjectionSidecar(datasetAny);
-      const manualUsage = await getManualUsageInputForUserHouse({ userId: u.user.id, houseId });
-      const manualMonthlyReconciliation = buildManualMonthlyReconciliation({
-        payload: manualUsage.payload,
-        dataset: datasetAny,
-      });
-      const sharedDiagnostics = buildSharedPastSimDiagnostics({
-        callerType: "user_past",
-        dataset: datasetAny,
-        scenarioId,
-        correlationId,
+      const {
         compareProjection,
+        manualReadModel,
         manualMonthlyReconciliation,
+        sharedDiagnostics,
+      } = await buildManualUsageReadDecorations({
+        userId: u.user.id,
+        houseId,
+        scenarioId,
+        dataset: datasetAny,
+        callerType: "user_past",
+        correlationId,
         readMode: "allow_rebuild",
-        projectionMode: "baseline",
       });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
@@ -161,12 +156,13 @@ export async function GET(request: NextRequest) {
         {
           ...out,
           compareProjection,
+          manualReadModel,
           manualMonthlyReconciliation,
           sharedDiagnostics,
           correlationId,
         },
         { headers: okHeaders }
-      );
+      });
     }
 
     const failureBody = {

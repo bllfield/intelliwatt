@@ -1578,7 +1578,7 @@ export async function simulatePastUsageDataset(
           keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
         emitAllIntervals,
         modeledKeepRefReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "TEST_MODELED_KEEP_REF",
-        defaultModeledReasonCode: "INCOMPLETE_METER_DAY",
+        defaultModeledReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "INCOMPLETE_METER_DAY",
         modeledDaySelectionStrategy: buildInputs.mode === "SMT_BASELINE" ? "weather_donor_first" : "calendar_first",
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,

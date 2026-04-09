@@ -8,6 +8,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   buildManualUsageStageOneResolvedSeeds,
 } from "@/modules/manualUsage/prefill";
+import { normalizeTravelRanges as normalizeManualTravelRanges } from "@/modules/manualUsage/statementRanges";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
@@ -168,7 +169,7 @@ function buildAdminManualRecalcFailure(args: {
 }
 
 function normalizeTravelRanges(payload: ManualUsagePayload | null): TravelRange[] {
-  return Array.isArray(payload?.travelRanges) ? payload!.travelRanges : [];
+  return normalizeManualTravelRanges(Array.isArray(payload?.travelRanges) ? payload!.travelRanges : []);
 }
 
 async function buildSourceUsageHouse(selectedSourceHouse: {

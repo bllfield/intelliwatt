@@ -191,7 +191,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
     expect(keepRef == null || keepRef.size === 0).toBe(true);
     expect(firstCall?.modeledKeepRefReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
-    expect(firstCall?.defaultModeledReasonCode).toBe("INCOMPLETE_METER_DAY");
+    expect(firstCall?.defaultModeledReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
     expect(firstCall?.lowDataSyntheticContext).toMatchObject({
       mode: "MANUAL_TOTALS",
       canonicalMonthKeys: baseBuildInputs.canonicalMonths,
@@ -234,7 +234,7 @@ describe("low-data Past shared chain (Slice 14)", () => {
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
     expect(keepRef == null || keepRef.size === 0).toBe(true);
     expect(firstCall?.modeledKeepRefReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
-    expect(firstCall?.defaultModeledReasonCode).toBe("INCOMPLETE_METER_DAY");
+    expect(firstCall?.defaultModeledReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
   });
 
   it("threads manual monthly weather evidence into the low-data shared path", async () => {

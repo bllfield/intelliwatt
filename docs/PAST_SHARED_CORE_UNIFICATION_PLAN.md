@@ -11,7 +11,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - USER MANUAL MONTHLY starts as a bill-cycle input chart anchored by the latest entered bill end date. That Stage 1 input chart must not be collapsed into the normalized shared Past Sim window.
 - USER MANUAL ANNUAL starts as billing-date context plus a single annual total. It must not render a pre-sim usage chart.
 - The latest entered bill end date is the last day of the Stage 1 monthly input sequence, and that sequence runs backward by bill-cycle months.
-- Current runtime keeps Stage 1 bill-range semantics with additive `statementRanges[]` metadata for monthly payloads and a shared annual summary presentation for annual payloads while Stage 2 still uses the shared normalized Past contract.
+- Current runtime keeps Stage 1 bill-range semantics with additive `statementRanges[]` bill-period constraint inputs plus reconciliation metadata for monthly payloads and a shared annual summary presentation for annual payloads while Stage 2 still uses the shared normalized Past contract.
 - GapFill monthly-from-source starts from source-derived monthly anchors used for grading/tuning. It is not the same input semantic as USER MANUAL MONTHLY.
 - USER MANUAL MONTHLY and USER MANUAL ANNUAL are still travel/vacant-aware. Travel/vacant behavior does not belong only to GapFill monthly-from-source.
 - Admin Manual Monthly Lab uses read-only source-home context plus a writable isolated test home. Usable source manual payload wins by default; deterministic SMT-derived seeded bill ranges are fallback/reset convenience only.
@@ -22,7 +22,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - Shared Past Sim now derives shared bill-period targets before shaping:
   - non-excluded bill periods stay eligible parity constraints
   - travel-touched bill periods stay visible but non-scored
-- Statement/bill ranges remain reconciliation metadata only. They are not promoted into travel-vacant ownership.
+- Statement/bill ranges remain Stage 1 bill-period constraint inputs plus reconciliation metadata. They may shape Stage 2 constraints, but they are not promoted into travel-vacant ownership, incomplete-meter ownership, or silent exclusions.
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
 - Manual monthly user Past and admin manual-monthly lab are required to stay identical from normalized input submission through chart rendering.
 - Allowed admin-only divergence begins only after the shared Past result is accepted for display:
@@ -46,16 +46,20 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Cache restore: sets `buildPathKind: 'cache_restore'`; when cached weather provenance missing, sets `weatherSourceSummary` and `weatherFallbackReason` to `'unknown'`.
   - **Stale daily prevention:** After decoding stored `intervals15`, `reconcileRestoredPastDatasetFromDecodedIntervals` overwrites display aggregates from interval truth and uses artifact **meta** (when explicit simulated-day fields exist) for which dates are simulated—so a new run’s persisted meta is not merged with leftover `SIMULATED` rows from an older save. Legacy artifacts without those meta fields still derive simulated membership from stored `daily` and, for `sourceDetail`, from meta keys when present else from the pre-reconcile daily row.
   - **User Past compare:** `attachValidationCompareProjection` enriches each `validationCompareRow` with **optional** same-date **`dailyWeather`** fields (read-only context aligned to the Past daily table). The Usage page compare section is **collapsed by default** with an inline expand control; scoring metrics and compare truth are unchanged.
-- **`modules/manualUsage/statementRanges.ts` + `modules/manualUsage/reconciliation.ts`**
+- **`modules/manualUsage/statementRanges.ts` + `modules/manualUsage/readModel.ts`**
   - Shared manual helpers now own Stage 1 presentation plus Stage 2 bill-period target derivation for both monthly and annual payloads.
   - `buildManualBillPeriodTargets()` is the shared authority for normalized bill periods, entered totals, eligibility flags, and travel-overlap exclusions.
-  - `buildManualMonthlyReconciliation()` now uses those shared targets plus `monthlyTargetConstructionDiagnostics` so monthly compare rows can show actual interval totals, Stage 1 targets, and final simulated totals from one artifact-backed contract.
+  - Shared manual readback now publishes one canonical bill-period-first compare contract from persisted artifacts:
+    - `ManualBillPeriodTarget[]`
+    - `manualBillPeriodTotalsKwhById`
+    - shared bill-period compare rows consumed by user/admin manual surfaces and GapFill manual compare
 - **modules/usageSimulator/build.ts**
   - Manual modes now emit `manualBillPeriods` and `manualBillPeriodTotalsKwhById` in shared build inputs instead of relying on month-first metadata only.
 - **modules/simulatedUsage/simulatePastUsageDataset.ts**
   - In low-data shared Past mode, eligible manual bill periods now reserve their dates inside the shaping/reference pool.
   - Travel-touched bill periods are excluded from parity shaping rather than aborting the build.
   - Lean manual/low-data runs suppress full actual-interval carry-through, avoid exact-interval-style keep-ref expansion, and renormalize manual bill periods with a bounded indexed pass after baseline return.
+  - Constrained manual non-travel modeled days now stay on manual-constrained ownership semantics even when the resolved constrained path lands on `whole_home_only`; explicit travel ranges remain the only travel/vacant ownership source.
   - Manual-monthly runs now attach `manualMonthlyWeatherEvidenceSummary`, derived from Stage 1 monthly targets plus actual monthly weather pressure, to the shared artifact metadata.
 - **UsageDashboard / ManualMonthlyLab**
   - Stage 1 monthly surfaces render bill-period rows only.
@@ -68,7 +72,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Artifact-producing rebuilds normalize inputs then call the same shared recalc producer path before persistence; GapFill diagnostics may differ only after stored outputs exist.
   - GapFill Actual Home is the exact same user Past Sim flow with a different trigger/view surface only; it stays on `userValidationPolicy` and the shared persisted read/display path.
   - GapFill Test Home may fork only before lockbox entry: admin-owned validation policy plus usage input mode (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). After normalization it must use the same lockbox producer chain and artifact writer.
-  - GapFill manual monthly/manual annual use the same shared dispatch + persisted readback pattern as Manual Monthly Lab; compare/reconciliation is read-only and artifact-backed.
+  - GapFill manual monthly/manual annual use the same shared dispatch + persisted readback pattern as Manual Monthly Lab; compare/reconciliation is read-only, artifact-backed, and derived from the same shared bill-period-first read model after readback.
   - Daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab flow/debug surface.
   - USER MANUAL MONTHLY remains a distinct user-input semantic before normalization. GapFill `MONTHLY_FROM_SOURCE_INTERVALS` must not be treated as the only travel-aware monthly mode or as a replacement definition for user manual monthly.
   - Weather logic is pre-lockbox only: user Past owns `userWeatherLogicSetting`; GapFill Actual/Test share `gapfillWeatherLogicSetting` for a run; the shared resolver and lockbox chain stay the same after normalization.
@@ -122,6 +126,7 @@ Summary:
 - Artifact fingerprint ownership and usage-shape identity contracts are unchanged by this step; deferred profile/hash contract work remains separate.
 - Current branch caveat: canonical simulated-day totals are owned by `buildSimulatedUsageDatasetFromCurve()` and consumed from persisted artifact fields. The remaining narrow caveat is historical artifact provenance/readback hardening, not an active Gap-Fill authority split.
 - Current branch caveat: shared window/date ownership is still correct and must stay locked. Compare identity uses `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage uses `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership or artifact identity.
+- Current branch caveat: stronger monthly weather evidence, stronger baseload inference, and stronger HVAC-share inference still remain future manual-monthly work after this shared-contract/ownership pass.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
   - `simulatePastUsageDataset`

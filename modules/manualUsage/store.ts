@@ -1,12 +1,11 @@
 import { prisma } from "@/lib/db";
 import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
-import { normalizeStatementRanges } from "@/modules/manualUsage/statementRanges";
+import { normalizeStatementRanges, normalizeTravelRanges } from "@/modules/manualUsage/statementRanges";
 import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
 import type {
   AnnualManualUsagePayload,
   ManualUsagePayload,
   MonthlyManualUsagePayload,
-  TravelRange,
 } from "@/modules/simulatedUsage/types";
 
 function clampInt(n: unknown, lo: number, hi: number): number {
@@ -21,16 +20,6 @@ function isIsoDate(s: unknown): s is string {
 
 function isYearMonth(s: unknown): s is string {
   return typeof s === "string" && /^\d{4}-\d{2}$/.test(s.trim());
-}
-
-function normalizeRanges(ranges: unknown): TravelRange[] {
-  if (!Array.isArray(ranges)) return [];
-  return ranges
-    .map((r) => ({
-      startDate: String((r as any)?.startDate ?? "").slice(0, 10),
-      endDate: String((r as any)?.endDate ?? "").slice(0, 10),
-    }))
-    .filter((r) => isIsoDate(r.startDate) && isIsoDate(r.endDate));
 }
 
 export async function getManualUsageInputForUserHouse(args: {
@@ -98,7 +87,7 @@ export async function saveManualUsageInputForUserHouse(args: {
       anchorEndDate: (anchorEndDateKey ?? `${anchorEndMonth}-${String(anchorEndDate.getUTCDate()).padStart(2, "0")}`).slice(0, 10),
       monthlyKwh: cleanedMonthly,
       statementRanges: normalizeStatementRanges((payload as any).statementRanges),
-      travelRanges: normalizeRanges(payload.travelRanges),
+      travelRanges: normalizeTravelRanges(payload.travelRanges),
     };
 
     const rec = await (prisma as any).manualUsageInput.upsert({
@@ -143,7 +132,7 @@ export async function saveManualUsageInputForUserHouse(args: {
     mode: "ANNUAL",
     anchorEndDate: anchorEndDateKey,
     annualKwh,
-    travelRanges: normalizeRanges(payload.travelRanges),
+    travelRanges: normalizeTravelRanges(payload.travelRanges),
   };
   const rec = await (prisma as any).manualUsageInput.upsert({
     where: { userId_houseId: { userId: args.userId, houseId: args.houseId } },

@@ -8,14 +8,10 @@ import {
   buildMonthlyPayloadFromStatementRows,
   buildStatementRowsFromMonthlyPayload,
   MAX_MANUAL_MONTHLY_BILLS,
+  normalizeTravelRanges,
   type ManualStatementInputRow,
 } from "@/modules/manualUsage/statementRanges";
-import type {
-  AnnualManualUsagePayload,
-  ManualUsagePayload,
-  MonthlyManualUsagePayload,
-  TravelRange,
-} from "@/modules/simulatedUsage/types";
+import type { AnnualManualUsagePayload, ManualUsagePayload, MonthlyManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
 
 type LoadResp =
   | {
@@ -35,15 +31,6 @@ type ManualUsageTransport = {
   load?: (houseId: string) => Promise<LoadResp>;
   save?: (args: { houseId: string; payload: ManualUsagePayload }) => Promise<{ ok: true; updatedAt?: string | null } | { ok: false; error: string }>;
 };
-
-function normalizeRanges(ranges: TravelRange[]): TravelRange[] {
-  return (ranges || [])
-    .map((r) => ({
-      startDate: String(r.startDate || "").slice(0, 10),
-      endDate: String(r.endDate || "").slice(0, 10),
-    }))
-    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
-}
 
 const DEFAULT_ANCHOR_END_DATE = `${lastFullMonthChicago()}-15`;
 
@@ -187,14 +174,14 @@ export function ManualUsageEntry({
           anchorEndDate: built.anchorEndDate,
           monthlyKwh: built.monthlyKwh,
           statementRanges: built.statementRanges,
-          travelRanges: normalizeRanges(travelRanges),
+          travelRanges: normalizeTravelRanges(travelRanges),
         };
       } else {
         payload = {
           mode: "ANNUAL",
           anchorEndDate: String(annualAnchorEndDate ?? "").slice(0, 10),
           annualKwh: annualKwh === "" ? "" : Number(annualKwh),
-          travelRanges: normalizeRanges(travelRanges),
+          travelRanges: normalizeTravelRanges(travelRanges),
         };
       }
 

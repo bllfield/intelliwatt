@@ -4,23 +4,75 @@ import {
   buildGapfillManualAnnualCompareSummary,
   buildGapfillManualMonthlyCompareRows,
 } from "@/modules/manualUsage/gapfillCompare";
+import { buildManualUsageReadModel } from "@/modules/manualUsage/readModel";
 
 describe("gapfill manual usage compare helpers", () => {
-  it("reconciles actual, Stage 1, and simulated monthly totals by month", () => {
+  it("reconciles actual, Stage 1, and simulated monthly totals from the shared read model", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-02-28",
+      monthlyKwh: [
+        { month: "2025-02", kwh: 115 },
+        { month: "2025-01", kwh: 110 },
+      ],
+      statementRanges: [
+        { month: "2025-02", startDate: "2025-02-01", endDate: "2025-02-28" },
+        { month: "2025-01", startDate: "2025-01-01", endDate: "2025-01-31" },
+      ],
+      travelRanges: [],
+    };
+    const readModel = buildManualUsageReadModel({
+      payload,
+      dataset: {
+        meta: {
+          filledMonths: [],
+          manualMonthlyInputState: {
+            inputKindByMonth: {
+              "2025-01": "entered_nonzero",
+              "2025-02": "entered_nonzero",
+            },
+          },
+        },
+        daily: [
+          ...Array.from({ length: 31 }, (_, idx) => ({
+            date: `2025-01-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 108 / 31,
+          })),
+          ...Array.from({ length: 28 }, (_, idx) => ({
+            date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 117 / 28,
+          })),
+        ],
+      },
+      actualDataset: {
+        daily: [
+          ...Array.from({ length: 31 }, (_, idx) => ({
+            date: `2025-01-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 100 / 31,
+          })),
+          ...Array.from({ length: 28 }, (_, idx) => ({
+            date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 120 / 28,
+          })),
+        ],
+      },
+    });
+
     expect(
       buildGapfillManualMonthlyCompareRows({
-        actualMonthlyTotals: [
-          { month: "2025-01", kwh: 100 },
-          { month: "2025-02", kwh: 120 },
-        ],
-        stageOneMonthlyTotalsKwhByMonth: {
-          "2025-01": 110,
-          "2025-02": 115,
+        manualReadModel: readModel,
+        actualDataset: {
+          daily: [
+            ...Array.from({ length: 31 }, (_, idx) => ({
+              date: `2025-01-${String(idx + 1).padStart(2, "0")}`,
+              kwh: 100 / 31,
+            })),
+            ...Array.from({ length: 28 }, (_, idx) => ({
+              date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
+              kwh: 120 / 28,
+            })),
+          ],
         },
-        simulatedMonthlyTotals: [
-          { month: "2025-01", kwh: 108 },
-          { month: "2025-02", kwh: 117 },
-        ],
       })
     ).toEqual([
       {
@@ -44,18 +96,47 @@ describe("gapfill manual usage compare helpers", () => {
     ]);
   });
 
-  it("reconciles actual, Stage 1, and simulated annual totals", () => {
+  it("reconciles actual, Stage 1, and simulated annual totals from the shared read model", () => {
+    const payload = {
+      mode: "ANNUAL" as const,
+      anchorEndDate: "2025-02-28",
+      annualKwh: 230,
+      travelRanges: [],
+    };
+    const actualDataset = {
+      daily: [
+        ...Array.from({ length: 31 }, (_, idx) => ({
+          date: `2025-01-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 100 / 31,
+        })),
+        ...Array.from({ length: 28 }, (_, idx) => ({
+          date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 120 / 28,
+        })),
+      ],
+    };
+    const readModel = buildManualUsageReadModel({
+      payload,
+      dataset: {
+        meta: { filledMonths: [], manualMonthlyInputState: null },
+        daily: [
+          ...Array.from({ length: 31 }, (_, idx) => ({
+            date: `2025-01-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 108 / 31,
+          })),
+          ...Array.from({ length: 28 }, (_, idx) => ({
+            date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 117 / 28,
+          })),
+        ],
+      },
+      actualDataset,
+    });
+
     expect(
       buildGapfillManualAnnualCompareSummary({
-        actualMonthlyTotals: [
-          { month: "2025-01", kwh: 100 },
-          { month: "2025-02", kwh: 120 },
-        ],
-        stageOneAnnualTotalKwh: 230,
-        simulatedMonthlyTotals: [
-          { month: "2025-01", kwh: 108 },
-          { month: "2025-02", kwh: 117 },
-        ],
+        manualReadModel: readModel,
+        actualDataset,
       })
     ).toEqual({
       actualIntervalKwh: 220,

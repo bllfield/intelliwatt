@@ -23,11 +23,11 @@ export function ManualMonthlyReconciliationPanel(props: {
         <table className="min-w-full text-xs border border-brand-blue/10">
           <thead className="bg-brand-blue/5">
             <tr>
-              <th className="border border-brand-blue/10 px-2 py-1 text-left">Range</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-left">Bill period</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-left">Input kind</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual kWh</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Entered kWh</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-right">Stage 1 kWh</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-right">Stage 1 target kWh</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Past Sim kWh</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Delta</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-left">Status</th>
