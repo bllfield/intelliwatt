@@ -6,6 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
+import { resolveManualReadbackPollPlan } from "@/modules/manualUsage/readbackPolling";
 import { buildManualMonthlyStageOneRows, resolveManualStageOneLabPayloads } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
@@ -352,28 +353,53 @@ export default function ManualMonthlyLab() {
       setRecalcJson(json);
       if (json.readResult?.ok) {
         setResultJson(json);
-      } else if (json.executionMode === "droplet_async") {
-        const started = Date.now();
-        let latestMessage = `Run dispatched${json.jobId ? ` (job ${json.jobId})` : ""}. Waiting for the shared result...`;
-        setStatus(latestMessage);
-        while (Date.now() - started < LAB_RUN_MAX_WAIT_MS) {
-          await sleep(LAB_RUN_POLL_MS);
-          const readAttempt = await callRouteResult("read_result");
-          if (readAttempt.ok) {
-            setResultJson(readAttempt.json);
-            latestMessage = "Past Sim completed and Stage 2 refreshed.";
-            setStatus(latestMessage);
-            break;
+      } else {
+        const pollPlan = resolveManualReadbackPollPlan(json);
+        if (pollPlan.shouldPoll) {
+          const started = Date.now();
+          let latestMessage = `Run dispatched${json.jobId ? ` (job ${json.jobId})` : ""}. Waiting for the shared result...`;
+          setStatus(latestMessage);
+          console.info("[ManualMonthlyLab] manual readback poll start", {
+            correlationId: pollPlan.correlationId,
+            exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+            executionMode: json.executionMode ?? null,
+          });
+          while (Date.now() - started < LAB_RUN_MAX_WAIT_MS) {
+            await sleep(LAB_RUN_POLL_MS);
+            const readAttempt = await callRouteResult("read_result", {
+              correlationId: pollPlan.correlationId ?? undefined,
+              exactArtifactInputHash: pollPlan.exactArtifactInputHash ?? undefined,
+            });
+            if (readAttempt.ok) {
+              setResultJson(readAttempt.json);
+              latestMessage = "Past Sim completed and Stage 2 refreshed.";
+              setStatus(latestMessage);
+              console.info("[ManualMonthlyLab] manual readback poll success", {
+                correlationId: pollPlan.correlationId,
+                exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+              });
+              break;
+            }
+            const message = String(
+              readAttempt.json?.failureCode ?? readAttempt.json?.error ?? readAttempt.json?.message ?? `HTTP ${readAttempt.status}`
+            );
+            if (!isPendingReadResultError(message)) {
+              console.error("[ManualMonthlyLab] manual readback poll failure", {
+                correlationId: pollPlan.correlationId,
+                exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+                status: readAttempt.status,
+                failureCode: readAttempt.json?.failureCode ?? readAttempt.json?.error ?? null,
+              });
+              throw new Error(String(readAttempt.json?.message ?? readAttempt.json?.error ?? `HTTP ${readAttempt.status}`));
+            }
           }
-          const message = String(
-            readAttempt.json?.failureCode ?? readAttempt.json?.error ?? readAttempt.json?.message ?? `HTTP ${readAttempt.status}`
-          );
-          if (!isPendingReadResultError(message)) {
-            throw new Error(String(readAttempt.json?.message ?? readAttempt.json?.error ?? `HTTP ${readAttempt.status}`));
+          if (Date.now() - started >= LAB_RUN_MAX_WAIT_MS) {
+            console.error("[ManualMonthlyLab] manual readback poll timeout", {
+              correlationId: pollPlan.correlationId,
+              exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+            });
+            throw new Error("Past Sim is still running. Wait a minute and run again if the result has not appeared.");
           }
-        }
-        if (Date.now() - started >= LAB_RUN_MAX_WAIT_MS) {
-          throw new Error("Past Sim is still running. Wait a minute and run again if the result has not appeared.");
         }
       }
       if (json.executionMode === "inline") setStatus("Past Sim completed and Stage 2 refreshed.");

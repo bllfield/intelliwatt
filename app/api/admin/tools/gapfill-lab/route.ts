@@ -56,7 +56,7 @@ import {
   replaceGlobalLabTestHomeFromSource,
   GAPFILL_LAB_TEST_HOME_LABEL,
 } from "@/modules/usageSimulator/labTestHome";
-import { createSimCorrelationId, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { attachFailureContract } from "@/lib/api/usageSimulationApiContract";
 import {
   GAPFILL_CANONICAL_LAB_TREATMENT_MODE,
@@ -436,7 +436,13 @@ async function buildGapfillManualUsageReadbackResponse(args: {
   validationPolicyOwner: ValidationPolicyOwner;
   userDefaultValidationSelectionMode: string;
   selectionDiagnostics: Record<string, unknown> | null;
+  exactArtifactInputHash?: string | null;
+  requireExactArtifactMatch?: boolean;
 }) {
+  const exactArtifactInputHash =
+    typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
+      ? args.exactArtifactInputHash.trim()
+      : null;
   const [buildRow, artifactRow, manualUsagePayload] = await Promise.all([
     (prisma as any).usageSimulatorBuild
       .findUnique({
@@ -452,7 +458,11 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       .catch(() => null),
     (usagePrisma as any).pastSimulatedDatasetCache
       .findFirst({
-        where: { houseId: args.testHomeHouse.id, scenarioId: String(args.scenarioId) },
+        where: {
+          houseId: args.testHomeHouse.id,
+          scenarioId: String(args.scenarioId),
+          ...(exactArtifactInputHash ? { inputHash: exactArtifactInputHash } : {}),
+        },
         orderBy: { updatedAt: "desc" },
         select: { id: true, updatedAt: true, inputHash: true, engineVersion: true },
       })
@@ -475,6 +485,8 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     readMode: "artifact_only",
     callerType: "gapfill_test",
     correlationId: args.correlationId ?? null,
+    exactArtifactInputHash,
+    requireExactArtifactMatch: args.requireExactArtifactMatch === true,
     usageInputMode: args.testUsageInputMode,
     validationPolicyOwner: args.validationPolicyOwner,
     weatherLogicMode: args.gapfillWeatherLogic.weatherLogicMode,
@@ -1676,6 +1688,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(failure.body, { status: failure.status });
       }
       if (dispatched.executionMode === "droplet_async") {
+        logSimPipelineEvent("admin_lab_manual_recalc_response_ready", {
+          correlationId: dispatched.correlationId,
+          source: "gapfill_lab",
+          action: "run_test_home_canonical_recalc",
+          userId: labOwnerUser.id,
+          sourceHouseId: sourceHouse.id,
+          testHomeId: testHomeHouse.id,
+          scenarioId: String(pastScenario.id),
+          executionMode: "droplet_async",
+          readbackPending: true,
+          jobId: dispatched.jobId,
+          memoryRssMb: getMemoryRssMb(),
+        });
         return NextResponse.json({
           ok: true,
           action: "run_test_home_canonical_recalc",
@@ -1684,6 +1709,7 @@ export async function POST(req: NextRequest) {
           correlationId: dispatched.correlationId,
           jobId: dispatched.jobId,
           treatmentMode: testUsageInputMode,
+          usageInputMode: testUsageInputMode,
           simulatorMode: "MANUAL_TOTALS",
           testSelectionMode,
           adminValidationMode: testSelectionMode,
@@ -1692,32 +1718,43 @@ export async function POST(req: NextRequest) {
             usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
         });
       }
-      return await buildGapfillManualUsageReadbackResponse({
-        action: "run_test_home_canonical_recalc",
-        email: user.email,
-        timezone,
-        labOwnerUserId: labOwnerUser.id,
-        sourceHouse,
-        sourceUserId: String(sourceHouse.userId ?? link.sourceUserId),
-        testHomeHouse,
-        scenarioId: String(pastScenario.id),
+      const canonicalArtifactInputHash =
+        dispatched.result.ok &&
+        typeof dispatched.result.canonicalArtifactInputHash === "string" &&
+        dispatched.result.canonicalArtifactInputHash.trim()
+          ? dispatched.result.canonicalArtifactInputHash.trim()
+          : null;
+      logSimPipelineEvent("admin_lab_manual_recalc_response_ready", {
         correlationId: dispatched.correlationId,
-        testUsageInputMode,
-        weatherKind,
-        gapfillWeatherLogic,
-        canonicalWindow,
-        canonicalWindowHelper,
-        usage365,
-        homeProfile,
-        applianceProfile,
-        travelRangesFromDb,
-        sourceTravelRangesFromDb,
-        travelRangesForRecalc,
-        usingSourceTravelRangesForRecalc,
+        source: "gapfill_lab",
+        action: "run_test_home_canonical_recalc",
+        userId: labOwnerUser.id,
+        sourceHouseId: sourceHouse.id,
+        testHomeId: testHomeHouse.id,
+        scenarioId: String(pastScenario.id),
+        executionMode: "inline",
+        readbackPending: true,
+        artifactInputHash: canonicalArtifactInputHash,
+        memoryRssMb: getMemoryRssMb(),
+      });
+      return NextResponse.json({
+        ok: true,
+        action: "run_test_home_canonical_recalc",
+        mode: "canonical_test_home_lab",
+        executionMode: "inline",
+        correlationId: dispatched.correlationId,
+        jobId: null,
+        readbackPending: true,
+        canonicalArtifactInputHash,
+        treatmentMode: testUsageInputMode,
+        usageInputMode: testUsageInputMode,
+        simulatorMode: "MANUAL_TOTALS",
         testSelectionMode,
-        validationPolicyOwner,
-        userDefaultValidationSelectionMode: userValidationPolicy.selectionMode,
-        selectionDiagnostics,
+        adminValidationMode: testSelectionMode,
+        effectiveTravelRangesForRecalc: travelRangesForRecalc,
+        effectiveTravelRangesSource:
+          usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
+        result: dispatched.result,
       });
     }
 
@@ -2449,6 +2486,12 @@ export async function POST(req: NextRequest) {
       testDaysRequested,
     });
     const travelRangesForRecalc = usingSourceTravelRangesForRecalc ? sourceTravelRangesFromDb : travelRangesFromDb;
+    const exactArtifactInputHash =
+      typeof body?.exactArtifactInputHash === "string" && body.exactArtifactInputHash.trim()
+        ? body.exactArtifactInputHash.trim()
+        : null;
+    const correlationId =
+      typeof body?.correlationId === "string" && body.correlationId.trim() ? body.correlationId.trim() : null;
     const selectionDiagnostics = {
       modeUsed: validationPolicy.selectionMode,
       targetCount: validationPolicy.validationDayCount,
@@ -2467,7 +2510,19 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       })
       .catch(() => null);
-    return await buildGapfillManualUsageReadbackResponse({
+    logSimPipelineEvent("admin_lab_manual_readback_start", {
+      correlationId,
+      source: "gapfill_lab",
+      action: "read_test_home_canonical_result",
+      userId: labOwnerUser.id,
+      sourceHouseId: sourceHouse.id,
+      testHomeId: testHomeHouse.id,
+      scenarioId: String(pastScenario?.id ?? ""),
+      artifactInputHash: exactArtifactInputHash,
+      requireExactArtifactMatch: exactArtifactInputHash != null,
+      memoryRssMb: getMemoryRssMb(),
+    });
+    const response = await buildGapfillManualUsageReadbackResponse({
       action: "read_test_home_canonical_result",
       email: user.email,
       timezone,
@@ -2493,7 +2548,27 @@ export async function POST(req: NextRequest) {
       validationPolicyOwner: "adminValidationPolicy",
       userDefaultValidationSelectionMode: userValidationPolicy.selectionMode,
       selectionDiagnostics,
+      exactArtifactInputHash,
+      requireExactArtifactMatch: exactArtifactInputHash != null,
     });
+    logSimPipelineEvent(
+      response.status >= 200 && response.status < 300
+        ? "admin_lab_manual_readback_success"
+        : "admin_lab_manual_readback_failure",
+      {
+        correlationId,
+        source: "gapfill_lab",
+        action: "read_test_home_canonical_result",
+        userId: labOwnerUser.id,
+        sourceHouseId: sourceHouse.id,
+        testHomeId: testHomeHouse.id,
+        scenarioId: String(pastScenario?.id ?? ""),
+        artifactInputHash: exactArtifactInputHash,
+        httpStatus: response.status,
+        memoryRssMb: getMemoryRssMb(),
+      }
+    );
+    return response;
   }
 
   if (rawAction === "run_source_home_past_sim_snapshot") {

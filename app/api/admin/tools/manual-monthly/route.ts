@@ -22,6 +22,7 @@ import { classifySimulationFailure } from "@/modules/usageSimulator/simulationDa
 import {
   getUserDefaultValidationSelectionMode,
 } from "@/modules/usageSimulator/service";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
 export const dynamic = "force-dynamic";
@@ -95,12 +96,18 @@ async function buildReadResult(args: {
   houseId: string;
   scenarioId: string | null;
   readMode: "artifact_only" | "allow_rebuild";
+  correlationId?: string | null;
+  exactArtifactInputHash?: string | null;
+  requireExactArtifactMatch?: boolean;
 }) {
   return buildManualUsagePastSimReadResult({
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
     readMode: args.readMode,
+    correlationId: args.correlationId ?? null,
+    exactArtifactInputHash: args.exactArtifactInputHash ?? null,
+    requireExactArtifactMatch: args.requireExactArtifactMatch === true,
     callerType: "user_past",
   });
 }
@@ -564,31 +571,22 @@ export async function POST(req: NextRequest) {
         );
       }
       if (dispatched.executionMode === "inline") {
-        const readResult = await buildReadResult({
-          userId: ownerUserId,
+        const canonicalArtifactInputHash =
+          typeof dispatched.result.canonicalArtifactInputHash === "string" &&
+          dispatched.result.canonicalArtifactInputHash.trim()
+            ? dispatched.result.canonicalArtifactInputHash.trim()
+            : null;
+        logSimPipelineEvent("admin_manual_monthly_recalc_response_ready", {
+          correlationId: dispatched.correlationId,
           houseId: labHome.id,
+          sourceHouseId: sourceResolved.selectedHouse.id,
           scenarioId,
-          readMode: "artifact_only",
+          executionMode: "inline",
+          readbackPending: true,
+          artifactInputHash: canonicalArtifactInputHash,
+          memoryRssMb: getMemoryRssMb(),
+          source: "admin_manual_monthly_route",
         });
-        if (!readResult.ok) {
-          return NextResponse.json(
-            {
-              ...readResult,
-              action,
-              email: sourceResolved.email,
-              userId: ownerUserId,
-              sourceUserId: sourceResolved.userId,
-              selectedHouse: sourceResolved.selectedHouse,
-              selectedSourceHouse: sourceResolved.selectedHouse,
-              labHome,
-              scenarioId,
-              executionMode: "inline",
-              correlationId: dispatched.correlationId,
-              result: dispatched.result,
-            },
-            { status: statusForReadResultFailure(readResult) }
-          );
-        }
         return NextResponse.json({
           ok: true,
           action,
@@ -601,11 +599,24 @@ export async function POST(req: NextRequest) {
           scenarioId,
           executionMode: "inline",
           correlationId: dispatched.correlationId,
+          readbackPending: true,
+          canonicalArtifactInputHash,
           jobId: null,
           result: dispatched.result,
-          readResult,
+          readResult: null,
         });
       }
+      logSimPipelineEvent("admin_manual_monthly_recalc_response_ready", {
+        correlationId: dispatched.correlationId,
+        houseId: labHome.id,
+        sourceHouseId: sourceResolved.selectedHouse.id,
+        scenarioId,
+        executionMode: "droplet_async",
+        readbackPending: true,
+        jobId: dispatched.jobId,
+        memoryRssMb: getMemoryRssMb(),
+        source: "admin_manual_monthly_route",
+      });
       return NextResponse.json({
         ok: true,
         action,
@@ -624,13 +635,45 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "read_result") {
+      const exactArtifactInputHash =
+        typeof body?.exactArtifactInputHash === "string" && body.exactArtifactInputHash.trim()
+          ? body.exactArtifactInputHash.trim()
+          : null;
+      const correlationId =
+        typeof body?.correlationId === "string" && body.correlationId.trim() ? body.correlationId.trim() : null;
+      logSimPipelineEvent("admin_manual_monthly_read_result_start", {
+        correlationId,
+        houseId: labHome.id,
+        sourceHouseId: sourceResolved.selectedHouse.id,
+        scenarioId,
+        artifactInputHash: exactArtifactInputHash,
+        requireExactArtifactMatch: exactArtifactInputHash != null,
+        memoryRssMb: getMemoryRssMb(),
+        source: "admin_manual_monthly_route",
+      });
       const readResult = await buildReadResult({
         userId: ownerUserId,
         houseId: labHome.id,
         scenarioId,
         readMode: "artifact_only",
+        correlationId,
+        exactArtifactInputHash,
+        requireExactArtifactMatch: exactArtifactInputHash != null,
       });
       if (readResult.ok) {
+        logSimPipelineEvent("admin_manual_monthly_read_result_success", {
+          correlationId,
+          houseId: labHome.id,
+          sourceHouseId: sourceResolved.selectedHouse.id,
+          scenarioId,
+          artifactInputHash: exactArtifactInputHash,
+          dayCount: Array.isArray((readResult.dataset as any)?.daily) ? (readResult.dataset as any).daily.length : 0,
+          compareRowCount: Array.isArray((readResult.compareProjection as any)?.rows)
+            ? (readResult.compareProjection as any).rows.length
+            : 0,
+          memoryRssMb: getMemoryRssMb(),
+          source: "admin_manual_monthly_route",
+        });
         return NextResponse.json({
           ok: true,
           action,
@@ -644,6 +687,17 @@ export async function POST(req: NextRequest) {
           readResult,
         });
       }
+      logSimPipelineEvent("admin_manual_monthly_read_result_failure", {
+        correlationId,
+        houseId: labHome.id,
+        sourceHouseId: sourceResolved.selectedHouse.id,
+        scenarioId,
+        artifactInputHash: exactArtifactInputHash,
+        failureCode: readResult.failureCode ?? readResult.error ?? null,
+        failureMessage: readResult.failureMessage ?? readResult.message ?? null,
+        memoryRssMb: getMemoryRssMb(),
+        source: "admin_manual_monthly_route",
+      });
       return NextResponse.json(
         {
           action,

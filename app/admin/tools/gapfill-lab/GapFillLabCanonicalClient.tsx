@@ -19,6 +19,7 @@ import {
   buildGapfillManualAnnualCompareSummary,
   buildGapfillManualMonthlyCompareRows,
 } from "@/modules/manualUsage/gapfillCompare";
+import { resolveManualReadbackPollPlan } from "@/modules/manualUsage/readbackPolling";
 import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/calculationLogicSummary";
 import { GapFillDailyCurveCompare } from "@/components/admin/GapFillDailyCurveCompare";
 import { buildDailyCurveCompareSummary } from "@/modules/usageSimulator/dailyCurveCompareSummary";
@@ -91,10 +92,12 @@ type RunResult = {
   artifactCacheUpdatedAt?: string | null;
   artifactEngineVersion?: string | null;
   artifactInputHash?: string | null;
+  canonicalArtifactInputHash?: string | null;
   buildLastBuiltAt?: string | null;
   buildInputsHash?: string | null;
   executionMode?: "inline" | "droplet_async";
   jobId?: string | null;
+  readbackPending?: boolean | null;
   compareProjection?: {
     rows?: Array<{
       localDate: string;
@@ -751,8 +754,31 @@ export default function GapFillLabCanonicalClient() {
     };
     const trigger = await runAction("run_test_home_canonical_recalc", extra);
     if (!trigger.ok) return trigger;
-    if (trigger.executionMode === "droplet_async") {
-      return pollForCanonicalManualUsageReadback(extra);
+    const pollPlan = resolveManualReadbackPollPlan(trigger);
+    if (pollPlan.shouldPoll) {
+      console.info("[GapFillLabCanonicalClient] manual readback poll start", {
+        correlationId: pollPlan.correlationId,
+        exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+        executionMode: trigger.executionMode ?? null,
+      });
+      const readback = await pollForCanonicalManualUsageReadback({
+        ...extra,
+        correlationId: pollPlan.correlationId ?? undefined,
+        exactArtifactInputHash: pollPlan.exactArtifactInputHash ?? undefined,
+      });
+      if (readback.ok) {
+        console.info("[GapFillLabCanonicalClient] manual readback poll success", {
+          correlationId: pollPlan.correlationId,
+          exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+        });
+      } else {
+        console.error("[GapFillLabCanonicalClient] manual readback poll failure", {
+          correlationId: pollPlan.correlationId,
+          exactArtifactInputHash: pollPlan.exactArtifactInputHash,
+          failureCode: (readback as any)?.failureCode ?? (readback as any)?.error ?? null,
+        });
+      }
+      return readback;
     }
     return trigger;
   }

@@ -6,6 +6,7 @@ import {
   buildSharedPastSimDiagnostics,
   type SharedDiagnosticsCallerType,
 } from "@/modules/usageSimulator/sharedDiagnostics";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 
 export type ManualUsagePastSimReadResult =
@@ -36,6 +37,8 @@ export async function buildManualUsagePastSimReadResult(args: {
   readMode: "artifact_only" | "allow_rebuild";
   callerType: SharedDiagnosticsCallerType;
   correlationId?: string | null;
+  exactArtifactInputHash?: string | null;
+  requireExactArtifactMatch?: boolean;
   usageInputMode?: string | null;
   validationPolicyOwner?: string | null;
   weatherLogicMode?: string | null;
@@ -45,7 +48,26 @@ export async function buildManualUsagePastSimReadResult(args: {
   artifactPersistenceOutcome?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
 }) : Promise<ManualUsagePastSimReadResult> {
+  const startedAt = Date.now();
+  const emit = (event: string, extra: Record<string, unknown> = {}) => {
+    logSimPipelineEvent(event, {
+      correlationId: args.correlationId ?? null,
+      houseId: args.houseId,
+      scenarioId: args.scenarioId ?? null,
+      readMode: args.readMode,
+      callerType: args.callerType,
+      artifactInputHash: args.exactArtifactInputHash ?? args.artifactInputHash ?? null,
+      durationMs: Date.now() - startedAt,
+      memoryRssMb: getMemoryRssMb(),
+      source: "buildManualUsagePastSimReadResult",
+      ...extra,
+    });
+  };
   if (!args.scenarioId) {
+    emit("manual_readback_failure", {
+      failureCode: "past_scenario_missing",
+      failureMessage: "Past (Corrected) scenario is missing for this house.",
+    });
     return {
       ok: false,
       error: "past_scenario_missing",
@@ -55,11 +77,16 @@ export async function buildManualUsagePastSimReadResult(args: {
     };
   }
 
+  emit("manual_readback_start", {
+    requireExactArtifactMatch: args.requireExactArtifactMatch === true,
+  });
   const out = await getSimulatedUsageForHouseScenario({
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
     readMode: args.readMode,
+    exactArtifactInputHash: args.exactArtifactInputHash ?? undefined,
+    requireExactArtifactMatch: args.requireExactArtifactMatch === true,
     projectionMode: "baseline",
     correlationId: args.correlationId ?? undefined,
     readContext: {
@@ -69,6 +96,10 @@ export async function buildManualUsagePastSimReadResult(args: {
     },
   });
   if (!out.ok) {
+    emit("manual_readback_failure", {
+      failureCode: out.code,
+      failureMessage: out.message,
+    });
     return {
       ok: false,
       error: out.code,
@@ -82,6 +113,11 @@ export async function buildManualUsagePastSimReadResult(args: {
     args.manualUsagePayload !== undefined
       ? { payload: args.manualUsagePayload }
       : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
+  emit("manual_readback_dataset_ready", {
+    intervalCount: Array.isArray((out.dataset as any)?.series?.intervals15) ? (out.dataset as any).series.intervals15.length : 0,
+    dayCount: Array.isArray((out.dataset as any)?.daily) ? (out.dataset as any).daily.length : 0,
+    monthCount: Array.isArray((out.dataset as any)?.monthly) ? (out.dataset as any).monthly.length : 0,
+  });
   const compareProjection = buildValidationCompareProjectionSidecar(out.dataset);
   const manualMonthlyReconciliation = buildManualMonthlyReconciliation({
     payload: manualUsageRecord.payload,
@@ -103,6 +139,12 @@ export async function buildManualUsagePastSimReadResult(args: {
     artifactInputHash: args.artifactInputHash ?? null,
     artifactEngineVersion: args.artifactEngineVersion ?? null,
     artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
+  });
+  emit("manual_readback_success", {
+    compareRowCount: Array.isArray(compareProjection?.rows) ? compareProjection.rows.length : 0,
+    reconciliationRowCount: Array.isArray((manualMonthlyReconciliation as any)?.rows)
+      ? (manualMonthlyReconciliation as any).rows.length
+      : 0,
   });
   return {
     ok: true,

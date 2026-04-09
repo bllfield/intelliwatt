@@ -187,7 +187,7 @@ describe("admin manual monthly route", () => {
     mocks.dispatchPastSimRecalc.mockResolvedValue({
       executionMode: "inline",
       correlationId: "cid-1",
-      result: { ok: true },
+      result: { ok: true, canonicalArtifactInputHash: "artifact-hash-1" },
     });
     mocks.getSimulatedUsageForHouseScenario.mockResolvedValue({
       ok: true,
@@ -387,7 +387,7 @@ describe("admin manual monthly route", () => {
     expect(body.payload).toBeUndefined();
   });
 
-  it("save and recalc stay on the isolated lab home runtime path and return the shared read result", async () => {
+  it("save and recalc stay on the isolated lab home runtime path and return a fast readback handoff", async () => {
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
 
     const saveRes = await POST(
@@ -419,7 +419,10 @@ describe("admin manual monthly route", () => {
     );
     const recalcBody = await recalcRes.json();
     expect(recalcBody.ok).toBe(true);
-    expect(recalcBody.readResult.ok).toBe(true);
+    expect(recalcBody.executionMode).toBe("inline");
+    expect(recalcBody.readbackPending).toBe(true);
+    expect(recalcBody.canonicalArtifactInputHash).toBe("artifact-hash-1");
+    expect(recalcBody.readResult).toBeNull();
     expect(mocks.dispatchPastSimRecalc).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "admin-owner-1",
@@ -429,14 +432,7 @@ describe("admin manual monthly route", () => {
         scenarioId: "past-lab-s1",
       })
     );
-    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        userId: "admin-owner-1",
-        houseId: "lab-home-1",
-        scenarioId: "past-lab-s1",
-        readMode: "artifact_only",
-      })
-    );
+    expect(mocks.getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
   });
 
   it("returns a recalc failure directly instead of masking it behind a later read_result error", async () => {
@@ -510,7 +506,15 @@ describe("admin manual monthly route", () => {
     });
 
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
-    const readRes = await POST(buildRequest({ action: "read_result", email: "user@example.com", houseId: "source-house-1" }));
+    const readRes = await POST(
+      buildRequest({
+        action: "read_result",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        correlationId: "cid-read",
+        exactArtifactInputHash: "artifact-hash-1",
+      })
+    );
     const readBody = await readRes.json();
 
     expect(readRes.status).toBe(409);
@@ -521,5 +525,16 @@ describe("admin manual monthly route", () => {
       failureCode: "COMPARE_TRUTH_INCOMPLETE",
       failureMessage: "Missing canonical simulated-day totals.",
     });
+    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-owner-1",
+        houseId: "lab-home-1",
+        scenarioId: "past-lab-s1",
+        readMode: "artifact_only",
+        correlationId: "cid-read",
+        exactArtifactInputHash: "artifact-hash-1",
+        requireExactArtifactMatch: true,
+      })
+    );
   });
 });

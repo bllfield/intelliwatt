@@ -27,6 +27,7 @@ const ensureGlobalLabTestHomeHouse = vi.fn();
 const selectValidationDayKeys = vi.fn();
 const logSimPipelineEvent = vi.fn();
 const createSimCorrelationId = vi.fn();
+const getMemoryRssMb = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
 
 const homeDetailsPrisma: any = {
@@ -88,6 +89,7 @@ vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
 vi.mock("@/modules/usageSimulator/simObservability", () => ({
   logSimPipelineEvent: (...args: any[]) => logSimPipelineEvent(...args),
   createSimCorrelationId: (...args: any[]) => createSimCorrelationId(...args),
+  getMemoryRssMb: (...args: any[]) => getMemoryRssMb(...args),
 }));
 vi.mock("@/modules/usageSimulator/simDropletJob", () => ({
   getPastSimRecalcJobForUser: (...args: any[]) => getPastSimRecalcJobForUser(...args),
@@ -2179,7 +2181,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.diagnosticsVerdict?.validationDatesRenderedAsSimulatedCount).toBe(1);
   });
 
-  it("routes manual monthly mode through shared dispatch and artifact readback", async () => {
+  it("routes manual monthly mode through shared dispatch and returns a fast readback handoff", async () => {
     dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "inline",
       correlationId: "manual-cid-1",
@@ -2222,11 +2224,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const res = await POST(req);
     const body = await res.json();
     expect(res.status).toBe(200);
+    expect(body.executionMode).toBe("inline");
+    expect(body.readbackPending).toBe(true);
+    expect(body.canonicalArtifactInputHash).toBe("manual-canonical-hash-1");
     expect(body.simulatorMode).toBe("MANUAL_TOTALS");
     expect(body.treatmentMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
     expect(body.usageInputMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
-    expect(body.buildId).toBe("build-manual-1");
-    expect(body.artifactId).toBe("artifact-manual-1");
     expect(body.correlationId).toBe("manual-cid-1");
     expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
@@ -2235,7 +2238,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal).toBeUndefined();
-    expect(body.sharedDiagnostics?.identityContext?.callerType).toBe("gapfill_test");
+    expect(body.result?.canonicalArtifactInputHash).toBe("manual-canonical-hash-1");
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
@@ -2281,6 +2284,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const res = await POST(req);
     const body = await res.json();
     expect(res.status).toBe(200);
+    expect(body.executionMode).toBe("inline");
+    expect(body.readbackPending).toBe(true);
+    expect(body.canonicalArtifactInputHash).toBe("manual-canonical-hash-annual");
     expect(body.simulatorMode).toBe("MANUAL_TOTALS");
     expect(body.treatmentMode).toBe("ANNUAL_FROM_SOURCE_INTERVALS");
     expect(body.usageInputMode).toBe("ANNUAL_FROM_SOURCE_INTERVALS");
