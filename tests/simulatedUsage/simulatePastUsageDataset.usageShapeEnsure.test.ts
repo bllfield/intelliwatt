@@ -228,6 +228,110 @@ describe("shared sim usage-shape ensure path", () => {
     }
   });
 
+  it("completes MANUAL_TOTALS immediate post-baseline renormalization and emits the shared handoff logs", async () => {
+    getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
+    const jan1 = Array.from({ length: 96 }, (_, idx) => ({
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, idx * 15)).toISOString(),
+      kwh: 60 / 96,
+    }));
+    const jan2 = Array.from({ length: 96 }, (_, idx) => ({
+      timestamp: new Date(Date.UTC(2026, 0, 2, 0, idx * 15)).toISOString(),
+      kwh: 60 / 96,
+    }));
+    buildPastSimulatedBaselineV1.mockImplementationOnce(() => ({
+      intervals: [...jan1, ...jan2],
+      dayResults: [
+        {
+          localDate: "2026-01-01",
+          simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
+          intervals: [...jan1],
+          intervals15: jan1.map((row) => row.kwh),
+          intervalSumKwh: 60,
+          finalDayKwh: 60,
+          displayDayKwh: 60,
+          weatherAdjustedDayKwh: 60,
+        },
+        {
+          localDate: "2026-01-02",
+          simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
+          intervals: [...jan2],
+          intervals15: jan2.map((row) => row.kwh),
+          intervalSumKwh: 60,
+          finalDayKwh: 60,
+          displayDayKwh: 60,
+          weatherAdjustedDayKwh: 60,
+        },
+      ],
+    }));
+
+    const out = await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-02",
+      timezone: "UTC",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        canonicalEndMonth: "2026-01",
+        mode: "MANUAL_TOTALS",
+        snapshots: {
+          manualUsagePayload: { mode: "MONTHLY" },
+        },
+        manualBillPeriods: [
+          {
+            id: "bill-1",
+            startDate: "2026-01-01",
+            endDate: "2026-01-02",
+            eligibleForConstraint: true,
+          },
+        ],
+        manualBillPeriodTotalsKwhById: {
+          "bill-1": 100,
+        },
+      } as any,
+      buildPathKind: "recalc",
+      includeSimulatedDayResults: true,
+      correlationId: "cid-manual-renorm",
+    });
+
+    expect(out.dataset).not.toBeNull();
+    expect(out.simulatedDayResults?.map((row) => Number(row.displayDayKwh))).toEqual([50, 50]);
+    expect(dateKeyInTimezoneMock.mock.calls.length).toBeLessThanOrEqual(260);
+
+    const postBaselineEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_post_baseline_return_received");
+    const renormStartEv = logPipeline.mock.calls.find(
+      (c) => c[0] === "day_simulation_manual_bill_period_renormalization_start"
+    );
+    const renormSuccessEv = logPipeline.mock.calls.find(
+      (c) => c[0] === "day_simulation_manual_bill_period_renormalization_success"
+    );
+    const projectionStartEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_projection_shaping_start");
+    const projectionSuccessEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_projection_shaping_success");
+    const returnReadyEv = logPipeline.mock.calls.find((c) => c[0] === "day_simulation_return_ready");
+
+    expect(postBaselineEv?.[1]).toMatchObject({
+      correlationId: "cid-manual-renorm",
+      mode: "MANUAL_TOTALS",
+      manualUsageInputMode: "MONTHLY",
+    });
+    expect(renormStartEv?.[1]).toMatchObject({
+      correlationId: "cid-manual-renorm",
+      manualBillPeriodCount: 1,
+    });
+    expect(renormSuccessEv?.[1]).toMatchObject({
+      correlationId: "cid-manual-renorm",
+      manualBillPeriodCount: 1,
+    });
+    expect(projectionStartEv?.[1]).toMatchObject({ correlationId: "cid-manual-renorm" });
+    expect(projectionSuccessEv?.[1]).toMatchObject({ correlationId: "cid-manual-renorm" });
+    expect(returnReadyEv?.[1]).toMatchObject({
+      correlationId: "cid-manual-renorm",
+      mode: "MANUAL_TOTALS",
+    });
+  });
+
   it("chooses the later local date when utc-day local slot counts tie", async () => {
     getLatestUsageShapeProfile.mockResolvedValue(validUsageShapeRow());
     dateKeyInTimezoneMock.mockImplementation((iso: string) => {

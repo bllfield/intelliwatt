@@ -140,41 +140,54 @@ export function renormalizeManualBillPeriodIntervals(args: {
   const eligiblePeriods = args.manualBillPeriods.filter((period) => period.eligibleForConstraint !== false);
   if (eligiblePeriods.length === 0 || !args.patchedIntervals.length) return;
 
+  const intervalRows = args.patchedIntervals.map((interval) => ({
+    interval,
+    timestamp: String(interval.timestamp ?? ""),
+    dateKey: dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone),
+  }));
   const timestampToKwh = new Map<string, number>();
-  for (const interval of args.patchedIntervals) {
-    timestampToKwh.set(String(interval.timestamp ?? ""), Number(interval.kwh) || 0);
+  const intervalRowsByDateKey = new Map<string, typeof intervalRows>();
+  const summedDayTotalsByDate = new Map<string, number>();
+  for (const row of intervalRows) {
+    const kwh = Number(row.interval.kwh) || 0;
+    timestampToKwh.set(row.timestamp, kwh);
+    const bucket = intervalRowsByDateKey.get(row.dateKey) ?? [];
+    bucket.push(row);
+    intervalRowsByDateKey.set(row.dateKey, bucket);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(row.dateKey)) {
+      summedDayTotalsByDate.set(row.dateKey, (summedDayTotalsByDate.get(row.dateKey) ?? 0) + kwh);
+    }
   }
+  const sortedIntervalDateKeys = Array.from(intervalRowsByDateKey.keys()).sort();
 
   for (const period of eligiblePeriods) {
     const targetTotal = Number(args.manualBillPeriodTotalsKwhById?.[period.id] ?? NaN);
     if (!Number.isFinite(targetTotal) || targetTotal < 0) continue;
 
     let actualTotal = 0;
-    for (const interval of args.patchedIntervals) {
-      const dateKey = dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone);
+    const affectedDateKeys: string[] = [];
+    for (const dateKey of sortedIntervalDateKeys) {
       if (dateKey < period.startDate || dateKey > period.endDate) continue;
-      actualTotal += Number(interval.kwh) || 0;
+      if (!intervalRowsByDateKey.has(dateKey)) continue;
+      actualTotal += summedDayTotalsByDate.get(dateKey) ?? 0;
+      affectedDateKeys.push(dateKey);
     }
     if (!Number.isFinite(actualTotal) || actualTotal <= 0) continue;
 
     const factor = targetTotal / actualTotal;
     if (!Number.isFinite(factor) || Math.abs(factor - 1) <= 1e-9) continue;
 
-    for (const interval of args.patchedIntervals) {
-      const timestamp = String(interval.timestamp ?? "");
-      const dateKey = dateKeyInTimezone(timestamp, args.timezone);
-      if (dateKey < period.startDate || dateKey > period.endDate) continue;
-      const scaledKwh = (Number(interval.kwh) || 0) * factor;
-      interval.kwh = scaledKwh;
-      timestampToKwh.set(timestamp, scaledKwh);
+    for (const dateKey of affectedDateKeys) {
+      const dateRows = intervalRowsByDateKey.get(dateKey) ?? [];
+      for (const row of dateRows) {
+        const scaledKwh = (Number(row.interval.kwh) || 0) * factor;
+        row.interval.kwh = scaledKwh;
+        timestampToKwh.set(row.timestamp, scaledKwh);
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        summedDayTotalsByDate.set(dateKey, (summedDayTotalsByDate.get(dateKey) ?? 0) * factor);
+      }
     }
-  }
-
-  const summedDayTotalsByDate = new Map<string, number>();
-  for (const interval of args.patchedIntervals) {
-    const dateKey = dateKeyInTimezone(String(interval.timestamp ?? ""), args.timezone);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
-    summedDayTotalsByDate.set(dateKey, (summedDayTotalsByDate.get(dateKey) ?? 0) + (Number(interval.kwh) || 0));
   }
 
   for (const result of args.dayResults) {
@@ -1401,14 +1414,93 @@ export async function simulatePastUsageDataset(
       });
       patchedIntervals = baselineBuild.intervals;
       dayResults = baselineBuild.dayResults;
+      const manualUsageInputMode =
+        buildInputs.mode === "MANUAL_TOTALS"
+          ? typeof (buildInputs as any)?.snapshots?.manualUsagePayload?.mode === "string" &&
+            String((buildInputs as any).snapshots.manualUsagePayload.mode).trim()
+            ? String((buildInputs as any).snapshots.manualUsagePayload.mode).trim()
+            : Array.isArray((buildInputs as any)?.manualBillPeriods) && (buildInputs as any).manualBillPeriods.length > 0
+              ? "MONTHLY"
+              : "ANNUAL"
+          : null;
+      logSimPipelineEvent("day_simulation_post_baseline_return_received", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        mode: buildInputs.mode,
+        manualUsageInputMode,
+        lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+        intervalCount: patchedIntervals.length,
+        simulatedDayResultsCount: dayResults.length,
+        durationMs: Date.now() - baselinePhaseStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
       if (buildInputs.mode === "MANUAL_TOTALS") {
-        renormalizeManualBillPeriodIntervals({
-          patchedIntervals,
-          dayResults,
-          manualBillPeriods: eligibleManualBillPeriods,
-          manualBillPeriodTotalsKwhById: buildInputs.manualBillPeriodTotalsKwhById ?? null,
-          timezone: timezoneResolved || "UTC",
+        const renormalizeStartedAt = Date.now();
+        logSimPipelineEvent("day_simulation_manual_bill_period_renormalization_start", {
+          correlationId,
+          houseId,
+          sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+          userId,
+          buildPathKind,
+          mode: buildInputs.mode,
+          manualUsageInputMode,
+          lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+          intervalCount: patchedIntervals.length,
+          simulatedDayResultsCount: dayResults.length,
+          manualBillPeriodCount: eligibleManualBillPeriods.length,
+          source: "simulatePastUsageDataset",
+          memoryRssMb: getMemoryRssMb(),
         });
+        try {
+          renormalizeManualBillPeriodIntervals({
+            patchedIntervals,
+            dayResults,
+            manualBillPeriods: eligibleManualBillPeriods,
+            manualBillPeriodTotalsKwhById: buildInputs.manualBillPeriodTotalsKwhById ?? null,
+            timezone: timezoneResolved || "UTC",
+          });
+          logSimPipelineEvent("day_simulation_manual_bill_period_renormalization_success", {
+            correlationId,
+            houseId,
+            sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+            userId,
+            buildPathKind,
+            mode: buildInputs.mode,
+            manualUsageInputMode,
+            lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+            intervalCount: patchedIntervals.length,
+            simulatedDayResultsCount: dayResults.length,
+            manualBillPeriodCount: eligibleManualBillPeriods.length,
+            durationMs: Date.now() - renormalizeStartedAt,
+            source: "simulatePastUsageDataset",
+            memoryRssMb: getMemoryRssMb(),
+          });
+        } catch (renormalizeError) {
+          const renormalizeErr =
+            renormalizeError instanceof Error ? renormalizeError : new Error(String(renormalizeError));
+          logSimPipelineEvent("day_simulation_manual_bill_period_renormalization_failure", {
+            correlationId,
+            houseId,
+            sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+            userId,
+            buildPathKind,
+            mode: buildInputs.mode,
+            manualUsageInputMode,
+            lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+            intervalCount: patchedIntervals.length,
+            simulatedDayResultsCount: dayResults.length,
+            manualBillPeriodCount: eligibleManualBillPeriods.length,
+            durationMs: Date.now() - renormalizeStartedAt,
+            failureMessage: renormalizeErr.message,
+            source: "simulatePastUsageDataset",
+            memoryRssMb: getMemoryRssMb(),
+          });
+          throw renormalizeErr;
+        }
       }
       logSimPipelineEvent("day_simulation_baseline_build_success", {
         correlationId,
@@ -1688,113 +1780,180 @@ export async function simulatePastUsageDataset(
       throw stitchDatasetErr;
     }
 
-    if (dataset && typeof dataset === "object") {
-      const simulatedDayDiagnosticsSample = dayResults.slice(0, 40).map((r) => ({
-        localDate: String(r.localDate ?? "").slice(0, 10),
-        targetDayKwhBeforeWeather: Number(r.targetDayKwhBeforeWeather ?? r.rawDayKwh ?? 0) || 0,
-        weatherAdjustedDayKwh: Number(r.weatherAdjustedDayKwh ?? 0) || 0,
-        dayTypeUsed: (r.dayTypeUsed as "weekday" | "weekend" | undefined) ?? null,
-        shapeVariantUsed: r.shapeVariantUsed ?? null,
-        finalDayKwh: Number(r.finalDayKwh ?? 0) || 0,
-        intervalSumKwh: Number(r.intervalSumKwh ?? 0) || 0,
-        fallbackLevel: r.fallbackLevel ?? null,
-      }));
-      const weatherUsed =
-        provenance.weatherSourceSummary === "actual_only" ||
-        provenance.weatherSourceSummary === "mixed_actual_and_stub" ||
-        provenance.weatherSourceSummary === "stub_only";
-      dataset.meta = {
-        ...(dataset.meta as Record<string, unknown>),
+    const projectionShapingStartedAt = Date.now();
+    logSimPipelineEvent("day_simulation_projection_shaping_start", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      mode: buildInputs.mode,
+      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+      intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+      dayCount: Array.isArray(dataset?.daily) ? dataset.daily.length : 0,
+      monthCount: Array.isArray(dataset?.monthly) ? dataset.monthly.length : 0,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    try {
+      if (dataset && typeof dataset === "object") {
+        const simulatedDayDiagnosticsSample = dayResults.slice(0, 40).map((r) => ({
+          localDate: String(r.localDate ?? "").slice(0, 10),
+          targetDayKwhBeforeWeather: Number(r.targetDayKwhBeforeWeather ?? r.rawDayKwh ?? 0) || 0,
+          weatherAdjustedDayKwh: Number(r.weatherAdjustedDayKwh ?? 0) || 0,
+          dayTypeUsed: (r.dayTypeUsed as "weekday" | "weekend" | undefined) ?? null,
+          shapeVariantUsed: r.shapeVariantUsed ?? null,
+          finalDayKwh: Number(r.finalDayKwh ?? 0) || 0,
+          intervalSumKwh: Number(r.intervalSumKwh ?? 0) || 0,
+          fallbackLevel: r.fallbackLevel ?? null,
+        }));
+        const weatherUsed =
+          provenance.weatherSourceSummary === "actual_only" ||
+          provenance.weatherSourceSummary === "mixed_actual_and_stub" ||
+          provenance.weatherSourceSummary === "stub_only";
+        dataset.meta = {
+          ...(dataset.meta as Record<string, unknown>),
+          buildPathKind,
+          sharedWeatherTimelineContract: smtBaselineStrictWeather
+            ? "last365_actual_strict"
+            : "last365_actual_with_normal_gapfill",
+          weatherNormalGapFillDateKeyCount: smtBaselineStrictWeather ? undefined : normalFilledDateKeyCount,
+          lowDataSharedPastAdapter: isLowDataSharedPastMode ? true : undefined,
+          lowDataShapeAdapterUsed: lowDataShapeAdapterUsed ? true : undefined,
+          /** Low-data modes can still score explicit keep-ref days, but no longer auto-expand the entire window. */
+          lowDataKeepRefModeledDays: keepRefUtcDateKeys.size > 0 ? true : undefined,
+          sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+          derivationVersion: PAST_ENGINE_VERSION,
+          simVersion: PAST_ENGINE_VERSION,
+          weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
+          dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
+          dayTotalShapingPath: "shared_daytype_neighbor_weather_shaping",
+          curveShapingVersion: "shared_curve_v2",
+          usageShapeProfileDiag,
+          profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
+          dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
+          intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+          coverageStart: dataset?.summary?.start ?? startDate,
+          coverageEnd: dataset?.summary?.end ?? endDate,
+          actualDayCount:
+            typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
+              ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
+              : undefined,
+          simulatedDayCount: pastDayCounts.simulatedDays,
+          stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
+          actualIntervalsCount: actualIntervals.length,
+          sourceActualIntervalsCount,
+          actualIntervalPayloadSuppressed,
+          actualIntervalPayloadSuppressedCount,
+          actualIntervalPayloadAttached: actualIntervals.length > 0,
+          referenceDaysCount,
+          lowDataSyntheticContextUsed: pastDayCounts.lowDataSyntheticContextUsed,
+          lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode,
+          actualBackedReferencePoolUsed: pastDayCounts.actualBackedReferencePoolUsed,
+          exactIntervalReferencePreparationSkipped: pastDayCounts.exactIntervalReferencePreparationSkipped,
+          lowDataSummarizedSourceTruthUsed: pastDayCounts.lowDataSummarizedSourceTruthUsed,
+          explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
+          effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
+          shapeMonthsPresent,
+          excludedDateKeysCount: excludedDateKeys.size,
+          excludedDateKeysFingerprint,
+          leadingMissingDaysCount: pastDayCounts.leadingMissingDays ?? undefined,
+          trustedIntervalFingerprintDayCount: pastDayCounts.trustedIntervalFingerprintDayCount,
+          intervalUsageFingerprintIdentity: pastDayCounts.intervalUsageFingerprintIdentity,
+          excludedTravelVacantFingerprintDayCount: pastDayCounts.excludedTravelVacantFingerprintDayCount,
+          excludedIncompleteMeterFingerprintDayCount: pastDayCounts.excludedIncompleteMeterFingerprintDayCount,
+          excludedLeadingMissingFingerprintDayCount: pastDayCounts.excludedLeadingMissingFingerprintDayCount,
+          excludedOtherUntrustedFingerprintDayCount: pastDayCounts.excludedOtherUntrustedFingerprintDayCount,
+          fingerprintMonthBucketsUsed: pastDayCounts.fingerprintMonthBucketsUsed,
+          fingerprintWeekdayWeekendBucketsUsed: pastDayCounts.fingerprintWeekdayWeekendBucketsUsed,
+          fingerprintWeatherBucketsUsed: pastDayCounts.fingerprintWeatherBucketsUsed,
+          fingerprintShapeSummaryByMonthDayType: pastDayCounts.fingerprintShapeSummaryByMonthDayType,
+          weatherLogicMode: provenance.weatherLogicMode,
+          weatherKindUsed: provenance.weatherKindUsed,
+          weatherSourceSummary: provenance.weatherSourceSummary,
+          weatherFallbackReason: provenance.weatherFallbackReason,
+          weatherProviderName: provenance.weatherProviderName,
+          weatherCoverageStart: provenance.weatherCoverageStart,
+          weatherCoverageEnd: provenance.weatherCoverageEnd,
+          weatherStubRowCount: provenance.weatherStubRowCount,
+          weatherActualRowCount: provenance.weatherActualRowCount,
+          weatherUsed,
+          weatherNote: weatherUsed
+            ? smtBaselineStrictWeather
+              ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
+              : `Weather integrated in shared past path (${provenance.weatherSourceSummary}${
+                  normalFilledDateKeyCount > 0
+                    ? `; normal-climate gap-fill ${normalFilledDateKeyCount} day(s)`
+                    : ""
+                }).`
+            : "Weather unavailable for shared past path.",
+          simulatedDayDiagnosticsSample,
+          gapfillForceModeledKeepRefLocalDateKeys:
+            forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0
+              ? Array.from(forceModeledOutputKeepReferencePoolDateKeysLocalSet).sort()
+              : undefined,
+          gapfillForceModeledKeepRefUtcKeyCount: keepRefUtcDateKeys.size,
+          resolvedSimFingerprint: (buildInputs as { resolvedSimFingerprint?: unknown }).resolvedSimFingerprint ?? undefined,
+          monthlyTargetConstructionDiagnostics:
+            (buildInputs as { monthlyTargetConstructionDiagnostics?: unknown }).monthlyTargetConstructionDiagnostics ?? null,
+          manualMonthlyInputState:
+            (buildInputs as { manualMonthlyInputState?: unknown }).manualMonthlyInputState ?? null,
+          sharedProducerPathUsed:
+            (buildInputs as { sharedProducerPathUsed?: unknown }).sharedProducerPathUsed === false ? false : true,
+        } as unknown as typeof dataset.meta;
+      }
+      logSimPipelineEvent("day_simulation_projection_shaping_success", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
         buildPathKind,
-        sharedWeatherTimelineContract: smtBaselineStrictWeather
-          ? "last365_actual_strict"
-          : "last365_actual_with_normal_gapfill",
-        weatherNormalGapFillDateKeyCount: smtBaselineStrictWeather ? undefined : normalFilledDateKeyCount,
-        lowDataSharedPastAdapter: isLowDataSharedPastMode ? true : undefined,
-        lowDataShapeAdapterUsed: lowDataShapeAdapterUsed ? true : undefined,
-        /** Low-data modes can still score explicit keep-ref days, but no longer auto-expand the entire window. */
-        lowDataKeepRefModeledDays: keepRefUtcDateKeys.size > 0 ? true : undefined,
-        sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
-        derivationVersion: PAST_ENGINE_VERSION,
-        simVersion: PAST_ENGINE_VERSION,
-        weekdayWeekendSplitUsed: !!usageShapeProfileSnap,
-        dayTotalSource: usageShapeProfileSnap ? "usageShapeProfile_avgKwhPerDayByMonth" : "fallback_month_avg",
-        dayTotalShapingPath: "shared_daytype_neighbor_weather_shaping",
-        curveShapingVersion: "shared_curve_v2",
-        usageShapeProfileDiag,
-        profileAutoBuilt: ensuredUsageShape.profileAutoBuilt,
-        dailyRowCount: Array.isArray(dataset.daily) ? dataset.daily.length : 0,
+        mode: buildInputs.mode,
+        lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
         intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
-        coverageStart: dataset?.summary?.start ?? startDate,
-        coverageEnd: dataset?.summary?.end ?? endDate,
-        actualDayCount:
-          typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
-            ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
-            : undefined,
-        simulatedDayCount: pastDayCounts.simulatedDays,
-        stitchedDayCount: pastDayCounts.excludedDays != null ? pastDayCounts.excludedDays : undefined,
-        actualIntervalsCount: actualIntervals.length,
-        sourceActualIntervalsCount,
-        actualIntervalPayloadSuppressed,
-        actualIntervalPayloadSuppressedCount,
-        actualIntervalPayloadAttached: actualIntervals.length > 0,
-        referenceDaysCount,
-        lowDataSyntheticContextUsed: pastDayCounts.lowDataSyntheticContextUsed,
-        lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode,
-        actualBackedReferencePoolUsed: pastDayCounts.actualBackedReferencePoolUsed,
-        exactIntervalReferencePreparationSkipped: pastDayCounts.exactIntervalReferencePreparationSkipped,
-        lowDataSummarizedSourceTruthUsed: pastDayCounts.lowDataSummarizedSourceTruthUsed,
-        explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
-        effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
-        shapeMonthsPresent,
-        excludedDateKeysCount: excludedDateKeys.size,
-        excludedDateKeysFingerprint,
-        leadingMissingDaysCount: pastDayCounts.leadingMissingDays ?? undefined,
-        trustedIntervalFingerprintDayCount: pastDayCounts.trustedIntervalFingerprintDayCount,
-        intervalUsageFingerprintIdentity: pastDayCounts.intervalUsageFingerprintIdentity,
-        excludedTravelVacantFingerprintDayCount: pastDayCounts.excludedTravelVacantFingerprintDayCount,
-        excludedIncompleteMeterFingerprintDayCount: pastDayCounts.excludedIncompleteMeterFingerprintDayCount,
-        excludedLeadingMissingFingerprintDayCount: pastDayCounts.excludedLeadingMissingFingerprintDayCount,
-        excludedOtherUntrustedFingerprintDayCount: pastDayCounts.excludedOtherUntrustedFingerprintDayCount,
-        fingerprintMonthBucketsUsed: pastDayCounts.fingerprintMonthBucketsUsed,
-        fingerprintWeekdayWeekendBucketsUsed: pastDayCounts.fingerprintWeekdayWeekendBucketsUsed,
-        fingerprintWeatherBucketsUsed: pastDayCounts.fingerprintWeatherBucketsUsed,
-        fingerprintShapeSummaryByMonthDayType: pastDayCounts.fingerprintShapeSummaryByMonthDayType,
-        weatherLogicMode: provenance.weatherLogicMode,
-        weatherKindUsed: provenance.weatherKindUsed,
-        weatherSourceSummary: provenance.weatherSourceSummary,
-        weatherFallbackReason: provenance.weatherFallbackReason,
-        weatherProviderName: provenance.weatherProviderName,
-        weatherCoverageStart: provenance.weatherCoverageStart,
-        weatherCoverageEnd: provenance.weatherCoverageEnd,
-        weatherStubRowCount: provenance.weatherStubRowCount,
-        weatherActualRowCount: provenance.weatherActualRowCount,
-        weatherUsed,
-        weatherNote: weatherUsed
-          ? smtBaselineStrictWeather
-            ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
-            : `Weather integrated in shared past path (${provenance.weatherSourceSummary}${
-                normalFilledDateKeyCount > 0
-                  ? `; normal-climate gap-fill ${normalFilledDateKeyCount} day(s)`
-                  : ""
-              }).`
-          : "Weather unavailable for shared past path.",
-        simulatedDayDiagnosticsSample,
-        gapfillForceModeledKeepRefLocalDateKeys:
-          forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0
-            ? Array.from(forceModeledOutputKeepReferencePoolDateKeysLocalSet).sort()
-            : undefined,
-        gapfillForceModeledKeepRefUtcKeyCount: keepRefUtcDateKeys.size,
-        resolvedSimFingerprint: (buildInputs as { resolvedSimFingerprint?: unknown }).resolvedSimFingerprint ?? undefined,
-        monthlyTargetConstructionDiagnostics:
-          (buildInputs as { monthlyTargetConstructionDiagnostics?: unknown }).monthlyTargetConstructionDiagnostics ?? null,
-        manualMonthlyInputState:
-          (buildInputs as { manualMonthlyInputState?: unknown }).manualMonthlyInputState ?? null,
-        sharedProducerPathUsed:
-          (buildInputs as { sharedProducerPathUsed?: unknown }).sharedProducerPathUsed === false ? false : true,
-      } as unknown as typeof dataset.meta;
+        dayCount: Array.isArray(dataset?.daily) ? dataset.daily.length : 0,
+        monthCount: Array.isArray(dataset?.monthly) ? dataset.monthly.length : 0,
+        durationMs: Date.now() - projectionShapingStartedAt,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+    } catch (projectionShapingError) {
+      const projectionErr =
+        projectionShapingError instanceof Error ? projectionShapingError : new Error(String(projectionShapingError));
+      logSimPipelineEvent("day_simulation_projection_shaping_failure", {
+        correlationId,
+        houseId,
+        sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+        userId,
+        buildPathKind,
+        mode: buildInputs.mode,
+        lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+        intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+        dayCount: Array.isArray(dataset?.daily) ? dataset.daily.length : 0,
+        monthCount: Array.isArray(dataset?.monthly) ? dataset.monthly.length : 0,
+        durationMs: Date.now() - projectionShapingStartedAt,
+        failureMessage: projectionErr.message,
+        source: "simulatePastUsageDataset",
+        memoryRssMb: getMemoryRssMb(),
+      });
+      throw projectionErr;
     }
 
+    logSimPipelineEvent("day_simulation_return_ready", {
+      correlationId,
+      houseId,
+      sourceHouseId: actualHouseId !== houseId ? actualHouseId : undefined,
+      userId,
+      buildPathKind,
+      mode: buildInputs.mode,
+      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
+      intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
+      dayCount: Array.isArray(dataset?.daily) ? dataset.daily.length : 0,
+      monthCount: Array.isArray(dataset?.monthly) ? dataset.monthly.length : 0,
+      durationMs: Date.now() - daySimStartedAt,
+      source: "simulatePastUsageDataset",
+      memoryRssMb: getMemoryRssMb(),
+    });
     logSimPipelineEvent("day_simulation_success", {
       correlationId,
       houseId,
