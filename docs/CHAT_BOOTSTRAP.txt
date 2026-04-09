@@ -55,6 +55,7 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
 - USER MANUAL MONTHLY and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` are distinct input semantics.
 - GapFill monthly-from-source is for grading/tuning with source-derived monthly anchors.
 - After normalization, both paths enter the same shared Past Sim path.
+- Explicit travel ranges are the only travel-vacant ownership source on the constrained manual path. Statement/bill ranges remain reconciliation metadata only.
 - Admin Manual Monthly Lab rules:
   - source home is read-only context only
   - isolated test home is the only writable target
@@ -63,13 +64,34 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
   - shared Stage 1/pre-lockbox monthly+annual helper ownership lives in `modules/manualUsage/prefill.ts`
   - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same helper family before the shared lockbox path
   - GapFill manual monthly/manual annual should trigger recalc through shared `dispatchPastSimRecalc` and then read the persisted artifact back for manual compare/reconciliation UI; do not reintroduce the old single-request heavy recalc/read bundle
+  - manual-mode recalc/readback contract is now explicit: recalc may return `readbackPending: true` plus `canonicalArtifactInputHash`, and admin clients poll readback using that exact hash
   - keep `MANUAL_TOTALS` recalc lean: exact-interval fingerprint/profile work is not required for manual monthly/annual truth production and richer diagnostics belong on persisted readback
+  - `lookup` is the lightweight source-home selection step; `load` does the heavier isolated-home reset/seed/read prep
   - In GapFill manual modes, Actual House stays the full interval-backed source truth, while Test Home shows the shared constrained result with monthly or annual reconciliation compare
   - admin manual-mode failures may expose root-cause infrastructure detail like Prisma pool exhaustion (`P2024`) instead of only a generic timeout
   - deterministic SMT-derived bill ranges are fallback/reset convenience only
   - fallback seeding is bounded by actual coverage, capped at 12, and fails closed if lab-home seed persistence fails
 - Stage 1 reconciliation may use exact stored statement ranges, but the main Stage 2 Past chart remains the normalized shared Past output.
+- Current shared low-data/manual engine behavior:
+  - `MANUAL_TOTALS` stays on the shared producer path; there is no separate manual engine
+  - full actual interval payloads are suppressed for the lean low-data/manual baseline path
+  - post-baseline manual bill-period renormalization is optimized and bounded
+  - non-critical post-artifact persistence is deferred for lean manual recalc; richer compare/reconciliation stays on readback
+- Current manual-monthly low-data weather behavior:
+  - `manualMonthlyWeatherEvidenceSummary` is attached from Stage 1 monthly targets plus actual monthly weather pressure
+  - that evidence currently drives daily weather classification, weather-scaled-day activation, and low-data curve-amplitude response
+  - non-travel constrained manual days may surface as `SIMULATED_MANUAL_CONSTRAINED`
 - Manual Usage Lab and GapFill stay separate pages; daily curve compare/tuning belongs on GapFill/admin tuning surfaces, not on the Manual Usage Lab flow/debug page.
+
+========================================
+CUSTOM PRISMA CLIENT PACKAGING (CURRENT)
+========================================
+
+- Current custom Prisma client packaging is a deployment/bundling concern only; it is separate from simulator math and manual sim logic.
+- `next.config.js` now traces custom Prisma assets with real App Router URL pathname keys (`/api/(.*)`), not stale `/app/...` filesystem-style keys.
+- Current live custom Prisma clients are externalized from `node_modules/@prisma/*-client` and traced from there.
+- Home Details currently imports from `@prisma/home-details-client`, and its schema output is `../../node_modules/@prisma/home-details-client`.
+- When adding a new route that can transitively load a custom Prisma client, verify that the route remains covered by the tracing rules and traced assets.
 
 ========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)

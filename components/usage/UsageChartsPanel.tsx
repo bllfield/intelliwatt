@@ -25,6 +25,7 @@ type DailyRow = {
   sourceDetail?:
     | "SIMULATED_TRAVEL_VACANT"
     | "SIMULATED_TEST_DAY"
+    | "SIMULATED_MANUAL_CONSTRAINED"
     | "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
     | "SIMULATED_INCOMPLETE_METER"
     | "SIMULATED_LEADING_MISSING"
@@ -128,8 +129,11 @@ export function UsageChartsPanel(props: {
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_TEST_DAY") {
       return "SIMULATED (TEST DAY)";
     }
-    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL") {
-      return "SIMULATED (MONTHLY CONSTRAINED)";
+    if (
+      row.source === "SIMULATED" &&
+      (row.sourceDetail === "SIMULATED_MANUAL_CONSTRAINED" || row.sourceDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL")
+    ) {
+      return "SIMULATED (MANUAL CONSTRAINED)";
     }
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_INCOMPLETE_METER") {
       return "SIMULATED (INCOMPLETE METER)";

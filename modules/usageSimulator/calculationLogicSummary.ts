@@ -182,6 +182,29 @@ function formatMaybeCount(value: unknown): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "not attached";
 }
 
+function formatStringList(value: unknown, max = 6): string {
+  const items = asArray<string>(value)
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+  if (items.length === 0) return "none";
+  if (items.length <= max) return items.join(", ");
+  return `${items.slice(0, max).join(", ")} (+${items.length - max} more)`;
+}
+
+function summarizeStageOneTargets(rows: Array<Record<string, unknown>>, max = 6): string {
+  const formatted = rows
+    .map((row) => {
+      const month = String(row.month ?? "").trim();
+      const target = Number(row.normalizedMonthTarget);
+      if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(target)) return null;
+      return `${month}: ${target.toFixed(2)}`;
+    })
+    .filter((row): row is string => Boolean(row));
+  if (formatted.length === 0) return "not attached";
+  if (formatted.length <= max) return formatted.join(" | ");
+  return `${formatted.slice(0, max).join(" | ")} | +${formatted.length - max} more`;
+}
+
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000;
 }
@@ -197,7 +220,7 @@ function prettyLabel(value: string): string {
 function bandForSourceDetail(detail: string): Exclude<PriorityBand, "Not Used"> {
   if (detail === "ACTUAL" || detail === "ACTUAL_VALIDATION_TEST_DAY") return "Hard Truth";
   if (detail === "SIMULATED_TEST_DAY") return "Primary Driver";
-  if (detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL") return "Hard Constraint";
+  if (detail === "SIMULATED_MANUAL_CONSTRAINED" || detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL") return "Hard Constraint";
   if (detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING") {
     return "Exclusion";
   }
@@ -214,6 +237,8 @@ function explanationForSourceDetail(detail: string): string {
       return "Modeled output produced specifically for selected validation/test-day compare behavior.";
     case "SIMULATED_TRAVEL_VACANT":
       return "Modeled because travel/vacant exclusions removed the day from the trusted fingerprint pool.";
+    case "SIMULATED_MANUAL_CONSTRAINED":
+      return "Modeled under the manual constrained path without claiming incomplete-meter or travel-vacant ownership.";
     case "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL":
       return "Modeled underneath a monthly constraint even though the day is not a travel/vacant exclusion.";
     case "SIMULATED_INCOMPLETE_METER":
@@ -451,6 +476,8 @@ export function buildGapfillCalculationLogicSummary(args: {
   const travelRangeList = asArray<Record<string, unknown>>(travelRanges.ranges ?? sourceTruthContext.travelRangesUsed);
   const validationKeyList = asArray<string>(validationKeys.localDateKeys ?? sourceTruthContext.validationTestKeysUsed);
   const monthlyDiagnostics = asArray<Record<string, unknown>>(sourceTruthContext.monthlyTargetConstructionDiagnostics);
+  const manualMonthlyInputState = asRecord(sourceTruthContext.manualMonthlyInputState);
+  const manualMonthlyWeatherEvidence = asRecord(sourceTruthContext.manualMonthlyWeatherEvidenceSummary);
   const fingerprintDiagnostics = asRecord(sourceTruthContext.intervalUsageFingerprintDiagnostics);
   const perDayReasonCounts = countBy(perDayTrace, (row) => String(row.simulatedReasonCode ?? "").trim());
   const perDayFallbackCounts = countBy(perDayTrace, (row) => String(row.fallbackLevel ?? "").trim());
@@ -1287,6 +1314,27 @@ export function buildGapfillCalculationLogicSummary(args: {
         }),
         explanation: "Extreme cold and freeze-protect classifications reflect stronger event behavior layered after the base day is selected.",
       },
+      ...(modeInfo.modeFamily === "manual_monthly"
+        ? [
+            {
+              label: "Manual monthly weather evidence",
+              value: joinNonEmpty([
+                `Responsiveness: ${String(manualMonthlyWeatherEvidence.dailyWeatherResponsiveness ?? "not attached")}`,
+                `Baseload share: ${formatMaybeNumber(manualMonthlyWeatherEvidence.baseloadShare, 2)}`,
+                `HVAC share: ${formatMaybeNumber(manualMonthlyWeatherEvidence.hvacShare, 2)}`,
+              ]),
+              explanation: "Derived from Stage 1 monthly targets versus actual monthly weather pressure; home details act only as stabilizing priors.",
+            },
+            {
+              label: "Heating / cooling sensitivity",
+              value: joinNonEmpty([
+                `Heating: ${formatMaybeNumber(manualMonthlyWeatherEvidence.heatingSensitivity, 2)}`,
+                `Cooling: ${formatMaybeNumber(manualMonthlyWeatherEvidence.coolingSensitivity, 2)}`,
+              ]),
+              explanation: "Shows the inferred weather elasticity used by the low-data manual-monthly fast path for daily totals and curve amplitude.",
+            },
+          ]
+        : []),
     ],
   };
 
@@ -1329,6 +1377,24 @@ export function buildGapfillCalculationLogicSummary(args: {
       ]),
       explanation: "Summarizes how often noisy donor cohorts were damped toward their local median instead of letting one donor dominate.",
     },
+    ...(modeInfo.modeFamily === "manual_monthly"
+      ? [
+          {
+            label: "Manual month coverage",
+            value: joinNonEmpty([
+              `Entered: ${formatStringList(manualMonthlyInputState.enteredMonthKeys)}`,
+              `Missing: ${formatStringList(manualMonthlyInputState.missingMonthKeys)}`,
+              `Explicit zero: ${formatStringList(manualMonthlyInputState.explicitZeroMonthKeys)}`,
+            ]),
+            explanation: "Shows which months were explicit Stage 1 truth versus missing/fill-later months in the shared lockbox input.",
+          },
+          {
+            label: "Stage 1 normalized month targets",
+            value: summarizeStageOneTargets(monthlyDiagnostics),
+            explanation: "These are the actual normalized monthly targets carried through the shared lockbox diagnostics and used for manual-monthly reconciliation.",
+          },
+        ]
+      : []),
     {
       label: "Most common shape variants",
       value: describeCountMap(perDayShapeVariantCounts),

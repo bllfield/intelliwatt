@@ -25,6 +25,95 @@ function makeTrainingStats(): PastDayTrainingWeatherStats {
 }
 
 describe("pastDaySimulator shared curve shaping", () => {
+  it("widens interval-shape amplitude more for HVAC-heavy low-data manual evidence than for baseload-heavy evidence", () => {
+    const shape96 = Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 3 : 1));
+    const makeContext = (baseloadShare: number, hvacShare: number) =>
+      buildPastDaySimulationContext({
+        profile: {
+          monthKeys: ["2026-08"],
+          avgKwhPerDayWeekdayByMonth: [30],
+          avgKwhPerDayWeekendByMonth: [26],
+          weekdayCountByMonth: { "2026-08": 22 },
+          weekendCountByMonth: { "2026-08": 9 },
+          monthOverallAvgByMonth: { "2026-08": 28.5 },
+          monthOverallCountByMonth: { "2026-08": 31 },
+        },
+        trainingWeatherStats: null,
+        weatherByDateKey: new Map(),
+        lowDataSyntheticDayKwhByMonthDayType: {
+          "2026-08": { weekday: 30, weekend: 26 },
+        },
+        lowDataWeatherEvidence: {
+          inputMonthKeys: ["2026-08"],
+          missingMonthKeys: [],
+          explicitTravelRangesUsed: [],
+          baseloadShare,
+          hvacShare,
+          heatingSensitivity: 0.4,
+          coolingSensitivity: 1.2,
+          dailyWeatherResponsiveness: "weather_driven",
+          byMonth: {
+            "2026-08": {
+              monthKey: "2026-08",
+              baseloadShare,
+              hvacShare,
+              heatingSensitivity: 0.4,
+              coolingSensitivity: 1.2,
+              referenceDailyHdd: 0,
+              referenceDailyCdd: 6,
+              referenceAvgTempC: 28,
+            },
+          },
+        },
+        shapeVariants: {
+          byMonthDayType96: {
+            "2026-08": {
+              weekday: shape96,
+              weekend: shape96,
+            },
+          },
+        },
+      });
+
+    const hvacHeavy = simulatePastDay(
+      {
+        localDate: "2026-08-12",
+        isWeekend: false,
+        gridTimestamps: fixedGrid("2026-08-12"),
+        weatherForDay: {
+          dailyAvgTempC: 35,
+          dailyMinTempC: 29,
+          dailyMaxTempC: 41,
+          heatingDegreeSeverity: 0,
+          coolingDegreeSeverity: 18,
+          freezeHoursCount: 0,
+        },
+      },
+      makeContext(0.28, 0.72)
+    );
+    const baseloadHeavy = simulatePastDay(
+      {
+        localDate: "2026-08-12",
+        isWeekend: false,
+        gridTimestamps: fixedGrid("2026-08-12"),
+        weatherForDay: {
+          dailyAvgTempC: 35,
+          dailyMinTempC: 29,
+          dailyMaxTempC: 41,
+          heatingDegreeSeverity: 0,
+          coolingDegreeSeverity: 18,
+          freezeHoursCount: 0,
+        },
+      },
+      makeContext(0.78, 0.22)
+    );
+
+    const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
+    expect(hvacHeavy.dayClassification).toBe("weather_scaled_day");
+    expect(baseloadHeavy.dayClassification).toBe("weather_scaled_day");
+    expect(spread(hvacHeavy.shape96Used)).toBeGreaterThan(spread(baseloadHeavy.shape96Used));
+  });
+
   it("prefers weather-similar donors before broader calendar fallbacks", () => {
     const context = buildPastDaySimulationContext({
       profile: {

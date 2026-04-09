@@ -395,7 +395,8 @@ Notes:
 - Manual entry is no longer a placeholder. /dashboard/api/manual contains real Monthly + Annual entry UI (with travel ranges) and persists real kWh inputs.
 - Manual monthly requires an explicit anchor (anchorEndMonth YYYY-MM or anchorEndDate). For user manual monthly product semantics, the latest entered bill end date is the input anchor for the bill-cycle chart. After that bill-cycle input is built, the shared Past Sim path normalizes it into the canonical Past coverage window used by the rest of the system.
 - Existing SMT and Green Button ingestion/storage paths are untouched. Real usage remains immutable.
-- Added a new simulated usage engine module that generates a baseline 15-minute interval curve (flat distribution) from manual totals, applies whole-day travel exclusions, and renormalizes totals.
+- Manual monthly/annual now run through the same shared Past producer path used by the rest of the system; there is no separate manual-only simulator engine.
+- `MANUAL_TOTALS` no longer drags full actual-interval payloads or exact-interval-style keep-ref behavior through the low-data branch. The shared engine now uses lean low-data synthetic context, shared bill-period constraints, optimized post-baseline renormalization, and weather-aware daily shaping inside the same producer architecture.
 - Added /api/user/usage/simulated which returns the exact same JSON shape as /api/user/usage (ok + houses[] with dataset), enabling reuse of UsageDashboard charts.
 - Do NOT expand dataset.summary.source union. Simulated labeling is done via dataset.meta.datasetKind = "SIMULATED" and/or dataset.meta.isSimulated.
 - UsageDashboard now supports a Real vs Simulated toggle. Simulated mode fetches /api/user/usage/simulated; when dataset is null it shows a CTA to /dashboard/api/manual.
@@ -453,15 +454,27 @@ This section is authoritative for future manual-usage implementation work.
   - annual seed derivation
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must use that same shared Stage 1 helper family before entering the shared lockbox/sim/artifact path.
 - GapFill manual monthly/manual annual now dispatch through the shared `dispatchPastSimRecalc` entry with the same Stage 1 seed-resolution family (`modules/manualUsage/prefill.ts`) and then read back the persisted artifact, instead of doing the old inline recalc-plus-heavy-read orchestration in one blocking request.
+- That shared recalc/readback contract is now explicit:
+  - recalc returns once the canonical artifact is ready
+  - responses may include `readbackPending: true` plus `canonicalArtifactInputHash`
+  - admin manual clients poll readback using the exact artifact hash so compare/reconciliation stays artifact-backed
 - `MANUAL_TOTALS` recalc on that shared path must stay lean: exact-interval fingerprint resolution, usage-shape profile DB reads/ensures, and bucket-oriented persistence work are not part of manual monthly/annual truth production and should be deferred to readback-only diagnostics when needed.
-- GapFill Actual House remains the full interval-backed source-truth view in manual modes; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
+- GapFill Actual House remains the full interval-backed source-truth view in manual modes and now reads the same shared persisted Past artifact/display path as the user Past page; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
 - GapFill manual monthly compare must reconcile source actual interval monthly totals, shared Stage 1 monthly targets, and final simulated monthly totals; GapFill manual annual compare must reconcile source actual annual total, shared Stage 1 annual target, and final simulated annual total.
 - Admin manual-mode responses may surface root-cause infrastructure failures such as Prisma pool exhaustion (`P2024`) so GapFill and Manual Monthly Lab can distinguish producer failure from a generic timeout.
 - The exact-interval donor-tuning path remains locked: weather-first K-nearest donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic diagnostics are preserved and not replaced by manual-usage work.
+- Manual-monthly ownership/readback behavior is now more explicit in the shared artifact:
+  - non-travel low-data constrained modeled days may surface as `SIMULATED_MANUAL_CONSTRAINED`
+  - explicit travel ranges remain the only travel/vacant ownership source
+  - statement/bill ranges remain reconciliation metadata and must not be promoted into travel ownership
+- Manual-monthly low-data weather evidence is now implemented in the shared producer:
+  - Stage 1 monthly targets plus actual monthly weather pressure are analyzed into a `manualMonthlyWeatherEvidenceSummary`
+  - that evidence drives daily weather classification, weather-scaled-day activation, and low-data curve-amplitude response
+  - this is implemented for current manual-monthly low-data runs; further tuning remains future work
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only
-  - `lookup` reads source context plus current isolated lab-home state
-  - `load` replaces and seeds the isolated lab home only
+  - `lookup` is the lightweight source-home selection step
+  - `load` replaces, seeds, and prepares the isolated lab home
   - `save`, `recalc`, and `read_result` stay on the isolated lab home only
 - Admin Manual Monthly Lab seed precedence is explicit:
   - usable source manual payload wins by default
@@ -485,8 +498,8 @@ This section is authoritative for future manual-usage implementation work.
 
 ### Out of Scope / Next Phase
 - Patch incomplete SMT months using simulated segments (real usage remains unchanged; simulated curve will support patch ranges).
-- Scenario deltas (EV, occupants, upgrades, solar) beyond baseline flat distribution.
-- More realistic load-shaping (weather/HVAC/occupancy) beyond baseline.
+- Scenario deltas (EV, occupants, upgrades, solar) beyond the current shared baseline/manual constrained path.
+- Further manual-monthly/weather-response tuning beyond the current shared low-data evidence branch.
 
 ### Usage Layer Map (Canonical)
 

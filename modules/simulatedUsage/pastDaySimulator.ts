@@ -21,6 +21,7 @@ import type {
   PastNeighborDaySample,
   PastWeatherDonorSample,
   PastWeatherDonorContribution,
+  PastLowDataWeatherEvidenceMonth,
 } from "./pastDaySimulatorTypes";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
@@ -114,6 +115,13 @@ function weightedNeighborDayKwh(args: {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeShape96Weights(shape: number[]): number[] {
+  const nonNegative = shape.map((value) => Math.max(0, Number(value) || 0));
+  const sum = nonNegative.reduce((acc, value) => acc + value, 0);
+  if (!Number.isFinite(sum) || sum <= 0) return Array.from({ length: INTERVALS_PER_DAY }, () => 1 / INTERVALS_PER_DAY);
+  return nonNegative.map((value) => value / sum);
 }
 
 function spreadForWeather(wx: {
@@ -544,6 +552,98 @@ function normalizeShape96Safe(shape: unknown): number[] | null {
   return nums.map((v) => v / sum);
 }
 
+function computeLowDataWeatherAdjustedDayTotal(args: {
+  baseDayKwh: number;
+  weatherForDay: PastDayWeatherFeatures | null;
+  monthEvidence: PastLowDataWeatherEvidenceMonth | null;
+}): {
+  finalSelectedDayKwh: number;
+  weatherSeverityMultiplier: number;
+  weatherModeUsed: "heating" | "cooling" | "neutral";
+  dayClassification: PastDayWeatherClassification;
+  preBlendAdjustedDayKwh: number;
+  weatherAdjustmentModeUsed: "manual_monthly_weather_evidence";
+  postDonorAdjustmentCoefficient: number | null;
+} {
+  const baseDayKwh = Math.max(0, Number(args.baseDayKwh) || 0);
+  const wx = args.weatherForDay;
+  const evidence = args.monthEvidence;
+  if (!wx || !evidence || baseDayKwh <= 0) {
+    return {
+      finalSelectedDayKwh: baseDayKwh,
+      weatherSeverityMultiplier: 1,
+      weatherModeUsed: "neutral",
+      dayClassification: "normal_day",
+      preBlendAdjustedDayKwh: baseDayKwh,
+      weatherAdjustmentModeUsed: "manual_monthly_weather_evidence",
+      postDonorAdjustmentCoefficient: 1,
+    };
+  }
+
+  const baseloadShare = clampNumber(Number(evidence.baseloadShare) || 0, 0.15, 0.92);
+  const hvacShare = clampNumber(Number(evidence.hvacShare) || 0, 0.08, 0.85);
+  const heatingSensitivity = clampNumber(Number(evidence.heatingSensitivity) || 0, 0, 1.8);
+  const coolingSensitivity = clampNumber(Number(evidence.coolingSensitivity) || 0, 0, 1.8);
+  const referenceDailyHdd = Math.max(0, Number(evidence.referenceDailyHdd) || 0);
+  const referenceDailyCdd = Math.max(0, Number(evidence.referenceDailyCdd) || 0);
+
+  const heatingDelta = (Math.max(0, Number(wx.heatingDegreeSeverity) || 0) - referenceDailyHdd) / Math.max(referenceDailyHdd, 6);
+  const coolingDelta = (Math.max(0, Number(wx.coolingDegreeSeverity) || 0) - referenceDailyCdd) / Math.max(referenceDailyCdd, 6);
+  const heatingResponse = heatingDelta * heatingSensitivity;
+  const coolingResponse = coolingDelta * coolingSensitivity;
+  const hvacMultiplier = clampNumber(1 + heatingResponse + coolingResponse, 0.3, 2.25);
+  const baseloadKwh = baseDayKwh * baseloadShare;
+  const hvacResponsiveKwh = Math.max(0, baseDayKwh - baseloadKwh) * hvacMultiplier;
+  const preBlendAdjustedDayKwh = baseloadKwh + hvacResponsiveKwh;
+  const weatherSeverityMultiplier = baseDayKwh > 1e-6 ? preBlendAdjustedDayKwh / baseDayKwh : 1;
+
+  const weatherModeUsed: "heating" | "cooling" | "neutral" =
+    Math.max(0, Number(wx.heatingDegreeSeverity) || 0) > Math.max(referenceDailyHdd + 1, Number(wx.coolingDegreeSeverity) || 0)
+      ? "heating"
+      : Math.max(0, Number(wx.coolingDegreeSeverity) || 0) > Math.max(referenceDailyCdd + 1, Number(wx.heatingDegreeSeverity) || 0)
+        ? "cooling"
+        : "neutral";
+  const dayClassification: PastDayWeatherClassification =
+    Math.abs(weatherSeverityMultiplier - 1) >= 0.035 ? "weather_scaled_day" : "normal_day";
+  const finalSelectedDayKwh =
+    dayClassification === "weather_scaled_day"
+      ? baseDayKwh * WEATHER_SCALED_PROFILE_ANCHOR_FRAC + preBlendAdjustedDayKwh * (1 - WEATHER_SCALED_PROFILE_ANCHOR_FRAC)
+      : baseDayKwh;
+
+  return {
+    finalSelectedDayKwh: Math.max(0, finalSelectedDayKwh),
+    weatherSeverityMultiplier,
+    weatherModeUsed,
+    dayClassification,
+    preBlendAdjustedDayKwh,
+    weatherAdjustmentModeUsed: "manual_monthly_weather_evidence",
+    postDonorAdjustmentCoefficient: weatherSeverityMultiplier,
+  };
+}
+
+function applyLowDataShapeWeatherAmplitude(args: {
+  shape96: number[];
+  weatherRegime: PastWeatherRegimeKey;
+  weatherSeverityMultiplier: number;
+  monthEvidence: PastLowDataWeatherEvidenceMonth | null;
+}): number[] {
+  const normalized = normalizeShape96Weights(args.shape96);
+  if (args.weatherRegime === "neutral" || !args.monthEvidence) return normalized;
+  const hvacShare = clampNumber(Number(args.monthEvidence.hvacShare) || 0, 0.08, 0.85);
+  const baseloadShare = clampNumber(Number(args.monthEvidence.baseloadShare) || 0, 0.15, 0.92);
+  const deviation = Math.abs((Number(args.weatherSeverityMultiplier) || 1) - 1);
+  if (deviation < 0.02) return normalized;
+
+  const flat = 1 / INTERVALS_PER_DAY;
+  const amplitudeMultiplier = 1 + deviation * (0.6 + hvacShare * 0.9);
+  const flattenBlend = clampNumber(baseloadShare * 0.45, 0, 0.35);
+  const adjusted = normalized.map((value) => {
+    const amplified = flat + (value - flat) * amplitudeMultiplier;
+    return flat * flattenBlend + amplified * (1 - flattenBlend);
+  });
+  return normalizeShape96Weights(adjusted);
+}
+
 function selectShape96(args: {
   monthKey: string;
   dayType: PastDayTypeKey;
@@ -925,6 +1025,7 @@ export function buildPastDaySimulationContext(args: {
   modeledDaySelectionStrategy?: PastDaySimulationContext["modeledDaySelectionStrategy"];
   shapeVariants?: PastDaySimulationContext["shapeVariants"];
   lowDataSyntheticDayKwhByMonthDayType?: PastDaySimulationContext["lowDataSyntheticDayKwhByMonthDayType"];
+  lowDataWeatherEvidence?: PastDaySimulationContext["lowDataWeatherEvidence"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
@@ -935,6 +1036,7 @@ export function buildPastDaySimulationContext(args: {
     modeledDaySelectionStrategy: args.modeledDaySelectionStrategy ?? "calendar_first",
     shapeVariants: args.shapeVariants ?? null,
     lowDataSyntheticDayKwhByMonthDayType: args.lowDataSyntheticDayKwhByMonthDayType ?? null,
+    lowDataWeatherEvidence: args.lowDataWeatherEvidence ?? null,
   };
 }
 
@@ -952,6 +1054,7 @@ export function simulatePastDay(
   const monthKey = localDate.slice(0, 7);
   const dayTypeUsed: PastDayTypeKey = isWeekend ? "weekend" : "weekday";
   const lowDataMonthBucket = context.lowDataSyntheticDayKwhByMonthDayType?.[monthKey] ?? null;
+  const lowDataMonthEvidence = context.lowDataWeatherEvidence?.byMonth?.[monthKey] ?? null;
   const lowDataTargetDayKwh = lowDataMonthBucket
     ? Number(dayTypeUsed === "weekend" ? lowDataMonthBucket.weekend : lowDataMonthBucket.weekday) || 0
     : null;
@@ -1000,22 +1103,29 @@ export function simulatePastDay(
       });
 
   const adj = canUseLowDataSyntheticFastPath
-    ? {
-        finalSelectedDayKwh: sel.targetDayKwh,
-        weatherSeverityMultiplier: 1,
-        weatherModeUsed: "neutral" as const,
-        auxHeatKwhAdder: 0,
-        poolFreezeProtectKwhAdder: 0,
-        dayClassification: "normal_day" as const,
-        auxHeatGate_minTempPassed: false,
-        auxHeatGate_freezeHoursPassed: false,
-        auxHeatGate_severityPassed: false,
-        referenceHeatingSeverity: 0,
-        preBlendAdjustedDayKwh: sel.targetDayKwh,
-        blendedBackTowardProfile: false,
-        weatherAdjustmentModeUsed: "legacy_training_stats" as const,
-        postDonorAdjustmentCoefficient: 1,
-      }
+    ? (() => {
+        const adjusted = computeLowDataWeatherAdjustedDayTotal({
+          baseDayKwh: sel.targetDayKwh,
+          weatherForDay,
+          monthEvidence: lowDataMonthEvidence,
+        });
+        return {
+          finalSelectedDayKwh: adjusted.finalSelectedDayKwh,
+          weatherSeverityMultiplier: adjusted.weatherSeverityMultiplier,
+          weatherModeUsed: adjusted.weatherModeUsed,
+          auxHeatKwhAdder: 0,
+          poolFreezeProtectKwhAdder: 0,
+          dayClassification: adjusted.dayClassification,
+          auxHeatGate_minTempPassed: false,
+          auxHeatGate_freezeHoursPassed: false,
+          auxHeatGate_severityPassed: false,
+          referenceHeatingSeverity: 0,
+          preBlendAdjustedDayKwh: adjusted.preBlendAdjustedDayKwh,
+          blendedBackTowardProfile: adjusted.dayClassification === "weather_scaled_day",
+          weatherAdjustmentModeUsed: adjusted.weatherAdjustmentModeUsed,
+          postDonorAdjustmentCoefficient: adjusted.postDonorAdjustmentCoefficient,
+        };
+      })()
     : (() => {
         const weatherByDateKey = new Map<string, PastDayWeatherFeatures>();
         if (weatherForDay) weatherByDateKey.set(localDate, weatherForDay);
@@ -1043,7 +1153,14 @@ export function simulatePastDay(
     shapeVariants: context.shapeVariants,
     legacyByMonth96: shapeByMonth96 ?? null,
   });
-  const normShape = selectedShape.shape96;
+  const normShape = canUseLowDataSyntheticFastPath
+    ? applyLowDataShapeWeatherAmplitude({
+        shape96: selectedShape.shape96,
+        weatherRegime,
+        weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
+        monthEvidence: lowDataMonthEvidence,
+      })
+    : selectedShape.shape96;
 
   const intervals = gridTimestamps.slice(0, INTERVALS_PER_DAY).map((ts, i) => ({
     timestamp: ts,

@@ -45,7 +45,10 @@ import {
   buildUsageShapeSnapFromMonthlyTotalsForLowData,
 } from "@/modules/usageSimulator/lowDataPastSimAdapter";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
-import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
+import type {
+  PastLowDataWeatherEvidenceSummary,
+  SimulatedDayResult,
+} from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import {
   normalizePastProducerBuildPathKind,
   type PastProducerBuildPathKind,
@@ -111,6 +114,181 @@ function simulatedDayResultIntersectsLocalDateKeys(
 
 function round2CanonicalSimDayTotal(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function daysInMonthFromYearMonth(monthKey: string): number {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey ?? "").trim());
+  if (!match) return 30;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return 30;
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function invert3x3(matrix: number[][]): number[][] | null {
+  const [[a, b, c], [d, e, f], [g, h, i]] = matrix;
+  const A = e * i - f * h;
+  const B = -(d * i - f * g);
+  const C = d * h - e * g;
+  const D = -(b * i - c * h);
+  const E = a * i - c * g;
+  const F = -(a * h - b * g);
+  const G = b * f - c * e;
+  const H = -(a * f - c * d);
+  const I = a * e - b * d;
+  const det = a * A + b * B + c * C;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return null;
+  return [
+    [A / det, D / det, G / det],
+    [B / det, E / det, H / det],
+    [C / det, F / det, I / det],
+  ];
+}
+
+function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
+  return matrix.map((row) => row.reduce((sum, value, index) => sum + value * (vector[index] ?? 0), 0));
+}
+
+function clampNumberForEvidence(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeTravelRangeSummary(ranges: unknown): Array<{ startDate: string; endDate: string }> {
+  return Array.isArray(ranges)
+    ? ranges
+        .map((range) => ({
+          startDate: String((range as any)?.startDate ?? "").slice(0, 10),
+          endDate: String((range as any)?.endDate ?? "").slice(0, 10),
+        }))
+        .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate))
+    : [];
+}
+
+function buildManualMonthlyWeatherEvidenceSummary(args: {
+  buildInputs: SimulatorBuildInputsV1;
+  manualUsagePayload: unknown;
+  weatherByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  homeProfile: Record<string, unknown> | null;
+  applianceProfile: Record<string, unknown> | null;
+}): PastLowDataWeatherEvidenceSummary | null {
+  if (args.buildInputs.mode !== "MANUAL_TOTALS") return null;
+  if (String((args.manualUsagePayload as any)?.mode ?? "").trim() !== "MONTHLY") return null;
+
+  const diagnostics = Array.isArray((args.buildInputs as any)?.monthlyTargetConstructionDiagnostics)
+    ? (args.buildInputs as any).monthlyTargetConstructionDiagnostics
+    : [];
+  const inputState = ((args.buildInputs as any)?.manualMonthlyInputState ?? null) as
+    | { enteredMonthKeys?: string[]; missingMonthKeys?: string[] }
+    | null;
+  const rows = diagnostics
+    .map((row: any) => {
+      const month = String(row?.month ?? "").trim();
+      const normalizedMonthTarget = Number(row?.normalizedMonthTarget);
+      if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(normalizedMonthTarget)) return null;
+      if (String(row?.monthlyTargetBuildMethod ?? "") === "missing_user_manual_month_fill_later") return null;
+      const monthDateKeys = Array.from(args.weatherByDateKey.keys()).filter((dateKey) => dateKey.startsWith(`${month}-`));
+      const daysInMonth = daysInMonthFromYearMonth(month);
+      const monthRows = monthDateKeys
+        .map((dateKey) => args.weatherByDateKey.get(dateKey))
+        .filter((value): value is NonNullable<typeof value> => Boolean(value));
+      const avgHdd =
+        monthRows.length > 0
+          ? monthRows.reduce((sum, value) => sum + (Number(value?.hdd65) || 0), 0) / monthRows.length
+          : 0;
+      const avgCdd =
+        monthRows.length > 0
+          ? monthRows.reduce((sum, value) => sum + (Number(value?.cdd65) || 0), 0) / monthRows.length
+          : 0;
+      const avgTempC =
+        monthRows.length > 0
+          ? monthRows.reduce((sum, value) => sum + (((Number(value?.tAvgF) || 0) - 32) * (5 / 9)), 0) / monthRows.length
+          : null;
+      return {
+        month,
+        avgDailyTarget: normalizedMonthTarget / Math.max(1, daysInMonth),
+        avgHdd,
+        avgCdd,
+        avgTempC,
+      };
+    })
+    .filter((row): row is { month: string; avgDailyTarget: number; avgHdd: number; avgCdd: number; avgTempC: number | null } => Boolean(row));
+  if (rows.length === 0) return null;
+
+  const xtx = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ];
+  const xty = [0, 0, 0];
+  for (const row of rows) {
+    const vector = [1, row.avgHdd, row.avgCdd];
+    for (let i = 0; i < 3; i += 1) {
+      xty[i] += vector[i] * row.avgDailyTarget;
+      for (let j = 0; j < 3; j += 1) xtx[i][j] += vector[i] * vector[j];
+    }
+  }
+  const inverse = invert3x3(xtx);
+  const solved = inverse ? multiplyMatrixVector(inverse, xty) : [0, 0, 0];
+  const meanTarget = rows.reduce((sum, row) => sum + row.avgDailyTarget, 0) / Math.max(1, rows.length);
+  const meanHdd = rows.reduce((sum, row) => sum + row.avgHdd, 0) / Math.max(1, rows.length);
+  const meanCdd = rows.reduce((sum, row) => sum + row.avgCdd, 0) / Math.max(1, rows.length);
+  const fuelConfiguration = String((args.homeProfile as any)?.fuelConfiguration ?? "").trim();
+  const heatingType = String((args.homeProfile as any)?.heatingType ?? "").trim();
+  const hasCoolingPriors =
+    String((args.homeProfile as any)?.hvacType ?? "").trim().length > 0 ||
+    Array.isArray((args.applianceProfile as any)?.appliances);
+  const heatingPriorSensitivity =
+    fuelConfiguration === "all_electric" || heatingType === "electric" ? 0.95 : 0.45;
+  const coolingPriorSensitivity = hasCoolingPriors ? 0.75 : 0.45;
+  const evidenceWeight = rows.length >= 5 ? 0.9 : rows.length >= 3 ? 0.7 : 0.45;
+
+  const baseloadDaily = clampNumberForEvidence(Number(solved[0]) || meanTarget * 0.55, meanTarget * 0.18, meanTarget * 0.92);
+  const hvacDaily = Math.max(0, meanTarget - baseloadDaily);
+  const rawHeatingSensitivity = meanHdd > 1e-6 && hvacDaily > 1e-6 ? ((Number(solved[1]) || 0) * meanHdd) / hvacDaily : 0;
+  const rawCoolingSensitivity = meanCdd > 1e-6 && hvacDaily > 1e-6 ? ((Number(solved[2]) || 0) * meanCdd) / hvacDaily : 0;
+  const heatingSensitivity = clampNumberForEvidence(
+    rawHeatingSensitivity * evidenceWeight + heatingPriorSensitivity * (1 - evidenceWeight),
+    0.12,
+    1.8
+  );
+  const coolingSensitivity = clampNumberForEvidence(
+    rawCoolingSensitivity * evidenceWeight + coolingPriorSensitivity * (1 - evidenceWeight),
+    0.12,
+    1.8
+  );
+  const baseloadShare = clampNumberForEvidence(baseloadDaily / Math.max(meanTarget, 1e-6), 0.18, 0.9);
+  const hvacShare = clampNumberForEvidence(1 - baseloadShare, 0.1, 0.82);
+
+  return {
+    inputMonthKeys: Array.isArray(inputState?.enteredMonthKeys) ? inputState!.enteredMonthKeys.map((value) => String(value)) : rows.map((row) => row.month),
+    missingMonthKeys: Array.isArray(inputState?.missingMonthKeys) ? inputState!.missingMonthKeys.map((value) => String(value)) : [],
+    explicitTravelRangesUsed: normalizeTravelRangeSummary((args.manualUsagePayload as any)?.travelRanges),
+    baseloadShare,
+    hvacShare,
+    heatingSensitivity,
+    coolingSensitivity,
+    dailyWeatherResponsiveness:
+      hvacShare >= 0.48 || Math.max(heatingSensitivity, coolingSensitivity) >= 0.9
+        ? "weather_driven"
+        : hvacShare <= 0.24
+          ? "mostly_baseload_driven"
+          : "mixed",
+    byMonth: Object.fromEntries(
+      rows.map((row) => [
+        row.month,
+        {
+          monthKey: row.month,
+          baseloadShare,
+          hvacShare,
+          heatingSensitivity,
+          coolingSensitivity,
+          referenceDailyHdd: row.avgHdd,
+          referenceDailyCdd: row.avgCdd,
+          referenceAvgTempC: row.avgTempC,
+        },
+      ])
+    ),
+  };
 }
 
 /** Sum simulator-owned interval kWh for one local calendar day (timezone-local date key). */
@@ -988,24 +1166,13 @@ export async function simulatePastUsageDataset(
     const manualBillPeriods: NonNullable<SimulatorBuildInputsV1["manualBillPeriods"]> = Array.isArray(manualBillPeriodsRaw)
       ? (manualBillPeriodsRaw as NonNullable<SimulatorBuildInputsV1["manualBillPeriods"]>)
       : [];
-    const inferredManualTotalsConstraint =
-      buildInputs.mode === "MANUAL_TOTALS"
-        ? manualBillPeriods.length > 0
-          ? "monthly"
-          : "annual"
-        : null;
-    const manualTotalsConstraint =
-      resolvedSimFingerprint?.manualTotalsConstraint ??
-      inferredManualTotalsConstraint;
-    const isMonthlyConstrainedManualTotals =
-      buildInputs.mode === "MANUAL_TOTALS" && manualTotalsConstraint === "monthly";
     const usesWholeHomeOnlyPrior =
       resolvedSimFingerprint?.blendMode === "whole_home_only" ||
       resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
     const useWholeHomeOnlyLowDataFastPath = isLowDataSharedPastMode && usesWholeHomeOnlyPrior;
     const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
-    const lowDataSyntheticContext: {
+    const lowDataSyntheticContextBase: {
       mode: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE";
       canonicalMonthKeys: string[];
       intradayShape96: number[] | null;
@@ -1029,7 +1196,7 @@ export async function simulatePastUsageDataset(
         }));
     const sourceActualIntervals = preloadedIntervals != null ? preloadedIntervals : fetchedActualIntervals ?? [];
     const actualIntervals =
-      useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContext ? [] : sourceActualIntervals;
+      useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContextBase ? [] : sourceActualIntervals;
     const sourceActualIntervalsCount = sourceActualIntervals.length;
     const actualIntervalPayloadSuppressedCount = Math.max(0, sourceActualIntervalsCount - actualIntervals.length);
     const actualIntervalPayloadSuppressed = actualIntervalPayloadSuppressedCount > 0;
@@ -1074,10 +1241,10 @@ export async function simulatePastUsageDataset(
       excludedDateKeyCount: excludedDateKeys.size,
       explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,
       effectiveKeepRefLocalDateKeyCount: mergedKeepRefLocalDateKeys.size,
-      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContext),
-      lowDataSyntheticMode: lowDataSyntheticContext?.mode,
-      actualBackedReferencePoolExpected: !lowDataSyntheticContext,
-      lowDataUsesSummarizedSourceTruth: Boolean(lowDataSyntheticContext),
+      lowDataSyntheticContextUsed: Boolean(lowDataSyntheticContextBase),
+      lowDataSyntheticMode: lowDataSyntheticContextBase?.mode,
+      actualBackedReferencePoolExpected: !lowDataSyntheticContextBase,
+      lowDataUsesSummarizedSourceTruth: Boolean(lowDataSyntheticContextBase),
       durationMs: Date.now() - inputPrepStartedAt,
       source: "simulatePastUsageDataset",
       memoryRssMb: getMemoryRssMb(),
@@ -1185,9 +1352,23 @@ export async function simulatePastUsageDataset(
       provenance.weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
         ? selectedWeatherByDateKey
         : mergedActualWxByDateKey;
-
     let homeProfileForPast = (buildInputs as any)?.snapshots?.homeProfile ?? null;
     let applianceProfileForPast = normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
+    const manualUsagePayload = (buildInputs as any)?.snapshots?.manualUsagePayload ?? null;
+    const manualLowDataWeatherEvidenceSummary = buildManualMonthlyWeatherEvidenceSummary({
+      buildInputs,
+      manualUsagePayload,
+      weatherByDateKey: weatherByDateKeyForSimulation,
+      homeProfile: homeProfileForPast as Record<string, unknown> | null,
+      applianceProfile: applianceProfileForPast as Record<string, unknown> | null,
+    });
+    const lowDataSyntheticContext =
+      lowDataSyntheticContextBase == null
+        ? null
+        : {
+            ...lowDataSyntheticContextBase,
+            weatherEvidenceSummary: manualLowDataWeatherEvidenceSummary,
+          };
     let ensuredUsageShape: Awaited<ReturnType<typeof ensureUsageShapeProfileForSharedSimulation>> = {
       usageShapeProfileSnap: null,
       usageShapeProfileDiag: {
@@ -1396,9 +1577,8 @@ export async function simulatePastUsageDataset(
         forceModeledOutputKeepReferencePoolDateKeys:
           keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
         emitAllIntervals,
-        modeledKeepRefReasonCode: isMonthlyConstrainedManualTotals
-          ? "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
-          : "TEST_MODELED_KEEP_REF",
+        modeledKeepRefReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "TEST_MODELED_KEEP_REF",
+        defaultModeledReasonCode: "INCOMPLETE_METER_DAY",
         modeledDaySelectionStrategy: buildInputs.mode === "SMT_BASELINE" ? "weather_donor_first" : "calendar_first",
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
@@ -1898,6 +2078,7 @@ export async function simulatePastUsageDataset(
             (buildInputs as { monthlyTargetConstructionDiagnostics?: unknown }).monthlyTargetConstructionDiagnostics ?? null,
           manualMonthlyInputState:
             (buildInputs as { manualMonthlyInputState?: unknown }).manualMonthlyInputState ?? null,
+          manualMonthlyWeatherEvidenceSummary: manualLowDataWeatherEvidenceSummary ?? null,
           sharedProducerPathUsed:
             (buildInputs as { sharedProducerPathUsed?: unknown }).sharedProducerPathUsed === false ? false : true,
         } as unknown as typeof dataset.meta;

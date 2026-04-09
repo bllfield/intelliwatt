@@ -72,8 +72,13 @@ This section is authoritative for future manual-usage implementation and handoff
 - Do not invent a separate manual-monthly sim window.
 - Do not collapse bill-cycle input semantics into the normalized shared Past Sim window semantics.
 - Manual monthly and manual annual now enter a shared bill-period-first pipeline before the Past producer runs.
-- Shared helpers derive normalized `ManualBillPeriodTarget[]` metadata, bill-period totals, and exclusion ranges from the manual payload before Stage 2 shaping.
+- Shared helpers derive normalized `ManualBillPeriodTarget[]` metadata and bill-period totals from the manual payload before Stage 2 shaping.
+- Statement/bill ranges remain Stage 1 / reconciliation metadata. They are not travel ranges and must not become travel-vacant ownership.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
+- Manual monthly / annual admin recalc now returns once the canonical artifact is ready. Rich compare/reconciliation stays on persisted readback:
+  - recalc may return `readbackPending: true`
+  - `canonicalArtifactInputHash` identifies the exact artifact the client must read back
+  - admin manual clients poll readback using that exact artifact hash
 - For manual monthly, the user Past page and the admin manual-monthly test page must share the same post-submit path all the way through:
   - shared producer execution
   - persisted artifact/readback
@@ -97,6 +102,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - Travel awareness does not belong only to GapFill monthly-from-source.
 - GapFill monthly-from-source is not the only travel-aware monthly mode.
 - Travel ranges may come from the manual payload for user manual monthly or annual and must drive excluded date keys in the shared simulator after normalization.
+- Explicit travel/vacant ranges are the only travel-vacant ownership source on the constrained manual path.
 - Bill periods touched by travel/vacant dates are excluded from manual parity shaping and compare scoring rather than treated as a fatal build error.
 - Non-excluded bill periods must still reconcile back to the entered totals.
 - Past Sim must simulate excluded travel/vacant days for user manual modes too.
@@ -118,6 +124,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - GapFill `MONTHLY_FROM_SOURCE_INTERVALS` and `ANNUAL_FROM_SOURCE_INTERVALS` must call that same shared helper family before entering the shared lockbox/sim/artifact path.
 - GapFill manual monthly/manual annual now follow the shared orchestration contract too: trigger the canonical recalc through `dispatchPastSimRecalc`, then load the richer manual compare/diagnostic view from the persisted artifact via a follow-up read, rather than bundling heavy recalc and post-read work into one blocking route pass.
 - On that shared manual path, `MANUAL_TOTALS` recalc should stay lean: it should not depend on exact-interval fingerprint/profile tuning work to produce manual monthly/annual truth, and richer compare/reconciliation diagnostics should load from persisted readback after recalc succeeds.
+- Manual Monthly Lab `lookup` is now intentionally lightweight. The heavier source-dataset/prefill/readback preparation work happens in `load`.
 - For GapFill manual modes, Actual House stays the full interval-backed source reference, while Test Home exposes the constrained shared Past result. Monthly compare shows source interval monthly totals vs shared Stage 1 monthly totals vs final simulated monthly totals; annual compare shows source interval annual total vs shared Stage 1 annual total vs final simulated annual total.
 - The shared Stage 2 producer/artifact owner does not change for manual work, and the exact-interval donor-tuning path remains the authoritative shared path for `EXACT_INTERVALS`.
 - Admin-only manual-mode failures may include root-cause infrastructure detail such as Prisma pool exhaustion (`P2024`) so operators can tell pool starvation from a manual producer/data failure.
@@ -145,7 +152,7 @@ This section is authoritative for future manual-usage implementation and handoff
   - `ManualStageOnePresentation`
   - `ManualBillPeriodTarget[]`
   - bill-period totals by id
-  - bill-period exclusion ranges
+- persisted readback poll plans keyed by exact artifact hash
 - This remains a transitional runtime contract rather than the full product definition.
 - Future payload evolution may still be needed if Stage 1 eventually needs richer per-bill metadata than the additive bridge supports.
 
@@ -203,10 +210,18 @@ Used for manual usage simulation, new-build simulation, and sparse-history homes
 For USER MANUAL MONTHLY, this modeling-mode label applies after the Stage 1 bill-cycle input chart is constructed and then normalized into the shared Past Sim window. It does not turn the user input chart into a calendar-month chart.
 
 Primary drivers:
+- Stage 1 monthly targets / annual targets after normalization
+- weather/temperature
 - declared home/appliance/occupancy details
 - HVAC/thermostat/fuel/pool/EV configuration
-- weather/temperature
 - learned priors from similar homes (when available)
+
+Current runtime note:
+- `MANUAL_TOTALS` now uses a lean low-data/manual branch inside the same shared engine.
+- It does not carry full actual interval payloads into the low-data baseline builder.
+- It does not auto-expand exact-interval-style keep-ref behavior across the manual window.
+- For manual monthly, the shared producer now computes `manualMonthlyWeatherEvidenceSummary` from Stage 1 monthly targets plus actual monthly weather pressure and uses that evidence for low-data daily weather response and curve-amplitude shaping.
+- This is implemented for current manual-monthly runs. Further tuning of the evidence model remains open work.
 
 ## Home Details Intake and Usage (Authoritative)
 

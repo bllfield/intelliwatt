@@ -1175,7 +1175,8 @@ export function buildPastSimulatedBaselineV1(args: {
    * (same core as travel/vacant fills). Mutually exclusive use: do not duplicate keys in `forceSimulateDateKeys`.
    */
   forceModeledOutputKeepReferencePoolDateKeys?: Set<string>;
-  modeledKeepRefReasonCode?: "TEST_MODELED_KEEP_REF" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY";
+  modeledKeepRefReasonCode?: "TEST_MODELED_KEEP_REF" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" | "MANUAL_CONSTRAINED_DAY";
+  defaultModeledReasonCode?: "INCOMPLETE_METER_DAY" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" | "MANUAL_CONSTRAINED_DAY";
   /**
    * Optional: when false, omit passthrough actual intervals for non-simulated days.
    * Useful for selected-day fresh compare scoring where only simulated-day intervals are needed.
@@ -1195,6 +1196,7 @@ export function buildPastSimulatedBaselineV1(args: {
     canonicalMonthKeys?: string[];
     intradayShape96?: number[] | null;
     weekdayWeekendShape96?: { weekday?: number[] | null; weekend?: number[] | null } | null;
+    weatherEvidenceSummary?: import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDaySimulationContext["lowDataWeatherEvidence"];
   } | null;
   observability?: {
     correlationId?: string;
@@ -1273,13 +1275,24 @@ export function buildPastSimulatedBaselineV1(args: {
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
-    const dayIsIncomplete = !dayIsExcluded && !dayIsLeadingMissing && presentSlotCount < INTERVALS_PER_DAY;
+    const dayIsLowDataSyntheticModeled =
+      useLowDataSyntheticContext &&
+      !dayIsExcluded &&
+      !dayIsLeadingMissing &&
+      !dayIsForcedSimulate &&
+      !dayIsForceModeledKeepRef;
+    const dayIsIncomplete =
+      !dayIsLowDataSyntheticModeled &&
+      !dayIsExcluded &&
+      !dayIsLeadingMissing &&
+      presentSlotCount < INTERVALS_PER_DAY;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
       dayIsExcluded ||
       dayIsLeadingMissing ||
       dayIsIncomplete ||
-      dayIsForceModeledKeepRef;
+      dayIsForceModeledKeepRef ||
+      dayIsLowDataSyntheticModeled;
     /** Reference pool: good at-home days only; excludes travel (forced elsewhere) and incomplete/leading; includes Gap-Fill test days (keep-ref modeled). */
     const isReferenceDayForPool =
       !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing && !dayIsIncomplete;
@@ -1291,6 +1304,7 @@ export function buildPastSimulatedBaselineV1(args: {
       dayIsForceModeledKeepRef,
       dayIsExcluded,
       dayIsLeadingMissing,
+      dayIsLowDataSyntheticModeled,
       dayIsIncomplete,
       shouldSimulateDay,
       isReferenceDayForPool,
@@ -1856,6 +1870,7 @@ export function buildPastSimulatedBaselineV1(args: {
     modeledDaySelectionStrategy: args.modeledDaySelectionStrategy ?? "calendar_first",
     shapeVariants: shapeVariantsForContext,
     lowDataSyntheticDayKwhByMonthDayType,
+    lowDataWeatherEvidence: lowDataSyntheticContext?.weatherEvidenceSummary ?? null,
   });
   emitStage("buildPastSimulatedBaselineV1_stage_shape_context_ready", {
     elapsedMs: Date.now() - baselineStartedAt,
@@ -1978,6 +1993,7 @@ export function buildPastSimulatedBaselineV1(args: {
   const dayDiagnostics: PastSimulatedDayDiagnostic[] = [];
   const legacyShapeByMonth96ForPastDay = wholeHomeOnlyPrior ? {} : shapeByMonth96Ref;
   const modeledKeepRefReasonCode = args.modeledKeepRefReasonCode ?? "TEST_MODELED_KEEP_REF";
+  const defaultModeledReasonCode = args.defaultModeledReasonCode ?? "INCOMPLETE_METER_DAY";
   const selectedReferencePoolCountForVariant = (
     shapeVariantUsed: string,
     monthKey: string,
@@ -2025,6 +2041,7 @@ export function buildPastSimulatedBaselineV1(args: {
       const simulatedReason:
         | "EXCLUDED"
         | "LEADING_MISSING"
+        | "LOW_DATA_CONSTRAINED"
         | "INCOMPLETE"
         | "FORCED_SELECTED_DAY"
         | "GAPFILL_MODELED_KEEP_REF" =
@@ -2036,10 +2053,13 @@ export function buildPastSimulatedBaselineV1(args: {
               ? "EXCLUDED"
               : day.dayIsLeadingMissing
                 ? "LEADING_MISSING"
+                : day.dayIsLowDataSyntheticModeled
+                  ? "LOW_DATA_CONSTRAINED"
                 : "INCOMPLETE";
       const simulatedReasonCode:
         | "TRAVEL_VACANT"
         | "TEST_MODELED_KEEP_REF"
+        | "MANUAL_CONSTRAINED_DAY"
         | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
         | "FORCED_SELECTED_DAY"
         | "INCOMPLETE_METER_DAY"
@@ -2048,11 +2068,13 @@ export function buildPastSimulatedBaselineV1(args: {
           ? "TRAVEL_VACANT"
           : simulatedReason === "GAPFILL_MODELED_KEEP_REF"
             ? modeledKeepRefReasonCode
+            : simulatedReason === "LOW_DATA_CONSTRAINED"
+              ? modeledKeepRefReasonCode
             : simulatedReason === "FORCED_SELECTED_DAY"
               ? "FORCED_SELECTED_DAY"
               : simulatedReason === "LEADING_MISSING"
                 ? "LEADING_MISSING_DAY"
-                : "INCOMPLETE_METER_DAY";
+                : defaultModeledReasonCode;
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       // One shared core for all modeled-day reasons (travel, incomplete, forced, keep-ref modeled).
@@ -2098,7 +2120,7 @@ export function buildPastSimulatedBaselineV1(args: {
         templateSelectionKind:
           simulatedReasonCode === "TRAVEL_VACANT"
             ? "travel_vacant_shared_day_template"
-            : simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+            : simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" || simulatedReasonCode === "MANUAL_CONSTRAINED_DAY"
               ? "monthly_manual_constrained_shared_day_template"
               : simulatedReasonCode === "TEST_MODELED_KEEP_REF"
                 ? "validation_keep_ref_shared_day_template"

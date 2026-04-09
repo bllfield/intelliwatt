@@ -37,7 +37,7 @@
 
 **Purpose**: This document provides operational context for the IntelliWatt project, including current deployment state, database information, and development guidelines for AI chat sessions.
 
-**Last Updated**: January 2025
+**Last Updated**: April 2026
 
 ---
 
@@ -66,12 +66,14 @@
 - Usage layer contract map: `docs/USAGE_LAYER_MAP.md` (canonical interval-series layer meanings + endpoint/function mapping)
 
 - Manual-usage product semantics: `docs/PROJECT_PLAN.md` and `docs/USAGE_SIMULATION_PLAN.md` are authoritative for the two-stage manual model: monthly Stage 1 bill-cycle semantics, annual Stage 1 annual-total semantics, then shared Stage 2 normalized Past Sim behavior. Current implementation stores additive `statementRanges[]` metadata for monthly payloads, keeps Manual Usage Lab and GapFill as separate surfaces, and centralizes shared Stage 1/pre-lockbox monthly+annual helper ownership in `modules/manualUsage/prefill.ts`.
-- GapFill manual monthly/manual annual now reuse that same shared Stage 1 helper family and the shared recalc dispatch/readback contract: the route triggers the canonical Past recalc, then loads persisted manual compare/reconciliation views from the artifact. Actual House remains the interval-backed source truth; Test Home shows the constrained shared result.
-- `MANUAL_TOTALS` recalc is intentionally lean on that shared path: exact-interval fingerprint/profile tuning work is not part of manual monthly/annual truth production, and admin-facing compare/diagnostic enrichment belongs on persisted readback after recalc succeeds.
+- GapFill manual monthly/manual annual now reuse that same shared Stage 1 helper family and the shared recalc dispatch/readback contract: the route triggers the canonical Past recalc, then loads persisted manual compare/reconciliation views from the artifact. Recalc may return `readbackPending: true` plus `canonicalArtifactInputHash`, and admin clients poll readback using that exact artifact hash. Actual House remains the interval-backed source truth; Test Home shows the constrained shared result.
+- `MANUAL_TOTALS` recalc is intentionally lean on that shared path: exact-interval fingerprint/profile tuning work is not part of manual monthly/annual truth production, full actual-interval payloads are suppressed for the low-data/manual baseline branch, non-critical post-artifact persistence can defer, and admin-facing compare/diagnostic enrichment belongs on persisted readback after recalc succeeds.
+- Current manual-monthly low-data runs also attach `manualMonthlyWeatherEvidenceSummary` from Stage 1 monthly targets plus actual monthly weather pressure; that shared evidence currently drives daily weather classification and low-data curve-amplitude response.
 - Exact-interval observed-history modeling intent is now explicit in runtime and docs: bounded K-nearest weather-similar donor blending leads modeled-day reconstruction in actual-backed mode, donor-pool variance guardrails damp noisy donor cohorts, heating-day donor ranking weights HDD/min-temp more strongly, broader calendar ladders are fallback-only, bounded post-donor weather tuning is secondary, and home/appliance profiles stay supportive context rather than the main selector.
 - GapFill tuning surfaces must report donor-path usage separately from true broad fallback usage, and the Actual House lockbox-flow panel must read the same shared-diagnostics truth already attached to the artifact.
 - Manual-usage wiring work must not replace or weaken that exact-interval path; Daily Curve Compare, calculation-logic exact-interval summaries, and actual/test parity stay on the existing shared donor-tuning branch.
 - Admin-only manual-mode failures may surface root-cause infrastructure detail such as Prisma pool exhaustion (`P2024`) for debugging without changing customer-page semantics.
+- Custom Prisma client packaging is now tracked as a deployment concern: `next.config.js` uses real App Router URL-path tracing, and Home Details currently imports from `@prisma/home-details-client` with schema output under `node_modules/@prisma/home-details-client`.
 
 ## Where To Start
 
@@ -128,6 +130,7 @@
 - **Gap-Fill target semantics (data pool):** The shared Past sim’s **good-data / reference pool** includes **test compare** days’ **actual** intervals (good at-home signal). **Only** travel/vacant-style days are **excluded** from that pool as bad reference data. Travel/vacant days are still **simulated** from the rest of the window. **Implemented:** scored test days use **`forceModeledOutputKeepReferencePoolDateKeys`** so compare output is **modeled** (`GAPFILL_MODELED_KEEP_REF`) while actuals stay in the pool; **`gapfillScoringDiagnostics`** + Gap-Fill Lab UI confirm sources. See `docs/USAGE_SIMULATION_PLAN.md` (Gap-Fill Lab: Target architecture §6) and `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`.
 - Gap-Fill Lab canonical actions (`run_test_home_canonical_recalc`) are expected to stay lightweight: shared simulator math remains authoritative, but the response should avoid heavy snapshot-only report payloads.
 - Gap-Fill Lab main UI path uses a single reusable test-home identity loaded from a selected source house, then recalc/read from the same canonical simulator service chain and saved artifact family as `/api/user/usage/simulated/house`.
+- GapFill Actual House now reads the same shared persisted Past artifact/display path as the user Past page. GapFill may layer diagnostics onto that artifact, but it must not create a separate actual-house truth path.
 - **Droplet async sim (optional):** With webhook URL + secret, **Gap-Fill compare** enqueues via `GapfillCompareRunSnapshot` + **`runGapfillCompareCorePipeline`** on the worker, and **Past sim recalc** enqueues via **`SimDropletJob`** + **`recalcSimulatorBuild`** on the worker—same TS service layer as Vercel, not a second engine. Inline overrides: **`GAPFILL_COMPARE_INLINE`**, **`PAST_SIM_RECALC_INLINE`**, or global **`SIM_DROPLET_EXECUTION_INLINE`**. See `docs/CHAT_BOOTSTRAP.txt` (shared sim → droplet) and `docs/PROJECT_PLAN.md`.
 - Shared weather truth for both Past Sim and Gap-Fill compare is owned by `loadWeatherForPastWindow`: it must reuse persisted non-stub `ACTUAL_LAST_YEAR` daily weather rows when the requested canonical window is already covered, and only backfill/repair missing or `STUB_V1` dates.
 - Shared weather provenance must remain truthful when that loader runs: `weatherSourceSummary` should reflect whether the window is `actual_only`, `mixed_actual_and_stub`, or `stub_only`, rather than implying a fresh pull when saved actual weather already exists.

@@ -172,9 +172,49 @@ describe("manual monthly reconciliation", () => {
     expect(out?.rows[0]).toMatchObject({
       month: "2025-04",
       enteredStatementTotalKwh: 100,
+      stageOneTargetTotalKwh: 100,
       simulatedStatementTotalKwh: 100,
       deltaKwh: 0,
       status: "reconciled",
+    });
+  });
+
+  it("surfaces actual and Stage 1 monthly targets from shared diagnostics", () => {
+    const out = buildManualMonthlyReconciliation({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+        travelRanges: [],
+      },
+      dataset: {
+        meta: {
+          filledMonths: [],
+          manualMonthlyInputState: {
+            inputKindByMonth: { "2025-04": "entered_nonzero" },
+          },
+          monthlyTargetConstructionDiagnostics: [
+            {
+              month: "2025-04",
+              rawMonthKwhFromSource: 284,
+              normalizedMonthTarget: 312,
+            },
+          ],
+        },
+        daily: Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+        })),
+      },
+    });
+
+    expect(out?.rows[0]).toMatchObject({
+      month: "2025-04",
+      actualIntervalTotalKwh: 284,
+      enteredStatementTotalKwh: 300,
+      stageOneTargetTotalKwh: 312,
+      simulatedStatementTotalKwh: 300,
+      deltaKwh: -12,
     });
   });
 });

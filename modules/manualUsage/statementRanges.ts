@@ -312,15 +312,6 @@ export function buildManualBillPeriodTargets(payload: ManualUsagePayload): Manua
   ];
 }
 
-export function buildManualBillPeriodExclusionRanges(periods: ManualBillPeriodTarget[]): TravelRange[] {
-  return periods
-    .filter((period) => period.exclusionReason === "travel_overlap")
-    .map((period) => ({
-      startDate: period.startDate,
-      endDate: period.endDate,
-    }));
-}
-
 export function buildManualBillPeriodTotalsById(periods: ManualBillPeriodTarget[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const period of periods) {

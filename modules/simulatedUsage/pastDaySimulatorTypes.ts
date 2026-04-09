@@ -91,6 +91,29 @@ export type PastWeatherDonorContribution = {
 
 export type PastModeledDaySelectionStrategy = "calendar_first" | "weather_donor_first";
 
+export type PastLowDataWeatherEvidenceMonth = {
+  monthKey: string;
+  baseloadShare: number;
+  hvacShare: number;
+  heatingSensitivity: number;
+  coolingSensitivity: number;
+  referenceDailyHdd: number;
+  referenceDailyCdd: number;
+  referenceAvgTempC: number | null;
+};
+
+export type PastLowDataWeatherEvidenceSummary = {
+  inputMonthKeys: string[];
+  missingMonthKeys: string[];
+  explicitTravelRangesUsed: Array<{ startDate: string; endDate: string }>;
+  baseloadShare: number;
+  hvacShare: number;
+  heatingSensitivity: number;
+  coolingSensitivity: number;
+  dailyWeatherResponsiveness: "weather_driven" | "mixed" | "mostly_baseload_driven";
+  byMonth: Record<string, PastLowDataWeatherEvidenceMonth>;
+};
+
 /** Training weather aggregates by bucket (month+daytype, season+daytype, global). */
 export type PastDayTrainingWeatherStats = {
   byMonthDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
@@ -117,6 +140,7 @@ export type PastDaySimulationContext = {
   modeledDaySelectionStrategy?: PastModeledDaySelectionStrategy;
   shapeVariants?: PastShapeVariants | null;
   lowDataSyntheticDayKwhByMonthDayType?: Record<string, { weekday: number; weekend: number }> | null;
+  lowDataWeatherEvidence?: PastLowDataWeatherEvidenceSummary | null;
 };
 
 /** Request to simulate one past day. */
@@ -140,6 +164,7 @@ export type SimulatedDayResult = {
   simulatedReasonCode?:
     | "TRAVEL_VACANT"
     | "TEST_MODELED_KEEP_REF"
+    | "MANUAL_CONSTRAINED_DAY"
     | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
     | "INCOMPLETE_METER_DAY"
@@ -178,7 +203,7 @@ export type SimulatedDayResult = {
   donorPoolKwhVariance?: number | null;
   donorPoolMedianKwh?: number | null;
   donorVarianceGuardrailTriggered?: boolean;
-  weatherAdjustmentModeUsed?: "legacy_training_stats" | "bounded_post_donor";
+  weatherAdjustmentModeUsed?: "legacy_training_stats" | "bounded_post_donor" | "manual_monthly_weather_evidence";
   postDonorAdjustmentCoefficient?: number | null;
   templateSelectionKind?: string;
   selectedFingerprintBucketMonth?: string;

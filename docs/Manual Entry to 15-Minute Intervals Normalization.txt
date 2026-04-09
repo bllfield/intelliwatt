@@ -1,6 +1,15 @@
 # Manual Entry to 15-Minute Intervals Normalization
 ## Implementation Guide for New Projects
 
+## Legacy Status
+
+This file is historical reference only and does **not** describe the current IntelliWatt runtime.
+
+For the current implemented manual-monthly / manual-annual / shared Past Sim behavior, use:
+- `docs/USAGE_SIMULATION_PLAN.md`
+- `docs/PROJECT_PLAN.md`
+- `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`
+
 This guide explains how to port the manual-to-intervals normalization pipeline from the Intellipath Tools Website project into your new IntelliWatt or other projects.
 
 ---

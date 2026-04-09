@@ -15,7 +15,9 @@ export type ManualMonthlyReconciliationRow = {
   startDate: string;
   endDate: string;
   inputKind: "entered_nonzero" | "entered_zero" | "missing" | "annual_total";
+  actualIntervalTotalKwh: number | null;
   enteredStatementTotalKwh: number | null;
+  stageOneTargetTotalKwh: number | null;
   simulatedStatementTotalKwh: number | null;
   deltaKwh: number | null;
   eligible: boolean;
@@ -94,6 +96,22 @@ export function buildManualMonthlyReconciliation(args: {
   const intervalTotalsByDate = buildIntervalTotalsByDate(args.dataset);
   const dailyTotalsByDate = intervalTotalsByDate.size > 0 ? intervalTotalsByDate : buildDailyTotalsByDate(args.dataset);
   const meta = args.dataset?.meta && typeof args.dataset.meta === "object" ? args.dataset.meta : {};
+  const diagnosticsByMonth = new Map<string, { rawMonthKwhFromSource: number | null; normalizedMonthTarget: number | null }>();
+  const monthlyDiagnostics = Array.isArray((meta as any).monthlyTargetConstructionDiagnostics)
+    ? (meta as any).monthlyTargetConstructionDiagnostics
+    : [];
+  for (const row of monthlyDiagnostics) {
+    const month = String((row as any)?.month ?? "").trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    diagnosticsByMonth.set(month, {
+      rawMonthKwhFromSource: Number.isFinite(Number((row as any)?.rawMonthKwhFromSource))
+        ? Number((row as any).rawMonthKwhFromSource)
+        : null,
+      normalizedMonthTarget: Number.isFinite(Number((row as any)?.normalizedMonthTarget))
+        ? Number((row as any).normalizedMonthTarget)
+        : null,
+    });
+  }
   const inputState = (meta.manualMonthlyInputState ?? null) as ManualMonthlyInputStateLike;
   const filledMonths = new Set(
     Array.isArray(meta.filledMonths) ? meta.filledMonths.map((value: unknown) => String(value ?? "").trim()) : []
@@ -103,7 +121,10 @@ export function buildManualMonthlyReconciliation(args: {
       payload.mode === "MONTHLY"
         ? (inputState?.inputKindByMonth?.[period.month] ?? period.inputKind)
         : period.inputKind;
+    const diagnostic = diagnosticsByMonth.get(period.month) ?? null;
+    const actualIntervalTotalKwh = round2(diagnostic?.rawMonthKwhFromSource ?? null);
     const enteredStatementTotalKwh = period.enteredKwh ?? null;
+    const stageOneTargetTotalKwh = round2(diagnostic?.normalizedMonthTarget ?? period.enteredKwh ?? null);
     const simulatedStatementTotalKwh = round2(
       dayKeysForRange(period.startDate, period.endDate).reduce((sum, date) => sum + (dailyTotalsByDate.get(date) ?? 0), 0)
     );
@@ -131,8 +152,8 @@ export function buildManualMonthlyReconciliation(args: {
     }
 
     const deltaKwh =
-      eligible && enteredStatementTotalKwh != null && simulatedStatementTotalKwh != null
-        ? round2(simulatedStatementTotalKwh - enteredStatementTotalKwh)
+      eligible && stageOneTargetTotalKwh != null && simulatedStatementTotalKwh != null
+        ? round2(simulatedStatementTotalKwh - stageOneTargetTotalKwh)
         : null;
     if (eligible && deltaKwh != null && Math.abs(deltaKwh) > 0.05) {
       status = "delta_present";
@@ -144,7 +165,9 @@ export function buildManualMonthlyReconciliation(args: {
       startDate: period.startDate,
       endDate: period.endDate,
       inputKind,
+      actualIntervalTotalKwh,
       enteredStatementTotalKwh,
+      stageOneTargetTotalKwh,
       simulatedStatementTotalKwh,
       deltaKwh,
       eligible,

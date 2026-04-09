@@ -465,9 +465,9 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
 
     expect(simulatePastUsageDataset).toHaveBeenCalledWith(
       expect.objectContaining({
-        travelRanges: expect.arrayContaining([{ startDate: "2026-02-10", endDate: "2026-02-12" }]),
+        travelRanges: [{ startDate: "2026-02-10", endDate: "2026-02-12" }],
         buildInputs: expect.objectContaining({
-          travelRanges: expect.arrayContaining([{ startDate: "2026-02-10", endDate: "2026-02-12" }]),
+          travelRanges: [{ startDate: "2026-02-10", endDate: "2026-02-12" }],
         }),
       })
     );

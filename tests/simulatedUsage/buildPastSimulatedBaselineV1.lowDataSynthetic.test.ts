@@ -94,4 +94,75 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
       ])
     );
   });
+
+  it("labels low-data non-travel days as manual constrained and makes them weather-responsive when evidence is attached", () => {
+    const day1StartMs = new Date("2026-01-05T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-01-06T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals: [],
+      canonicalDayStartsMs: [day1StartMs, day2StartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map([
+        [
+          dateKeyFromTimestamp(day1Grid[0]!),
+          { tAvgF: 35, tMinF: 28, tMaxF: 42, hdd65: 24, cdd65: 0 },
+        ],
+        [
+          dateKeyFromTimestamp(day2Grid[0]!),
+          { tAvgF: 92, tMinF: 80, tMaxF: 100, hdd65: 0, cdd65: 22 },
+        ],
+      ]),
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-01": 24 },
+        weekendAvgByMonthKey: { "2026-01": 18 },
+      },
+      modeledKeepRefReasonCode: "MANUAL_CONSTRAINED_DAY",
+      defaultModeledReasonCode: "INCOMPLETE_METER_DAY",
+      lowDataSyntheticContext: {
+        mode: "MANUAL_TOTALS",
+        canonicalMonthKeys: ["2026-01"],
+        intradayShape96: Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 2 : 1)),
+        weekdayWeekendShape96: {
+          weekday: Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 2 : 1)),
+          weekend: Array.from({ length: 96 }, () => 1),
+        },
+        weatherEvidenceSummary: {
+          inputMonthKeys: ["2026-01"],
+          missingMonthKeys: [],
+          explicitTravelRangesUsed: [],
+          baseloadShare: 0.35,
+          hvacShare: 0.65,
+          heatingSensitivity: 1.1,
+          coolingSensitivity: 1.2,
+          dailyWeatherResponsiveness: "weather_driven",
+          byMonth: {
+            "2026-01": {
+              monthKey: "2026-01",
+              baseloadShare: 0.35,
+              hvacShare: 0.65,
+              heatingSensitivity: 1.1,
+              coolingSensitivity: 1.2,
+              referenceDailyHdd: 10,
+              referenceDailyCdd: 4,
+              referenceAvgTempC: 18,
+            },
+          },
+        },
+      },
+    });
+
+    expect(out.dayResults).toHaveLength(2);
+    expect(out.dayResults.every((row) => row.simulatedReasonCode === "MANUAL_CONSTRAINED_DAY")).toBe(true);
+    expect(out.dayResults[0]?.dayClassification).toBe("weather_scaled_day");
+    expect(out.dayResults[1]?.dayClassification).toBe("weather_scaled_day");
+    expect(out.dayResults[0]?.weatherModeUsed).toBe("heating");
+    expect(out.dayResults[1]?.weatherModeUsed).toBe("cooling");
+    expect(out.dayResults[0]?.finalDayKwh).not.toBeCloseTo(out.dayResults[1]?.finalDayKwh ?? 0, 6);
+  });
 });

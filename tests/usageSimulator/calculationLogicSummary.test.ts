@@ -111,9 +111,22 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
         weatherSourceIdentity: "actual_only",
         weatherDatasetIdentity: "wx-lockbox-1",
         intervalUsageFingerprintIdentity: "shape-prof-1",
+        manualMonthlyInputState: {
+          enteredMonthKeys: ["2025-06", "2025-07"],
+          missingMonthKeys: ["2025-08"],
+          explicitZeroMonthKeys: [],
+        },
+        manualMonthlyWeatherEvidenceSummary: {
+          dailyWeatherResponsiveness: "weather_driven",
+          baseloadShare: 0.41,
+          hvacShare: 0.59,
+          heatingSensitivity: 0.88,
+          coolingSensitivity: 1.14,
+        },
         monthlyTargetConstructionDiagnostics: [
           {
             month: "2025-06",
+            normalizedMonthTarget: 312.5,
             monthlyTargetBuildMethod: "normalized_from_non_travel_days",
           },
         ],
@@ -193,6 +206,15 @@ describe("buildGapfillCalculationLogicSummary", () => {
     });
     expect(summary.intervalCurveLogic.ladder[0]?.label).toContain("Month + day-type + weather regime");
     expect(summary.sharedProducerPathUsed).toBe(true);
+    expect(summary.artifactDecisionSummary.find((item) => item.label === "Manual month coverage")?.value).toContain(
+      "Entered: 2025-06, 2025-07"
+    );
+    expect(
+      summary.artifactDecisionSummary.find((item) => item.label === "Stage 1 normalized month targets")?.value
+    ).toContain("2025-06: 312.50");
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Manual monthly weather evidence")?.value).toContain(
+      "Responsiveness: weather_driven"
+    );
   });
 
   it("explains annual constraints without surfacing monthly-statement logic", () => {

@@ -190,7 +190,8 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(wxArg?.get("2026-01-05")?.source).toBe("OPEN_METEO");
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
     expect(keepRef == null || keepRef.size === 0).toBe(true);
-    expect(firstCall?.modeledKeepRefReasonCode).toBe("MONTHLY_CONSTRAINED_NON_TRAVEL_DAY");
+    expect(firstCall?.modeledKeepRefReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
+    expect(firstCall?.defaultModeledReasonCode).toBe("INCOMPLETE_METER_DAY");
     expect(firstCall?.lowDataSyntheticContext).toMatchObject({
       mode: "MANUAL_TOTALS",
       canonicalMonthKeys: baseBuildInputs.canonicalMonths,
@@ -232,7 +233,84 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(firstCall?.actualIntervals).toHaveLength(0);
     const keepRef = firstCall?.forceModeledOutputKeepReferencePoolDateKeys as Set<string> | undefined;
     expect(keepRef == null || keepRef.size === 0).toBe(true);
-    expect(firstCall?.modeledKeepRefReasonCode).toBe("MONTHLY_CONSTRAINED_NON_TRAVEL_DAY");
+    expect(firstCall?.modeledKeepRefReasonCode).toBe("MANUAL_CONSTRAINED_DAY");
+    expect(firstCall?.defaultModeledReasonCode).toBe("INCOMPLETE_METER_DAY");
+  });
+
+  it("threads manual monthly weather evidence into the low-data shared path", async () => {
+    buildPastSimulatedBaselineV1.mockClear();
+    getHouseWeatherDays.mockImplementation(async ({ dateKeys }: any) => {
+      const keys = Array.from(dateKeys ?? []) as string[];
+      const m = new Map();
+      for (const dk of keys) {
+        const winter = dk.startsWith("2026-01");
+        m.set(dk, {
+          tAvgF: winter ? 42 : 82,
+          tMinF: winter ? 34 : 74,
+          tMaxF: winter ? 50 : 90,
+          hdd65: winter ? 22 : 0,
+          cdd65: winter ? 0 : 18,
+          source: "OPEN_METEO",
+        });
+      }
+      return m;
+    });
+
+    await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "h1",
+      esiid: null,
+      startDate: "2026-01-01",
+      endDate: "2026-02-05",
+      timezone: "America/Chicago",
+      travelRanges: [{ startDate: "2026-01-10", endDate: "2026-01-12" }],
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "MANUAL_TOTALS",
+        monthlyTargetConstructionDiagnostics: [
+          { month: "2026-01", normalizedMonthTarget: 620, monthlyTargetBuildMethod: "user_manual_month_value" },
+          { month: "2026-02", normalizedMonthTarget: 340, monthlyTargetBuildMethod: "user_manual_month_value" },
+        ],
+        manualMonthlyInputState: {
+          enteredMonthKeys: ["2026-01", "2026-02"],
+          missingMonthKeys: [],
+          explicitZeroMonthKeys: [],
+          inputKindByMonth: {
+            "2026-01": "entered_nonzero",
+            "2026-02": "entered_nonzero",
+          },
+        },
+        snapshots: {
+          manualUsagePayload: {
+            mode: "MONTHLY",
+            travelRanges: [{ startDate: "2026-01-10", endDate: "2026-01-12" }],
+          },
+          homeProfile: {
+            fuelConfiguration: "all_electric",
+            heatingType: "electric",
+            hvacType: "central",
+          },
+          applianceProfile: {
+            appliances: [{ type: "cooling" }],
+          },
+        },
+        resolvedSimFingerprint: {
+          manualTotalsConstraint: "monthly",
+        },
+      } as any,
+      buildPathKind: "recalc",
+      includeSimulatedDayResults: false,
+    });
+
+    const firstCall = buildPastSimulatedBaselineV1.mock.calls[0]?.[0];
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary).toMatchObject({
+      inputMonthKeys: ["2026-01", "2026-02"],
+      explicitTravelRangesUsed: [{ startDate: "2026-01-10", endDate: "2026-01-12" }],
+      dailyWeatherResponsiveness: expect.any(String),
+    });
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.heatingSensitivity).toBeGreaterThan(0);
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.coolingSensitivity).toBeGreaterThan(0);
   });
 
   it("NEW_BUILD_ESTIMATE uses synthetic intervals path (no DB interval fetch)", async () => {

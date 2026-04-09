@@ -4441,7 +4441,6 @@ async function recalcSimulatorBuildImpl(args: {
   const scenarioMergedTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
   const preserveCanonicalTravelTruthForManualMonthly =
     simMode === "MANUAL_TOTALS" && manualMonthlySourceDerivedResolution != null;
-  const manualBillPeriodExclusionRanges = built.manualBillPeriodExclusionRanges ?? [];
   const manualPayloadTravelRanges =
     simMode === "MANUAL_TOTALS"
       ? normalizePreLockboxTravelRanges((manualUsagePayload as any)?.travelRanges)
@@ -4451,7 +4450,6 @@ async function recalcSimulatorBuildImpl(args: {
       ? normalizePreLockboxTravelRanges([
           ...manualPayloadTravelRanges,
           ...scenarioMergedTravelRanges,
-          ...manualBillPeriodExclusionRanges,
         ])
       : simMode === "NEW_BUILD_ESTIMATE"
         ? []

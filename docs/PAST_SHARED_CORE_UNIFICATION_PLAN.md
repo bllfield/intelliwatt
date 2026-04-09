@@ -18,9 +18,11 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - Manual Usage Lab and GapFill stay separate surfaces; shared ownership here is Stage 1/pre-lockbox helper logic only.
 - Shared monthly+annual Stage 1 helper ownership now lives in `modules/manualUsage/prefill.ts`, and GapFill `MONTHLY_FROM_SOURCE_INTERVALS` / `ANNUAL_FROM_SOURCE_INTERVALS` must use that same helper family before the shared lockbox path.
 - After normalization, both paths must use the same shared weather loader, lockbox producer path, persistence path, and artifact read path.
+- Manual-mode recalc/readback is now split explicitly: recalc returns once the canonical artifact is ready, and richer manual compare/reconciliation is loaded from persisted readback using the exact `canonicalArtifactInputHash` when present.
 - Shared Past Sim now derives shared bill-period targets before shaping:
   - non-excluded bill periods stay eligible parity constraints
   - travel-touched bill periods stay visible but non-scored
+- Statement/bill ranges remain reconciliation metadata only. They are not promoted into travel-vacant ownership.
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
 - Manual monthly user Past and admin manual-monthly lab are required to stay identical from normalized input submission through chart rendering.
 - Allowed admin-only divergence begins only after the shared Past result is accepted for display:
@@ -47,12 +49,14 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - **`modules/manualUsage/statementRanges.ts` + `modules/manualUsage/reconciliation.ts`**
   - Shared manual helpers now own Stage 1 presentation plus Stage 2 bill-period target derivation for both monthly and annual payloads.
   - `buildManualBillPeriodTargets()` is the shared authority for normalized bill periods, entered totals, eligibility flags, and travel-overlap exclusions.
-  - `buildManualMonthlyReconciliation()` now uses those shared targets so monthly and annual manual compare rows read from one bill-period contract.
+  - `buildManualMonthlyReconciliation()` now uses those shared targets plus `monthlyTargetConstructionDiagnostics` so monthly compare rows can show actual interval totals, Stage 1 targets, and final simulated totals from one artifact-backed contract.
 - **modules/usageSimulator/build.ts**
-  - Manual modes now emit `manualBillPeriods`, `manualBillPeriodTotalsKwhById`, and `manualBillPeriodExclusionRanges` in shared build inputs instead of relying on month-first metadata only.
+  - Manual modes now emit `manualBillPeriods` and `manualBillPeriodTotalsKwhById` in shared build inputs instead of relying on month-first metadata only.
 - **modules/simulatedUsage/simulatePastUsageDataset.ts**
   - In low-data shared Past mode, eligible manual bill periods now reserve their dates inside the shaping/reference pool.
   - Travel-touched bill periods are excluded from parity shaping rather than aborting the build.
+  - Lean manual/low-data runs suppress full actual-interval carry-through, avoid exact-interval-style keep-ref expansion, and renormalize manual bill periods with a bounded indexed pass after baseline return.
+  - Manual-monthly runs now attach `manualMonthlyWeatherEvidenceSummary`, derived from Stage 1 monthly targets plus actual monthly weather pressure, to the shared artifact metadata.
 - **UsageDashboard / ManualMonthlyLab**
   - Stage 1 monthly surfaces render bill-period rows only.
   - Stage 1 annual surfaces render billing-date context plus annual total only, with no pre-sim chart.
@@ -64,11 +68,13 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
   - Artifact-producing rebuilds normalize inputs then call the same shared recalc producer path before persistence; GapFill diagnostics may differ only after stored outputs exist.
   - GapFill Actual Home is the exact same user Past Sim flow with a different trigger/view surface only; it stays on `userValidationPolicy` and the shared persisted read/display path.
   - GapFill Test Home may fork only before lockbox entry: admin-owned validation policy plus usage input mode (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). After normalization it must use the same lockbox producer chain and artifact writer.
+  - GapFill manual monthly/manual annual use the same shared dispatch + persisted readback pattern as Manual Monthly Lab; compare/reconciliation is read-only and artifact-backed.
   - Daily curve compare/tuning diagnostics belong on GapFill/admin tuning surfaces only, not on the Manual Usage Lab flow/debug surface.
   - USER MANUAL MONTHLY remains a distinct user-input semantic before normalization. GapFill `MONTHLY_FROM_SOURCE_INTERVALS` must not be treated as the only travel-aware monthly mode or as a replacement definition for user manual monthly.
   - Weather logic is pre-lockbox only: user Past owns `userWeatherLogicSetting`; GapFill Actual/Test share `gapfillWeatherLogicSetting` for a run; the shared resolver and lockbox chain stay the same after normalization.
 - **Metadata**
   - dataset.meta includes: buildPathKind, sourceOfDaySimulationCore, simVersion, derivationVersion, weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount, dailyRowCount, intervalCount, coverageStart/End, actualDayCount, simulatedDayCount, stitchedDayCount, actualIntervalsCount, referenceDaysCount, shapeMonthsPresent, excludedDateKeysCount, leadingMissingDaysCount, usageShapeProfileDiag, etc.
+  - Manual constrained shared runs may also carry `manualMonthlyInputState`, `manualMonthlyWeatherEvidenceSummary`, and `SIMULATED_MANUAL_CONSTRAINED` source-detail mapping on the artifact.
   - Shared parity/tuning diagnostics now normalize to one contract: `identityContext`, `sourceTruthContext`, `lockboxExecutionSummary`, `projectionReadSummary`, and `tuningSummary`.
 - **UsageDashboard**
   - `getWeatherBasisLabel(meta)` surfaces weatherFallbackReason for stub/mixed (e.g. "no coordinates", "partial coverage", "API unavailable"); does not imply actual weather when summary is stub_only, mixed, or unknown.

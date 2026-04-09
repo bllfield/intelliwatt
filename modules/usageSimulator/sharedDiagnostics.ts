@@ -145,6 +145,7 @@ export function buildSharedPastSimDiagnostics(args: {
         ? meta.monthlyTargetConstructionDiagnostics
         : null,
       manualMonthlyInputState: asRecord(meta.manualMonthlyInputState),
+      manualMonthlyWeatherEvidenceSummary: asRecord(meta.manualMonthlyWeatherEvidenceSummary),
       travelRangesUsed: asRecord(lockboxInput.travelRanges).ranges ?? [],
       validationTestKeysUsed: validationKeys.localDateKeys ?? [],
       exclusionDrivingCanonicalInputsSummary: {

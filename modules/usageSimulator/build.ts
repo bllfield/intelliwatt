@@ -4,7 +4,6 @@ import { estimateUsageForCanonicalWindow } from "@/modules/usageEstimator/estima
 import type { HomeProfileInput } from "@/modules/homeProfile/validation";
 import type { ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/validation";
 import {
-  buildManualBillPeriodExclusionRanges,
   buildManualBillPeriodTargets,
   buildManualBillPeriodTotalsById,
   type ManualBillPeriodTarget,
@@ -36,7 +35,6 @@ export type BuildResult = {
   manualMonthlyInputState?: ManualMonthlyInputState | null;
   manualBillPeriods?: ManualBillPeriodTarget[];
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
-  manualBillPeriodExclusionRanges?: Array<{ startDate: string; endDate: string }>;
   source?: {
     actualSource?: "SMT" | "GREEN_BUTTON";
     actualMonthlyAnchorsByMonth?: Record<string, number>;
@@ -180,7 +178,6 @@ export async function buildSimulatorInputs(args: {
     );
     const manualBillPeriods = buildManualBillPeriodTargets(args.manualUsagePayload);
     const manualBillPeriodTotalsKwhById = buildManualBillPeriodTotalsById(manualBillPeriods);
-    const manualBillPeriodExclusionRanges = buildManualBillPeriodExclusionRanges(manualBillPeriods);
     const eligibleBillPeriodCount = manualBillPeriods.filter((period) => period.eligibleForConstraint).length;
     const excludedBillPeriodCount = manualBillPeriods.length - eligibleBillPeriodCount;
     const manualNotes = [...notes];
@@ -206,7 +203,6 @@ export async function buildSimulatorInputs(args: {
       manualMonthlyInputState,
       manualBillPeriods,
       manualBillPeriodTotalsKwhById,
-      manualBillPeriodExclusionRanges,
     };
   }
 

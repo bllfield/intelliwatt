@@ -1,7 +1,10 @@
 import { logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
-import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
+import type {
+  PastLowDataWeatherEvidenceSummary,
+  SimulatedDayResult,
+} from "@/modules/simulatedUsage/pastDaySimulatorTypes";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 import type {
   ManualMonthlyInputState,
@@ -16,6 +19,7 @@ type UsageSeriesPoint = { timestamp: string; kwh: number };
 export type PastSimulatedDaySourceDetail =
   | "SIMULATED_TRAVEL_VACANT"
   | "SIMULATED_TEST_DAY"
+  | "SIMULATED_MANUAL_CONSTRAINED"
   | "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
   | "SIMULATED_INCOMPLETE_METER"
   | "SIMULATED_LEADING_MISSING"
@@ -539,6 +543,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
       const sourceDetail: PastSimulatedDaySourceDetail =
         detail === "SIMULATED_TRAVEL_VACANT" ||
         detail === "SIMULATED_TEST_DAY" ||
+        detail === "SIMULATED_MANUAL_CONSTRAINED" ||
         detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
           ? detail
           : detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING"
@@ -550,6 +555,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
     if (
       legacyDetail === "SIMULATED_TRAVEL_VACANT" ||
       legacyDetail === "SIMULATED_TEST_DAY" ||
+      legacyDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
       legacyDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
       legacyDetail === "SIMULATED_INCOMPLETE_METER" ||
       legacyDetail === "SIMULATED_LEADING_MISSING"
@@ -794,6 +800,7 @@ export type SimulatorBuildInputsV1 = {
   filledMonths?: string[];
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   manualMonthlyInputState?: ManualMonthlyInputState | null;
+  manualMonthlyWeatherEvidenceSummary?: PastLowDataWeatherEvidenceSummary | null;
   manualBillPeriods?: ManualBillPeriodTarget[];
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   sharedProducerPathUsed?: boolean;
@@ -947,6 +954,7 @@ export type SimulatedUsageDatasetMeta = {
   /** Shared month-anchor diagnostics for manual monthly flows. */
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   manualMonthlyInputState?: ManualMonthlyInputState | null;
+  manualMonthlyWeatherEvidenceSummary?: PastLowDataWeatherEvidenceSummary | null;
   sharedProducerPathUsed?: boolean;
   /** Compare-only projection rows for validation/test days from this same canonical family. */
   validationCompareRows?: Array<{
@@ -1231,6 +1239,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     filledMonths?: string[];
     monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
     manualMonthlyInputState?: ManualMonthlyInputState | null;
+    manualMonthlyWeatherEvidenceSummary?: PastLowDataWeatherEvidenceSummary | null;
     sharedProducerPathUsed?: boolean;
   },
   options?: {
@@ -1277,6 +1286,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     const detail: PastSimulatedDaySourceDetail =
       reason === "TRAVEL_VACANT"
         ? "SIMULATED_TRAVEL_VACANT"
+        : reason === "MANUAL_CONSTRAINED_DAY"
+          ? "SIMULATED_MANUAL_CONSTRAINED"
         : reason === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
           ? "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
         : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
@@ -1420,6 +1431,7 @@ export function buildSimulatedUsageDatasetFromCurve(
       filledMonths: meta.filledMonths ?? [],
       monthlyTargetConstructionDiagnostics: meta.monthlyTargetConstructionDiagnostics ?? null,
       manualMonthlyInputState: meta.manualMonthlyInputState ?? null,
+      manualMonthlyWeatherEvidenceSummary: meta.manualMonthlyWeatherEvidenceSummary ?? null,
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
       sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
@@ -1431,6 +1443,7 @@ export function buildSimulatedUsageDatasetFromCurve(
         .filter(
           (row) =>
             row.sourceDetail === "SIMULATED_TEST_DAY" ||
+            row.sourceDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
             row.sourceDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
         )
         .map((row) => row.date),
@@ -1440,6 +1453,7 @@ export function buildSimulatedUsageDatasetFromCurve(
         acc[row.date] =
           d === "SIMULATED_TRAVEL_VACANT" ||
           d === "SIMULATED_TEST_DAY" ||
+          d === "SIMULATED_MANUAL_CONSTRAINED" ||
           d === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
           d === "SIMULATED_INCOMPLETE_METER" ||
           d === "SIMULATED_LEADING_MISSING" ||
