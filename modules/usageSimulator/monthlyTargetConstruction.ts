@@ -228,7 +228,7 @@ export function buildSourceDerivedMonthlyTargetResolutionFromPayload(args: {
     });
   }
 
-  const diagnostics = args.canonicalMonths.map((month) => {
+  const diagnostics: MonthlyTargetConstructionDiagnostic[] = args.canonicalMonths.map((month): MonthlyTargetConstructionDiagnostic => {
     return (
       diagnosticsByMonth.get(month) ?? {
         month,
