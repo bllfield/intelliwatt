@@ -556,6 +556,14 @@ export default function ManualMonthlyLab() {
             >
               Appliances
             </button>
+            <button
+              type="button"
+              onClick={() => setShowManualEditor(true)}
+              disabled={!labReady}
+              className="rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              Manual editor
+            </button>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -613,27 +621,11 @@ export default function ManualMonthlyLab() {
 
         {labReady ? (
           <div className="rounded-lg bg-brand-white p-6 shadow-lg">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold text-brand-navy">Manual input editor</div>
-                <p className="text-sm text-slate-600">
-                  This editor saves only to the isolated lab home. Source-home manual input is used only as a prefill source.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowManualEditor((current) => !current)}
-                className="rounded border border-brand-blue/50 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20"
-              >
-                {showManualEditor ? "Collapse editor" : "Expand to edit"}
-              </button>
-            </div>
-            {!showManualEditor ? (
-              <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                The manual usage editor is collapsed by default to keep Stage 1 and Stage 2 visible. Use "Expand to edit" when you want to
-                update the lab-home monthly or annual inputs.
-              </div>
-            ) : null}
+            <div className="text-lg font-semibold text-brand-navy">Manual input editor</div>
+            <p className="mt-2 text-sm text-slate-600">
+              This editor saves only to the isolated lab home. Use the `Manual editor` button above, next to `Appliances`, to open the popup
+              and update the lab-home monthly or annual inputs.
+            </p>
           </div>
         ) : null}
 

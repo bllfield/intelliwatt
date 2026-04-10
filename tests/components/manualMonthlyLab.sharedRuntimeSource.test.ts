@@ -28,5 +28,7 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
 
     expect(source).toContain('ModalShell title="Lab-home Manual Usage"');
     expect(source).toContain("{showManualEditor && labReady ? (");
+    expect(source).toContain("Manual editor");
+    expect(source).toContain("Use the `Manual editor` button above, next to `Appliances`, to open the popup");
   });
 });
