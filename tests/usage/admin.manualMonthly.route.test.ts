@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   dispatchPastSimRecalc: vi.fn(),
   getUserDefaultValidationSelectionMode: vi.fn(),
   getSimulatedUsageForHouseScenario: vi.fn(),
+  getTravelRangesFromDb: vi.fn(),
   resolveUserValidationPolicy: vi.fn(),
   resolveUserWeatherLogicSetting: vi.fn(),
   buildValidationCompareProjectionSidecar: vi.fn(),
@@ -57,6 +58,9 @@ vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
 vi.mock("@/modules/usageSimulator/service", () => ({
   getUserDefaultValidationSelectionMode: (...args: any[]) => mocks.getUserDefaultValidationSelectionMode(...args),
   getSimulatedUsageForHouseScenario: (...args: any[]) => mocks.getSimulatedUsageForHouseScenario(...args),
+}));
+vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", () => ({
+  getTravelRangesFromDb: (...args: any[]) => mocks.getTravelRangesFromDb(...args),
 }));
 vi.mock("@/modules/usageSimulator/pastSimPolicy", () => ({
   resolveUserValidationPolicy: (...args: any[]) => mocks.resolveUserValidationPolicy(...args),
@@ -214,6 +218,7 @@ describe("admin manual monthly route", () => {
       projectionReadSummary: {},
       tuningSummary: {},
     });
+    mocks.getTravelRangesFromDb.mockResolvedValue([]);
   });
 
   it("lookup returns source-house selection quickly without loading heavy source or readback context", async () => {
@@ -372,6 +377,49 @@ describe("admin manual monthly route", () => {
         houseId: "lab-home-1",
         payload: expect.objectContaining({
           mode: "MONTHLY",
+        }),
+      })
+    );
+  });
+
+  it("load prefers canonical source travel ranges over stale source-payload travel ranges for derived lab payloads", async () => {
+    mocks.getManualUsageInputForUserHouse.mockImplementation(async ({ userId, houseId }: any) => {
+      if (userId === "source-user-1" && houseId === "source-house-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2025-12-31",
+            monthlyKwh: [{ month: "2025-12", kwh: "" }],
+            travelRanges: [{ startDate: "2025-02-18", endDate: "2025-05-26" }],
+          },
+          updatedAt: "2025-05-01T00:00:00.000Z",
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
+    mocks.getTravelRangesFromDb.mockResolvedValue([
+      { startDate: "2025-03-14", endDate: "2025-06-01" },
+      { startDate: "2025-08-13", endDate: "2025-08-17" },
+    ]);
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.payload.travelRanges).toEqual([
+      { startDate: "2025-03-14", endDate: "2025-06-01" },
+      { startDate: "2025-08-13", endDate: "2025-08-17" },
+    ]);
+    expect(mocks.saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-owner-1",
+        houseId: "lab-home-1",
+        payload: expect.objectContaining({
+          travelRanges: [
+            { startDate: "2025-03-14", endDate: "2025-06-01" },
+            { startDate: "2025-08-13", endDate: "2025-08-17" },
+          ],
         }),
       })
     );

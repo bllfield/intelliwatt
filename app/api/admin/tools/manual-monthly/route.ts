@@ -16,6 +16,7 @@ import {
   ensureGlobalManualMonthlyLabTestHomeHouse,
   replaceGlobalManualMonthlyLabTestHomeFromSource,
 } from "@/modules/usageSimulator/labTestHome";
+import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
@@ -287,15 +288,27 @@ function summarizeReadResultForLabResponse(readResult: Awaited<ReturnType<typeof
 async function buildLabPrefill(args: {
   sourcePayload: ManualUsagePayload | null;
   sourceUsageHouse: Awaited<ReturnType<typeof buildSourceUsageHouse>>;
+  canonicalTravelRanges?: TravelRange[];
 }) {
+  const effectiveTravelRanges =
+    Array.isArray(args.canonicalTravelRanges) && args.canonicalTravelRanges.length > 0
+      ? normalizeManualTravelRanges(args.canonicalTravelRanges)
+      : normalizeTravelRanges(args.sourcePayload);
+  const sourcePayloadWithCanonicalTravelRanges =
+    args.sourcePayload && effectiveTravelRanges.length > 0
+      ? ({
+          ...args.sourcePayload,
+          travelRanges: effectiveTravelRanges,
+        } as ManualUsagePayload)
+      : args.sourcePayload;
   const resolved = resolveSharedManualStageOneContract({
     mode: "MONTHLY",
-    sourcePayload: args.sourcePayload,
+    sourcePayload: sourcePayloadWithCanonicalTravelRanges,
     actualEndDate: String(args.sourceUsageHouse?.dataset?.summary?.end ?? "").slice(0, 10) || null,
-    travelRanges: normalizeTravelRanges(args.sourcePayload),
+    travelRanges: effectiveTravelRanges,
     dailyRows: args.sourceUsageHouse?.dataset?.daily ?? [],
   });
-  if (!resolved.seedSet.anchorEndDate) {
+  if (!resolved.seedSet.anchorEndDate || !resolved.payload) {
     return {
       payloadToPersist: null,
       seed: {
@@ -306,7 +319,7 @@ async function buildLabPrefill(args: {
     };
   }
   return {
-    payloadToPersist: resolved.payloadSource === "actual_derived_seed" ? resolved.payload : null,
+    payloadToPersist: resolved.payload,
     seed: {
       sourceMode: resolved.seedSet.sourceMode,
       monthly: resolved.seedSet.usableSourceMonthlyPayload ?? resolved.seedSet.monthlySeed,
@@ -370,6 +383,7 @@ export async function POST(req: NextRequest) {
     const sourceUsageHouseResponse = buildSourceUsageHouseResponse(sourceUsageHouse);
 
     if (action === "load") {
+      const sourceTravelRangesFromDb = await getTravelRangesFromDb(sourceResolved.userId, sourceResolved.selectedHouse.id);
       const replaced = await replaceGlobalManualMonthlyLabTestHomeFromSource({
         ownerUserId,
         sourceUserId: sourceResolved.userId,
@@ -390,6 +404,7 @@ export async function POST(req: NextRequest) {
       const labSeed = await buildLabPrefill({
         sourcePayload: sourcePayloadRecord.payload,
         sourceUsageHouse,
+        canonicalTravelRanges: sourceTravelRangesFromDb,
       });
 
       let payload = await getManualUsageInputForUserHouse({ userId: ownerUserId, houseId: labHome.id });
