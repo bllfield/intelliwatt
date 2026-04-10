@@ -308,10 +308,14 @@ describe("pastSimPolicy split helpers", () => {
     });
   });
 
-  it("maps the four pre-lockbox usage input modes to the shared recalc entry", () => {
+  it("maps the pre-lockbox usage input modes to the shared recalc entry", () => {
     expect(resolveTestHomeUsageInputMode("EXACT_INTERVALS")).toBe("EXACT_INTERVALS");
     expect(resolveTestHomeUsageModeRecalcConfig("EXACT_INTERVALS")).toEqual({
       simulatorMode: "SMT_BASELINE",
+    });
+    expect(resolveTestHomeUsageInputMode("MANUAL_MONTHLY")).toBe("MANUAL_MONTHLY");
+    expect(resolveTestHomeUsageModeRecalcConfig("MANUAL_MONTHLY")).toEqual({
+      simulatorMode: "MANUAL_TOTALS",
     });
     expect(resolveTestHomeUsageModeRecalcConfig("MONTHLY_FROM_SOURCE_INTERVALS")).toEqual({
       simulatorMode: "MANUAL_TOTALS",

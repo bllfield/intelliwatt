@@ -3,7 +3,7 @@ import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/ca
 
 function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
   return {
-    selectedMode: args?.selectedMode ?? "MONTHLY_FROM_SOURCE_INTERVALS",
+    selectedMode: args?.selectedMode ?? "MANUAL_MONTHLY",
     dataset: {
       daily: [
         { date: "2025-06-14", kwh: 30, sourceDetail: "ACTUAL" },
@@ -100,7 +100,7 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
     },
     sharedDiagnostics: {
       identityContext: {
-        usageInputMode: args?.selectedMode ?? "MONTHLY_FROM_SOURCE_INTERVALS",
+        usageInputMode: args?.selectedMode ?? "MANUAL_MONTHLY",
         simulatorMode: args?.lockboxMode ?? "MANUAL_MONTHLY",
         sourceHouseId: "source-house-1",
         profileHouseId: "test-home-1",
@@ -145,10 +145,13 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
             },
           ],
         },
-        sourceDerivedMonthlyTotalsKwhByMonth: {
-          "2025-06": 312.5,
-          "2025-07": 330,
-        },
+        sourceDerivedMonthlyTotalsKwhByMonth:
+          args?.selectedMode === "MONTHLY_FROM_SOURCE_INTERVALS"
+            ? {
+                "2025-06": 312.5,
+                "2025-07": 330,
+              }
+            : null,
         manualBillPeriods: [
           {
             id: "2025-06",
@@ -234,20 +237,27 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
 }
 
 describe("buildGapfillCalculationLogicSummary", () => {
-  it("explains manual monthly constraints and bill-range semantics", () => {
+  it("explains pure manual monthly as manual-driven with source actuals compare-only", () => {
     const summary = buildGapfillCalculationLogicSummary(buildFixture());
 
     expect(summary.modeFamily).toBe("manual_monthly");
-    expect(summary.modeLabel).toContain("Manual Monthly");
-    expect(summary.stageOnePath).toContain("manual-monthly");
+    expect(summary.modeLabel).toContain("Pure Manual Monthly");
+    expect(summary.stageOnePath).toContain("saved manual-monthly payload");
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.used).toBe(true);
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.details.join(" ")).toContain("Bill-range semantics");
     expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.status).toBe("hard truth");
     expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.status).toBe("context only");
-    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.details.join(" ")).toContain(
-      "Source-derived monthly anchors: 2"
+    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.whereEntered).toEqual([
+      "compare only",
+      "diagnostics only",
+    ]);
+    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.priorityBand).toBe("Not Used");
+    expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.evidence.join(" ")).toContain(
+      "No source-derived month anchors were attached"
     );
-    expect(summary.layers.find((layer) => layer.key === "monthly-target-layer")?.summary).toContain("Monthly totals are fixed first");
+    expect(summary.layers.find((layer) => layer.key === "monthly-target-layer")?.summary).toContain(
+      "without using source intervals as Stage 2 drivers"
+    );
     expect(summary.dailyTotalLogic.ladder[0]).toMatchObject({
       key: "month_daytype_neighbor",
       observedCount: null,
@@ -272,6 +282,25 @@ describe("buildGapfillCalculationLogicSummary", () => {
     );
     expect(summary.weatherExplanation.rows.find((row) => row.label === "Whole-home prior blend")?.value).toContain(
       "Prior fallback weight: 0.30"
+    );
+  });
+
+  it("keeps monthly-from-source mode distinct and source-derived in the explanation", () => {
+    const summary = buildGapfillCalculationLogicSummary(
+      buildFixture({
+        selectedMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+        lockboxMode: "MANUAL_MONTHLY",
+      })
+    );
+
+    expect(summary.modeLabel).toContain("Monthly From Source Intervals");
+    expect(summary.modeOverview).toContain("source-derived monthly");
+    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.priorityBand).toBe("Secondary Driver");
+    expect(summary.inputGroups.find((group) => group.key === "source-actual-intervals")?.whereEntered).toContain(
+      "source-derived monthly fitting"
+    );
+    expect(summary.inputGroups.find((group) => group.key === "manual-monthly")?.evidence.join(" ")).toContain(
+      "Source-derived month anchors survived"
     );
   });
 

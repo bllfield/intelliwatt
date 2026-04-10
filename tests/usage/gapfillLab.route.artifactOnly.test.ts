@@ -2259,6 +2259,88 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.result?.canonicalArtifactInputHash).toBe("manual-canonical-hash-1");
   });
 
+  it("keeps pure manual monthly distinct from monthly-from-source mode on canonical recalc", async () => {
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 900 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return {
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-02-28",
+          monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+          statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+          travelRanges: [{ startDate: "2026-02-10", endDate: "2026-02-12" }],
+        },
+        updatedAt: null,
+      };
+    });
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "manual-cid-pure",
+      result: {
+        ok: true,
+        houseId: "test-home-1",
+        buildInputsHash: "hash-manual-pure",
+        dataset: {},
+        canonicalArtifactInputHash: "manual-canonical-pure-hash-1",
+        effectiveSimulatorMode: "MANUAL_TOTALS",
+      },
+    });
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+      id: "build-manual-pure-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
+      buildInputsHash: "hash-manual-pure",
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+      },
+    });
+    pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+      id: "artifact-manual-pure-1",
+      updatedAt: new Date("2026-01-02T00:01:00.000Z"),
+      inputHash: "artifact-manual-pure-hash",
+      engineVersion: "production_past_stitched_v1",
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      testUsageInputMode: "MANUAL_MONTHLY",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.executionMode).toBe("inline");
+    expect(body.treatmentMode).toBe("MANUAL_MONTHLY");
+    expect(body.usageInputMode).toBe("MANUAL_MONTHLY");
+    expect(body.simulatorMode).toBe("MANUAL_TOTALS");
+    expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBeUndefined();
+    expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+        }),
+      })
+    );
+  });
+
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "h1") {

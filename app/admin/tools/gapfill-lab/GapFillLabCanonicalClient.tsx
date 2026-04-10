@@ -157,7 +157,7 @@ function prettyJson(v: unknown): string {
 }
 
 function isManualUsageTreatmentMode(value: string | null | undefined): boolean {
-  return value === "MONTHLY_FROM_SOURCE_INTERVALS" || value === "ANNUAL_FROM_SOURCE_INTERVALS";
+  return value === "MANUAL_MONTHLY" || value === "MONTHLY_FROM_SOURCE_INTERVALS" || value === "ANNUAL_FROM_SOURCE_INTERVALS";
 }
 
 function parseJsonSafe(s: string): { ok: true; value: any } | { ok: false; error: string } {
@@ -232,9 +232,9 @@ function getModeExplanation(mode: unknown): string {
     case "ACTUAL_INTERVAL_BASELINE":
       return "Uses persisted source interval truth as the baseline input; travel/vacant and validation selections constrain display and scoring only.";
     case "MANUAL_MONTHLY":
-      return "Uses the shared monthly-constrained lockbox branch, with source-derived monthly totals kept fixed inside the persisted run.";
+      return "Uses the shared monthly-constrained lockbox branch, with the saved manual payload driving Stage 2 and source actual usage available for compare-only diagnostics.";
     case "MANUAL_ANNUAL":
-      return "Uses the shared annual-constrained lockbox branch, with source-derived annual truth kept fixed inside the persisted run.";
+      return "Uses the shared annual-constrained lockbox branch, with the saved annual payload driving Stage 2 and source actual usage available for compare-only diagnostics.";
     case "PROFILE_ONLY_NEW_BUILD":
       return "Uses the shared profile-only new-build branch, with source/profile identities captured in the persisted lockbox trace.";
     default:
@@ -1106,7 +1106,8 @@ export default function GapFillLabCanonicalClient() {
     };
   }, [result]);
   const selectedTreatmentMode = visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode;
-  const showManualMonthlyCompare = selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS";
+  const showManualMonthlyCompare =
+    selectedTreatmentMode === "MANUAL_MONTHLY" || selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS";
   const showManualAnnualCompare = selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
   const showExactIntervalCurveCompare = selectedTreatmentMode === "EXACT_INTERVALS";
 
@@ -1405,6 +1406,7 @@ export default function GapFillLabCanonicalClient() {
                 disabled={loading}
               >
                 <option value="EXACT_INTERVALS">EXACT_INTERVALS</option>
+                <option value="MANUAL_MONTHLY">MANUAL_MONTHLY</option>
                 <option value="MONTHLY_FROM_SOURCE_INTERVALS">MONTHLY_FROM_SOURCE_INTERVALS</option>
                 <option value="ANNUAL_FROM_SOURCE_INTERVALS">ANNUAL_FROM_SOURCE_INTERVALS</option>
                 <option value="PROFILE_ONLY_NEW_BUILD">PROFILE_ONLY_NEW_BUILD</option>
@@ -1414,8 +1416,8 @@ export default function GapFillLabCanonicalClient() {
               Last recalc echo: {visibilityFromResult?.treatmentMode ?? "—"}
             </div>
             <div className="text-xs text-brand-navy/60 mt-1">
-              Sent on &quot;Run canonical recalc&quot; only. Manual monthly and manual annual both reuse the shared Stage 1 helper family that
-              powers the Manual Usage Lab, then the Test Home enters the same shared Past Sim chain the user flow and Actual Home use.
+              Sent on &quot;Run canonical recalc&quot; only. `MANUAL_MONTHLY` keeps the saved test-home manual payload as the Stage 2 driver, while
+              `MONTHLY_FROM_SOURCE_INTERVALS` keeps explicit source-derived monthly anchors. Both still enter the same shared Past Sim chain after Stage 1.
             </div>
           </div>
           <div>

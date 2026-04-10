@@ -80,6 +80,7 @@ import {
   resolveUserWeatherLogicSetting,
 } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import {
+  hasUsableMonthlyPayload,
   resolveSharedManualStageOneContract,
   type ManualUsageStageOneResolvedPayload,
 } from "@/modules/manualUsage/prefill";
@@ -340,6 +341,7 @@ function shouldUseCanonicalSourceCopyPolicy(args: {
 
 function isGapfillManualUsageInputMode(usageInputMode: TestHomeUsageInputMode): boolean {
   return (
+    usageInputMode === "MANUAL_MONTHLY" ||
     usageInputMode === "MONTHLY_FROM_SOURCE_INTERVALS" ||
     usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
   );
@@ -413,6 +415,45 @@ async function buildGapfillManualConstraintPayload(args: {
   travelRangesForRecalc: DateRange[];
   usageInputMode: TestHomeUsageInputMode;
 }): Promise<ManualUsageStageOneResolvedPayload> {
+  if (args.usageInputMode === "MANUAL_MONTHLY") {
+    const testHomeManualRec = await getManualUsageInputForUserHouse({
+      userId: args.labOwnerUserId,
+      houseId: args.testHomeHouseId,
+    });
+    return hasUsableMonthlyPayload(testHomeManualRec.payload)
+      ? {
+          mode: "MONTHLY",
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: testHomeManualRec.payload.anchorEndDate,
+            monthlyKwh: testHomeManualRec.payload.monthlyKwh,
+            statementRanges: testHomeManualRec.payload.statementRanges,
+            travelRanges: testHomeManualRec.payload.travelRanges,
+          },
+          payloadSource: "test_home_saved_payload",
+          seedSet: {
+            anchorEndDate: testHomeManualRec.payload.anchorEndDate,
+            usableSourceMonthlyPayload: null,
+            usableSourceAnnualPayload: null,
+            monthlySeed: null,
+            annualSeed: null,
+            sourceMode: null,
+          },
+        }
+      : {
+          mode: "MONTHLY",
+          payload: null,
+          payloadSource: "unresolved",
+          seedSet: {
+            anchorEndDate: null,
+            usableSourceMonthlyPayload: null,
+            usableSourceAnnualPayload: null,
+            monthlySeed: null,
+            annualSeed: null,
+            sourceMode: null,
+          },
+        };
+  }
   const [sourceManualRec, testHomeManualRec, sourceUsageDataset] = await Promise.all([
     getManualUsageInputForUserHouse({
       userId: args.sourceHouseUserId,

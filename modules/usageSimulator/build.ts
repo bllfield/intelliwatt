@@ -10,7 +10,6 @@ import {
 } from "@/modules/manualUsage/statementRanges";
 import {
   resolveManualMonthlyTargetDiagnostics,
-  buildSourceDerivedMonthlyTargetResolutionFromPayload,
   type ManualMonthlyInputState,
   type MonthlyTargetConstructionDiagnostic,
   type SourceDerivedMonthlyTargetResolution,
@@ -154,12 +153,7 @@ export async function buildSimulatorInputs(args: {
     if (!args.manualUsagePayload) {
       throw new Error("manual_usage_required");
     }
-    const sourceDerivedResolution =
-      args.manualMonthlySourceDerivedResolution ??
-      buildSourceDerivedMonthlyTargetResolutionFromPayload({
-        canonicalMonths,
-        payload: args.manualUsagePayload,
-      });
+    const sourceDerivedResolution = args.manualMonthlySourceDerivedResolution ?? null;
     const monthlyResolution =
       (args.manualUsagePayload as any)?.mode === "MONTHLY"
         ? resolveManualMonthlyTargetDiagnostics({

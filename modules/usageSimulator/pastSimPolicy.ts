@@ -6,6 +6,7 @@ export type ValidationPolicyOwner = "userValidationPolicy" | "adminValidationPol
 
 export type TestHomeUsageInputMode =
   | "EXACT_INTERVALS"
+  | "MANUAL_MONTHLY"
   | "MONTHLY_FROM_SOURCE_INTERVALS"
   | "ANNUAL_FROM_SOURCE_INTERVALS"
   | "PROFILE_ONLY_NEW_BUILD";
@@ -41,6 +42,8 @@ export function resolveAdminValidationPolicy(args: {
 export function resolveTestHomeUsageInputMode(raw: unknown): TestHomeUsageInputMode {
   const value = String(raw ?? "").trim();
   switch (value) {
+    case "MANUAL_MONTHLY":
+      return "MANUAL_MONTHLY";
     case "MONTHLY_FROM_SOURCE_INTERVALS":
     case "manual_monthly_constrained":
       return "MONTHLY_FROM_SOURCE_INTERVALS";
@@ -64,6 +67,10 @@ export function resolveTestHomeUsageModeRecalcConfig(
   adminLabTreatmentMode?: AdminLabTreatmentMode;
 } {
   switch (usageInputMode) {
+    case "MANUAL_MONTHLY":
+      return {
+        simulatorMode: "MANUAL_TOTALS",
+      };
     case "MONTHLY_FROM_SOURCE_INTERVALS":
       return {
         simulatorMode: "MANUAL_TOTALS",

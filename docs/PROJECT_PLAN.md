@@ -9,7 +9,7 @@
 - **Single authority**: shared outputs come from `simulatePastUsageDataset` / `simulatePastFullWindowShared` / `simulatePastSelectedDaysShared` plus artifact canonical fields—not a second recomputed simulated total when the canonical path fails.
 - **localDate vs intervals**: interval timestamps determine local-date membership; if `SimulatedDayResult.localDate` disagrees, the shared path fails loudly (`simulated_day_local_date_interval_invariant_violation`).
 - **GapFill Actual Home** must remain identical to the normal user Past flow: same user-owned validation policy, same source truth, same sealed lockbox chain, same artifact family, same shared display path.
-- **GapFill Test Home** may diverge only before lockbox entry via admin-owned validation policy and the four usage input modes (`EXACT_INTERVALS`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). No post-entry branch is allowed.
+- **GapFill Test Home** may diverge only before lockbox entry via admin-owned validation policy and the usage input modes (`EXACT_INTERVALS`, `MANUAL_MONTHLY`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). No post-entry branch is allowed.
 - **Shared diagnostics contract** must drive parity/tuning surfaces for user Past, GapFill Actual Home, GapFill Test Home, and compare read-side views. Thin UI wrappers are fine; separate truth-bearing diagnostics shapes are not.
 - **Shared weather selector rule**: user Past owns `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home share `gapfillWeatherLogicSetting` within a run. The selector difference is pre-lockbox only; the resolver/path/display remain shared.
 - **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
@@ -444,6 +444,7 @@ This section is authoritative for future manual-usage implementation work.
 - Blank or missing bill-cycle input months are an input-state concept, not the final simulated-output contract.
 - After simulation has run, both monthly and annual manual modes flow into the normal full Stage 2/Past chart and analytics surface.
 - GapFill monthly-from-source remains a distinct input semantic used for grading and tuning. It uses source-derived monthly anchors from actuals before entering the same shared Past Sim path after normalization.
+- GapFill `MANUAL_MONTHLY` remains the pure manual monthly harness on interval-backed houses. It uses the saved/manual Stage 1 payload only; source actual usage stays compare-only after Stage 1 is locked.
 - USER MANUAL MONTHLY must not be reframed as source-derived monthly, and GapFill monthly-from-source must not be treated as the only travel-aware monthly mode.
 - GapFill Actual remains the normal Past baseline truth path. GapFill Test may differ only in pre-lockbox normalized input semantics, then must enter the same shared producer path.
 - Manual Usage Lab and GapFill remain separate pages with separate purposes.
@@ -456,6 +457,7 @@ This section is authoritative for future manual-usage implementation work.
 - GapFill manual monthly/manual annual now dispatch through the shared `dispatchPastSimRecalc` entry with the same Stage 1 seed-resolution family (`modules/manualUsage/prefill.ts`) and then read back the persisted artifact, instead of doing the old inline recalc-plus-heavy-read orchestration in one blocking request.
 - Manual Lab remains the authority for manual-entry Stage 1 semantics, so GapFill manual modes now resolve and persist the same shared manual payload contract before recalc; on `MANUAL_TOTALS`, manual payload travel ranges are the canonical manual travel input, and route-local DB travel state is parity context only.
 - Manual monthly Stage 2 input is totals-only. Source actual usage may seed month/bill-period totals, but raw intervals, source daily rows, donor-day truth, and actual intraday shapes must not become manual-monthly simulation truth.
+- In pure manual monthly runs, source-derived monthly totals, source-derived annual totals, interval fingerprints, and source-interval identity must not act as Stage 2 drivers. They may remain attached only for compare/scoring/diagnostics when available.
 - Manual monthly source-backed periods that overlap travel/vacant dates are excluded from source-truth ownership for simulation and are filled by the shared simulation path instead of reusing actual-derived totals.
 - Manual annual Stage 2 input is annual-only. The simulator receives the annual total plus anchor window and derives month/day/hour allocation internally rather than inheriting a precomputed monthly split.
 - That shared recalc/readback contract is now explicit:
