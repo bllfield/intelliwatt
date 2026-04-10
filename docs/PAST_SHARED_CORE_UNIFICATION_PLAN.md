@@ -146,6 +146,8 @@ Summary:
 - Pure `MANUAL_MONTHLY` now has one shared travel/vacant donor-pool rule: reuse same-run simulated non-travel manual days as donor/reference truth inside the shared Stage 2 runtime, instead of actual interval donor history.
 - That donor-pool rule is shared by Manual Usage Lab and GapFill pure manual monthly because both must pass through the same `simulatePastUsageDataset` -> `buildPastSimulatedBaselineV1` path.
 - Source actual intervals remain compare-only on pure manual monthly, and explicit source-derived monthly runs stay on their existing source-derived behavior rather than inheriting the pure-manual donor pool.
+- Manual Usage Lab contract display must follow the persisted artifact-backed manual payload for the run being shown so stale lab-only travel state cannot diverge from the shared runtime contract GapFill already shows.
+- Actual House top summary projection must be a thin read of the same shared artifact diagnostics owner as the detailed diagnostics payload; blank header identity fields are a projection bug, not a separate truth source.
 - This Plan Change overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or separate flat travel-day behavior.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

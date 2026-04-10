@@ -107,4 +107,36 @@ describe("buildSharedPastSimDiagnostics manual monthly constrained artifact fiel
       validationRowsCount: 1,
     });
   });
+
+  it("copies source and profile house identities into shared source-truth diagnostics for header projection fallback", () => {
+    const diagnostics = buildSharedPastSimDiagnostics({
+      callerType: "gapfill_actual",
+      scenarioId: "past-s1",
+      dataset: {
+        meta: {
+          lockboxInput: {
+            sourceContext: {
+              sourceHouseId: "source-house-1",
+              intervalFingerprint: "ifp-1",
+              weatherIdentity: "wx-1",
+            },
+            profileContext: {
+              profileHouseId: "profile-house-1",
+            },
+          },
+          lockboxPerRunTrace: {
+            sourceHouseId: "",
+            profileHouseId: "",
+          },
+        },
+      },
+    });
+
+    expect(diagnostics.sourceTruthContext).toMatchObject({
+      sourceHouseId: "source-house-1",
+      profileHouseId: "profile-house-1",
+      intervalSourceIdentity: "ifp-1",
+      weatherDatasetIdentity: "wx-1",
+    });
+  });
 });

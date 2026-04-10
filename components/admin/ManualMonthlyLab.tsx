@@ -178,7 +178,7 @@ export default function ManualMonthlyLab() {
   const labReady = Boolean(loadJson?.labHome);
   const sourceUsageHouse = resultJson?.sourceUsageHouse ?? loadJson?.sourceUsageHouse ?? lookupJson?.sourceUsageHouse ?? null;
   const { previewPayload: stageOnePreviewPayload } = resolveManualStageOneLabPayloads({
-    savedPayload: saveJson?.payload,
+    savedPayload: displayedReadResult?.payload ?? saveJson?.payload,
     loadedPayload: loadJson?.payload,
     lookupPayload: lookupJson?.payload,
     loadedSourcePayload: loadJson?.sourcePayload,
@@ -191,8 +191,8 @@ export default function ManualMonthlyLab() {
     [stageOnePreviewPayload]
   );
   const activeManualPayload = useMemo(
-    () => (saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null) as ManualUsagePayload | null,
-    [loadJson, lookupJson, saveJson]
+    () => (displayedReadResult?.payload ?? saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null) as ManualUsagePayload | null,
+    [displayedReadResult, loadJson, lookupJson, saveJson]
   );
 
   const sourceUsageOverride = useMemo(() => {
@@ -703,7 +703,7 @@ export default function ManualMonthlyLab() {
               open
               value={{
                 sourcePayload: loadJson?.sourcePayload ?? null,
-                activePayload: saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null,
+                activePayload: displayedReadResult?.payload ?? saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null,
                 seed: loadJson?.seed ?? null,
               }}
             />

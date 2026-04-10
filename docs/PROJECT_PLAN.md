@@ -493,6 +493,8 @@ This section is authoritative for future manual-usage implementation work.
 - In pure `MANUAL_MONTHLY`, travel/vacant Stage 2 donor/reference truth now comes from the same run's already-simulated non-travel manual days, routed through the shared Past day-simulation runtime instead of actual interval donor history.
 - That donor-pool behavior is shared Stage 2 runtime ownership for both Manual Usage Lab and GapFill pure manual monthly. It is not a route-local or UI-local enhancement.
 - Source actual intervals remain compare-only for pure manual monthly, and explicit source-derived monthly modes keep their existing source-derived semantics instead of inheriting the pure-manual donor pool.
+- Manual Usage Lab Stage 1/readback presentation must prefer the artifact-backed lab-home manual payload once a run is shown, so the visible travel contract and monthly totals stay aligned with the same shared pure-manual runtime GapFill is using.
+- Actual House top lockbox/header summary must project `sourceHouseId`, `profileHouseId`, `intervalFingerprint`, and `weatherIdentity` from the same shared artifact diagnostics owner as the detailed diagnostics below rather than a stale duplicate projection path.
 - This Plan Change overrides any prior wording that tolerated alternate compare totals, stale active travel contracts, or separate flat travel-day behavior for manual monthly runs.
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only

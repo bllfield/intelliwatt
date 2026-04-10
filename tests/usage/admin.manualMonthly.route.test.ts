@@ -648,4 +648,66 @@ describe("admin manual monthly route", () => {
     );
     expect(body.readResult.sharedDiagnostics.sourceTruthContext.manualTravelVacantDonorDayCount).toBe(19);
   });
+
+  it("read_result returns the active lab-home manual payload so Stage 1 can match the shared run contract", async () => {
+    mocks.getManualUsageInputForUserHouse.mockImplementation(async ({ userId, houseId }: any) => {
+      if (userId === "source-user-1" && houseId === "source-house-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2025-04-30",
+            monthlyKwh: [{ month: "2025-04", kwh: 13540.1 }],
+            travelRanges: [{ startDate: "2025-02-18", endDate: "2025-05-26" }],
+          },
+          updatedAt: null,
+        };
+      }
+      return {
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2025-08-31",
+          monthlyKwh: [{ month: "2025-08", kwh: 15000.2 }],
+          statementRanges: [{ month: "2025-08", startDate: "2025-08-01", endDate: "2025-08-31" }],
+          travelRanges: [
+            { startDate: "2025-03-14", endDate: "2025-06-01" },
+            { startDate: "2025-08-13", endDate: "2025-08-17" },
+          ],
+        },
+        updatedAt: "2025-08-18T00:00:00.000Z",
+      };
+    });
+    mocks.getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+      ok: true,
+      dataset: {
+        meta: {
+          mode: "MANUAL_TOTALS",
+          lockboxInput: { mode: "MANUAL_MONTHLY" },
+          lockboxPerDayTrace: [],
+          filledMonths: [],
+        },
+        daily: [{ date: "2025-08-14", kwh: 12, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(
+      buildRequest({
+        action: "read_result",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        exactArtifactInputHash: "artifact-hash-1",
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.readResult.payload).toMatchObject({
+      mode: "MONTHLY",
+      monthlyKwh: [{ month: "2025-08", kwh: 15000.2 }],
+      travelRanges: [
+        { startDate: "2025-03-14", endDate: "2025-06-01" },
+        { startDate: "2025-08-13", endDate: "2025-08-17" },
+      ],
+    });
+  });
 });

@@ -462,6 +462,52 @@ describe("user simulated house compare projection", () => {
     expect(readout.validationKeys).toContain("2025-04-10");
   });
 
+  it("falls back to shared source-truth identities when persisted lockbox header fields are blank", () => {
+    const readout = buildPersistedHouseReadout({
+      dataset: {
+        meta: {
+          lockboxInput: {
+            mode: "",
+            sourceContext: {
+              sourceHouseId: "",
+              intervalFingerprint: "",
+              weatherIdentity: "",
+            },
+            profileContext: {
+              profileHouseId: "",
+            },
+            travelRanges: { ranges: [] },
+            validationKeys: { localDateKeys: [] },
+          },
+          lockboxPerRunTrace: {
+            inputHash: "",
+            fullChainHash: "",
+            sourceHouseId: "",
+            profileHouseId: "",
+          },
+        },
+      },
+      sharedDiagnostics: {
+        identityContext: {
+          sourceHouseId: "",
+          profileHouseId: "",
+          simulatorMode: "ACTUAL_INTERVAL_BASELINE",
+        },
+        sourceTruthContext: {
+          sourceHouseId: "source-house-shared",
+          profileHouseId: "profile-house-shared",
+          intervalSourceIdentity: "ifp-shared",
+          weatherDatasetIdentity: "wx-shared",
+        },
+      },
+    });
+
+    expect(readout.sourceHouseId).toBe("source-house-shared");
+    expect(readout.profileHouseId).toBe("profile-house-shared");
+    expect(readout.intervalFingerprint).toBe("ifp-shared");
+    expect(readout.weatherIdentity).toBe("wx-shared");
+  });
+
   it("prefers explicit usage-input mode and hides source-derived anchors on pure manual readouts", () => {
     const readout = buildPersistedHouseReadout({
       dataset: {

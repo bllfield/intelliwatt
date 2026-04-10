@@ -152,6 +152,8 @@ This section is authoritative for future manual-usage implementation and handoff
 - In pure `MANUAL_MONTHLY`, travel/vacant donor/reference truth now comes from same-run simulated non-travel manual days, using the shared Past simulated-day family and weather/shape ladder rather than actual interval donor truth.
 - Manual Usage Lab and GapFill pure manual monthly both reach that behavior through the same shared Stage 2 runtime owner. No caller-specific travel/vacant path is allowed.
 - Pure manual monthly keeps source actual usage compare-only, while `MONTHLY_FROM_SOURCE_INTERVALS` remains source-derived and does not switch onto the pure-manual donor pool.
+- Once a Manual Usage Lab artifact is read back, the lab's visible Stage 1 contract must come from that artifact-backed manual payload so the displayed travel ranges and totals match the same run the shared Stage 2 runtime produced.
+- Actual House top lockbox/header fields must read from the same shared artifact diagnostics truth as the detailed diagnostics section for `sourceHouseId`, `profileHouseId`, `intervalFingerprint`, and `weatherIdentity`.
 - This overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or a separate flat travel-day path.
 - GapFill admin-only daily curve compare UI now summarizes scored/test-day 96-slot overlays, grouped representative curves, and slot metrics through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it is read-side only and does not create a second compare path.
 - Stage 1 preview supports both manual payload modes:

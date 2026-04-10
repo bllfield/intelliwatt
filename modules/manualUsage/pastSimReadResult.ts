@@ -15,6 +15,7 @@ export type ManualUsagePastSimReadResult =
       ok: true;
       houseId: string;
       scenarioId: string;
+      payload: ManualUsagePayload | null;
       dataset: any;
       compareProjection: {
         rows?: unknown;
@@ -167,6 +168,7 @@ export async function buildManualUsagePastSimReadResult(args: {
     ok: true,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
+    payload: manualUsagePayload,
     dataset: out.dataset,
     compareProjection,
     manualReadModel,

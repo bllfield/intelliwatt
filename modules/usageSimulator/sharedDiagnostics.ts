@@ -20,6 +20,15 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function meaningfulString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
 function normalizeRows(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((row) => row && typeof row === "object" && !Array.isArray(row)) as Array<Record<string, unknown>>
@@ -86,8 +95,8 @@ export function buildSharedPastSimDiagnostics(args: {
   return {
     identityContext: {
       callerType: args.callerType,
-      sourceHouseId: lockboxTrace.sourceHouseId ?? sourceContext.sourceHouseId ?? null,
-      profileHouseId: lockboxTrace.profileHouseId ?? profileContext.profileHouseId ?? null,
+      sourceHouseId: meaningfulString(lockboxTrace.sourceHouseId, sourceContext.sourceHouseId),
+      profileHouseId: meaningfulString(lockboxTrace.profileHouseId, profileContext.profileHouseId),
       scenarioId: args.scenarioId,
       simulatorMode: meta.mode ?? lockboxInput.mode ?? null,
       usageInputMode: args.usageInputMode ?? lockboxInput.mode ?? null,
@@ -109,6 +118,8 @@ export function buildSharedPastSimDiagnostics(args: {
       fullChainHash: lockboxTrace.fullChainHash ?? meta.fullChainHash ?? null,
     },
     sourceTruthContext: {
+      sourceHouseId: meaningfulString(lockboxTrace.sourceHouseId, sourceContext.sourceHouseId),
+      profileHouseId: meaningfulString(lockboxTrace.profileHouseId, profileContext.profileHouseId),
       canonicalCoverageWindow: sourceContext.window ?? {
         startDate: meta.coverageStart ?? dataset?.summary?.start ?? null,
         endDate: meta.coverageEnd ?? dataset?.summary?.end ?? null,

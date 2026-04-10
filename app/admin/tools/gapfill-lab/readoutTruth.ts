@@ -95,9 +95,19 @@ export function buildPersistedHouseReadout(args: {
 
   return {
     sourceHouseId:
-      coalesceMeaningfulString(sourceContext?.sourceHouseId, perRunTrace?.sourceHouseId, identityContext?.sourceHouseId) ?? "—",
+      coalesceMeaningfulString(
+        sourceContext?.sourceHouseId,
+        perRunTrace?.sourceHouseId,
+        identityContext?.sourceHouseId,
+        sourceTruthContext?.sourceHouseId
+      ) ?? "—",
     profileHouseId:
-      coalesceMeaningfulString(profileContext?.profileHouseId, perRunTrace?.profileHouseId, identityContext?.profileHouseId) ?? "—",
+      coalesceMeaningfulString(
+        profileContext?.profileHouseId,
+        perRunTrace?.profileHouseId,
+        identityContext?.profileHouseId,
+        sourceTruthContext?.profileHouseId
+      ) ?? "—",
     mode: selectedMode,
     travelRanges:
       summarizeRanges(travelRangeSource) +
