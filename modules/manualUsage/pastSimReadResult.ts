@@ -51,6 +51,13 @@ export async function buildManualUsagePastSimReadResult(args: {
   artifactPersistenceOutcome?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   actualDataset?: any;
+  actualReference?:
+    | {
+        userId: string;
+        houseId: string;
+        scenarioId: string | null;
+      }
+    | null;
 }) : Promise<ManualUsagePastSimReadResult> {
   const startedAt = Date.now();
   const emit = (event: string, extra: Record<string, unknown> = {}) => {
@@ -118,6 +125,11 @@ export async function buildManualUsagePastSimReadResult(args: {
     dayCount: Array.isArray((out.dataset as any)?.daily) ? (out.dataset as any).daily.length : 0,
     monthCount: Array.isArray((out.dataset as any)?.monthly) ? (out.dataset as any).monthly.length : 0,
   });
+  const resolvedActualDataset = await resolveManualCompareActualDataset({
+    actualDataset: args.actualDataset,
+    actualReference: args.actualReference ?? null,
+    correlationId: args.correlationId ?? null,
+  });
   const { compareProjection, manualReadModel, manualMonthlyReconciliation, sharedDiagnostics, manualUsagePayload } =
     await buildManualUsageReadDecorations({
       userId: args.userId,
@@ -135,7 +147,7 @@ export async function buildManualUsagePastSimReadResult(args: {
       artifactEngineVersion: args.artifactEngineVersion ?? null,
       artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
       manualUsagePayload: args.manualUsagePayload,
-      actualDataset: args.actualDataset,
+      actualDataset: resolvedActualDataset,
     });
   const manualParitySummary = buildManualParitySummary({
     scenarioId: args.scenarioId,
@@ -162,6 +174,35 @@ export async function buildManualUsagePastSimReadResult(args: {
     sharedDiagnostics,
     manualParitySummary,
   };
+}
+
+async function resolveManualCompareActualDataset(args: {
+  actualDataset?: any;
+  actualReference?:
+    | {
+        userId: string;
+        houseId: string;
+        scenarioId: string | null;
+      }
+    | null;
+  correlationId?: string | null;
+}) {
+  if (args.actualDataset !== undefined) return args.actualDataset ?? null;
+  if (!args.actualReference?.scenarioId) return null;
+  const out = await getSimulatedUsageForHouseScenario({
+    userId: args.actualReference.userId,
+    houseId: args.actualReference.houseId,
+    scenarioId: args.actualReference.scenarioId,
+    readMode: "allow_rebuild",
+    projectionMode: "baseline",
+    correlationId: args.correlationId ?? undefined,
+    readContext: {
+      artifactReadMode: "allow_rebuild",
+      projectionMode: "baseline",
+      compareSidecarRequest: false,
+    },
+  });
+  return out.ok ? out.dataset : null;
 }
 
 function compactTravelRanges(value: unknown): Array<{ startDate: string; endDate: string }> {

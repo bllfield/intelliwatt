@@ -575,6 +575,17 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       usageInputMode: args.testUsageInputMode,
     }),
   ]);
+  const sourcePastScenario = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: {
+        userId: args.sourceUserId,
+        houseId: args.sourceHouse.id,
+        name: "Past (Corrected)",
+        archivedAt: null,
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
 
   const readResultWithManualPayload = await buildManualUsagePastSimReadResult({
     userId: args.labOwnerUserId,
@@ -593,6 +604,11 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
     manualUsagePayload: manualContract.payload,
+    actualReference: {
+      userId: args.sourceUserId,
+      houseId: args.sourceHouse.id,
+      scenarioId: sourcePastScenario?.id ?? null,
+    },
   });
   if (!readResultWithManualPayload.ok) {
     return NextResponse.json(

@@ -8,6 +8,7 @@ import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTrut
 import {
   buildActualDiagnosticsHeaderReadout,
   buildNonValidationSimulatedBaselineReadout,
+  buildPersistedHouseReadout,
   buildStageTimingReadout,
   formatIdentityReadout,
 } from "@/app/admin/tools/gapfill-lab/readoutTruth";
@@ -396,6 +397,71 @@ describe("user simulated house compare projection", () => {
     expect(readout.intervalFingerprint).toBe("ifp-shared");
   });
 
+  it("prefers shared actual-house diagnostics for persisted top-summary fields", () => {
+    const readout = buildPersistedHouseReadout({
+      dataset: {
+        meta: {
+          lockboxInput: {
+            mode: "",
+            sourceContext: {
+              sourceHouseId: "",
+              intervalFingerprint: "",
+              weatherIdentity: "",
+            },
+            travelRanges: {
+              ranges: [],
+            },
+            validationKeys: {
+              localDateKeys: [],
+            },
+          },
+          lockboxPerRunTrace: {
+            inputHash: "",
+            fullChainHash: "",
+          },
+        },
+      },
+      sharedDiagnostics: {
+        identityContext: {
+          sourceHouseId: "source-house-1",
+          profileHouseId: "profile-house-1",
+          simulatorMode: "ACTUAL_INTERVAL_BASELINE",
+          inputHash: "input-hash-1",
+          fullChainHash: "full-chain-hash-1",
+        },
+        sourceTruthContext: {
+          travelRangesUsed: [{ startDate: "2025-04-01", endDate: "2025-04-03" }],
+          validationTestKeysUsed: ["2025-04-10"],
+          intervalSourceIdentity: "ifp-shared",
+          weatherDatasetIdentity: "wx-shared",
+        },
+        lockboxExecutionSummary: {
+          artifactEngineVersion: "engine-v1",
+        },
+        projectionReadSummary: {
+          validationRowsCount: 2,
+        },
+      },
+      compareProjection: {
+        rows: [{ localDate: "2025-04-10" }],
+      },
+    });
+
+    expect(readout).toMatchObject({
+      sourceHouseId: "source-house-1",
+      profileHouseId: "profile-house-1",
+      mode: "ACTUAL_INTERVAL_BASELINE",
+      intervalFingerprint: "ifp-shared",
+      weatherIdentity: "wx-shared",
+      inputHash: "input-hash-1",
+      fullChainHash: "full-chain-hash-1",
+      artifactEngineVersion: "engine-v1",
+      compareRowsCount: "2",
+    });
+    expect(readout.travelRanges).toContain("2025-04-01 -> 2025-04-03");
+    expect(readout.validationKeys).toContain("2025-04-10");
+  });
+
   it("truthfully marks blank identities and zeroed artifact-only timings as unavailable", () => {
     expect(formatIdentityReadout("")).toBe("unavailable");
     expect(
@@ -562,7 +628,11 @@ describe("user simulated house compare projection", () => {
 
     expect(built.monthlyTotalsKwhByMonth["2025-04"]).toBe(321.45);
     expect(built.sourceDerivedTrustedMonthlyTotalsKwhByMonth).toBeNull();
-    expect((built.monthlyTargetConstructionDiagnostics as MonthlyTargetConstructionDiagnostic[])[0]).toEqual({
+    expect(
+      (built.monthlyTargetConstructionDiagnostics as MonthlyTargetConstructionDiagnostic[]).find(
+        (row) => row.month === "2025-04"
+      )
+    ).toEqual({
       month: "2025-04",
       rawMonthKwhFromSource: 46,
       travelVacantDayCountInMonth: 2,

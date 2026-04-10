@@ -235,6 +235,11 @@ describe("admin manual monthly route", () => {
   });
 
   it("load resets and seeds only the isolated lab home", async () => {
+    mocks.prisma.usageSimulatorScenario.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where?.userId === "admin-owner-1" && where?.houseId === "lab-home-1") return null;
+      if (where?.userId === "source-user-1" && where?.houseId === "source-house-1") return { id: "past-source-s1" };
+      return null;
+    });
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
     const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
     const body = await res.json();
@@ -283,6 +288,7 @@ describe("admin manual monthly route", () => {
     expect(typeof body.seed.annual.annualKwh).toBe("number");
     expect(body.readResult.ok).toBe(true);
     expect(body.readResult.dataset.daily).toHaveLength(30);
+    expect(body.readResult.manualMonthlyReconciliation?.rows?.[0]?.actualIntervalTotalKwh).toBe(300);
     expect(body.readResult.manualParitySummary).toMatchObject({
       stage1_contract: expect.objectContaining({
         anchorEndDate: "2025-04-30",
@@ -291,6 +297,15 @@ describe("admin manual monthly route", () => {
         stage2PathParity: true,
       }),
     });
+    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "source-user-1",
+        houseId: "source-house-1",
+        scenarioId: "past-source-s1",
+        readMode: "allow_rebuild",
+        projectionMode: "baseline",
+      })
+    );
   });
 
   it("routes shared Stage 1 monthly/annual seed resolution through manualUsage/prefill on load", async () => {

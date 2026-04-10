@@ -35,21 +35,21 @@ export type ManualBillPeriodCompare = {
 
 export type ManualMonthlyCompareRow = {
   month: string;
-  actualIntervalKwh: number;
+  actualIntervalKwh: number | null;
   stageOneTargetKwh: number;
   simulatedKwh: number;
-  simulatedVsActualDeltaKwh: number;
+  simulatedVsActualDeltaKwh: number | null;
   simulatedVsTargetDeltaKwh: number;
-  targetVsActualDeltaKwh: number;
+  targetVsActualDeltaKwh: number | null;
 };
 
 export type ManualAnnualCompareSummary = {
-  actualIntervalKwh: number;
+  actualIntervalKwh: number | null;
   stageOneTargetKwh: number;
   simulatedKwh: number;
-  simulatedVsActualDeltaKwh: number;
+  simulatedVsActualDeltaKwh: number | null;
   simulatedVsTargetDeltaKwh: number;
-  targetVsActualDeltaKwh: number;
+  targetVsActualDeltaKwh: number | null;
 };
 
 export type ManualUsageReadModel = {
@@ -73,6 +73,10 @@ function round2(value: number | null): number | null {
 
 function round2Number(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function subtractRounded(left: number | null, right: number | null): number | null {
+  return left == null || right == null ? null : round2Number(left - right);
 }
 
 function buildDailyTotalsByDate(dataset: any): Map<string, number> {
@@ -261,12 +265,12 @@ export function buildManualUsageReadModel(args: {
     payload.mode === "MONTHLY"
       ? rows.map((row) => ({
           month: row.month,
-          actualIntervalKwh: round2Number(row.actualIntervalTotalKwh ?? 0),
+          actualIntervalKwh: round2(row.actualIntervalTotalKwh),
           stageOneTargetKwh: round2Number(row.stageOneTargetTotalKwh ?? 0),
           simulatedKwh: round2Number(row.simulatedStatementTotalKwh ?? 0),
-          simulatedVsActualDeltaKwh: round2Number((row.simulatedStatementTotalKwh ?? 0) - (row.actualIntervalTotalKwh ?? 0)),
+          simulatedVsActualDeltaKwh: subtractRounded(round2(row.simulatedStatementTotalKwh), round2(row.actualIntervalTotalKwh)),
           simulatedVsTargetDeltaKwh: round2Number((row.simulatedStatementTotalKwh ?? 0) - (row.stageOneTargetTotalKwh ?? 0)),
-          targetVsActualDeltaKwh: round2Number((row.stageOneTargetTotalKwh ?? 0) - (row.actualIntervalTotalKwh ?? 0)),
+          targetVsActualDeltaKwh: subtractRounded(round2(row.stageOneTargetTotalKwh), round2(row.actualIntervalTotalKwh)),
         }))
       : [];
 
@@ -275,12 +279,12 @@ export function buildManualUsageReadModel(args: {
     annualRow == null
       ? null
       : {
-          actualIntervalKwh: round2Number(annualRow.actualIntervalTotalKwh ?? 0),
+          actualIntervalKwh: round2(annualRow.actualIntervalTotalKwh),
           stageOneTargetKwh: round2Number(annualRow.stageOneTargetTotalKwh ?? 0),
           simulatedKwh: round2Number(annualRow.simulatedStatementTotalKwh ?? 0),
-          simulatedVsActualDeltaKwh: round2Number((annualRow.simulatedStatementTotalKwh ?? 0) - (annualRow.actualIntervalTotalKwh ?? 0)),
+          simulatedVsActualDeltaKwh: subtractRounded(round2(annualRow.simulatedStatementTotalKwh), round2(annualRow.actualIntervalTotalKwh)),
           simulatedVsTargetDeltaKwh: round2Number((annualRow.simulatedStatementTotalKwh ?? 0) - (annualRow.stageOneTargetTotalKwh ?? 0)),
-          targetVsActualDeltaKwh: round2Number((annualRow.stageOneTargetTotalKwh ?? 0) - (annualRow.actualIntervalTotalKwh ?? 0)),
+          targetVsActualDeltaKwh: subtractRounded(round2(annualRow.stageOneTargetTotalKwh), round2(annualRow.actualIntervalTotalKwh)),
         };
 
   return {

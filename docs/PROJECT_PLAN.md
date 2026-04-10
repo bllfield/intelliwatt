@@ -447,6 +447,7 @@ This section is authoritative for future manual-usage implementation work.
 - GapFill `MANUAL_MONTHLY` remains the pure manual monthly harness on interval-backed houses. It uses the saved/manual Stage 1 payload only; source actual usage stays compare-only after Stage 1 is locked.
 - USER MANUAL MONTHLY must not be reframed as source-derived monthly, and GapFill monthly-from-source must not be treated as the only travel-aware monthly mode.
 - GapFill Actual remains the normal Past baseline truth path. GapFill Test may differ only in pre-lockbox normalized input semantics, then must enter the same shared producer path.
+- GapFill Actual House top-summary/display panels must read that same shared Past artifact/read-model truth too; if shared diagnostics/readback contain actual-house identity or compare facts, GapFill must surface them from that shared path rather than a route/UI-local fallback.
 - Manual Usage Lab and GapFill remain separate pages with separate purposes.
 - Shared Stage 1/pre-lockbox helper ownership for both surfaces now lives in `modules/manualUsage/prefill.ts`:
   - monthly source-payload usability and precedence
@@ -467,6 +468,7 @@ This section is authoritative for future manual-usage implementation work.
 - `MANUAL_TOTALS` recalc on that shared path must stay lean: exact-interval fingerprint resolution, usage-shape profile DB reads/ensures, and bucket-oriented persistence work are not part of manual monthly/annual truth production and should be deferred to readback-only diagnostics when needed.
 - GapFill Actual House remains the full interval-backed source-truth view in manual modes and now reads the same shared persisted Past artifact/display path as the user Past page; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
 - GapFill manual compare must derive its Stage 1 target contract from shared bill-period targets/readback, not from a separate month-first truth owner.
+- Manual compare Actual kWh must come from that same shared actual-house interval-backed truth summed by the shared displayed bill periods; `0.00` is not a valid fallback when actual-backed compare truth is missing.
 - Admin manual-mode responses may surface root-cause infrastructure failures such as Prisma pool exhaustion (`P2024`) so GapFill and Manual Monthly Lab can distinguish producer failure from a generic timeout.
 - New Build launch remains intentionally delayed. Before launch, real-house home/appliance/detail data plus actual interval usage should be studied in GapFill to calibrate fingerprint logic and to measure how close home-details-plus-weather logic can get to actual usage.
 - The exact-interval donor-tuning path remains locked: weather-first K-nearest donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic diagnostics are preserved and not replaced by manual-usage work.

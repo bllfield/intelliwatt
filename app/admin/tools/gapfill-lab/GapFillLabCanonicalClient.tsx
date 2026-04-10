@@ -27,6 +27,7 @@ import type { FingerprintBuildFreshnessPayload } from "@/lib/api/gapfillLabAdmin
 import {
   buildActualDiagnosticsHeaderReadout,
   buildNonValidationSimulatedBaselineReadout,
+  buildPersistedHouseReadout,
   buildStageTimingReadout,
   formatIdentityReadout,
 } from "./readoutTruth";
@@ -336,24 +337,14 @@ function LockboxFlowPanel(props: {
   sharedDiagnostics?: Record<string, unknown> | null;
 }) {
   const presentation = readLockboxPresentation(props.dataset);
-  const sourceContext = presentation.sourceContext as Record<string, unknown> | null;
-  const profileContext = presentation.profileContext as Record<string, unknown> | null;
-  const validationKeys = presentation.validationKeys as Record<string, unknown> | null;
-  const travelRanges = presentation.travelRanges as Record<string, unknown> | null;
   const sharedDiagnostics =
     props.sharedDiagnostics && typeof props.sharedDiagnostics === "object" ? props.sharedDiagnostics : null;
-  const identityContext =
-    sharedDiagnostics?.identityContext && typeof sharedDiagnostics.identityContext === "object"
-      ? (sharedDiagnostics.identityContext as Record<string, unknown>)
-      : null;
-  const sourceTruthContext =
-    sharedDiagnostics?.sourceTruthContext && typeof sharedDiagnostics.sourceTruthContext === "object"
-      ? (sharedDiagnostics.sourceTruthContext as Record<string, unknown>)
-      : null;
-  const lockboxExecutionSummary =
-    sharedDiagnostics?.lockboxExecutionSummary && typeof sharedDiagnostics.lockboxExecutionSummary === "object"
-      ? (sharedDiagnostics.lockboxExecutionSummary as Record<string, unknown>)
-      : null;
+  const readout = buildPersistedHouseReadout({
+    dataset: props.dataset,
+    sharedDiagnostics,
+    fallbackTravelRanges: props.fallbackTravelRanges,
+    fallbackValidationKeys: props.fallbackValidationKeys,
+  });
   const stageTimingReadout = buildStageTimingReadout({
     stageTimings: presentation.stageTimings,
     artifactReadMode: presentation.artifactReadMode,
@@ -370,38 +361,39 @@ function LockboxFlowPanel(props: {
         items={[
           {
             label: "sourceHouseId",
-            value: String(sourceContext?.sourceHouseId ?? presentation.perRunTrace?.sourceHouseId ?? identityContext?.sourceHouseId ?? "—"),
+            value: readout.sourceHouseId,
           },
-          { label: "profileHouseId", value: String(profileContext?.profileHouseId ?? presentation.perRunTrace?.profileHouseId ?? "—") },
-          { label: "mode", value: String(presentation.mode ?? "—") },
+          { label: "profileHouseId", value: readout.profileHouseId },
+          { label: "mode", value: readout.mode },
           {
             label: "travelRanges",
-            value: summarizeRanges(travelRanges?.ranges ?? sourceTruthContext?.travelRangesUsed ?? props.fallbackTravelRanges),
+            value: readout.travelRanges,
           },
           {
             label: "validationKeys",
-            value: summarizeValidationKeys(validationKeys?.localDateKeys ?? sourceTruthContext?.validationTestKeysUsed ?? props.fallbackValidationKeys),
+            value: readout.validationKeys,
           },
           {
             label: "sourceDerivedMonthlyTotalsKwhByMonth",
-            value: JSON.stringify(sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null),
+            value: readout.sourceDerivedMonthlyTotalsKwhByMonth,
           },
           {
             label: "sourceDerivedAnnualTotalKwh",
-            value: formatNumberMaybe(sourceContext?.sourceDerivedAnnualTotalKwh),
+            value: readout.sourceDerivedAnnualTotalKwh,
           },
           {
             label: "intervalFingerprint",
-            value: formatIdentityReadout(sourceContext?.intervalFingerprint ?? sourceTruthContext?.intervalSourceIdentity),
+            value: readout.intervalFingerprint,
           },
           {
             label: "weatherIdentity",
-            value: formatIdentityReadout(sourceContext?.weatherIdentity ?? sourceTruthContext?.weatherDatasetIdentity),
+            value: readout.weatherIdentity,
           },
-          { label: "usageShapeProfileIdentity", value: formatIdentityReadout(profileContext?.usageShapeProfileIdentity) },
-          { label: "inputHash", value: String(presentation.inputHash ?? lockboxExecutionSummary?.artifactInputHash ?? "—") },
-          { label: "fullChainHash", value: String(presentation.fullChainHash ?? "—") },
-          { label: "artifactEngineVersion", value: String(lockboxExecutionSummary?.artifactEngineVersion ?? "—") },
+          { label: "usageShapeProfileIdentity", value: readout.usageShapeProfileIdentity },
+          { label: "inputHash", value: readout.inputHash },
+          { label: "fullChainHash", value: readout.fullChainHash },
+          { label: "artifactEngineVersion", value: readout.artifactEngineVersion },
+          { label: "compareRowsCount", value: readout.compareRowsCount },
         ]}
       />
       <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
@@ -473,10 +465,13 @@ function LeverVisibilityPanel(props: {
   isTestHouse: boolean;
   adminValidationMode?: string | null;
   treatmentMode?: string | null;
+  sharedDiagnostics?: Record<string, unknown> | null;
 }) {
   const presentation = readLockboxPresentation(props.dataset);
-  const sourceContext = presentation.sourceContext as Record<string, unknown> | null;
-  const profileContext = presentation.profileContext as Record<string, unknown> | null;
+  const readout = buildPersistedHouseReadout({
+    dataset: props.dataset,
+    sharedDiagnostics: props.sharedDiagnostics,
+  });
   return (
     <div className="space-y-3 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
       <div>
@@ -487,12 +482,12 @@ function LeverVisibilityPanel(props: {
       </div>
       <MetadataGrid
         items={[
-          { label: "Fixed source truth", value: `sourceHouseId=${String(sourceContext?.sourceHouseId ?? "—")} | intervalFingerprint=${formatIdentityReadout(sourceContext?.intervalFingerprint)} | weatherIdentity=${formatIdentityReadout(sourceContext?.weatherIdentity)}` },
-          { label: "Fixed profile truth", value: `profileHouseId=${String(profileContext?.profileHouseId ?? "—")} | usageShapeProfileIdentity=${formatIdentityReadout(profileContext?.usageShapeProfileIdentity)}` },
-          { label: "Mode-selected constraints", value: `mode=${String(presentation.mode ?? "—")} | validationMode=${String(props.adminValidationMode ?? "—")} | travelRanges=${summarizeRanges(presentation.travelRanges?.ranges ?? [])}` },
+          { label: "Fixed source truth", value: `sourceHouseId=${readout.sourceHouseId} | intervalFingerprint=${readout.intervalFingerprint} | weatherIdentity=${readout.weatherIdentity}` },
+          { label: "Fixed profile truth", value: `profileHouseId=${readout.profileHouseId} | usageShapeProfileIdentity=${readout.usageShapeProfileIdentity}` },
+          { label: "Mode-selected constraints", value: `mode=${readout.mode} | validationMode=${String(props.adminValidationMode ?? "—")} | travelRanges=${readout.travelRanges}` },
           {
             label: "Derived inputs",
-            value: `monthlyTotals=${JSON.stringify(sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null)} | annual=${formatNumberMaybe(sourceContext?.sourceDerivedAnnualTotalKwh)}`,
+            value: `monthlyTotals=${readout.sourceDerivedMonthlyTotalsKwhByMonth} | annual=${readout.sourceDerivedAnnualTotalKwh}`,
           },
           {
             label: "Adjustable controls in normal graded flow",
@@ -1840,6 +1835,7 @@ export default function GapFillLabCanonicalClient() {
                 title="Actual House fixed inputs and constraints"
                 dataset={actualHouseBaselineDataset}
                 isTestHouse={false}
+                sharedDiagnostics={actualSharedDiagnostics}
               />
             </div>
             {pastSimSnapshot ? (
@@ -1995,6 +1991,7 @@ export default function GapFillLabCanonicalClient() {
                 isTestHouse={true}
                 adminValidationMode={visibilityFromResult?.adminLabValidationSelectionMode ?? adminLabValidationSelectionMode}
                 treatmentMode={visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode}
+                sharedDiagnostics={testSharedDiagnostics}
               />
             </div>
             {manualParitySummary ? (
@@ -2113,12 +2110,12 @@ export default function GapFillLabCanonicalClient() {
                   {manualMonthlyCompareRows.map((row) => (
                     <tr key={row.month}>
                       <td className="border border-brand-blue/10 px-2 py-1">{row.month}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.actualIntervalKwh.toFixed(2)}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.stageOneTargetKwh.toFixed(2)}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedKwh.toFixed(2)}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedVsActualDeltaKwh.toFixed(2)}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.simulatedVsTargetDeltaKwh.toFixed(2)}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{row.targetVsActualDeltaKwh.toFixed(2)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.actualIntervalKwh)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.stageOneTargetKwh)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedKwh)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedVsActualDeltaKwh)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedVsTargetDeltaKwh)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.targetVsActualDeltaKwh)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2135,27 +2132,27 @@ export default function GapFillLabCanonicalClient() {
             <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Actual interval</div>
-                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.actualIntervalKwh.toFixed(2)}</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.actualIntervalKwh)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Stage 1 target</div>
-                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.stageOneTargetKwh.toFixed(2)}</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.stageOneTargetKwh)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Final simulated</div>
-                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.simulatedKwh.toFixed(2)}</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.simulatedKwh)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Sim vs actual</div>
-                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.simulatedVsActualDeltaKwh.toFixed(2)}</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.simulatedVsActualDeltaKwh)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Sim vs target</div>
-                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.simulatedVsTargetDeltaKwh.toFixed(2)}</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.simulatedVsTargetDeltaKwh)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Target vs actual</div>
-                <div className="mt-2 text-lg font-semibold text-brand-navy">{manualAnnualCompareSummary.targetVsActualDeltaKwh.toFixed(2)}</div>
+                <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.targetVsActualDeltaKwh)}</div>
               </div>
             </div>
           </div>

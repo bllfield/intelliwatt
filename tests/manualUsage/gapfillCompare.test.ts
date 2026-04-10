@@ -147,4 +147,44 @@ describe("gapfill manual usage compare helpers", () => {
       targetVsActualDeltaKwh: 10,
     });
   });
+
+  it("keeps actual compare fields unavailable instead of zero-falling back", () => {
+    const readModel = buildManualUsageReadModel({
+      payload: {
+        mode: "MONTHLY" as const,
+        anchorEndDate: "2025-02-28",
+        monthlyKwh: [{ month: "2025-02", kwh: 115 }],
+        statementRanges: [{ month: "2025-02", startDate: "2025-02-01", endDate: "2025-02-28" }],
+        travelRanges: [],
+      },
+      dataset: {
+        meta: {
+          filledMonths: [],
+          manualMonthlyInputState: {
+            inputKindByMonth: { "2025-02": "entered_nonzero" },
+          },
+        },
+        daily: Array.from({ length: 28 }, (_, idx) => ({
+          date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 117 / 28,
+        })),
+      },
+    });
+
+    expect(
+      buildGapfillManualMonthlyCompareRows({
+        manualReadModel: readModel,
+      })
+    ).toEqual([
+      {
+        month: "2025-02",
+        actualIntervalKwh: null,
+        stageOneTargetKwh: 115,
+        simulatedKwh: 117,
+        simulatedVsActualDeltaKwh: null,
+        simulatedVsTargetDeltaKwh: 2,
+        targetVsActualDeltaKwh: null,
+      },
+    ]);
+  });
 });

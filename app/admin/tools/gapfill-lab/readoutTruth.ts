@@ -10,6 +10,10 @@ function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export function coalesceMeaningfulString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value !== "string") continue;
@@ -21,6 +25,95 @@ export function coalesceMeaningfulString(...values: unknown[]): string | null {
 
 export function formatIdentityReadout(value: unknown, missingLabel = "unavailable"): string {
   return coalesceMeaningfulString(value) ?? missingLabel;
+}
+
+function summarizeRanges(value: unknown): string {
+  const list = asArray(value)
+    .map((range) => {
+      const record = asRecord(range);
+      const start = coalesceMeaningfulString(record?.startDate);
+      const end = coalesceMeaningfulString(record?.endDate);
+      return start && end ? `${start} -> ${end}` : null;
+    })
+    .filter((value): value is string => Boolean(value));
+  if (list.length === 0) return "none";
+  return list.slice(0, 4).join(" | ") + (list.length > 4 ? ` | +${list.length - 4} more` : "");
+}
+
+function summarizeValidationKeys(value: unknown): string {
+  const list = asArray(value)
+    .map((entry) => String(entry ?? "").slice(0, 10))
+    .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry));
+  if (list.length === 0) return "none";
+  return `${list.length} key(s): ${list.slice(0, 6).join(", ")}${list.length > 6 ? ", ..." : ""}`;
+}
+
+export function buildPersistedHouseReadout(args: {
+  dataset: any;
+  sharedDiagnostics?: Record<string, unknown> | null;
+  fallbackTravelRanges?: unknown;
+  fallbackValidationKeys?: unknown;
+  compareProjection?: { rows?: unknown } | null;
+}) {
+  const meta = asRecord(args.dataset?.meta);
+  const lockboxInput = asRecord(meta?.lockboxInput);
+  const perRunTrace = asRecord(meta?.lockboxPerRunTrace);
+  const sourceContext = asRecord(lockboxInput?.sourceContext);
+  const profileContext = asRecord(lockboxInput?.profileContext);
+  const validationKeys = asRecord(lockboxInput?.validationKeys);
+  const travelRanges = asRecord(lockboxInput?.travelRanges);
+  const sharedDiagnostics = asRecord(args.sharedDiagnostics);
+  const identityContext = asRecord(sharedDiagnostics?.identityContext);
+  const sourceTruthContext = asRecord(sharedDiagnostics?.sourceTruthContext);
+  const lockboxExecutionSummary = asRecord(sharedDiagnostics?.lockboxExecutionSummary);
+  const projectionReadSummary = asRecord(sharedDiagnostics?.projectionReadSummary);
+  const travelRangeSource =
+    asArray(travelRanges?.ranges).length > 0
+      ? travelRanges?.ranges
+      : asArray(sourceTruthContext?.travelRangesUsed).length > 0
+        ? sourceTruthContext?.travelRangesUsed
+        : args.fallbackTravelRanges;
+  const validationKeySource =
+    asArray(validationKeys?.localDateKeys).length > 0
+      ? validationKeys?.localDateKeys
+      : asArray(sourceTruthContext?.validationTestKeysUsed).length > 0
+        ? sourceTruthContext?.validationTestKeysUsed
+        : args.fallbackValidationKeys;
+  const validationRowsCount =
+    toFiniteNumber(projectionReadSummary?.validationRowsCount) ??
+    (Array.isArray(args.compareProjection?.rows) ? args.compareProjection.rows.length : null);
+
+  return {
+    sourceHouseId:
+      coalesceMeaningfulString(sourceContext?.sourceHouseId, perRunTrace?.sourceHouseId, identityContext?.sourceHouseId) ?? "—",
+    profileHouseId:
+      coalesceMeaningfulString(profileContext?.profileHouseId, perRunTrace?.profileHouseId, identityContext?.profileHouseId) ?? "—",
+    mode: coalesceMeaningfulString(lockboxInput?.mode, identityContext?.simulatorMode, identityContext?.usageInputMode) ?? "—",
+    travelRanges: summarizeRanges(travelRangeSource),
+    validationKeys: summarizeValidationKeys(validationKeySource),
+    sourceDerivedMonthlyTotalsKwhByMonth: JSON.stringify(
+      sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? sourceTruthContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null
+    ),
+    sourceDerivedAnnualTotalKwh: (() => {
+      const value = toFiniteNumber(sourceContext?.sourceDerivedAnnualTotalKwh ?? sourceTruthContext?.sourceDerivedAnnualTotalKwh);
+      return value != null ? value.toFixed(2) : "—";
+    })(),
+    intervalFingerprint: formatIdentityReadout(
+      coalesceMeaningfulString(sourceContext?.intervalFingerprint, sourceTruthContext?.intervalSourceIdentity)
+    ),
+    weatherIdentity: formatIdentityReadout(
+      coalesceMeaningfulString(sourceContext?.weatherIdentity, sourceTruthContext?.weatherDatasetIdentity)
+    ),
+    usageShapeProfileIdentity: formatIdentityReadout(
+      coalesceMeaningfulString(profileContext?.usageShapeProfileIdentity, sourceTruthContext?.intervalUsageFingerprintIdentity)
+    ),
+    inputHash:
+      coalesceMeaningfulString(perRunTrace?.inputHash, identityContext?.inputHash, lockboxExecutionSummary?.artifactInputHash) ?? "—",
+    fullChainHash:
+      coalesceMeaningfulString(meta?.fullChainHash, perRunTrace?.fullChainHash, identityContext?.fullChainHash) ?? "—",
+    artifactEngineVersion: coalesceMeaningfulString(lockboxExecutionSummary?.artifactEngineVersion) ?? "—",
+    compareRowsCount: validationRowsCount != null ? String(validationRowsCount) : "—",
+  };
 }
 
 export function buildStageTimingReadout(args: {
