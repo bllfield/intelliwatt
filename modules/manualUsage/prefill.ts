@@ -1,4 +1,4 @@
-import { buildContiguousStatementRanges } from "@/modules/manualUsage/statementRanges";
+import { addDaysToIsoDate, buildContiguousStatementRanges, MAX_MANUAL_MONTHLY_BILLS } from "@/modules/manualUsage/statementRanges";
 import type {
   AnnualManualUsagePayload,
   ManualUsagePayload,
@@ -112,6 +112,10 @@ export function resolveSeedAnchorEndDate(args: {
       : null;
   if (sourceAnchor) return sourceAnchor;
   return isIsoDate(args.actualEndDate) ? args.actualEndDate.trim() : null;
+}
+
+export function resolveGapfillSyntheticAnchorEndDate(actualEndDate?: string | null): string | null {
+  return isIsoDate(actualEndDate) ? addDaysToIsoDate(actualEndDate.trim(), -2) : null;
 }
 
 export function deriveMonthlySeedFromActual(args: {
@@ -357,4 +361,31 @@ export function resolveSharedManualStageOneContract(args: {
     testHomePayload: args.testHomePayload ?? null,
     seedSet,
   });
+}
+
+export function reanchorGapfillManualStageOnePayload(args: {
+  payload: MonthlyManualUsagePayload | AnnualManualUsagePayload;
+  anchorEndDate: string;
+}): MonthlyManualUsagePayload | AnnualManualUsagePayload {
+  if (!isIsoDate(args.anchorEndDate)) return args.payload;
+  if (args.payload.mode === "ANNUAL") {
+    return {
+      ...args.payload,
+      anchorEndDate: args.anchorEndDate,
+    };
+  }
+  const statementRanges = buildContiguousStatementRanges(args.anchorEndDate, MAX_MANUAL_MONTHLY_BILLS);
+  const monthlyKwh = statementRanges.map((range, index) => {
+    const rawKwh = args.payload.monthlyKwh?.[index]?.kwh;
+    return {
+      month: range.month,
+      kwh: typeof rawKwh === "number" && Number.isFinite(rawKwh) ? rawKwh : "",
+    };
+  });
+  return {
+    ...args.payload,
+    anchorEndDate: args.anchorEndDate,
+    monthlyKwh,
+    statementRanges,
+  };
 }

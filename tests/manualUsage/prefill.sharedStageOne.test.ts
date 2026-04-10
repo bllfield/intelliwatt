@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildManualUsageStageOneResolvedSeeds,
+  reanchorGapfillManualStageOnePayload,
+  resolveGapfillSyntheticAnchorEndDate,
   resolveManualUsageStageOnePayloadForMode,
 } from "@/modules/manualUsage/prefill";
 
@@ -92,6 +94,48 @@ describe("manualUsage shared Stage 1 helpers", () => {
       mode: "ANNUAL",
       anchorEndDate: "2025-04-15",
       annualKwh: 456,
+    });
+  });
+
+  it("uses a synthetic gapfill anchor and rebuilds 12 monthly bill periods", () => {
+    expect(resolveGapfillSyntheticAnchorEndDate("2026-02-28")).toBe("2026-02-26");
+
+    const reanchoredMonthly = reanchorGapfillManualStageOnePayload({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-02-28",
+        monthlyKwh: [
+          { month: "2026-02", kwh: 25 },
+          { month: "2026-01", kwh: 20 },
+        ],
+        statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+        travelRanges: [],
+      },
+      anchorEndDate: "2026-02-26",
+    });
+    expect(reanchoredMonthly).toMatchObject({
+      mode: "MONTHLY",
+      anchorEndDate: "2026-02-26",
+    });
+    expect(reanchoredMonthly.mode).toBe("MONTHLY");
+    expect(reanchoredMonthly.statementRanges).toHaveLength(12);
+    expect(reanchoredMonthly.monthlyKwh).toHaveLength(12);
+    expect(reanchoredMonthly.monthlyKwh[0]).toMatchObject({ month: "2026-02", kwh: 25 });
+    expect(reanchoredMonthly.monthlyKwh[1]).toMatchObject({ month: "2026-01", kwh: 20 });
+
+    const reanchoredAnnual = reanchorGapfillManualStageOnePayload({
+      payload: {
+        mode: "ANNUAL",
+        anchorEndDate: "2026-02-28",
+        annualKwh: 1200,
+        travelRanges: [],
+      },
+      anchorEndDate: "2026-02-26",
+    });
+    expect(reanchoredAnnual).toMatchObject({
+      mode: "ANNUAL",
+      anchorEndDate: "2026-02-26",
+      annualKwh: 1200,
     });
   });
 });

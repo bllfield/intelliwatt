@@ -2335,10 +2335,105 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
-          monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+          anchorEndDate: "2026-02-26",
+          statementRanges: expect.any(Array),
+          monthlyKwh: expect.arrayContaining([expect.objectContaining({ month: "2026-02", kwh: 25 })]),
         }),
       })
     );
+  });
+
+  it("derives a synthetic anchor for gapfill manual monthly when the copied payload is legacy and blank", async () => {
+    getActualUsageDatasetForHouse.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SMT", intervalsCount: 0, start: "2025-02-26", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
+        daily: [
+          { date: "2025-02-26", kwh: 10 },
+          { date: "2026-02-26", kwh: 20 },
+        ],
+        monthly: [],
+        insights: {},
+      },
+    });
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndMonth: "2026-01",
+            billEndDay: 15,
+            monthlyKwh: [{ month: "2026-01", kwh: "" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return {
+        payload: {
+          mode: "MONTHLY",
+          anchorEndMonth: "2026-01",
+          billEndDay: 15,
+          monthlyKwh: [{ month: "2026-01", kwh: "" }],
+          travelRanges: [{ startDate: "2026-02-10", endDate: "2026-02-12" }],
+        },
+        updatedAt: null,
+      };
+    });
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "manual-cid-gapfill-anchor",
+      result: {
+        ok: true,
+        houseId: "test-home-1",
+        buildInputsHash: "hash-gapfill-anchor",
+        dataset: {},
+        canonicalArtifactInputHash: "manual-canonical-gapfill-anchor-hash-1",
+        effectiveSimulatorMode: "MANUAL_TOTALS",
+      },
+    });
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+      id: "build-gapfill-anchor-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
+      buildInputsHash: "hash-gapfill-anchor",
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+      },
+    });
+    pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+      id: "artifact-gapfill-anchor-1",
+      updatedAt: new Date("2026-01-02T00:01:00.000Z"),
+      inputHash: "artifact-gapfill-anchor-hash",
+      engineVersion: "production_past_stitched_v1",
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      testUsageInputMode: "MANUAL_MONTHLY",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.treatmentMode).toBe("MANUAL_MONTHLY");
+    expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          anchorEndDate: "2026-02-26",
+          statementRanges: expect.any(Array),
+          monthlyKwh: expect.arrayContaining([expect.objectContaining({ month: "2026-02", kwh: 20 })]),
+        }),
+      })
+    );
+    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.preLockboxTravelRanges).toEqual([
+      { startDate: "2026-02-10", endDate: "2026-02-12" },
+    ]);
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
@@ -2408,6 +2503,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_annual_constrained");
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
+    expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          mode: "ANNUAL",
+          anchorEndDate: "2026-02-26",
+          annualKwh: 1200,
+        }),
+      })
+    );
   });
 
   it("returns async handoff for manual monthly mode so the client can poll persisted readback", async () => {

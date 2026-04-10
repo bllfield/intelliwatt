@@ -80,7 +80,8 @@ import {
   resolveUserWeatherLogicSetting,
 } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import {
-  hasUsableMonthlyPayload,
+  reanchorGapfillManualStageOnePayload,
+  resolveGapfillSyntheticAnchorEndDate,
   resolveSharedManualStageOneContract,
   type ManualUsageStageOneResolvedPayload,
 } from "@/modules/manualUsage/prefill";
@@ -415,45 +416,6 @@ async function buildGapfillManualConstraintPayload(args: {
   travelRangesForRecalc: DateRange[];
   usageInputMode: TestHomeUsageInputMode;
 }): Promise<ManualUsageStageOneResolvedPayload> {
-  if (args.usageInputMode === "MANUAL_MONTHLY") {
-    const testHomeManualRec = await getManualUsageInputForUserHouse({
-      userId: args.labOwnerUserId,
-      houseId: args.testHomeHouseId,
-    });
-    return hasUsableMonthlyPayload(testHomeManualRec.payload)
-      ? {
-          mode: "MONTHLY",
-          payload: {
-            mode: "MONTHLY",
-            anchorEndDate: testHomeManualRec.payload.anchorEndDate,
-            monthlyKwh: testHomeManualRec.payload.monthlyKwh,
-            statementRanges: testHomeManualRec.payload.statementRanges,
-            travelRanges: testHomeManualRec.payload.travelRanges,
-          },
-          payloadSource: "test_home_saved_payload",
-          seedSet: {
-            anchorEndDate: testHomeManualRec.payload.anchorEndDate,
-            usableSourceMonthlyPayload: null,
-            usableSourceAnnualPayload: null,
-            monthlySeed: null,
-            annualSeed: null,
-            sourceMode: null,
-          },
-        }
-      : {
-          mode: "MONTHLY",
-          payload: null,
-          payloadSource: "unresolved",
-          seedSet: {
-            anchorEndDate: null,
-            usableSourceMonthlyPayload: null,
-            usableSourceAnnualPayload: null,
-            monthlySeed: null,
-            annualSeed: null,
-            sourceMode: null,
-          },
-        };
-  }
   const [sourceManualRec, testHomeManualRec, sourceUsageDataset] = await Promise.all([
     getManualUsageInputForUserHouse({
       userId: args.sourceHouseUserId,
@@ -467,20 +429,34 @@ async function buildGapfillManualConstraintPayload(args: {
       skipFullYearIntervalFetch: true,
     }).catch(() => ({ dataset: null })),
   ]);
-  return resolveSharedManualStageOneContract({
+  const actualEndDate = String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null;
+  const syntheticAnchorEndDate = resolveGapfillSyntheticAnchorEndDate(actualEndDate) ?? actualEndDate;
+  const travelRanges =
+    Array.isArray(testHomeManualRec.payload?.travelRanges) && testHomeManualRec.payload.travelRanges.length > 0
+      ? testHomeManualRec.payload.travelRanges
+      : Array.isArray(sourceManualRec.payload?.travelRanges) && sourceManualRec.payload.travelRanges.length > 0
+        ? sourceManualRec.payload.travelRanges
+        : args.travelRangesForRecalc;
+  const resolved = resolveSharedManualStageOneContract({
     mode: args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS" ? "ANNUAL" : "MONTHLY",
     sourcePayload: sourceManualRec.payload,
-    actualEndDate:
-      String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null,
-    // Manual Usage Lab is the authority for manual-entry travel semantics, so seed
-    // the shared manual contract from manual payload travel ranges rather than DB-only travel state.
-    travelRanges:
-      Array.isArray(sourceManualRec.payload?.travelRanges)
-        ? sourceManualRec.payload.travelRanges
-        : [],
+    actualEndDate: syntheticAnchorEndDate,
+    // GapFill manual Stage 1 can use a synthetic anchor for interval-backed tuning runs;
+    // travel still comes from the saved manual payload first when available.
+    travelRanges,
     dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
     testHomePayload: testHomeManualRec.payload,
   });
+  if (!resolved.payload || !syntheticAnchorEndDate) {
+    return resolved;
+  }
+  return {
+    ...resolved,
+    payload: reanchorGapfillManualStageOnePayload({
+      payload: resolved.payload,
+      anchorEndDate: syntheticAnchorEndDate,
+    }),
+  };
 }
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
