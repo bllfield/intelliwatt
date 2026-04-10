@@ -364,6 +364,14 @@ export function resolveSharedManualStageOneContract(args: {
 }
 
 export function reanchorGapfillManualStageOnePayload(args: {
+  payload: MonthlyManualUsagePayload;
+  anchorEndDate: string;
+}): MonthlyManualUsagePayload;
+export function reanchorGapfillManualStageOnePayload(args: {
+  payload: AnnualManualUsagePayload;
+  anchorEndDate: string;
+}): AnnualManualUsagePayload;
+export function reanchorGapfillManualStageOnePayload(args: {
   payload: MonthlyManualUsagePayload | AnnualManualUsagePayload;
   anchorEndDate: string;
 }): MonthlyManualUsagePayload | AnnualManualUsagePayload {
@@ -374,16 +382,17 @@ export function reanchorGapfillManualStageOnePayload(args: {
       anchorEndDate: args.anchorEndDate,
     };
   }
+  const monthlyPayload = args.payload as MonthlyManualUsagePayload;
   const statementRanges = buildContiguousStatementRanges(args.anchorEndDate, MAX_MANUAL_MONTHLY_BILLS);
-  const monthlyKwh = statementRanges.map((range, index) => {
-    const rawKwh = args.payload.monthlyKwh?.[index]?.kwh;
+  const monthlyKwh: MonthlyManualUsagePayload["monthlyKwh"] = statementRanges.map((range, index) => {
+    const rawKwh = monthlyPayload.monthlyKwh?.[index]?.kwh;
     return {
       month: range.month,
-      kwh: typeof rawKwh === "number" && Number.isFinite(rawKwh) ? rawKwh : "",
+      kwh: typeof rawKwh === "number" && Number.isFinite(rawKwh) ? rawKwh : ("" as const),
     };
   });
   return {
-    ...args.payload,
+    ...monthlyPayload,
     anchorEndDate: args.anchorEndDate,
     monthlyKwh,
     statementRanges,

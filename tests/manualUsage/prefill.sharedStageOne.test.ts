@@ -118,6 +118,9 @@ describe("manualUsage shared Stage 1 helpers", () => {
       anchorEndDate: "2026-02-26",
     });
     expect(reanchoredMonthly.mode).toBe("MONTHLY");
+    if (reanchoredMonthly.mode !== "MONTHLY") {
+      throw new Error("expected monthly payload");
+    }
     expect(reanchoredMonthly.statementRanges).toHaveLength(12);
     expect(reanchoredMonthly.monthlyKwh).toHaveLength(12);
     expect(reanchoredMonthly.monthlyKwh[0]).toMatchObject({ month: "2026-02", kwh: 25 });

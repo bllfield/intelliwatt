@@ -450,13 +450,25 @@ async function buildGapfillManualConstraintPayload(args: {
   if (!resolved.payload || !syntheticAnchorEndDate) {
     return resolved;
   }
-  return {
-    ...resolved,
-    payload: reanchorGapfillManualStageOnePayload({
-      payload: resolved.payload,
-      anchorEndDate: syntheticAnchorEndDate,
-    }),
-  };
+  if (resolved.mode === "MONTHLY" && resolved.payload.mode === "MONTHLY") {
+    return {
+      ...resolved,
+      payload: reanchorGapfillManualStageOnePayload({
+        payload: resolved.payload,
+        anchorEndDate: syntheticAnchorEndDate,
+      }),
+    };
+  }
+  if (resolved.mode === "ANNUAL" && resolved.payload.mode === "ANNUAL") {
+    return {
+      ...resolved,
+      payload: reanchorGapfillManualStageOnePayload({
+        payload: resolved.payload,
+        anchorEndDate: syntheticAnchorEndDate,
+      }),
+    };
+  }
+  return resolved;
 }
 
 function hasAdminSessionCookie(request: NextRequest): boolean {
