@@ -319,7 +319,7 @@ export function ManualUsageEntry({
                   const isOldest = idx === monthlyRows.length - 1;
                   const statementStartDate = statementStartDateForRow(monthlyRows, idx);
                   return (
-                    <div key={`${idx}:${row.endDate}:${statementMonthLabel(row.endDate)}`} className="rounded-2xl border border-brand-cyan/15 bg-brand-navy px-4 py-4">
+                    <div key={`bill-${idx}`} className="rounded-2xl border border-brand-cyan/15 bg-brand-navy px-4 py-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <div className="text-sm font-semibold text-brand-cyan">

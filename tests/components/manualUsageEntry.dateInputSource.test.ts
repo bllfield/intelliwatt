@@ -16,4 +16,11 @@ describe("ManualUsageEntry date input editing", () => {
     expect(source).toContain("onBlur={(e) => {");
     expect(source).toContain("normalizeManualDateInput(e.target.value)");
   });
+
+  it("keeps monthly bill rows on stable React keys while editing dates", () => {
+    const source = readRepoFile("components/manual/ManualUsageEntry.tsx");
+
+    expect(source).toContain('key={`bill-${idx}`}');
+    expect(source).not.toContain('key={`${idx}:${row.endDate}:${statementMonthLabel(row.endDate)}`}');
+  });
 });
