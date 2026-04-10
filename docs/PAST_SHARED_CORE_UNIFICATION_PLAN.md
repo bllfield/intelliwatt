@@ -139,6 +139,11 @@ Summary:
 - Current branch caveat: canonical simulated-day totals are owned by `buildSimulatedUsageDatasetFromCurve()` and consumed from persisted artifact fields. The remaining narrow caveat is historical artifact provenance/readback hardening, not an active Gap-Fill authority split.
 - Current branch caveat: shared window/date ownership is still correct and must stay locked. Compare identity uses `resolveWindowFromBuildInputsForPastIdentity()`, metadata/report coverage uses `resolveCanonicalUsage365CoverageWindow()`, and scored/test dates must not widen travel/vacant exclusion ownership or artifact identity.
 - Current branch caveat: stronger monthly weather evidence, stronger baseload inference, and stronger HVAC-share inference still remain future manual-monthly work after this shared-contract/ownership pass.
+### Plan Change (2026-04) — Manual Monthly Canonical Actual + Active Contract Pass
+- Canonical actual-house artifact/readback truth is the only valid owner for manual compare actual-reference. Shared compare/read surfaces must not switch annual totals, monthly actuals, or bill-period Actual kWh onto a second aggregate path when the actual-house artifact already carries that truth.
+- Active `MANUAL_MONTHLY` contract ownership is now exact-artifact scoped: the Stage 1 payload written for the run must carry the same saved/effective travel contract selected for recalc, and stale saved payload travel ranges must not be surfaced as active artifact truth.
+- Shared manual low-data travel behavior must remain on the same modeled-day family as manual-constrained days. Travel/vacant weather evidence may be weaker, but the runtime must keep the same shared weather/day-shape selector family instead of dropping onto a separate frozen-value engine.
+- This Plan Change overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or separate flat travel-day behavior.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`
   - `simulatePastUsageDataset`

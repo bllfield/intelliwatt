@@ -377,6 +377,92 @@ describe("low-data Past shared chain (Slice 14)", () => {
     expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.coolingSensitivity).toBeGreaterThan(0);
   });
 
+  it("keeps shared weather evidence active even when all manual bill periods are travel-overlap", async () => {
+    buildPastSimulatedBaselineV1.mockClear();
+    getHouseWeatherDays.mockImplementation(async ({ dateKeys }: any) => {
+      const keys = Array.from(dateKeys ?? []) as string[];
+      const m = new Map();
+      for (const dk of keys) {
+        const cold = dk.endsWith("-01") || dk.endsWith("-02") || dk.endsWith("-03");
+        m.set(dk, {
+          tAvgF: cold ? 38 : 79,
+          tMinF: cold ? 30 : 72,
+          tMaxF: cold ? 45 : 88,
+          hdd65: cold ? 27 : 0,
+          cdd65: cold ? 0 : 16,
+          source: "OPEN_METEO",
+        });
+      }
+      return m;
+    });
+
+    await simulatePastUsageDataset({
+      userId: "u1",
+      houseId: "h1",
+      actualContextHouseId: "h1",
+      esiid: null,
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      timezone: "America/Chicago",
+      travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-31" }],
+      buildInputs: {
+        ...baseBuildInputs,
+        mode: "MANUAL_TOTALS",
+        manualBillPeriods: [
+          {
+            id: "2026-01",
+            month: "2026-01",
+            startDate: "2026-01-01",
+            endDate: "2026-01-31",
+            eligibleForConstraint: false,
+            exclusionReason: "travel_overlap",
+            enteredKwh: 620,
+          },
+        ],
+        manualBillPeriodTotalsKwhById: {},
+        monthlyTargetConstructionDiagnostics: [
+          { month: "2026-01", normalizedMonthTarget: 620, monthlyTargetBuildMethod: "user_manual_month_value" },
+        ],
+        manualMonthlyInputState: {
+          enteredMonthKeys: ["2026-01"],
+          missingMonthKeys: [],
+          explicitZeroMonthKeys: [],
+          inputKindByMonth: {
+            "2026-01": "entered_nonzero",
+          },
+        },
+        snapshots: {
+          manualUsagePayload: {
+            mode: "MONTHLY",
+            travelRanges: [{ startDate: "2026-01-01", endDate: "2026-01-31" }],
+          },
+          homeProfile: {
+            fuelConfiguration: "all_electric",
+            heatingType: "electric",
+            hvacType: "central",
+          },
+          applianceProfile: {
+            appliances: [{ type: "cooling" }],
+          },
+        },
+        resolvedSimFingerprint: {
+          manualTotalsConstraint: "monthly",
+        },
+      } as any,
+      buildPathKind: "recalc",
+      includeSimulatedDayResults: false,
+    });
+
+    const firstCall = buildPastSimulatedBaselineV1.mock.calls[0]?.[0];
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary).toMatchObject({
+      explicitTravelRangesUsed: [{ startDate: "2026-01-01", endDate: "2026-01-31" }],
+    });
+    expect(firstCall?.lowDataSyntheticContext?.weatherEvidenceSummary?.byMonth?.["2026-01"]).toMatchObject({
+      monthKey: "2026-01",
+      excludedTravelTouchedBillPeriodCount: 1,
+    });
+  });
+
   it("NEW_BUILD_ESTIMATE uses synthetic intervals path (no DB interval fetch)", async () => {
     buildPastSimulatedBaselineV1.mockClear();
     await simulatePastUsageDataset({

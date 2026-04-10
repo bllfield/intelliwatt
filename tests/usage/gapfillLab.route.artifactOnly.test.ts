@@ -2343,6 +2343,101 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     );
   });
 
+  it("writes the active saved test-home travel contract into the manual payload before pure-manual recalc", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    vi.mocked(helpers.getTravelRangesFromDb as any).mockImplementation(async (_userId: string, houseId: string) => {
+      if (houseId === "test-home-1") {
+        return [
+          { startDate: "2025-03-14", endDate: "2025-06-01" },
+          { startDate: "2025-08-13", endDate: "2025-08-17" },
+        ];
+      }
+      return [];
+    });
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 900 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return {
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-02-28",
+          monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+          statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+          travelRanges: [{ startDate: "2025-02-18", endDate: "2025-05-26" }],
+        },
+        updatedAt: null,
+      };
+    });
+    dispatchPastSimRecalc.mockResolvedValueOnce({
+      executionMode: "inline",
+      correlationId: "manual-cid-active-travel",
+      result: {
+        ok: true,
+        houseId: "test-home-1",
+        buildInputsHash: "hash-manual-active-travel",
+        dataset: {},
+        canonicalArtifactInputHash: "manual-canonical-active-travel-hash-1",
+        effectiveSimulatorMode: "MANUAL_TOTALS",
+      },
+    });
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+      id: "build-manual-active-travel-1",
+      lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
+      buildInputsHash: "hash-manual-active-travel",
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+      },
+    });
+    pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+      id: "artifact-manual-active-travel-1",
+      updatedAt: new Date("2026-01-02T00:01:00.000Z"),
+      inputHash: "artifact-manual-active-travel-hash",
+      engineVersion: "production_past_stitched_v1",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "run_test_home_canonical_recalc",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      testUsageInputMode: "MANUAL_MONTHLY",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.effectiveTravelRangesForRecalc).toEqual([
+      { startDate: "2025-03-14", endDate: "2025-06-01" },
+      { startDate: "2025-08-13", endDate: "2025-08-17" },
+    ]);
+    expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          travelRanges: [
+            { startDate: "2025-03-14", endDate: "2025-06-01" },
+            { startDate: "2025-08-13", endDate: "2025-08-17" },
+          ],
+        }),
+      })
+    );
+  });
+
   it("derives a synthetic anchor for gapfill manual monthly when the copied payload is legacy and blank", async () => {
     getActualUsageDatasetForHouse.mockResolvedValueOnce({
       dataset: {

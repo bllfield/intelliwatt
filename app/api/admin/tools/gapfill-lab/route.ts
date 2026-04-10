@@ -431,19 +431,21 @@ async function buildGapfillManualConstraintPayload(args: {
   ]);
   const actualEndDate = String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null;
   const syntheticAnchorEndDate = resolveGapfillSyntheticAnchorEndDate(actualEndDate) ?? actualEndDate;
-  const travelRanges =
-    Array.isArray(testHomeManualRec.payload?.travelRanges) && testHomeManualRec.payload.travelRanges.length > 0
-      ? testHomeManualRec.payload.travelRanges
-      : Array.isArray(sourceManualRec.payload?.travelRanges) && sourceManualRec.payload.travelRanges.length > 0
-        ? sourceManualRec.payload.travelRanges
-        : args.travelRangesForRecalc;
+  const activeTravelRanges =
+    Array.isArray(args.travelRangesForRecalc) && args.travelRangesForRecalc.length > 0
+      ? args.travelRangesForRecalc
+      : Array.isArray(testHomeManualRec.payload?.travelRanges) && testHomeManualRec.payload.travelRanges.length > 0
+        ? testHomeManualRec.payload.travelRanges
+        : Array.isArray(sourceManualRec.payload?.travelRanges) && sourceManualRec.payload.travelRanges.length > 0
+          ? sourceManualRec.payload.travelRanges
+          : args.travelRangesForRecalc;
   const resolved = resolveSharedManualStageOneContract({
     mode: args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS" ? "ANNUAL" : "MONTHLY",
     sourcePayload: sourceManualRec.payload,
     actualEndDate: syntheticAnchorEndDate,
-    // GapFill manual Stage 1 can use a synthetic anchor for interval-backed tuning runs;
-    // travel still comes from the saved manual payload first when available.
-    travelRanges,
+    // GapFill manual Stage 1 can use a synthetic anchor for interval-backed tuning runs,
+    // but the active run contract must own travel ranges for the artifact being written.
+    travelRanges: activeTravelRanges,
     dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
     testHomePayload: testHomeManualRec.payload,
   });
@@ -454,7 +456,13 @@ async function buildGapfillManualConstraintPayload(args: {
     return {
       ...resolved,
       payload: reanchorGapfillManualStageOnePayload({
-        payload: resolved.payload,
+        payload: {
+          ...resolved.payload,
+          travelRanges:
+            Array.isArray(args.travelRangesForRecalc) && args.travelRangesForRecalc.length > 0
+              ? activeTravelRanges
+              : resolved.payload.travelRanges,
+        },
         anchorEndDate: syntheticAnchorEndDate,
       }),
     };
@@ -463,7 +471,13 @@ async function buildGapfillManualConstraintPayload(args: {
     return {
       ...resolved,
       payload: reanchorGapfillManualStageOnePayload({
-        payload: resolved.payload,
+        payload: {
+          ...resolved.payload,
+          travelRanges:
+            Array.isArray(args.travelRangesForRecalc) && args.travelRangesForRecalc.length > 0
+              ? activeTravelRanges
+              : resolved.payload.travelRanges,
+        },
         anchorEndDate: syntheticAnchorEndDate,
       }),
     };

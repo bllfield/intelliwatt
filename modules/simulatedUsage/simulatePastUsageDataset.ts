@@ -295,7 +295,67 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
       };
     })
     .filter((row: BillPeriodWeatherEvidenceRow | null): row is BillPeriodWeatherEvidenceRow => Boolean(row)) as BillPeriodWeatherEvidenceRow[];
-  if (rows.length === 0) return null;
+  const excludedTravelTouchedBillPeriods = manualBillPeriods
+    .filter((period) => String(period?.exclusionReason ?? "").trim() === "travel_overlap")
+    .map((period) => ({
+      id: String(period?.id ?? "").trim(),
+      monthKey: String(period?.month ?? "").trim() || String(period?.endDate ?? "").slice(0, 7),
+      startDate: String(period?.startDate ?? "").slice(0, 10),
+      endDate: String(period?.endDate ?? "").slice(0, 10),
+      targetKwh: Number.isFinite(Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
+        ? Math.max(0, Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
+        : null,
+      travelVacantDayCount: listUtcDateKeysInclusive(
+        String(period?.startDate ?? "").slice(0, 10),
+        String(period?.endDate ?? "").slice(0, 10)
+      ).filter((dateKey) => travelDateKeys.has(dateKey)).length,
+    }))
+    .filter((period) => period.id && /^\d{4}-\d{2}$/.test(period.monthKey));
+  const inputMonthKeys =
+    Array.isArray(inputState?.enteredMonthKeys) && inputState!.enteredMonthKeys.length > 0
+      ? inputState!.enteredMonthKeys.map((value) => String(value))
+      : Array.from(new Set([...rows.map((row) => row.monthKey), ...canonicalMonths])).sort();
+  const targetMonthKeys = Array.from(new Set([...inputMonthKeys, ...canonicalMonths, ...rows.map((row) => row.monthKey)])).filter(
+    (value) => /^\d{4}-\d{2}$/.test(value)
+  );
+  const normalizedMonthlyTargetsByMonth = new Map<string, number>();
+  const monthlyTargetDiagnostics = Array.isArray((args.buildInputs as any)?.monthlyTargetConstructionDiagnostics)
+    ? ((args.buildInputs as any).monthlyTargetConstructionDiagnostics as Array<{ month?: unknown; normalizedMonthTarget?: unknown }>)
+    : [];
+  for (const row of monthlyTargetDiagnostics) {
+    const monthKey = String(row?.month ?? "").slice(0, 7);
+    const normalizedMonthTarget = Number(row?.normalizedMonthTarget);
+    if (!/^\d{4}-\d{2}$/.test(monthKey) || !Number.isFinite(normalizedMonthTarget)) continue;
+    normalizedMonthlyTargetsByMonth.set(monthKey, Math.max(0, normalizedMonthTarget));
+  }
+  for (const [monthKey, value] of Object.entries((((args.buildInputs as any)?.monthlyTotalsKwhByMonth ?? null) as Record<string, unknown> | null) ?? {})) {
+    const numericValue = Number(value);
+    if (!/^\d{4}-\d{2}$/.test(monthKey) || !Number.isFinite(numericValue) || normalizedMonthlyTargetsByMonth.has(monthKey)) continue;
+    normalizedMonthlyTargetsByMonth.set(monthKey, Math.max(0, numericValue));
+  }
+  const regressionRows: BillPeriodWeatherEvidenceRow[] =
+    rows.length > 0
+      ? rows
+      : targetMonthKeys
+          .map((monthKey) => {
+            const aggregate = monthWeatherAggregateByMonth.get(monthKey);
+            const targetKwh = normalizedMonthlyTargetsByMonth.get(monthKey);
+            if (!aggregate || !Number.isFinite(targetKwh)) return null;
+            return {
+              id: `month:${monthKey}`,
+              monthKey,
+              startDate: `${monthKey}-01`,
+              endDate: `${monthKey}-01`,
+              targetKwh: Math.max(0, targetKwh ?? 0),
+              avgDailyTarget: Math.max(0, targetKwh ?? 0) / Math.max(1, aggregate.dayCount),
+              eligibleNonTravelDayCount: 0,
+              avgHdd: aggregate.avgHdd,
+              avgCdd: aggregate.avgCdd,
+              avgTempC: aggregate.avgTempC,
+            };
+          })
+          .filter((row): row is BillPeriodWeatherEvidenceRow => Boolean(row));
+  if (regressionRows.length === 0 && excludedTravelTouchedBillPeriods.length === 0) return null;
 
   const xtx = [
     [0, 0, 0],
@@ -303,7 +363,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     [0, 0, 0],
   ];
   const xty = [0, 0, 0];
-  for (const row of rows) {
+  for (const row of regressionRows) {
     const vector = [1, row.avgHdd, row.avgCdd];
     for (let i = 0; i < 3; i += 1) {
       xty[i] += vector[i] * row.avgDailyTarget;
@@ -312,9 +372,9 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   }
   const inverse = invert3x3(xtx);
   const solved = inverse ? multiplyMatrixVector(inverse, xty) : [0, 0, 0];
-  const meanTarget = rows.reduce((sum: number, row) => sum + row.avgDailyTarget, 0) / Math.max(1, rows.length);
-  const meanHdd = rows.reduce((sum: number, row) => sum + row.avgHdd, 0) / Math.max(1, rows.length);
-  const meanCdd = rows.reduce((sum: number, row) => sum + row.avgCdd, 0) / Math.max(1, rows.length);
+  const meanTarget = regressionRows.reduce((sum: number, row) => sum + row.avgDailyTarget, 0) / Math.max(1, regressionRows.length);
+  const meanHdd = regressionRows.reduce((sum: number, row) => sum + row.avgHdd, 0) / Math.max(1, regressionRows.length);
+  const meanCdd = regressionRows.reduce((sum: number, row) => sum + row.avgCdd, 0) / Math.max(1, regressionRows.length);
   const fuelConfiguration = String((args.homeProfile as any)?.fuelConfiguration ?? "").trim();
   const heatingType = String((args.homeProfile as any)?.heatingType ?? "").trim();
   const hasCoolingPriors =
@@ -323,7 +383,7 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   const heatingPriorSensitivity =
     fuelConfiguration === "all_electric" || heatingType === "electric" ? 0.95 : 0.45;
   const coolingPriorSensitivity = hasCoolingPriors ? 0.75 : 0.45;
-  const evidenceWeight = rows.length >= 5 ? 0.9 : rows.length >= 3 ? 0.7 : 0.45;
+  const evidenceWeight = rows.length >= 5 ? 0.9 : rows.length >= 3 ? 0.7 : rows.length > 0 ? 0.45 : 0;
   const wholeHomePriorFallbackWeight = 1 - evidenceWeight;
 
   const baseloadDaily = clampNumberForEvidence(Number(solved[0]) || meanTarget * 0.55, meanTarget * 0.18, meanTarget * 0.92);
@@ -350,29 +410,6 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     targetKwh: row.targetKwh,
     eligibleNonTravelDayCount: row.eligibleNonTravelDayCount,
   }));
-  const excludedTravelTouchedBillPeriods = manualBillPeriods
-    .filter((period) => String(period?.exclusionReason ?? "").trim() === "travel_overlap")
-    .map((period) => ({
-      id: String(period?.id ?? "").trim(),
-      monthKey: String(period?.month ?? "").trim() || String(period?.endDate ?? "").slice(0, 7),
-      startDate: String(period?.startDate ?? "").slice(0, 10),
-      endDate: String(period?.endDate ?? "").slice(0, 10),
-      targetKwh: Number.isFinite(Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
-        ? Math.max(0, Number(manualBillPeriodTotalsKwhById[String(period?.id ?? "").trim()] ?? period?.enteredKwh))
-        : null,
-      travelVacantDayCount: listUtcDateKeysInclusive(
-        String(period?.startDate ?? "").slice(0, 10),
-        String(period?.endDate ?? "").slice(0, 10)
-      ).filter((dateKey) => travelDateKeys.has(dateKey)).length,
-    }))
-    .filter((period) => period.id && /^\d{4}-\d{2}$/.test(period.monthKey));
-  const inputMonthKeys =
-    Array.isArray(inputState?.enteredMonthKeys) && inputState!.enteredMonthKeys.length > 0
-      ? inputState!.enteredMonthKeys.map((value) => String(value))
-      : Array.from(new Set([...rows.map((row) => row.monthKey), ...canonicalMonths])).sort();
-  const targetMonthKeys = Array.from(new Set([...inputMonthKeys, ...canonicalMonths, ...rows.map((row) => row.monthKey)])).filter(
-    (value) => /^\d{4}-\d{2}$/.test(value)
-  );
   const byMonth = Object.fromEntries(
     targetMonthKeys
       .map((monthKey) => {

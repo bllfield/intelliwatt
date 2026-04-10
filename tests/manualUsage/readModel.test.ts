@@ -139,4 +139,74 @@ describe("manual usage read model", () => {
       targetVsActualDeltaKwh: 365,
     });
   });
+
+  it("uses canonical actual-house artifact totals for annual compare when only summary/monthly truth is available", () => {
+    const payload = {
+      mode: "ANNUAL" as const,
+      anchorEndDate: "2025-12-31",
+      annualKwh: 15053.4,
+      travelRanges: [],
+    };
+    const dataset = {
+      meta: { filledMonths: [], manualMonthlyInputState: null },
+      daily: Array.from({ length: 365 }, (_, idx) => ({
+        date: new Date(Date.UTC(2025, 0, 1 + idx)).toISOString().slice(0, 10),
+        kwh: 10,
+      })),
+    };
+    const actualDataset = {
+      monthly: [
+        { month: "2025-01", kwh: 1200.4 },
+        { month: "2025-02", kwh: 1180.0 },
+        { month: "2025-03", kwh: 1265.2 },
+        { month: "2025-04", kwh: 1211.3 },
+        { month: "2025-05", kwh: 1299.9 },
+        { month: "2025-06", kwh: 1310.1 },
+        { month: "2025-07", kwh: 1388.2 },
+        { month: "2025-08", kwh: 1440.7 },
+        { month: "2025-09", kwh: 1277.5 },
+        { month: "2025-10", kwh: 1208.0 },
+        { month: "2025-11", kwh: 1122.6 },
+        { month: "2025-12", kwh: 1149.5 },
+      ],
+      summary: { totalKwh: 15053.4 },
+    };
+
+    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset });
+
+    expect(readModel?.annualCompareSummary?.actualIntervalKwh).toBe(15053.4);
+  });
+
+  it("uses canonical actual-house artifact monthly truth for bill-period actuals when the bill period aligns to that month", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-04-30",
+      monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+      statementRanges: [{ month: "2025-04", startDate: "2025-04-01", endDate: "2025-04-30" }],
+      travelRanges: [],
+    };
+    const dataset = {
+      meta: {
+        filledMonths: [],
+        manualMonthlyInputState: {
+          inputKindByMonth: {
+            "2025-04": "entered_nonzero",
+          },
+        },
+      },
+      daily: Array.from({ length: 30 }, (_, idx) => ({
+        date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+        kwh: 10,
+      })),
+    };
+    const actualDataset = {
+      monthly: [{ month: "2025-04", kwh: 338.4 }],
+      summary: { totalKwh: 338.4 },
+    };
+
+    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset });
+
+    expect(readModel?.billPeriodCompare.rows[0]?.actualIntervalTotalKwh).toBe(338.4);
+    expect(readModel?.monthlyCompareRows[0]?.actualIntervalKwh).toBe(338.4);
+  });
 });

@@ -143,6 +143,53 @@ function sumRangeTotals(range: { startDate: string; endDate: string }, totalsByD
   );
 }
 
+function buildMonthlyTotalsByMonth(dataset: any): Map<string, number> {
+  const out = new Map<string, number>();
+  const monthlyRows = Array.isArray(dataset?.monthly) ? dataset.monthly : [];
+  for (const row of monthlyRows) {
+    const month = String((row as any)?.month ?? "").slice(0, 7);
+    const kwh = Number((row as any)?.kwh ?? Number.NaN);
+    if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(kwh)) continue;
+    out.set(month, (out.get(month) ?? 0) + kwh);
+  }
+  return out;
+}
+
+function listCoveredWholeMonths(range: { startDate: string; endDate: string }): string[] | null {
+  if (!/^\d{4}-\d{2}-01$/.test(range.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(range.endDate)) return null;
+  const start = new Date(`${range.startDate}T00:00:00.000Z`);
+  const end = new Date(`${range.endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) return null;
+  const lastDayOfEndMonth = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+  if (range.endDate !== lastDayOfEndMonth) return null;
+  const months: string[] = [];
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  while (true) {
+    months.push(`${year}-${String(month + 1).padStart(2, "0")}`);
+    if (year === end.getUTCFullYear() && month === end.getUTCMonth()) break;
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+function sumRangeMonthlyTotals(range: { startDate: string; endDate: string }, totalsByMonth: Map<string, number>): number | null {
+  const months = listCoveredWholeMonths(range);
+  if (!months || months.length === 0) return null;
+  let sum = 0;
+  let any = false;
+  for (const month of months) {
+    if (!totalsByMonth.has(month)) continue;
+    sum += totalsByMonth.get(month) ?? 0;
+    any = true;
+  }
+  return any ? round2(sum) : null;
+}
+
 export function buildManualUsageReadModel(args: {
   payload: ManualUsagePayload | null;
   dataset: any;
@@ -168,6 +215,11 @@ export function buildManualUsageReadModel(args: {
           return actualIntervalTotals.size > 0 ? actualIntervalTotals : buildDailyTotalsByDate(args.actualDataset);
         })()
       : null;
+  const actualDatasetTotalsByMonth = args.actualDataset != null ? buildMonthlyTotalsByMonth(args.actualDataset) : null;
+  const actualDatasetSummaryTotalKwh =
+    args.actualDataset != null && Number.isFinite(Number(args.actualDataset?.summary?.totalKwh))
+      ? round2(Number(args.actualDataset.summary.totalKwh))
+      : null;
 
   const meta = args.dataset?.meta && typeof args.dataset.meta === "object" ? args.dataset.meta : {};
   const inputState = (meta.manualMonthlyInputState ?? null) as ManualMonthlyInputStateLike;
@@ -181,9 +233,13 @@ export function buildManualUsageReadModel(args: {
         ? (inputState?.inputKindByMonth?.[period.month] ?? period.inputKind)
         : period.inputKind;
     const actualIntervalTotalKwh =
-      actualDatasetTotalsByDate != null
+      actualDatasetTotalsByDate != null && actualDatasetTotalsByDate.size > 0
         ? sumRangeTotals(period, actualDatasetTotalsByDate)
-        : null;
+        : actualDatasetTotalsByMonth != null && actualDatasetTotalsByMonth.size > 0
+          ? sumRangeMonthlyTotals(period, actualDatasetTotalsByMonth)
+          : payload.mode === "ANNUAL"
+            ? actualDatasetSummaryTotalKwh
+            : null;
     const enteredStatementTotalKwh = period.enteredKwh ?? null;
     const stageOneTargetTotalKwh = round2(
       Number.isFinite(Number(billPeriodTotalsKwhById[period.id])) ? Number(billPeriodTotalsKwhById[period.id]) : period.enteredKwh ?? null

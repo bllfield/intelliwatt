@@ -486,6 +486,11 @@ This section is authoritative for future manual-usage implementation work.
   - constrained artifact diagnostics must also retain `manualBillPeriods`, `manualBillPeriodTotalsKwhById`, and source-derived monthly anchors when GapFill monthly-from-source semantics are active
   - this wiring exists today, but stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work
 - Travel/vacant simulated days and manual-constrained simulated days use the same shared day-simulation family and shaping path. Their difference is constraint role and labeling, not a second flat/frozen simulation engine.
+### Plan Change (2026-04) — Manual Monthly Canonical Actual + Active Contract Pass
+- Compare/reconciliation actual-reference now uses one canonical actual-house artifact source. If shared actual truth exists on the actual-house artifact/read model, annual compare totals, monthly actual totals, and bill-period Actual kWh must resolve from that same source rather than a second aggregate or a zero/blank fallback.
+- The active `MANUAL_MONTHLY` artifact shown in GapFill must reflect the current saved/effective manual-travel contract for that run. If the route selected newer travel ranges for recalc, the persisted Stage 1 manual payload written for that run must carry those same ranges instead of surfacing an older saved payload snapshot as active truth.
+- `TRAVEL_VACANT` and `MANUAL_CONSTRAINED` stay on the same shared day-simulation family. Travel/vacant days may differ in constraint role, but they must keep the same shared weather classification, day-total shaping, and interval-shape selection path instead of dropping to a separate flat/frozen behavior when shaping evidence exists.
+- This Plan Change overrides any prior wording that tolerated alternate compare totals, stale active travel contracts, or separate flat travel-day behavior for manual monthly runs.
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only
   - `lookup` is the lightweight source-home selection step
