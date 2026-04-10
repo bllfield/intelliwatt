@@ -33,6 +33,39 @@ type ManualUsageTransport = {
 };
 
 const DEFAULT_ANCHOR_END_DATE = `${lastFullMonthChicago()}-15`;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SLASH_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  return (
+    candidate.getUTCFullYear() === year &&
+    candidate.getUTCMonth() === month - 1 &&
+    candidate.getUTCDate() === day
+  );
+}
+
+function normalizeManualDateInput(value: string): string {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  if (ISO_DATE_RE.test(trimmed)) return trimmed;
+  const slashMatch = SLASH_DATE_RE.exec(trimmed);
+  if (!slashMatch) return trimmed;
+  const [, monthRaw, dayRaw, yearRaw] = slashMatch;
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const year = Number(yearRaw);
+  if (!Number.isInteger(month) || !Number.isInteger(day) || !Number.isInteger(year)) return trimmed;
+  if (!isValidCalendarDate(year, month, day)) return trimmed;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function formatManualDateForEditor(value: string): string {
+  const normalized = normalizeManualDateInput(value);
+  if (!ISO_DATE_RE.test(normalized)) return String(value ?? "");
+  const [year, month, day] = normalized.split("-");
+  return `${month}/${day}/${year}`;
+}
 
 function defaultMonthlyRows(): ManualStatementInputRow[] {
   const defaultRange = buildContiguousStatementRanges(DEFAULT_ANCHOR_END_DATE, 1)[0];
@@ -65,19 +98,25 @@ function mapSaveError(error: string): string {
 }
 
 function statementStartDateForRow(rows: ManualStatementInputRow[], index: number): string {
-  return index === rows.length - 1 ? rows[index]!.startDate : addDaysToIsoDate(rows[index + 1]!.endDate, 1);
+  return index === rows.length - 1
+    ? rows[index]!.startDate
+    : addDaysToIsoDate(normalizeManualDateInput(rows[index + 1]!.endDate), 1);
 }
 
 function statementMonthLabel(endDate: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate.slice(0, 7) : "pending";
+  const normalized = normalizeManualDateInput(endDate);
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized.slice(0, 7) : "pending";
 }
 
 function addOlderBillRow(rows: ManualStatementInputRow[]): ManualStatementInputRow[] {
   if (rows.length >= MAX_MANUAL_MONTHLY_BILLS) return rows;
   const oldest = rows[rows.length - 1]!;
-  const defaultOlder = buildContiguousStatementRanges(oldest.endDate || DEFAULT_ANCHOR_END_DATE, 2)[1];
+  const oldestEndDate = normalizeManualDateInput(oldest.endDate) || DEFAULT_ANCHOR_END_DATE;
+  const defaultOlder = buildContiguousStatementRanges(oldestEndDate, 2)[1];
   const nextEndDate =
-    /^\d{4}-\d{2}-\d{2}$/.test(oldest.startDate) ? addDaysToIsoDate(oldest.startDate, -1) : defaultOlder?.endDate ?? DEFAULT_ANCHOR_END_DATE;
+    /^\d{4}-\d{2}-\d{2}$/.test(normalizeManualDateInput(oldest.startDate))
+      ? addDaysToIsoDate(normalizeManualDateInput(oldest.startDate), -1)
+      : defaultOlder?.endDate ?? DEFAULT_ANCHOR_END_DATE;
   const nextStartDate = defaultOlder?.startDate ?? nextEndDate;
   return [...rows, { startDate: nextStartDate, endDate: nextEndDate, kwh: "" }];
 }
@@ -165,7 +204,12 @@ export function ManualUsageEntry({
     try {
       let payload: ManualUsagePayload;
       if (activeTab === "MONTHLY") {
-        const built = buildMonthlyPayloadFromStatementRows(monthlyRows);
+        const normalizedRows = monthlyRows.map((row) => ({
+          ...row,
+          startDate: normalizeManualDateInput(row.startDate),
+          endDate: normalizeManualDateInput(row.endDate),
+        }));
+        const built = buildMonthlyPayloadFromStatementRows(normalizedRows);
         if (!built.ok) {
           throw new Error(mapSaveError(built.error));
         }
@@ -179,7 +223,7 @@ export function ManualUsageEntry({
       } else {
         payload = {
           mode: "ANNUAL",
-          anchorEndDate: String(annualAnchorEndDate ?? "").slice(0, 10),
+          anchorEndDate: normalizeManualDateInput(String(annualAnchorEndDate ?? "")),
           annualKwh: annualKwh === "" ? "" : Number(annualKwh),
           travelRanges: normalizeTravelRanges(travelRanges),
         };
@@ -296,10 +340,16 @@ export function ManualUsageEntry({
                             Bill End Date
                           </label>
                           <input
-                            type="date"
-                            value={row.endDate}
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="MM/DD/YYYY"
+                            value={formatManualDateForEditor(row.endDate)}
                             onChange={(e) => {
                               const value = e.target.value;
+                              setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, endDate: value } : entry)));
+                            }}
+                            onBlur={(e) => {
+                              const value = normalizeManualDateInput(e.target.value);
                               setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, endDate: value } : entry)));
                             }}
                             className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
@@ -311,11 +361,18 @@ export function ManualUsageEntry({
                             {isOldest ? "Bill Start Date" : "Bill Start Date (Auto)"}
                           </label>
                           <input
-                            type="date"
-                            value={statementStartDate}
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="MM/DD/YYYY"
+                            value={formatManualDateForEditor(statementStartDate)}
                             onChange={(e) => {
                               if (!isOldest) return;
                               const value = e.target.value;
+                              setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, startDate: value } : entry)));
+                            }}
+                            onBlur={(e) => {
+                              if (!isOldest) return;
+                              const value = normalizeManualDateInput(e.target.value);
                               setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, startDate: value } : entry)));
                             }}
                             readOnly={!isOldest}
@@ -388,9 +445,12 @@ export function ManualUsageEntry({
                     Anchor end date
                   </label>
                   <input
-                    type="date"
-                    value={annualAnchorEndDate}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="MM/DD/YYYY"
+                    value={formatManualDateForEditor(annualAnchorEndDate)}
                     onChange={(e) => setAnnualAnchorEndDate(e.target.value)}
+                    onBlur={(e) => setAnnualAnchorEndDate(normalizeManualDateInput(e.target.value))}
                     className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
                   />
                 </div>
