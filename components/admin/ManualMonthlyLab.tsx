@@ -628,22 +628,12 @@ export default function ManualMonthlyLab() {
                 {showManualEditor ? "Collapse editor" : "Expand to edit"}
               </button>
             </div>
-            {showManualEditor ? (
-              <ManualUsageEntry
-                key={`${selectedHouseId}:${manualEntryKey}`}
-                houseId={labHome?.id ?? selectedHouseId}
-                transport={manualTransport}
-                onSaved={async () => {
-                  setShowManualEditor(false);
-                  setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");
-                }}
-              />
-            ) : (
+            {!showManualEditor ? (
               <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                 The manual usage editor is collapsed by default to keep Stage 1 and Stage 2 visible. Use "Expand to edit" when you want to
                 update the lab-home monthly or annual inputs.
               </div>
-            )}
+            ) : null}
           </div>
         ) : null}
 
@@ -804,6 +794,20 @@ export default function ManualMonthlyLab() {
             saveUrl="/api/admin/tools/manual-monthly/test-home/appliances"
             onSaved={() => {
               setStatus("Lab-home appliances saved.");
+            }}
+          />
+        </ModalShell>
+      ) : null}
+
+      {showManualEditor && labReady ? (
+        <ModalShell title="Lab-home Manual Usage" onClose={() => setShowManualEditor(false)}>
+          <ManualUsageEntry
+            key={`${selectedHouseId}:${manualEntryKey}`}
+            houseId={labHome?.id ?? selectedHouseId}
+            transport={manualTransport}
+            onSaved={async () => {
+              setShowManualEditor(false);
+              setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");
             }}
           />
         </ModalShell>

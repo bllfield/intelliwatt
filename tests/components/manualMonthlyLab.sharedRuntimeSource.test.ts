@@ -22,4 +22,11 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("sourcePayloadContextUpdatedAt");
     expect(source).toContain("prefillSeed");
   });
+
+  it("opens the manual editor in a modal shell instead of only rendering inline", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain('ModalShell title="Lab-home Manual Usage"');
+    expect(source).toContain("{showManualEditor && labReady ? (");
+  });
 });
