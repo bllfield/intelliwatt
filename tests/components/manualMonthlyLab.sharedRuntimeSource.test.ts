@@ -31,4 +31,11 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("Manual editor");
     expect(source).toContain("Use the `Manual editor` button above, next to `Appliances`, to open the popup");
   });
+
+  it("does not immediately close the manual editor during transport load", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain('setStatus("Manual payload loaded from the isolated lab home.")');
+    expect(source).not.toContain('setShowManualEditor(false);\n        setStatus("Manual payload loaded from the isolated lab home.")');
+  });
 });
