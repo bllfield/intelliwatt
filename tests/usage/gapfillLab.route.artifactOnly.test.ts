@@ -2721,6 +2721,53 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     );
   });
 
+  it("surfaces shared pure-manual travel donor diagnostics on gapfill readback", async () => {
+    getSimulatedUsageForHouseScenario
+      .mockResolvedValueOnce({
+        ok: true,
+        dataset: {
+          meta: {
+            mode: "MANUAL_TOTALS",
+            manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+            manualTravelVacantDonorDayCount: 21,
+            lockboxInput: { mode: "MANUAL_MONTHLY" },
+            lockboxPerDayTrace: [],
+            filledMonths: [],
+          },
+          daily: [{ date: "2026-02-10", kwh: 1, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        dataset: {
+          meta: { mode: "SMT_BASELINE", lockboxInput: { mode: "ACTUAL_INTERVAL_BASELINE" }, lockboxPerDayTrace: [] },
+          daily: [],
+        },
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "read_test_home_canonical_result",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      testUsageInputMode: "MANUAL_MONTHLY",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      exactArtifactInputHash: "artifact-hash-1",
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sharedDiagnostics?.sourceTruthContext?.manualTravelVacantDonorSource).toBe(
+      "same_run_simulated_non_travel_days"
+    );
+    expect(body.sharedDiagnostics?.sourceTruthContext?.manualTravelVacantDonorDayCount).toBe(21);
+  });
+
   it("surfaces Prisma pool exhaustion details for manual shared-producer failures", async () => {
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "h1") {

@@ -18,6 +18,8 @@ describe("buildSharedPastSimDiagnostics manual monthly constrained artifact fiel
         meta: {
           weatherSourceSummary: "actual_only",
           validationOnlyDateKeysLocal: ["2025-07-04"],
+          manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+          manualTravelVacantDonorDayCount: 27,
           manualMonthlyInputState: {
             enteredMonthKeys: ["2025-06", "2025-07"],
             missingMonthKeys: [],
@@ -83,6 +85,10 @@ describe("buildSharedPastSimDiagnostics manual monthly constrained artifact fiel
     expect(diagnostics.sourceTruthContext.manualMonthlyWeatherEvidenceSummary).toMatchObject({
       dailyWeatherResponsiveness: "weather_driven",
       wholeHomePriorFallbackWeight: 0.3,
+    });
+    expect(diagnostics.sourceTruthContext).toMatchObject({
+      manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+      manualTravelVacantDonorDayCount: 27,
     });
     expect(diagnostics.sourceTruthContext.manualBillPeriods).toEqual([
       expect.objectContaining({

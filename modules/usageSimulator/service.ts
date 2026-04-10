@@ -4302,6 +4302,15 @@ async function recalcSimulatorBuildImpl(args: {
     });
   }
 
+  const manualTravelVacantDonorPoolMode =
+    simMode !== "MANUAL_TOTALS"
+      ? null
+      : String((manualUsagePayload as { mode?: unknown } | null | undefined)?.mode ?? "").trim() !== "MONTHLY"
+        ? null
+        : args.adminLabTreatmentMode === "manual_monthly_constrained"
+          ? ("source_derived_mode_unchanged" as const)
+          : ("same_run_simulated_non_travel_days" as const);
+
   // Enforce simMode->baseKind mapping (no mismatches). `simMode` may upgrade to MANUAL_TOTALS for admin lab manual treatments.
   const baseKind = baseKindFromMode(simMode);
 
@@ -4880,6 +4889,7 @@ async function recalcSimulatorBuildImpl(args: {
         filledMonths: built.filledMonths ?? [],
         monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
         manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+        manualTravelVacantDonorPoolMode,
         manualBillPeriods: built.manualBillPeriods ?? [],
         manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
@@ -5056,6 +5066,7 @@ async function recalcSimulatorBuildImpl(args: {
     manualAnnualTotalKwh: built.manualAnnualTotalKwh ?? null,
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
+    manualTravelVacantDonorPoolMode,
     manualBillPeriods: built.manualBillPeriods ?? [],
     manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
     sharedProducerPathUsed: shouldUseSharedPastProducer,

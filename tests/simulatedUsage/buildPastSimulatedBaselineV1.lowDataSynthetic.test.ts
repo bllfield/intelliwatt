@@ -326,4 +326,227 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
     expect(janDay?.shapeVariantUsed).not.toBe("uniform_fallback");
     expect(febDay?.shapeVariantUsed).not.toBe("uniform_fallback");
   });
+
+  it("reuses simulated non-travel manual days as the donor pool for pure-manual travel/vacant days", () => {
+    const donorStarts = [
+      "2026-01-05T00:00:00.000Z",
+      "2026-01-06T00:00:00.000Z",
+      "2026-01-07T00:00:00.000Z",
+    ].map((value) => new Date(value).getTime());
+    const travelStarts = [
+      "2026-01-08T00:00:00.000Z",
+      "2026-01-09T00:00:00.000Z",
+    ].map((value) => new Date(value).getTime());
+    const allStarts = [...donorStarts, ...travelStarts];
+    const allDateKeys = allStarts.map((value) => dateKeyFromTimestamp(getDayGridTimestamps(value)[0]!));
+    const debugOut: Record<string, unknown> = {};
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals: [],
+      canonicalDayStartsMs: allStarts,
+      excludedDateKeys: new Set<string>(allDateKeys.slice(3)),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map([
+        ["2026-01-05", { tAvgF: 78, tMinF: 70, tMaxF: 86, hdd65: 0, cdd65: 13 }],
+        ["2026-01-06", { tAvgF: 56, tMinF: 49, tMaxF: 63, hdd65: 9, cdd65: 0 }],
+        ["2026-01-07", { tAvgF: 31, tMinF: 22, tMaxF: 39, hdd65: 34, cdd65: 0 }],
+        ["2026-01-08", { tAvgF: 27, tMinF: 18, tMaxF: 35, hdd65: 38, cdd65: 0 }],
+        ["2026-01-09", { tAvgF: 90, tMinF: 80, tMaxF: 98, hdd65: 0, cdd65: 20 }],
+      ]),
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-01": 24 },
+        weekendAvgByMonthKey: { "2026-01": 18 },
+      },
+      modeledKeepRefReasonCode: "MANUAL_CONSTRAINED_DAY",
+      defaultModeledReasonCode: "MANUAL_CONSTRAINED_DAY",
+      lowDataSyntheticContext: {
+        mode: "MANUAL_TOTALS",
+        canonicalMonthKeys: ["2026-01"],
+        intradayShape96: Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 2 : 1)),
+        weekdayWeekendShape96: {
+          weekday: Array.from({ length: 96 }, (_, idx) => (idx >= 56 && idx < 84 ? 2 : 1)),
+          weekend: Array.from({ length: 96 }, () => 1),
+        },
+        weatherEvidenceSummary: {
+          inputMonthKeys: ["2026-01"],
+          missingMonthKeys: [],
+          explicitTravelRangesUsed: [{ startDate: "2026-01-08", endDate: "2026-01-09" }],
+          eligibleBillPeriodsUsed: [
+            {
+              id: "2026-01",
+              monthKey: "2026-01",
+              startDate: "2026-01-01",
+              endDate: "2026-01-31",
+              targetKwh: 620,
+              eligibleNonTravelDayCount: 29,
+            },
+          ],
+          excludedTravelTouchedBillPeriods: [],
+          monthlyWeatherPressureInputsUsed: [
+            {
+              billPeriodId: "2026-01",
+              monthKey: "2026-01",
+              avgDailyTargetKwh: 20,
+              avgHdd: 12,
+              avgCdd: 4,
+              avgTempC: 16,
+            },
+          ],
+          evidenceWeight: 0.7,
+          wholeHomePriorFallbackWeight: 0.3,
+          baseloadShare: 0.34,
+          hvacShare: 0.66,
+          heatingSensitivity: 1.1,
+          coolingSensitivity: 1.15,
+          dailyWeatherResponsiveness: "weather_driven",
+          byMonth: {
+            "2026-01": {
+              monthKey: "2026-01",
+              targetAvgDailyKwh: 20,
+              evidenceSource: "eligible_bill_period",
+              drivingBillPeriodIds: ["2026-01"],
+              eligibleNonTravelDayCount: 29,
+              excludedTravelDayCount: 2,
+              eligibleBillPeriodCount: 1,
+              excludedTravelTouchedBillPeriodCount: 0,
+              baseloadShare: 0.34,
+              hvacShare: 0.66,
+              heatingSensitivity: 1.1,
+              coolingSensitivity: 1.15,
+              referenceDailyHdd: 12,
+              referenceDailyCdd: 4,
+              referenceAvgTempC: 16,
+            },
+          },
+        },
+      },
+      debug: { out: debugOut as any },
+    });
+
+    const travelRows = out.dayResults.filter((row) => row.simulatedReasonCode === "TRAVEL_VACANT");
+    expect(travelRows).toHaveLength(2);
+    expect(debugOut).toMatchObject({
+      manualSimulatedReferencePoolUsed: true,
+      manualSimulatedReferencePoolDayCount: 3,
+    });
+    expect(travelRows.every((row) => (row.selectedDonorLocalDates?.length ?? 0) > 0)).toBe(true);
+    expect(
+      travelRows.every((row) =>
+        (row.selectedDonorLocalDates ?? []).every((localDate) =>
+          ["2026-01-05", "2026-01-06", "2026-01-07"].includes(localDate)
+        )
+      )
+    ).toBe(true);
+    expect(travelRows.every((row) => row.donorSelectionModeUsed !== "low_data_month_daytype")).toBe(true);
+    expect(travelRows.every((row) => row.weatherAdjustmentModeUsed === "bounded_post_donor")).toBe(true);
+  });
+
+  it("keeps pure-manual travel/vacant days on the shared donor ladder instead of the flat low-data fast path", () => {
+    const donorStarts = [
+      "2026-01-05T00:00:00.000Z",
+      "2026-01-06T00:00:00.000Z",
+      "2026-01-07T00:00:00.000Z",
+    ].map((value) => new Date(value).getTime());
+    const travelStarts = [
+      "2026-01-08T00:00:00.000Z",
+      "2026-01-09T00:00:00.000Z",
+    ].map((value) => new Date(value).getTime());
+    const allStarts = [...donorStarts, ...travelStarts];
+    const allDateKeys = allStarts.map((value) => dateKeyFromTimestamp(getDayGridTimestamps(value)[0]!));
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals: [],
+      canonicalDayStartsMs: allStarts,
+      excludedDateKeys: new Set<string>(allDateKeys.slice(3)),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      actualWxByDateKey: new Map([
+        ["2026-01-05", { tAvgF: 72, tMinF: 64, tMaxF: 80, hdd65: 0, cdd65: 10 }],
+        ["2026-01-06", { tAvgF: 50, tMinF: 43, tMaxF: 57, hdd65: 15, cdd65: 0 }],
+        ["2026-01-07", { tAvgF: 29, tMinF: 18, tMaxF: 37, hdd65: 36, cdd65: 0 }],
+        ["2026-01-08", { tAvgF: 24, tMinF: 14, tMaxF: 31, hdd65: 41, cdd65: 0 }],
+        ["2026-01-09", { tAvgF: 92, tMinF: 82, tMaxF: 100, hdd65: 0, cdd65: 24 }],
+      ]),
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-01": 23 },
+        weekendAvgByMonthKey: { "2026-01": 18 },
+      },
+      modeledKeepRefReasonCode: "MANUAL_CONSTRAINED_DAY",
+      defaultModeledReasonCode: "MANUAL_CONSTRAINED_DAY",
+      lowDataSyntheticContext: {
+        mode: "MANUAL_TOTALS",
+        canonicalMonthKeys: ["2026-01"],
+        intradayShape96: Array.from({ length: 96 }, (_, idx) => (idx >= 60 && idx < 80 ? 3 : 1)),
+        weekdayWeekendShape96: {
+          weekday: Array.from({ length: 96 }, (_, idx) => (idx >= 60 && idx < 80 ? 3 : 1)),
+          weekend: Array.from({ length: 96 }, () => 1),
+        },
+        weatherEvidenceSummary: {
+          inputMonthKeys: ["2026-01"],
+          missingMonthKeys: [],
+          explicitTravelRangesUsed: [{ startDate: "2026-01-08", endDate: "2026-01-09" }],
+          eligibleBillPeriodsUsed: [
+            {
+              id: "2026-01",
+              monthKey: "2026-01",
+              startDate: "2026-01-01",
+              endDate: "2026-01-31",
+              targetKwh: 620,
+              eligibleNonTravelDayCount: 29,
+            },
+          ],
+          excludedTravelTouchedBillPeriods: [],
+          monthlyWeatherPressureInputsUsed: [
+            {
+              billPeriodId: "2026-01",
+              monthKey: "2026-01",
+              avgDailyTargetKwh: 20,
+              avgHdd: 12,
+              avgCdd: 4,
+              avgTempC: 16,
+            },
+          ],
+          evidenceWeight: 0.7,
+          wholeHomePriorFallbackWeight: 0.3,
+          baseloadShare: 0.34,
+          hvacShare: 0.66,
+          heatingSensitivity: 1.1,
+          coolingSensitivity: 1.15,
+          dailyWeatherResponsiveness: "weather_driven",
+          byMonth: {
+            "2026-01": {
+              monthKey: "2026-01",
+              targetAvgDailyKwh: 20,
+              evidenceSource: "eligible_bill_period",
+              drivingBillPeriodIds: ["2026-01"],
+              eligibleNonTravelDayCount: 29,
+              excludedTravelDayCount: 2,
+              eligibleBillPeriodCount: 1,
+              excludedTravelTouchedBillPeriodCount: 0,
+              baseloadShare: 0.34,
+              hvacShare: 0.66,
+              heatingSensitivity: 1.1,
+              coolingSensitivity: 1.15,
+              referenceDailyHdd: 12,
+              referenceDailyCdd: 4,
+              referenceAvgTempC: 16,
+            },
+          },
+        },
+      },
+    });
+
+    const coldTravelDay = out.dayResults.find((row) => row.localDate === "2026-01-08");
+    const hotTravelDay = out.dayResults.find((row) => row.localDate === "2026-01-09");
+    expect(coldTravelDay?.simulatedReasonCode).toBe("TRAVEL_VACANT");
+    expect(hotTravelDay?.simulatedReasonCode).toBe("TRAVEL_VACANT");
+    expect(coldTravelDay?.fallbackLevel).toMatch(/^weather_nearest_daytype/);
+    expect(hotTravelDay?.fallbackLevel).toMatch(/^weather_nearest_daytype/);
+    expect(coldTravelDay?.selectedDonorLocalDates).not.toEqual(hotTravelDay?.selectedDonorLocalDates);
+    expect(coldTravelDay?.intervals15).not.toEqual(hotTravelDay?.intervals15);
+  });
+
 });

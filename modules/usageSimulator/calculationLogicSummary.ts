@@ -504,6 +504,18 @@ export function buildGapfillCalculationLogicSummary(args: {
   const monthlyDiagnostics = asArray<Record<string, unknown>>(sourceTruthContext.monthlyTargetConstructionDiagnostics);
   const manualMonthlyInputState = asRecord(sourceTruthContext.manualMonthlyInputState);
   const manualMonthlyWeatherEvidence = asRecord(sourceTruthContext.manualMonthlyWeatherEvidenceSummary);
+  const manualTravelVacantDonorSource =
+    typeof sourceTruthContext.manualTravelVacantDonorSource === "string"
+      ? sourceTruthContext.manualTravelVacantDonorSource
+      : typeof meta.manualTravelVacantDonorSource === "string"
+        ? meta.manualTravelVacantDonorSource
+        : null;
+  const manualTravelVacantDonorDayCount =
+    typeof sourceTruthContext.manualTravelVacantDonorDayCount === "number"
+      ? sourceTruthContext.manualTravelVacantDonorDayCount
+      : typeof meta.manualTravelVacantDonorDayCount === "number"
+        ? meta.manualTravelVacantDonorDayCount
+        : null;
   const manualBillPeriods = asArray<Record<string, unknown>>(sourceTruthContext.manualBillPeriods);
   const manualBillPeriodTotalsById = asRecord(sourceTruthContext.manualBillPeriodTotalsKwhById);
   const sourceDerivedMonthlyTotals = asRecord(sourceTruthContext.sourceDerivedMonthlyTotalsKwhByMonth);
@@ -1415,6 +1427,15 @@ export function buildGapfillCalculationLogicSummary(args: {
                 `Prior fallback weight: ${formatMaybeNumber(manualMonthlyWeatherEvidence.wholeHomePriorFallbackWeight, 2)}`,
               ]),
               explanation: "Shows how much of the low-data manual-monthly response came from eligible bill-period evidence versus whole-home stabilizing priors.",
+            },
+            {
+              label: "Travel/vacant donor source",
+              value: joinNonEmpty([
+                String(manualTravelVacantDonorSource ?? "not attached"),
+                `Simulated donor days: ${formatMaybeCount(manualTravelVacantDonorDayCount)}`,
+              ]),
+              explanation:
+                "Pure manual travel/vacant days should reuse the same shared donor-led family, but their donor pool must come from same-run simulated non-travel manual days rather than actual interval history.",
             },
           ]
         : []),

@@ -604,4 +604,48 @@ describe("admin manual monthly route", () => {
       })
     );
   });
+
+  it("read_result exposes shared pure-manual travel donor truth from persisted artifact diagnostics", async () => {
+    mocks.buildSharedPastSimDiagnostics.mockReturnValueOnce({
+      identityContext: {},
+      sourceTruthContext: {
+        manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+        manualTravelVacantDonorDayCount: 19,
+      },
+      lockboxExecutionSummary: { sharedProducerPathUsed: true },
+      projectionReadSummary: {},
+      tuningSummary: {},
+    });
+    mocks.getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+      ok: true,
+      dataset: {
+        meta: {
+          mode: "MANUAL_TOTALS",
+          manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+          manualTravelVacantDonorDayCount: 19,
+          lockboxInput: { mode: "MANUAL_MONTHLY" },
+          lockboxPerDayTrace: [],
+          filledMonths: [],
+        },
+        daily: [{ date: "2025-04-10", kwh: 10, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(
+      buildRequest({
+        action: "read_result",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        exactArtifactInputHash: "artifact-hash-1",
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.readResult.sharedDiagnostics.sourceTruthContext.manualTravelVacantDonorSource).toBe(
+      "same_run_simulated_non_travel_days"
+    );
+    expect(body.readResult.sharedDiagnostics.sourceTruthContext.manualTravelVacantDonorDayCount).toBe(19);
+  });
 });

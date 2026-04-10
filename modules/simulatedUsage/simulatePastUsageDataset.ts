@@ -1467,6 +1467,7 @@ export async function simulatePastUsageDataset(
       canonicalMonthKeys: string[];
       intradayShape96: number[] | null;
       weekdayWeekendShape96: { weekday: number[]; weekend: number[] } | null;
+      manualTravelVacantDonorPoolMode?: "same_run_simulated_non_travel_days" | "source_derived_mode_unchanged" | null;
     } | null =
       isLowDataSharedPastMode
         ? {
@@ -1474,6 +1475,8 @@ export async function simulatePastUsageDataset(
             canonicalMonthKeys: canonicalMonths,
             intradayShape96: (buildInputs as SimulatorBuildInputsV1).intradayShape96 ?? null,
             weekdayWeekendShape96: (buildInputs as SimulatorBuildInputsV1).weekdayWeekendShape96 ?? null,
+            manualTravelVacantDonorPoolMode:
+              (buildInputs as SimulatorBuildInputsV1).manualTravelVacantDonorPoolMode ?? null,
           }
         : null;
     const fetchedActualIntervals = preloadedIntervals
@@ -1806,6 +1809,9 @@ export async function simulatePastUsageDataset(
       fingerprintWeekdayWeekendBucketsUsed?: string[];
       fingerprintWeatherBucketsUsed?: string[];
       fingerprintShapeSummaryByMonthDayType?: Record<string, Record<string, Record<string, number>>>;
+      manualSimulatedReferencePoolUsed?: boolean;
+      manualSimulatedReferencePoolDayCount?: number;
+      manualTravelVacantDonorSource?: string | null;
     } = {};
     // Single shared day-level model (Section 21 / Phase 1): travel/vacant and Gap-Fill keep-ref modeled days
     // both flow through buildPastSimulatedBaselineV1 → simulatePastDay; stitch/compare remain downstream consumers only.
@@ -1990,6 +1996,9 @@ export async function simulatePastUsageDataset(
         lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode ?? lowDataSyntheticContext?.mode ?? undefined,
         actualBackedReferencePoolUsed:
           pastDayCounts.actualBackedReferencePoolUsed ?? (lowDataSyntheticContext ? false : undefined),
+        manualSimulatedReferencePoolUsed: pastDayCounts.manualSimulatedReferencePoolUsed,
+        manualSimulatedReferencePoolDayCount: pastDayCounts.manualSimulatedReferencePoolDayCount,
+        manualTravelVacantDonorSource: pastDayCounts.manualTravelVacantDonorSource,
         actualIntervalsCount: actualIntervals.length,
         sourceActualIntervalsCount,
         actualIntervalPayloadSuppressed,
@@ -2013,6 +2022,9 @@ export async function simulatePastUsageDataset(
         lowDataSyntheticContextUsed: pastDayCounts.lowDataSyntheticContextUsed,
         lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode,
         actualBackedReferencePoolUsed: pastDayCounts.actualBackedReferencePoolUsed,
+        manualSimulatedReferencePoolUsed: pastDayCounts.manualSimulatedReferencePoolUsed,
+        manualSimulatedReferencePoolDayCount: pastDayCounts.manualSimulatedReferencePoolDayCount,
+        manualTravelVacantDonorSource: pastDayCounts.manualTravelVacantDonorSource,
         actualIntervalsCount: actualIntervals.length,
         sourceActualIntervalsCount,
         actualIntervalPayloadSuppressed,
@@ -2324,6 +2336,9 @@ export async function simulatePastUsageDataset(
           lowDataSyntheticContextUsed: pastDayCounts.lowDataSyntheticContextUsed,
           lowDataSyntheticMode: pastDayCounts.lowDataSyntheticMode,
           actualBackedReferencePoolUsed: pastDayCounts.actualBackedReferencePoolUsed,
+          manualSimulatedReferencePoolUsed: pastDayCounts.manualSimulatedReferencePoolUsed,
+          manualSimulatedReferencePoolDayCount: pastDayCounts.manualSimulatedReferencePoolDayCount,
+          manualTravelVacantDonorSource: pastDayCounts.manualTravelVacantDonorSource,
           exactIntervalReferencePreparationSkipped: pastDayCounts.exactIntervalReferencePreparationSkipped,
           lowDataSummarizedSourceTruthUsed: pastDayCounts.lowDataSummarizedSourceTruthUsed,
           explicitKeepRefLocalDateKeyCount: forceModeledOutputKeepReferencePoolDateKeysLocalSet.size,

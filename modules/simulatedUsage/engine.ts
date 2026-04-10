@@ -190,6 +190,337 @@ function normalizeShape96OrNull(shape: number[] | undefined): number[] | null {
   return safe.map((v) => v / sum);
 }
 
+type ReferenceDayVector = {
+  dayStartMs: number;
+  dateKey: string;
+  monthKey: string;
+  dow: number;
+  slotKwh: number[];
+  hourly: number[];
+  total: number;
+  hourlyWeights: number[];
+  quarterShapeByHour: number[][];
+  wx: { tAvgF: number; hdd65: number; cdd65: number } | null;
+  pastWeather: PastDayWeatherFeatures | null;
+  hvacKwh: number;
+};
+
+function buildReferenceDayVector(args: {
+  dateKey: string;
+  slotKwh: number[];
+  wxRaw?: { tAvgF: number; tMinF?: number; tMaxF?: number; hdd65: number; cdd65: number } | null;
+  homeProfile?: any;
+  applianceProfile?: any;
+}): ReferenceDayVector | null {
+  const dateKey = String(args.dateKey ?? "").slice(0, 10);
+  if (!isIsoDate(dateKey) || !Array.isArray(args.slotKwh) || args.slotKwh.length !== INTERVALS_PER_DAY) return null;
+  const dayStartMs = Date.parse(`${dateKey}T00:00:00.000Z`);
+  if (!Number.isFinite(dayStartMs)) return null;
+  const slotKwh = args.slotKwh.map((value) => Math.max(0, Number(value) || 0));
+  const hourly = Array.from({ length: 24 }, (_, h) => {
+    let s = 0;
+    for (let q = 0; q < 4; q++) s += slotKwh[h * 4 + q] ?? 0;
+    return s;
+  });
+  const total = slotKwh.reduce((a, b) => a + b, 0);
+  const totalForWeights = total > 0 ? total : 1;
+  const hourlyWeights = hourly.map((value) => (Number(value) || 0) / totalForWeights);
+  const hourlyWeightSum = hourlyWeights.reduce((a, b) => a + b, 0) || 1;
+  for (let h = 0; h < 24; h++) hourlyWeights[h] = (hourlyWeights[h] ?? 0) / hourlyWeightSum;
+
+  const quarterShapeByHour: number[][] = [];
+  for (let h = 0; h < 24; h++) {
+    const hourSum = (hourly[h] ?? 0) || 0;
+    const q = [0.25, 0.25, 0.25, 0.25];
+    if (hourSum > 0) {
+      for (let i = 0; i < 4; i++) q[i] = Math.max(0, (Number(slotKwh[h * 4 + i]) || 0) / hourSum);
+      const qSum = q.reduce((a, b) => a + b, 0) || 1;
+      for (let i = 0; i < 4; i++) q[i] /= qSum;
+    }
+    quarterShapeByHour.push(q);
+  }
+
+  const wxRaw = args.wxRaw ?? null;
+  const wx = wxRaw
+    ? {
+        tAvgF: Number(wxRaw.tAvgF) || 0,
+        hdd65: Number(wxRaw.hdd65) || 0,
+        cdd65: Number(wxRaw.cdd65) || 0,
+      }
+    : null;
+  const hvacRef = weatherAwareHvacKwh({
+    wx,
+    homeProfile: args.homeProfile,
+    applianceProfile: args.applianceProfile,
+  });
+
+  return {
+    dayStartMs,
+    dateKey,
+    monthKey: dateKey.slice(0, 7),
+    dow: new Date(dayStartMs).getUTCDay(),
+    slotKwh,
+    hourly,
+    total,
+    hourlyWeights,
+    quarterShapeByHour,
+    wx,
+    pastWeather: engineWxToPastDayWeather(wxRaw),
+    hvacKwh: Number(hvacRef.hvacKwh) || 0,
+  };
+}
+
+function buildManualSimulatedTravelDonorRuntime(args: {
+  donorDayResults: SimulatedDayResult[];
+  actualWxByDateKey?: Map<string, { tAvgF: number; tMinF?: number; tMaxF?: number; hdd65: number; cdd65: number }>;
+  homeProfile?: any;
+  applianceProfile?: any;
+}):
+  | {
+      donorContext: ReturnType<typeof buildPastDaySimulationContext>;
+      donorReferenceDayCount: number;
+      donorFingerprintIdentity: string | null;
+    }
+  | null {
+  const referenceDays = args.donorDayResults
+    .map((row) =>
+      buildReferenceDayVector({
+        dateKey: row.localDate,
+        slotKwh: row.intervals15,
+        wxRaw: args.actualWxByDateKey?.get(row.localDate) ?? null,
+        homeProfile: args.homeProfile,
+        applianceProfile: args.applianceProfile,
+      })
+    )
+    .filter((row): row is ReferenceDayVector => row != null && row.total > 0);
+  if (referenceDays.length === 0) return null;
+
+  const weatherByDateKeyPast = new Map<string, PastDayWeatherFeatures>();
+  for (const day of referenceDays) {
+    if (day.pastWeather) weatherByDateKeyPast.set(day.dateKey, day.pastWeather);
+  }
+
+  const monthKeysRef = Array.from(new Set(referenceDays.map((d) => d.monthKey))).sort();
+  const weekdayCountByMonthRef: Record<string, number> = {};
+  const weekendCountByMonthRef: Record<string, number> = {};
+  const monthOverallAvgByMonthRef: Record<string, number> = {};
+  const monthOverallCountByMonthRef: Record<string, number> = {};
+  for (const ym of monthKeysRef) {
+    const inMonth = referenceDays.filter((d) => d.monthKey === ym);
+    const weekdays = inMonth.filter((d) => d.dow >= 1 && d.dow <= 5);
+    const weekends = inMonth.filter((d) => d.dow === 0 || d.dow === 6);
+    weekdayCountByMonthRef[ym] = weekdays.length;
+    weekendCountByMonthRef[ym] = weekends.length;
+    monthOverallCountByMonthRef[ym] = inMonth.length;
+    monthOverallAvgByMonthRef[ym] =
+      inMonth.length > 0 ? inMonth.reduce((sum, d) => sum + d.total, 0) / inMonth.length : 0;
+  }
+  const avgKwhPerDayWeekdayByMonthRef = monthKeysRef.map((ym) => {
+    const count = weekdayCountByMonthRef[ym] ?? 0;
+    return count > 0
+      ? referenceDays
+          .filter((d) => d.monthKey === ym && d.dow >= 1 && d.dow <= 5)
+          .reduce((sum, d) => sum + d.total, 0) / count
+      : 0;
+  });
+  const avgKwhPerDayWeekendByMonthRef = monthKeysRef.map((ym) => {
+    const count = weekendCountByMonthRef[ym] ?? 0;
+    return count > 0
+      ? referenceDays
+          .filter((d) => d.monthKey === ym && (d.dow === 0 || d.dow === 6))
+          .reduce((sum, d) => sum + d.total, 0) / count
+      : 0;
+  });
+  const profile: PastDayProfileLite = {
+    monthKeys: monthKeysRef,
+    avgKwhPerDayWeekdayByMonth: avgKwhPerDayWeekdayByMonthRef,
+    avgKwhPerDayWeekendByMonth: avgKwhPerDayWeekendByMonthRef,
+    weekdayCountByMonth: weekdayCountByMonthRef,
+    weekendCountByMonth: weekendCountByMonthRef,
+    monthOverallAvgByMonth: monthOverallAvgByMonthRef,
+    monthOverallCountByMonth: monthOverallCountByMonthRef,
+  };
+
+  const trainingDayKwhByDate = new Map<string, number>();
+  for (const day of referenceDays) trainingDayKwhByDate.set(day.dateKey, day.total);
+  const isWeekendRef = (dateKey: string) => {
+    const match = referenceDays.find((day) => day.dateKey === dateKey);
+    return match ? match.dow === 0 || match.dow === 6 : false;
+  };
+  const trainingWeatherStats =
+    weatherByDateKeyPast.size > 0
+      ? (buildTrainingWeatherStats({
+          trainingDateKeys: referenceDays.map((day) => day.dateKey),
+          trainingDayKwhByDate,
+          weatherByDateKey: weatherByDateKeyPast as Map<string, DailyWeatherFeatures>,
+          isWeekend: isWeekendRef,
+        }) as unknown as PastDayTrainingWeatherStats)
+      : null;
+
+  type ShapeAcc = { sum: number[]; count: number };
+  type WeatherShapeAcc = Record<PastWeatherRegimeKey, ShapeAcc>;
+  const makeShapeAcc = (): ShapeAcc => ({ sum: emptyShape96Array(), count: 0 });
+  const makeWeatherShapeAcc = (): WeatherShapeAcc => ({
+    heating: makeShapeAcc(),
+    cooling: makeShapeAcc(),
+    neutral: makeShapeAcc(),
+  });
+  const addShapeToAcc = (acc: ShapeAcc, shape: number[]) => {
+    for (let i = 0; i < INTERVALS_PER_DAY; i++) acc.sum[i] += Number(shape[i]) || 0;
+    acc.count += 1;
+  };
+
+  const neighborDayTotals: PastNeighborDayTotals = { weekdayByMonth: {}, weekendByMonth: {} };
+  const monthDayTypeAcc: Record<string, Record<PastDayTypeKey, ShapeAcc>> = {};
+  const monthWeatherDayTypeAcc: Record<string, Record<PastDayTypeKey, WeatherShapeAcc>> = {};
+  const weekdayWeekendAcc: Record<PastDayTypeKey, ShapeAcc> = {
+    weekday: makeShapeAcc(),
+    weekend: makeShapeAcc(),
+  };
+  const weekdayWeekendWeatherAcc: Record<PastDayTypeKey, WeatherShapeAcc> = {
+    weekday: makeWeatherShapeAcc(),
+    weekend: makeWeatherShapeAcc(),
+  };
+
+  for (const day of referenceDays) {
+    const dayType: PastDayTypeKey = day.dow === 0 || day.dow === 6 ? "weekend" : "weekday";
+    const dom = Number(day.dateKey.slice(8, 10));
+    if (Number.isFinite(dom) && dom >= 1 && dom <= 31) {
+      const bucket = dayType === "weekend" ? neighborDayTotals.weekendByMonth : neighborDayTotals.weekdayByMonth;
+      if (!bucket?.[day.monthKey]) bucket![day.monthKey] = [];
+      bucket![day.monthKey]!.push({
+        localDate: day.dateKey,
+        dayOfMonth: dom,
+        dayKwh: Number(day.total) || 0,
+      });
+    }
+    const dayTotal = Number(day.total) || 0;
+    if (dayTotal <= 0) continue;
+    const dayShape = day.slotKwh.map((value) => Math.max(0, (Number(value) || 0) / dayTotal));
+    const weatherRegime = weatherRegimeForShape(day.wx);
+    if (!monthDayTypeAcc[day.monthKey]) {
+      monthDayTypeAcc[day.monthKey] = { weekday: makeShapeAcc(), weekend: makeShapeAcc() };
+    }
+    if (!monthWeatherDayTypeAcc[day.monthKey]) {
+      monthWeatherDayTypeAcc[day.monthKey] = { weekday: makeWeatherShapeAcc(), weekend: makeWeatherShapeAcc() };
+    }
+    addShapeToAcc(monthDayTypeAcc[day.monthKey]![dayType], dayShape);
+    addShapeToAcc(monthWeatherDayTypeAcc[day.monthKey]![dayType][weatherRegime], dayShape);
+    addShapeToAcc(weekdayWeekendAcc[dayType], dayShape);
+    addShapeToAcc(weekdayWeekendWeatherAcc[dayType][weatherRegime], dayShape);
+  }
+
+  const normalizedFromAcc = (acc: ShapeAcc): number[] | null =>
+    acc.count > 0 ? normalizeShape96OrNull(acc.sum.map((value) => value / acc.count)) : null;
+  const shapeByMonth96Ref: Record<string, number[]> = {};
+  for (const ym of monthKeysRef) {
+    const wd = monthDayTypeAcc[ym]?.weekday;
+    const we = monthDayTypeAcc[ym]?.weekend;
+    const monthSum = emptyShape96Array();
+    const monthCount = (wd?.count ?? 0) + (we?.count ?? 0);
+    if (wd?.count) for (let i = 0; i < INTERVALS_PER_DAY; i++) monthSum[i] += wd.sum[i];
+    if (we?.count) for (let i = 0; i < INTERVALS_PER_DAY; i++) monthSum[i] += we.sum[i];
+    const normalized =
+      monthCount > 0 ? normalizeShape96OrNull(monthSum.map((value) => value / monthCount)) : null;
+    if (normalized) shapeByMonth96Ref[ym] = normalized;
+  }
+  const shapeVariants: PastShapeVariants = {
+    byMonth96: shapeByMonth96Ref,
+    byMonthDayType96: {},
+    byMonthWeatherDayType96: {},
+    weekdayWeekend96: {},
+    weekdayWeekendWeather96: {},
+  };
+  for (const ym of Object.keys(monthDayTypeAcc)) {
+    const dayTypeBuckets: Record<PastDayTypeKey, number[] | null> = {
+      weekday: normalizedFromAcc(monthDayTypeAcc[ym]!.weekday),
+      weekend: normalizedFromAcc(monthDayTypeAcc[ym]!.weekend),
+    };
+    (shapeVariants.byMonthDayType96 as NonNullable<PastShapeVariants["byMonthDayType96"]>)[ym] = dayTypeBuckets;
+    const weatherBuckets: Record<PastDayTypeKey, Record<PastWeatherRegimeKey, number[] | null>> = {
+      weekday: { heating: null, cooling: null, neutral: null },
+      weekend: { heating: null, cooling: null, neutral: null },
+    };
+    for (const dayType of ["weekday", "weekend"] as const) {
+      for (const regime of ["heating", "cooling", "neutral"] as const) {
+        weatherBuckets[dayType][regime] = normalizedFromAcc(monthWeatherDayTypeAcc[ym]![dayType][regime]);
+      }
+    }
+    (shapeVariants.byMonthWeatherDayType96 as NonNullable<PastShapeVariants["byMonthWeatherDayType96"]>)[ym] =
+      weatherBuckets;
+  }
+  (shapeVariants.weekdayWeekend96 as NonNullable<PastShapeVariants["weekdayWeekend96"]>).weekday = normalizedFromAcc(
+    weekdayWeekendAcc.weekday
+  );
+  (shapeVariants.weekdayWeekend96 as NonNullable<PastShapeVariants["weekdayWeekend96"]>).weekend = normalizedFromAcc(
+    weekdayWeekendAcc.weekend
+  );
+  (shapeVariants.weekdayWeekendWeather96 as NonNullable<PastShapeVariants["weekdayWeekendWeather96"]>).weekday = {
+    heating: normalizedFromAcc(weekdayWeekendWeatherAcc.weekday.heating),
+    cooling: normalizedFromAcc(weekdayWeekendWeatherAcc.weekday.cooling),
+    neutral: normalizedFromAcc(weekdayWeekendWeatherAcc.weekday.neutral),
+  };
+  (shapeVariants.weekdayWeekendWeather96 as NonNullable<PastShapeVariants["weekdayWeekendWeather96"]>).weekend = {
+    heating: normalizedFromAcc(weekdayWeekendWeatherAcc.weekend.heating),
+    cooling: normalizedFromAcc(weekdayWeekendWeatherAcc.weekend.cooling),
+    neutral: normalizedFromAcc(weekdayWeekendWeatherAcc.weekend.neutral),
+  };
+
+  const weatherDonorSamples: PastWeatherDonorSample[] = referenceDays
+    .map((day) => {
+      if (!day.pastWeather) return null;
+      return {
+        localDate: day.dateKey,
+        monthKey: day.monthKey,
+        dayType: day.dow === 0 || day.dow === 6 ? "weekend" : "weekday",
+        weatherRegime: weatherRegimeForShape(day.wx),
+        dayKwh: day.total,
+        dailyAvgTempC: day.pastWeather.dailyAvgTempC,
+        dailyMinTempC: day.pastWeather.dailyMinTempC,
+        dailyMaxTempC: day.pastWeather.dailyMaxTempC,
+        tempSpreadC:
+          day.pastWeather.dailyMinTempC != null && day.pastWeather.dailyMaxTempC != null
+            ? day.pastWeather.dailyMaxTempC - day.pastWeather.dailyMinTempC
+            : null,
+        heatingDegreeSeverity: day.pastWeather.heatingDegreeSeverity,
+        coolingDegreeSeverity: day.pastWeather.coolingDegreeSeverity,
+      } satisfies PastWeatherDonorSample;
+    })
+    .filter((sample): sample is PastWeatherDonorSample => sample != null);
+
+  const donorFingerprintIdentity = createHash("sha256")
+    .update(
+      JSON.stringify({
+        version: "manual_travel_simulated_donor_pool_v1",
+        referenceDays: referenceDays.map((day) => ({
+          dateKey: day.dateKey,
+          monthKey: day.monthKey,
+          dow: day.dow,
+          total: Number(day.total.toFixed(4)),
+          wx: day.wx,
+          hourlyWeights: day.hourlyWeights.map((value) => Number(value.toFixed(6))),
+        })),
+      }),
+      "utf8"
+    )
+    .digest("base64url")
+    .slice(0, 24);
+
+  return {
+    donorContext: buildPastDaySimulationContext({
+      profile,
+      trainingWeatherStats,
+      weatherByDateKey: weatherByDateKeyPast,
+      neighborDayTotals,
+      weatherDonorSamples,
+      modeledDaySelectionStrategy: "weather_donor_first",
+      shapeVariants,
+    }),
+    donorReferenceDayCount: referenceDays.length,
+    donorFingerprintIdentity,
+  };
+}
+
 export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): SimulatedCurve {
   const excludedDays = buildExcludedDaySet(payload.travelRanges ?? []);
 
@@ -1277,6 +1608,7 @@ export function buildPastSimulatedBaselineV1(args: {
     intradayShape96?: number[] | null;
     weekdayWeekendShape96?: { weekday?: number[] | null; weekend?: number[] | null } | null;
     weatherEvidenceSummary?: import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDaySimulationContext["lowDataWeatherEvidence"];
+    manualTravelVacantDonorPoolMode?: "same_run_simulated_non_travel_days" | "source_derived_mode_unchanged" | null;
   } | null;
   observability?: {
     correlationId?: string;
@@ -2080,6 +2412,65 @@ export function buildPastSimulatedBaselineV1(args: {
   const legacyShapeByMonth96ForPastDay = wholeHomeOnlyPrior ? {} : shapeByMonth96Ref;
   const modeledKeepRefReasonCode = args.modeledKeepRefReasonCode ?? "TEST_MODELED_KEEP_REF";
   const defaultModeledReasonCode = args.defaultModeledReasonCode ?? "INCOMPLETE_METER_DAY";
+  const manualSimulatedReferencePoolEnabled =
+    useLowDataSyntheticContext &&
+    lowDataSyntheticContext?.mode === "MANUAL_TOTALS" &&
+    (lowDataSyntheticContext?.manualTravelVacantDonorPoolMode == null ||
+      lowDataSyntheticContext?.manualTravelVacantDonorPoolMode === "same_run_simulated_non_travel_days");
+  const manualSimulatedDonorCandidates: SimulatedDayResult[] = [];
+  const manualTravelVacantDateKeys = new Set<string>();
+  const outIndexByTimestamp = manualSimulatedReferencePoolEnabled ? new Map<string, number>() : null;
+  const toStoredDayResult = (classifiedResult: SimulatedDayResult): SimulatedDayResult =>
+    compactSimulatedDayResults
+      ? ({
+          localDate: classifiedResult.localDate,
+          source: classifiedResult.source,
+          simulatedReasonCode: classifiedResult.simulatedReasonCode,
+          intervalSumKwh: classifiedResult.intervalSumKwh,
+          displayDayKwh: classifiedResult.displayDayKwh,
+          rawDayKwh: classifiedResult.rawDayKwh,
+          weatherAdjustedDayKwh: classifiedResult.weatherAdjustedDayKwh,
+          profileSelectedDayKwh: classifiedResult.profileSelectedDayKwh,
+          finalDayKwh: classifiedResult.finalDayKwh,
+          weatherSeverityMultiplier: classifiedResult.weatherSeverityMultiplier,
+          weatherModeUsed: classifiedResult.weatherModeUsed,
+          auxHeatKwhAdder: classifiedResult.auxHeatKwhAdder,
+          poolFreezeProtectKwhAdder: classifiedResult.poolFreezeProtectKwhAdder,
+          dayClassification: classifiedResult.dayClassification,
+          fallbackLevel: classifiedResult.fallbackLevel,
+          clampApplied: classifiedResult.clampApplied,
+          dayTypeUsed: classifiedResult.dayTypeUsed,
+          shapeVariantUsed: classifiedResult.shapeVariantUsed,
+          weatherRegimeUsed: classifiedResult.weatherRegimeUsed,
+          targetDayKwhBeforeWeather: classifiedResult.targetDayKwhBeforeWeather,
+          donorSelectionModeUsed: classifiedResult.donorSelectionModeUsed,
+          donorCandidatePoolSize: classifiedResult.donorCandidatePoolSize,
+          selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates,
+          selectedDonorWeights: classifiedResult.selectedDonorWeights,
+          donorWeatherRegimeUsed: classifiedResult.donorWeatherRegimeUsed,
+          donorMonthKeyUsed: classifiedResult.donorMonthKeyUsed,
+          thermalDistanceScore: classifiedResult.thermalDistanceScore,
+          broadFallbackUsed: classifiedResult.broadFallbackUsed,
+          sameRegimeDonorPoolAvailable: classifiedResult.sameRegimeDonorPoolAvailable,
+          donorPoolBlendStrategy: classifiedResult.donorPoolBlendStrategy,
+          donorPoolKwhSpread: classifiedResult.donorPoolKwhSpread,
+          donorPoolKwhVariance: classifiedResult.donorPoolKwhVariance,
+          donorPoolMedianKwh: classifiedResult.donorPoolMedianKwh,
+          donorVarianceGuardrailTriggered: classifiedResult.donorVarianceGuardrailTriggered,
+          weatherAdjustmentModeUsed: classifiedResult.weatherAdjustmentModeUsed,
+          postDonorAdjustmentCoefficient: classifiedResult.postDonorAdjustmentCoefficient,
+          templateSelectionKind: classifiedResult.templateSelectionKind,
+          selectedFingerprintBucketMonth: classifiedResult.selectedFingerprintBucketMonth,
+          selectedFingerprintBucketDayType: classifiedResult.selectedFingerprintBucketDayType,
+          selectedFingerprintWeatherBucket: classifiedResult.selectedFingerprintWeatherBucket,
+          selectedFingerprintIdentity: classifiedResult.selectedFingerprintIdentity,
+          selectedReferencePoolCount: classifiedResult.selectedReferencePoolCount,
+          weatherScalingCoefficientUsed: classifiedResult.weatherScalingCoefficientUsed,
+          dayTotalBeforeWeatherScale: classifiedResult.dayTotalBeforeWeatherScale,
+          dayTotalAfterWeatherScale: classifiedResult.dayTotalAfterWeatherScale,
+          intervalShapeScalingMethod: classifiedResult.intervalShapeScalingMethod,
+        } as SimulatedDayResult)
+      : classifiedResult;
   const selectedReferencePoolCountForVariant = (
     shapeVariantUsed: string,
     monthKey: string,
@@ -2104,6 +2495,48 @@ export function buildPastSimulatedBaselineV1(args: {
     }
     return referenceDays.length;
   };
+  const classifyModeledResult = (args: {
+    dateKey: string;
+    monthKey: string;
+    simulatedReasonCode:
+      | "TRAVEL_VACANT"
+      | "TEST_MODELED_KEEP_REF"
+      | "MANUAL_CONSTRAINED_DAY"
+      | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+      | "FORCED_SELECTED_DAY"
+      | "INCOMPLETE_METER_DAY"
+      | "LEADING_MISSING_DAY";
+    modeledResult: SimulatedDayResult;
+    fingerprintIdentity?: string | null;
+  }): SimulatedDayResult => ({
+    ...args.modeledResult,
+    simulatedReasonCode: args.simulatedReasonCode,
+    templateSelectionKind:
+      args.simulatedReasonCode === "TRAVEL_VACANT" ||
+      args.simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" ||
+      args.simulatedReasonCode === "MANUAL_CONSTRAINED_DAY"
+        ? "shared_modeled_day_template"
+        : args.simulatedReasonCode === "TEST_MODELED_KEEP_REF"
+          ? "validation_keep_ref_shared_day_template"
+          : "shared_day_template",
+    selectedFingerprintBucketMonth: args.modeledResult.selectedFingerprintBucketMonth ?? args.monthKey,
+    selectedFingerprintBucketDayType: args.modeledResult.dayTypeUsed,
+    selectedFingerprintWeatherBucket: args.modeledResult.weatherRegimeUsed,
+    selectedFingerprintIdentity: args.fingerprintIdentity ?? intervalUsageFingerprintIdentity ?? undefined,
+    selectedReferencePoolCount:
+      args.modeledResult.dayTypeUsed && args.modeledResult.weatherRegimeUsed
+        ? selectedReferencePoolCountForVariant(
+            args.modeledResult.shapeVariantUsed ?? "uniform_fallback",
+            args.modeledResult.selectedFingerprintBucketMonth ?? args.monthKey,
+            args.modeledResult.dayTypeUsed,
+            args.modeledResult.weatherRegimeUsed
+          ) ?? undefined
+        : undefined,
+    weatherScalingCoefficientUsed: args.modeledResult.weatherSeverityMultiplier,
+    dayTotalBeforeWeatherScale: args.modeledResult.targetDayKwhBeforeWeather,
+    dayTotalAfterWeatherScale: args.modeledResult.weatherAdjustedDayKwh,
+    intervalShapeScalingMethod: `shape_variant:${args.modeledResult.shapeVariantUsed ?? "uniform_fallback"}`,
+  });
   const perDayLoopStartedAt = Date.now();
   emitStage("buildPastSimulatedBaselineV1_stage_per_day_loop_start", {
     modeledDayCount: 0,
@@ -2200,90 +2633,25 @@ export function buildPastSimulatedBaselineV1(args: {
       const retainDayResult =
         !collectSimulatedDayResultsDateKeys ||
         collectSimulatedDayResultsDateKeys.has(dateKey);
-      const classifiedResult: SimulatedDayResult = {
-        ...blendedResult,
+      const classifiedResult = classifyModeledResult({
+        dateKey,
+        monthKey: ym,
         simulatedReasonCode,
-        templateSelectionKind:
-          simulatedReasonCode === "TRAVEL_VACANT" ||
-          simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" ||
-          simulatedReasonCode === "MANUAL_CONSTRAINED_DAY"
-            ? "shared_modeled_day_template"
-            : simulatedReasonCode === "TEST_MODELED_KEEP_REF"
-              ? "validation_keep_ref_shared_day_template"
-              : "shared_day_template",
-        selectedFingerprintBucketMonth: blendedResult.selectedFingerprintBucketMonth ?? ym,
-        selectedFingerprintBucketDayType: blendedResult.dayTypeUsed,
-        selectedFingerprintWeatherBucket: blendedResult.weatherRegimeUsed,
-        selectedFingerprintIdentity: intervalUsageFingerprintIdentity ?? undefined,
-        selectedReferencePoolCount:
-          blendedResult.dayTypeUsed && blendedResult.weatherRegimeUsed
-            ? selectedReferencePoolCountForVariant(
-                blendedResult.shapeVariantUsed ?? "uniform_fallback",
-                blendedResult.selectedFingerprintBucketMonth ?? ym,
-                blendedResult.dayTypeUsed,
-                blendedResult.weatherRegimeUsed
-              ) ?? undefined
-            : undefined,
-        weatherScalingCoefficientUsed: blendedResult.weatherSeverityMultiplier,
-        dayTotalBeforeWeatherScale: blendedResult.targetDayKwhBeforeWeather,
-        dayTotalAfterWeatherScale: blendedResult.weatherAdjustedDayKwh,
-        intervalShapeScalingMethod: `shape_variant:${blendedResult.shapeVariantUsed ?? "uniform_fallback"}`,
-      };
-      if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
-        dayResults.push(
-          compactSimulatedDayResults
-            ? ({
-                localDate: classifiedResult.localDate,
-                source: classifiedResult.source,
-                simulatedReasonCode: classifiedResult.simulatedReasonCode,
-                intervalSumKwh: classifiedResult.intervalSumKwh,
-                displayDayKwh: classifiedResult.displayDayKwh,
-                rawDayKwh: classifiedResult.rawDayKwh,
-                weatherAdjustedDayKwh: classifiedResult.weatherAdjustedDayKwh,
-                profileSelectedDayKwh: classifiedResult.profileSelectedDayKwh,
-                finalDayKwh: classifiedResult.finalDayKwh,
-                weatherSeverityMultiplier: classifiedResult.weatherSeverityMultiplier,
-                weatherModeUsed: classifiedResult.weatherModeUsed,
-                auxHeatKwhAdder: classifiedResult.auxHeatKwhAdder,
-                poolFreezeProtectKwhAdder: classifiedResult.poolFreezeProtectKwhAdder,
-                dayClassification: classifiedResult.dayClassification,
-                fallbackLevel: classifiedResult.fallbackLevel,
-                clampApplied: classifiedResult.clampApplied,
-                dayTypeUsed: classifiedResult.dayTypeUsed,
-                shapeVariantUsed: classifiedResult.shapeVariantUsed,
-                weatherRegimeUsed: classifiedResult.weatherRegimeUsed,
-                targetDayKwhBeforeWeather: classifiedResult.targetDayKwhBeforeWeather,
-                donorSelectionModeUsed: classifiedResult.donorSelectionModeUsed,
-                donorCandidatePoolSize: classifiedResult.donorCandidatePoolSize,
-                selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates,
-                selectedDonorWeights: classifiedResult.selectedDonorWeights,
-                donorWeatherRegimeUsed: classifiedResult.donorWeatherRegimeUsed,
-                donorMonthKeyUsed: classifiedResult.donorMonthKeyUsed,
-                thermalDistanceScore: classifiedResult.thermalDistanceScore,
-                broadFallbackUsed: classifiedResult.broadFallbackUsed,
-                sameRegimeDonorPoolAvailable: classifiedResult.sameRegimeDonorPoolAvailable,
-                donorPoolBlendStrategy: classifiedResult.donorPoolBlendStrategy,
-                donorPoolKwhSpread: classifiedResult.donorPoolKwhSpread,
-                donorPoolKwhVariance: classifiedResult.donorPoolKwhVariance,
-                donorPoolMedianKwh: classifiedResult.donorPoolMedianKwh,
-                donorVarianceGuardrailTriggered: classifiedResult.donorVarianceGuardrailTriggered,
-                weatherAdjustmentModeUsed: classifiedResult.weatherAdjustmentModeUsed,
-                postDonorAdjustmentCoefficient: classifiedResult.postDonorAdjustmentCoefficient,
-                templateSelectionKind: classifiedResult.templateSelectionKind,
-                selectedFingerprintBucketMonth: classifiedResult.selectedFingerprintBucketMonth,
-                selectedFingerprintBucketDayType: classifiedResult.selectedFingerprintBucketDayType,
-                selectedFingerprintWeatherBucket: classifiedResult.selectedFingerprintWeatherBucket,
-                selectedFingerprintIdentity: classifiedResult.selectedFingerprintIdentity,
-                selectedReferencePoolCount: classifiedResult.selectedReferencePoolCount,
-                weatherScalingCoefficientUsed: classifiedResult.weatherScalingCoefficientUsed,
-                dayTotalBeforeWeatherScale: classifiedResult.dayTotalBeforeWeatherScale,
-                dayTotalAfterWeatherScale: classifiedResult.dayTotalAfterWeatherScale,
-                intervalShapeScalingMethod: classifiedResult.intervalShapeScalingMethod,
-              } as SimulatedDayResult)
-            : classifiedResult
-        );
+        modeledResult: blendedResult,
+      });
+      if (manualSimulatedReferencePoolEnabled && simulatedReasonCode === "MANUAL_CONSTRAINED_DAY") {
+        manualSimulatedDonorCandidates.push(classifiedResult);
+      } else if (manualSimulatedReferencePoolEnabled && simulatedReasonCode === "TRAVEL_VACANT") {
+        manualTravelVacantDateKeys.add(dateKey);
       }
-      for (const iv of classifiedResult.intervals) out.push(iv);
+      if (collectSimulatedDayResults && retainDayResult && dayResults.length < collectSimulatedDayResultsLimit) {
+        dayResults.push(toStoredDayResult(classifiedResult));
+      }
+      for (const iv of classifiedResult.intervals) {
+        const intervalIndex = out.length;
+        out.push(iv);
+        outIndexByTimestamp?.set(iv.timestamp, intervalIndex);
+      }
       const mappedFallback = pastDayFallbackToEngineLevel(classifiedResult.fallbackLevel);
       if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
         dayDiagnostics.push({
@@ -2387,6 +2755,66 @@ export function buildPastSimulatedBaselineV1(args: {
       }
     }
   }
+  let manualSimulatedReferencePoolUsed = false;
+  let manualSimulatedReferencePoolDayCount = 0;
+  let manualTravelVacantDonorSource: string | null =
+    lowDataSyntheticContext?.manualTravelVacantDonorPoolMode === "source_derived_mode_unchanged"
+      ? "source_derived_mode_unchanged"
+      : null;
+  if (
+    manualSimulatedReferencePoolEnabled &&
+    manualSimulatedDonorCandidates.length > 0 &&
+    manualTravelVacantDateKeys.size > 0
+  ) {
+    const donorRuntime = buildManualSimulatedTravelDonorRuntime({
+      donorDayResults: manualSimulatedDonorCandidates,
+      actualWxByDateKey: args.actualWxByDateKey,
+      homeProfile: args.homeProfile,
+      applianceProfile: args.applianceProfile,
+    });
+    if (donorRuntime) {
+      manualSimulatedReferencePoolUsed = true;
+      manualSimulatedReferencePoolDayCount = donorRuntime.donorReferenceDayCount;
+      manualTravelVacantDonorSource = "same_run_simulated_non_travel_days";
+      for (const dateKey of Array.from(manualTravelVacantDateKeys)) {
+        const dayStartMs = Date.parse(`${dateKey}T00:00:00.000Z`);
+        if (!Number.isFinite(dayStartMs)) continue;
+        const gridTs = args.getDayGridTimestamps(dayStartMs);
+        const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
+        const rerun = simulatePastDay(
+          {
+            localDate: dateKey,
+            isWeekend: new Date(dayStartMs).getUTCDay() === 0 || new Date(dayStartMs).getUTCDay() === 6,
+            gridTimestamps: gridTs,
+            weatherForDay: wx ? engineWxToPastDayWeather(wx) : null,
+          },
+          donorRuntime.donorContext,
+          args.homeProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayHomeProfile | null,
+          args.applianceProfile as import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDayApplianceProfile | null,
+          legacyShapeByMonth96ForPastDay
+        );
+        const classifiedResult = classifyModeledResult({
+          dateKey,
+          monthKey: dateKey.slice(0, 7),
+          simulatedReasonCode: "TRAVEL_VACANT",
+          modeledResult: rerun,
+          fingerprintIdentity: donorRuntime.donorFingerprintIdentity,
+        });
+        const retainedIndex = dayResults.findIndex((row) => row.localDate === dateKey);
+        if (retainedIndex >= 0) dayResults[retainedIndex] = toStoredDayResult(classifiedResult);
+        for (const interval of classifiedResult.intervals) {
+          const idx = outIndexByTimestamp?.get(interval.timestamp);
+          if (idx != null) out[idx] = interval;
+        }
+      }
+    }
+  } else if (
+    manualSimulatedReferencePoolEnabled &&
+    manualTravelVacantDateKeys.size > 0 &&
+    lowDataSyntheticContext?.manualTravelVacantDonorPoolMode == null
+  ) {
+    manualTravelVacantDonorSource = "same_run_simulated_non_travel_days";
+  }
   emitStage("buildPastSimulatedBaselineV1_stage_per_day_loop_success", {
     elapsedMs: Date.now() - perDayLoopStartedAt,
     modeledDayCount: simulatedDays,
@@ -2417,6 +2845,9 @@ export function buildPastSimulatedBaselineV1(args: {
     args.debug.out.fingerprintWeekdayWeekendBucketsUsed = fingerprintWeekdayWeekendBucketsUsed;
     args.debug.out.fingerprintWeatherBucketsUsed = fingerprintWeatherBucketsUsed;
     args.debug.out.fingerprintShapeSummaryByMonthDayType = fingerprintShapeSummaryByMonthDayType;
+    (args.debug.out as Record<string, unknown>).manualSimulatedReferencePoolUsed = manualSimulatedReferencePoolUsed;
+    (args.debug.out as Record<string, unknown>).manualSimulatedReferencePoolDayCount = manualSimulatedReferencePoolDayCount;
+    (args.debug.out as Record<string, unknown>).manualTravelVacantDonorSource = manualTravelVacantDonorSource;
     args.debug.out.dayDiagnostics = dayDiagnostics;
     (args.debug.out as Record<string, unknown>).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
   }

@@ -143,6 +143,9 @@ Summary:
 - Canonical actual-house artifact/readback truth is the only valid owner for manual compare actual-reference. Shared compare/read surfaces must not switch annual totals, monthly actuals, or bill-period Actual kWh onto a second aggregate path when the actual-house artifact already carries that truth.
 - Active `MANUAL_MONTHLY` contract ownership is now exact-artifact scoped: the Stage 1 payload written for the run must carry the same saved/effective travel contract selected for recalc, and stale saved payload travel ranges must not be surfaced as active artifact truth.
 - Shared manual low-data travel behavior must remain on the same modeled-day family as manual-constrained days. Travel/vacant weather evidence may be weaker, but the runtime must keep the same shared weather/day-shape selector family instead of dropping onto a separate frozen-value engine.
+- Pure `MANUAL_MONTHLY` now has one shared travel/vacant donor-pool rule: reuse same-run simulated non-travel manual days as donor/reference truth inside the shared Stage 2 runtime, instead of actual interval donor history.
+- That donor-pool rule is shared by Manual Usage Lab and GapFill pure manual monthly because both must pass through the same `simulatePastUsageDataset` -> `buildPastSimulatedBaselineV1` path.
+- Source actual intervals remain compare-only on pure manual monthly, and explicit source-derived monthly runs stay on their existing source-derived behavior rather than inheriting the pure-manual donor pool.
 - This Plan Change overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or separate flat travel-day behavior.
 - Authoritative shared simulator call chain:
   - `getPastSimulatedDatasetForHouse`

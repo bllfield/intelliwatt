@@ -922,6 +922,7 @@ export type SimulatorBuildInputsV1 = {
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;
   manualMonthlyInputState?: ManualMonthlyInputState | null;
   manualMonthlyWeatherEvidenceSummary?: PastLowDataWeatherEvidenceSummary | null;
+  manualTravelVacantDonorPoolMode?: "same_run_simulated_non_travel_days" | "source_derived_mode_unchanged" | null;
   manualBillPeriods?: ManualBillPeriodTarget[];
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   sharedProducerPathUsed?: boolean;

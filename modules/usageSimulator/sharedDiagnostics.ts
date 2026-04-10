@@ -148,6 +148,10 @@ export function buildSharedPastSimDiagnostics(args: {
         : null,
       manualMonthlyInputState: asRecord(meta.manualMonthlyInputState),
       manualMonthlyWeatherEvidenceSummary: asRecord(meta.manualMonthlyWeatherEvidenceSummary),
+      manualTravelVacantDonorSource:
+        typeof meta.manualTravelVacantDonorSource === "string" ? meta.manualTravelVacantDonorSource : null,
+      manualTravelVacantDonorDayCount:
+        typeof meta.manualTravelVacantDonorDayCount === "number" ? meta.manualTravelVacantDonorDayCount : null,
       manualBillPeriods: Array.isArray(meta.manualBillPeriods) ? meta.manualBillPeriods : [],
       manualBillPeriodTotalsKwhById: asRecord(meta.manualBillPeriodTotalsKwhById),
       travelRangesUsed: asRecord(lockboxInput.travelRanges).ranges ?? [],

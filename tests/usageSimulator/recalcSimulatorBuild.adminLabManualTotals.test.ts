@@ -662,6 +662,144 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     expect(out).toBeTruthy();
   }, 15000);
 
+  it("marks pure manual monthly runs to use the shared same-run simulated donor pool for travel/vacant days", async () => {
+    manualUsageInputFindUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-02-28",
+        monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+        statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+        travelRanges: [{ startDate: "2026-02-10", endDate: "2026-02-12" }],
+      },
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 25,
+          start: "2026-02-01",
+          end: "2026-02-28",
+        },
+        meta: { sharedProducerPathUsed: true },
+        daily: [{ date: "2026-02-10", kwh: 1, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+        monthly: [{ month: "2026-02", kwh: 25 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-02-10T00:00:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-02-10T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2026-02-01",
+        end: "2026-02-28",
+        intervals: [],
+        monthlyTotals: [{ month: "2026-02", kwh: 25 }],
+        annualTotalKwh: 25,
+        meta: { excludedDays: 3, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
+
+    await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "cid-pure-manual-donor-pool",
+      runContext: {
+        callerLabel: "admin_manual_monthly_lab",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buildInputs: expect.objectContaining({
+          manualTravelVacantDonorPoolMode: "same_run_simulated_non_travel_days",
+        }),
+      })
+    );
+  }, 15000);
+
+  it("keeps source-derived monthly runs off the pure-manual same-run donor pool", async () => {
+    manualUsageInputFindUnique.mockImplementation(async ({ where }: any) => {
+      const key = where?.userId_houseId;
+      if (key?.userId === "source-user-1" && key?.houseId === "source-home-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 900 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+        };
+      }
+      return null;
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 25,
+          start: "2026-02-01",
+          end: "2026-02-28",
+        },
+        meta: { sharedProducerPathUsed: true },
+        daily: [{ date: "2026-02-10", kwh: 1, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+        monthly: [{ month: "2026-02", kwh: 25 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-02-10T00:00:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-02-10T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      stitchedCurve: {
+        start: "2026-02-01",
+        end: "2026-02-28",
+        intervals: [],
+        monthlyTotals: [{ month: "2026-02", kwh: 25 }],
+        annualTotalKwh: 25,
+        meta: { excludedDays: 3, renormalized: false },
+      },
+      simulatedDayResults: [],
+    });
+
+    await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "test-home-1",
+      actualContextHouseId: "source-home-1",
+      esiid: "E1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      adminLabTreatmentMode: "manual_monthly_constrained",
+      persistPastSimBaseline: true,
+      correlationId: "cid-source-derived-donor-pool",
+      runContext: {
+        callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: true,
+        adminLabTreatmentMode: "manual_monthly_constrained",
+      },
+    });
+
+    expect(simulatePastUsageDataset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buildInputs: expect.objectContaining({
+          manualTravelVacantDonorPoolMode: "source_derived_mode_unchanged",
+        }),
+      })
+    );
+  }, 15000);
+
   it("treats PROFILE_ONLY_NEW_BUILD as profile-only and does not propagate travel exclusions", async () => {
     simulatePastUsageDataset.mockResolvedValueOnce({
       dataset: {

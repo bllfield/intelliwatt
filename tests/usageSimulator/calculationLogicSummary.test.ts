@@ -15,6 +15,8 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
       meta: {
         sharedProducerPathUsed: true,
         weatherSourceSummary: "actual_only",
+        manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+        manualTravelVacantDonorDayCount: 27,
         lockboxInput: {
           mode: args?.lockboxMode ?? "MANUAL_MONTHLY",
           sourceContext: {
@@ -111,6 +113,8 @@ function buildFixture(args?: { selectedMode?: string; lockboxMode?: string }) {
         weatherSourceIdentity: "actual_only",
         weatherDatasetIdentity: "wx-lockbox-1",
         intervalUsageFingerprintIdentity: "shape-prof-1",
+        manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+        manualTravelVacantDonorDayCount: 27,
         manualMonthlyInputState: {
           enteredMonthKeys: ["2025-06", "2025-07"],
           missingMonthKeys: ["2025-08"],
@@ -282,6 +286,12 @@ describe("buildGapfillCalculationLogicSummary", () => {
     );
     expect(summary.weatherExplanation.rows.find((row) => row.label === "Whole-home prior blend")?.value).toContain(
       "Prior fallback weight: 0.30"
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Travel/vacant donor source")?.value).toContain(
+      "same_run_simulated_non_travel_days"
+    );
+    expect(summary.weatherExplanation.rows.find((row) => row.label === "Travel/vacant donor source")?.value).toContain(
+      "27"
     );
   });
 
