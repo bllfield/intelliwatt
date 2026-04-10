@@ -699,12 +699,13 @@ export default function ManualMonthlyLab() {
             />
 
             <SectionJson
-              title="Prefill and saved manual payload"
+              title="Active lab payload and prefill context"
               open
               value={{
-                sourcePayload: loadJson?.sourcePayload ?? null,
                 activePayload: displayedReadResult?.payload ?? saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null,
-                seed: loadJson?.seed ?? null,
+                prefillSeed: loadJson?.seed ?? null,
+                sourcePayloadContextOnly: loadJson?.sourcePayload ?? null,
+                sourcePayloadContextUpdatedAt: loadJson?.sourceUpdatedAt ?? null,
               }}
             />
 

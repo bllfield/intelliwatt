@@ -13,4 +13,13 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("displayedReadResult?.payload");
     expect(source).toContain("activePayload: displayedReadResult?.payload");
   });
+
+  it("labels raw source payload as context only instead of presenting it as the active lab contract", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("Active lab payload and prefill context");
+    expect(source).toContain("sourcePayloadContextOnly");
+    expect(source).toContain("sourcePayloadContextUpdatedAt");
+    expect(source).toContain("prefillSeed");
+  });
 });
