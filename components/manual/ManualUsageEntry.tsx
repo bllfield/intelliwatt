@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { lastFullMonthChicago } from "@/modules/manualUsage/anchor";
+import { lastFullMonthChicago, rollingAutoAnchorEndDateChicago } from "@/modules/manualUsage/anchor";
 import {
   addDaysToIsoDate,
   buildContiguousStatementRanges,
@@ -11,7 +11,13 @@ import {
   normalizeTravelRanges,
   type ManualStatementInputRow,
 } from "@/modules/manualUsage/statementRanges";
-import type { AnnualManualUsagePayload, ManualUsagePayload, MonthlyManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
+import type {
+  AnnualManualUsagePayload,
+  ManualMonthlyDateSourceMode,
+  ManualUsagePayload,
+  MonthlyManualUsagePayload,
+  TravelRange,
+} from "@/modules/simulatedUsage/types";
 
 type LoadResp =
   | {
@@ -19,6 +25,8 @@ type LoadResp =
       houseId: string;
       payload: ManualUsagePayload | null;
       updatedAt: string | null;
+      sourcePayload?: ManualUsagePayload | null;
+      sourceUpdatedAt?: string | null;
       seed?: {
         sourceMode?: string | null;
         monthly?: MonthlyManualUsagePayload | null;
@@ -35,6 +43,15 @@ type ManualUsageTransport = {
 const DEFAULT_ANCHOR_END_DATE = `${lastFullMonthChicago()}-15`;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SLASH_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+const MONTHLY_DATE_SOURCE_OPTIONS: Array<{ value: ManualMonthlyDateSourceMode; label: string }> = [
+  { value: "CUSTOMER_DATES", label: "Customer dates" },
+  { value: "AUTO_DATES", label: "Auto dates" },
+  { value: "ADMIN_CUSTOM_DATES", label: "Admin custom dates" },
+];
+
+function isMonthlyDateSourceMode(value: unknown): value is ManualMonthlyDateSourceMode {
+  return value === "CUSTOMER_DATES" || value === "AUTO_DATES" || value === "ADMIN_CUSTOM_DATES";
+}
 
 function isValidCalendarDate(year: number, month: number, day: number): boolean {
   const candidate = new Date(Date.UTC(year, month - 1, day));
@@ -121,14 +138,37 @@ function addOlderBillRow(rows: ManualStatementInputRow[]): ManualStatementInputR
   return [...rows, { startDate: nextStartDate, endDate: nextEndDate, kwh: "" }];
 }
 
+function applyReferenceRowsKeepingTotals(
+  currentRows: ManualStatementInputRow[],
+  referenceRows: ManualStatementInputRow[]
+): ManualStatementInputRow[] {
+  return referenceRows.map((row, idx) => ({
+    startDate: row.startDate,
+    endDate: row.endDate,
+    kwh: idx < currentRows.length ? currentRows[idx]?.kwh ?? "" : row.kwh,
+  }));
+}
+
+function buildAutoDateRows(currentRows: ManualStatementInputRow[], anchorEndDate: string): ManualStatementInputRow[] {
+  const count = Math.max(1, currentRows.length);
+  const ranges = buildContiguousStatementRanges(anchorEndDate, count);
+  return ranges.map((range, idx) => ({
+    startDate: range.startDate ?? range.endDate,
+    endDate: range.endDate,
+    kwh: currentRows[idx]?.kwh ?? "",
+  }));
+}
+
 export function ManualUsageEntry({
   houseId,
   onSaved,
   transport,
+  showMonthlyDateSourceControls = false,
 }: {
   houseId: string;
   onSaved?: () => void | Promise<void>;
   transport?: ManualUsageTransport;
+  showMonthlyDateSourceControls?: boolean;
 }) {
   const [activeTab, setActiveTab] = React.useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [loading, setLoading] = React.useState(true);
@@ -140,6 +180,15 @@ export function ManualUsageEntry({
   const [annualAnchorEndDate, setAnnualAnchorEndDate] = React.useState<string>("");
   const [annualKwh, setAnnualKwh] = React.useState<number | "">("");
   const [travelRanges, setTravelRanges] = React.useState<TravelRange[]>([]);
+  const [sourcePayloadContext, setSourcePayloadContext] = React.useState<ManualUsagePayload | null>(null);
+  const [monthlyDateSourceMode, setMonthlyDateSourceMode] = React.useState<ManualMonthlyDateSourceMode>("ADMIN_CUSTOM_DATES");
+
+  const rollingAutoAnchorEndDate = React.useMemo(() => rollingAutoAnchorEndDateChicago(), []);
+  const customerDateRows = React.useMemo(
+    () => (sourcePayloadContext?.mode === "MONTHLY" ? buildStatementRowsFromMonthlyPayload(sourcePayloadContext) : []),
+    [sourcePayloadContext]
+  );
+  const dateEditingLocked = showMonthlyDateSourceControls && monthlyDateSourceMode !== "ADMIN_CUSTOM_DATES";
 
   React.useEffect(() => {
     let cancelled = false;
@@ -164,6 +213,7 @@ export function ManualUsageEntry({
         }
         if (cancelled) return;
         const payload = (json as any).payload as ManualUsagePayload | null;
+        setSourcePayloadContext(((json as any).sourcePayload as ManualUsagePayload | null) ?? null);
         setSavedAt((json as any).updatedAt ?? null);
         const seed = (json as any).seed ?? null;
         if (seed?.monthly) {
@@ -176,6 +226,13 @@ export function ManualUsageEntry({
         if (payload?.mode === "MONTHLY") {
           setActiveTab("MONTHLY");
           setMonthlyRows(buildStatementRowsFromMonthlyPayload(payload));
+          setMonthlyDateSourceMode(
+            isMonthlyDateSourceMode((payload as any).dateSourceMode)
+              ? (payload as any).dateSourceMode
+              : ((json as any).sourcePayload as ManualUsagePayload | null)?.mode === "MONTHLY"
+                ? "CUSTOMER_DATES"
+                : "ADMIN_CUSTOM_DATES"
+          );
           setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
         }
@@ -219,6 +276,7 @@ export function ManualUsageEntry({
           monthlyKwh: built.monthlyKwh,
           statementRanges: built.statementRanges,
           travelRanges: normalizeTravelRanges(travelRanges),
+          dateSourceMode: showMonthlyDateSourceControls ? monthlyDateSourceMode : undefined,
         };
       } else {
         payload = {
@@ -254,6 +312,21 @@ export function ManualUsageEntry({
       setSaving(false);
     }
   };
+
+  const applyMonthlyDateSourceMode = React.useCallback(
+    (nextMode: ManualMonthlyDateSourceMode) => {
+      setMonthlyDateSourceMode(nextMode);
+      if (nextMode === "ADMIN_CUSTOM_DATES") return;
+      if (nextMode === "CUSTOMER_DATES") {
+        if (customerDateRows.length > 0) {
+          setMonthlyRows((prev) => applyReferenceRowsKeepingTotals(prev, customerDateRows));
+        }
+        return;
+      }
+      setMonthlyRows((prev) => buildAutoDateRows(prev, rollingAutoAnchorEndDate));
+    },
+    [customerDateRows, rollingAutoAnchorEndDate]
+  );
 
   return (
     <div id="manual-entry" className="space-y-6">
@@ -313,6 +386,42 @@ export function ManualUsageEntry({
                 shared Past Sim display.
               </div>
 
+              {showMonthlyDateSourceControls ? (
+                <div className="mt-4 rounded-2xl border border-brand-cyan/15 bg-brand-navy px-4 py-4">
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <div>
+                      <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
+                        Date source
+                      </label>
+                      <select
+                        value={monthlyDateSourceMode}
+                        onChange={(e) => applyMonthlyDateSourceMode(e.target.value as ManualMonthlyDateSourceMode)}
+                        className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                      >
+                        {MONTHLY_DATE_SOURCE_OPTIONS.map((option) => (
+                          <option
+                            key={option.value}
+                            value={option.value}
+                            disabled={option.value === "CUSTOMER_DATES" && customerDateRows.length === 0}
+                          >
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="text-xs text-brand-cyan/75 lg:col-span-2">
+                      <div>Active mode: {monthlyDateSourceMode}</div>
+                      <div>Resolved anchorEndDate: {normalizeManualDateInput(monthlyRows[0]?.endDate ?? "") || "pending"}</div>
+                      <div>Resolved bill-end day: {(normalizeManualDateInput(monthlyRows[0]?.endDate ?? "").slice(8, 10) || "pending")}</div>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-[0.7rem] text-brand-cyan/60">
+                    Customer dates are read-only source context, Auto dates use the shared rolling current-date-minus-2-days rule,
+                    and Admin custom dates unlock direct date edits on the isolated lab payload only.
+                  </p>
+                </div>
+              ) : null}
+
               <div className="mt-6 space-y-4">
                 {monthlyRows.map((row, idx) => {
                   const isNewest = idx === 0;
@@ -345,14 +454,17 @@ export function ManualUsageEntry({
                             placeholder="MM/DD/YYYY"
                             value={formatManualDateForEditor(row.endDate)}
                             onChange={(e) => {
+                              if (dateEditingLocked) return;
                               const value = e.target.value;
                               setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, endDate: value } : entry)));
                             }}
                             onBlur={(e) => {
+                              if (dateEditingLocked) return;
                               const value = normalizeManualDateInput(e.target.value);
                               setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, endDate: value } : entry)));
                             }}
-                            className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                            readOnly={dateEditingLocked}
+                            className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan read-only:opacity-70"
                           />
                         </div>
 
@@ -366,16 +478,16 @@ export function ManualUsageEntry({
                             placeholder="MM/DD/YYYY"
                             value={formatManualDateForEditor(statementStartDate)}
                             onChange={(e) => {
-                              if (!isOldest) return;
+                              if (dateEditingLocked || !isOldest) return;
                               const value = e.target.value;
                               setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, startDate: value } : entry)));
                             }}
                             onBlur={(e) => {
-                              if (!isOldest) return;
+                              if (dateEditingLocked || !isOldest) return;
                               const value = normalizeManualDateInput(e.target.value);
                               setMonthlyRows((prev) => prev.map((entry, entryIdx) => (entryIdx === idx ? { ...entry, startDate: value } : entry)));
                             }}
-                            readOnly={!isOldest}
+                            readOnly={dateEditingLocked || !isOldest}
                             className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan read-only:opacity-70"
                           />
                           <p className="mt-2 text-[0.7rem] text-brand-cyan/60">
@@ -418,7 +530,7 @@ export function ManualUsageEntry({
                 <button
                   type="button"
                   onClick={() => setMonthlyRows((prev) => addOlderBillRow(prev))}
-                  disabled={monthlyRows.length >= MAX_MANUAL_MONTHLY_BILLS}
+                  disabled={dateEditingLocked || monthlyRows.length >= MAX_MANUAL_MONTHLY_BILLS}
                   className="rounded-full border border-brand-blue/60 bg-brand-blue/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
                 >
                   Add Bill
@@ -426,7 +538,7 @@ export function ManualUsageEntry({
                 <button
                   type="button"
                   onClick={() => setMonthlyRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev))}
-                  disabled={monthlyRows.length <= 1}
+                  disabled={dateEditingLocked || monthlyRows.length <= 1}
                   className="rounded-full border border-brand-cyan/20 bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80 transition hover:bg-brand-cyan/5 disabled:opacity-60"
                 >
                   Remove Oldest Bill

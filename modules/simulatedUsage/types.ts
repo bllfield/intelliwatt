@@ -6,6 +6,8 @@ export type ManualStatementRange = {
   endDate: string;
 };
 
+export type ManualMonthlyDateSourceMode = "CUSTOMER_DATES" | "AUTO_DATES" | "ADMIN_CUSTOM_DATES";
+
 export type MonthlyManualUsagePayload = {
   mode: "MONTHLY";
   // V1 contract: full-date anchor for billing-cycle periods (America/Chicago semantics at UI level).
@@ -14,6 +16,7 @@ export type MonthlyManualUsagePayload = {
   // Transitional additive metadata for Stage 1 bill-range entry semantics.
   statementRanges?: ManualStatementRange[];
   travelRanges: TravelRange[];
+  dateSourceMode?: ManualMonthlyDateSourceMode;
   // Legacy (supported for backward compatibility with saved payloads)
   anchorEndMonth?: string; // YYYY-MM
   billEndDay?: number;

@@ -71,6 +71,12 @@ export function chicagoDateKey(now = new Date()): string {
   return fmt.format(now);
 }
 
+export function rollingAutoAnchorEndDateChicago(now = new Date(), lagDays = 2): string {
+  const safeLagDays = Math.max(0, Math.trunc(lagDays));
+  const shifted = new Date(now.getTime() - safeLagDays * 24 * 60 * 60 * 1000);
+  return chicagoDateKey(shifted);
+}
+
 const dtfCache = new Map<string, Intl.DateTimeFormat>();
 
 function getFormatter(

@@ -88,6 +88,12 @@ export async function saveManualUsageInputForUserHouse(args: {
       monthlyKwh: cleanedMonthly,
       statementRanges: normalizeStatementRanges((payload as any).statementRanges),
       travelRanges: normalizeTravelRanges(payload.travelRanges),
+      dateSourceMode:
+        (payload as any).dateSourceMode === "CUSTOMER_DATES" ||
+        (payload as any).dateSourceMode === "AUTO_DATES" ||
+        (payload as any).dateSourceMode === "ADMIN_CUSTOM_DATES"
+          ? (payload as any).dateSourceMode
+          : undefined,
     };
 
     const rec = await (prisma as any).manualUsageInput.upsert({

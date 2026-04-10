@@ -1,3 +1,4 @@
+import { rollingAutoAnchorEndDateChicago } from "@/modules/manualUsage/anchor";
 import { addDaysToIsoDate, buildContiguousStatementRanges, MAX_MANUAL_MONTHLY_BILLS } from "@/modules/manualUsage/statementRanges";
 import type {
   AnnualManualUsagePayload,
@@ -114,8 +115,8 @@ export function resolveSeedAnchorEndDate(args: {
   return isIsoDate(args.actualEndDate) ? args.actualEndDate.trim() : null;
 }
 
-export function resolveGapfillSyntheticAnchorEndDate(actualEndDate?: string | null): string | null {
-  return isIsoDate(actualEndDate) ? addDaysToIsoDate(actualEndDate.trim(), -2) : null;
+export function resolveGapfillSyntheticAnchorEndDate(_actualEndDate?: string | null, now = new Date()): string {
+  return rollingAutoAnchorEndDateChicago(now, 2);
 }
 
 export function deriveMonthlySeedFromActual(args: {
@@ -131,6 +132,7 @@ export function deriveMonthlySeedFromActual(args: {
       monthlyKwh: args.sourcePayload.monthlyKwh,
       statementRanges: args.sourcePayload.statementRanges,
       travelRanges: args.sourcePayload.travelRanges,
+      dateSourceMode: args.sourcePayload.dateSourceMode,
     };
   }
 
@@ -220,6 +222,7 @@ export function buildManualUsageStageOneResolvedSeeds(args: {
         monthlyKwh: args.sourcePayload.monthlyKwh,
         statementRanges: args.sourcePayload.statementRanges,
         travelRanges: args.sourcePayload.travelRanges,
+        dateSourceMode: args.sourcePayload.dateSourceMode,
       }
     : null;
   const usableSourceAnnualPayload = hasUsableAnnualPayload(args.sourcePayload)
@@ -282,6 +285,7 @@ export function resolveManualUsageStageOnePayloadForMode(args: {
           monthlyKwh: args.testHomePayload.monthlyKwh,
           statementRanges: args.testHomePayload.statementRanges,
           travelRanges: args.testHomePayload.travelRanges,
+          dateSourceMode: args.testHomePayload.dateSourceMode,
         },
         payloadSource: "test_home_saved_payload",
         seedSet: args.seedSet,

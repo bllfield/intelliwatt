@@ -38,4 +38,14 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain('setStatus("Manual payload loaded from the isolated lab home.")');
     expect(source).not.toContain('setShowManualEditor(false);\n        setStatus("Manual payload loaded from the isolated lab home.")');
   });
+
+  it("supports customer, auto, and admin custom monthly date-source modes in the lab popup", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+    const editorSource = readRepoFile("components/manual/ManualUsageEntry.tsx");
+
+    expect(source).toContain("Manual editor");
+    expect(editorSource).toContain("CUSTOMER_DATES");
+    expect(editorSource).toContain("AUTO_DATES");
+    expect(editorSource).toContain("ADMIN_CUSTOM_DATES");
+  });
 });

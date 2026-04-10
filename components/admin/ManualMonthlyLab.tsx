@@ -445,6 +445,8 @@ export default function ManualMonthlyLab() {
           houseId: existing.labHome?.id ?? existing.selectedSourceHouse?.id ?? selectedHouseId,
           payload: existing.payload ?? null,
           updatedAt: existing.updatedAt ?? null,
+          sourcePayload: existing.sourcePayload ?? null,
+          sourceUpdatedAt: existing.sourceUpdatedAt ?? null,
           seed: existing.seed ?? null,
         };
       },
@@ -684,6 +686,12 @@ export default function ManualMonthlyLab() {
               open
               value={{
                 activePayload: displayedReadResult?.payload ?? saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null,
+                activePayloadDateSourceMode:
+                  activeManualPayload?.mode === "MONTHLY" ? (activeManualPayload.dateSourceMode ?? null) : null,
+                activePayloadAnchorEndDate:
+                  activeManualPayload && "anchorEndDate" in activeManualPayload ? activeManualPayload.anchorEndDate : null,
+                activePayloadBillEndDay:
+                  activeManualPayload?.mode === "MONTHLY" ? String(activeManualPayload.anchorEndDate ?? "").slice(8, 10) || null : null,
                 prefillSeed: loadJson?.seed ?? null,
                 sourcePayloadContextOnly: loadJson?.sourcePayload ?? null,
                 sourcePayloadContextUpdatedAt: loadJson?.sourceUpdatedAt ?? null,
@@ -796,6 +804,7 @@ export default function ManualMonthlyLab() {
             key={`${selectedHouseId}:${manualEntryKey}`}
             houseId={labHome?.id ?? selectedHouseId}
             transport={manualTransport}
+            showMonthlyDateSourceControls
             onSaved={async () => {
               setShowManualEditor(false);
               setStatus("Manual payload saved to the isolated lab home. Stage 1 preview updated; run Past Sim to refresh Stage 2.");

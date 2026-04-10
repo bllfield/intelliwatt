@@ -85,6 +85,7 @@ import {
   resolveSharedManualStageOneContract,
   type ManualUsageStageOneResolvedPayload,
 } from "@/modules/manualUsage/prefill";
+import { addDaysToIsoDate } from "@/modules/manualUsage/statementRanges";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
@@ -430,7 +431,12 @@ async function buildGapfillManualConstraintPayload(args: {
     }).catch(() => ({ dataset: null })),
   ]);
   const actualEndDate = String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null;
-  const syntheticAnchorEndDate = resolveGapfillSyntheticAnchorEndDate(actualEndDate) ?? actualEndDate;
+  const syntheticAnchorEndDate =
+    args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
+      ? actualEndDate
+        ? addDaysToIsoDate(actualEndDate, -2)
+        : null
+      : resolveGapfillSyntheticAnchorEndDate(actualEndDate);
   const activeTravelRanges =
     Array.isArray(args.travelRangesForRecalc) && args.travelRangesForRecalc.length > 0
       ? args.travelRangesForRecalc
@@ -458,6 +464,7 @@ async function buildGapfillManualConstraintPayload(args: {
       payload: reanchorGapfillManualStageOnePayload({
         payload: {
           ...resolved.payload,
+          dateSourceMode: "AUTO_DATES",
           travelRanges:
             Array.isArray(args.travelRangesForRecalc) && args.travelRangesForRecalc.length > 0
               ? activeTravelRanges
@@ -662,6 +669,15 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       buildRow?.buildInputs as Record<string, unknown> | undefined,
       args.testSelectionMode
     );
+  const manualAnchorEndDate =
+    manualContract.payload && (manualContract.payload.mode === "MONTHLY" || manualContract.payload.mode === "ANNUAL")
+      ? String((manualContract.payload as any).anchorEndDate ?? "").slice(0, 10) || null
+      : null;
+  const manualBillEndDay =
+    manualContract.payload?.mode === "MONTHLY" && /^\d{4}-\d{2}-\d{2}$/.test(String(manualContract.payload.anchorEndDate ?? ""))
+      ? String(manualContract.payload.anchorEndDate).slice(8, 10)
+      : null;
+  const manualDateSourceMode = manualContract.payload?.mode === "MONTHLY" ? (manualContract.payload.dateSourceMode ?? null) : null;
 
   return NextResponse.json({
     ok: true,
@@ -711,6 +727,9 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     sourceTravelRangesFromDb: args.sourceTravelRangesFromDb,
     effectiveTravelRangesForRecalc: args.travelRangesForRecalc,
     effectiveTravelRangesSource: args.usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
+    manualDateSourceMode,
+    manualAnchorEndDate,
+    manualBillEndDay,
     testRangesUsed: [],
     testSelectionMode: args.testSelectionMode,
     adminValidationMode: args.testSelectionMode,
@@ -1825,6 +1844,16 @@ export async function POST(req: NextRequest) {
             }))
             .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate))
         : [];
+      const manualAnchorEndDate =
+        manualContract.payload.mode === "MONTHLY" || manualContract.payload.mode === "ANNUAL"
+          ? String((manualContract.payload as any).anchorEndDate ?? "").slice(0, 10) || null
+          : null;
+      const manualBillEndDay =
+        manualContract.payload.mode === "MONTHLY" && /^\d{4}-\d{2}-\d{2}$/.test(String(manualContract.payload.anchorEndDate ?? ""))
+          ? String(manualContract.payload.anchorEndDate).slice(8, 10)
+          : null;
+      const manualDateSourceMode =
+        manualContract.payload.mode === "MONTHLY" ? (manualContract.payload.dateSourceMode ?? null) : null;
       await saveManualUsageInputForUserHouse({
         userId: labOwnerUser.id,
         houseId: testHomeHouse.id,
@@ -1899,6 +1928,9 @@ export async function POST(req: NextRequest) {
           adminValidationMode: testSelectionMode,
           effectiveTravelRangesForRecalc: effectiveManualTravelRanges,
           effectiveTravelRangesSource: manualContract.payloadSource,
+          manualDateSourceMode,
+          manualAnchorEndDate,
+          manualBillEndDay,
         });
         logSimPipelineEvent("admin_lab_manual_recalc_response_sent", {
           correlationId: dispatched.correlationId,
@@ -1951,6 +1983,9 @@ export async function POST(req: NextRequest) {
         adminValidationMode: testSelectionMode,
         effectiveTravelRangesForRecalc: effectiveManualTravelRanges,
         effectiveTravelRangesSource: manualContract.payloadSource,
+        manualDateSourceMode,
+        manualAnchorEndDate,
+        manualBillEndDay,
         result: dispatched.result,
       });
       logSimPipelineEvent("admin_lab_manual_recalc_response_sent", {

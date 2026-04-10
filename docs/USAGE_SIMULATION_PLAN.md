@@ -153,6 +153,10 @@ This section is authoritative for future manual-usage implementation and handoff
 - Manual Usage Lab and GapFill pure manual monthly both reach that behavior through the same shared Stage 2 runtime owner. No caller-specific travel/vacant path is allowed.
 - Pure manual monthly keeps source actual usage compare-only, while `MONTHLY_FROM_SOURCE_INTERVALS` remains source-derived and does not switch onto the pure-manual donor pool.
 - Once a Manual Usage Lab artifact is read back, the lab's visible Stage 1 contract must come from that artifact-backed manual payload so the displayed travel ranges and totals match the same run the shared Stage 2 runtime produced.
+- GapFill `MANUAL_MONTHLY` Stage 1 date contract is now rolling auto-date ownership: anchor/bill-end date = current Chicago date minus 2 days. Stale saved bill-end days are not valid active GapFill manual-monthly truth.
+- Manual Usage Lab monthly popup now exposes three Stage 1 date-source modes on the isolated lab payload: `CUSTOMER_DATES`, `AUTO_DATES`, and `ADMIN_CUSTOM_DATES`.
+- `CUSTOMER_DATES` uses customer/source statement-date structure as read-only context only. Admin edits in Manual Lab or GapFill must never mutate customer/source monthly dates, totals, or travel ranges.
+- `AUTO_DATES` uses the same rolling current-minus-2-days contract GapFill uses, and `ADMIN_CUSTOM_DATES` unlocks direct statement-range edits. Both persist only on lab/test-home payloads and do not change Stage 2 math.
 - Actual House top lockbox/header fields must read from the same shared artifact diagnostics truth as the detailed diagnostics section for `sourceHouseId`, `profileHouseId`, `intervalFingerprint`, and `weatherIdentity`.
 - This overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or a separate flat travel-day path.
 - GapFill admin-only daily curve compare UI now summarizes scored/test-day 96-slot overlays, grouped representative curves, and slot metrics through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it is read-side only and does not create a second compare path.

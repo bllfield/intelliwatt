@@ -2260,6 +2260,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("keeps pure manual monthly distinct from monthly-from-source mode on canonical recalc", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T18:00:00.000Z"));
+    try {
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "h1") {
         return {
@@ -2335,12 +2338,16 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
-          anchorEndDate: "2026-02-26",
+          anchorEndDate: "2026-04-08",
+          dateSourceMode: "AUTO_DATES",
           statementRanges: expect.any(Array),
-          monthlyKwh: expect.arrayContaining([expect.objectContaining({ month: "2026-02", kwh: 25 })]),
+          monthlyKwh: expect.arrayContaining([expect.objectContaining({ month: "2026-04", kwh: 25 })]),
         }),
       })
     );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("writes the active saved test-home travel contract into the manual payload before pure-manual recalc", async () => {
@@ -2439,6 +2446,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
   });
 
   it("derives a synthetic anchor for gapfill manual monthly when the copied payload is legacy and blank", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T18:00:00.000Z"));
+    try {
     getActualUsageDatasetForHouse.mockResolvedValueOnce({
       dataset: {
         summary: { source: "SMT", intervalsCount: 0, start: "2025-02-26", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
@@ -2520,15 +2530,176 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
-          anchorEndDate: "2026-02-26",
+          anchorEndDate: "2026-04-08",
+          dateSourceMode: "AUTO_DATES",
           statementRanges: expect.any(Array),
-          monthlyKwh: expect.arrayContaining([expect.objectContaining({ month: "2026-02", kwh: 20 })]),
         }),
       })
     );
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.preLockboxTravelRanges).toEqual([
       { startDate: "2026-02-10", endDate: "2026-02-12" },
     ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses rolling auto-date anchor logic for gapfill manual monthly at current date minus 2 days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T18:00:00.000Z"));
+    try {
+      getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+        if (houseId === "h1") {
+          return {
+            payload: {
+              mode: "MONTHLY",
+              anchorEndDate: "2026-04-05",
+              monthlyKwh: [{ month: "2026-04", kwh: 900 }],
+              statementRanges: [{ month: "2026-04", startDate: "2026-03-06", endDate: "2026-04-05" }],
+              travelRanges: [],
+            },
+            updatedAt: null,
+          };
+        }
+        return { payload: null, updatedAt: null };
+      });
+      dispatchPastSimRecalc.mockResolvedValueOnce({
+        executionMode: "inline",
+        correlationId: "manual-cid-gapfill-auto-anchor",
+        result: {
+          ok: true,
+          houseId: "test-home-1",
+          buildInputsHash: "hash-gapfill-auto-anchor",
+          dataset: {},
+          canonicalArtifactInputHash: "manual-canonical-gapfill-auto-anchor-hash-1",
+          effectiveSimulatorMode: "MANUAL_TOTALS",
+        },
+      });
+      prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+        id: "build-gapfill-auto-anchor-1",
+        lastBuiltAt: new Date("2026-04-10T00:00:00.000Z"),
+        buildInputsHash: "hash-gapfill-auto-anchor",
+        buildInputs: {
+          mode: "MANUAL_TOTALS",
+          effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+        },
+      });
+      pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+        id: "artifact-gapfill-auto-anchor-1",
+        updatedAt: new Date("2026-04-10T00:01:00.000Z"),
+        inputHash: "artifact-gapfill-auto-anchor-hash",
+        engineVersion: "production_past_stitched_v1",
+      });
+
+      const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+      const req = buildRequest({
+        action: "run_test_home_canonical_recalc",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        testUsageInputMode: "MANUAL_MONTHLY",
+        includeUsage365: false,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        testRanges: [],
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(200);
+      expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            anchorEndDate: "2026-04-08",
+          }),
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reuse a stale saved bill-end day when gapfill auto-date logic should roll to current minus 2 days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T18:00:00.000Z"));
+    try {
+      getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+        if (houseId === "h1") {
+          return {
+            payload: {
+              mode: "MONTHLY",
+              anchorEndDate: "2026-04-05",
+              monthlyKwh: [{ month: "2026-04", kwh: 900 }],
+              statementRanges: [{ month: "2026-04", startDate: "2026-03-06", endDate: "2026-04-05" }],
+              travelRanges: [],
+            },
+            updatedAt: null,
+          };
+        }
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-04-05",
+            monthlyKwh: [{ month: "2026-04", kwh: 25 }],
+            statementRanges: [{ month: "2026-04", startDate: "2026-03-06", endDate: "2026-04-05" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      });
+      dispatchPastSimRecalc.mockResolvedValueOnce({
+        executionMode: "inline",
+        correlationId: "manual-cid-gapfill-auto-roll",
+        result: {
+          ok: true,
+          houseId: "test-home-1",
+          buildInputsHash: "hash-gapfill-auto-roll",
+          dataset: {},
+          canonicalArtifactInputHash: "manual-canonical-gapfill-auto-roll-hash-1",
+          effectiveSimulatorMode: "MANUAL_TOTALS",
+        },
+      });
+      prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+        id: "build-gapfill-auto-roll-1",
+        lastBuiltAt: new Date("2026-04-10T00:00:00.000Z"),
+        buildInputsHash: "hash-gapfill-auto-roll",
+        buildInputs: {
+          mode: "MANUAL_TOTALS",
+          effectiveValidationSelectionMode: "customer_style_seasonal_mix",
+        },
+      });
+      pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+        id: "artifact-gapfill-auto-roll-1",
+        updatedAt: new Date("2026-04-10T00:01:00.000Z"),
+        inputHash: "artifact-gapfill-auto-roll-hash",
+        engineVersion: "production_past_stitched_v1",
+      });
+
+      const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+      const req = buildRequest({
+        action: "run_test_home_canonical_recalc",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        testUsageInputMode: "MANUAL_MONTHLY",
+        includeUsage365: false,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        testRanges: [],
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(200);
+      expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            anchorEndDate: "2026-04-08",
+            statementRanges: expect.arrayContaining([expect.objectContaining({ endDate: "2026-04-08" })]),
+          }),
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {

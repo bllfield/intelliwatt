@@ -98,7 +98,7 @@ describe("manualUsage shared Stage 1 helpers", () => {
   });
 
   it("uses a synthetic gapfill anchor and rebuilds 12 monthly bill periods", () => {
-    expect(resolveGapfillSyntheticAnchorEndDate("2026-02-28")).toBe("2026-02-26");
+    expect(resolveGapfillSyntheticAnchorEndDate("2026-02-28", new Date("2026-04-10T18:00:00.000Z"))).toBe("2026-04-08");
 
     const reanchoredMonthly = reanchorGapfillManualStageOnePayload({
       payload: {

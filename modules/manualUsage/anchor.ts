@@ -4,5 +4,6 @@ export {
   lastFullMonthChicago,
   monthAdd,
   monthsEndingAt,
+  rollingAutoAnchorEndDateChicago,
 } from "@/lib/time/chicago";
 

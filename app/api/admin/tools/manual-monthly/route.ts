@@ -319,7 +319,13 @@ async function buildLabPrefill(args: {
     };
   }
   return {
-    payloadToPersist: resolved.payload,
+    payloadToPersist:
+      resolved.mode === "MONTHLY" && resolved.payload.mode === "MONTHLY"
+        ? {
+            ...resolved.payload,
+            dateSourceMode: resolved.payload.dateSourceMode ?? (resolved.payloadSource === "source_payload" ? "CUSTOMER_DATES" : undefined),
+          }
+        : resolved.payload,
     seed: {
       sourceMode: resolved.seedSet.sourceMode,
       monthly: resolved.seedSet.usableSourceMonthlyPayload ?? resolved.seedSet.monthlySeed,

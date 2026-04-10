@@ -53,6 +53,9 @@ type RunResult = {
   sourceTravelRangesFromDb?: DateRange[];
   effectiveTravelRangesForRecalc?: DateRange[];
   effectiveTravelRangesSource?: string | null;
+  manualDateSourceMode?: string | null;
+  manualAnchorEndDate?: string | null;
+  manualBillEndDay?: string | null;
   travelRangesSource?: string | null;
   testHomeLink?: any;
   usage365?: any;
@@ -1641,7 +1644,7 @@ export default function GapFillLabCanonicalClient() {
 
         <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-3 space-y-2">
           <div className="text-xs font-semibold text-brand-navy">Travel range visibility</div>
-          <div className="grid gap-2 md:grid-cols-3 text-xs text-brand-navy/85">
+          <div className="grid gap-2 md:grid-cols-4 text-xs text-brand-navy/85">
             <div className="rounded border border-brand-blue/10 bg-white p-2">
               <div className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Source Home</div>
               <div className="mt-1">{summarizeRanges(sourceTravelRanges)}</div>
@@ -1654,6 +1657,12 @@ export default function GapFillLabCanonicalClient() {
               <div className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Effective latest recalc</div>
               <div className="mt-1">{effectiveTravelRanges ? summarizeRanges(effectiveTravelRanges) : "Run canonical recalc to confirm the exact travel ranges used."}</div>
               <div className="mt-1 text-brand-navy/60">{formatTravelRangeSourceLabel(effectiveTravelRangesSource)}</div>
+            </div>
+            <div className="rounded border border-brand-blue/10 bg-white p-2">
+              <div className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Manual monthly date contract</div>
+              <div className="mt-1">Source: {String((result as any)?.manualDateSourceMode ?? "—")}</div>
+              <div>Anchor: {String((result as any)?.manualAnchorEndDate ?? "—")}</div>
+              <div>Bill-end day: {String((result as any)?.manualBillEndDay ?? "—")}</div>
             </div>
           </div>
           <div className="text-[11px] text-brand-navy/65">

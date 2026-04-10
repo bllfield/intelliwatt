@@ -493,6 +493,117 @@ describe("admin manual monthly route", () => {
     expect(mocks.getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
   });
 
+  it("saving AUTO_DATES writes only to the lab payload and never to the customer/source payload", async () => {
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+
+    const saveRes = await POST(
+      buildRequest({
+        action: "save",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-08",
+          monthlyKwh: [{ month: "2026-04", kwh: 300 }],
+          statementRanges: [{ month: "2026-04", startDate: "2026-03-09", endDate: "2026-04-08" }],
+          travelRanges: [],
+          dateSourceMode: "AUTO_DATES",
+        } as any,
+      })
+    );
+    const saveBody = await saveRes.json();
+
+    expect(saveBody.ok).toBe(true);
+    expect(mocks.saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-owner-1",
+        houseId: "lab-home-1",
+        payload: expect.objectContaining({
+          anchorEndDate: "2026-04-08",
+          dateSourceMode: "AUTO_DATES",
+        }),
+      })
+    );
+    expect(mocks.saveManualUsageInputForUserHouse).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "source-user-1",
+        houseId: "source-house-1",
+      })
+    );
+  });
+
+  it("saving ADMIN_CUSTOM_DATES writes only to the lab payload and preserves source-home isolation", async () => {
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+
+    const saveRes = await POST(
+      buildRequest({
+        action: "save",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-12",
+          monthlyKwh: [{ month: "2026-04", kwh: 300 }],
+          statementRanges: [{ month: "2026-04", startDate: "2026-03-13", endDate: "2026-04-12" }],
+          travelRanges: [],
+          dateSourceMode: "ADMIN_CUSTOM_DATES",
+        } as any,
+      })
+    );
+    const saveBody = await saveRes.json();
+
+    expect(saveBody.ok).toBe(true);
+    expect(mocks.saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-owner-1",
+        houseId: "lab-home-1",
+        payload: expect.objectContaining({
+          anchorEndDate: "2026-04-12",
+          dateSourceMode: "ADMIN_CUSTOM_DATES",
+        }),
+      })
+    );
+    expect(mocks.saveManualUsageInputForUserHouse).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "source-user-1",
+        houseId: "source-house-1",
+      })
+    );
+  });
+
+  it("saving CUSTOMER_DATES mode never mutates customer/source manual data", async () => {
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+
+    const saveRes = await POST(
+      buildRequest({
+        action: "save",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        payload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-05",
+          monthlyKwh: [{ month: "2026-04", kwh: 300 }],
+          statementRanges: [{ month: "2026-04", startDate: "2026-03-06", endDate: "2026-04-05" }],
+          travelRanges: [],
+          dateSourceMode: "CUSTOMER_DATES",
+        } as any,
+      })
+    );
+    const saveBody = await saveRes.json();
+
+    expect(saveBody.ok).toBe(true);
+    expect(mocks.saveManualUsageInputForUserHouse).toHaveBeenCalledTimes(1);
+    expect(mocks.saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-owner-1",
+        houseId: "lab-home-1",
+        payload: expect.objectContaining({
+          dateSourceMode: "CUSTOMER_DATES",
+        }),
+      })
+    );
+  });
+
   it("returns a recalc failure directly instead of masking it behind a later read_result error", async () => {
     mocks.dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "inline",
