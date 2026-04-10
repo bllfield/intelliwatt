@@ -467,8 +467,10 @@ This section is authoritative for future manual-usage implementation work.
   - admin manual clients poll readback using the exact artifact hash so compare/reconciliation stays artifact-backed
 - `MANUAL_TOTALS` recalc on that shared path must stay lean: exact-interval fingerprint resolution, usage-shape profile DB reads/ensures, and bucket-oriented persistence work are not part of manual monthly/annual truth production and should be deferred to readback-only diagnostics when needed.
 - GapFill Actual House remains the full interval-backed source-truth view in manual modes and now reads the same shared persisted Past artifact/display path as the user Past page; only the Test Home reflects the Stage 1 manual/source-derived constraint before entering the shared Stage 2 producer/artifact path.
+- Actual compare totals must come from that same shared actual-house artifact/read model as the Actual House monthly display; do not silently mix a second annual aggregate or alternate monthly table source under the same "Actual annual kWh" label.
 - GapFill manual compare must derive its Stage 1 target contract from shared bill-period targets/readback, not from a separate month-first truth owner.
 - Manual compare Actual kWh must come from that same shared actual-house interval-backed truth summed by the shared displayed bill periods; `0.00` is not a valid fallback when actual-backed compare truth is missing.
+- Pure manual monthly / annual readback must not expose source-derived monthly anchors as active truth. If source-derived anchors are intentionally active, the run must stay labeled as `MONTHLY_FROM_SOURCE_INTERVALS` / `ANNUAL_FROM_SOURCE_INTERVALS` instead of looking like pure manual.
 - Admin manual-mode responses may surface root-cause infrastructure failures such as Prisma pool exhaustion (`P2024`) so GapFill and Manual Monthly Lab can distinguish producer failure from a generic timeout.
 - New Build launch remains intentionally delayed. Before launch, real-house home/appliance/detail data plus actual interval usage should be studied in GapFill to calibrate fingerprint logic and to measure how close home-details-plus-weather logic can get to actual usage.
 - The exact-interval donor-tuning path remains locked: weather-first K-nearest donor logic, donor variance guardrails, heating-day weighting, Daily Curve Compare, and exact-interval calculation-logic diagnostics are preserved and not replaced by manual-usage work.
@@ -483,6 +485,7 @@ This section is authoritative for future manual-usage implementation work.
   - the summary now records eligible driving bill periods, excluded travel-touched bill periods, eligible/travel day counts, weather pressure inputs used, and whole-home/prior fallback weight for shared diagnostics/readback
   - constrained artifact diagnostics must also retain `manualBillPeriods`, `manualBillPeriodTotalsKwhById`, and source-derived monthly anchors when GapFill monthly-from-source semantics are active
   - this wiring exists today, but stronger monthly weather evidence, baseload inference, and HVAC-share inference remain future work
+- Travel/vacant simulated days and manual-constrained simulated days use the same shared day-simulation family and shaping path. Their difference is constraint role and labeling, not a second flat/frozen simulation engine.
 - Admin Manual Monthly Lab now enforces explicit ownership boundaries:
   - selected customer house is read-only source context only
   - `lookup` is the lightweight source-home selection step

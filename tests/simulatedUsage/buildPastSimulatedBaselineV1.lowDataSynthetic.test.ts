@@ -189,6 +189,7 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
 
     expect(out.dayResults).toHaveLength(2);
     expect(out.dayResults.every((row) => row.simulatedReasonCode === "MANUAL_CONSTRAINED_DAY")).toBe(true);
+    expect(out.dayResults.every((row) => row.templateSelectionKind === "shared_modeled_day_template")).toBe(true);
     expect(out.dayResults[0]?.dayClassification).toBe("weather_scaled_day");
     expect(out.dayResults[1]?.dayClassification).toBe("weather_scaled_day");
     expect(out.dayResults[0]?.weatherModeUsed).toBe("heating");
@@ -317,6 +318,10 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
     const febDay = out.dayResults.find((row) => row.localDate === "2026-02-05");
     expect(janDay?.targetDayKwhBeforeWeather).toBeDefined();
     expect(febDay?.targetDayKwhBeforeWeather).toBeDefined();
+    expect(janDay?.simulatedReasonCode).toBe("TRAVEL_VACANT");
+    expect(febDay?.simulatedReasonCode).toBe("TRAVEL_VACANT");
+    expect(janDay?.templateSelectionKind).toBe("shared_modeled_day_template");
+    expect(febDay?.templateSelectionKind).toBe("shared_modeled_day_template");
     expect(febDay!.targetDayKwhBeforeWeather).toBeGreaterThan(janDay!.targetDayKwhBeforeWeather!);
     expect(janDay?.shapeVariantUsed).not.toBe("uniform_fallback");
     expect(febDay?.shapeVariantUsed).not.toBe("uniform_fallback");

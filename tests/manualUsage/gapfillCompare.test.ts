@@ -61,18 +61,6 @@ describe("gapfill manual usage compare helpers", () => {
     expect(
       buildGapfillManualMonthlyCompareRows({
         manualReadModel: readModel,
-        actualDataset: {
-          daily: [
-            ...Array.from({ length: 31 }, (_, idx) => ({
-              date: `2025-01-${String(idx + 1).padStart(2, "0")}`,
-              kwh: 100 / 31,
-            })),
-            ...Array.from({ length: 28 }, (_, idx) => ({
-              date: `2025-02-${String(idx + 1).padStart(2, "0")}`,
-              kwh: 120 / 28,
-            })),
-          ],
-        },
       })
     ).toEqual([
       {
@@ -136,7 +124,6 @@ describe("gapfill manual usage compare helpers", () => {
     expect(
       buildGapfillManualAnnualCompareSummary({
         manualReadModel: readModel,
-        actualDataset,
       })
     ).toEqual({
       actualIntervalKwh: 220,

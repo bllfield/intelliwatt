@@ -16,7 +16,6 @@ function subtractRounded(left: number | null, right: number | null): number | nu
 
 export function buildGapfillManualMonthlyCompareRows(args: {
   manualReadModel: ManualUsageReadModel | null | undefined;
-  actualDataset?: any;
 }): GapfillManualMonthlyCompareRow[] {
   const readModel = args.manualReadModel;
   if (!readModel || readModel.payloadMode !== "MONTHLY") return [];
@@ -38,7 +37,6 @@ export function buildGapfillManualMonthlyCompareRows(args: {
 
 export function buildGapfillManualAnnualCompareSummary(args: {
   manualReadModel: ManualUsageReadModel | null | undefined;
-  actualDataset?: any;
 }): GapfillManualAnnualCompareSummary {
   const readModel = args.manualReadModel;
   if (!readModel || readModel.payloadMode !== "ANNUAL") {

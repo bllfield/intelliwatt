@@ -200,11 +200,25 @@ export function projectBaselineFromCanonicalDataset(
       const month = dk.slice(0, 7);
       monthlyMap.set(month, (monthlyMap.get(month) ?? 0) + (Number(day?.kwh) || 0));
     }
-    if (Array.isArray(projected.monthly)) {
-      projected.monthly = projected.monthly.map((m: any) => {
-        const month = String(m?.month ?? "").slice(0, 7);
-        if (!monthlyMap.has(month)) return m;
-        return { ...m, kwh: round2(monthlyMap.get(month) ?? 0) };
+    const existingMonthlyRows = Array.isArray(projected.monthly) ? projected.monthly : [];
+    const existingMonthlyByMonth = new Map<string, any>();
+    for (const row of existingMonthlyRows) {
+      const month = String((row as any)?.month ?? "").slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(month) || existingMonthlyByMonth.has(month)) continue;
+      existingMonthlyByMonth.set(month, row);
+    }
+    if (existingMonthlyRows.length > 0 || monthlyMap.size > 0) {
+      const orderedMonths = Array.from(
+        new Set([...Array.from(existingMonthlyByMonth.keys()), ...Array.from(monthlyMap.keys())])
+      ).sort();
+      projected.monthly = orderedMonths.map((month) => {
+        const existingRow = existingMonthlyByMonth.get(month);
+        const monthlyKwh = monthlyMap.has(month)
+          ? round2(monthlyMap.get(month) ?? 0)
+          : Number((existingRow as any)?.kwh ?? 0) || 0;
+        return existingRow && typeof existingRow === "object"
+          ? { ...existingRow, month, kwh: monthlyKwh }
+          : { month, kwh: monthlyKwh };
       });
     }
     const totalKwh = Array.from(monthlyMap.values()).reduce((s, v) => s + v, 0);

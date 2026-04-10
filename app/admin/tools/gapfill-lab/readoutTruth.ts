@@ -67,18 +67,28 @@ export function buildPersistedHouseReadout(args: {
   const sourceTruthContext = asRecord(sharedDiagnostics?.sourceTruthContext);
   const lockboxExecutionSummary = asRecord(sharedDiagnostics?.lockboxExecutionSummary);
   const projectionReadSummary = asRecord(sharedDiagnostics?.projectionReadSummary);
-  const travelRangeSource =
-    asArray(travelRanges?.ranges).length > 0
-      ? travelRanges?.ranges
-      : asArray(sourceTruthContext?.travelRangesUsed).length > 0
-        ? sourceTruthContext?.travelRangesUsed
-        : args.fallbackTravelRanges;
-  const validationKeySource =
-    asArray(validationKeys?.localDateKeys).length > 0
-      ? validationKeys?.localDateKeys
-      : asArray(sourceTruthContext?.validationTestKeysUsed).length > 0
-        ? sourceTruthContext?.validationTestKeysUsed
-        : args.fallbackValidationKeys;
+  const selectedMode =
+    coalesceMeaningfulString(identityContext?.usageInputMode, lockboxInput?.mode, identityContext?.simulatorMode) ?? "—";
+  const showSourceDerivedInputs =
+    selectedMode === "MONTHLY_FROM_SOURCE_INTERVALS" || selectedMode === "ANNUAL_FROM_SOURCE_INTERVALS";
+  const travelRangesFromLockbox = asArray(travelRanges?.ranges);
+  const travelRangesFromShared = asArray(sourceTruthContext?.travelRangesUsed);
+  const validationKeysFromLockbox = asArray(validationKeys?.localDateKeys);
+  const validationKeysFromShared = asArray(sourceTruthContext?.validationTestKeysUsed);
+  const travelRangeSource = travelRangesFromLockbox.length > 0
+    ? travelRangesFromLockbox
+    : travelRangesFromShared.length > 0
+      ? travelRangesFromShared
+      : args.fallbackTravelRanges;
+  const validationKeySource = validationKeysFromLockbox.length > 0
+    ? validationKeysFromLockbox
+    : validationKeysFromShared.length > 0
+      ? validationKeysFromShared
+      : args.fallbackValidationKeys;
+  const sourceDerivedMonthlyTotals =
+    sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? sourceTruthContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null;
+  const sourceDerivedAnnualTotal =
+    toFiniteNumber(sourceContext?.sourceDerivedAnnualTotalKwh ?? sourceTruthContext?.sourceDerivedAnnualTotalKwh);
   const validationRowsCount =
     toFiniteNumber(projectionReadSummary?.validationRowsCount) ??
     (Array.isArray(args.compareProjection?.rows) ? args.compareProjection.rows.length : null);
@@ -88,15 +98,20 @@ export function buildPersistedHouseReadout(args: {
       coalesceMeaningfulString(sourceContext?.sourceHouseId, perRunTrace?.sourceHouseId, identityContext?.sourceHouseId) ?? "—",
     profileHouseId:
       coalesceMeaningfulString(profileContext?.profileHouseId, perRunTrace?.profileHouseId, identityContext?.profileHouseId) ?? "—",
-    mode: coalesceMeaningfulString(lockboxInput?.mode, identityContext?.simulatorMode, identityContext?.usageInputMode) ?? "—",
-    travelRanges: summarizeRanges(travelRangeSource),
-    validationKeys: summarizeValidationKeys(validationKeySource),
-    sourceDerivedMonthlyTotalsKwhByMonth: JSON.stringify(
-      sourceContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? sourceTruthContext?.sourceDerivedMonthlyTotalsKwhByMonth ?? null
-    ),
+    mode: selectedMode,
+    travelRanges:
+      summarizeRanges(travelRangeSource) +
+      (travelRangesFromLockbox.length === 0 && travelRangesFromShared.length === 0 && asArray(args.fallbackTravelRanges).length > 0
+        ? " (fallback context only)"
+        : ""),
+    validationKeys:
+      summarizeValidationKeys(validationKeySource) +
+      (validationKeysFromLockbox.length === 0 && validationKeysFromShared.length === 0 && asArray(args.fallbackValidationKeys).length > 0
+        ? " (fallback context only)"
+        : ""),
+    sourceDerivedMonthlyTotalsKwhByMonth: showSourceDerivedInputs ? JSON.stringify(sourceDerivedMonthlyTotals) : "—",
     sourceDerivedAnnualTotalKwh: (() => {
-      const value = toFiniteNumber(sourceContext?.sourceDerivedAnnualTotalKwh ?? sourceTruthContext?.sourceDerivedAnnualTotalKwh);
-      return value != null ? value.toFixed(2) : "—";
+      return showSourceDerivedInputs && sourceDerivedAnnualTotal != null ? sourceDerivedAnnualTotal.toFixed(2) : "—";
     })(),
     intervalFingerprint: formatIdentityReadout(
       coalesceMeaningfulString(sourceContext?.intervalFingerprint, sourceTruthContext?.intervalSourceIdentity)

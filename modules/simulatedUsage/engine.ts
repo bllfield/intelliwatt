@@ -2204,13 +2204,13 @@ export function buildPastSimulatedBaselineV1(args: {
         ...blendedResult,
         simulatedReasonCode,
         templateSelectionKind:
-          simulatedReasonCode === "TRAVEL_VACANT"
-            ? "travel_vacant_shared_day_template"
-            : simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" || simulatedReasonCode === "MANUAL_CONSTRAINED_DAY"
-              ? "monthly_manual_constrained_shared_day_template"
-              : simulatedReasonCode === "TEST_MODELED_KEEP_REF"
-                ? "validation_keep_ref_shared_day_template"
-                : "shared_day_template",
+          simulatedReasonCode === "TRAVEL_VACANT" ||
+          simulatedReasonCode === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" ||
+          simulatedReasonCode === "MANUAL_CONSTRAINED_DAY"
+            ? "shared_modeled_day_template"
+            : simulatedReasonCode === "TEST_MODELED_KEEP_REF"
+              ? "validation_keep_ref_shared_day_template"
+              : "shared_day_template",
         selectedFingerprintBucketMonth: blendedResult.selectedFingerprintBucketMonth ?? ym,
         selectedFingerprintBucketDayType: blendedResult.dayTypeUsed,
         selectedFingerprintWeatherBucket: blendedResult.weatherRegimeUsed,

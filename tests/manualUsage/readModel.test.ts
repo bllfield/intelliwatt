@@ -77,7 +77,6 @@ describe("manual usage read model", () => {
     expect(
       buildGapfillManualMonthlyCompareRows({
         manualReadModel: readModel,
-        actualDataset,
       })
     ).toEqual([
       {
@@ -130,7 +129,6 @@ describe("manual usage read model", () => {
     expect(
       buildGapfillManualAnnualCompareSummary({
         manualReadModel: readModel,
-        actualDataset,
       })
     ).toEqual({
       actualIntervalKwh: 3285,

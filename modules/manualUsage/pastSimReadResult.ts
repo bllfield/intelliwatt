@@ -384,6 +384,13 @@ export async function buildManualUsageReadDecorations(args: {
     dataset: args.dataset,
     actualDataset: args.actualDataset,
   });
+  const usageInputMode =
+    args.usageInputMode ??
+    (manualUsageRecord.payload?.mode === "ANNUAL"
+      ? "MANUAL_ANNUAL"
+      : manualUsageRecord.payload?.mode === "MONTHLY"
+        ? "MANUAL_MONTHLY"
+        : null);
   const manualMonthlyReconciliation =
     manualReadModel?.billPeriodCompare ??
     buildManualMonthlyReconciliation({
@@ -395,7 +402,7 @@ export async function buildManualUsageReadDecorations(args: {
     dataset: args.dataset,
     scenarioId: args.scenarioId,
     correlationId: args.correlationId ?? null,
-    usageInputMode: args.usageInputMode ?? null,
+    usageInputMode,
     validationPolicyOwner: args.validationPolicyOwner ?? null,
     weatherLogicMode: args.weatherLogicMode ?? null,
     compareProjection,

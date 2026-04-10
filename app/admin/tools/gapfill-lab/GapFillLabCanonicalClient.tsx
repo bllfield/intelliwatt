@@ -354,7 +354,8 @@ function LockboxFlowPanel(props: {
       <div>
         <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
         <div className="mt-1 text-xs text-brand-navy/70">
-          Read-only trace of the persisted lockbox run, identity chain, and stage timings.
+          Read-only trace of the persisted lockbox run, identity chain, and stage timings. Values below are sealed artifact truth; current
+          controls can differ until the next recalc writes a new artifact.
         </div>
       </div>
       <MetadataGrid
@@ -990,9 +991,7 @@ export default function GapFillLabCanonicalClient() {
   const actualVsTestMonthlyRows = useMemo(() => {
     const actualMonthly = Array.isArray(actualHouseBaselineDataset?.monthly)
       ? actualHouseBaselineDataset.monthly
-      : Array.isArray((result as any)?.usage365?.monthly)
-        ? (((result as any)?.usage365?.monthly as Array<Record<string, unknown>>) ?? [])
-        : [];
+      : [];
     const testMonthly = Array.isArray(testHouseBaselineDataset?.monthly)
       ? testHouseBaselineDataset.monthly
       : [];
@@ -1029,17 +1028,15 @@ export default function GapFillLabCanonicalClient() {
     () =>
       buildGapfillManualMonthlyCompareRows({
         manualReadModel,
-        actualDataset: actualHouseBaselineDataset,
       }),
-    [actualHouseBaselineDataset, manualReadModel]
+    [manualReadModel]
   );
   const manualAnnualCompareSummary = useMemo(
     () =>
       buildGapfillManualAnnualCompareSummary({
         manualReadModel,
-        actualDataset: actualHouseBaselineDataset,
       }),
-    [actualHouseBaselineDataset, manualReadModel]
+    [manualReadModel]
   );
   const hasCurveData = Boolean(actualHouseOverride?.length || testHouseOverride?.length);
   const actualDiagnosticsHeader = useMemo(
@@ -2023,21 +2020,23 @@ export default function GapFillLabCanonicalClient() {
           <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Actual annual kWh</div>
             <div className="mt-2 text-xl font-semibold text-brand-navy">
-              {formatNumberMaybe(Number(actualHouseBaselineDataset?.summary?.totalKwh ?? 0), 0)}
+              {formatNumberMaybe(actualHouseBaselineDataset?.summary?.totalKwh, 0)}
             </div>
           </div>
           <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test annual kWh</div>
             <div className="mt-2 text-xl font-semibold text-brand-navy">
-              {formatNumberMaybe(Number(testHouseBaselineDataset?.summary?.totalKwh ?? 0), 0)}
+              {formatNumberMaybe(testHouseBaselineDataset?.summary?.totalKwh, 0)}
             </div>
           </div>
           <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test vs actual delta</div>
             <div className="mt-2 text-xl font-semibold text-brand-navy">
               {formatNumberMaybe(
-                Number(testHouseBaselineDataset?.summary?.totalKwh ?? 0) -
-                  Number(actualHouseBaselineDataset?.summary?.totalKwh ?? 0),
+                typeof testHouseBaselineDataset?.summary?.totalKwh === "number" &&
+                  typeof actualHouseBaselineDataset?.summary?.totalKwh === "number"
+                  ? testHouseBaselineDataset.summary.totalKwh - actualHouseBaselineDataset.summary.totalKwh
+                  : null,
                 0
               )}
             </div>

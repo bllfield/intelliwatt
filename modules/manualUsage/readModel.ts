@@ -143,20 +143,6 @@ function sumRangeTotals(range: { startDate: string; endDate: string }, totalsByD
   );
 }
 
-function buildActualIntervalFallbackByMonth(dataset: any): Map<string, number> {
-  const out = new Map<string, number>();
-  const monthlyDiagnostics = Array.isArray(dataset?.meta?.monthlyTargetConstructionDiagnostics)
-    ? dataset.meta.monthlyTargetConstructionDiagnostics
-    : [];
-  for (const row of monthlyDiagnostics) {
-    const month = String((row as any)?.month ?? "").trim();
-    const rawMonthKwhFromSource = Number((row as any)?.rawMonthKwhFromSource);
-    if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(rawMonthKwhFromSource)) continue;
-    out.set(month, rawMonthKwhFromSource);
-  }
-  return out;
-}
-
 export function buildManualUsageReadModel(args: {
   payload: ManualUsagePayload | null;
   dataset: any;
@@ -182,7 +168,6 @@ export function buildManualUsageReadModel(args: {
           return actualIntervalTotals.size > 0 ? actualIntervalTotals : buildDailyTotalsByDate(args.actualDataset);
         })()
       : null;
-  const actualFallbackByMonth = buildActualIntervalFallbackByMonth(args.dataset);
 
   const meta = args.dataset?.meta && typeof args.dataset.meta === "object" ? args.dataset.meta : {};
   const inputState = (meta.manualMonthlyInputState ?? null) as ManualMonthlyInputStateLike;
@@ -198,7 +183,7 @@ export function buildManualUsageReadModel(args: {
     const actualIntervalTotalKwh =
       actualDatasetTotalsByDate != null
         ? sumRangeTotals(period, actualDatasetTotalsByDate)
-        : round2(actualFallbackByMonth.get(period.month) ?? null);
+        : null;
     const enteredStatementTotalKwh = period.enteredKwh ?? null;
     const stageOneTargetTotalKwh = round2(
       Number.isFinite(Number(billPeriodTotalsKwhById[period.id])) ? Number(billPeriodTotalsKwhById[period.id]) : period.enteredKwh ?? null

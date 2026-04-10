@@ -462,6 +462,64 @@ describe("user simulated house compare projection", () => {
     expect(readout.validationKeys).toContain("2025-04-10");
   });
 
+  it("prefers explicit usage-input mode and hides source-derived anchors on pure manual readouts", () => {
+    const readout = buildPersistedHouseReadout({
+      dataset: {
+        meta: {
+          lockboxInput: {
+            mode: "MANUAL_MONTHLY",
+            sourceContext: {
+              sourceDerivedMonthlyTotalsKwhByMonth: { "2025-06": 312.5 },
+              sourceDerivedAnnualTotalKwh: 312.5,
+            },
+            travelRanges: { ranges: [] },
+            validationKeys: { localDateKeys: [] },
+          },
+        },
+      },
+      sharedDiagnostics: {
+        identityContext: {
+          usageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+          simulatorMode: "MANUAL_MONTHLY",
+        },
+        sourceTruthContext: {
+          sourceDerivedMonthlyTotalsKwhByMonth: { "2025-06": 312.5 },
+        },
+      },
+    });
+
+    expect(readout.mode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
+    expect(readout.sourceDerivedMonthlyTotalsKwhByMonth).toBe(JSON.stringify({ "2025-06": 312.5 }));
+
+    const pureManualReadout = buildPersistedHouseReadout({
+      dataset: {
+        meta: {
+          lockboxInput: {
+            mode: "MANUAL_MONTHLY",
+            sourceContext: {
+              sourceDerivedMonthlyTotalsKwhByMonth: { "2025-06": 312.5 },
+              sourceDerivedAnnualTotalKwh: 312.5,
+            },
+            travelRanges: { ranges: [] },
+            validationKeys: { localDateKeys: [] },
+          },
+        },
+      },
+      sharedDiagnostics: {
+        identityContext: {
+          usageInputMode: "MANUAL_MONTHLY",
+          simulatorMode: "MANUAL_MONTHLY",
+        },
+        sourceTruthContext: {
+          sourceDerivedMonthlyTotalsKwhByMonth: { "2025-06": 312.5 },
+        },
+      },
+    });
+
+    expect(pureManualReadout.sourceDerivedMonthlyTotalsKwhByMonth).toBe("—");
+    expect(pureManualReadout.sourceDerivedAnnualTotalKwh).toBe("—");
+  });
+
   it("truthfully marks blank identities and zeroed artifact-only timings as unavailable", () => {
     expect(formatIdentityReadout("")).toBe("unavailable");
     expect(
@@ -904,7 +962,7 @@ describe("user simulated house compare projection", () => {
         dayTypeUsed: "weekday",
         weatherRegimeUsed: "cooling",
         shapeVariantUsed: "month_weekday_weather_cooling",
-        templateSelectionKind: "monthly_manual_constrained_shared_day_template",
+        templateSelectionKind: "shared_modeled_day_template",
         selectedFingerprintBucketMonth: "2025-06",
         selectedFingerprintBucketDayType: "weekday",
         selectedFingerprintWeatherBucket: "cooling",
@@ -919,7 +977,7 @@ describe("user simulated house compare projection", () => {
 
     expect(trace[0]).toMatchObject({
       simulatedReasonCode: "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY",
-      templateSelectionKind: "monthly_manual_constrained_shared_day_template",
+      templateSelectionKind: "shared_modeled_day_template",
       selectedFingerprintBucketMonth: "2025-06",
       selectedFingerprintBucketDayType: "weekday",
       selectedFingerprintWeatherBucket: "cooling",

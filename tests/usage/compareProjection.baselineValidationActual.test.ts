@@ -140,4 +140,33 @@ describe("projectBaselineFromCanonicalDataset", () => {
     // 2025-08-11 is Monday in America/Chicago — insights must use house TZ, not UTC calendar on the date string
     expect(projected.insights.weekdayVsWeekend).toEqual({ weekday: 36, weekend: 0 });
   });
+
+  it("keeps projected monthly rows and annual totals aligned from the same daily truth", () => {
+    const dataset = {
+      daily: [
+        { date: "2025-07-31", kwh: 10, source: "ACTUAL" },
+        { date: "2025-08-01", kwh: 12, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+        { date: "2025-08-02", kwh: 13, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" },
+      ],
+      monthly: [{ month: "2025-08", kwh: 0 }],
+      summary: { totalKwh: 0, timezone: "America/Chicago" },
+      totals: { importKwh: 0, exportKwh: 0, netKwh: 0 },
+      meta: {
+        validationOnlyDateKeysLocal: ["2025-08-01"],
+      },
+    } as any;
+
+    const projected = projectBaselineFromCanonicalDataset(
+      dataset,
+      "America/Chicago",
+      new Map([["2025-08-01", 20]])
+    );
+
+    expect(projected.monthly).toEqual([
+      { month: "2025-07", kwh: 10 },
+      { month: "2025-08", kwh: 33 },
+    ]);
+    expect(projected.summary.totalKwh).toBe(43);
+    expect(projected.totals.netKwh).toBe(43);
+  });
 });
