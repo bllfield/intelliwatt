@@ -2555,6 +2555,77 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
   });
 
+  it("keeps gapfill manual readback actual-reference reads artifact-only so compare does not rebuild source truth", async () => {
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "h1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-28",
+            monthlyKwh: [{ month: "2026-02", kwh: 900 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      if (houseId === "test-home-1") {
+        return {
+          payload: {
+            mode: "MONTHLY",
+            anchorEndDate: "2026-02-26",
+            monthlyKwh: [{ month: "2026-02", kwh: 25 }],
+            statementRanges: [{ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }],
+            travelRanges: [],
+          },
+          updatedAt: null,
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const req = buildRequest({
+      action: "read_test_home_canonical_result",
+      email: "brian@intellipath-solutions.com",
+      timezone: "America/Chicago",
+      sourceHouseId: "h1",
+      testUsageInputMode: "MANUAL_MONTHLY",
+      includeUsage365: false,
+      includeDiagnostics: false,
+      includeFullReportText: false,
+      exactArtifactInputHash: "artifact-hash-1",
+      testRanges: [],
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        userId: "u1",
+        houseId: "test-home-1",
+        scenarioId: "past-s1",
+        readMode: "artifact_only",
+        projectionMode: "baseline",
+        exactArtifactInputHash: "artifact-hash-1",
+        requireExactArtifactMatch: true,
+      })
+    );
+    expect(getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        userId: "u1",
+        houseId: "h1",
+        scenarioId: "past-s1",
+        readMode: "artifact_only",
+        projectionMode: "baseline",
+      })
+    );
+  });
+
   it("surfaces Prisma pool exhaustion details for manual shared-producer failures", async () => {
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "h1") {

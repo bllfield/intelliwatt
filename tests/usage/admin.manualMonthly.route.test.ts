@@ -302,7 +302,7 @@ describe("admin manual monthly route", () => {
         userId: "source-user-1",
         houseId: "source-house-1",
         scenarioId: "past-source-s1",
-        readMode: "allow_rebuild",
+        readMode: "artifact_only",
         projectionMode: "baseline",
       })
     );
@@ -544,6 +544,63 @@ describe("admin manual monthly route", () => {
         correlationId: "cid-read",
         exactArtifactInputHash: "artifact-hash-1",
         requireExactArtifactMatch: true,
+      })
+    );
+  });
+
+  it("keeps manual compare actual-reference reads artifact-only so readback does not rebuild source truth", async () => {
+    mocks.prisma.usageSimulatorScenario.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where?.userId === "admin-owner-1" && where?.houseId === "lab-home-1") return { id: "past-lab-s1" };
+      if (where?.userId === "source-user-1" && where?.houseId === "source-house-1") return { id: "past-source-s1" };
+      return null;
+    });
+    mocks.getSimulatedUsageForHouseScenario
+      .mockResolvedValueOnce({
+        ok: true,
+        dataset: {
+          meta: {
+            mode: "MANUAL_TOTALS",
+            manualMonthlyInputState: {
+              inputKindByMonth: { "2025-04": "entered_nonzero" },
+            },
+            filledMonths: [],
+          },
+          daily: Array.from({ length: 30 }, (_, idx) => ({
+            date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 10,
+            source: "SIMULATED",
+          })),
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "NO_BUILD",
+        message: "No persisted source artifact.",
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(
+      buildRequest({
+        action: "read_result",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        correlationId: "cid-artifact-only",
+        exactArtifactInputHash: "artifact-hash-1",
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.readResult.ok).toBe(true);
+    expect(body.readResult.manualMonthlyReconciliation?.rows?.[0]?.actualIntervalTotalKwh).toBeNull();
+    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        userId: "source-user-1",
+        houseId: "source-house-1",
+        scenarioId: "past-source-s1",
+        readMode: "artifact_only",
+        projectionMode: "baseline",
       })
     );
   });

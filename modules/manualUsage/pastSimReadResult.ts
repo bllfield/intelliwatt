@@ -193,11 +193,11 @@ async function resolveManualCompareActualDataset(args: {
     userId: args.actualReference.userId,
     houseId: args.actualReference.houseId,
     scenarioId: args.actualReference.scenarioId,
-    readMode: "allow_rebuild",
+    readMode: "artifact_only",
     projectionMode: "baseline",
     correlationId: args.correlationId ?? undefined,
     readContext: {
-      artifactReadMode: "allow_rebuild",
+      artifactReadMode: "artifact_only",
       projectionMode: "baseline",
       compareSidecarRequest: false,
     },
