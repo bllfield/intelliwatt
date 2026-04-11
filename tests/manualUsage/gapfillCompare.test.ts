@@ -63,7 +63,7 @@ describe("gapfill manual usage compare helpers", () => {
         manualReadModel: readModel,
       })
     ).toEqual([
-      {
+      expect.objectContaining({
         month: "2025-01",
         actualIntervalKwh: 100,
         stageOneTargetKwh: 110,
@@ -71,8 +71,11 @@ describe("gapfill manual usage compare helpers", () => {
         simulatedVsActualDeltaKwh: 8,
         simulatedVsTargetDeltaKwh: -2,
         targetVsActualDeltaKwh: 10,
-      },
-      {
+        eligible: true,
+        parityRequirement: "exact_match_required",
+        status: "delta_present",
+      }),
+      expect.objectContaining({
         month: "2025-02",
         actualIntervalKwh: 120,
         stageOneTargetKwh: 115,
@@ -80,7 +83,10 @@ describe("gapfill manual usage compare helpers", () => {
         simulatedVsActualDeltaKwh: -3,
         simulatedVsTargetDeltaKwh: 2,
         targetVsActualDeltaKwh: -5,
-      },
+        eligible: true,
+        parityRequirement: "exact_match_required",
+        status: "delta_present",
+      }),
     ]);
   });
 
@@ -125,14 +131,17 @@ describe("gapfill manual usage compare helpers", () => {
       buildGapfillManualAnnualCompareSummary({
         manualReadModel: readModel,
       })
-    ).toEqual({
+    ).toEqual(expect.objectContaining({
       actualIntervalKwh: 220,
       stageOneTargetKwh: 230,
       simulatedKwh: 225,
       simulatedVsActualDeltaKwh: 5,
       simulatedVsTargetDeltaKwh: -5,
       targetVsActualDeltaKwh: 10,
-    });
+      eligible: true,
+      parityRequirement: "exact_match_required",
+      status: "delta_present",
+    }));
   });
 
   it("keeps actual compare fields unavailable instead of zero-falling back", () => {
@@ -163,15 +172,89 @@ describe("gapfill manual usage compare helpers", () => {
         manualReadModel: readModel,
       })
     ).toEqual([
-      {
+      expect.objectContaining({
         month: "2025-02",
+        eligible: true,
+        parityRequirement: "exact_match_required",
+        status: "delta_present",
         actualIntervalKwh: null,
         stageOneTargetKwh: 115,
         simulatedKwh: 117,
         simulatedVsActualDeltaKwh: null,
         simulatedVsTargetDeltaKwh: 2,
         targetVsActualDeltaKwh: null,
+      }),
+    ]);
+  });
+
+  it("keeps non-travel periods exact-match-required and marks travel-overlapped periods as excluded", () => {
+    const readModel = buildManualUsageReadModel({
+      payload: {
+        mode: "MONTHLY" as const,
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [
+          { month: "2025-04", kwh: 300 },
+          { month: "2025-03", kwh: 280 },
+        ],
+        statementRanges: [
+          { month: "2025-04", startDate: "2025-03-31", endDate: "2025-04-30" },
+          { month: "2025-03", startDate: "2025-03-01", endDate: "2025-03-30" },
+        ],
+        travelRanges: [{ startDate: "2025-04-10", endDate: "2025-04-12" }],
       },
+      dataset: {
+        meta: {
+          filledMonths: [],
+          manualMonthlyInputState: {
+            inputKindByMonth: {
+              "2025-04": "entered_nonzero",
+              "2025-03": "entered_nonzero",
+            },
+          },
+        },
+        daily: [
+          ...Array.from({ length: 30 }, (_, idx) => ({
+            date: `2025-03-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 280 / 30,
+          })),
+          { date: "2025-03-31", kwh: 10 },
+          ...Array.from({ length: 30 }, (_, idx) => ({
+            date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 300 / 30,
+          })),
+        ],
+      },
+      actualDataset: {
+        daily: [
+          ...Array.from({ length: 30 }, (_, idx) => ({
+            date: `2025-03-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 280 / 30,
+          })),
+          { date: "2025-03-31", kwh: 10 },
+          ...Array.from({ length: 30 }, (_, idx) => ({
+            date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+            kwh: 300 / 30,
+          })),
+        ],
+      },
+    });
+
+    expect(
+      buildGapfillManualMonthlyCompareRows({
+        manualReadModel: readModel,
+      })
+    ).toEqual([
+      expect.objectContaining({
+        month: "2025-03",
+        eligible: true,
+        parityRequirement: "exact_match_required",
+      }),
+      expect.objectContaining({
+        month: "2025-04",
+        eligible: false,
+        parityRequirement: "excluded_travel_overlap",
+        status: "travel_overlap",
+      }),
     ]);
   });
 });

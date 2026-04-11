@@ -93,6 +93,8 @@
 - GapFill `MANUAL_MONTHLY` now owns one rolling admin auto-date contract: active anchor/bill-end date = current Chicago date minus 2 days.
 - Manual Usage Lab monthly popup now exposes `CUSTOMER_DATES`, `AUTO_DATES`, and `ADMIN_CUSTOM_DATES` for the isolated lab payload only.
 - Customer/source manual usage payloads are read-only context in Manual Lab and GapFill admin flows. Admin date edits, total edits, and travel edits must persist only on lab/test-home payloads and must never mutate or sync back into customer/source payloads.
+- GapFill manual modes now expose a dedicated Stage 1 UI panel for test-home manual-monthly/manual-annual readback. Actual House remains the unchanged shared Past Sim chart/data/compare source.
+- Manual monthly compare/reconciliation now treats non-travel-eligible bill periods as exact-match-required and travel-overlapped periods as explicit excluded/partial context.
 - The Actual House top lockbox/header summary must read the same shared artifact truth as the diagnostics block for `sourceHouseId`, `profileHouseId`, `intervalFingerprint`, and `weatherIdentity`.
 - This overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or separate flat travel-day behavior.
 - Exact-interval observed-history modeling intent is now explicit in runtime and docs: bounded K-nearest weather-similar donor blending leads modeled-day reconstruction in actual-backed mode, donor-pool variance guardrails damp noisy donor cohorts, heating-day donor ranking weights HDD/min-temp more strongly, broader calendar ladders are fallback-only, bounded post-donor weather tuning is secondary, and home/appliance profiles stay supportive context rather than the main selector.

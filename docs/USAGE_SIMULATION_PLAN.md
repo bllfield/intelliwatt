@@ -158,6 +158,8 @@ This section is authoritative for future manual-usage implementation and handoff
 - `CUSTOMER_DATES` uses customer/source statement-date structure as read-only context only. Admin edits in Manual Lab or GapFill must never mutate customer/source monthly dates, totals, or travel ranges.
 - `AUTO_DATES` uses the same rolling current-minus-2-days contract GapFill uses, and `ADMIN_CUSTOM_DATES` unlocks direct statement-range edits. Both persist only on lab/test-home payloads and do not change Stage 2 math.
 - Actual House top lockbox/header fields must read from the same shared artifact diagnostics truth as the detailed diagnostics section for `sourceHouseId`, `profileHouseId`, `intervalFingerprint`, and `weatherIdentity`.
+- GapFill `MANUAL_MONTHLY` and `MANUAL_ANNUAL` now expose a dedicated Stage 1 UI panel on the test-home admin surface. That panel is shared read-model publication only and does not replace Actual House, which remains the unchanged shared Past Sim compare source.
+- Manual monthly compare/reconciliation requires exact-match parity only for non-travel-eligible bill periods/month targets. Travel-overlapped periods remain visible as excluded/partial context and must not silently participate in the equality contract.
 - This overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or a separate flat travel-day path.
 - GapFill admin-only daily curve compare UI now summarizes scored/test-day 96-slot overlays, grouped representative curves, and slot metrics through `modules/usageSimulator/dailyCurveCompareSummary.ts`; it is read-side only and does not create a second compare path.
 - Stage 1 preview supports both manual payload modes:

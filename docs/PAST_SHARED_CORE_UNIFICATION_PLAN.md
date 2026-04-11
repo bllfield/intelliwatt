@@ -150,6 +150,8 @@ Summary:
 - GapFill `MANUAL_MONTHLY` Stage 1 date ownership is now rolling auto-date ownership: active anchor/bill-end date = current Chicago date minus 2 days.
 - Manual Usage Lab monthly editor now supports `CUSTOMER_DATES`, `AUTO_DATES`, and `ADMIN_CUSTOM_DATES` as isolated lab/test-home date-source modes.
 - Customer/source manual payloads are read-only context only for those admin tools. Admin date edits, total edits, and travel edits must persist only on the lab/test-home payload and must never mutate or copy back into the customer/source payload.
+- GapFill manual-mode UI now includes a dedicated Stage 1 panel for `MANUAL_MONTHLY` and `MANUAL_ANNUAL` test-home runs. That panel is additive shared-read-model publication and must not replace the unchanged Actual House persisted Past Sim chart/data path.
+- Manual monthly compare/reconciliation parity is exact-match-required only for non-travel-eligible bill periods. Travel-overlapped periods must stay visible with explicit excluded labeling instead of being silently enforced.
 - Actual House top summary projection must be a thin read of the same shared artifact diagnostics owner as the detailed diagnostics payload; blank header identity fields are a projection bug, not a separate truth source.
 - This Plan Change overrides any prior wording that tolerated alternate compare totals, stale active travel-contract readback, or separate flat travel-day behavior.
 - Authoritative shared simulator call chain:

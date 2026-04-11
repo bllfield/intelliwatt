@@ -1,4 +1,11 @@
-import { buildManualBillPeriodTargets, buildManualBillPeriodTotalsById, type ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
+import {
+  buildManualBillPeriodTargets,
+  buildManualBillPeriodTotalsById,
+  formatStatementRangeLabel,
+  type ManualAnnualStageOneSummary,
+  type ManualBillPeriodTarget,
+  type ManualMonthlyStageOneRow,
+} from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 export type ManualBillPeriodCompareStatus =
@@ -20,6 +27,11 @@ export type ManualBillPeriodCompareRow = {
   simulatedStatementTotalKwh: number | null;
   deltaKwh: number | null;
   eligible: boolean;
+  parityRequirement:
+    | "exact_match_required"
+    | "excluded_travel_overlap"
+    | "excluded_missing_input"
+    | "excluded_filled_later";
   status: ManualBillPeriodCompareStatus;
   reason: string | null;
 };
@@ -35,6 +47,11 @@ export type ManualBillPeriodCompare = {
 
 export type ManualMonthlyCompareRow = {
   month: string;
+  label?: string;
+  eligible?: boolean;
+  parityRequirement?: ManualBillPeriodCompareRow["parityRequirement"];
+  status?: ManualBillPeriodCompareStatus;
+  reason?: string | null;
   actualIntervalKwh: number | null;
   stageOneTargetKwh: number;
   simulatedKwh: number;
@@ -47,6 +64,10 @@ export type ManualAnnualCompareSummary = {
   actualIntervalKwh: number | null;
   stageOneTargetKwh: number;
   simulatedKwh: number;
+  eligible?: boolean;
+  parityRequirement?: ManualBillPeriodCompareRow["parityRequirement"];
+  status?: ManualBillPeriodCompareStatus;
+  reason?: string | null;
   simulatedVsActualDeltaKwh: number | null;
   simulatedVsTargetDeltaKwh: number;
   targetVsActualDeltaKwh: number | null;
@@ -61,6 +82,30 @@ export type ManualUsageReadModel = {
   monthlyCompareRows: ManualMonthlyCompareRow[];
   annualCompareSummary: ManualAnnualCompareSummary | null;
 };
+
+export type ManualMonthlyStageOneCanonicalRow = ManualMonthlyStageOneRow & {
+  eligible: boolean;
+  parityRequirement: ManualBillPeriodCompareRow["parityRequirement"];
+  status: ManualBillPeriodCompareStatus;
+  reason: string | null;
+};
+
+export type ManualAnnualStageOneCanonicalSummary = ManualAnnualStageOneSummary & {
+  eligible: boolean;
+  parityRequirement: ManualBillPeriodCompareRow["parityRequirement"];
+  status: ManualBillPeriodCompareStatus;
+  reason: string | null;
+};
+
+export type ManualStageOnePresentationFromReadModel =
+  | {
+      mode: "MONTHLY";
+      rows: ManualMonthlyStageOneCanonicalRow[];
+    }
+  | {
+      mode: "ANNUAL";
+      summary: ManualAnnualStageOneCanonicalSummary;
+    };
 
 type ManualMonthlyInputStateLike = {
   inputKindByMonth?: Record<string, "entered_nonzero" | "entered_zero" | "missing">;
@@ -77,6 +122,16 @@ function round2Number(value: number): number {
 
 function subtractRounded(left: number | null, right: number | null): number | null {
   return left == null || right == null ? null : round2Number(left - right);
+}
+
+function parityRequirementForRow(args: {
+  eligible: boolean;
+  status: ManualBillPeriodCompareStatus;
+}): ManualBillPeriodCompareRow["parityRequirement"] {
+  if (args.eligible) return "exact_match_required";
+  if (args.status === "travel_overlap") return "excluded_travel_overlap";
+  if (args.status === "filled_later") return "excluded_filled_later";
+  return "excluded_missing_input";
 }
 
 function buildDailyTotalsByDate(dataset: any): Map<string, number> {
@@ -155,6 +210,20 @@ function buildMonthlyTotalsByMonth(dataset: any): Map<string, number> {
   return out;
 }
 
+function buildMonthlyTotalsByMonthFromDiagnostics(dataset: any): Map<string, number> {
+  const out = new Map<string, number>();
+  const diagnostics = Array.isArray(dataset?.meta?.monthlyTargetConstructionDiagnostics)
+    ? dataset.meta.monthlyTargetConstructionDiagnostics
+    : [];
+  for (const row of diagnostics) {
+    const month = String((row as any)?.month ?? "").slice(0, 7);
+    const rawMonthKwhFromSource = Number((row as any)?.rawMonthKwhFromSource ?? Number.NaN);
+    if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(rawMonthKwhFromSource)) continue;
+    out.set(month, (out.get(month) ?? 0) + rawMonthKwhFromSource);
+  }
+  return out;
+}
+
 function listCoveredWholeMonths(range: { startDate: string; endDate: string }): string[] | null {
   if (!/^\d{4}-\d{2}-01$/.test(range.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(range.endDate)) return null;
   const start = new Date(`${range.startDate}T00:00:00.000Z`);
@@ -216,6 +285,7 @@ export function buildManualUsageReadModel(args: {
         })()
       : null;
   const actualDatasetTotalsByMonth = args.actualDataset != null ? buildMonthlyTotalsByMonth(args.actualDataset) : null;
+  const actualDiagnosticsTotalsByMonth = buildMonthlyTotalsByMonthFromDiagnostics(args.dataset);
   const actualDatasetSummaryTotalKwh =
     args.actualDataset != null && Number.isFinite(Number(args.actualDataset?.summary?.totalKwh))
       ? round2(Number(args.actualDataset.summary.totalKwh))
@@ -237,6 +307,11 @@ export function buildManualUsageReadModel(args: {
         ? sumRangeTotals(period, actualDatasetTotalsByDate)
         : actualDatasetTotalsByMonth != null && actualDatasetTotalsByMonth.size > 0
           ? sumRangeMonthlyTotals(period, actualDatasetTotalsByMonth)
+          : actualDiagnosticsTotalsByMonth.size > 0
+            ? round2(
+                sumRangeMonthlyTotals(period, actualDiagnosticsTotalsByMonth) ??
+                  (actualDiagnosticsTotalsByMonth.has(period.month) ? actualDiagnosticsTotalsByMonth.get(period.month) ?? 0 : null)
+              )
           : payload.mode === "ANNUAL"
             ? actualDatasetSummaryTotalKwh
             : null;
@@ -288,6 +363,7 @@ export function buildManualUsageReadModel(args: {
       simulatedStatementTotalKwh,
       deltaKwh,
       eligible,
+      parityRequirement: parityRequirementForRow({ eligible, status }),
       status,
       reason,
     };
@@ -336,5 +412,58 @@ export function buildManualUsageReadModel(args: {
     billPeriodCompare,
     monthlyCompareRows,
     annualCompareSummary,
+  };
+}
+
+export function buildManualStageOnePresentationFromReadModel(args: {
+  readModel: ManualUsageReadModel | null | undefined;
+}): ManualStageOnePresentationFromReadModel | null {
+  const readModel = args.readModel;
+  if (!readModel) return null;
+  if (readModel.payloadMode === "MONTHLY") {
+    return {
+      mode: "MONTHLY",
+      rows: readModel.billPeriodCompare.rows.map((row) => {
+        const labels = formatStatementRangeLabel({
+          startDate: row.startDate,
+          endDate: row.endDate,
+        });
+        return {
+          key: `${row.month}:${row.endDate}`,
+          month: row.month,
+          startDate: row.startDate,
+          endDate: row.endDate,
+          label: labels.label,
+          shortLabel: labels.shortLabel,
+          kwh: round2Number(row.stageOneTargetTotalKwh ?? 0),
+          eligible: row.eligible,
+          parityRequirement: row.parityRequirement,
+          status: row.status,
+          reason: row.reason,
+        };
+      }),
+    };
+  }
+  const annualRow = readModel.billPeriodCompare.rows[0] ?? null;
+  if (!annualRow) return null;
+  const labels = formatStatementRangeLabel({
+    startDate: annualRow.startDate,
+    endDate: annualRow.endDate,
+  });
+  return {
+    mode: "ANNUAL",
+    summary: {
+      key: annualRow.month,
+      startDate: annualRow.startDate,
+      endDate: annualRow.endDate,
+      anchorEndDate: readModel.anchorEndDate,
+      label: labels.label,
+      shortLabel: labels.shortLabel,
+      annualKwh: round2Number(readModel.annualCompareSummary?.stageOneTargetKwh ?? annualRow.stageOneTargetTotalKwh ?? 0),
+      eligible: annualRow.eligible,
+      parityRequirement: annualRow.parityRequirement,
+      status: annualRow.status,
+      reason: annualRow.reason,
+    },
   };
 }

@@ -423,7 +423,7 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(constrainedDay?.shape96Used).toEqual(whDay?.shape96Used);
   });
 
-  it("baseline intervals remain in canonical chronological order", () => {
+it("baseline intervals remain in canonical chronological order", () => {
     const day1StartMs = new Date("2026-10-01T00:00:00.000Z").getTime();
     const day2StartMs = new Date("2026-10-02T00:00:00.000Z").getTime();
     const day1Grid = getDayGridTimestamps(day1StartMs);

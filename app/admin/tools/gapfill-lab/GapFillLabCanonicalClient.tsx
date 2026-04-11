@@ -2,6 +2,7 @@
 
 import { type ReactNode, useMemo, useState } from "react";
 import UsageDashboard, { type HouseUsage } from "@/components/usage/UsageDashboard";
+import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
@@ -19,6 +20,7 @@ import {
   buildGapfillManualAnnualCompareSummary,
   buildGapfillManualMonthlyCompareRows,
 } from "@/modules/manualUsage/gapfillCompare";
+import { buildManualStageOnePresentationFromReadModel } from "@/modules/manualUsage/readModel";
 import { resolveManualReadbackPollPlan } from "@/modules/manualUsage/readbackPolling";
 import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/calculationLogicSummary";
 import { GapFillDailyCurveCompare } from "@/components/admin/GapFillDailyCurveCompare";
@@ -551,6 +553,7 @@ export default function GapFillLabCanonicalClient() {
   const [actualEngineDiagnosticsLoading, setActualEngineDiagnosticsLoading] = useState(false);
   const [actualEngineDiagnosticsError, setActualEngineDiagnosticsError] = useState<string | null>(null);
   const [openCalculationLogic, setOpenCalculationLogic] = useState(false);
+  const [manualStageOneMonthlyView, setManualStageOneMonthlyView] = useState<"chart" | "table">("chart");
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
@@ -1027,6 +1030,10 @@ export default function GapFillLabCanonicalClient() {
       : null;
   const manualReadModel = result?.ok ? (result.manualReadModel ?? null) : null;
   const manualParitySummary = result?.ok ? ((result as any).manualParitySummary ?? null) : null;
+  const manualStageOnePresentation = useMemo(
+    () => buildManualStageOnePresentationFromReadModel({ readModel: manualReadModel }),
+    [manualReadModel]
+  );
   const manualMonthlyCompareRows = useMemo(
     () =>
       buildGapfillManualMonthlyCompareRows({
@@ -1101,9 +1108,15 @@ export default function GapFillLabCanonicalClient() {
     };
   }, [result]);
   const selectedTreatmentMode = visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode;
+  const showManualStageOne =
+    selectedTreatmentMode === "MANUAL_MONTHLY" ||
+    selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS" ||
+    selectedTreatmentMode === "MANUAL_ANNUAL" ||
+    selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
   const showManualMonthlyCompare =
     selectedTreatmentMode === "MANUAL_MONTHLY" || selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS";
-  const showManualAnnualCompare = selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
+  const showManualAnnualCompare =
+    selectedTreatmentMode === "MANUAL_ANNUAL" || selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
   const showExactIntervalCurveCompare = selectedTreatmentMode === "EXACT_INTERVALS";
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
@@ -2018,6 +2031,51 @@ export default function GapFillLabCanonicalClient() {
         )}
       </section>
 
+      {showManualStageOne ? (
+        <section className="space-y-4 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+          <div>
+            <h2 className="text-lg font-semibold text-brand-navy">Manual Stage 1 contract</h2>
+            <p className="mt-1 text-sm text-brand-navy/70">
+              Canonical test-home manual Stage 1 contract for this persisted run. This is read from the shared manual read model and
+              does not replace the Actual House chart or compare source.
+            </p>
+          </div>
+          {manualStageOnePresentation?.mode === "MONTHLY" ? (
+            <UsageChartsPanel
+              monthly={[]}
+              stitchedMonth={null}
+              weekdayKwh={0}
+              weekendKwh={0}
+              monthlyView={manualStageOneMonthlyView}
+              onMonthlyViewChange={setManualStageOneMonthlyView}
+              dailyView="table"
+              onDailyViewChange={() => undefined}
+              daily={[]}
+              fifteenCurve={[]}
+              manualMonthlyStageOneRows={manualStageOnePresentation.rows}
+            />
+          ) : manualStageOnePresentation?.mode === "ANNUAL" ? (
+            <UsageChartsPanel
+              monthly={[]}
+              stitchedMonth={null}
+              weekdayKwh={0}
+              weekendKwh={0}
+              monthlyView="chart"
+              onMonthlyViewChange={() => undefined}
+              dailyView="table"
+              onDailyViewChange={() => undefined}
+              daily={[]}
+              fifteenCurve={[]}
+              manualAnnualStageOneSummary={manualStageOnePresentation.summary}
+            />
+          ) : (
+            <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-4 text-sm text-brand-navy/70">
+              Run canonical recalc first to publish the persisted manual Stage 1 contract for this test-home mode.
+            </div>
+          )}
+        </section>
+      ) : null}
+
       <section className="space-y-4 rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
         <div>
           <h2 className="text-lg font-semibold text-brand-navy">Compare / Analysis</h2>
@@ -2099,31 +2157,38 @@ export default function GapFillLabCanonicalClient() {
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
             <div className="text-sm font-semibold text-brand-navy">Manual monthly reconciliation compare</div>
             <div className="mt-1 text-xs text-brand-navy/70">
-              Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals.
+              Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals. Non-travel-eligible
+              periods stay on exact-match-required parity; travel-overlapped periods are explicitly excluded here.
             </div>
             <div className="mt-3 max-h-80 overflow-auto">
               <table className="min-w-full text-xs border border-brand-blue/10">
                 <thead className="bg-brand-blue/5">
                   <tr>
                     <th className="border border-brand-blue/10 px-2 py-1 text-left">Month</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-left">Bill period</th>
                     <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual interval</th>
                     <th className="border border-brand-blue/10 px-2 py-1 text-right">Stage 1 target</th>
                     <th className="border border-brand-blue/10 px-2 py-1 text-right">Final simulated</th>
                     <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim vs actual</th>
                     <th className="border border-brand-blue/10 px-2 py-1 text-right">Sim vs target</th>
                     <th className="border border-brand-blue/10 px-2 py-1 text-right">Target vs actual</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-left">Parity contract</th>
+                    <th className="border border-brand-blue/10 px-2 py-1 text-left">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {manualMonthlyCompareRows.map((row) => (
                     <tr key={row.month}>
                       <td className="border border-brand-blue/10 px-2 py-1">{row.month}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1">{row.label ?? "—"}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.actualIntervalKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.stageOneTargetKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedVsActualDeltaKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedVsTargetDeltaKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.targetVsActualDeltaKwh)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1">{row.parityRequirement ?? "—"}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1">{row.status ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2161,6 +2226,14 @@ export default function GapFillLabCanonicalClient() {
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Target vs actual</div>
                 <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.targetVsActualDeltaKwh)}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Parity contract</div>
+                <div className="mt-2 text-sm font-semibold text-brand-navy">{manualAnnualCompareSummary.parityRequirement ?? "—"}</div>
+              </div>
+              <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Status</div>
+                <div className="mt-2 text-sm font-semibold text-brand-navy">{manualAnnualCompareSummary.status ?? "—"}</div>
               </div>
             </div>
           </div>

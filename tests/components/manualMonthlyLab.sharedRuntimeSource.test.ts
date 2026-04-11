@@ -48,4 +48,14 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(editorSource).toContain("AUTO_DATES");
     expect(editorSource).toContain("ADMIN_CUSTOM_DATES");
   });
+
+  it("publishes Stage 1 from the canonical manual read model when artifact-backed totals are available", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("displayedReadResult?.manualReadModel");
+    expect(source).toContain("buildManualStageOnePresentationFromReadModel");
+    expect(source).not.toContain("return stageOnePreviewPayload;");
+    expect(source).not.toContain("manualMonthlyStageOneRowsOverride={stageOnePreviewRows}");
+    expect(source).toContain("Canonical shared manual Stage 1 contract");
+  });
 });

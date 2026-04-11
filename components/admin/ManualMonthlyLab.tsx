@@ -5,9 +5,11 @@ import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
+import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
 import { resolveManualReadbackPollPlan } from "@/modules/manualUsage/readbackPolling";
-import { buildManualMonthlyStageOneRows, resolveManualStageOneLabPayloads } from "@/modules/manualUsage/statementRanges";
+import { resolveManualStageOneLabPayloads, resolveManualStageOnePresentation } from "@/modules/manualUsage/statementRanges";
+import { buildManualStageOnePresentationFromReadModel } from "@/modules/manualUsage/readModel";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 const LAB_RUN_POLL_MS = 2000;
@@ -186,10 +188,21 @@ export default function ManualMonthlyLab() {
     loadedSourceSeed: loadJson?.sourcePayload ?? loadJson?.seed?.monthly ?? loadJson?.seed?.annual ?? null,
     lookupSourceSeed: lookupJson?.sourcePayload ?? lookupJson?.sourceSeed?.monthly ?? lookupJson?.sourceSeed?.annual ?? null,
   });
-  const stageOnePreviewRows = useMemo(
-    () => (stageOnePreviewPayload?.mode === "MONTHLY" ? buildManualMonthlyStageOneRows(stageOnePreviewPayload) : []),
-    [stageOnePreviewPayload]
+  const canonicalStageOnePresentation = useMemo(
+    () => buildManualStageOnePresentationFromReadModel({ readModel: displayedReadResult?.manualReadModel ?? null }),
+    [displayedReadResult?.manualReadModel]
   );
+  const previewStageOnePresentation = useMemo(
+    () =>
+      canonicalStageOnePresentation
+        ? null
+        : resolveManualStageOnePresentation({
+            surface: "admin_manual_monthly_stage_one",
+            payload: stageOnePreviewPayload,
+          }),
+    [canonicalStageOnePresentation, stageOnePreviewPayload]
+  );
+  const displayedStageOnePresentation = canonicalStageOnePresentation ?? previewStageOnePresentation;
   const activeManualPayload = useMemo(
     () => (displayedReadResult?.payload ?? saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null) as ManualUsagePayload | null,
     [displayedReadResult, loadJson, lookupJson, saveJson]
@@ -593,24 +606,46 @@ export default function ManualMonthlyLab() {
             <div>
               <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 1</div>
               <p className="text-sm text-slate-600">
-                Pre-sim Stage 1 view for the lab flow. Monthly mode keeps bill-period semantics, annual mode keeps annual-total semantics, and
-                both update here whenever the admin saves lab-home manual usage.
+                {canonicalStageOnePresentation
+                  ? "Canonical shared manual Stage 1 contract for the current lab artifact. This mirrors the shared manual read-model publication used by GapFill."
+                  : "Pre-run Stage 1 preview for the lab flow. Monthly mode keeps bill-period semantics, annual mode keeps annual-total semantics, and this preview is replaced by the canonical shared read-model contract after Past Sim readback."}
               </p>
             </div>
-            {stageOnePreviewPayload ? (
-              <UsageDashboard
-                forcedMode="REAL"
-                fetchModeOverride="REAL"
-                allowModeToggle={false}
-                initialMode="REAL"
-                housesOverride={sourceUsageOverride}
-                dashboardVariant="USAGE"
-                preferredHouseId={selectedSourceHouse?.id ?? null}
-                manualUsagePayload={stageOnePreviewPayload}
-                manualUsageHouseId={selectedSourceHouse?.id ?? null}
-                manualMonthlyStageOneRowsOverride={stageOnePreviewRows}
-                forceManualMonthlyStageOne
-                presentationSurface="admin_manual_monthly_stage_one"
+            {displayedStageOnePresentation?.mode === "MONTHLY" ? (
+              <UsageChartsPanel
+                monthly={[]}
+                stitchedMonth={null}
+                weekdayKwh={0}
+                weekendKwh={0}
+                timeOfDayBuckets={[]}
+                monthlyView="chart"
+                onMonthlyViewChange={() => undefined}
+                dailyView="table"
+                onDailyViewChange={() => undefined}
+                daily={[]}
+                fifteenCurve={[]}
+                summaryTotalKwh={displayedStageOnePresentation.rows.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)}
+                coverageStart={null}
+                coverageEnd={null}
+                manualMonthlyStageOneRows={displayedStageOnePresentation.rows}
+              />
+            ) : displayedStageOnePresentation?.mode === "ANNUAL" ? (
+              <UsageChartsPanel
+                monthly={[]}
+                stitchedMonth={null}
+                weekdayKwh={0}
+                weekendKwh={0}
+                timeOfDayBuckets={[]}
+                monthlyView="chart"
+                onMonthlyViewChange={() => undefined}
+                dailyView="table"
+                onDailyViewChange={() => undefined}
+                daily={[]}
+                fifteenCurve={[]}
+                summaryTotalKwh={displayedStageOnePresentation.summary.annualKwh}
+                coverageStart={null}
+                coverageEnd={null}
+                manualAnnualStageOneSummary={displayedStageOnePresentation.summary}
               />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">

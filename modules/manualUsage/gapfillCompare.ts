@@ -25,6 +25,11 @@ export function buildGapfillManualMonthlyCompareRows(args: {
     const simulatedKwh = round2(row.simulatedStatementTotalKwh ?? 0);
     return {
       month: row.month,
+      label: `${row.startDate} - ${row.endDate}`,
+      eligible: row.eligible,
+      parityRequirement: row.parityRequirement,
+      status: row.status,
+      reason: row.reason,
       actualIntervalKwh,
       stageOneTargetKwh,
       simulatedKwh,
@@ -58,6 +63,10 @@ export function buildGapfillManualAnnualCompareSummary(args: {
       actualIntervalKwh,
       stageOneTargetKwh,
       simulatedKwh,
+      eligible: Boolean(readModel.billPeriodCompare.rows[0]?.eligible),
+      parityRequirement: readModel.billPeriodCompare.rows[0]?.parityRequirement ?? "excluded_missing_input",
+      status: readModel.billPeriodCompare.rows[0]?.status ?? "sim_result_unavailable",
+      reason: readModel.billPeriodCompare.rows[0]?.reason ?? null,
       simulatedVsActualDeltaKwh: subtractRounded(simulatedKwh, actualIntervalKwh),
       simulatedVsTargetDeltaKwh: round2(simulatedKwh - stageOneTargetKwh),
       targetVsActualDeltaKwh: subtractRounded(stageOneTargetKwh, actualIntervalKwh),

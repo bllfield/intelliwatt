@@ -30,6 +30,7 @@ export function ManualMonthlyReconciliationPanel(props: {
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Stage 1 target kWh</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Past Sim kWh</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Delta</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-left">Parity contract</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-left">Status</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-left">Reason</th>
             </tr>
@@ -49,6 +50,7 @@ export function ManualMonthlyReconciliationPanel(props: {
                 <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.stageOneTargetTotalKwh)}</td>
                 <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.simulatedStatementTotalKwh)}</td>
                 <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.deltaKwh)}</td>
+                <td className="border border-brand-blue/10 px-2 py-1">{row.parityRequirement}</td>
                 <td className="border border-brand-blue/10 px-2 py-1">{row.status}</td>
                 <td className="border border-brand-blue/10 px-2 py-1">{row.reason ?? "\u2014"}</td>
               </tr>

@@ -47,10 +47,33 @@ describe("GapFill calculation logic UI wiring", () => {
 
     expect(source).toContain("Manual monthly reconciliation compare");
     expect(source).toContain("Manual annual reconciliation compare");
+    expect(source).toContain("Manual Stage 1 contract");
+    expect(source).toContain("UsageChartsPanel");
+    expect(source).toContain("selectedTreatmentMode === \"MANUAL_ANNUAL\"");
     expect(source).toContain("Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals.");
     expect(source).toContain("Source actual interval annual total, shared Stage 1 annual target, and final simulated annual total.");
     expect(source).toContain("LockboxFlowPanel");
     expect(source).toContain("sharedDiagnostics={testSharedDiagnostics}");
+  });
+
+  it("shows the canonical manual Stage 1 UI for both monthly and annual manual modes", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain('selectedTreatmentMode === "MANUAL_MONTHLY"');
+    expect(source).toContain('selectedTreatmentMode === "MANUAL_ANNUAL"');
+    expect(source).toContain("Canonical test-home manual Stage 1 contract for this persisted run.");
+    expect(source).toContain("manualStageOnePresentation?.mode === \"MONTHLY\"");
+    expect(source).toContain("manualStageOnePresentation?.mode === \"ANNUAL\"");
+  });
+
+  it("keeps Actual House on the shared persisted Past Sim path while adding manual Stage 1 UI only for test-home manual modes", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("<h2 className=\"text-lg font-semibold text-brand-navy\">Actual House</h2>");
+    expect(source).toContain("Source-house Past Sim results are not loaded yet. Run the source-home Past Sim action to load the Actual House chart.");
+    expect(source).toContain("Actual House compare rows");
+    expect(source).toContain("Manual Stage 1 contract");
+    expect(source).not.toContain("Manual Stage 1 contract</div>\n            <div className=\"text-sm font-semibold text-brand-navy\">Actual House");
   });
 
   it("shows separate source, test-home, and effective travel-range visibility in GapFill", () => {
@@ -66,9 +89,9 @@ describe("GapFill calculation logic UI wiring", () => {
   it("hydrates Actual House lockbox flow from shared diagnostics when attached", () => {
     const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
 
-    expect(source).toContain("sharedDiagnostics?: Record<string, unknown> | null");
-    expect(source).toContain("sourceTruthContext?.intervalSourceIdentity");
-    expect(source).toContain("sourceTruthContext?.weatherDatasetIdentity");
+    expect(source).toContain("Actual House shared diagnostics");
+    expect(source).toContain("actualSharedDiagnostics");
+    expect(source).toContain("buildActualDiagnosticsHeaderReadout");
     expect(source).toContain("artifactEngineVersion");
   });
 

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildGapfillManualAnnualCompareSummary, buildGapfillManualMonthlyCompareRows } from "@/modules/manualUsage/gapfillCompare";
-import { buildManualUsageReadModel } from "@/modules/manualUsage/readModel";
+import {
+  buildGapfillManualAnnualCompareSummary,
+  buildGapfillManualMonthlyCompareRows,
+} from "@/modules/manualUsage/gapfillCompare";
+import { buildManualStageOnePresentationFromReadModel, buildManualUsageReadModel } from "@/modules/manualUsage/readModel";
 
 describe("manual usage read model", () => {
   it("publishes one bill-period-first contract for monthly manual compare surfaces", () => {
@@ -79,7 +82,7 @@ describe("manual usage read model", () => {
         manualReadModel: readModel,
       })
     ).toEqual([
-      {
+      expect.objectContaining({
         month: "2025-03",
         actualIntervalKwh: 240,
         stageOneTargetKwh: 280,
@@ -87,8 +90,11 @@ describe("manual usage read model", () => {
         simulatedVsActualDeltaKwh: 30,
         simulatedVsTargetDeltaKwh: -10,
         targetVsActualDeltaKwh: 40,
-      },
-      {
+        eligible: true,
+        parityRequirement: "exact_match_required",
+        status: "delta_present",
+      }),
+      expect.objectContaining({
         month: "2025-04",
         actualIntervalKwh: 338,
         stageOneTargetKwh: 300,
@@ -96,7 +102,10 @@ describe("manual usage read model", () => {
         simulatedVsActualDeltaKwh: -29,
         simulatedVsTargetDeltaKwh: 9,
         targetVsActualDeltaKwh: -38,
-      },
+        eligible: true,
+        parityRequirement: "exact_match_required",
+        status: "delta_present",
+      }),
     ]);
   });
 
@@ -130,14 +139,17 @@ describe("manual usage read model", () => {
       buildGapfillManualAnnualCompareSummary({
         manualReadModel: readModel,
       })
-    ).toEqual({
+    ).toEqual(expect.objectContaining({
       actualIntervalKwh: 3285,
       stageOneTargetKwh: 3650,
       simulatedKwh: 3650,
       simulatedVsActualDeltaKwh: 365,
       simulatedVsTargetDeltaKwh: 0,
       targetVsActualDeltaKwh: 365,
-    });
+      eligible: true,
+      parityRequirement: "exact_match_required",
+      status: "reconciled",
+    }));
   });
 
   it("uses canonical actual-house artifact totals for annual compare when only summary/monthly truth is available", () => {
@@ -208,5 +220,106 @@ describe("manual usage read model", () => {
 
     expect(readModel?.billPeriodCompare.rows[0]?.actualIntervalTotalKwh).toBe(338.4);
     expect(readModel?.monthlyCompareRows[0]?.actualIntervalKwh).toBe(338.4);
+  });
+
+  it("publishes canonical Stage 1 monthly rows from the shared read model instead of the raw payload family", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-04-30",
+      monthlyKwh: [
+        { month: "2025-04", kwh: 300 },
+        { month: "2025-03", kwh: 280 },
+      ],
+      statementRanges: [
+        { month: "2025-04", startDate: "2025-03-31", endDate: "2025-04-30" },
+        { month: "2025-03", startDate: "2025-03-01", endDate: "2025-03-30" },
+      ],
+      travelRanges: [{ startDate: "2025-04-10", endDate: "2025-04-12" }],
+    };
+    const dataset = {
+      meta: {
+        filledMonths: [],
+        manualMonthlyInputState: {
+          inputKindByMonth: {
+            "2025-04": "entered_nonzero",
+            "2025-03": "entered_nonzero",
+          },
+        },
+      },
+      daily: [
+        ...Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-03-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 9,
+        })),
+        { date: "2025-03-31", kwh: 9 },
+        ...Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+        })),
+      ],
+    };
+
+    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset: null });
+    const presentation = buildManualStageOnePresentationFromReadModel({ readModel });
+
+    expect(presentation).toMatchObject({
+      mode: "MONTHLY",
+      rows: [
+        expect.objectContaining({
+          month: "2025-03",
+          kwh: 280,
+          parityRequirement: "exact_match_required",
+        }),
+        expect.objectContaining({
+          month: "2025-04",
+          kwh: 300,
+          parityRequirement: "excluded_travel_overlap",
+        }),
+      ],
+    });
+  });
+
+  it("marks non-travel periods as exact-match-required and travel-overlapped periods as excluded in the shared compare contract", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-04-30",
+      monthlyKwh: [
+        { month: "2025-04", kwh: 300 },
+        { month: "2025-03", kwh: 280 },
+      ],
+      statementRanges: [
+        { month: "2025-04", startDate: "2025-03-31", endDate: "2025-04-30" },
+        { month: "2025-03", startDate: "2025-03-01", endDate: "2025-03-30" },
+      ],
+      travelRanges: [{ startDate: "2025-04-10", endDate: "2025-04-12" }],
+    };
+    const dataset = {
+      meta: {
+        filledMonths: [],
+        manualMonthlyInputState: {
+          inputKindByMonth: {
+            "2025-04": "entered_nonzero",
+            "2025-03": "entered_nonzero",
+          },
+        },
+      },
+      daily: [],
+    };
+
+    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset: null });
+
+    expect(readModel?.billPeriodCompare.rows).toEqual([
+      expect.objectContaining({
+        month: "2025-03",
+        eligible: true,
+        parityRequirement: "exact_match_required",
+      }),
+      expect.objectContaining({
+        month: "2025-04",
+        eligible: false,
+        status: "travel_overlap",
+        parityRequirement: "excluded_travel_overlap",
+      }),
+    ]);
   });
 });
