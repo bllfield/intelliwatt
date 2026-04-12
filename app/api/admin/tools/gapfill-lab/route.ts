@@ -52,7 +52,6 @@ import {
 } from "@/modules/usageSimulator/compareRunSnapshot";
 import {
   ensureGlobalLabTestHomeHouse,
-  ensureGlobalManualMonthlyLabTestHomeHouse,
   getLabTestHomeLink,
   replaceGlobalLabTestHomeFromSource,
   GAPFILL_LAB_TEST_HOME_LABEL,
@@ -418,7 +417,7 @@ async function buildGapfillManualConstraintPayload(args: {
   travelRangesForRecalc: DateRange[];
   usageInputMode: TestHomeUsageInputMode;
 }): Promise<ManualUsageStageOneResolvedPayload> {
-  const [sourceManualRec, testHomeManualRec, sourceUsageDataset, manualLabHome] = await Promise.all([
+  const [sourceManualRec, testHomeManualRec, sourceUsageDataset] = await Promise.all([
     getManualUsageInputForUserHouse({
       userId: args.sourceHouseUserId,
       houseId: args.sourceHouseId,
@@ -430,25 +429,7 @@ async function buildGapfillManualConstraintPayload(args: {
     getActualUsageDatasetForHouse(args.sourceHouseId, args.sourceEsiid ?? null, {
       skipFullYearIntervalFetch: true,
     }).catch(() => ({ dataset: null })),
-    ensureGlobalManualMonthlyLabTestHomeHouse(args.labOwnerUserId).catch(() => null),
   ]);
-  const manualLabManualRec =
-    manualLabHome?.id && manualLabHome.id !== args.testHomeHouseId
-      ? await getManualUsageInputForUserHouse({
-          userId: args.labOwnerUserId,
-          houseId: manualLabHome.id,
-        })
-      : { payload: null, updatedAt: null };
-  const manualLabMatchesSourceContext = Boolean(
-    manualLabHome?.id &&
-      manualLabHome.id !== args.testHomeHouseId &&
-      manualLabHome.esiid &&
-      args.sourceEsiid &&
-      String(manualLabHome.esiid).trim() === String(args.sourceEsiid).trim()
-  );
-  const authoritativeSavedPayload = manualLabMatchesSourceContext
-    ? manualLabManualRec.payload
-    : testHomeManualRec.payload;
   const actualEndDate = String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null;
   const syntheticAnchorEndDate =
     args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
@@ -459,8 +440,8 @@ async function buildGapfillManualConstraintPayload(args: {
   const activeTravelRanges =
     Array.isArray(args.travelRangesForRecalc) && args.travelRangesForRecalc.length > 0
       ? args.travelRangesForRecalc
-      : Array.isArray(authoritativeSavedPayload?.travelRanges) && authoritativeSavedPayload.travelRanges.length > 0
-        ? authoritativeSavedPayload.travelRanges
+      : Array.isArray(testHomeManualRec.payload?.travelRanges) && testHomeManualRec.payload.travelRanges.length > 0
+        ? testHomeManualRec.payload.travelRanges
         : Array.isArray(sourceManualRec.payload?.travelRanges) && sourceManualRec.payload.travelRanges.length > 0
           ? sourceManualRec.payload.travelRanges
           : args.travelRangesForRecalc;
@@ -472,7 +453,7 @@ async function buildGapfillManualConstraintPayload(args: {
     // but the active run contract must own travel ranges for the artifact being written.
     travelRanges: activeTravelRanges,
     dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
-    testHomePayload: authoritativeSavedPayload,
+    testHomePayload: testHomeManualRec.payload,
   });
   if (!resolved.payload || !syntheticAnchorEndDate) {
     return resolved;
@@ -606,9 +587,6 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       })
       .catch(() => null),
   ]);
-  const artifactManualUsagePayload =
-    ((buildRow?.buildInputs as { snapshots?: { manualUsagePayload?: unknown | null } } | null | undefined)?.snapshots
-      ?.manualUsagePayload as any) ?? undefined;
   const sourcePastScenario = await (prisma as any).usageSimulatorScenario
     .findFirst({
       where: {
@@ -637,7 +615,6 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactInputHash: artifactRow?.inputHash ?? null,
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
-    manualUsagePayload: artifactManualUsagePayload,
     actualReference: {
       userId: args.sourceUserId,
       houseId: args.sourceHouse.id,

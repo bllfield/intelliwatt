@@ -219,6 +219,45 @@ function buildCanonicalManualMonthlyPayload() {
   };
 }
 
+function buildManualLabParityPayload() {
+  const statementRanges = [
+    { month: "2026-04", startDate: "2026-03-10", endDate: "2026-04-09" },
+    { month: "2026-03", startDate: "2026-02-10", endDate: "2026-03-09" },
+    { month: "2026-02", startDate: "2026-01-10", endDate: "2026-02-09" },
+    { month: "2026-01", startDate: "2025-12-10", endDate: "2026-01-09" },
+    { month: "2025-12", startDate: "2025-11-10", endDate: "2025-12-09" },
+    { month: "2025-11", startDate: "2025-10-10", endDate: "2025-11-09" },
+    { month: "2025-10", startDate: "2025-09-10", endDate: "2025-10-09" },
+    { month: "2025-09", startDate: "2025-08-10", endDate: "2025-09-09" },
+    { month: "2025-08", startDate: "2025-07-10", endDate: "2025-08-09" },
+    { month: "2025-07", startDate: "2025-06-10", endDate: "2025-07-09" },
+    { month: "2025-06", startDate: "2025-05-10", endDate: "2025-06-09" },
+    { month: "2025-05", startDate: "2025-04-10", endDate: "2025-05-09" },
+  ];
+  const monthlyKwh = [
+    { month: "2026-04", kwh: 1384.36 },
+    { month: "2026-03", kwh: 1280.1 },
+    { month: "2026-02", kwh: 980.6 },
+    { month: "2026-01", kwh: 1045.3 },
+    { month: "2025-12", kwh: 930.4 },
+    { month: "2025-11", kwh: 890.2 },
+    { month: "2025-10", kwh: 1185.7 },
+    { month: "2025-09", kwh: 1420.0 },
+    { month: "2025-08", kwh: 1540.0 },
+    { month: "2025-07", kwh: 1635.44 },
+    { month: "2025-06", kwh: 959.51 },
+    { month: "2025-05", kwh: 275.89 },
+  ];
+  return {
+    mode: "MONTHLY" as const,
+    anchorEndDate: "2026-04-09",
+    monthlyKwh,
+    statementRanges,
+    travelRanges: [],
+    dateSourceMode: "AUTO_DATES" as const,
+  };
+}
+
 function buildStaleGapfillMonthlyPayload() {
   return {
     mode: "MONTHLY" as const,
@@ -2777,20 +2816,23 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     }
   });
 
-  it("prefers the canonical saved Manual Lab payload over a stale zero-month GapFill payload for pure manual monthly", async () => {
-    const canonicalLabPayload = buildCanonicalManualMonthlyPayload();
+  it("keeps pure manual monthly on the saved shared test-home contract and does not borrow Manual Lab home", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-11T18:00:00.000Z"));
+    const canonicalLabPayload = buildManualLabParityPayload();
     const staleGapfillPayload = buildStaleGapfillMonthlyPayload();
-    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+    try {
+      getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "manual-lab-home-1") {
         return {
-          payload: canonicalLabPayload,
+          payload: staleGapfillPayload,
           updatedAt: "2026-04-10T18:00:00.000Z",
         };
       }
       if (houseId === "test-home-1") {
         return {
-          payload: staleGapfillPayload,
-          updatedAt: "2026-04-09T18:00:00.000Z",
+          payload: canonicalLabPayload,
+          updatedAt: "2026-04-10T18:00:00.000Z",
         };
       }
       if (houseId === "h1") {
@@ -2800,8 +2842,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         };
       }
       return { payload: null, updatedAt: null };
-    });
-    dispatchPastSimRecalc.mockResolvedValueOnce({
+      });
+      dispatchPastSimRecalc.mockResolvedValueOnce({
       executionMode: "inline",
       correlationId: "manual-cid-lab-payload",
       result: {
@@ -2812,8 +2854,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         canonicalArtifactInputHash: "manual-canonical-lab-payload-hash-1",
         effectiveSimulatorMode: "MANUAL_TOTALS",
       },
-    });
-    prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
+      });
+      prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
       id: "build-manual-lab-payload-1",
       lastBuiltAt: new Date("2026-04-10T18:00:00.000Z"),
       buildInputsHash: "hash-manual-lab-payload",
@@ -2821,16 +2863,16 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         mode: "MANUAL_TOTALS",
         effectiveValidationSelectionMode: "customer_style_seasonal_mix",
       },
-    });
-    pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
+      });
+      pastSimulatedDatasetCacheFindFirst.mockResolvedValueOnce({
       id: "artifact-manual-lab-payload-1",
       updatedAt: new Date("2026-04-10T18:01:00.000Z"),
       inputHash: "artifact-manual-lab-payload-hash",
       engineVersion: "production_past_stitched_v1",
-    });
+      });
 
-    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
-    const res = await POST(
+      const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+      const res = await POST(
       buildRequest({
         action: "run_test_home_canonical_recalc",
         email: "brian@intellipath-solutions.com",
@@ -2842,22 +2884,26 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         includeFullReportText: false,
         testRanges: [],
       })
-    );
-    const body = await res.json();
+      );
+      const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(ensureGlobalManualMonthlyLabTestHomeHouse).toHaveBeenCalledWith("u1");
+    expect(ensureGlobalManualMonthlyLabTestHomeHouse).not.toHaveBeenCalled();
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "u1",
         houseId: "test-home-1",
         payload: expect.objectContaining({
-          anchorEndDate: "2026-04-10",
+          anchorEndDate: "2026-04-09",
           dateSourceMode: "AUTO_DATES",
           monthlyKwh: expect.arrayContaining([
-            expect.objectContaining({ month: "2026-04", kwh: 1384.4 }),
-            expect.objectContaining({ month: "2026-03", kwh: 1280.1 }),
-            expect.objectContaining({ month: "2025-05", kwh: 275.9 }),
+            expect.objectContaining({ month: "2026-04", kwh: 1384.36 }),
+            expect.objectContaining({ month: "2025-07", kwh: 1635.44 }),
+            expect.objectContaining({ month: "2025-06", kwh: 959.51 }),
+            expect.objectContaining({ month: "2025-05", kwh: 275.89 }),
+          ]),
+          statementRanges: expect.arrayContaining([
+            expect.objectContaining({ month: "2025-05", startDate: "2025-04-10", endDate: "2025-05-09" }),
           ]),
         }),
       })
@@ -2868,30 +2914,94 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         houseId: "h1",
       })
     );
-    expect(body.manualDateSourceMode).toBe("AUTO_DATES");
-    expect(body.manualAnchorEndDate).toBe("2026-04-10");
-    expect(body.treatmentMode).toBe("MANUAL_MONTHLY");
-    expect(body.usageInputMode).toBe("MANUAL_MONTHLY");
+      expect(body.manualDateSourceMode).toBe("AUTO_DATES");
+      expect(body.manualAnchorEndDate).toBe("2026-04-09");
+      expect(body.manualBillEndDay).toBe("09");
+      expect(body.treatmentMode).toBe("MANUAL_MONTHLY");
+      expect(body.usageInputMode).toBe("MANUAL_MONTHLY");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("reads the exact artifact-backed manual payload on GapFill readback instead of re-resolving Manual Lab payload", async () => {
-    const canonicalLabPayload = buildCanonicalManualMonthlyPayload();
+  it("publishes the saved shared test-home payload through shared readback without route-level artifact override", async () => {
+    const canonicalLabPayload = buildManualLabParityPayload();
     const staleGapfillPayload = buildStaleGapfillMonthlyPayload();
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
-      if (houseId === "manual-lab-home-1") {
+      if (houseId === "test-home-1") {
         return {
           payload: canonicalLabPayload,
           updatedAt: "2026-04-10T18:00:00.000Z",
         };
       }
-      if (houseId === "test-home-1") {
-        return {
-          payload: staleGapfillPayload,
-          updatedAt: "2026-04-09T18:00:00.000Z",
-        };
-      }
       return { payload: null, updatedAt: null };
     });
+    getSimulatedUsageForHouseScenario
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        houseId: "test-home-1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: {
+            source: "SIMULATED",
+            totalKwh: 14866.6,
+            intervalsCount: 2,
+            start: "2025-04-10",
+            end: "2026-04-09",
+          },
+          daily: [
+            { date: "2025-04-10", kwh: 8.9, source: "SIMULATED" },
+            { date: "2025-04-11", kwh: 8.9, source: "SIMULATED" },
+          ],
+          monthly: canonicalLabPayload.monthlyKwh.map((row) => ({ month: row.month, kwh: Number(row.kwh) || 0 })),
+          series: {
+            intervals15: [
+              { timestamp: "2025-04-10T00:00:00.000Z", kwh: 1.2 },
+              { timestamp: "2025-04-10T00:15:00.000Z", kwh: 1.1 },
+            ],
+          },
+          meta: {
+            validationOnlyDateKeysLocal: [],
+            lockboxInput: { mode: "MANUAL_MONTHLY" },
+            lockboxPerDayTrace: [],
+            monthlyTargetConstructionDiagnostics: [
+              {
+                month: "2025-05",
+                rawMonthKwhFromSource: null,
+                travelVacantDayCountInMonth: 0,
+                eligibleNonTravelDayCount: 30,
+                eligibleNonTravelKwhTotal: 275.89,
+                nonTravelDailyAverage: 9.2,
+                normalizedMonthTarget: 275.89,
+                monthlyTargetBuildMethod: "user_manual_month_value",
+                trustedMonthlyAnchorUsed: true,
+              },
+            ],
+            manualMonthlyInputState: {
+              enteredMonthKeys: canonicalLabPayload.monthlyKwh.map((row) => row.month),
+              missingMonthKeys: [],
+              explicitZeroMonthKeys: [],
+              inputKindByMonth: Object.fromEntries(
+                canonicalLabPayload.monthlyKwh.map((row) => [row.month, "entered_nonzero"])
+              ),
+            },
+          },
+        },
+      }))
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        houseId: "h1",
+        scenarioKey: "past-s1",
+        scenarioId: "past-s1",
+        dataset: {
+          summary: { source: "SIMULATED", totalKwh: 15029.5, intervalsCount: 2, start: "2025-04-10", end: "2026-04-09" },
+          daily: [],
+          monthly: [],
+          series: { intervals15: [] },
+          meta: { lockboxInput: { mode: "ACTUAL_INTERVAL_BASELINE" }, lockboxPerDayTrace: [] },
+        },
+      }));
     prisma.usageSimulatorBuild.findUnique.mockResolvedValueOnce({
       id: "build-manual-lab-readback-1",
       lastBuiltAt: new Date("2026-04-10T18:00:00.000Z"),
@@ -2928,17 +3038,27 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.manualReadModel.anchorEndDate).toBe("2026-04-10");
+    expect(body.manualReadModel.anchorEndDate).toBe("2026-04-09");
     expect(body.manualReadModel.billPeriodTargets.slice(0, 3)).toEqual([
-      expect.objectContaining({ month: "2025-05", startDate: "2025-04-11", endDate: "2025-05-10", enteredKwh: 0 }),
-      expect.objectContaining({ month: "2025-06", startDate: "2025-05-11", endDate: "2025-06-10", enteredKwh: 276.25 }),
-      expect.objectContaining({ month: "2025-07", startDate: "2025-06-11", endDate: "2025-07-10", enteredKwh: 1005.23 }),
+      expect.objectContaining({ month: "2025-05", startDate: "2025-04-10", endDate: "2025-05-09", enteredKwh: 275.89 }),
+      expect.objectContaining({ month: "2025-06", startDate: "2025-05-10", endDate: "2025-06-09", enteredKwh: 959.51 }),
+      expect.objectContaining({ month: "2025-07", startDate: "2025-06-10", endDate: "2025-07-09", enteredKwh: 1635.44 }),
     ]);
     expect(
       body.manualReadModel.billPeriodTargets.reduce((sum: number, row: any) => sum + Number(row.enteredKwh ?? 0), 0)
-    ).toBeCloseTo(12765, 5);
-    expect(body.manualReadModel.billPeriodTargets[0].enteredKwh).toBe(0);
-    expect(body.manualParitySummary.stage1_contract.normalizedMonthTargetsByMonth["2025-05"]).toBe(0);
+    ).toBeCloseTo(13527.5, 1);
+    expect(body.manualReadModel.billPeriodTargets[0].enteredKwh).toBeGreaterThan(0);
+    expect(body.manualParitySummary.stage1_contract.normalizedMonthTargetsByMonth["2025-05"]).toBe(275.89);
+    expect(body.sharedDiagnostics?.sourceTruthContext?.manualMonthlyInputState?.inputKindByMonth?.["2025-05"]).toBe(
+      "entered_nonzero"
+    );
+    expect(body.sharedDiagnostics?.sourceTruthContext?.monthlyTargetConstructionDiagnostics?.[0]).toEqual(
+      expect.objectContaining({
+        month: "2025-05",
+        normalizedMonthTarget: 275.89,
+      })
+    );
+    expect(body.baselineDatasetProjection?.summary?.totalKwh).toBe(14866.6);
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
