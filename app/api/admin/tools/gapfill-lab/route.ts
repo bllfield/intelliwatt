@@ -1845,8 +1845,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (isManualUsageMode) {
-      const useSharedManualPayloadRuntime =
-        testUsageInputMode === "MANUAL_MONTHLY" || testUsageInputMode === "MANUAL_ANNUAL";
+      const useSharedManualPayloadRuntime = testUsageInputMode === "MANUAL_MONTHLY";
       const manualContract = await buildGapfillManualConstraintPayload({
         labOwnerUserId: labOwnerUser.id,
         testHomeHouseId: testHomeHouse.id,
