@@ -581,7 +581,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
       ? args.exactArtifactInputHash.trim()
       : null;
-  const [buildRow, artifactRow, manualContract] = await Promise.all([
+  const [buildRow, artifactRow] = await Promise.all([
     (prisma as any).usageSimulatorBuild
       .findUnique({
         where: {
@@ -605,16 +605,10 @@ async function buildGapfillManualUsageReadbackResponse(args: {
         select: { id: true, updatedAt: true, inputHash: true, engineVersion: true },
       })
       .catch(() => null),
-    buildGapfillManualConstraintPayload({
-      labOwnerUserId: args.labOwnerUserId,
-      testHomeHouseId: args.testHomeHouse.id,
-      sourceHouseUserId: args.sourceUserId,
-      sourceHouseId: args.sourceHouse.id,
-      sourceEsiid: args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null,
-      travelRangesForRecalc: args.travelRangesForRecalc,
-      usageInputMode: args.testUsageInputMode,
-    }),
   ]);
+  const artifactManualUsagePayload =
+    ((buildRow?.buildInputs as { snapshots?: { manualUsagePayload?: unknown | null } } | null | undefined)?.snapshots
+      ?.manualUsagePayload as any) ?? undefined;
   const sourcePastScenario = await (prisma as any).usageSimulatorScenario
     .findFirst({
       where: {
@@ -643,7 +637,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactInputHash: artifactRow?.inputHash ?? null,
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
-    manualUsagePayload: manualContract.payload,
+    manualUsagePayload: artifactManualUsagePayload,
     actualReference: {
       userId: args.sourceUserId,
       houseId: args.sourceHouse.id,
@@ -688,15 +682,30 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       buildRow?.buildInputs as Record<string, unknown> | undefined,
       args.testSelectionMode
     );
+  const readbackManualPayload = readResultWithManualPayload.manualUsagePayload;
+  const effectiveManualTravelRanges =
+    Array.isArray((readbackManualPayload as any)?.travelRanges)
+      ? (readbackManualPayload as any).travelRanges
+          .map((range: any) => ({
+            startDate: String(range?.startDate ?? "").slice(0, 10),
+            endDate: String(range?.endDate ?? "").slice(0, 10),
+          }))
+          .filter(
+            (range: { startDate: string; endDate: string }) =>
+              /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate)
+          )
+      : args.travelRangesForRecalc;
   const manualAnchorEndDate =
-    manualContract.payload && (manualContract.payload.mode === "MONTHLY" || manualContract.payload.mode === "ANNUAL")
-      ? String((manualContract.payload as any).anchorEndDate ?? "").slice(0, 10) || null
+    readbackManualPayload && (readbackManualPayload.mode === "MONTHLY" || readbackManualPayload.mode === "ANNUAL")
+      ? String((readbackManualPayload as any).anchorEndDate ?? "").slice(0, 10) || null
       : null;
   const manualBillEndDay =
-    manualContract.payload?.mode === "MONTHLY" && /^\d{4}-\d{2}-\d{2}$/.test(String(manualContract.payload.anchorEndDate ?? ""))
-      ? String(manualContract.payload.anchorEndDate).slice(8, 10)
+    readbackManualPayload?.mode === "MONTHLY" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(String(readbackManualPayload.anchorEndDate ?? ""))
+      ? String(readbackManualPayload.anchorEndDate).slice(8, 10)
       : null;
-  const manualDateSourceMode = manualContract.payload?.mode === "MONTHLY" ? (manualContract.payload.dateSourceMode ?? null) : null;
+  const manualDateSourceMode =
+    readbackManualPayload?.mode === "MONTHLY" ? (readbackManualPayload.dateSourceMode ?? null) : null;
 
   return NextResponse.json({
     ok: true,
@@ -744,7 +753,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     travelRangesFromDb: args.travelRangesForRecalc,
     testHomeTravelRangesFromDb: args.travelRangesFromDb,
     sourceTravelRangesFromDb: args.sourceTravelRangesFromDb,
-    effectiveTravelRangesForRecalc: args.travelRangesForRecalc,
+    effectiveTravelRangesForRecalc: effectiveManualTravelRanges,
     effectiveTravelRangesSource: args.usingSourceTravelRangesForRecalc ? "source_house_copy_policy" : "test_home_saved",
     manualDateSourceMode,
     manualAnchorEndDate,
@@ -1855,8 +1864,25 @@ export async function POST(req: NextRequest) {
           { status: 409 }
         );
       }
-      const effectiveManualTravelRanges = Array.isArray(manualContract.payload.travelRanges)
-        ? manualContract.payload.travelRanges
+      const saveManualResult = await saveManualUsageInputForUserHouse({
+        userId: labOwnerUser.id,
+        houseId: testHomeHouse.id,
+        payload: manualContract.payload,
+      });
+      if (!saveManualResult.ok) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "manual_stage_one_payload_persist_failed",
+            message: `GapFill could not persist the canonical manual Stage 1 payload before recalc (${saveManualResult.error}).`,
+            correlationId: labCorrelationId,
+          }),
+          { status: 500 }
+        );
+      }
+      const persistedManualPayload = saveManualResult.payload;
+      const effectiveManualTravelRanges = Array.isArray(persistedManualPayload.travelRanges)
+        ? persistedManualPayload.travelRanges
             .map((range) => ({
               startDate: String(range?.startDate ?? "").slice(0, 10),
               endDate: String(range?.endDate ?? "").slice(0, 10),
@@ -1864,20 +1890,16 @@ export async function POST(req: NextRequest) {
             .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate))
         : [];
       const manualAnchorEndDate =
-        manualContract.payload.mode === "MONTHLY" || manualContract.payload.mode === "ANNUAL"
-          ? String((manualContract.payload as any).anchorEndDate ?? "").slice(0, 10) || null
+        persistedManualPayload.mode === "MONTHLY" || persistedManualPayload.mode === "ANNUAL"
+          ? String((persistedManualPayload as any).anchorEndDate ?? "").slice(0, 10) || null
           : null;
       const manualBillEndDay =
-        manualContract.payload.mode === "MONTHLY" && /^\d{4}-\d{2}-\d{2}$/.test(String(manualContract.payload.anchorEndDate ?? ""))
-          ? String(manualContract.payload.anchorEndDate).slice(8, 10)
+        persistedManualPayload.mode === "MONTHLY" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(String(persistedManualPayload.anchorEndDate ?? ""))
+          ? String(persistedManualPayload.anchorEndDate).slice(8, 10)
           : null;
       const manualDateSourceMode =
-        manualContract.payload.mode === "MONTHLY" ? (manualContract.payload.dateSourceMode ?? null) : null;
-      await saveManualUsageInputForUserHouse({
-        userId: labOwnerUser.id,
-        houseId: testHomeHouse.id,
-        payload: manualContract.payload,
-      });
+        persistedManualPayload.mode === "MONTHLY" ? (persistedManualPayload.dateSourceMode ?? null) : null;
       let dispatched: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
       try {
         dispatched = await dispatchPastSimRecalc({

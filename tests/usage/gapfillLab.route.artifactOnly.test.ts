@@ -318,7 +318,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       endDate: "2026-02-28",
     });
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: null, updatedAt: null });
-    saveManualUsageInputForUserHouse.mockResolvedValue(undefined);
+    saveManualUsageInputForUserHouse.mockImplementation(async ({ payload }: any) => ({
+      ok: true,
+      updatedAt: "2026-04-10T18:00:00.000Z",
+      payload,
+    }));
     getUserDefaultValidationSelectionMode.mockResolvedValue("random_simple");
     setUserDefaultValidationSelectionMode.mockResolvedValue({ ok: true, mode: "random_simple" });
     getAdminLabDefaultValidationSelectionMode.mockReturnValue("stratified_weather_balanced");
@@ -2870,8 +2874,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.usageInputMode).toBe("MANUAL_MONTHLY");
   });
 
-  it("publishes the same Stage 1 bill periods and total from the canonical Manual Lab payload in GapFill readback", async () => {
+  it("reads the exact artifact-backed manual payload on GapFill readback instead of re-resolving Manual Lab payload", async () => {
     const canonicalLabPayload = buildCanonicalManualMonthlyPayload();
+    const staleGapfillPayload = buildStaleGapfillMonthlyPayload();
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "manual-lab-home-1") {
         return {
@@ -2881,7 +2886,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       }
       if (houseId === "test-home-1") {
         return {
-          payload: buildStaleGapfillMonthlyPayload(),
+          payload: staleGapfillPayload,
           updatedAt: "2026-04-09T18:00:00.000Z",
         };
       }
@@ -2893,6 +2898,9 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       buildInputsHash: "hash-manual-lab-readback",
       buildInputs: {
         mode: "MANUAL_TOTALS",
+        snapshots: {
+          manualUsagePayload: staleGapfillPayload,
+        },
         effectiveValidationSelectionMode: "customer_style_seasonal_mix",
       },
     });
@@ -2922,15 +2930,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(res.status).toBe(200);
     expect(body.manualReadModel.anchorEndDate).toBe("2026-04-10");
     expect(body.manualReadModel.billPeriodTargets.slice(0, 3)).toEqual([
-      expect.objectContaining({ month: "2025-05", startDate: "2025-04-11", endDate: "2025-05-10", enteredKwh: 275.9 }),
-      expect.objectContaining({ month: "2025-06", startDate: "2025-05-11", endDate: "2025-06-10", enteredKwh: 959.5 }),
-      expect.objectContaining({ month: "2025-07", startDate: "2025-06-11", endDate: "2025-07-10", enteredKwh: 1635.4 }),
+      expect.objectContaining({ month: "2025-05", startDate: "2025-04-11", endDate: "2025-05-10", enteredKwh: 0 }),
+      expect.objectContaining({ month: "2025-06", startDate: "2025-05-11", endDate: "2025-06-10", enteredKwh: 276.25 }),
+      expect.objectContaining({ month: "2025-07", startDate: "2025-06-11", endDate: "2025-07-10", enteredKwh: 1005.23 }),
     ]);
     expect(
       body.manualReadModel.billPeriodTargets.reduce((sum: number, row: any) => sum + Number(row.enteredKwh ?? 0), 0)
-    ).toBeCloseTo(13527.5, 5);
-    expect(body.manualReadModel.billPeriodTargets[0].enteredKwh).not.toBe(0);
-    expect(body.manualParitySummary.stage1_contract.normalizedMonthTargetsByMonth["2025-05"]).toBe(275.9);
+    ).toBeCloseTo(12765, 5);
+    expect(body.manualReadModel.billPeriodTargets[0].enteredKwh).toBe(0);
+    expect(body.manualParitySummary.stage1_contract.normalizedMonthTargetsByMonth["2025-05"]).toBe(0);
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
@@ -3050,6 +3058,49 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.jobId).toBe("job-123");
     expect(body.treatmentMode).toBe("MONTHLY_FROM_SOURCE_INTERVALS");
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when GapFill cannot persist the canonical manual payload before recalc", async () => {
+    const canonicalLabPayload = buildCanonicalManualMonthlyPayload();
+    getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
+      if (houseId === "manual-lab-home-1") {
+        return {
+          payload: canonicalLabPayload,
+          updatedAt: "2026-04-10T18:00:00.000Z",
+        };
+      }
+      if (houseId === "test-home-1") {
+        return {
+          payload: buildStaleGapfillMonthlyPayload(),
+          updatedAt: "2026-04-09T18:00:00.000Z",
+        };
+      }
+      return { payload: null, updatedAt: null };
+    });
+    saveManualUsageInputForUserHouse.mockResolvedValueOnce({
+      ok: false,
+      error: "manual_usage_write_failed",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const res = await POST(
+      buildRequest({
+        action: "run_test_home_canonical_recalc",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        testUsageInputMode: "MANUAL_MONTHLY",
+        includeUsage365: false,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        testRanges: [],
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("manual_stage_one_payload_persist_failed");
+    expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
   });
 
   it("keeps gapfill manual readback actual-reference reads artifact-only so compare does not rebuild source truth", async () => {
