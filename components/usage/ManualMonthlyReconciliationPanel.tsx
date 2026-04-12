@@ -126,7 +126,7 @@ export function ManualMonthlyReconciliationPanel(props: {
                 <td className="border border-brand-blue/10 px-2 py-1">
                   <div className="font-medium">{row.month}</div>
                   <div className="text-[0.7rem] text-brand-navy/60">
-                    {row.startDate} -> {row.endDate}
+                    {row.startDate} {"->"} {row.endDate}
                   </div>
                 </td>
                 <td className="border border-brand-blue/10 px-2 py-1">{formatInputKind(row.inputKind)}</td>
