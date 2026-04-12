@@ -2821,6 +2821,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     const canonicalLabPayload = buildManualLabParityPayload();
     const staleGapfillPayload = buildStaleGapfillMonthlyPayload();
     try {
+      ensureGlobalManualMonthlyLabTestHomeHouse.mockResolvedValueOnce({
+        id: "manual-lab-home-1",
+        esiid: null,
+        label: "MANUAL_MONTHLY_LAB_TEST_HOME",
+      });
       getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "manual-lab-home-1") {
         return {

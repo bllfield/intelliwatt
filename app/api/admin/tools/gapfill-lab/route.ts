@@ -441,17 +441,12 @@ async function buildGapfillManualConstraintPayload(args: {
           houseId: manualLabHome.id,
         })
       : { payload: null, updatedAt: null };
-  const manualLabMatchesSourceContext = Boolean(
-    args.usageInputMode === "MANUAL_MONTHLY" &&
-      manualLabHome?.id &&
-      manualLabHome.id !== args.testHomeHouseId &&
-      manualLabHome.esiid &&
-      args.sourceEsiid &&
-      String(manualLabHome.esiid).trim() === String(args.sourceEsiid).trim()
-  );
-  const authoritativeSavedPayload = manualLabMatchesSourceContext
-    ? manualLabManualRec.payload
-    : testHomeManualRec.payload;
+  // The shared Manual Lab home intentionally clears `esiid` when it copies source-house identity,
+  // so ESIID matching cannot be used to discover the canonical saved manual payload.
+  const authoritativeSavedPayload =
+    args.usageInputMode === "MANUAL_MONTHLY" && manualLabManualRec.payload
+      ? manualLabManualRec.payload
+      : testHomeManualRec.payload;
   const actualEndDate = String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null;
   const syntheticAnchorEndDate =
     args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
