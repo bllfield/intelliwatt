@@ -181,7 +181,9 @@ export function ManualUsageEntry({
   const [annualKwh, setAnnualKwh] = React.useState<number | "">("");
   const [travelRanges, setTravelRanges] = React.useState<TravelRange[]>([]);
   const [sourcePayloadContext, setSourcePayloadContext] = React.useState<ManualUsagePayload | null>(null);
-  const [monthlyDateSourceMode, setMonthlyDateSourceMode] = React.useState<ManualMonthlyDateSourceMode>("ADMIN_CUSTOM_DATES");
+  const [monthlyDateSourceMode, setMonthlyDateSourceMode] = React.useState<ManualMonthlyDateSourceMode>(
+    showMonthlyDateSourceControls ? "AUTO_DATES" : "ADMIN_CUSTOM_DATES"
+  );
 
   const rollingAutoAnchorEndDate = React.useMemo(() => rollingAutoAnchorEndDateChicago(), []);
   const customerDateRows = React.useMemo(
@@ -213,11 +215,17 @@ export function ManualUsageEntry({
         }
         if (cancelled) return;
         const payload = (json as any).payload as ManualUsagePayload | null;
-        setSourcePayloadContext(((json as any).sourcePayload as ManualUsagePayload | null) ?? null);
+        const sourcePayload = ((json as any).sourcePayload as ManualUsagePayload | null) ?? null;
+        const sourceDateRows = sourcePayload?.mode === "MONTHLY" ? buildStatementRowsFromMonthlyPayload(sourcePayload) : [];
+        setSourcePayloadContext(sourcePayload);
         setSavedAt((json as any).updatedAt ?? null);
         const seed = (json as any).seed ?? null;
         if (seed?.monthly) {
-          setMonthlyRows(buildStatementRowsFromMonthlyPayload(seed.monthly));
+          const seedRows = buildStatementRowsFromMonthlyPayload(seed.monthly);
+          setMonthlyRows(showMonthlyDateSourceControls ? buildAutoDateRows(seedRows, rollingAutoAnchorEndDate) : seedRows);
+          if (showMonthlyDateSourceControls) {
+            setMonthlyDateSourceMode("AUTO_DATES");
+          }
         }
         if (seed?.annual) {
           setAnnualAnchorEndDate(String(seed.annual.anchorEndDate ?? "").slice(0, 10));
@@ -225,13 +233,22 @@ export function ManualUsageEntry({
         }
         if (payload?.mode === "MONTHLY") {
           setActiveTab("MONTHLY");
-          setMonthlyRows(buildStatementRowsFromMonthlyPayload(payload));
-          setMonthlyDateSourceMode(
+          const payloadRows = buildStatementRowsFromMonthlyPayload(payload);
+          const resolvedMonthlyDateSourceMode =
             isMonthlyDateSourceMode((payload as any).dateSourceMode)
               ? (payload as any).dateSourceMode
-              : ((json as any).sourcePayload as ManualUsagePayload | null)?.mode === "MONTHLY"
-                ? "CUSTOMER_DATES"
-                : "ADMIN_CUSTOM_DATES"
+              : showMonthlyDateSourceControls
+                ? "AUTO_DATES"
+                : sourcePayload?.mode === "MONTHLY"
+                  ? "CUSTOMER_DATES"
+                  : "ADMIN_CUSTOM_DATES";
+          setMonthlyDateSourceMode(resolvedMonthlyDateSourceMode);
+          setMonthlyRows(
+            resolvedMonthlyDateSourceMode === "AUTO_DATES"
+              ? buildAutoDateRows(payloadRows, rollingAutoAnchorEndDate)
+              : resolvedMonthlyDateSourceMode === "CUSTOMER_DATES" && sourceDateRows.length > 0
+                ? applyReferenceRowsKeepingTotals(payloadRows, sourceDateRows)
+                : payloadRows
           );
           setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
@@ -253,7 +270,7 @@ export function ManualUsageEntry({
     return () => {
       cancelled = true;
     };
-  }, [houseId, transport]);
+  }, [houseId, rollingAutoAnchorEndDate, showMonthlyDateSourceControls, transport]);
 
   const save = async () => {
     setSaving(true);

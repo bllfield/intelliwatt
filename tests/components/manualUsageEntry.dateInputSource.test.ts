@@ -23,4 +23,11 @@ describe("ManualUsageEntry date input editing", () => {
     expect(source).toContain('key={`bill-${idx}`}');
     expect(source).not.toContain('key={`${idx}:${row.endDate}:${statementMonthLabel(row.endDate)}`}');
   });
+
+  it("defaults the lab date-source selector to Auto Dates", () => {
+    const source = readRepoFile("components/manual/ManualUsageEntry.tsx");
+
+    expect(source).toContain('showMonthlyDateSourceControls ? "AUTO_DATES" : "ADMIN_CUSTOM_DATES"');
+    expect(source).toContain('setMonthlyDateSourceMode("AUTO_DATES")');
+  });
 });

@@ -23,6 +23,14 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("prefillSeed");
   });
 
+  it("lists the active lab date-source mode in the source and lab context section", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("Source vs lab-home target context");
+    expect(source).toContain("activeLabDateSourceModeRunning");
+    expect(source).toContain('(activeManualPayload.dateSourceMode ?? "AUTO_DATES")');
+  });
+
   it("opens the manual editor in a modal shell instead of only rendering inline", () => {
     const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
 

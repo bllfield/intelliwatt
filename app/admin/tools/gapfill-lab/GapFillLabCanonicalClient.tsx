@@ -21,6 +21,7 @@ import {
   buildGapfillManualMonthlyCompareRows,
 } from "@/modules/manualUsage/gapfillCompare";
 import { buildManualStageOnePresentationFromReadModel } from "@/modules/manualUsage/readModel";
+import { buildActualVsTestMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { resolveManualReadbackPollPlan } from "@/modules/manualUsage/readbackPolling";
 import { buildGapfillCalculationLogicSummary } from "@/modules/usageSimulator/calculationLogicSummary";
 import { GapFillDailyCurveCompare } from "@/components/admin/GapFillDailyCurveCompare";
@@ -995,33 +996,9 @@ export default function GapFillLabCanonicalClient() {
     [effectiveTestHomeId, result, testHouseBaselineDataset]
   );
   const actualVsTestMonthlyRows = useMemo(() => {
-    const actualMonthly = Array.isArray(actualHouseBaselineDataset?.monthly)
-      ? actualHouseBaselineDataset.monthly
-      : [];
-    const testMonthly = Array.isArray(testHouseBaselineDataset?.monthly)
-      ? testHouseBaselineDataset.monthly
-      : [];
-    const allMonths = Array.from(
-      new Set([
-        ...actualMonthly.map((row: any) => String(row?.month ?? "").slice(0, 7)),
-        ...testMonthly.map((row: any) => String(row?.month ?? "").slice(0, 7)),
-      ])
-    )
-      .filter((value) => /^\d{4}-\d{2}$/.test(value))
-      .sort();
-    return allMonths.map((month) => {
-      const actual = Number(
-        actualMonthly.find((row: any) => String(row?.month ?? "").slice(0, 7) === month)?.kwh ?? 0
-      ) || 0;
-      const test = Number(
-        testMonthly.find((row: any) => String(row?.month ?? "").slice(0, 7) === month)?.kwh ?? 0
-      ) || 0;
-      return {
-        month,
-        actual,
-        test,
-        delta: Number((test - actual).toFixed(2)),
-      };
+    return buildActualVsTestMonthlyRows({
+      actualDataset: actualHouseBaselineDataset,
+      testDataset: testHouseBaselineDataset,
     });
   }, [actualHouseBaselineDataset, testHouseBaselineDataset]);
   const testSharedDiagnostics =

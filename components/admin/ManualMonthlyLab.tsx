@@ -714,6 +714,8 @@ export default function ManualMonthlyLab() {
                 selectedSourceHouse,
                 labHome,
                 scenarioId,
+                activeLabDateSourceModeRunning:
+                  activeManualPayload?.mode === "MONTHLY" ? (activeManualPayload.dateSourceMode ?? "AUTO_DATES") : null,
               }}
             />
 
