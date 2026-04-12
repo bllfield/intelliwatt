@@ -595,6 +595,10 @@ export default function ManualMonthlyLab() {
               <div><span className="font-semibold">Lab home ID:</span> {compactSummary(labHome?.id)}</div>
               <div><span className="font-semibold">Lab home label:</span> {compactSummary(labHome?.label)}</div>
               <div><span className="font-semibold">Past scenario ID:</span> {compactSummary(scenarioId)}</div>
+              <div>
+                <span className="font-semibold">Date source being run:</span>{" "}
+                {compactSummary(activeManualPayload?.mode === "MONTHLY" ? (activeManualPayload.dateSourceMode ?? "AUTO_DATES") : null)}
+              </div>
             </div>
           </div>
 

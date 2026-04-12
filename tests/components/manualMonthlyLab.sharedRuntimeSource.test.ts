@@ -31,6 +31,14 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain('(activeManualPayload.dateSourceMode ?? "AUTO_DATES")');
   });
 
+  it("shows the active date source in the visible isolated lab home context card", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("Isolated lab home context");
+    expect(source).toContain("Date source being run:");
+    expect(source).toContain('{compactSummary(activeManualPayload?.mode === "MONTHLY" ? (activeManualPayload.dateSourceMode ?? "AUTO_DATES") : null)}');
+  });
+
   it("opens the manual editor in a modal shell instead of only rendering inline", () => {
     const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
 
