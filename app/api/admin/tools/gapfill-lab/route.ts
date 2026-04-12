@@ -682,7 +682,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       buildRow?.buildInputs as Record<string, unknown> | undefined,
       args.testSelectionMode
     );
-  const readbackManualPayload = readResultWithManualPayload.manualUsagePayload;
+  const readbackManualPayload = readResultWithManualPayload.payload;
   const effectiveManualTravelRanges =
     Array.isArray((readbackManualPayload as any)?.travelRanges)
       ? (readbackManualPayload as any).travelRanges
