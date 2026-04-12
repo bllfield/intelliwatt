@@ -58,4 +58,13 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).not.toContain("manualMonthlyStageOneRowsOverride={stageOnePreviewRows}");
     expect(source).toContain("Canonical shared manual Stage 1 contract");
   });
+
+  it("keeps the Manual Usage Stage 1 chart and table toggle interactive", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain('const [stageOneMonthlyView, setStageOneMonthlyView] = useState<"chart" | "table">("chart")');
+    expect(source).toContain("monthlyView={stageOneMonthlyView}");
+    expect(source).toContain("onMonthlyViewChange={setStageOneMonthlyView}");
+    expect(source).not.toContain('monthlyView="chart"\n                onMonthlyViewChange={() => undefined}');
+  });
 });

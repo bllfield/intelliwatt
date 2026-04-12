@@ -159,6 +159,7 @@ export default function ManualMonthlyLab() {
   const [showHomeDetails, setShowHomeDetails] = useState(false);
   const [showAppliances, setShowAppliances] = useState(false);
   const [showManualEditor, setShowManualEditor] = useState(false);
+  const [stageOneMonthlyView, setStageOneMonthlyView] = useState<"chart" | "table">("chart");
 
   const selectedHouse = useMemo(
     () => houses.find((house) => house.id === selectedHouseId) ?? null,
@@ -618,8 +619,8 @@ export default function ManualMonthlyLab() {
                 weekdayKwh={0}
                 weekendKwh={0}
                 timeOfDayBuckets={[]}
-                monthlyView="chart"
-                onMonthlyViewChange={() => undefined}
+                monthlyView={stageOneMonthlyView}
+                onMonthlyViewChange={setStageOneMonthlyView}
                 dailyView="table"
                 onDailyViewChange={() => undefined}
                 daily={[]}
