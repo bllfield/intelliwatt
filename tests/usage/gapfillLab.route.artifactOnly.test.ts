@@ -2452,10 +2452,11 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
-          anchorEndDate: "2026-04-08",
-          dateSourceMode: "AUTO_DATES",
-          statementRanges: expect.any(Array),
-          monthlyKwh: expect.arrayContaining([expect.objectContaining({ month: "2026-04", kwh: 25 })]),
+          anchorEndDate: "2026-02-28",
+          statementRanges: [
+            expect.objectContaining({ month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" }),
+          ],
+          monthlyKwh: [expect.objectContaining({ month: "2026-02", kwh: 25 })],
         }),
       })
     );
@@ -2544,15 +2545,13 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
 
     expect(res.status).toBe(200);
     expect(body.effectiveTravelRangesForRecalc).toEqual([
-      { startDate: "2025-03-14", endDate: "2025-06-01" },
-      { startDate: "2025-08-13", endDate: "2025-08-17" },
+      { startDate: "2025-02-18", endDate: "2025-05-26" },
     ]);
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
           travelRanges: [
-            { startDate: "2025-03-14", endDate: "2025-06-01" },
-            { startDate: "2025-08-13", endDate: "2025-08-17" },
+            { startDate: "2025-02-18", endDate: "2025-05-26" },
           ],
         }),
       })
@@ -2732,7 +2731,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     }
   });
 
-  it("does not reuse a stale saved bill-end day when gapfill auto-date logic should roll to current minus 2 days", async () => {
+  it("keeps the saved shared bill-end day for pure manual monthly instead of route-local auto-roll", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T18:00:00.000Z"));
     try {
@@ -2806,8 +2805,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({
-            anchorEndDate: "2026-04-08",
-            statementRanges: expect.arrayContaining([expect.objectContaining({ endDate: "2026-04-08" })]),
+            anchorEndDate: "2026-04-05",
+            statementRanges: expect.arrayContaining([expect.objectContaining({ endDate: "2026-04-05" })]),
           }),
         })
       );
@@ -2816,23 +2815,23 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     }
   });
 
-  it("keeps pure manual monthly on the saved shared test-home contract and does not borrow Manual Lab home", async () => {
+  it("persists the canonical shared Manual Lab payload onto GapFill test home without reanchoring it", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-11T18:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-12T18:00:00.000Z"));
     const canonicalLabPayload = buildManualLabParityPayload();
     const staleGapfillPayload = buildStaleGapfillMonthlyPayload();
     try {
       getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "manual-lab-home-1") {
         return {
-          payload: staleGapfillPayload,
+          payload: canonicalLabPayload,
           updatedAt: "2026-04-10T18:00:00.000Z",
         };
       }
       if (houseId === "test-home-1") {
         return {
-          payload: canonicalLabPayload,
-          updatedAt: "2026-04-10T18:00:00.000Z",
+          payload: staleGapfillPayload,
+          updatedAt: "2026-04-08T18:00:00.000Z",
         };
       }
       if (houseId === "h1") {
@@ -2888,7 +2887,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(ensureGlobalManualMonthlyLabTestHomeHouse).not.toHaveBeenCalled();
+    expect(ensureGlobalManualMonthlyLabTestHomeHouse).toHaveBeenCalledWith("u1");
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "u1",
