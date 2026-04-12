@@ -2913,6 +2913,15 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         houseId: "h1",
       })
     );
+      expect(dispatchPastSimRecalc).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "u1",
+          houseId: "test-home-1",
+          mode: "MANUAL_TOTALS",
+          esiid: null,
+          actualContextHouseId: undefined,
+        })
+      );
       expect(body.manualDateSourceMode).toBe("AUTO_DATES");
       expect(body.manualAnchorEndDate).toBe("2026-04-09");
       expect(body.manualBillEndDay).toBe("09");

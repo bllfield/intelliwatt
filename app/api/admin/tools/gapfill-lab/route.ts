@@ -1845,6 +1845,8 @@ export async function POST(req: NextRequest) {
     });
 
     if (isManualUsageMode) {
+      const useSharedManualPayloadRuntime =
+        testUsageInputMode === "MANUAL_MONTHLY" || testUsageInputMode === "MANUAL_ANNUAL";
       const manualContract = await buildGapfillManualConstraintPayload({
         labOwnerUserId: labOwnerUser.id,
         testHomeHouseId: testHomeHouse.id,
@@ -1907,8 +1909,8 @@ export async function POST(req: NextRequest) {
         dispatched = await dispatchPastSimRecalc({
           userId: labOwnerUser.id,
           houseId: testHomeHouse.id,
-          esiid: sourceEsiid,
-          actualContextHouseId: sourceHouse.id,
+          esiid: useSharedManualPayloadRuntime ? null : sourceEsiid,
+          actualContextHouseId: useSharedManualPayloadRuntime ? undefined : sourceHouse.id,
           mode: testHomeSimulatorMode,
           scenarioId: String(pastScenario.id),
           weatherPreference: gapfillWeatherLogic.weatherPreference,
