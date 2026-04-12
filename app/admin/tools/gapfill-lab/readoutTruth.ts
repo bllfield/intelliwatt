@@ -92,22 +92,29 @@ export function buildPersistedHouseReadout(args: {
   const validationRowsCount =
     toFiniteNumber(projectionReadSummary?.validationRowsCount) ??
     (Array.isArray(args.compareProjection?.rows) ? args.compareProjection.rows.length : null);
+  const artifactMissingLabel = "not attached on this artifact read";
 
   return {
     sourceHouseId:
-      coalesceMeaningfulString(
-        sourceContext?.sourceHouseId,
-        perRunTrace?.sourceHouseId,
-        identityContext?.sourceHouseId,
-        sourceTruthContext?.sourceHouseId
-      ) ?? "—",
+      formatIdentityReadout(
+        coalesceMeaningfulString(
+          sourceContext?.sourceHouseId,
+          perRunTrace?.sourceHouseId,
+          identityContext?.sourceHouseId,
+          sourceTruthContext?.sourceHouseId
+        ),
+        artifactMissingLabel
+      ),
     profileHouseId:
-      coalesceMeaningfulString(
-        profileContext?.profileHouseId,
-        perRunTrace?.profileHouseId,
-        identityContext?.profileHouseId,
-        sourceTruthContext?.profileHouseId
-      ) ?? "—",
+      formatIdentityReadout(
+        coalesceMeaningfulString(
+          profileContext?.profileHouseId,
+          perRunTrace?.profileHouseId,
+          identityContext?.profileHouseId,
+          sourceTruthContext?.profileHouseId
+        ),
+        artifactMissingLabel
+      ),
     mode: selectedMode,
     travelRanges:
       summarizeRanges(travelRangeSource) +
@@ -119,25 +126,34 @@ export function buildPersistedHouseReadout(args: {
       (validationKeysFromLockbox.length === 0 && validationKeysFromShared.length === 0 && asArray(args.fallbackValidationKeys).length > 0
         ? " (fallback context only)"
         : ""),
-    sourceDerivedMonthlyTotalsKwhByMonth: showSourceDerivedInputs ? JSON.stringify(sourceDerivedMonthlyTotals) : "—",
+    sourceDerivedMonthlyTotalsKwhByMonth: showSourceDerivedInputs ? JSON.stringify(sourceDerivedMonthlyTotals) : "not shown in this mode",
     sourceDerivedAnnualTotalKwh: (() => {
-      return showSourceDerivedInputs && sourceDerivedAnnualTotal != null ? sourceDerivedAnnualTotal.toFixed(2) : "—";
+      return showSourceDerivedInputs && sourceDerivedAnnualTotal != null ? sourceDerivedAnnualTotal.toFixed(2) : "not shown in this mode";
     })(),
     intervalFingerprint: formatIdentityReadout(
-      coalesceMeaningfulString(sourceContext?.intervalFingerprint, sourceTruthContext?.intervalSourceIdentity)
+      coalesceMeaningfulString(sourceContext?.intervalFingerprint, sourceTruthContext?.intervalSourceIdentity),
+      artifactMissingLabel
     ),
     weatherIdentity: formatIdentityReadout(
-      coalesceMeaningfulString(sourceContext?.weatherIdentity, sourceTruthContext?.weatherDatasetIdentity)
+      coalesceMeaningfulString(sourceContext?.weatherIdentity, sourceTruthContext?.weatherDatasetIdentity),
+      artifactMissingLabel
     ),
     usageShapeProfileIdentity: formatIdentityReadout(
-      coalesceMeaningfulString(profileContext?.usageShapeProfileIdentity, sourceTruthContext?.intervalUsageFingerprintIdentity)
+      coalesceMeaningfulString(profileContext?.usageShapeProfileIdentity, sourceTruthContext?.intervalUsageFingerprintIdentity),
+      artifactMissingLabel
     ),
     inputHash:
-      coalesceMeaningfulString(perRunTrace?.inputHash, identityContext?.inputHash, lockboxExecutionSummary?.artifactInputHash) ?? "—",
+      formatIdentityReadout(
+        coalesceMeaningfulString(perRunTrace?.inputHash, identityContext?.inputHash, lockboxExecutionSummary?.artifactInputHash),
+        artifactMissingLabel
+      ),
     fullChainHash:
-      coalesceMeaningfulString(meta?.fullChainHash, perRunTrace?.fullChainHash, identityContext?.fullChainHash) ?? "—",
-    artifactEngineVersion: coalesceMeaningfulString(lockboxExecutionSummary?.artifactEngineVersion) ?? "—",
-    compareRowsCount: validationRowsCount != null ? String(validationRowsCount) : "—",
+      formatIdentityReadout(
+        coalesceMeaningfulString(meta?.fullChainHash, perRunTrace?.fullChainHash, identityContext?.fullChainHash),
+        artifactMissingLabel
+      ),
+    artifactEngineVersion: formatIdentityReadout(lockboxExecutionSummary?.artifactEngineVersion, artifactMissingLabel),
+    compareRowsCount: validationRowsCount != null ? String(validationRowsCount) : "not attached on this artifact read",
   };
 }
 
@@ -199,30 +215,51 @@ export function buildActualDiagnosticsHeaderReadout(args: {
   const build = asRecord(snapshot?.build);
   const engineIdentity = asRecord(asRecord(snapshot?.engineContext)?.identity);
   const sharedDiagnostics = asRecord(snapshot?.sharedDiagnostics);
+  const identityContext = asRecord(sharedDiagnostics?.identityContext);
   const sourceTruthContext = asRecord(sharedDiagnostics?.sourceTruthContext);
   const datasetMeta = asRecord(args.actualHouseBaselineDataset?.meta);
   const lockboxInput = asRecord(datasetMeta?.lockboxInput);
   const sourceContext = asRecord(lockboxInput?.sourceContext);
+  const profileContext = asRecord(lockboxInput?.profileContext);
+  const actualReadMissingLabel = "not attached on this actual-house read";
 
   return {
     recalcExecutionMode: String(recalc?.executionMode ?? "—"),
     recalcCorrelationId: String(recalc?.correlationId ?? "—"),
     buildMode: String(build?.mode ?? "—"),
     buildInputsHash: String(build?.buildInputsHash ?? "—"),
+    sourceHouseId: formatIdentityReadout(
+      coalesceMeaningfulString(
+        identityContext?.sourceHouseId,
+        sourceTruthContext?.sourceHouseId,
+        sourceContext?.sourceHouseId
+      ),
+      actualReadMissingLabel
+    ),
+    profileHouseId: formatIdentityReadout(
+      coalesceMeaningfulString(
+        identityContext?.profileHouseId,
+        sourceTruthContext?.profileHouseId,
+        profileContext?.profileHouseId
+      ),
+      actualReadMissingLabel
+    ),
     weatherIdentity: formatIdentityReadout(
       coalesceMeaningfulString(
         engineIdentity?.weatherIdentity,
         sourceTruthContext?.weatherDatasetIdentity,
         sourceContext?.weatherIdentity,
         datasetMeta?.weatherDatasetIdentity
-      )
+      ),
+      actualReadMissingLabel
     ),
     intervalFingerprint: formatIdentityReadout(
       coalesceMeaningfulString(
         engineIdentity?.intervalDataFingerprint,
         sourceTruthContext?.intervalSourceIdentity,
         sourceContext?.intervalFingerprint
-      )
+      ),
+      actualReadMissingLabel
     ),
   };
 }

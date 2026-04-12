@@ -219,6 +219,56 @@ function formatNumberMaybe(value: unknown, digits = 2): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
 }
 
+function formatManualParityRule(value: unknown): string {
+  switch (String(value ?? "").trim()) {
+    case "exact_match_required":
+      return "Exact match required";
+    case "excluded_travel_overlap":
+      return "Excluded: travel overlap";
+    case "excluded_filled_later":
+      return "Excluded: filled later";
+    case "excluded_missing_input":
+      return "Excluded: no entered total";
+    default:
+      return "Not shown in this view";
+  }
+}
+
+function formatManualStatusLabel(value: unknown): string {
+  switch (String(value ?? "").trim()) {
+    case "reconciled":
+      return "Reconciled";
+    case "delta_present":
+      return "Delta present";
+    case "travel_overlap":
+      return "Excluded";
+    case "filled_later":
+      return "Filled later";
+    case "missing_input":
+      return "Missing input";
+    case "sim_result_unavailable":
+      return "Sim result not attached";
+    default:
+      return "Not shown in this view";
+  }
+}
+
+function manualCompareRowToneClass(status: unknown): string {
+  switch (String(status ?? "").trim()) {
+    case "reconciled":
+      return "bg-emerald-50/40";
+    case "delta_present":
+      return "bg-amber-50/50";
+    case "travel_overlap":
+    case "filled_later":
+    case "missing_input":
+    case "sim_result_unavailable":
+      return "bg-slate-50";
+    default:
+      return "";
+  }
+}
+
 function formatTravelRangeSourceLabel(value: unknown): string {
   switch (String(value ?? "").trim()) {
     case "test_home_saved":
@@ -367,40 +417,40 @@ function LockboxFlowPanel(props: {
       <MetadataGrid
         items={[
           {
-            label: "sourceHouseId",
+            label: "Source house ID",
             value: readout.sourceHouseId,
           },
-          { label: "profileHouseId", value: readout.profileHouseId },
-          { label: "mode", value: readout.mode },
+          { label: "Profile house ID", value: readout.profileHouseId },
+          { label: "Mode", value: readout.mode },
           {
-            label: "travelRanges",
+            label: "Travel ranges",
             value: readout.travelRanges,
           },
           {
-            label: "validationKeys",
+            label: "Validation keys",
             value: readout.validationKeys,
           },
           {
-            label: "sourceDerivedMonthlyTotalsKwhByMonth",
+            label: "Source-derived monthly totals",
             value: readout.sourceDerivedMonthlyTotalsKwhByMonth,
           },
           {
-            label: "sourceDerivedAnnualTotalKwh",
+            label: "Source-derived annual total",
             value: readout.sourceDerivedAnnualTotalKwh,
           },
           {
-            label: "intervalFingerprint",
+            label: "Interval fingerprint",
             value: readout.intervalFingerprint,
           },
           {
-            label: "weatherIdentity",
+            label: "Weather identity",
             value: readout.weatherIdentity,
           },
-          { label: "usageShapeProfileIdentity", value: readout.usageShapeProfileIdentity },
-          { label: "inputHash", value: readout.inputHash },
-          { label: "fullChainHash", value: readout.fullChainHash },
-          { label: "artifactEngineVersion", value: readout.artifactEngineVersion },
-          { label: "compareRowsCount", value: readout.compareRowsCount },
+          { label: "Usage-shape profile identity", value: readout.usageShapeProfileIdentity },
+          { label: "Input hash", value: readout.inputHash },
+          { label: "Full chain hash", value: readout.fullChainHash },
+          { label: "Artifact engine version", value: readout.artifactEngineVersion },
+          { label: "Compare rows attached", value: readout.compareRowsCount },
         ]}
       />
       <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
@@ -1789,7 +1839,8 @@ export default function GapFillLabCanonicalClient() {
         <div>
           <h2 className="text-lg font-semibold text-brand-navy">Actual House</h2>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Same Past Sim run and display path the user page uses for the source house.
+            Same corrected Actual House Past Sim path the user page uses for the source house. This remains the compare source for admin
+            manual runs.
           </p>
         </div>
         {actualHouseOverride ? (
@@ -1857,6 +1908,14 @@ export default function GapFillLabCanonicalClient() {
                 ) : null}
                 <MetadataGrid
                   items={[
+                    {
+                      label: "Source house ID",
+                      value: actualDiagnosticsHeader.sourceHouseId,
+                    },
+                    {
+                      label: "Profile house ID",
+                      value: actualDiagnosticsHeader.profileHouseId,
+                    },
                     {
                       label: "Recalc execution mode",
                       value: actualDiagnosticsHeader.recalcExecutionMode,
@@ -2013,8 +2072,8 @@ export default function GapFillLabCanonicalClient() {
           <div>
             <h2 className="text-lg font-semibold text-brand-navy">Manual Stage 1 contract</h2>
             <p className="mt-1 text-sm text-brand-navy/70">
-              Canonical test-home manual Stage 1 contract for this persisted run. This is read from the shared manual read model and
-              does not replace the Actual House chart or compare source.
+              Canonical test-home bill-period / statement-total contract for this persisted run. It is read from the shared manual read
+              model and does not replace the Actual House compare source.
             </p>
           </div>
           {manualStageOnePresentation?.mode === "MONTHLY" ? (
@@ -2132,10 +2191,10 @@ export default function GapFillLabCanonicalClient() {
         </div>
         {showManualMonthlyCompare ? (
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-brand-navy">Manual monthly reconciliation compare</div>
+            <div className="text-sm font-semibold text-brand-navy">Manual monthly parity / reconciliation</div>
             <div className="mt-1 text-xs text-brand-navy/70">
-              Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals. Non-travel-eligible
-              periods stay on exact-match-required parity; travel-overlapped periods are explicitly excluded here.
+              Raw actual-source bill-period totals, manual Stage 1 bill-period targets, and manual Stage 2 simulated totals. Eligible
+              non-travel periods stay exact-match-required; travel-overlapped periods remain explicitly excluded.
             </div>
             <div className="mt-3 max-h-80 overflow-auto">
               <table className="min-w-full text-xs border border-brand-blue/10">
@@ -2155,7 +2214,7 @@ export default function GapFillLabCanonicalClient() {
                 </thead>
                 <tbody>
                   {manualMonthlyCompareRows.map((row) => (
-                    <tr key={row.month}>
+                    <tr key={row.month} className={manualCompareRowToneClass(row.status)}>
                       <td className="border border-brand-blue/10 px-2 py-1">{row.month}</td>
                       <td className="border border-brand-blue/10 px-2 py-1">{row.label ?? "—"}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.actualIntervalKwh)}</td>
@@ -2164,8 +2223,8 @@ export default function GapFillLabCanonicalClient() {
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedVsActualDeltaKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.simulatedVsTargetDeltaKwh)}</td>
                       <td className="border border-brand-blue/10 px-2 py-1 text-right">{formatNumberMaybe(row.targetVsActualDeltaKwh)}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1">{row.parityRequirement ?? "—"}</td>
-                      <td className="border border-brand-blue/10 px-2 py-1">{row.status ?? "—"}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1">{formatManualParityRule(row.parityRequirement)}</td>
+                      <td className="border border-brand-blue/10 px-2 py-1">{formatManualStatusLabel(row.status)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2175,9 +2234,9 @@ export default function GapFillLabCanonicalClient() {
         ) : null}
         {showManualAnnualCompare ? (
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-brand-navy">Manual annual reconciliation compare</div>
+            <div className="text-sm font-semibold text-brand-navy">Manual annual parity / reconciliation</div>
             <div className="mt-1 text-xs text-brand-navy/70">
-              Source actual interval annual total, shared Stage 1 annual target, and final simulated annual total.
+              Raw actual annual total, manual Stage 1 annual target, and manual Stage 2 simulated annual total.
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
@@ -2205,12 +2264,12 @@ export default function GapFillLabCanonicalClient() {
                 <div className="mt-2 text-lg font-semibold text-brand-navy">{formatNumberMaybe(manualAnnualCompareSummary.targetVsActualDeltaKwh)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Parity contract</div>
-                <div className="mt-2 text-sm font-semibold text-brand-navy">{manualAnnualCompareSummary.parityRequirement ?? "—"}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Parity rule</div>
+                <div className="mt-2 text-sm font-semibold text-brand-navy">{formatManualParityRule(manualAnnualCompareSummary.parityRequirement)}</div>
               </div>
               <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-navy/50">Status</div>
-                <div className="mt-2 text-sm font-semibold text-brand-navy">{manualAnnualCompareSummary.status ?? "—"}</div>
+                <div className="mt-2 text-sm font-semibold text-brand-navy">{formatManualStatusLabel(manualAnnualCompareSummary.status)}</div>
               </div>
             </div>
           </div>

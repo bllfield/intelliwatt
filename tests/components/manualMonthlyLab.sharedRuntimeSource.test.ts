@@ -73,6 +73,7 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).not.toContain("return stageOnePreviewPayload;");
     expect(source).not.toContain("manualMonthlyStageOneRowsOverride={stageOnePreviewRows}");
     expect(source).toContain("Canonical shared manual Stage 1 contract");
+    expect(source).toContain("Manual Stage 1 contract");
   });
 
   it("keeps the Manual Usage Stage 1 chart and table toggle interactive", () => {
@@ -82,5 +83,14 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("monthlyView={stageOneMonthlyView}");
     expect(source).toContain("onMonthlyViewChange={setStageOneMonthlyView}");
     expect(source).not.toContain('monthlyView="chart"\n                onMonthlyViewChange={() => undefined}');
+  });
+
+  it("keeps the stage labels aligned with the shared admin workflow wording", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("Manual Stage 1 contract");
+    expect(source).toContain("Manual Stage 2 simulated result");
+    expect(source).toContain("Manual monthly parity / reconciliation");
+    expect(source).toContain("bill-period / statement-total semantics");
   });
 });

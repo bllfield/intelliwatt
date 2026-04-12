@@ -45,13 +45,13 @@ describe("GapFill calculation logic UI wiring", () => {
   it("adds manual-usage reconciliation compare panels without replacing exact-interval UI", () => {
     const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
 
-    expect(source).toContain("Manual monthly reconciliation compare");
-    expect(source).toContain("Manual annual reconciliation compare");
+    expect(source).toContain("Manual monthly parity / reconciliation");
+    expect(source).toContain("Manual annual parity / reconciliation");
     expect(source).toContain("Manual Stage 1 contract");
     expect(source).toContain("UsageChartsPanel");
     expect(source).toContain("selectedTreatmentMode === \"MANUAL_ANNUAL\"");
-    expect(source).toContain("Source actual interval totals, shared Stage 1 monthly targets, and final simulated monthly totals.");
-    expect(source).toContain("Source actual interval annual total, shared Stage 1 annual target, and final simulated annual total.");
+    expect(source).toContain("Raw actual-source bill-period totals, manual Stage 1 bill-period targets, and manual Stage 2 simulated totals.");
+    expect(source).toContain("Raw actual annual total, manual Stage 1 annual target, and manual Stage 2 simulated annual total.");
     expect(source).toContain("LockboxFlowPanel");
     expect(source).toContain("sharedDiagnostics={testSharedDiagnostics}");
   });
@@ -61,7 +61,7 @@ describe("GapFill calculation logic UI wiring", () => {
 
     expect(source).toContain('selectedTreatmentMode === "MANUAL_MONTHLY"');
     expect(source).toContain('selectedTreatmentMode === "MANUAL_ANNUAL"');
-    expect(source).toContain("Canonical test-home manual Stage 1 contract for this persisted run.");
+    expect(source).toContain("Canonical test-home bill-period / statement-total contract for this persisted run.");
     expect(source).toContain("manualStageOnePresentation?.mode === \"MONTHLY\"");
     expect(source).toContain("manualStageOnePresentation?.mode === \"ANNUAL\"");
   });
@@ -93,6 +93,9 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).toContain("actualSharedDiagnostics");
     expect(source).toContain("buildActualDiagnosticsHeaderReadout");
     expect(source).toContain("artifactEngineVersion");
+    expect(source).toContain("Source house ID");
+    expect(source).toContain("Profile house ID");
+    expect(source).toContain("Same corrected Actual House Past Sim path");
   });
 
   it("defines the modal sections for the admin-only calculation logic view", () => {

@@ -609,11 +609,11 @@ export default function ManualMonthlyLab() {
         {sourceUsageOverride ? (
           <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
             <div>
-              <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 1</div>
+              <div className="text-lg font-semibold text-brand-navy">Manual Stage 1 contract</div>
               <p className="text-sm text-slate-600">
                 {canonicalStageOnePresentation
-                  ? "Canonical shared manual Stage 1 contract for the current lab artifact. This mirrors the shared manual read-model publication used by GapFill."
-                  : "Pre-run Stage 1 preview for the lab flow. Monthly mode keeps bill-period semantics, annual mode keeps annual-total semantics, and this preview is replaced by the canonical shared read-model contract after Past Sim readback."}
+                  ? "Canonical shared manual Stage 1 contract for the current lab artifact. Monthly mode stays bill-period / statement-total only, and annual mode stays annual-total only."
+                  : "Pre-run Stage 1 preview for the lab flow. Monthly mode keeps bill-period / statement-total semantics, annual mode keeps annual-total semantics, and this preview is replaced by the canonical shared read-model contract after Past Sim readback."}
               </p>
             </div>
             {displayedStageOnePresentation?.mode === "MONTHLY" ? (
@@ -674,8 +674,11 @@ export default function ManualMonthlyLab() {
           <div className="space-y-4">
             <div className="rounded-lg bg-brand-white p-6 shadow-lg space-y-4">
               <div>
-                <div className="text-lg font-semibold text-brand-navy">Manual Usage Stage 2</div>
-                <p className="text-sm text-slate-600">Shared Past Sim results rendered from the dedicated lab home artifact only.</p>
+                <div className="text-lg font-semibold text-brand-navy">Manual Stage 2 simulated result</div>
+                <p className="text-sm text-slate-600">
+                  Shared Past Sim output rendered from the dedicated lab-home artifact. This is the simulated result under the manual
+                  Stage 1 contract above.
+                </p>
               </div>
               {pastSimOverride ? (
                 <UsageDashboard
@@ -694,9 +697,10 @@ export default function ManualMonthlyLab() {
             </div>
             {displayedReadResult?.manualMonthlyReconciliation ? (
               <div className="rounded-lg bg-brand-white p-6 shadow-lg">
-                <div className="text-sm font-semibold text-brand-navy">Bill Period Parity Compare</div>
+                <div className="text-sm font-semibold text-brand-navy">Manual monthly parity / reconciliation</div>
                 <div className="mt-1 text-xs text-slate-600">
-                  Totals below sum the simulated daily output across each manual bill period so eligible periods can be checked against the entered total.
+                  Raw actual-source bill-period totals, manual Stage 1 bill-period targets, and manual Stage 2 simulated totals. Eligible
+                  non-travel periods stay exact-match-required; excluded periods remain visible as context only.
                 </div>
                 <ManualMonthlyReconciliationPanel reconciliation={displayedReadResult.manualMonthlyReconciliation} />
               </div>
