@@ -52,7 +52,7 @@ export function buildActualVsTestMonthlyRows(args: {
 }) {
   const actualMonthly = buildGapfillCompareMonthlyTotals(args.actualDataset);
   const testMonthly = buildGapfillCompareMonthlyTotals(args.testDataset);
-  const allMonths = Array.from(new Set([...actualMonthly.keys(), ...testMonthly.keys()]))
+  const allMonths = Array.from(new Set([...Array.from(actualMonthly.keys()), ...Array.from(testMonthly.keys())]))
     .filter((value) => /^\d{4}-\d{2}$/.test(value))
     .sort();
   return allMonths.map((month) => {
