@@ -46,6 +46,12 @@ export function buildGapfillCompareMonthlyTotals(dataset: MonthlyDatasetLike): M
   return totals;
 }
 
+export function buildDisplayedMonthlyRows(dataset: MonthlyDatasetLike): Array<{ month: string; kwh: number }> {
+  return Array.from(buildGapfillCompareMonthlyTotals(dataset).entries())
+    .map(([month, kwh]) => ({ month, kwh }))
+    .sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0));
+}
+
 export function buildActualVsTestMonthlyRows(args: {
   actualDataset: MonthlyDatasetLike;
   testDataset: MonthlyDatasetLike;

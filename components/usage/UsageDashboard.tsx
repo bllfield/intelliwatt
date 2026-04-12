@@ -14,6 +14,7 @@ import {
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 type UsageSeriesPoint = {
@@ -732,7 +733,7 @@ export const UsageDashboard: React.FC<Props> = ({
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    const monthlySorted = monthly.slice().sort((a, b) => (a.month < b.month ? -1 : 1));
+    const monthlySorted = buildDisplayedMonthlyRows(dataset);
     const baseloadDaily =
       dataset?.insights?.baseloadDaily ??
       (() => {
