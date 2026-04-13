@@ -50,6 +50,88 @@ export type ValidationCompareProjectionSidecar = {
   metrics: Record<string, unknown>;
 };
 
+function round2(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function rebuildValidationCompareMetrics(
+  rows: ValidationCompareProjectionSidecar["rows"]
+): Record<string, unknown> {
+  const absErrors = rows.map((r) => Math.abs(Number(r.errorKwh ?? 0) || 0));
+  const actualTotal = rows.reduce((sum, row) => sum + (Number(row.actualDayKwh ?? 0) || 0), 0);
+  const simTotal = rows.reduce((sum, row) => sum + (Number(row.simulatedDayKwh ?? 0) || 0), 0);
+  const mae = rows.length > 0 ? absErrors.reduce((a, b) => a + b, 0) / rows.length : 0;
+  const rmse =
+    rows.length > 0
+      ? Math.sqrt(rows.reduce((sum, row) => sum + Math.pow(Number(row.errorKwh ?? 0) || 0, 2), 0) / rows.length)
+      : 0;
+  const maxAbs = absErrors.length > 0 ? Math.max(...absErrors) : 0;
+  const wape =
+    Math.abs(actualTotal) > 1e-6 ? (absErrors.reduce((a, b) => a + b, 0) / Math.abs(actualTotal)) * 100 : 0;
+  return {
+    mae: round2(mae),
+    rmse: round2(rmse),
+    mape: round2(wape),
+    wape: round2(wape),
+    maxAbs: round2(maxAbs),
+    totalActualKwhMasked: round2(actualTotal),
+    totalSimKwhMasked: round2(simTotal),
+    deltaKwhMasked: round2(simTotal - actualTotal),
+    mapeFiltered: rows.length > 0 ? round2(wape) : null,
+    mapeFilteredCount: rows.length,
+  };
+}
+
+export function overrideValidationCompareProjectionSimTotals(args: {
+  compareProjection: ValidationCompareProjectionSidecar | null | undefined;
+  simulatedDailyRows: Array<{ date?: string; kwh?: number }> | null | undefined;
+}): ValidationCompareProjectionSidecar {
+  const rows = Array.isArray(args.compareProjection?.rows) ? args.compareProjection.rows : [];
+  if (rows.length === 0) {
+    return {
+      rows: [],
+      metrics:
+        args.compareProjection?.metrics && typeof args.compareProjection.metrics === "object"
+          ? (args.compareProjection.metrics as Record<string, unknown>)
+          : {},
+    };
+  }
+  const simulatedByDate = new Map<string, number>();
+  for (const row of args.simulatedDailyRows ?? []) {
+    const dateKey = String(row?.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    simulatedByDate.set(dateKey, Number(row?.kwh ?? 0) || 0);
+  }
+  if (simulatedByDate.size === 0) {
+    return {
+      rows,
+      metrics:
+        args.compareProjection?.metrics && typeof args.compareProjection.metrics === "object"
+          ? (args.compareProjection.metrics as Record<string, unknown>)
+          : {},
+    };
+  }
+  const nextRows = rows.map((row) => {
+    const dateKey = String(row.localDate ?? "").slice(0, 10);
+    if (!simulatedByDate.has(dateKey)) return row;
+    const actualDayKwh = Number(row.actualDayKwh ?? 0) || 0;
+    const simulatedDayKwh = simulatedByDate.get(dateKey) ?? 0;
+    const errorKwh = simulatedDayKwh - actualDayKwh;
+    const percentError =
+      Math.abs(actualDayKwh) > 1e-6 ? (Math.abs(errorKwh) / Math.abs(actualDayKwh)) * 100 : null;
+    return {
+      ...row,
+      simulatedDayKwh: round2(simulatedDayKwh),
+      errorKwh: round2(errorKwh),
+      percentError: percentError == null ? null : round2(percentError),
+    };
+  });
+  return {
+    rows: nextRows,
+    metrics: rebuildValidationCompareMetrics(nextRows),
+  };
+}
+
 export function compareWeatherFromDailyWeather(dailyWeather: unknown, dateKey: string): ValidationCompareRowWeather {
   if (!dailyWeather || typeof dailyWeather !== "object" || Array.isArray(dailyWeather)) {
     return {

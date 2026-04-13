@@ -27,6 +27,7 @@ import {
 } from "@/modules/usageSimulator/validationSelection";
 import {
   buildValidationCompareProjectionSidecar,
+  overrideValidationCompareProjectionSimTotals,
 } from "@/modules/usageSimulator/compareProjection";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
@@ -2325,10 +2326,34 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    const compareProjectionForResponse = {
-      rows: compareProjectionRows,
-      metrics: compareProjectionMetrics,
-    };
+    const compareProjectionForResponse = isGapfillManualUsageInputMode(testUsageInputMode)
+      ? overrideValidationCompareProjectionSimTotals({
+          compareProjection: {
+            rows: compareProjectionRows as Array<{
+              localDate: string;
+              dayType: "weekday" | "weekend";
+              actualDayKwh: number;
+              simulatedDayKwh: number;
+              errorKwh: number;
+              percentError: number | null;
+              weather?: {
+                tAvgF: number | null;
+                tMinF: number | null;
+                tMaxF: number | null;
+                hdd65: number | null;
+                cdd65: number | null;
+                source: string | null;
+                weatherMissing: boolean;
+              };
+            }>,
+            metrics: compareProjectionMetrics,
+          },
+          simulatedDailyRows: rawCurveCompareDailyRows,
+        })
+      : {
+          rows: compareProjectionRows,
+          metrics: compareProjectionMetrics,
+        };
     const displayDatasetProjection =
       isGapfillManualUsageInputMode(testUsageInputMode) && rawCurveCompareDataset
         ? rawCurveCompareDataset

@@ -70,6 +70,7 @@ vi.mock("@/modules/usageSimulator/pastSimWeatherPolicy", () => ({
 }));
 vi.mock("@/modules/usageSimulator/compareProjection", () => ({
   buildValidationCompareProjectionSidecar: (...args: any[]) => mocks.buildValidationCompareProjectionSidecar(...args),
+  overrideValidationCompareProjectionSimTotals: (args: any) => args.compareProjection,
 }));
 vi.mock("@/modules/usageSimulator/sharedDiagnostics", () => ({
   buildSharedPastSimDiagnostics: (...args: any[]) => mocks.buildSharedPastSimDiagnostics(...args),

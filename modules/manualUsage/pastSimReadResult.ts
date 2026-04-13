@@ -2,7 +2,10 @@ import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import { buildManualUsageReadModel, type ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+import {
+  buildValidationCompareProjectionSidecar,
+  overrideValidationCompareProjectionSimTotals,
+} from "@/modules/usageSimulator/compareProjection";
 import {
   buildSharedPastSimDiagnostics,
   type SharedDiagnosticsCallerType,
@@ -163,6 +166,7 @@ export async function buildManualUsagePastSimReadResult(args: {
       artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
       manualUsagePayload: args.manualUsagePayload,
       actualDataset: resolvedActualDataset,
+      displayDataset,
     });
   const manualParitySummary = buildManualParitySummary({
     scenarioId: args.scenarioId,
@@ -430,12 +434,16 @@ export async function buildManualUsageReadDecorations(args: {
   artifactPersistenceOutcome?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   actualDataset?: any;
+  displayDataset?: any;
 }) {
   const manualUsageRecord =
     args.manualUsagePayload !== undefined
       ? { payload: args.manualUsagePayload }
       : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
-  const compareProjection = buildValidationCompareProjectionSidecar(args.dataset);
+  const compareProjection = overrideValidationCompareProjectionSimTotals({
+    compareProjection: buildValidationCompareProjectionSidecar(args.dataset),
+    simulatedDailyRows: Array.isArray(args.displayDataset?.daily) ? args.displayDataset.daily : null,
+  });
   const manualReadModel = buildManualUsageReadModel({
     payload: manualUsageRecord.payload,
     dataset: args.dataset,
