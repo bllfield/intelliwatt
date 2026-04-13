@@ -3,8 +3,8 @@ import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconcil
 import { buildManualUsageReadModel, type ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import {
+  buildValidationCompareProjectionFromDatasets,
   buildValidationCompareProjectionSidecar,
-  overrideValidationCompareProjectionSimTotals,
 } from "@/modules/usageSimulator/compareProjection";
 import {
   buildSharedPastSimDiagnostics,
@@ -249,21 +249,7 @@ async function resolveManualCompareActualDataset(args: {
   correlationId?: string | null;
 }) {
   if (args.actualDataset !== undefined) return args.actualDataset ?? null;
-  if (!args.actualReference?.scenarioId) return null;
-  const out = await getSimulatedUsageForHouseScenario({
-    userId: args.actualReference.userId,
-    houseId: args.actualReference.houseId,
-    scenarioId: args.actualReference.scenarioId,
-    readMode: "artifact_only",
-    projectionMode: "baseline",
-    correlationId: args.correlationId ?? undefined,
-    readContext: {
-      artifactReadMode: "artifact_only",
-      projectionMode: "baseline",
-      compareSidecarRequest: false,
-    },
-  });
-  return out.ok ? out.dataset : null;
+  return null;
 }
 
 function compactTravelRanges(value: unknown): Array<{ startDate: string; endDate: string }> {
@@ -440,10 +426,14 @@ export async function buildManualUsageReadDecorations(args: {
     args.manualUsagePayload !== undefined
       ? { payload: args.manualUsagePayload }
       : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
-  const compareProjection = overrideValidationCompareProjectionSimTotals({
-    compareProjection: buildValidationCompareProjectionSidecar(args.dataset),
-    simulatedDailyRows: Array.isArray(args.displayDataset?.daily) ? args.displayDataset.daily : null,
-  });
+  const compareProjection =
+    args.actualDataset && args.displayDataset
+      ? buildValidationCompareProjectionFromDatasets({
+          validationSourceDataset: args.dataset,
+          actualDataset: args.actualDataset,
+          simulatedDataset: args.displayDataset,
+        })
+      : buildValidationCompareProjectionSidecar(args.dataset);
   const manualReadModel = buildManualUsageReadModel({
     payload: manualUsageRecord.payload,
     dataset: args.dataset,

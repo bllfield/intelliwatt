@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   resolveUserValidationPolicy: vi.fn(),
   resolveUserWeatherLogicSetting: vi.fn(),
   buildValidationCompareProjectionSidecar: vi.fn(),
+  buildValidationCompareProjectionFromDatasets: vi.fn(),
   buildSharedPastSimDiagnostics: vi.fn(),
 }));
 
@@ -70,6 +71,8 @@ vi.mock("@/modules/usageSimulator/pastSimWeatherPolicy", () => ({
 }));
 vi.mock("@/modules/usageSimulator/compareProjection", () => ({
   buildValidationCompareProjectionSidecar: (...args: any[]) => mocks.buildValidationCompareProjectionSidecar(...args),
+  buildValidationCompareProjectionFromDatasets: (...args: any[]) =>
+    mocks.buildValidationCompareProjectionFromDatasets(...args),
   overrideValidationCompareProjectionSimTotals: (args: any) => args.compareProjection,
 }));
 vi.mock("@/modules/usageSimulator/sharedDiagnostics", () => ({
@@ -90,7 +93,7 @@ function buildRequest(body: Record<string, unknown>) {
 describe("admin manual monthly route", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.requireAdmin.mockReturnValue({ ok: true, status: 200, body: { ok: true } });
     mocks.lookupAdminHousesByEmail.mockResolvedValue({
       ok: true,
@@ -212,6 +215,7 @@ describe("admin manual monthly route", () => {
       },
     });
     mocks.buildValidationCompareProjectionSidecar.mockReturnValue({ rows: [], metrics: {} });
+    mocks.buildValidationCompareProjectionFromDatasets.mockReturnValue({ rows: [], metrics: {} });
     mocks.buildSharedPastSimDiagnostics.mockReturnValue({
       identityContext: {},
       sourceTruthContext: {},
@@ -243,8 +247,37 @@ describe("admin manual monthly route", () => {
   it("load resets and seeds only the isolated lab home", async () => {
     mocks.prisma.usageSimulatorScenario.findFirst.mockImplementation(async ({ where }: any) => {
       if (where?.userId === "admin-owner-1" && where?.houseId === "lab-home-1") return null;
-      if (where?.userId === "source-user-1" && where?.houseId === "source-house-1") return { id: "past-source-s1" };
       return null;
+    });
+    mocks.getActualUsageDatasetForHouse.mockResolvedValue({
+      dataset: {
+        summary: {
+          source: "SMT",
+          intervalsCount: 0,
+          totalKwh: 300,
+          start: "2025-01-01",
+          end: "2025-12-31",
+          latest: "2025-12-31T23:45:00.000Z",
+        },
+        daily: Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+        })).concat([{ date: "2025-12-31", kwh: 10 }]),
+        monthly: [{ month: "2025-04", kwh: 300 }, { month: "2025-12", kwh: 10 }],
+        series: {
+          intervals15: [],
+          hourly: [],
+          daily: [],
+          monthly: [{ month: "2025-04", kwh: 300 }, { month: "2025-12", kwh: 10 }],
+          annual: [],
+        },
+        insights: {},
+        totals: { importKwh: 300, exportKwh: 0, netKwh: 300 },
+        dailyWeather: {
+          "2025-01-01": { tAvgF: 45, hdd65: 20, cdd65: 0 },
+          "2025-12-31": { tAvgF: 48, hdd65: 17, cdd65: 0 },
+        },
+      },
     });
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
     const res = await POST(buildRequest({ action: "load", email: "user@example.com", houseId: "source-house-1" }));
@@ -303,14 +336,10 @@ describe("admin manual monthly route", () => {
         stage2PathParity: true,
       }),
     });
-    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "source-user-1",
-        houseId: "source-house-1",
-        scenarioId: "past-source-s1",
-        readMode: "artifact_only",
-        projectionMode: "baseline",
-      })
+    expect(mocks.getActualUsageDatasetForHouse).toHaveBeenCalledWith(
+      "source-house-1",
+      "E1",
+      expect.objectContaining({ skipFullYearIntervalFetch: true })
     );
   });
 
@@ -708,11 +737,30 @@ describe("admin manual monthly route", () => {
     );
   });
 
-  it("keeps manual compare actual-reference reads artifact-only so readback does not rebuild source truth", async () => {
+  it("keeps manual compare actuals on the interval-backed source dataset path", async () => {
     mocks.prisma.usageSimulatorScenario.findFirst.mockImplementation(async ({ where }: any) => {
       if (where?.userId === "admin-owner-1" && where?.houseId === "lab-home-1") return { id: "past-lab-s1" };
-      if (where?.userId === "source-user-1" && where?.houseId === "source-house-1") return { id: "past-source-s1" };
       return null;
+    });
+    mocks.getActualUsageDatasetForHouse.mockResolvedValue({
+      dataset: {
+        summary: {
+          source: "SMT",
+          intervalsCount: 0,
+          totalKwh: 300,
+          start: "2025-01-01",
+          end: "2025-12-31",
+          latest: "2025-12-31T23:45:00.000Z",
+        },
+        daily: Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+        })),
+        monthly: [{ month: "2025-04", kwh: 300 }],
+        series: { intervals15: [], hourly: [], daily: [], monthly: [{ month: "2025-04", kwh: 300 }], annual: [] },
+        insights: {},
+        totals: { importKwh: 300, exportKwh: 0, netKwh: 300 },
+      },
     });
     mocks.getSimulatedUsageForHouseScenario
       .mockResolvedValueOnce({
@@ -752,16 +800,11 @@ describe("admin manual monthly route", () => {
 
     expect(res.status).toBe(200);
     expect(body.readResult.ok).toBe(true);
-    expect(body.readResult.manualMonthlyReconciliation?.rows?.[0]?.actualIntervalTotalKwh).toBeNull();
-    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        userId: "source-user-1",
-        houseId: "source-house-1",
-        scenarioId: "past-source-s1",
-        readMode: "artifact_only",
-        projectionMode: "baseline",
-      })
+    expect(body.readResult.manualMonthlyReconciliation?.rows?.[0]?.actualIntervalTotalKwh).toBe(300);
+    expect(mocks.getActualUsageDatasetForHouse).toHaveBeenCalledWith(
+      "source-house-1",
+      "E1",
+      expect.objectContaining({ skipFullYearIntervalFetch: true })
     );
   });
 
@@ -776,7 +819,7 @@ describe("admin manual monthly route", () => {
       projectionReadSummary: {},
       tuningSummary: {},
     });
-    mocks.getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+    mocks.getSimulatedUsageForHouseScenario.mockResolvedValue({
       ok: true,
       dataset: {
         meta: {

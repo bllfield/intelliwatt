@@ -132,6 +132,86 @@ export function overrideValidationCompareProjectionSimTotals(args: {
   };
 }
 
+function buildDailyKwhByDate(rows: unknown): Map<string, number> {
+  const byDate = new Map<string, number>();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+    const kwh = Number((row as any)?.kwh);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !Number.isFinite(kwh)) continue;
+    byDate.set(dateKey, kwh);
+  }
+  return byDate;
+}
+
+export function buildValidationCompareProjectionFromDatasets(args: {
+  validationSourceDataset: any;
+  actualDataset: any;
+  simulatedDataset: any;
+  weatherDataset?: any;
+}): ValidationCompareProjectionSidecar {
+  const rawKeys = Array.isArray((args.validationSourceDataset as any)?.meta?.validationOnlyDateKeysLocal)
+    ? ((args.validationSourceDataset as any).meta.validationOnlyDateKeysLocal as unknown[])
+    : [];
+  const validationOnlyDateKeysLocal = rawKeys
+    .map((v) => String(v ?? "").slice(0, 10))
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+  if (validationOnlyDateKeysLocal.length === 0) {
+    return { rows: [], metrics: {} };
+  }
+
+  const actualByDate = buildDailyKwhByDate(args.actualDataset?.daily);
+  const simulatedByDate = buildDailyKwhByDate(args.simulatedDataset?.daily);
+  const missingActual = validationOnlyDateKeysLocal.filter((dk) => !actualByDate.has(dk));
+  if (missingActual.length > 0) {
+    throw new CompareTruthIncompleteError(
+      missingActual,
+      "Compare projection requires interval-backed actual day totals for every validation day; missing actual truth for: " +
+        missingActual.join(", ")
+    );
+  }
+  const missingSim = validationOnlyDateKeysLocal.filter((dk) => !simulatedByDate.has(dk));
+  if (missingSim.length > 0) {
+    throw new CompareTruthIncompleteError(
+      missingSim,
+      "Compare projection requires simulated day totals for every validation day; missing simulated truth for: " +
+        missingSim.join(", ")
+    );
+  }
+
+  const weatherDataset =
+    args.weatherDataset ?? args.actualDataset ?? args.simulatedDataset ?? args.validationSourceDataset;
+  const dailyWeather = weatherDataset?.dailyWeather;
+  const tz = String(
+    (args.validationSourceDataset as any)?.meta?.timezone ??
+      args.validationSourceDataset?.timezone ??
+      weatherDataset?.meta?.timezone ??
+      weatherDataset?.timezone ??
+      "America/Chicago"
+  );
+  const rows = validationOnlyDateKeysLocal
+    .map((dk) => {
+      const actualDayKwh = Number(actualByDate.get(dk) ?? 0) || 0;
+      const simulatedDayKwh = Number(simulatedByDate.get(dk) ?? 0) || 0;
+      const errorKwh = simulatedDayKwh - actualDayKwh;
+      const percentError =
+        Math.abs(actualDayKwh) > 1e-6 ? (Math.abs(errorKwh) / Math.abs(actualDayKwh)) * 100 : null;
+      return {
+        localDate: dk,
+        dayType: isWeekendLocalDateKeyInZone(dk, tz) ? ("weekend" as const) : ("weekday" as const),
+        actualDayKwh: round2(actualDayKwh),
+        simulatedDayKwh: round2(simulatedDayKwh),
+        errorKwh: round2(errorKwh),
+        percentError: percentError == null ? null : round2(percentError),
+        weather: compareWeatherFromDailyWeather(dailyWeather, dk),
+      };
+    })
+    .sort((a, b) => a.localDate.localeCompare(b.localDate));
+  return {
+    rows,
+    metrics: rebuildValidationCompareMetrics(rows),
+  };
+}
+
 export function compareWeatherFromDailyWeather(dailyWeather: unknown, dateKey: string): ValidationCompareRowWeather {
   if (!dailyWeather || typeof dailyWeather !== "object" || Array.isArray(dailyWeather)) {
     return {
@@ -219,7 +299,7 @@ export function projectBaselineFromCanonicalDataset(
     projected.daily = projected.daily.map((row: any) => {
       const dk = String(row?.date ?? "").slice(0, 10);
       if (!validationSet.has(dk)) return row;
-      if (!actualDaily.has(dk)) return { ...row, source: "ACTUAL", sourceDetail: "ACTUAL_VALIDATION_TEST_DAY" };
+      if (!actualDaily.has(dk)) return row;
       return {
         ...row,
         kwh: round2(actualDaily.get(dk)!),
@@ -239,6 +319,7 @@ export function projectBaselineFromCanonicalDataset(
             ? dkFromDaily
             : dateKeyInTimezone(String(row?.timestamp ?? ""), tz);
         if (!validationSet.has(dk)) return row;
+        if (!actualDaily.has(dk)) return row;
         if (!projectedDailyByDate.has(dk)) return row;
         return {
           ...row,
@@ -362,7 +443,17 @@ export function attachValidationCompareProjection(dataset: any): any {
   for (const row of dailyRows as Array<{ date?: string; kwh?: number }>) {
     const dk = String(row?.date ?? "").slice(0, 10);
     if (!keySet.has(dk)) continue;
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    if (source !== "ACTUAL") continue;
     actualByDate.set(dk, Number(row?.kwh ?? 0) || 0);
+  }
+  const missingActualTotals = validationOnlyDateKeysLocal.filter((dk) => !actualByDate.has(dk));
+  if (missingActualTotals.length > 0) {
+    throw new CompareTruthIncompleteError(
+      missingActualTotals,
+      "Compare projection requires interval-backed actual day totals for every validation day; missing actual truth for: " +
+        missingActualTotals.join(", ")
+    );
   }
   const simSrc =
     ((projected as any)?.meta?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??

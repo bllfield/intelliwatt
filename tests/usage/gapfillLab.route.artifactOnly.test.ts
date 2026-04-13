@@ -386,7 +386,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     getActualUsageDatasetForHouse.mockResolvedValue({
       dataset: {
         summary: { source: "SMT", intervalsCount: 0, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
-        daily: [],
+        daily: [
+          { date: "2025-04-10", kwh: 2 },
+          { date: "2025-05-02", kwh: 4 },
+        ],
         monthly: [],
         insights: {},
       },
@@ -2936,7 +2939,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
           houseId: "test-home-1",
           mode: "MANUAL_TOTALS",
           esiid: null,
-          actualContextHouseId: undefined,
+          actualContextHouseId: "h1",
         })
       );
       expect(body.manualDateSourceMode).toBe("AUTO_DATES");
@@ -3249,7 +3252,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
   });
 
-  it("keeps gapfill manual readback actual-reference reads artifact-only so compare does not rebuild source truth", async () => {
+  it("keeps gapfill manual readback on test-home artifact reads while sourcing actual compare truth from intervals", async () => {
     getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
       if (houseId === "h1") {
         return {
@@ -3320,16 +3323,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         requireExactArtifactMatch: true,
       })
     );
-    expect(getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        userId: "u1",
-        houseId: "h1",
-        scenarioId: "past-s1",
-        readMode: "artifact_only",
-        projectionMode: "baseline",
-      })
-    );
+    expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith("h1", "E1", expect.objectContaining({ skipFullYearIntervalFetch: true }));
   });
 
   it("surfaces shared pure-manual travel donor diagnostics on gapfill readback", async () => {

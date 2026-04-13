@@ -26,8 +26,9 @@ import {
   type ValidationDaySelectionMode,
 } from "@/modules/usageSimulator/validationSelection";
 import {
+  buildValidationCompareProjectionFromDatasets,
   buildValidationCompareProjectionSidecar,
-  overrideValidationCompareProjectionSimTotals,
+  CompareTruthIncompleteError,
 } from "@/modules/usageSimulator/compareProjection";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
@@ -608,17 +609,11 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       })
       .catch(() => null),
   ]);
-  const sourcePastScenario = await (prisma as any).usageSimulatorScenario
-    .findFirst({
-      where: {
-        userId: args.sourceUserId,
-        houseId: args.sourceHouse.id,
-        name: "Past (Corrected)",
-        archivedAt: null,
-      },
-      select: { id: true },
-    })
-    .catch(() => null);
+  const sourceActualUsageResult = await getActualUsageDatasetForHouse(
+    args.sourceHouse.id,
+    args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null,
+    { skipFullYearIntervalFetch: true }
+  ).catch(() => ({ dataset: null }));
 
   const readResultWithManualPayload = await buildManualUsagePastSimReadResult({
     userId: args.labOwnerUserId,
@@ -636,11 +631,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactInputHash: artifactRow?.inputHash ?? null,
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
-    actualReference: {
-      userId: args.sourceUserId,
-      houseId: args.sourceHouse.id,
-      scenarioId: sourcePastScenario?.id ?? null,
-    },
+    actualDataset: sourceActualUsageResult?.dataset ?? null,
   });
   if (!readResultWithManualPayload.ok) {
     return NextResponse.json(
@@ -1898,7 +1889,7 @@ export async function POST(req: NextRequest) {
           userId: labOwnerUser.id,
           houseId: testHomeHouse.id,
           esiid: useSharedManualPayloadRuntime ? null : sourceEsiid,
-          actualContextHouseId: useSharedManualPayloadRuntime ? undefined : sourceHouse.id,
+          actualContextHouseId: sourceHouse.id,
           mode: testHomeSimulatorMode,
           scenarioId: String(pastScenario.id),
           weatherPreference: gapfillWeatherLogic.weatherPreference,
@@ -2215,6 +2206,12 @@ export async function POST(req: NextRequest) {
     const effectiveValidationOnlyDateKeysLocal =
       selectedDateKeysSorted.length > 0 ? selectedDateKeysSorted : metadataValidationOnlyDateKeysLocal;
     const effectiveValidationDateKeySet = new Set<string>(effectiveValidationOnlyDateKeysLocal);
+    const sourceActualUsageResult =
+      isGapfillManualUsageInputMode(testUsageInputMode)
+        ? await getActualUsageDatasetForHouse(sourceHouse.id, sourceEsiid, { skipFullYearIntervalFetch: true }).catch(() => ({
+            dataset: null,
+          }))
+        : null;
     let rawCurveCompareDataset: any = null;
     let rawCurveCompareReadStatus: string | null = null;
     try {
@@ -2308,7 +2305,7 @@ export async function POST(req: NextRequest) {
         .map((row) => String((row as any)?.localDate ?? "").slice(0, 10))
         .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
     );
-    if (effectiveValidationOnlyDateKeysLocal.length > 0) {
+    if (effectiveValidationOnlyDateKeysLocal.length > 0 && !isGapfillManualUsageInputMode(testUsageInputMode)) {
       const missingCompareDateKeys = effectiveValidationOnlyDateKeysLocal.filter(
         (dk) => !compareProjectionRowDateSet.has(dk)
       );
@@ -2326,39 +2323,74 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    const compareProjectionForResponse = isGapfillManualUsageInputMode(testUsageInputMode)
-      ? overrideValidationCompareProjectionSimTotals({
-          compareProjection: {
-            rows: compareProjectionRows as Array<{
-              localDate: string;
-              dayType: "weekday" | "weekend";
-              actualDayKwh: number;
-              simulatedDayKwh: number;
-              errorKwh: number;
-              percentError: number | null;
-              weather?: {
-                tAvgF: number | null;
-                tMinF: number | null;
-                tMaxF: number | null;
-                hdd65: number | null;
-                cdd65: number | null;
-                source: string | null;
-                weatherMissing: boolean;
-              };
-            }>,
-            metrics: compareProjectionMetrics,
-          },
-          simulatedDailyRows: rawCurveCompareDailyRows,
-        })
-      : {
-          rows: compareProjectionRows,
-          metrics: compareProjectionMetrics,
-        };
+    if (
+      isGapfillManualUsageInputMode(testUsageInputMode) &&
+      effectiveValidationOnlyDateKeysLocal.length > 0 &&
+      !rawCurveCompareDataset
+    ) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "compare_truth_incomplete",
+          message: "Canonical GapFill manual compare requires the raw simulated artifact read for validation days.",
+          reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+          missingDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+          correlationId: labCorrelationId,
+        }),
+        { status: 409 }
+      );
+    }
+    if (
+      isGapfillManualUsageInputMode(testUsageInputMode) &&
+      effectiveValidationOnlyDateKeysLocal.length > 0 &&
+      !sourceActualUsageResult?.dataset
+    ) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "compare_truth_incomplete",
+          message: "Canonical GapFill manual compare requires interval-backed actual source usage for validation days.",
+          reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+          missingDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+          correlationId: labCorrelationId,
+        }),
+        { status: 409 }
+      );
+    }
+    let compareProjectionForResponse: { rows: Array<Record<string, unknown>>; metrics: Record<string, unknown> };
+    try {
+      compareProjectionForResponse =
+        isGapfillManualUsageInputMode(testUsageInputMode) && rawCurveCompareDataset && sourceActualUsageResult?.dataset
+          ? (buildValidationCompareProjectionFromDatasets({
+              validationSourceDataset: baselineDataset,
+              actualDataset: sourceActualUsageResult.dataset,
+              simulatedDataset: rawCurveCompareDataset,
+            }) as { rows: Array<Record<string, unknown>>; metrics: Record<string, unknown> })
+          : {
+              rows: compareProjectionRows,
+              metrics: compareProjectionMetrics,
+            };
+    } catch (error: unknown) {
+      if (error instanceof CompareTruthIncompleteError) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            error: "compare_truth_incomplete",
+            message: error.message,
+            reasonCode: "COMPARE_TRUTH_INCOMPLETE",
+            missingDateKeysLocal: error.missingDateKeysLocal,
+            correlationId: labCorrelationId,
+          }),
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
     const displayDatasetProjection =
       isGapfillManualUsageInputMode(testUsageInputMode) && rawCurveCompareDataset
         ? rawCurveCompareDataset
         : baselineDataset;
-    const compareRowsCount = compareProjectionRows.length;
+    const compareRowsCount = Array.isArray(compareProjectionForResponse.rows) ? compareProjectionForResponse.rows.length : 0;
     const artifactSourceMode =
       typeof metaRaw?.artifactSourceMode === "string" ? String(metaRaw.artifactSourceMode) : null;
     const artifactHashMatch =
@@ -2400,7 +2432,11 @@ export async function POST(req: NextRequest) {
       const source = String((row as any)?.source ?? "").toUpperCase();
       return !effectiveValidationDateKeySet.has(dateKey) && source === "SIMULATED" ? count + 1 : count;
     }, 0);
-    const compareRowDateSet = compareProjectionRowDateSet;
+    const compareRowDateSet = new Set(
+      (Array.isArray(compareProjectionForResponse.rows) ? compareProjectionForResponse.rows : [])
+        .map((row) => String((row as any)?.localDate ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    );
     const selectedValidationDateSet = new Set(effectiveValidationOnlyDateKeysLocal);
     const compareRowsMatchSelectedDates =
       compareRowDateSet.size === selectedValidationDateSet.size &&

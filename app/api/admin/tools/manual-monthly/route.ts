@@ -101,11 +101,7 @@ async function buildReadResult(args: {
   correlationId?: string | null;
   exactArtifactInputHash?: string | null;
   requireExactArtifactMatch?: boolean;
-  actualReference?: {
-    userId: string;
-    houseId: string;
-    scenarioId: string | null;
-  } | null;
+  actualDataset?: any;
 }) {
   return buildManualUsagePastSimReadResult({
     userId: args.userId,
@@ -116,7 +112,7 @@ async function buildReadResult(args: {
     exactArtifactInputHash: args.exactArtifactInputHash ?? null,
     requireExactArtifactMatch: args.requireExactArtifactMatch === true,
     callerType: "user_past",
-    actualReference: args.actualReference ?? null,
+    actualDataset: args.actualDataset,
   });
 }
 
@@ -434,10 +430,6 @@ export async function POST(req: NextRequest) {
         payload = { payload: saved.payload, updatedAt: saved.updatedAt };
       }
 
-      const sourcePastScenarioId = await findPastScenarioId({
-        userId: sourceResolved.userId,
-        houseId: sourceResolved.selectedHouse.id,
-      });
       const [labHomeProfile, labApplianceProfile, readResult] = await Promise.all([
         getHomeProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }),
         getApplianceProfileSimulatedByUserHouse({ userId: ownerUserId, houseId: labHome.id }),
@@ -446,11 +438,7 @@ export async function POST(req: NextRequest) {
           houseId: labHome.id,
           scenarioId,
           readMode: "artifact_only",
-          actualReference: {
-            userId: sourceResolved.userId,
-            houseId: sourceResolved.selectedHouse.id,
-            scenarioId: sourcePastScenarioId,
-          },
+          actualDataset: sourceUsageHouse?.dataset ?? null,
         }),
       ]);
 
@@ -685,10 +673,11 @@ export async function POST(req: NextRequest) {
         memoryRssMb: getMemoryRssMb(),
         source: "admin_manual_monthly_route",
       });
-      const sourcePastScenarioId = await findPastScenarioId({
-        userId: sourceResolved.userId,
-        houseId: sourceResolved.selectedHouse.id,
-      });
+      const actualUsageResult = await getActualUsageDatasetForHouse(
+        sourceResolved.selectedHouse.id,
+        sourceResolved.selectedHouse.esiid ?? null,
+        { skipFullYearIntervalFetch: true }
+      ).catch(() => ({ dataset: null }));
       const readResult = await buildReadResult({
         userId: ownerUserId,
         houseId: labHome.id,
@@ -697,11 +686,7 @@ export async function POST(req: NextRequest) {
         correlationId,
         exactArtifactInputHash,
         requireExactArtifactMatch: exactArtifactInputHash != null,
-        actualReference: {
-          userId: sourceResolved.userId,
-          houseId: sourceResolved.selectedHouse.id,
-          scenarioId: sourcePastScenarioId,
-        },
+        actualDataset: actualUsageResult?.dataset ?? null,
       });
       if (readResult.ok) {
         logSimPipelineEvent("admin_manual_monthly_read_result_success", {
