@@ -1144,9 +1144,6 @@ export default function GapFillLabCanonicalClient() {
     selectedTreatmentMode === "MANUAL_MONTHLY" || selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS";
   const showManualAnnualCompare =
     selectedTreatmentMode === "MANUAL_ANNUAL" || selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
-  const showExactIntervalCurveCompare = selectedTreatmentMode === "EXACT_INTERVALS";
-  const showValidationComparePanels =
-    selectedTreatmentMode !== "MANUAL_MONTHLY" && selectedTreatmentMode !== "MANUAL_ANNUAL";
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
@@ -1202,6 +1199,7 @@ export default function GapFillLabCanonicalClient() {
       timezone,
     ]
   );
+  const showTestDayCurveCompare = dailyCurveCompareSummary != null;
   const exportPayloadBase = useMemo(
     () => ({
       workspace: "gapfill-lab-canonical-client",
@@ -1857,30 +1855,20 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {showValidationComparePanels ? (
-              actualHouseCompareProjection.rows.length > 0 ? (
-                <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-                  <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
-                  <div className="mt-1 text-xs text-brand-navy/70">
-                    Persisted compare rows from the actual house Past artifact family.
-                  </div>
-                  <ValidationComparePanel
-                    rows={actualHouseCompareProjection.rows}
-                    metrics={actualHouseCompareProjection.metrics}
-                  />
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                  No persisted actual-house compare rows are currently attached to the source Past artifact.
-                </div>
-              )
-            ) : (
+            {actualHouseCompareProjection.rows.length > 0 ? (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
                 <div className="mt-1 text-xs text-brand-navy/70">
-                  Pure manual modes keep Actual House as the shared real-usage reference, but this validation/test-day compare block is not
-                  the primary manual compare surface. Use the manual bill-period parity section for manual-monthly compare.
+                  Persisted compare rows from the actual house Past artifact family.
                 </div>
+                <ValidationComparePanel
+                  rows={actualHouseCompareProjection.rows}
+                  metrics={actualHouseCompareProjection.metrics}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                No persisted actual-house compare rows are currently attached to the source Past artifact.
               </div>
             )}
             <div className="grid gap-4 xl:grid-cols-2">
@@ -2025,33 +2013,23 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {showValidationComparePanels ? (
-              testHouseCompareProjection.rows.length > 0 ? (
-                <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-                  <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
-                  <div className="mt-1 text-xs text-brand-navy/70">
-                    Persisted compare rows from the canonical test-house artifact family.
-                  </div>
-                  <ValidationComparePanel
-                    rows={testHouseCompareProjection.rows}
-                    metrics={testHouseCompareProjection.metrics}
-                  />
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                  {Array.isArray((testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal) &&
-                  (testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal.length > 0
-                    ? "Validation test days are configured, but compare rows were not returned with this persisted test-house response."
-                    : "No validation/test-day compare rows are available for this test-house artifact yet."}
-                </div>
-              )
-            ) : (
+            {testHouseCompareProjection.rows.length > 0 ? (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
                 <div className="mt-1 text-xs text-brand-navy/70">
-                  Pure manual modes do not use validation/test-day compare as the primary test-house compare surface here. Use the shared
-                  manual bill-period parity section below.
+                  Persisted compare rows from the canonical test-house artifact family.
                 </div>
+                <ValidationComparePanel
+                  rows={testHouseCompareProjection.rows}
+                  metrics={testHouseCompareProjection.metrics}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                {Array.isArray((testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal) &&
+                (testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal.length > 0
+                  ? "Validation test days are configured, but compare rows were not returned with this persisted test-house response."
+                  : "No validation/test-day compare rows are available for this test-house artifact yet."}
               </div>
             )}
             <div className="grid gap-4 xl:grid-cols-2">
@@ -2197,21 +2175,19 @@ export default function GapFillLabCanonicalClient() {
               <div className="mt-2 text-xs text-brand-navy/60">Monthly persisted outputs are not available for both panels yet.</div>
             )}
           </div>
-          {showValidationComparePanels ? (
-            <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
-              <div className="text-sm font-semibold text-brand-navy">Persisted compare metrics</div>
-              <MetadataGrid
-                items={[
-                  { label: "Actual house WAPE", value: `${formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.wape ?? null))}%` },
-                  { label: "Test house WAPE", value: `${formatNumberMaybe(Number(testHouseCompareProjection.metrics?.wape ?? null))}%` },
-                  { label: "Actual house MAE", value: formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.mae ?? null)) },
-                  { label: "Test house MAE", value: formatNumberMaybe(Number(testHouseCompareProjection.metrics?.mae ?? null)) },
-                  { label: "Actual compare rows", value: String(actualHouseCompareProjection.rows.length) },
-                  { label: "Test compare rows", value: String(testHouseCompareProjection.rows.length) },
-                ]}
-              />
-            </div>
-          ) : null}
+          <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
+            <div className="text-sm font-semibold text-brand-navy">Persisted compare metrics</div>
+            <MetadataGrid
+              items={[
+                { label: "Actual house WAPE", value: `${formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.wape ?? null))}%` },
+                { label: "Test house WAPE", value: `${formatNumberMaybe(Number(testHouseCompareProjection.metrics?.wape ?? null))}%` },
+                { label: "Actual house MAE", value: formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.mae ?? null)) },
+                { label: "Test house MAE", value: formatNumberMaybe(Number(testHouseCompareProjection.metrics?.mae ?? null)) },
+                { label: "Actual compare rows", value: String(actualHouseCompareProjection.rows.length) },
+                { label: "Test compare rows", value: String(testHouseCompareProjection.rows.length) },
+              ]}
+            />
+          </div>
         </div>
         {showManualMonthlyCompare ? (
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
@@ -2298,46 +2274,36 @@ export default function GapFillLabCanonicalClient() {
             </div>
           </div>
         ) : null}
-        {showExactIntervalCurveCompare ? (
+        {showTestDayCurveCompare ? (
           <GapFillDailyCurveCompare
             summary={dailyCurveCompareSummary}
             rawReadStatus={result?.ok ? result.curveCompareRawReadStatus ?? null : null}
           />
         ) : null}
-        {showValidationComparePanels ? (
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-              <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>
-              {actualHouseCompareProjection.rows.length > 0 ? (
-                <ValidationComparePanel
-                  rows={actualHouseCompareProjection.rows}
-                  metrics={actualHouseCompareProjection.metrics}
-                />
-              ) : (
-                <div className="mt-2 text-xs text-brand-navy/60">No persisted actual-house compare rows are attached.</div>
-              )}
-            </div>
-            <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-              <div className="text-sm font-semibold text-brand-navy">Test House compare rows</div>
-              {testHouseCompareProjection.rows.length > 0 ? (
-                <ValidationComparePanel
-                  rows={testHouseCompareProjection.rows}
-                  metrics={testHouseCompareProjection.metrics}
-                />
-              ) : (
-                <div className="mt-2 text-xs text-brand-navy/60">No persisted test-house compare rows are attached.</div>
-              )}
-            </div>
-          </div>
-        ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-brand-navy">Validation / test-day compare rows</div>
-            <div className="mt-1 text-xs text-brand-navy/70">
-              Pure manual modes use the bill-period parity table above as the canonical compare surface. Validation/test-day compare
-              rows remain diagnostics-only and are intentionally not shown as the primary manual compare family here.
-            </div>
+            <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>
+            {actualHouseCompareProjection.rows.length > 0 ? (
+              <ValidationComparePanel
+                rows={actualHouseCompareProjection.rows}
+                metrics={actualHouseCompareProjection.metrics}
+              />
+            ) : (
+              <div className="mt-2 text-xs text-brand-navy/60">No persisted actual-house compare rows are attached.</div>
+            )}
           </div>
-        )}
+          <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+            <div className="text-sm font-semibold text-brand-navy">Test House compare rows</div>
+            {testHouseCompareProjection.rows.length > 0 ? (
+              <ValidationComparePanel
+                rows={testHouseCompareProjection.rows}
+                metrics={testHouseCompareProjection.metrics}
+              />
+            ) : (
+              <div className="mt-2 text-xs text-brand-navy/60">No persisted test-house compare rows are attached.</div>
+            )}
+          </div>
+        </div>
       </section>
 
       {result?.ok ? (
