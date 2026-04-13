@@ -17,6 +17,7 @@ export type ManualUsagePastSimReadResult =
       scenarioId: string;
       payload: ManualUsagePayload | null;
       dataset: any;
+      displayDataset: any;
       compareProjection: {
         rows?: unknown;
         metrics?: unknown;
@@ -121,6 +122,19 @@ export async function buildManualUsagePastSimReadResult(args: {
     };
   }
 
+  const displayDataset = shouldUseRawDisplayDataset(args.usageInputMode)
+    ? await loadManualUsageRawDisplayDataset({
+        userId: args.userId,
+        houseId: args.houseId,
+        scenarioId: args.scenarioId,
+        readMode: args.readMode,
+        exactArtifactInputHash: args.exactArtifactInputHash ?? null,
+        requireExactArtifactMatch: args.requireExactArtifactMatch === true,
+        correlationId: args.correlationId ?? null,
+        fallbackDataset: out.dataset,
+      })
+    : out.dataset;
+
   emit("manual_readback_dataset_ready", {
     intervalCount: Array.isArray((out.dataset as any)?.series?.intervals15) ? (out.dataset as any).series.intervals15.length : 0,
     dayCount: Array.isArray((out.dataset as any)?.daily) ? (out.dataset as any).daily.length : 0,
@@ -163,6 +177,9 @@ export async function buildManualUsagePastSimReadResult(args: {
     reconciliationRowCount: Array.isArray((manualMonthlyReconciliation as any)?.rows)
       ? (manualMonthlyReconciliation as any).rows.length
       : 0,
+    displayDatasetAvailable: displayDataset != null,
+    displayDatasetSummaryTotalKwh:
+      typeof displayDataset?.summary?.totalKwh === "number" ? displayDataset.summary.totalKwh : null,
   });
   return {
     ok: true,
@@ -170,12 +187,50 @@ export async function buildManualUsagePastSimReadResult(args: {
     scenarioId: args.scenarioId,
     payload: manualUsagePayload,
     dataset: out.dataset,
+    displayDataset,
     compareProjection,
     manualReadModel,
     manualMonthlyReconciliation,
     sharedDiagnostics,
     manualParitySummary,
   };
+}
+
+function shouldUseRawDisplayDataset(usageInputMode: string | null | undefined): boolean {
+  return (
+    usageInputMode === "MANUAL_MONTHLY" ||
+    usageInputMode === "MONTHLY_FROM_SOURCE_INTERVALS" ||
+    usageInputMode === "MANUAL_ANNUAL" ||
+    usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
+  );
+}
+
+async function loadManualUsageRawDisplayDataset(args: {
+  userId: string;
+  houseId: string;
+  scenarioId: string;
+  readMode: "artifact_only" | "allow_rebuild";
+  exactArtifactInputHash?: string | null;
+  requireExactArtifactMatch?: boolean;
+  correlationId?: string | null;
+  fallbackDataset: any;
+}) {
+  const raw = await getSimulatedUsageForHouseScenario({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    readMode: args.readMode,
+    exactArtifactInputHash: args.exactArtifactInputHash ?? undefined,
+    requireExactArtifactMatch: args.requireExactArtifactMatch === true,
+    projectionMode: "raw",
+    correlationId: args.correlationId ?? undefined,
+    readContext: {
+      artifactReadMode: args.readMode,
+      projectionMode: "raw",
+      compareSidecarRequest: false,
+    },
+  });
+  return raw.ok ? raw.dataset : args.fallbackDataset;
 }
 
 async function resolveManualCompareActualDataset(args: {

@@ -3084,6 +3084,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       })
     );
     expect(body.baselineDatasetProjection?.summary?.totalKwh).toBe(14866.6);
+    expect(body.displayDatasetProjection?.summary?.totalKwh).toBe(15029.5);
   });
 
   it("maps annual source-interval mode onto shared manual dispatch instead of direct recalc", async () => {
@@ -3309,6 +3310,18 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     );
     expect(getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({
+        userId: "u1",
+        houseId: "test-home-1",
+        scenarioId: "past-s1",
+        readMode: "artifact_only",
+        projectionMode: "raw",
+        exactArtifactInputHash: "artifact-hash-1",
+        requireExactArtifactMatch: true,
+      })
+    );
+    expect(getSimulatedUsageForHouseScenario).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         userId: "u1",
         houseId: "h1",

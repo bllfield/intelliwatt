@@ -771,6 +771,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     validationSelectionDiagnostics: args.selectionDiagnostics,
     usage365: args.usage365,
     baselineDatasetProjection: readResultWithManualPayload.dataset,
+    displayDatasetProjection: readResultWithManualPayload.displayDataset,
     compareProjection: readResultWithManualPayload.compareProjection,
     manualReadModel: readResultWithManualPayload.manualReadModel,
     manualMonthlyReconciliation: readResultWithManualPayload.manualMonthlyReconciliation,
@@ -2328,6 +2329,10 @@ export async function POST(req: NextRequest) {
       rows: compareProjectionRows,
       metrics: compareProjectionMetrics,
     };
+    const displayDatasetProjection =
+      isGapfillManualUsageInputMode(testUsageInputMode) && rawCurveCompareDataset
+        ? rawCurveCompareDataset
+        : baselineDataset;
     const compareRowsCount = compareProjectionRows.length;
     const artifactSourceMode =
       typeof metaRaw?.artifactSourceMode === "string" ? String(metaRaw.artifactSourceMode) : null;
@@ -2583,6 +2588,7 @@ export async function POST(req: NextRequest) {
       validationSelectionDiagnostics: selectionDiagnostics,
       usage365,
       baselineDatasetProjection: baselineDataset,
+      displayDatasetProjection,
       compareProjection: compareProjectionForResponse,
       buildId: buildRow?.id ?? null,
       buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,

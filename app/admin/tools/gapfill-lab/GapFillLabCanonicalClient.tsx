@@ -63,6 +63,7 @@ type RunResult = {
   testHomeLink?: any;
   usage365?: any;
   baselineDatasetProjection?: any;
+  displayDatasetProjection?: any;
   manualReadModel?: any;
   manualMonthlyReconciliation?: any;
   manualParitySummary?: any;
@@ -164,7 +165,12 @@ function prettyJson(v: unknown): string {
 }
 
 function isManualUsageTreatmentMode(value: string | null | undefined): boolean {
-  return value === "MANUAL_MONTHLY" || value === "MONTHLY_FROM_SOURCE_INTERVALS" || value === "ANNUAL_FROM_SOURCE_INTERVALS";
+  return (
+    value === "MANUAL_MONTHLY" ||
+    value === "MONTHLY_FROM_SOURCE_INTERVALS" ||
+    value === "MANUAL_ANNUAL" ||
+    value === "ANNUAL_FROM_SOURCE_INTERVALS"
+  );
 }
 
 function parseJsonSafe(s: string): { ok: true; value: any } | { ok: false; error: string } {
@@ -1002,6 +1008,7 @@ export default function GapFillLabCanonicalClient() {
     [actualHouseBaselineDataset, actualPastSnapshotReads]
   );
   const testHouseBaselineDataset = result?.ok ? result.baselineDatasetProjection ?? null : null;
+  const testHouseDisplayDataset = result?.ok ? result.displayDatasetProjection ?? result.baselineDatasetProjection ?? null : null;
   const testHouseCompareProjection = useMemo(
     () =>
       result?.ok
@@ -1034,23 +1041,23 @@ export default function GapFillLabCanonicalClient() {
   );
   const testHouseOverride = useMemo(
     () =>
-      testHouseBaselineDataset
+      testHouseDisplayDataset
         ? [
             buildDashboardHouse({
               houseId: String((result as any)?.testHomeId ?? effectiveTestHomeId ?? "test-house"),
               label: "Test House",
-              dataset: testHouseBaselineDataset,
+              dataset: testHouseDisplayDataset,
             }),
           ]
         : null,
-    [effectiveTestHomeId, result, testHouseBaselineDataset]
+    [effectiveTestHomeId, result, testHouseDisplayDataset]
   );
   const actualVsTestMonthlyRows = useMemo(() => {
     return buildActualVsTestMonthlyRows({
       actualDataset: actualHouseBaselineDataset,
-      testDataset: testHouseBaselineDataset,
+      testDataset: testHouseDisplayDataset,
     });
-  }, [actualHouseBaselineDataset, testHouseBaselineDataset]);
+  }, [actualHouseBaselineDataset, testHouseDisplayDataset]);
   const testSharedDiagnostics =
     result?.ok && (result as any).sharedDiagnostics && typeof (result as any).sharedDiagnostics === "object"
       ? ((result as any).sharedDiagnostics as Record<string, unknown>)
@@ -2129,16 +2136,16 @@ export default function GapFillLabCanonicalClient() {
           <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test annual kWh</div>
             <div className="mt-2 text-xl font-semibold text-brand-navy">
-              {formatNumberMaybe(testHouseBaselineDataset?.summary?.totalKwh, 0)}
+              {formatNumberMaybe(testHouseDisplayDataset?.summary?.totalKwh, 0)}
             </div>
           </div>
           <div className="rounded border border-brand-blue/10 bg-brand-navy/5 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">Test vs actual delta</div>
             <div className="mt-2 text-xl font-semibold text-brand-navy">
               {formatNumberMaybe(
-                typeof testHouseBaselineDataset?.summary?.totalKwh === "number" &&
+                typeof testHouseDisplayDataset?.summary?.totalKwh === "number" &&
                   typeof actualHouseBaselineDataset?.summary?.totalKwh === "number"
-                  ? testHouseBaselineDataset.summary.totalKwh - actualHouseBaselineDataset.summary.totalKwh
+                  ? testHouseDisplayDataset.summary.totalKwh - actualHouseBaselineDataset.summary.totalKwh
                   : null,
                 0
               )}
