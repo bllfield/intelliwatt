@@ -30,6 +30,7 @@ import {
   buildValidationCompareProjectionSidecar,
   CompareTruthIncompleteError,
 } from "@/modules/usageSimulator/compareProjection";
+import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import { getWeatherForRange } from "@/lib/sim/weatherProvider";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import { validateHomeProfile } from "@/modules/homeProfile/validation";
@@ -871,6 +872,14 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactCacheUpdatedAt: artifactRow?.updatedAt instanceof Date ? artifactRow.updatedAt.toISOString() : null,
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     sharedDiagnostics: readResultWithManualPayload.sharedDiagnostics,
+    curveCompareActualIntervals15: readResultWithManualPayload.curveCompareActualIntervals15,
+    curveCompareSimulatedIntervals15: readResultWithManualPayload.curveCompareSimulatedIntervals15,
+    curveCompareSimulatedDailyRows: readResultWithManualPayload.curveCompareSimulatedDailyRows,
+    curveCompareRawReadStatus:
+      Array.isArray(readResultWithManualPayload.curveCompareSimulatedIntervals15) &&
+      readResultWithManualPayload.curveCompareSimulatedIntervals15.length > 0
+        ? "available"
+        : null,
     canonicalReadResultSummary,
     compareProjectionSummary: {
       attached: Array.isArray(readResultWithManualPayload.compareProjection?.rows) &&
@@ -2480,6 +2489,20 @@ export async function POST(req: NextRequest) {
       isGapfillManualUsageInputMode(testUsageInputMode) && rawCurveCompareDataset
         ? rawCurveCompareDataset
         : baselineDataset;
+    const sharedCurveComparePayload =
+      isGapfillManualUsageInputMode(testUsageInputMode) && sourceActualUsageResult?.dataset && rawCurveCompareDataset
+        ? buildDailyCurveComparePayload({
+            actualDataset: sourceActualUsageResult.dataset,
+            simulatedDataset: rawCurveCompareDataset,
+            compareRows: compareProjectionForResponse.rows,
+            timezone,
+          })
+        : null;
+    const curveCompareActualIntervals15 = sharedCurveComparePayload?.actualIntervals15 ?? [];
+    const curveCompareSimulatedIntervals15ForResponse =
+      sharedCurveComparePayload?.simulatedIntervals15 ?? rawCurveCompareSimulatedIntervals15;
+    const curveCompareDailyRowsForResponse =
+      sharedCurveComparePayload?.simulatedDailyRows ?? rawCurveCompareDailyRows;
     const compareRowsCount = Array.isArray(compareProjectionForResponse.rows) ? compareProjectionForResponse.rows.length : 0;
     const artifactSourceMode =
       typeof metaRaw?.artifactSourceMode === "string" ? String(metaRaw.artifactSourceMode) : null;
@@ -2774,8 +2797,9 @@ export async function POST(req: NextRequest) {
       pipelineDiagnosticsSummary,
       diagnosticsVerdict,
       sharedDiagnostics,
-      curveCompareSimulatedIntervals15: rawCurveCompareSimulatedIntervals15,
-      curveCompareSimulatedDailyRows: rawCurveCompareDailyRows,
+      curveCompareActualIntervals15,
+      curveCompareSimulatedIntervals15: curveCompareSimulatedIntervals15ForResponse,
+      curveCompareSimulatedDailyRows: curveCompareDailyRowsForResponse,
       curveCompareRawReadStatus: rawCurveCompareReadStatus,
       modelAssumptions: {
         canonicalReadFamily: "getSimulatedUsageForHouseScenario->/api/user/usage/simulated/house",

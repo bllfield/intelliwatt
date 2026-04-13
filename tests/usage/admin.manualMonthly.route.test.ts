@@ -913,4 +913,69 @@ describe("admin manual monthly route", () => {
       ],
     });
   });
+
+  it("read_result exposes shared manual daily-curve compare payloads from actual source truth plus raw artifact intervals", async () => {
+    mocks.buildValidationCompareProjectionFromDatasets.mockReturnValueOnce({
+      rows: [
+        {
+          localDate: "2024-12-31",
+          dayType: "weekday",
+          actualDayKwh: 0.4,
+          simulatedDayKwh: 0.5,
+          errorKwh: 0.1,
+          percentError: 25,
+        },
+      ],
+      metrics: { wape: 25 },
+    });
+    mocks.getSimulatedUsageForHouseScenario
+      .mockResolvedValueOnce({
+        ok: true,
+        dataset: {
+          meta: {
+            mode: "MANUAL_TOTALS",
+            lockboxInput: { mode: "MANUAL_MONTHLY" },
+            lockboxPerDayTrace: [],
+            validationOnlyDateKeysLocal: ["2024-12-31"],
+          },
+          daily: [{ date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        dataset: {
+          meta: {
+            mode: "MANUAL_TOTALS",
+            lockboxInput: { mode: "MANUAL_MONTHLY" },
+            lockboxPerDayTrace: [],
+          },
+          daily: [{ date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
+          series: {
+            intervals15: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.5 }],
+          },
+        },
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
+    const res = await POST(
+      buildRequest({
+        action: "read_result",
+        email: "user@example.com",
+        houseId: "source-house-1",
+        exactArtifactInputHash: "artifact-hash-1",
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.readResult.curveCompareActualIntervals15).toEqual([
+      { timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.4 },
+    ]);
+    expect(body.readResult.curveCompareSimulatedIntervals15).toEqual([
+      { timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.5 },
+    ]);
+    expect(body.readResult.curveCompareSimulatedDailyRows).toEqual([
+      { date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+    ]);
+  });
 });

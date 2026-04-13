@@ -3511,6 +3511,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       })
     );
     expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith("h1", "E1", expect.objectContaining({ skipFullYearIntervalFetch: true }));
+    expect(body.curveCompareActualIntervals15).toBeDefined();
+    expect(Array.isArray(body.curveCompareActualIntervals15)).toBe(true);
   });
 
   it("surfaces shared pure-manual travel donor diagnostics on gapfill readback", async () => {

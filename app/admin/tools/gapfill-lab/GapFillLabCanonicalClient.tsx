@@ -121,6 +121,7 @@ type RunResult = {
     }>;
     metrics?: Record<string, unknown>;
   };
+  curveCompareActualIntervals15?: Array<{ timestamp: string; kwh: number }>;
   curveCompareSimulatedIntervals15?: Array<{ timestamp: string; kwh: number }>;
   curveCompareSimulatedDailyRows?: Array<{
     date: string;
@@ -1195,9 +1196,9 @@ export default function GapFillLabCanonicalClient() {
   );
   const dailyCurveCompareSummary = useMemo(
     () =>
-      result?.ok && actualHouseBaselineDataset && testHouseBaselineDataset
+      result?.ok && testHouseBaselineDataset
         ? buildDailyCurveCompareSummary({
-            actualIntervals: actualHouseBaselineDataset?.series?.intervals15 ?? [],
+            actualIntervals: result.curveCompareActualIntervals15 ?? actualHouseBaselineDataset?.series?.intervals15 ?? [],
             simulatedIntervals: result.curveCompareSimulatedIntervals15 ?? [],
             compareRows: testHouseCompareProjection.rows,
             timezone,

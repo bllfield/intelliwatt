@@ -355,7 +355,7 @@ export function GapFillDailyCurveCompare(props: {
   if (!props.summary) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-        Daily Curve Compare appears only when GapFill already has persisted actual-vs-sim compare days plus both artifact-backed interval datasets to overlay.
+        Daily Curve Compare appears only when the admin surface already has persisted actual-vs-sim compare days plus both artifact-backed interval datasets to overlay.
         {props.rawReadStatus ? ` Raw compare read status: ${props.rawReadStatus}.` : ""}
       </div>
     );
@@ -366,7 +366,7 @@ export function GapFillDailyCurveCompare(props: {
       <div>
         <h3 className="text-lg font-semibold text-brand-navy">Daily Curve Compare</h3>
         <p className="mt-1 text-sm text-brand-navy/70">
-          Admin-only, read-only interval-shape diagnostic built from actual-house interval truth plus raw test-house artifact intervals for the same scored/test days.
+          Admin-only, read-only interval-shape diagnostic built from actual interval truth plus raw artifact intervals for the same compare days.
         </p>
       </div>
       <div className="flex flex-wrap gap-2">

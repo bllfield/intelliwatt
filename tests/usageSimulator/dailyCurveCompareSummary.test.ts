@@ -1,7 +1,53 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyCurveCompareSummary } from "@/modules/usageSimulator/dailyCurveCompareSummary";
+import {
+  buildDailyCurveComparePayload,
+  buildDailyCurveCompareSummary,
+} from "@/modules/usageSimulator/dailyCurveCompareSummary";
 
 describe("buildDailyCurveCompareSummary", () => {
+  it("filters actual and simulated interval payloads to compare-day dates only", () => {
+    const payload = buildDailyCurveComparePayload({
+      timezone: "America/Chicago",
+      compareRows: [
+        {
+          localDate: "2025-07-04",
+          dayType: "weekday",
+          actualDayKwh: 3,
+          simulatedDayKwh: 3.5,
+          errorKwh: 0.5,
+          percentError: 16.7,
+        },
+      ],
+      actualDataset: {
+        series: {
+          intervals15: [
+            { timestamp: "2025-07-04T05:00:00.000Z", kwh: 1 },
+            { timestamp: "2025-07-05T05:00:00.000Z", kwh: 9 },
+          ],
+        },
+      },
+      simulatedDataset: {
+        series: {
+          intervals15: [
+            { timestamp: "2025-07-04T05:00:00.000Z", kwh: 0.5 },
+            { timestamp: "2025-07-05T05:00:00.000Z", kwh: 8 },
+          ],
+        },
+        daily: [
+          { date: "2025-07-04", kwh: 3.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+          { date: "2025-07-05", kwh: 8, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
+        ],
+      },
+    });
+
+    expect(payload).toEqual({
+      selectedDateKeys: ["2025-07-04"],
+      actualIntervals15: [{ timestamp: "2025-07-04T05:00:00.000Z", kwh: 1 }],
+      simulatedIntervals15: [{ timestamp: "2025-07-04T05:00:00.000Z", kwh: 0.5 }],
+      simulatedDailyRows: [{ date: "2025-07-04", kwh: 3.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
+    });
+  });
+
   it("builds per-day overlays, aggregates, and slot metrics from artifact-backed compare dates only", () => {
     const summary = buildDailyCurveCompareSummary({
       timezone: "America/Chicago",

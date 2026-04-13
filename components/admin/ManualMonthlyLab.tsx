@@ -5,9 +5,11 @@ import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { WeatherSensitivityAdminDiagnostics } from "@/components/admin/WeatherSensitivityAdminDiagnostics";
+import { GapFillDailyCurveCompare } from "@/components/admin/GapFillDailyCurveCompare";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
+import { buildDailyCurveCompareSummary } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import { resolveManualReadbackPollPlan } from "@/modules/manualUsage/readbackPolling";
 import { resolveManualStageOneLabPayloads, resolveManualStageOnePresentation } from "@/modules/manualUsage/statementRanges";
 import { buildManualStageOnePresentationFromReadModel } from "@/modules/manualUsage/readModel";
@@ -275,6 +277,28 @@ export default function ManualMonthlyLab() {
         payloadJson: range,
       }));
   }, [activeManualPayload, displayedReadResult]);
+  const dailyCurveCompareSummary = useMemo(
+    () =>
+      displayedReadResult?.ok
+        ? buildDailyCurveCompareSummary({
+            actualIntervals: displayedReadResult?.curveCompareActualIntervals15 ?? [],
+            simulatedIntervals: displayedReadResult?.curveCompareSimulatedIntervals15 ?? [],
+            compareRows: displayedReadResult?.compareProjection?.rows ?? [],
+            timezone:
+              displayedReadResult?.displayDataset?.meta?.timezone ??
+              displayedReadResult?.dataset?.meta?.timezone ??
+              "America/Chicago",
+            perDayTrace:
+              (displayedReadResult?.displayDataset as any)?.meta?.lockboxPerDayTrace ??
+              (displayedReadResult?.dataset as any)?.meta?.lockboxPerDayTrace ??
+              [],
+            rawDailyRows:
+              displayedReadResult?.curveCompareSimulatedDailyRows ??
+              (Array.isArray(displayedReadResult?.displayDataset?.daily) ? displayedReadResult.displayDataset.daily : []),
+          })
+        : null,
+    [displayedReadResult]
+  );
 
   async function callRoute(action: string, extra: Record<string, unknown> = {}) {
     const res = await fetch("/api/admin/tools/manual-monthly", {
@@ -718,6 +742,7 @@ export default function ManualMonthlyLab() {
                 <ManualMonthlyReconciliationPanel reconciliation={displayedReadResult.manualMonthlyReconciliation} />
               </div>
             ) : null}
+            {dailyCurveCompareSummary ? <GapFillDailyCurveCompare summary={dailyCurveCompareSummary} /> : null}
           </div>
         ) : null}
 

@@ -38,8 +38,11 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(componentSource).toContain("Donor weights + variance guardrail");
     expect(componentSource).toContain("Thermal similarity + adjustment");
     expect(componentSource).toContain("Final selected shape path");
-    expect(manualMonthlySource).not.toContain("Daily Curve Compare");
-    expect(source).toContain("showExactIntervalCurveCompare");
+    expect(manualMonthlySource).toContain("GapFillDailyCurveCompare");
+    expect(manualMonthlySource).toContain("buildDailyCurveCompareSummary");
+    expect(source).toContain("showTestDayCurveCompare");
+    expect(source).toContain("curveCompareActualIntervals15");
+    expect(source).toContain('selectedTreatmentMode === "MANUAL_MONTHLY"');
   });
 
   it("adds manual-usage reconciliation compare panels without replacing exact-interval UI", () => {

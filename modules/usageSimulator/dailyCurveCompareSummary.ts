@@ -54,6 +54,13 @@ type DailyRowSummary = {
   sourceDetail: string | null;
 };
 
+export type DailyCurveComparePayload = {
+  selectedDateKeys: string[];
+  actualIntervals15: Array<{ timestamp: string; kwh: number }>;
+  simulatedIntervals15: Array<{ timestamp: string; kwh: number }>;
+  simulatedDailyRows: Array<{ date: string; kwh: number; source: string | null; sourceDetail: string | null }>;
+};
+
 export type DailyCurveCompareSlot = {
   slot: number;
   hhmm: string;
@@ -287,6 +294,57 @@ function normalizeDailyRows(rows: unknown): Map<string, DailyRowSummary> {
     });
   }
   return byDate;
+}
+
+function filterIntervalsToSelectedDates(
+  rows: unknown,
+  timezone: string,
+  selectedDateKeySet: Set<string>
+): Array<{ timestamp: string; kwh: number }> {
+  return asArray<IntervalPoint>(rows)
+    .filter((row) => {
+      const timestamp = String(row?.timestamp ?? "").trim();
+      return timestamp.length > 0 && selectedDateKeySet.has(dateKeyInTimezone(timestamp, timezone));
+    })
+    .map((row) => ({
+      timestamp: String(row.timestamp ?? ""),
+      kwh: Number(row.kwh ?? 0) || 0,
+    }));
+}
+
+function filterDailyRowsToSelectedDates(
+  rows: unknown,
+  selectedDateKeySet: Set<string>
+): Array<{ date: string; kwh: number; source: string | null; sourceDetail: string | null }> {
+  return asArray<Record<string, unknown>>(rows)
+    .filter((row) => selectedDateKeySet.has(String(row.date ?? "").slice(0, 10)))
+    .map((row) => ({
+      date: String(row.date ?? "").slice(0, 10),
+      kwh: Number(row.kwh ?? 0) || 0,
+      source: typeof row.source === "string" ? row.source : null,
+      sourceDetail: typeof row.sourceDetail === "string" ? row.sourceDetail : null,
+    }))
+    .sort((left, right) => left.date.localeCompare(right.date));
+}
+
+export function buildDailyCurveComparePayload(args: {
+  actualDataset?: { series?: { intervals15?: unknown } | null } | null | undefined;
+  simulatedDataset?: { series?: { intervals15?: unknown } | null; daily?: unknown } | null | undefined;
+  compareRows: unknown;
+  timezone: string | null | undefined;
+}): DailyCurveComparePayload | null {
+  const timezone = String(args.timezone ?? "").trim();
+  if (!timezone) return null;
+  const compareRows = normalizeCompareRows(args.compareRows);
+  if (compareRows.length === 0) return null;
+  const selectedDateKeys = Array.from(new Set(compareRows.map((row) => row.localDate))).sort();
+  const selectedDateKeySet = new Set(selectedDateKeys);
+  return {
+    selectedDateKeys,
+    actualIntervals15: filterIntervalsToSelectedDates(args.actualDataset?.series?.intervals15, timezone, selectedDateKeySet),
+    simulatedIntervals15: filterIntervalsToSelectedDates(args.simulatedDataset?.series?.intervals15, timezone, selectedDateKeySet),
+    simulatedDailyRows: filterDailyRowsToSelectedDates(args.simulatedDataset?.daily, selectedDateKeySet),
+  };
 }
 
 function intervalsByDateAndSlot(

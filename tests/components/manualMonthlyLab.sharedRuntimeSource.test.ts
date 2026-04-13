@@ -103,4 +103,15 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
     expect(source).not.toContain("buildSharedWeatherSensitivityScore");
   });
+
+  it("renders the shared daily curve compare from artifact-backed compare payloads", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("GapFillDailyCurveCompare");
+    expect(source).toContain("buildDailyCurveCompareSummary");
+    expect(source).toContain("displayedReadResult?.curveCompareActualIntervals15");
+    expect(source).toContain("displayedReadResult?.curveCompareSimulatedIntervals15");
+    expect(source).toContain("displayedReadResult?.curveCompareSimulatedDailyRows");
+    expect(source).toContain("displayedReadResult?.compareProjection?.rows");
+  });
 });

@@ -6,6 +6,7 @@ import {
   buildValidationCompareProjectionFromDatasets,
   buildValidationCompareProjectionSidecar,
 } from "@/modules/usageSimulator/compareProjection";
+import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import {
   buildSharedPastSimDiagnostics,
   type SharedDiagnosticsCallerType,
@@ -25,6 +26,14 @@ export type ManualUsagePastSimReadResult =
         rows?: unknown;
         metrics?: unknown;
       };
+      curveCompareActualIntervals15: Array<{ timestamp: string; kwh: number }>;
+      curveCompareSimulatedIntervals15: Array<{ timestamp: string; kwh: number }>;
+      curveCompareSimulatedDailyRows: Array<{
+        date: string;
+        kwh: number;
+        source: string | null;
+        sourceDetail: string | null;
+      }>;
       manualReadModel: ManualUsageReadModel | null;
       manualMonthlyReconciliation: ReturnType<typeof buildManualMonthlyReconciliation>;
       sharedDiagnostics: ReturnType<typeof buildSharedPastSimDiagnostics>;
@@ -96,6 +105,17 @@ export async function buildManualUsagePastSimReadResult(args: {
   emit("manual_readback_start", {
     requireExactArtifactMatch: args.requireExactArtifactMatch === true,
   });
+  const manualUsageRecord =
+    args.manualUsagePayload !== undefined
+      ? { payload: args.manualUsagePayload }
+      : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
+  const effectiveUsageInputMode =
+    args.usageInputMode ??
+    (manualUsageRecord.payload?.mode === "ANNUAL"
+      ? "MANUAL_ANNUAL"
+      : manualUsageRecord.payload?.mode === "MONTHLY"
+        ? "MANUAL_MONTHLY"
+        : null);
   const out = await getSimulatedUsageForHouseScenario({
     userId: args.userId,
     houseId: args.houseId,
@@ -125,7 +145,7 @@ export async function buildManualUsagePastSimReadResult(args: {
     };
   }
 
-  const displayDataset = shouldUseRawDisplayDataset(args.usageInputMode)
+  const displayDataset = shouldUseRawDisplayDataset(effectiveUsageInputMode)
     ? await loadManualUsageRawDisplayDataset({
         userId: args.userId,
         houseId: args.houseId,
@@ -164,7 +184,7 @@ export async function buildManualUsagePastSimReadResult(args: {
       artifactInputHash: args.artifactInputHash ?? null,
       artifactEngineVersion: args.artifactEngineVersion ?? null,
       artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
-      manualUsagePayload: args.manualUsagePayload,
+      manualUsagePayload: manualUsageRecord.payload,
       actualDataset: resolvedActualDataset,
       displayDataset,
     });
@@ -176,6 +196,12 @@ export async function buildManualUsagePastSimReadResult(args: {
     manualReadModel,
     sharedDiagnostics,
   });
+  const curveComparePayload = buildDailyCurveComparePayload({
+    actualDataset: resolvedActualDataset,
+    simulatedDataset: displayDataset,
+    compareRows: compareProjection?.rows ?? [],
+    timezone: displayDataset?.meta?.timezone ?? out.dataset?.meta?.timezone ?? "America/Chicago",
+  });
   emit("manual_readback_success", {
     compareRowCount: Array.isArray(compareProjection?.rows) ? compareProjection.rows.length : 0,
     reconciliationRowCount: Array.isArray((manualMonthlyReconciliation as any)?.rows)
@@ -184,6 +210,8 @@ export async function buildManualUsagePastSimReadResult(args: {
     displayDatasetAvailable: displayDataset != null,
     displayDatasetSummaryTotalKwh:
       typeof displayDataset?.summary?.totalKwh === "number" ? displayDataset.summary.totalKwh : null,
+    curveCompareActualIntervalCount: curveComparePayload?.actualIntervals15.length ?? 0,
+    curveCompareSimIntervalCount: curveComparePayload?.simulatedIntervals15.length ?? 0,
   });
   return {
     ok: true,
@@ -193,6 +221,9 @@ export async function buildManualUsagePastSimReadResult(args: {
     dataset: out.dataset,
     displayDataset,
     compareProjection,
+    curveCompareActualIntervals15: curveComparePayload?.actualIntervals15 ?? [],
+    curveCompareSimulatedIntervals15: curveComparePayload?.simulatedIntervals15 ?? [],
+    curveCompareSimulatedDailyRows: curveComparePayload?.simulatedDailyRows ?? [],
     manualReadModel,
     manualMonthlyReconciliation,
     sharedDiagnostics,
