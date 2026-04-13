@@ -2365,11 +2365,23 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.correlationId).toBe("manual-cid-1");
     expect(dispatchPastSimRecalc).toHaveBeenCalledTimes(1);
     expect(recalcSimulatorBuild).not.toHaveBeenCalled();
-    expect(selectValidationDayKeys).not.toHaveBeenCalled();
-    expect(getActualIntervalsForRange).not.toHaveBeenCalled();
+    expect(selectValidationDayKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "manual",
+        manualDateKeys: ["2025-04-10"],
+      })
+    );
+    expect(getActualIntervalsForRange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        houseId: "h1",
+        esiid: "E1",
+      })
+    );
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
     expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.mode).toBe("MANUAL_TOTALS");
-    expect(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal).toBeUndefined();
+    expect(Array.from(dispatchPastSimRecalc.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal ?? []).sort()).toEqual([
+      "2025-04-10",
+    ]);
     expect(body.result?.canonicalArtifactInputHash).toBe("manual-canonical-hash-1");
   });
 

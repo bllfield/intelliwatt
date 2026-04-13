@@ -1857,20 +1857,30 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {actualHouseCompareProjection.rows.length > 0 ? (
+            {showValidationComparePanels ? (
+              actualHouseCompareProjection.rows.length > 0 ? (
+                <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+                  <div className="mt-1 text-xs text-brand-navy/70">
+                    Persisted compare rows from the actual house Past artifact family.
+                  </div>
+                  <ValidationComparePanel
+                    rows={actualHouseCompareProjection.rows}
+                    metrics={actualHouseCompareProjection.metrics}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  No persisted actual-house compare rows are currently attached to the source Past artifact.
+                </div>
+              )
+            ) : (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
                 <div className="mt-1 text-xs text-brand-navy/70">
-                  Persisted compare rows from the actual house Past artifact family.
+                  Pure manual modes keep Actual House as the shared real-usage reference, but this validation/test-day compare block is not
+                  the primary manual compare surface. Use the manual bill-period parity section for manual-monthly compare.
                 </div>
-                <ValidationComparePanel
-                  rows={actualHouseCompareProjection.rows}
-                  metrics={actualHouseCompareProjection.metrics}
-                />
-              </div>
-            ) : (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                No persisted actual-house compare rows are currently attached to the source Past artifact.
               </div>
             )}
             <div className="grid gap-4 xl:grid-cols-2">

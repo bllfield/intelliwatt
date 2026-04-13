@@ -1679,15 +1679,7 @@ export async function POST(req: NextRequest) {
       testRanges: selectedTestRanges,
       testDaysRequested,
     });
-    if (isManualUsageMode) {
-      selectionDiagnostics = {
-        modeUsed: validationPolicy.selectionMode,
-        targetCount: validationPolicy.validationDayCount,
-        selectedCount: null,
-        delegatedToSharedPastSimRead: true,
-        source: "manual_usage_shared_dispatch",
-      };
-    } else if (usingSourceTravelRangesForRecalc) {
+    if (usingSourceTravelRangesForRecalc) {
       const sourcePastScenario = await (prisma as any).usageSimulatorScenario
         .findFirst({
           where: {
@@ -1779,7 +1771,7 @@ export async function POST(req: NextRequest) {
       testDaysSelected = selectedValidation.selectedDateKeys.length;
       selectionDiagnostics = selectedValidation.diagnostics;
     }
-    if (!isManualUsageMode && testDateKeysLocal.size === 0) {
+    if (testDateKeysLocal.size === 0) {
       return NextResponse.json(
         attachFailureContract({
           ok: false,
@@ -1910,6 +1902,7 @@ export async function POST(req: NextRequest) {
           weatherPreference: gapfillWeatherLogic.weatherPreference,
           persistPastSimBaseline: true,
           preLockboxTravelRanges: effectiveManualTravelRanges,
+          validationOnlyDateKeysLocal: testDateKeysLocal.size > 0 ? testDateKeysLocal : undefined,
           validationDaySelectionMode: testSelectionMode,
           validationDayCount: validationPolicy.validationDayCount,
           correlationId: labCorrelationId,
