@@ -39,6 +39,9 @@ describe("manual monthly reconciliation", () => {
       dataset: {
         meta: {
           filledMonths: [],
+          lockboxInput: {
+            mode: "MANUAL_MONTHLY",
+          },
           manualMonthlyInputState: {
             inputKindByMonth: { "2025-04": "entered_nonzero" },
           },
@@ -179,7 +182,7 @@ describe("manual monthly reconciliation", () => {
     });
   });
 
-  it("keeps bill-period targets authoritative while surfacing source actual totals from shared diagnostics", () => {
+  it("does not relabel source-derived diagnostic month totals as actual interval truth for pure manual monthly", () => {
     const out = buildManualMonthlyReconciliation({
       payload: {
         mode: "MONTHLY",
@@ -210,7 +213,7 @@ describe("manual monthly reconciliation", () => {
 
     expect(out?.rows[0]).toMatchObject({
       month: "2025-04",
-      actualIntervalTotalKwh: 284,
+      actualIntervalTotalKwh: null,
       enteredStatementTotalKwh: 300,
       stageOneTargetTotalKwh: 300,
       simulatedStatementTotalKwh: 300,

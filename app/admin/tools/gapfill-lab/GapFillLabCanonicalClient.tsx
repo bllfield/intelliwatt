@@ -1145,6 +1145,8 @@ export default function GapFillLabCanonicalClient() {
   const showManualAnnualCompare =
     selectedTreatmentMode === "MANUAL_ANNUAL" || selectedTreatmentMode === "ANNUAL_FROM_SOURCE_INTERVALS";
   const showExactIntervalCurveCompare = selectedTreatmentMode === "EXACT_INTERVALS";
+  const showValidationComparePanels =
+    selectedTreatmentMode !== "MANUAL_MONTHLY" && selectedTreatmentMode !== "MANUAL_ANNUAL";
 
   const apiSourceHouseId = result?.ok ? (result as any).sourceHouseId : undefined;
   const apiTestHomeId = result?.ok ? (result as any).testHomeId : undefined;
@@ -2280,30 +2282,40 @@ export default function GapFillLabCanonicalClient() {
             rawReadStatus={result?.ok ? result.curveCompareRawReadStatus ?? null : null}
           />
         ) : null}
-        <div className="grid gap-4 xl:grid-cols-2">
-          <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>
-            {actualHouseCompareProjection.rows.length > 0 ? (
-              <ValidationComparePanel
-                rows={actualHouseCompareProjection.rows}
-                metrics={actualHouseCompareProjection.metrics}
-              />
-            ) : (
-              <div className="mt-2 text-xs text-brand-navy/60">No persisted actual-house compare rows are attached.</div>
-            )}
+        {showValidationComparePanels ? (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+              <div className="text-sm font-semibold text-brand-navy">Actual House compare rows</div>
+              {actualHouseCompareProjection.rows.length > 0 ? (
+                <ValidationComparePanel
+                  rows={actualHouseCompareProjection.rows}
+                  metrics={actualHouseCompareProjection.metrics}
+                />
+              ) : (
+                <div className="mt-2 text-xs text-brand-navy/60">No persisted actual-house compare rows are attached.</div>
+              )}
+            </div>
+            <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+              <div className="text-sm font-semibold text-brand-navy">Test House compare rows</div>
+              {testHouseCompareProjection.rows.length > 0 ? (
+                <ValidationComparePanel
+                  rows={testHouseCompareProjection.rows}
+                  metrics={testHouseCompareProjection.metrics}
+                />
+              ) : (
+                <div className="mt-2 text-xs text-brand-navy/60">No persisted test-house compare rows are attached.</div>
+              )}
+            </div>
           </div>
+        ) : (
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-brand-navy">Test House compare rows</div>
-            {testHouseCompareProjection.rows.length > 0 ? (
-              <ValidationComparePanel
-                rows={testHouseCompareProjection.rows}
-                metrics={testHouseCompareProjection.metrics}
-              />
-            ) : (
-              <div className="mt-2 text-xs text-brand-navy/60">No persisted test-house compare rows are attached.</div>
-            )}
+            <div className="text-sm font-semibold text-brand-navy">Validation / test-day compare rows</div>
+            <div className="mt-1 text-xs text-brand-navy/70">
+              Pure manual modes use the bill-period parity table above as the canonical compare surface. Validation/test-day compare
+              rows remain diagnostics-only and are intentionally not shown as the primary manual compare family here.
+            </div>
           </div>
-        </div>
+        )}
       </section>
 
       {result?.ok ? (

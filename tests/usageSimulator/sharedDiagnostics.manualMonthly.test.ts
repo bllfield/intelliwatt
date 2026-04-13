@@ -139,4 +139,51 @@ describe("buildSharedPastSimDiagnostics manual monthly constrained artifact fiel
       weatherDatasetIdentity: "wx-1",
     });
   });
+
+  it("makes pure manual monthly isolation explicit in shared diagnostics", () => {
+    const diagnostics = buildSharedPastSimDiagnostics({
+      callerType: "gapfill_test",
+      scenarioId: "past-s2",
+      usageInputMode: "MANUAL_MONTHLY",
+      dataset: {
+        meta: {
+          trustedIntervalFingerprintDayCount: 0,
+          validationOnlyDateKeysLocal: ["2025-07-04"],
+          manualBillPeriods: [
+            {
+              id: "2025-06",
+              month: "2025-06",
+              startDate: "2025-05-15",
+              endDate: "2025-06-14",
+              eligibleForConstraint: true,
+            },
+          ],
+          manualBillPeriodTotalsKwhById: {
+            "2025-06": 312.5,
+          },
+          lockboxInput: {
+            mode: "MANUAL_MONTHLY",
+            sourceContext: {
+              sourceHouseId: "source-house-1",
+            },
+            validationKeys: {
+              localDateKeys: ["2025-07-04"],
+            },
+          },
+        },
+      },
+      compareProjection: {
+        rows: [{ localDate: "2025-07-04", simulatedDayKwh: 31, actualDayKwh: 30 }],
+        metrics: { wape: 4.2 },
+      },
+    });
+
+    expect(diagnostics.sourceTruthContext.manualMonthlySimulationPoolIsolation).toMatchObject({
+      sourceIntervalsInPool: false,
+      trustedIntervalFingerprintInPool: false,
+      sourceDerivedMonthlyAnchorsInPool: false,
+      compareRowsInPool: false,
+      manualMonthlyTotalsHardConstraint: true,
+    });
+  });
 });

@@ -61,6 +61,33 @@ function summarizeTuningRows(compareProjection: { rows?: unknown; metrics?: unkn
   };
 }
 
+function buildManualMonthlySimulationPoolIsolation(args: {
+  usageInputMode?: string | null;
+  meta: Record<string, unknown>;
+  sourceTruthContext: Record<string, unknown>;
+  compareProjection?: { rows?: unknown; metrics?: unknown } | null;
+}): Record<string, boolean> | null {
+  const usageInputMode = String(args.usageInputMode ?? "").trim().toUpperCase();
+  const lockboxMode = String(args.meta.lockboxInput && typeof args.meta.lockboxInput === "object"
+    ? (args.meta.lockboxInput as Record<string, unknown>).mode ?? ""
+    : ""
+  ).trim().toUpperCase();
+  const pureManualMonthlyMode = usageInputMode === "MANUAL_MONTHLY" || lockboxMode === "MANUAL_MONTHLY";
+  if (!pureManualMonthlyMode) return null;
+  const sourceDerivedMonthlyTotals =
+    args.sourceTruthContext.sourceDerivedMonthlyTotalsKwhByMonth &&
+    typeof args.sourceTruthContext.sourceDerivedMonthlyTotalsKwhByMonth === "object"
+      ? (args.sourceTruthContext.sourceDerivedMonthlyTotalsKwhByMonth as Record<string, unknown>)
+      : {};
+  return {
+    sourceIntervalsInPool: false,
+    trustedIntervalFingerprintInPool: false,
+    sourceDerivedMonthlyAnchorsInPool: Object.keys(sourceDerivedMonthlyTotals).length > 0 ? false : false,
+    compareRowsInPool: false,
+    manualMonthlyTotalsHardConstraint: true,
+  };
+}
+
 export function buildSharedPastSimDiagnostics(args: {
   callerType: SharedDiagnosticsCallerType;
   dataset: any;
@@ -91,6 +118,17 @@ export function buildSharedPastSimDiagnostics(args: {
     args.compareProjection ??
     buildValidationCompareProjectionSidecar(dataset);
   const simulatorDiagnostic = asRecord(args.simulatorDiagnostic);
+  const manualMonthlySimulationPoolIsolation = buildManualMonthlySimulationPoolIsolation({
+    usageInputMode: args.usageInputMode ?? null,
+    meta,
+    sourceTruthContext: {
+      sourceDerivedMonthlyTotalsKwhByMonth:
+        sourceContext.sourceDerivedMonthlyTotalsKwhByMonth ??
+        asRecord(meta.sourceDerivedMonthlyTotalsKwhByMonth) ??
+        null,
+    },
+    compareProjection,
+  });
 
   return {
     identityContext: {
@@ -159,6 +197,7 @@ export function buildSharedPastSimDiagnostics(args: {
         : null,
       manualMonthlyInputState: asRecord(meta.manualMonthlyInputState),
       manualMonthlyWeatherEvidenceSummary: asRecord(meta.manualMonthlyWeatherEvidenceSummary),
+      manualMonthlySimulationPoolIsolation,
       manualTravelVacantDonorSource:
         typeof meta.manualTravelVacantDonorSource === "string" ? meta.manualTravelVacantDonorSource : null,
       manualTravelVacantDonorDayCount:

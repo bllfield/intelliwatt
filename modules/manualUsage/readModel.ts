@@ -210,20 +210,6 @@ function buildMonthlyTotalsByMonth(dataset: any): Map<string, number> {
   return out;
 }
 
-function buildMonthlyTotalsByMonthFromDiagnostics(dataset: any): Map<string, number> {
-  const out = new Map<string, number>();
-  const diagnostics = Array.isArray(dataset?.meta?.monthlyTargetConstructionDiagnostics)
-    ? dataset.meta.monthlyTargetConstructionDiagnostics
-    : [];
-  for (const row of diagnostics) {
-    const month = String((row as any)?.month ?? "").slice(0, 7);
-    const rawMonthKwhFromSource = Number((row as any)?.rawMonthKwhFromSource ?? Number.NaN);
-    if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(rawMonthKwhFromSource)) continue;
-    out.set(month, (out.get(month) ?? 0) + rawMonthKwhFromSource);
-  }
-  return out;
-}
-
 function listCoveredWholeMonths(range: { startDate: string; endDate: string }): string[] | null {
   if (!/^\d{4}-\d{2}-01$/.test(range.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(range.endDate)) return null;
   const start = new Date(`${range.startDate}T00:00:00.000Z`);
@@ -285,7 +271,6 @@ export function buildManualUsageReadModel(args: {
         })()
       : null;
   const actualDatasetTotalsByMonth = args.actualDataset != null ? buildMonthlyTotalsByMonth(args.actualDataset) : null;
-  const actualDiagnosticsTotalsByMonth = buildMonthlyTotalsByMonthFromDiagnostics(args.dataset);
   const actualDatasetSummaryTotalKwh =
     args.actualDataset != null && Number.isFinite(Number(args.actualDataset?.summary?.totalKwh))
       ? round2(Number(args.actualDataset.summary.totalKwh))
@@ -307,11 +292,6 @@ export function buildManualUsageReadModel(args: {
         ? sumRangeTotals(period, actualDatasetTotalsByDate)
         : actualDatasetTotalsByMonth != null && actualDatasetTotalsByMonth.size > 0
           ? sumRangeMonthlyTotals(period, actualDatasetTotalsByMonth)
-          : actualDiagnosticsTotalsByMonth.size > 0
-            ? round2(
-                sumRangeMonthlyTotals(period, actualDiagnosticsTotalsByMonth) ??
-                  (actualDiagnosticsTotalsByMonth.has(period.month) ? actualDiagnosticsTotalsByMonth.get(period.month) ?? 0 : null)
-              )
           : payload.mode === "ANNUAL"
             ? actualDatasetSummaryTotalKwh
             : null;
