@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/admin";
-import { normalizeEmail } from "@/lib/utils/email";
+import { normalizeEmailSafe } from "@/lib/utils/email";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
@@ -13,12 +13,22 @@ import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensit
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const ADMIN_EMAILS = ["brian@intelliwatt.com", "brian@intellipath-solutions.com"];
+
+function hasAdminSessionCookie(request: NextRequest): boolean {
+  const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
+  const email = normalizeEmailSafe(raw);
+  return email != null && ADMIN_EMAILS.includes(email);
+}
+
 export async function GET(request: NextRequest) {
-  const gate = requireAdmin(request);
-  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+  if (!hasAdminSessionCookie(request)) {
+    const gate = requireAdmin(request);
+    if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+  }
 
   const url = new URL(request.url);
-  const email = normalizeEmail(url.searchParams.get("email") ?? "");
+  const email = normalizeEmailSafe(url.searchParams.get("email") ?? "");
   const requestedHouseId = String(url.searchParams.get("houseId") ?? "").trim();
   if (!email) {
     return NextResponse.json({ ok: true, user: null, houses: [], selectedHouseId: null });
