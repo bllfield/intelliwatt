@@ -181,6 +181,15 @@ function buildIntervalTotalsByDate(dataset: any): Map<string, number> {
   return out;
 }
 
+function selectActualTotalsByDate(dataset: any): Map<string, number> {
+  const intervalTotals = buildIntervalTotalsByDate(dataset);
+  const dailyTotals = buildDailyTotalsByDate(dataset);
+  if (intervalTotals.size === 0) return dailyTotals;
+  if (dailyTotals.size === 0) return intervalTotals;
+  // Actual compare truth should prefer the fuller coverage source for bill-period totals.
+  return dailyTotals.size > intervalTotals.size ? dailyTotals : intervalTotals;
+}
+
 function dayKeysForRange(startDate: string, endDate: string): string[] {
   const out: string[] = [];
   const start = new Date(`${startDate}T00:00:00.000Z`);
@@ -265,10 +274,7 @@ export function buildManualUsageReadModel(args: {
 
   const actualDatasetTotalsByDate =
     args.actualDataset != null
-      ? (() => {
-          const actualIntervalTotals = buildIntervalTotalsByDate(args.actualDataset);
-          return actualIntervalTotals.size > 0 ? actualIntervalTotals : buildDailyTotalsByDate(args.actualDataset);
-        })()
+      ? selectActualTotalsByDate(args.actualDataset)
       : null;
   const actualDatasetTotalsByMonth = args.actualDataset != null ? buildMonthlyTotalsByMonth(args.actualDataset) : null;
   const actualDatasetSummaryTotalKwh =

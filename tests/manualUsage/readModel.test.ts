@@ -222,6 +222,98 @@ describe("manual usage read model", () => {
     expect(readModel?.monthlyCompareRows[0]?.actualIntervalKwh).toBe(338.4);
   });
 
+  it("uses full bill-period actual totals instead of sparse interval leftovers when source daily truth is fuller", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-05-31",
+      monthlyKwh: [
+        { month: "2025-04", kwh: 300 },
+        { month: "2025-05", kwh: 310 },
+      ],
+      statementRanges: [
+        { month: "2025-04", startDate: "2025-04-01", endDate: "2025-04-30" },
+        { month: "2025-05", startDate: "2025-05-01", endDate: "2025-05-31" },
+      ],
+      travelRanges: [{ startDate: "2025-05-10", endDate: "2025-05-12" }],
+    };
+    const dataset = {
+      meta: {
+        timezone: "UTC",
+        filledMonths: [],
+        manualMonthlyInputState: {
+          inputKindByMonth: {
+            "2025-04": "entered_nonzero",
+            "2025-05": "entered_nonzero",
+          },
+        },
+      },
+      daily: [
+        ...Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+        })),
+        ...Array.from({ length: 31 }, (_, idx) => ({
+          date: `2025-05-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+        })),
+      ],
+    };
+    const actualDataset = {
+      summary: { totalKwh: 611 },
+      daily: [
+        ...Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 9,
+        })),
+        ...Array.from({ length: 31 }, (_, idx) => ({
+          date: `2025-05-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 11,
+        })),
+      ],
+      series: {
+        intervals15: [
+          { timestamp: "2025-04-01T00:00:00.000Z", kwh: 2.25 },
+          { timestamp: "2025-04-01T00:15:00.000Z", kwh: 2.25 },
+        ],
+      },
+    };
+
+    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset });
+
+    expect(readModel?.billPeriodCompare.rows).toEqual([
+      expect.objectContaining({
+        month: "2025-04",
+        actualIntervalTotalKwh: 270,
+        stageOneTargetTotalKwh: 300,
+        simulatedStatementTotalKwh: 300,
+        eligible: true,
+        status: "reconciled",
+      }),
+      expect.objectContaining({
+        month: "2025-05",
+        actualIntervalTotalKwh: 341,
+        stageOneTargetTotalKwh: 310,
+        simulatedStatementTotalKwh: 310,
+        eligible: false,
+        status: "travel_overlap",
+      }),
+    ]);
+    expect(readModel?.monthlyCompareRows).toEqual([
+      expect.objectContaining({
+        month: "2025-04",
+        actualIntervalKwh: 270,
+        stageOneTargetKwh: 300,
+        simulatedKwh: 300,
+      }),
+      expect.objectContaining({
+        month: "2025-05",
+        actualIntervalKwh: 341,
+        stageOneTargetKwh: 310,
+        simulatedKwh: 310,
+      }),
+    ]);
+  });
+
   it("publishes canonical Stage 1 monthly rows from the shared read model instead of the raw payload family", () => {
     const payload = {
       mode: "MONTHLY" as const,

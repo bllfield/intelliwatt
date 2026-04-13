@@ -695,6 +695,101 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       : null;
   const manualDateSourceMode =
     readbackManualPayload?.mode === "MONTHLY" ? (readbackManualPayload.dateSourceMode ?? null) : null;
+  const baselineDailyRows = Array.isArray((readResultWithManualPayload.dataset as any)?.daily)
+    ? ((readResultWithManualPayload.dataset as any).daily as Array<Record<string, unknown>>)
+    : [];
+  const validationDateSet = new Set(validationOnlyDateKeysLocal);
+  const validationLeakDatesInBaseline = baselineDailyRows
+    .filter((row) => {
+      const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+      const source = String((row as any)?.source ?? "").toUpperCase();
+      return validationDateSet.has(dateKey) && source === "SIMULATED";
+    })
+    .map((row) => String((row as any)?.date ?? "").slice(0, 10))
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    .sort();
+  const validationLeakCountInBaseline = validationLeakDatesInBaseline.length;
+  const validationDatesRenderedAsActualCount = baselineDailyRows.reduce((count, row) => {
+    const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    return validationDateSet.has(dateKey) && source === "ACTUAL" ? count + 1 : count;
+  }, 0);
+  const validationDatesRenderedAsSimulatedCount = baselineDailyRows.reduce((count, row) => {
+    const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    return validationDateSet.has(dateKey) && source === "SIMULATED" ? count + 1 : count;
+  }, 0);
+  const travelVacantSimulatedDatesInBaselineCount = baselineDailyRows.reduce((count, row) => {
+    const dateKey = String((row as any)?.date ?? "").slice(0, 10);
+    const source = String((row as any)?.source ?? "").toUpperCase();
+    return !validationDateSet.has(dateKey) && source === "SIMULATED" ? count + 1 : count;
+  }, 0);
+  const compareRowDateSet = new Set(
+    (Array.isArray(readResultWithManualPayload.compareProjection?.rows)
+      ? readResultWithManualPayload.compareProjection.rows
+      : []
+    )
+      .map((row) => String((row as any)?.localDate ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  const compareRowsMatchSelectedDates =
+    compareRowDateSet.size === validationDateSet.size &&
+    Array.from(compareRowDateSet).every((dk) => validationDateSet.has(dk));
+  const requestedInputHash = exactArtifactInputHash;
+  const readArtifactInputHash = artifactRow?.inputHash ?? null;
+  const artifactHashMatch = requestedInputHash == null ? true : requestedInputHash === readArtifactInputHash;
+  const exactCanonicalReadSucceeded = artifactRow != null && artifactHashMatch === true;
+  const baselineProjectionApplied = Boolean((readResultWithManualPayload.dataset as any)?.meta?.validationProjectionApplied);
+  const baselineProjectionExpected = validationOnlyDateKeysLocal.length > 0;
+  const baselineProjectionCorrect = baselineProjectionExpected
+    ? baselineProjectionApplied &&
+      validationLeakCountInBaseline === 0 &&
+      validationDatesRenderedAsSimulatedCount === 0
+    : validationLeakCountInBaseline === 0 && validationDatesRenderedAsSimulatedCount === 0;
+  const canonicalReadResultSummary = {
+    ok: true,
+    readMode: "artifact_only",
+    projectionMode: "baseline",
+    readLayer: "buildManualUsagePastSimReadResult",
+    readFamily: "buildManualUsagePastSimReadResult->getSimulatedUsageForHouseScenario",
+    fallbackAllowed: false,
+    exactCanonicalReadSucceeded,
+    usedFallbackArtifact: false,
+    artifactSourceMode: requestedInputHash == null ? "scenario_artifact_read" : "exact_hash_match",
+    artifactHashMatch,
+    requestedInputHash,
+    artifactInputHashUsed: readArtifactInputHash,
+    metadataValidationOnlyDateKeysLocal: validationOnlyDateKeysLocal,
+    canonicalReadFailureCode: null as string | null,
+    canonicalReadFailureMessage: null as string | null,
+  };
+  const baselineProjectionSummary = {
+    applied: baselineProjectionApplied,
+    expected: baselineProjectionExpected,
+    correct: baselineProjectionCorrect,
+    validationOnlyDateKeyCount: validationOnlyDateKeysLocal.length,
+    validationOnlyDateKeysLocal,
+  };
+  const diagnosticsVerdict = {
+    exactCanonicalReadSucceeded,
+    usedFallbackArtifact: false,
+    fallbackArtifactReason: null,
+    savedArtifactInputHash: artifactRow?.inputHash ?? null,
+    requestedInputHash,
+    readArtifactInputHash,
+    artifactHashMatch,
+    baselineProjectionExpected,
+    baselineProjectionApplied,
+    baselineProjectionCorrect,
+    selectedValidationDateCount: validationOnlyDateKeysLocal.length,
+    compareRowCount,
+    compareRowsMatchSelectedDates,
+    validationLeakDatesInBaseline,
+    validationLeakCountInBaseline,
+    travelVacantSimulatedDatesInBaselineCount,
+    validationDatesRenderedAsActualCount,
+    validationDatesRenderedAsSimulatedCount,
+  };
 
   return NextResponse.json({
     ok: true,
@@ -776,6 +871,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     artifactCacheUpdatedAt: artifactRow?.updatedAt instanceof Date ? artifactRow.updatedAt.toISOString() : null,
     artifactEngineVersion: artifactRow?.engineVersion ?? null,
     sharedDiagnostics: readResultWithManualPayload.sharedDiagnostics,
+    canonicalReadResultSummary,
     compareProjectionSummary: {
       attached: Array.isArray(readResultWithManualPayload.compareProjection?.rows) &&
         readResultWithManualPayload.compareProjection.rows.length > 0,
@@ -784,14 +880,8 @@ async function buildGapfillManualUsageReadbackResponse(args: {
         : 0,
       metrics: readResultWithManualPayload.compareProjection?.metrics ?? {},
     },
-    baselineProjectionSummary: {
-      applied: Boolean((readResultWithManualPayload.dataset as any)?.meta?.validationProjectionApplied),
-      expected: Array.isArray((readResultWithManualPayload.dataset as any)?.meta?.validationOnlyDateKeysLocal),
-      correct: true,
-      validationOnlyDateKeyCount: Array.isArray((readResultWithManualPayload.dataset as any)?.meta?.validationOnlyDateKeysLocal)
-        ? (readResultWithManualPayload.dataset as any).meta.validationOnlyDateKeysLocal.length
-        : 0,
-    },
+    baselineProjectionSummary,
+    diagnosticsVerdict,
   });
 }
 
