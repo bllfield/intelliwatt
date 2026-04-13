@@ -93,4 +93,14 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("Manual monthly parity / reconciliation");
     expect(source).toContain("bill-period / statement-total semantics");
   });
+
+  it("renders shared weather sensitivity diagnostics from the persisted manual lab dataset metadata", () => {
+    const source = readRepoFile("components/admin/ManualMonthlyLab.tsx");
+
+    expect(source).toContain("WeatherSensitivityAdminDiagnostics");
+    expect(source).toContain("displayedReadResult?.dataset?.meta?.weatherSensitivityScore");
+    expect(source).toContain("displayedReadResult?.dataset?.meta?.weatherEfficiencyDerivedInput");
+    expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
+    expect(source).not.toContain("buildSharedWeatherSensitivityScore");
+  });
 });

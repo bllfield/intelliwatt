@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import UsageDashboard, { type HouseUsage } from "@/components/usage/UsageDashboard";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
@@ -326,6 +326,8 @@ function buildDashboardHouse(args: {
       smt: null,
       greenButton: null,
     },
+    weatherSensitivityScore: args.dataset?.meta?.weatherSensitivityScore ?? null,
+    weatherEfficiencyDerivedInput: args.dataset?.meta?.weatherEfficiencyDerivedInput ?? null,
   };
 }
 
@@ -612,51 +614,10 @@ export default function GapFillLabCanonicalClient() {
   const [actualEngineDiagnosticsError, setActualEngineDiagnosticsError] = useState<string | null>(null);
   const [openCalculationLogic, setOpenCalculationLogic] = useState(false);
   const [manualStageOneMonthlyView, setManualStageOneMonthlyView] = useState<"chart" | "table">("chart");
-  const [sourceWeatherSensitivity, setSourceWeatherSensitivity] = useState<{ score: any | null; derivedInput: any | null } | null>(null);
-  const [testWeatherSensitivity, setTestWeatherSensitivity] = useState<{ score: any | null; derivedInput: any | null } | null>(null);
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
-  const sourceUserEmailForWeather = result && result.ok ? String(result.sourceUser?.email ?? "").trim() : "";
-  const selectedSourceHouseIdForWeather =
-    result && result.ok ? String(result.selectedSourceHouseId ?? sourceHouseId ?? "").trim() : "";
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
   const parsedApplianceProfile = useMemo(() => parseJsonSafe(applianceProfileJson), [applianceProfileJson]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadScore(houseId: string, assign: (value: { score: any | null; derivedInput: any | null } | null) => void) {
-      if (!sourceUserEmailForWeather || !houseId) {
-        assign(null);
-        return;
-      }
-      try {
-        const res = await fetch(
-          `/api/admin/tools/weather-sensitivity-lab?email=${encodeURIComponent(sourceUserEmailForWeather)}&houseId=${encodeURIComponent(houseId)}`,
-          { cache: "no-store" }
-        );
-        const json = (await res.json().catch(() => null)) as
-          | {
-              ok?: boolean;
-              houses?: Array<{ houseId: string; score?: any; derivedInput?: any }>;
-            }
-          | null;
-        if (cancelled) return;
-        if (!res.ok || !json?.ok) {
-          assign(null);
-          return;
-        }
-        const house = Array.isArray(json.houses) ? json.houses.find((entry) => entry.houseId === houseId) ?? null : null;
-        assign(house ? { score: house.score ?? null, derivedInput: house.derivedInput ?? null } : null);
-      } catch {
-        if (!cancelled) assign(null);
-      }
-    }
-    void loadScore(selectedSourceHouseIdForWeather, setSourceWeatherSensitivity);
-    void loadScore(effectiveTestHomeId, setTestWeatherSensitivity);
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveTestHomeId, selectedSourceHouseIdForWeather, sourceUserEmailForWeather]);
 
   function updateHomeField(field: string, value: unknown) {
     const parsed = parseJsonSafe(homeProfileJson);
@@ -1051,6 +1012,10 @@ export default function GapFillLabCanonicalClient() {
   );
   const testHouseBaselineDataset = result?.ok ? result.baselineDatasetProjection ?? null : null;
   const testHouseDisplayDataset = result?.ok ? result.displayDatasetProjection ?? result.baselineDatasetProjection ?? null : null;
+  const actualHouseWeatherSensitivityScore = (actualHouseBaselineDataset as any)?.meta?.weatherSensitivityScore ?? null;
+  const actualHouseWeatherEfficiencyDerivedInput = (actualHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null;
+  const testHouseWeatherSensitivityScore = (testHouseBaselineDataset as any)?.meta?.weatherSensitivityScore ?? null;
+  const testHouseWeatherEfficiencyDerivedInput = (testHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null;
   const testHouseCompareProjection = useMemo(
     () =>
       result?.ok
@@ -1904,10 +1869,10 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {sourceWeatherSensitivity?.score ? (
+            {actualHouseWeatherSensitivityScore ? (
               <WeatherSensitivityAdminDiagnostics
-                score={sourceWeatherSensitivity.score}
-                derivedInput={sourceWeatherSensitivity.derivedInput}
+                score={actualHouseWeatherSensitivityScore}
+                derivedInput={actualHouseWeatherEfficiencyDerivedInput}
               />
             ) : null}
             {actualHouseCompareProjection.rows.length > 0 ? (
@@ -2068,10 +2033,10 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {testWeatherSensitivity?.score ? (
+            {testHouseWeatherSensitivityScore ? (
               <WeatherSensitivityAdminDiagnostics
-                score={testWeatherSensitivity.score}
-                derivedInput={testWeatherSensitivity.derivedInput}
+                score={testHouseWeatherSensitivityScore}
+                derivedInput={testHouseWeatherEfficiencyDerivedInput}
               />
             ) : null}
             {testHouseCompareProjection.rows.length > 0 ? (

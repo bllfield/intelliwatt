@@ -98,6 +98,18 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).toContain("Same corrected Actual House Past Sim path");
   });
 
+  it("renders shared weather sensitivity diagnostics from existing GapFill dataset metadata", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("WeatherSensitivityAdminDiagnostics");
+    expect(source).toContain("(actualHouseBaselineDataset as any)?.meta?.weatherSensitivityScore");
+    expect(source).toContain("(actualHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput");
+    expect(source).toContain("(testHouseBaselineDataset as any)?.meta?.weatherSensitivityScore");
+    expect(source).toContain("(testHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput");
+    expect(source).not.toContain("/api/admin/tools/weather-sensitivity-lab");
+    expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
+  });
+
   it("defines the modal sections for the admin-only calculation logic view", () => {
     const source = readRepoFile("components/admin/GapFillCalculationLogicModal.tsx");
 

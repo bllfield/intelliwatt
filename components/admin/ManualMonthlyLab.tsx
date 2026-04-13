@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
+import { WeatherSensitivityAdminDiagnostics } from "@/components/admin/WeatherSensitivityAdminDiagnostics";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
@@ -208,6 +209,8 @@ export default function ManualMonthlyLab() {
     () => (displayedReadResult?.payload ?? saveJson?.payload ?? loadJson?.payload ?? lookupJson?.payload ?? null) as ManualUsagePayload | null,
     [displayedReadResult, loadJson, lookupJson, saveJson]
   );
+  const manualLabWeatherSensitivityScore = displayedReadResult?.dataset?.meta?.weatherSensitivityScore ?? null;
+  const manualLabWeatherEfficiencyDerivedInput = displayedReadResult?.dataset?.meta?.weatherEfficiencyDerivedInput ?? null;
 
   const sourceUsageOverride = useMemo(() => {
     if (!selectedSourceHouse) return null;
@@ -241,6 +244,8 @@ export default function ManualMonthlyLab() {
         esiid: null,
         dataset: displayedReadResult.dataset,
         alternatives: { smt: null, greenButton: null },
+        weatherSensitivityScore: displayedReadResult?.dataset?.meta?.weatherSensitivityScore ?? null,
+        weatherEfficiencyDerivedInput: displayedReadResult?.dataset?.meta?.weatherEfficiencyDerivedInput ?? null,
       },
     ];
   }, [displayedReadResult, labHome, selectedSourceHouse]);
@@ -681,14 +686,22 @@ export default function ManualMonthlyLab() {
                 </p>
               </div>
               {pastSimOverride ? (
-                <UsageDashboard
-                  forcedMode="SIMULATED"
-                  allowModeToggle={false}
-                  initialMode="SIMULATED"
-                  simulatedHousesOverride={pastSimOverride}
-                  dashboardVariant="PAST_SIMULATED_USAGE"
-                  pastVariables={pastScenarioVariables}
-                />
+                <div className="space-y-4">
+                  <UsageDashboard
+                    forcedMode="SIMULATED"
+                    allowModeToggle={false}
+                    initialMode="SIMULATED"
+                    simulatedHousesOverride={pastSimOverride}
+                    dashboardVariant="PAST_SIMULATED_USAGE"
+                    pastVariables={pastScenarioVariables}
+                  />
+                  {manualLabWeatherSensitivityScore ? (
+                    <WeatherSensitivityAdminDiagnostics
+                      score={manualLabWeatherSensitivityScore}
+                      derivedInput={manualLabWeatherEfficiencyDerivedInput}
+                    />
+                  ) : null}
+                </div>
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                   Stage 2 Past Sim appears here after the isolated lab home runs the shared Past Sim flow.
