@@ -2015,23 +2015,33 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {testHouseCompareProjection.rows.length > 0 ? (
+            {showValidationComparePanels ? (
+              testHouseCompareProjection.rows.length > 0 ? (
+                <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+                  <div className="mt-1 text-xs text-brand-navy/70">
+                    Persisted compare rows from the canonical test-house artifact family.
+                  </div>
+                  <ValidationComparePanel
+                    rows={testHouseCompareProjection.rows}
+                    metrics={testHouseCompareProjection.metrics}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  {Array.isArray((testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal) &&
+                  (testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal.length > 0
+                    ? "Validation test days are configured, but compare rows were not returned with this persisted test-house response."
+                    : "No validation/test-day compare rows are available for this test-house artifact yet."}
+                </div>
+              )
+            ) : (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
                 <div className="mt-1 text-xs text-brand-navy/70">
-                  Persisted compare rows from the canonical test-house artifact family.
+                  Pure manual modes do not use validation/test-day compare as the primary test-house compare surface here. Use the shared
+                  manual bill-period parity section below.
                 </div>
-                <ValidationComparePanel
-                  rows={testHouseCompareProjection.rows}
-                  metrics={testHouseCompareProjection.metrics}
-                />
-              </div>
-            ) : (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                {Array.isArray((testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal) &&
-                (testHouseBaselineDataset as any)?.meta?.validationOnlyDateKeysLocal.length > 0
-                  ? "Validation test days are configured, but compare rows were not returned with this persisted test-house response."
-                  : "No validation/test-day compare rows are available for this test-house artifact yet."}
               </div>
             )}
             <div className="grid gap-4 xl:grid-cols-2">
@@ -2177,19 +2187,21 @@ export default function GapFillLabCanonicalClient() {
               <div className="mt-2 text-xs text-brand-navy/60">Monthly persisted outputs are not available for both panels yet.</div>
             )}
           </div>
-          <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
-            <div className="text-sm font-semibold text-brand-navy">Persisted compare metrics</div>
-            <MetadataGrid
-              items={[
-                { label: "Actual house WAPE", value: `${formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.wape ?? null))}%` },
-                { label: "Test house WAPE", value: `${formatNumberMaybe(Number(testHouseCompareProjection.metrics?.wape ?? null))}%` },
-                { label: "Actual house MAE", value: formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.mae ?? null)) },
-                { label: "Test house MAE", value: formatNumberMaybe(Number(testHouseCompareProjection.metrics?.mae ?? null)) },
-                { label: "Actual compare rows", value: String(actualHouseCompareProjection.rows.length) },
-                { label: "Test compare rows", value: String(testHouseCompareProjection.rows.length) },
-              ]}
-            />
-          </div>
+          {showValidationComparePanels ? (
+            <div className="rounded-xl border border-brand-blue/10 bg-brand-navy/5 p-4">
+              <div className="text-sm font-semibold text-brand-navy">Persisted compare metrics</div>
+              <MetadataGrid
+                items={[
+                  { label: "Actual house WAPE", value: `${formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.wape ?? null))}%` },
+                  { label: "Test house WAPE", value: `${formatNumberMaybe(Number(testHouseCompareProjection.metrics?.wape ?? null))}%` },
+                  { label: "Actual house MAE", value: formatNumberMaybe(Number(actualHouseCompareProjection.metrics?.mae ?? null)) },
+                  { label: "Test house MAE", value: formatNumberMaybe(Number(testHouseCompareProjection.metrics?.mae ?? null)) },
+                  { label: "Actual compare rows", value: String(actualHouseCompareProjection.rows.length) },
+                  { label: "Test compare rows", value: String(testHouseCompareProjection.rows.length) },
+                ]}
+              />
+            </div>
+          ) : null}
         </div>
         {showManualMonthlyCompare ? (
           <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
