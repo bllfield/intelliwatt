@@ -106,6 +106,7 @@ import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDi
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
+import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -4145,6 +4146,26 @@ async function recalcSimulatorBuildImpl(args: {
   if (!homeProfile) return { ok: false, error: "homeProfile_required" };
   if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
 
+  let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
+  let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
+  try {
+    const weatherSensitivityActualDataset =
+      mode === "SMT_BASELINE"
+        ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
+        : null;
+    const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
+      actualDataset: weatherSensitivityActualDataset,
+      manualUsagePayload: manualUsagePayload as any,
+      homeProfile,
+      applianceProfile,
+      weatherHouseId: actualContextHouseId,
+    });
+    weatherSensitivityScore = weatherSensitivityEnvelope.score;
+    weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput;
+  } catch (error) {
+    console.warn("[usageSimulator] weather sensitivity pre-sim derivation failed", error);
+  }
+
   // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).
   let canonicalForBuild = canonical;
   let baselineInputsForRecalc: any = null;
@@ -4897,7 +4918,14 @@ async function recalcSimulatorBuildImpl(args: {
         validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
         actualContextHouseId,
         sharedProducerPathUsed: true,
-        snapshots: { homeProfile, applianceProfile, manualUsagePayload },
+        ...(weatherEfficiencyDerivedInput ? { weatherEfficiencyDerivedInput } : {}),
+        snapshots: {
+          homeProfile,
+          applianceProfile,
+          manualUsagePayload,
+          weatherSensitivityScore,
+          weatherEfficiencyDerivedInput,
+        },
         ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
       };
       let preloadedActualIntervalsForSim: Array<{ timestamp: string; kwh: number }> | undefined;
@@ -5070,6 +5098,7 @@ async function recalcSimulatorBuildImpl(args: {
     manualBillPeriods: built.manualBillPeriods ?? [],
     manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
     sharedProducerPathUsed: shouldUseSharedPastProducer,
+    ...(weatherEfficiencyDerivedInput ? { weatherEfficiencyDerivedInput } : {}),
     ...(pastSimulatedMonths != null ? { pastSimulatedMonths } : {}),
     snapshots: {
       manualUsagePayload: manualUsagePayload ?? null,
@@ -5085,6 +5114,8 @@ async function recalcSimulatorBuildImpl(args: {
       actualIntradayShape96: built.source?.actualIntradayShape96 ?? undefined,
       smtMonthlyAnchorsByMonth: built.source?.smtMonthlyAnchorsByMonth ?? undefined,
       smtIntradayShape96: built.source?.smtIntradayShape96 ?? undefined,
+      weatherSensitivityScore,
+      weatherEfficiencyDerivedInput,
       scenario: scenario ? { id: scenario.id, name: scenario.name } : null,
       scenarioEvents: scenarioEvents ?? [],
       scenarioOverlay: overlay ?? null,
@@ -5149,6 +5180,8 @@ async function recalcSimulatorBuildImpl(args: {
             monthlyTargetConstructionDiagnostics: buildInputs.monthlyTargetConstructionDiagnostics ?? null,
             manualMonthlyInputState: buildInputs.manualMonthlyInputState ?? null,
             sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
+            weatherSensitivityScore: buildInputs.snapshots?.weatherSensitivityScore ?? null,
+            weatherEfficiencyDerivedInput: buildInputs.weatherEfficiencyDerivedInput ?? null,
           }, {
             timezone: (buildInputs as any).timezone ?? undefined,
             useUtcMonth: true,

@@ -11,6 +11,7 @@ import { resolvePastCompareSectionMode } from "@/components/usage/pastCompareSec
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import {
   PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED,
   shouldResetPastValidationCompareExpanded,
@@ -114,6 +115,7 @@ type ScenarioHouseResp =
         metrics?: Record<string, number | null>;
       };
       manualMonthlyReconciliation?: ManualMonthlyReconciliation | null;
+      weatherSensitivityScore?: WeatherSensitivityScore | null;
     }
   | { ok: false; code: string; message: string; failureCode?: string; failureMessage?: string };
 
@@ -612,6 +614,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             esiid: null,
             dataset: okBody.dataset,
             alternatives: { smt: null, greenButton: null },
+            weatherSensitivityScore: okBody.weatherSensitivityScore ?? null,
           },
         ]);
         setScenarioCompareProjection(

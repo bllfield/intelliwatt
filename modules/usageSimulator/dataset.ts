@@ -13,6 +13,10 @@ import type {
 import { buildUniformMonthlyTotalsFromAnnualWindow } from "@/modules/usageSimulator/build";
 import type { ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
+import type {
+  WeatherEfficiencyDerivedInput,
+  WeatherSensitivityScore,
+} from "@/modules/weatherSensitivity/shared";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
 
@@ -926,6 +930,7 @@ export type SimulatorBuildInputsV1 = {
   manualBillPeriods?: ManualBillPeriodTarget[];
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   sharedProducerPathUsed?: boolean;
+  weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
   // Snapshots (for auditing / future UI): not required for regen.
   snapshots?: {
     manualUsagePayload?: any;
@@ -945,6 +950,8 @@ export type SimulatorBuildInputsV1 = {
     // Workspace chaining audit (Future based on Past)
     pastScenario?: { id: string; name: string } | null;
     pastScenarioEvents?: any[];
+    weatherSensitivityScore?: WeatherSensitivityScore | null;
+    weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
   };
   /** Phase 2c: single shared resolver output; attached during recalc for canonical sim chain provenance. */
   resolvedSimFingerprint?: ResolvedSimFingerprint;
@@ -1078,6 +1085,8 @@ export type SimulatedUsageDatasetMeta = {
   manualMonthlyInputState?: ManualMonthlyInputState | null;
   manualMonthlyWeatherEvidenceSummary?: PastLowDataWeatherEvidenceSummary | null;
   sharedProducerPathUsed?: boolean;
+  weatherSensitivityScore?: WeatherSensitivityScore | null;
+  weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
   /** Compare-only projection rows for validation/test days from this same canonical family. */
   validationCompareRows?: Array<{
     localDate: string;
@@ -1310,6 +1319,8 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
       sharedProducerPathUsed: false,
+      weatherSensitivityScore: buildInputs.snapshots?.weatherSensitivityScore ?? null,
+      weatherEfficiencyDerivedInput: buildInputs.weatherEfficiencyDerivedInput ?? null,
     },
     usageBucketsByMonth,
     ...(intervals15m !== undefined && { intervals15m }),
@@ -1377,6 +1388,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     manualMonthlyInputState?: ManualMonthlyInputState | null;
     manualMonthlyWeatherEvidenceSummary?: PastLowDataWeatherEvidenceSummary | null;
     sharedProducerPathUsed?: boolean;
+    weatherSensitivityScore?: WeatherSensitivityScore | null;
+    weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
   },
   options?: {
     excludedDateKeys?: Set<string>;
@@ -1703,6 +1716,8 @@ export function buildSimulatedUsageDatasetFromCurve(
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
       sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
+      weatherSensitivityScore: meta.weatherSensitivityScore ?? null,
+      weatherEfficiencyDerivedInput: meta.weatherEfficiencyDerivedInput ?? null,
       canonicalArtifactSimulatedDayTotalsByDate,
       simulatedTravelVacantDateKeysLocal,
       simulatedTestModeledDateKeysLocal,

@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import {
   type ManualAnnualStageOneSummary,
@@ -16,6 +17,10 @@ import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type {
+  WeatherEfficiencyDerivedInput,
+  WeatherSensitivityScore,
+} from "@/modules/weatherSensitivity/shared";
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -141,6 +146,8 @@ export type HouseUsage = {
     code?: string;
     explanation?: string;
   } | null;
+  weatherSensitivityScore?: WeatherSensitivityScore | null;
+  weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
 };
 
 type UsageApiResponse =
@@ -335,6 +342,8 @@ export const UsageDashboard: React.FC<Props> = ({
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
   const [fetchedManualUsagePayload, setFetchedManualUsagePayload] = useState<ManualUsagePayload | null>(null);
+  const [fetchedManualWeatherSensitivityScore, setFetchedManualWeatherSensitivityScore] =
+    useState<WeatherSensitivityScore | null>(null);
   const lastSmtIntervalsRef = useRef<number>(0);
   const smtPollTimerRef = useRef<number | null>(null);
 
@@ -543,35 +552,47 @@ export const UsageDashboard: React.FC<Props> = ({
     let cancelled = false;
     if (presentationSurface !== "user_usage_manual_monthly_stage_one") {
       setFetchedManualUsagePayload(null);
+      setFetchedManualWeatherSensitivityScore(null);
       return;
     }
     const targetHouseId = manualUsageHouseId ?? activeHouse?.houseId ?? null;
     if (!targetHouseId) {
       setFetchedManualUsagePayload(null);
-      return;
-    }
-    if (manualUsagePayload && (!manualUsageHouseId || manualUsageHouseId === targetHouseId)) {
-      setFetchedManualUsagePayload(null);
+      setFetchedManualWeatherSensitivityScore(null);
       return;
     }
     (async () => {
       try {
         const res = await fetch(`/api/user/manual-usage?houseId=${encodeURIComponent(targetHouseId)}`, { cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as { ok?: boolean; payload?: ManualUsagePayload | null } | null;
+        const json = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          payload?: ManualUsagePayload | null;
+          weatherSensitivityScore?: WeatherSensitivityScore | null;
+        } | null;
         if (cancelled) return;
         if (!res.ok || !json?.ok) {
           setFetchedManualUsagePayload(null);
+          setFetchedManualWeatherSensitivityScore(null);
           return;
         }
-        setFetchedManualUsagePayload(json.payload ?? null);
+        setFetchedManualUsagePayload(
+          manualUsagePayload && (!manualUsageHouseId || manualUsageHouseId === targetHouseId) ? null : (json.payload ?? null)
+        );
+        setFetchedManualWeatherSensitivityScore(json.weatherSensitivityScore ?? null);
       } catch {
-        if (!cancelled) setFetchedManualUsagePayload(null);
+        if (!cancelled) {
+          setFetchedManualUsagePayload(null);
+          setFetchedManualWeatherSensitivityScore(null);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [activeHouse?.houseId, manualUsageHouseId, manualUsagePayload, presentationSurface]);
+
+  const resolvedWeatherSensitivityScore =
+    activeHouse?.weatherSensitivityScore ?? fetchedManualWeatherSensitivityScore ?? null;
 
   const manualMonthlyStageOne = useMemo(() => {
     if (manualMonthlyStageOneRowsOverride?.length) {
@@ -932,6 +953,14 @@ export const UsageDashboard: React.FC<Props> = ({
           ) : null}
         </div>
       </div>
+
+      {resolvedWeatherSensitivityScore ? (
+        <WeatherSensitivityCard
+          score={resolvedWeatherSensitivityScore}
+          presentation="customer"
+          title="Weather Efficiency Score"
+        />
+      ) : null}
 
       {!hasData ? (
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">

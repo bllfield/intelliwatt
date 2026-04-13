@@ -9,6 +9,14 @@ import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile
 import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
 import { buildManualUsageReadDecorations } from "@/modules/manualUsage/pastSimReadResult";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import {
+  buildWeatherEfficiencyDerivedInput,
+  resolveSharedWeatherSensitivityEnvelope,
+} from "@/modules/weatherSensitivity/shared";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -84,10 +92,32 @@ export async function GET(request: NextRequest) {
         esiid: house.esiid ?? null,
       });
       const dataset = resolved?.dataset ?? null;
+      const [homeProfile, applianceProfileRec, manualUsageRec] = await Promise.all([
+        getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+        getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+        getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
+      ]);
+      const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
+      const weatherSensitivity = await resolveSharedWeatherSensitivityEnvelope({
+        actualDataset: dataset,
+        manualUsagePayload: manualUsageRec?.payload ?? null,
+        homeProfile,
+        applianceProfile,
+        weatherHouseId: houseId,
+      }).catch(() => ({ score: null, derivedInput: null }));
       const baselineHeaders = new Headers({ "Cache-Control": "private, max-age=30" });
       baselineHeaders.set("X-Correlation-Id", correlationId);
       return NextResponse.json(
-        { ok: true, houseId: house.id, scenarioKey: "BASELINE", scenarioId: null, dataset, correlationId },
+        {
+          ok: true,
+          houseId: house.id,
+          scenarioKey: "BASELINE",
+          scenarioId: null,
+          dataset,
+          correlationId,
+          weatherSensitivityScore: weatherSensitivity.score,
+          weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
+        },
         { headers: baselineHeaders }
       );
     }
@@ -152,12 +182,34 @@ export async function GET(request: NextRequest) {
       });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
+      const [homeProfile, applianceProfileRec, manualUsageRec] = await Promise.all([
+        getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+        getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+        getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
+      ]);
+      const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
+      const persistedScore = (datasetAny?.meta as any)?.weatherSensitivityScore ?? null;
+      const persistedDerivedInput = (datasetAny?.meta as any)?.weatherEfficiencyDerivedInput ?? null;
+      const weatherSensitivity =
+        persistedScore != null
+          ? {
+              score: persistedScore,
+              derivedInput: persistedDerivedInput ?? buildWeatherEfficiencyDerivedInput(persistedScore),
+            }
+          : await resolveSharedWeatherSensitivityEnvelope({
+              manualUsagePayload: manualUsageRec?.payload ?? null,
+              homeProfile,
+              applianceProfile,
+              weatherHouseId: houseId,
+            }).catch(() => ({ score: null, derivedInput: null }));
       const successBody = {
         ...out,
         compareProjection,
         manualReadModel,
         manualMonthlyReconciliation,
         sharedDiagnostics,
+        weatherSensitivityScore: weatherSensitivity.score,
+        weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
         correlationId,
       };
       return NextResponse.json(successBody, { headers: okHeaders });

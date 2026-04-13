@@ -4,6 +4,10 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 
 async function requireUser() {
   const cookieStore = cookies();
@@ -40,12 +44,25 @@ export async function GET(request: NextRequest) {
     if (!owns) return NextResponse.json({ ok: false, error: "House not found for user" }, { status: 403 });
 
     const rec = await getManualUsageInputForUserHouse({ userId: u.user.id, houseId });
+    const [homeProfile, applianceProfileRec] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+      getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+    ]);
+    const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
+    const weatherSensitivity = await resolveSharedWeatherSensitivityEnvelope({
+      manualUsagePayload: rec.payload,
+      homeProfile,
+      applianceProfile,
+      weatherHouseId: houseId,
+    }).catch(() => ({ score: null, derivedInput: null }));
 
     return NextResponse.json({
       ok: true,
       houseId,
       payload: rec.payload,
       updatedAt: rec.updatedAt,
+      weatherSensitivityScore: weatherSensitivity.score,
+      weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
     });
   } catch (error) {
     console.error("[user/manual-usage] GET error", error);
