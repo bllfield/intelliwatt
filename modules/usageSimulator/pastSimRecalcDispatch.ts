@@ -44,6 +44,7 @@ export async function dispatchPastSimRecalc(args: {
   weatherPreference?: WeatherPreference;
   persistPastSimBaseline?: boolean;
   actualContextHouseId?: string | null;
+  validationOnlyDateKeysLocal?: Set<string> | string[];
   preLockboxTravelRanges?: TravelRange[];
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;
@@ -52,6 +53,9 @@ export async function dispatchPastSimRecalc(args: {
   runContext?: Partial<PastSimRunContext>;
 }): Promise<PastSimRecalcDispatchResult> {
   const correlationId = args.correlationId ?? createSimCorrelationId();
+  const validationOnlyDateKeysLocal = args.validationOnlyDateKeysLocal
+    ? Array.from(args.validationOnlyDateKeysLocal)
+    : undefined;
   const payload: PastSimRecalcQueuedPayloadV1 = {
     v: PAST_SIM_RECALC_PAYLOAD_V,
     userId: args.userId,
@@ -62,6 +66,7 @@ export async function dispatchPastSimRecalc(args: {
     weatherPreference: args.weatherPreference,
     persistPastSimBaseline: args.persistPastSimBaseline === true,
     actualContextHouseId: args.actualContextHouseId ?? null,
+    validationOnlyDateKeysLocal,
     preLockboxTravelRanges: args.preLockboxTravelRanges ?? [],
     validationDaySelectionMode: args.validationDaySelectionMode,
     validationDayCount: args.validationDayCount,
@@ -87,6 +92,7 @@ export async function dispatchPastSimRecalc(args: {
         weatherPreference: args.weatherPreference,
         persistPastSimBaseline: args.persistPastSimBaseline,
         actualContextHouseId: args.actualContextHouseId ?? undefined,
+        validationOnlyDateKeysLocal,
         preLockboxTravelRanges: args.preLockboxTravelRanges,
         validationDaySelectionMode: args.validationDaySelectionMode,
         validationDayCount: args.validationDayCount,

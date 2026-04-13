@@ -52,6 +52,7 @@ describe("dispatchPastSimRecalc", () => {
       scenarioId: "past-s1",
       persistPastSimBaseline: true,
       actualContextHouseId: "source-h1",
+      validationOnlyDateKeysLocal: new Set(["2025-04-10"]),
       preLockboxTravelRanges: [{ startDate: "2025-01-01", endDate: "2025-01-02" }],
       adminLabTreatmentMode: "manual_monthly_constrained",
     });
@@ -64,6 +65,7 @@ describe("dispatchPastSimRecalc", () => {
     expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.preLockboxTravelRanges).toEqual([
       { startDate: "2025-01-01", endDate: "2025-01-02" },
     ]);
+    expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.validationOnlyDateKeysLocal).toEqual(["2025-04-10"]);
     expect(recalcSimulatorBuild.mock.calls[0]?.[0]?.adminLabTreatmentMode).toBe("manual_monthly_constrained");
   });
 });

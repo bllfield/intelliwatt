@@ -22,6 +22,7 @@ export type PastSimRecalcQueuedPayloadV1 = {
   weatherPreference?: WeatherPreference;
   persistPastSimBaseline?: boolean;
   actualContextHouseId?: string | null;
+  validationOnlyDateKeysLocal?: string[];
   preLockboxTravelRanges?: TravelRange[];
   validationDaySelectionMode?: ValidationDaySelectionMode;
   validationDayCount?: number;

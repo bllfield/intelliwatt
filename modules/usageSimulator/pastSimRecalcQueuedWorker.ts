@@ -42,6 +42,7 @@ export async function runPastSimRecalcQueuedWorker(jobId: string): Promise<void>
     weatherPreference: payload.weatherPreference,
     persistPastSimBaseline: payload.persistPastSimBaseline === true,
     actualContextHouseId: payload.actualContextHouseId ?? undefined,
+    validationOnlyDateKeysLocal: payload.validationOnlyDateKeysLocal,
     preLockboxTravelRanges: payload.preLockboxTravelRanges,
     validationDaySelectionMode: payload.validationDaySelectionMode,
     validationDayCount: payload.validationDayCount,
