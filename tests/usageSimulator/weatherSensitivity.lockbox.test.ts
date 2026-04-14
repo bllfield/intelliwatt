@@ -242,7 +242,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
   });
 
   it("attaches the shared derived input before simulation executes without activating simulation consumption", async () => {
-    await recalcSimulatorBuild({
+    const result = await recalcSimulatorBuild({
       userId: "u1",
       houseId: "house-1",
       esiid: "esiid-1",
@@ -262,6 +262,17 @@ describe("weather sensitivity shared lockbox attachment", () => {
       scoringMode: "BILLING_PERIOD_BASED",
       nextDetailPromptType: expect.any(String),
     });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect((result.dataset as any)?.meta?.weatherSensitivityScore).toMatchObject({
+        scoringMode: "BILLING_PERIOD_BASED",
+      });
+      expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
+        derivedInputAttached: true,
+        simulationActive: false,
+        scoringMode: "BILLING_PERIOD_BASED",
+      });
+    }
   });
 
   it(

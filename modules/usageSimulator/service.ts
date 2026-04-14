@@ -5281,6 +5281,9 @@ async function recalcSimulatorBuildImpl(args: {
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
     manualBillPeriods: built.manualBillPeriods ?? [],
     manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
+    weatherSensitivityScore: weatherSensitivityScore ?? (dataset as any)?.meta?.weatherSensitivityScore ?? null,
+    weatherEfficiencyDerivedInput:
+      weatherEfficiencyDerivedInput ?? (dataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null,
     sourceDerivedMonthlyTotalsKwhByMonth,
     sharedProducerPathUsed: buildInputs.sharedProducerPathUsed ?? false,
     lockboxInput: normalizedLockboxInput,
