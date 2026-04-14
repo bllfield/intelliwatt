@@ -55,7 +55,6 @@ import {
 } from "@/modules/usageSimulator/compareRunSnapshot";
 import {
   ensureGlobalLabTestHomeHouse,
-  ensureGlobalManualMonthlyLabTestHomeHouse,
   getLabTestHomeLink,
   replaceGlobalLabTestHomeFromSource,
   GAPFILL_LAB_TEST_HOME_LABEL,
@@ -90,7 +89,11 @@ import {
   type ManualUsageStageOneResolvedPayload,
 } from "@/modules/manualUsage/prefill";
 import { addDaysToIsoDate } from "@/modules/manualUsage/statementRanges";
-import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import {
+  deleteManualUsageInputForUserHouse,
+  getManualUsageInputForUserHouse,
+  saveManualUsageInputForUserHouse,
+} from "@/modules/manualUsage/store";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
@@ -421,7 +424,7 @@ async function buildGapfillManualConstraintPayload(args: {
   travelRangesForRecalc: DateRange[];
   usageInputMode: TestHomeUsageInputMode;
 }): Promise<ManualUsageStageOneResolvedPayload> {
-  const [sourceManualRec, testHomeManualRec, sourceUsageDataset, manualLabHome] = await Promise.all([
+  const [sourceManualRec, testHomeManualRec, sourceUsageDataset] = await Promise.all([
     getManualUsageInputForUserHouse({
       userId: args.sourceHouseUserId,
       houseId: args.sourceHouseId,
@@ -433,23 +436,8 @@ async function buildGapfillManualConstraintPayload(args: {
     getActualUsageDatasetForHouse(args.sourceHouseId, args.sourceEsiid ?? null, {
       skipFullYearIntervalFetch: true,
     }).catch(() => ({ dataset: null })),
-    args.usageInputMode === "MANUAL_MONTHLY"
-      ? ensureGlobalManualMonthlyLabTestHomeHouse(args.labOwnerUserId).catch(() => null)
-      : Promise.resolve(null),
   ]);
-  const manualLabManualRec =
-    args.usageInputMode === "MANUAL_MONTHLY" && manualLabHome?.id && manualLabHome.id !== args.testHomeHouseId
-      ? await getManualUsageInputForUserHouse({
-          userId: args.labOwnerUserId,
-          houseId: manualLabHome.id,
-        })
-      : { payload: null, updatedAt: null };
-  // The shared Manual Lab home intentionally clears `esiid` when it copies source-house identity,
-  // so ESIID matching cannot be used to discover the canonical saved manual payload.
-  const authoritativeSavedPayload =
-    args.usageInputMode === "MANUAL_MONTHLY" && manualLabManualRec.payload
-      ? manualLabManualRec.payload
-      : testHomeManualRec.payload;
+  const authoritativeSavedPayload = testHomeManualRec.payload;
   const actualEndDate = String(sourceUsageDataset?.dataset?.summary?.end ?? "").slice(0, 10) || null;
   const syntheticAnchorEndDate =
     args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS"
@@ -2127,6 +2115,23 @@ export async function POST(req: NextRequest) {
         memoryRssMb: getMemoryRssMb(),
       });
       return response;
+    }
+
+    const clearManualResult = await deleteManualUsageInputForUserHouse({
+      userId: labOwnerUser.id,
+      houseId: testHomeHouse.id,
+    });
+    if (!clearManualResult.ok) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "test_home_manual_payload_clear_failed",
+          message:
+            "GapFill could not clear saved manual usage inputs before running a non-manual canonical recalc.",
+          correlationId: labCorrelationId,
+        }),
+        { status: 500 }
+      );
     }
 
     let recalcOut: Awaited<ReturnType<typeof recalcSimulatorBuild>>;

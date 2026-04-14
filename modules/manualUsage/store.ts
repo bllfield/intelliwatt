@@ -36,6 +36,26 @@ export async function getManualUsageInputForUserHouse(args: {
   };
 }
 
+export async function deleteManualUsageInputForUserHouse(args: {
+  userId: string;
+  houseId: string;
+}): Promise<{ ok: true; deletedCount: number } | { ok: false; error: string }> {
+  try {
+    const result = await (prisma as any).manualUsageInput.deleteMany({
+      where: { userId: args.userId, houseId: args.houseId },
+    });
+    return {
+      ok: true,
+      deletedCount: Number(result?.count ?? 0) || 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "manual_usage_delete_failed",
+    };
+  }
+}
+
 export async function saveManualUsageInputForUserHouse(args: {
   userId: string;
   houseId: string;

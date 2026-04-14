@@ -30,6 +30,7 @@ const logSimPipelineEvent = vi.fn();
 const createSimCorrelationId = vi.fn();
 const getMemoryRssMb = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
+const deleteManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 
 const homeDetailsPrisma: any = {
@@ -127,6 +128,7 @@ vi.mock("@/modules/applianceProfile/validation", () => ({
 }));
 
 vi.mock("@/modules/manualUsage/store", () => ({
+  deleteManualUsageInputForUserHouse: (...args: any[]) => deleteManualUsageInputForUserHouse(...args),
   getManualUsageInputForUserHouse: (...args: any[]) => getManualUsageInputForUserHouse(...args),
   saveManualUsageInputForUserHouse: (...args: any[]) => saveManualUsageInputForUserHouse(...args),
 }));
@@ -357,6 +359,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       endDate: "2026-02-28",
     });
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: null, updatedAt: null });
+    deleteManualUsageInputForUserHouse.mockResolvedValue({ ok: true, deletedCount: 0 });
     saveManualUsageInputForUserHouse.mockImplementation(async ({ payload }: any) => ({
       ok: true,
       updatedAt: "2026-04-10T18:00:00.000Z",
@@ -1475,6 +1478,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       "2025-04-11",
       "2025-04-12",
     ]);
+    expect(deleteManualUsageInputForUserHouse).toHaveBeenCalledWith({
+      userId: "u1",
+      houseId: "test-home-1",
+    });
     expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.preLockboxTravelRanges).toEqual([
       { startDate: "2025-08-13", endDate: "2025-08-17" },
     ]);
@@ -2830,24 +2837,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     }
   });
 
-  it("persists the canonical shared Manual Lab payload onto GapFill test home without reanchoring it", async () => {
+  it("uses the current GapFill test-home manual payload and does not inherit the shared Manual Lab payload", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-12T18:00:00.000Z"));
-    const canonicalLabPayload = buildManualLabParityPayload();
     const staleGapfillPayload = buildStaleGapfillMonthlyPayload();
     try {
-      ensureGlobalManualMonthlyLabTestHomeHouse.mockResolvedValueOnce({
-        id: "manual-lab-home-1",
-        esiid: null,
-        label: "MANUAL_MONTHLY_LAB_TEST_HOME",
-      });
       getManualUsageInputForUserHouse.mockImplementation(async ({ houseId }: any) => {
-      if (houseId === "manual-lab-home-1") {
-        return {
-          payload: canonicalLabPayload,
-          updatedAt: "2026-04-10T18:00:00.000Z",
-        };
-      }
       if (houseId === "test-home-1") {
         return {
           payload: staleGapfillPayload,
@@ -2907,22 +2902,23 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(ensureGlobalManualMonthlyLabTestHomeHouse).toHaveBeenCalledWith("u1");
+    expect(ensureGlobalManualMonthlyLabTestHomeHouse).not.toHaveBeenCalled();
+    expect(getManualUsageInputForUserHouse.mock.calls.map((call) => call?.[0]?.houseId)).not.toContain("manual-lab-home-1");
     expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "u1",
         houseId: "test-home-1",
         payload: expect.objectContaining({
-          anchorEndDate: "2026-04-09",
+          anchorEndDate: "2026-04-10",
           dateSourceMode: "AUTO_DATES",
           monthlyKwh: expect.arrayContaining([
-            expect.objectContaining({ month: "2026-04", kwh: 1384.36 }),
-            expect.objectContaining({ month: "2025-07", kwh: 1635.44 }),
-            expect.objectContaining({ month: "2025-06", kwh: 959.51 }),
-            expect.objectContaining({ month: "2025-05", kwh: 275.89 }),
+            expect.objectContaining({ month: "2026-04", kwh: 2853.52 }),
+            expect.objectContaining({ month: "2025-07", kwh: 1005.23 }),
+            expect.objectContaining({ month: "2025-06", kwh: 276.25 }),
+            expect.objectContaining({ month: "2025-05", kwh: 0 }),
           ]),
           statementRanges: expect.arrayContaining([
-            expect.objectContaining({ month: "2025-05", startDate: "2025-04-10", endDate: "2025-05-09" }),
+            expect.objectContaining({ month: "2025-05", startDate: "2025-04-11", endDate: "2025-05-10" }),
           ]),
         }),
       })
@@ -2943,8 +2939,8 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         })
       );
       expect(body.manualDateSourceMode).toBe("AUTO_DATES");
-      expect(body.manualAnchorEndDate).toBe("2026-04-09");
-      expect(body.manualBillEndDay).toBe("09");
+      expect(body.manualAnchorEndDate).toBe("2026-04-10");
+      expect(body.manualBillEndDay).toBe("10");
       expect(body.treatmentMode).toBe("MANUAL_MONTHLY");
       expect(body.usageInputMode).toBe("MANUAL_MONTHLY");
     } finally {

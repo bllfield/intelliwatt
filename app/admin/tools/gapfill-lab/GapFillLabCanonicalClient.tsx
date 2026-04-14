@@ -921,19 +921,8 @@ export default function GapFillLabCanonicalClient() {
   async function onRunCanonicalFlow() {
     const lookupResult = await runAction("lookup_source_houses");
     if (!lookupResult.ok) return;
-
-    const selectedSourceHouseId = String((lookupResult as any)?.selectedSourceHouseId ?? sourceHouseId ?? "").trim();
-    const linkedSourceHouseId = String(((lookupResult as any)?.testHomeLink?.sourceHouseId ?? testHomeLink?.sourceHouseId ?? "")).trim();
-    const linkedTestHomeId = String(
-      ((lookupResult as any)?.testHomeLink?.testHomeHouseId ?? testHomeLink?.testHomeHouseId ?? testHome?.id ?? "")
-    ).trim();
-    const shouldReplaceFromSource =
-      !linkedTestHomeId || !selectedSourceHouseId || !linkedSourceHouseId || linkedSourceHouseId !== selectedSourceHouseId;
-
-    if (shouldReplaceFromSource) {
-      const replaceResult = await runAction("replace_test_home_from_source");
-      if (!replaceResult.ok) return;
-    }
+    const replaceResult = await runAction("replace_test_home_from_source");
+    if (!replaceResult.ok) return;
 
     const parsedHome = parseJsonSafe(homeProfileJson);
     if (!parsedHome.ok) {
