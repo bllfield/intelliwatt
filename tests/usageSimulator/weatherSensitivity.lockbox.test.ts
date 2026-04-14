@@ -302,4 +302,31 @@ describe("weather sensitivity shared lockbox attachment", () => {
     },
     15000
   );
+
+  it("does not attach weather sensitivity inputs for gapfill launcher past sim runs", async () => {
+    usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
+    const result = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "house-1",
+      actualContextHouseId: "source-house-1",
+      esiid: "esiid-1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "corr-weather-gapfill-skip",
+      runContext: {
+        callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
+    expect(buildInputs.weatherEfficiencyDerivedInput).toBeUndefined();
+    expect(buildInputs.snapshots?.weatherSensitivityScore).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("artifact_persist_failed");
+    }
+  });
 });

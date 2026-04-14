@@ -4213,23 +4213,26 @@ async function recalcSimulatorBuildImpl(args: {
 
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
-  try {
-    const shouldLoadWeatherSensitivityActualDataset =
-      typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
-    const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
-      ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
-      : null;
-    const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
-      actualDataset: weatherSensitivityActualDataset,
-      manualUsagePayload: manualUsagePayload as any,
-      homeProfile,
-      applianceProfile,
-      weatherHouseId: actualContextHouseId,
-    });
-    weatherSensitivityScore = weatherSensitivityEnvelope.score;
-    weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput;
-  } catch (error) {
-    console.warn("[usageSimulator] weather sensitivity pre-sim derivation failed", error);
+  const shouldAttachPreSimWeatherSensitivity = runContext.callerLabel !== "gapfill_launcher";
+  if (shouldAttachPreSimWeatherSensitivity) {
+    try {
+      const shouldLoadWeatherSensitivityActualDataset =
+        typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
+      const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
+        ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
+        : null;
+      const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
+        actualDataset: weatherSensitivityActualDataset,
+        manualUsagePayload: manualUsagePayload as any,
+        homeProfile,
+        applianceProfile,
+        weatherHouseId: actualContextHouseId,
+      });
+      weatherSensitivityScore = weatherSensitivityEnvelope.score;
+      weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput;
+    } catch (error) {
+      console.warn("[usageSimulator] weather sensitivity pre-sim derivation failed", error);
+    }
   }
 
   // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).
