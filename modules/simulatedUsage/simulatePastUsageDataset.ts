@@ -22,7 +22,6 @@ import {
   ensureHouseWeatherNormalAvgBackfill,
 } from "@/modules/weather/backfill";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
-import { activateWeatherEfficiencyDerivedInputForSimulation } from "@/modules/weatherSensitivity/shared";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -1457,29 +1456,6 @@ export async function simulatePastUsageDataset(
     const manualBillPeriods: NonNullable<SimulatorBuildInputsV1["manualBillPeriods"]> = Array.isArray(manualBillPeriodsRaw)
       ? (manualBillPeriodsRaw as NonNullable<SimulatorBuildInputsV1["manualBillPeriods"]>)
       : [];
-    const simulationActiveWeatherEfficiencyDerivedInput = activateWeatherEfficiencyDerivedInputForSimulation(
-      buildInputs.weatherEfficiencyDerivedInput ?? null
-    );
-    if (simulationActiveWeatherEfficiencyDerivedInput) {
-      buildInputs.weatherEfficiencyDerivedInput = simulationActiveWeatherEfficiencyDerivedInput;
-      if (buildInputs.snapshots && typeof buildInputs.snapshots === "object") {
-        buildInputs.snapshots.weatherEfficiencyDerivedInput = simulationActiveWeatherEfficiencyDerivedInput;
-      }
-    }
-    const weatherEfficiencySimulationSummary = simulationActiveWeatherEfficiencyDerivedInput
-      ? {
-          activationSource: "shared_past_day_simulator",
-          scoringMode: simulationActiveWeatherEfficiencyDerivedInput.scoringMode,
-          confidenceScore0to100: simulationActiveWeatherEfficiencyDerivedInput.confidenceScore0to100,
-          estimatedWeatherDrivenLoadShare: simulationActiveWeatherEfficiencyDerivedInput.estimatedWeatherDrivenLoadShare,
-          estimatedBaseloadShare: simulationActiveWeatherEfficiencyDerivedInput.estimatedBaseloadShare,
-          coolingResponseRatio: simulationActiveWeatherEfficiencyDerivedInput.coolingResponseRatio,
-          heatingResponseRatio: simulationActiveWeatherEfficiencyDerivedInput.heatingResponseRatio,
-          coolingSlopeKwhPerCDD: simulationActiveWeatherEfficiencyDerivedInput.coolingSlopeKwhPerCDD,
-          heatingSlopeKwhPerHDD: simulationActiveWeatherEfficiencyDerivedInput.heatingSlopeKwhPerHDD,
-          calculationVersion: simulationActiveWeatherEfficiencyDerivedInput.calculationVersion,
-        }
-      : null;
     const usesWholeHomeOnlyPrior =
       resolvedSimFingerprint?.blendMode === "whole_home_only" ||
       resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
@@ -1906,7 +1882,6 @@ export async function simulatePastUsageDataset(
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
         lowDataSyntheticContext,
-        weatherEfficiencyDerivedInput: simulationActiveWeatherEfficiencyDerivedInput,
         observability: {
           correlationId,
           houseId,
@@ -2413,8 +2388,6 @@ export async function simulatePastUsageDataset(
           manualMonthlyInputState:
             (buildInputs as { manualMonthlyInputState?: unknown }).manualMonthlyInputState ?? null,
           manualMonthlyWeatherEvidenceSummary: manualLowDataWeatherEvidenceSummary ?? null,
-          weatherEfficiencyDerivedInput: simulationActiveWeatherEfficiencyDerivedInput,
-          weatherEfficiencySimulationSummary,
           sharedProducerPathUsed:
             (buildInputs as { sharedProducerPathUsed?: unknown }).sharedProducerPathUsed === false ? false : true,
         } as unknown as typeof dataset.meta;

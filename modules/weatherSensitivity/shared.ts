@@ -59,7 +59,7 @@ export type WeatherSensitivityScore = {
 
 export type WeatherEfficiencyDerivedInput = {
   derivedInputAttached: true;
-  simulationActive: boolean;
+  simulationActive: false;
   scoringMode: WeatherSensitivityScore["scoringMode"];
   weatherEfficiencyScore0to100: number;
   coolingSensitivityScore0to100: number;
@@ -596,109 +596,6 @@ export function buildWeatherEfficiencyDerivedInput(
     thermostatAdjustmentApplied: score.thermostatAdjustmentApplied,
     scoreVersion: score.scoreVersion,
     calculationVersion: score.calculationVersion,
-  };
-}
-
-export function activateWeatherEfficiencyDerivedInputForSimulation(
-  input: WeatherEfficiencyDerivedInput | null | undefined
-): WeatherEfficiencyDerivedInput | null {
-  if (!input) return null;
-  return {
-    ...input,
-    simulationActive: true,
-  };
-}
-
-type SimulationWeatherLike = {
-  heatingDegreeSeverity?: number | null;
-  coolingDegreeSeverity?: number | null;
-};
-
-export function applySharedWeatherEfficiencySimulation(args: {
-  derivedInput: WeatherEfficiencyDerivedInput | null | undefined;
-  weatherForDay: SimulationWeatherLike | null | undefined;
-  baseDayKwh: number;
-  currentFinalDayKwh: number;
-  currentWeatherSeverityMultiplier: number;
-  weatherModeUsed: "heating" | "cooling" | "neutral";
-  simulationMode: "actual_backed" | "low_data";
-}): {
-  finalDayKwh: number;
-  weatherSeverityMultiplier: number;
-  weatherAdjustmentModeUsed: "shared_weather_efficiency_blend" | null;
-  postDonorAdjustmentCoefficient: number | null;
-  weatherEfficiencyScaleFactorUsed: number | null;
-} {
-  const input = args.derivedInput;
-  if (!input?.simulationActive || args.weatherModeUsed === "neutral") {
-    return {
-      finalDayKwh: args.currentFinalDayKwh,
-      weatherSeverityMultiplier: args.currentWeatherSeverityMultiplier,
-      weatherAdjustmentModeUsed: null,
-      postDonorAdjustmentCoefficient: null,
-      weatherEfficiencyScaleFactorUsed: null,
-    };
-  }
-
-  const weatherSignal =
-    args.weatherModeUsed === "heating"
-      ? Math.max(0, Number(args.weatherForDay?.heatingDegreeSeverity) || 0)
-      : Math.max(0, Number(args.weatherForDay?.coolingDegreeSeverity) || 0);
-  if (!(weatherSignal > 0) || !(args.baseDayKwh > 0) || !(args.currentFinalDayKwh > 0)) {
-    return {
-      finalDayKwh: args.currentFinalDayKwh,
-      weatherSeverityMultiplier: args.currentWeatherSeverityMultiplier,
-      weatherAdjustmentModeUsed: null,
-      postDonorAdjustmentCoefficient: null,
-      weatherEfficiencyScaleFactorUsed: null,
-    };
-  }
-
-  const responseRatio =
-    args.weatherModeUsed === "heating"
-      ? clamp(Number(input.heatingResponseRatio) || 1, 0.55, 1.85)
-      : clamp(Number(input.coolingResponseRatio) || 1, 0.55, 1.85);
-  const slope =
-    args.weatherModeUsed === "heating"
-      ? Math.max(0, Number(input.heatingSlopeKwhPerHDD) || 0)
-      : Math.max(0, Number(input.coolingSlopeKwhPerCDD) || 0);
-  const confidenceWeight = clamp((Number(input.confidenceScore0to100) || 0) / 100, 0.25, 1);
-  const weatherDrivenShare = clamp(Number(input.estimatedWeatherDrivenLoadShare) || 0, 0.08, 0.9);
-  const baseloadShare = clamp(Number(input.estimatedBaseloadShare) || 0, 0.1, 0.92);
-  const modeWeight = args.simulationMode === "low_data" ? 0.55 : 0.18;
-  const signalWeight = clamp(weatherSignal / 18, 0.12, 1.25);
-  const slopeWeight = clamp(slope / (args.weatherModeUsed === "heating" ? 1.4 : 1.8), 0.35, 1.2);
-  const scaleFactor =
-    1 +
-    clamp(
-      (responseRatio - 1) * weatherDrivenShare * confidenceWeight * modeWeight * signalWeight * slopeWeight,
-      -0.18,
-      0.18
-    );
-  if (Math.abs(scaleFactor - 1) < 0.005) {
-    return {
-      finalDayKwh: args.currentFinalDayKwh,
-      weatherSeverityMultiplier: args.currentWeatherSeverityMultiplier,
-      weatherAdjustmentModeUsed: null,
-      postDonorAdjustmentCoefficient: round2(scaleFactor),
-      weatherEfficiencyScaleFactorUsed: round2(scaleFactor),
-    };
-  }
-
-  const weatherResponsiveKwh = args.currentFinalDayKwh * (1 - baseloadShare);
-  const weatherAdjustedKwh = args.currentFinalDayKwh * baseloadShare + weatherResponsiveKwh * scaleFactor;
-  const blendedFinalDayKwh =
-    args.simulationMode === "low_data"
-      ? weatherAdjustedKwh
-      : args.currentFinalDayKwh * 0.82 + weatherAdjustedKwh * 0.18;
-  const blendedWeatherSeverityMultiplier = blendedFinalDayKwh / Math.max(args.baseDayKwh, 1e-6);
-
-  return {
-    finalDayKwh: round2(Math.max(0, blendedFinalDayKwh)),
-    weatherSeverityMultiplier: round2(Math.max(0, blendedWeatherSeverityMultiplier)),
-    weatherAdjustmentModeUsed: "shared_weather_efficiency_blend",
-    postDonorAdjustmentCoefficient: round2(scaleFactor),
-    weatherEfficiencyScaleFactorUsed: round2(scaleFactor),
   };
 }
 

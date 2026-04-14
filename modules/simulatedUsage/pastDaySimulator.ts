@@ -23,7 +23,6 @@ import type {
   PastWeatherDonorContribution,
   PastLowDataWeatherEvidenceMonth,
 } from "./pastDaySimulatorTypes";
-import { applySharedWeatherEfficiencySimulation } from "@/modules/weatherSensitivity/shared";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
 export type { PastDaySimulationContext, PastDaySimulationRequest, PastDaySimulationResult, SimulatedDayResult } from "./pastDaySimulatorTypes";
@@ -565,7 +564,6 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
   preBlendAdjustedDayKwh: number;
   weatherAdjustmentModeUsed: "manual_monthly_weather_evidence";
   postDonorAdjustmentCoefficient: number | null;
-  weatherEfficiencyScaleFactorUsed?: number | null;
 } {
   const baseDayKwh = Math.max(0, Number(args.baseDayKwh) || 0);
   const wx = args.weatherForDay;
@@ -774,12 +772,8 @@ function computeWeatherAdjustedDayTotal(args: {
   referenceHeatingSeverity: number;
   preBlendAdjustedDayKwh: number;
   blendedBackTowardProfile: boolean;
-  weatherAdjustmentModeUsed:
-    | "legacy_training_stats"
-    | "bounded_post_donor"
-    | "shared_weather_efficiency_blend";
+  weatherAdjustmentModeUsed: "legacy_training_stats" | "bounded_post_donor";
   postDonorAdjustmentCoefficient: number | null;
-  weatherEfficiencyScaleFactorUsed?: number | null;
 } {
   const {
     baseDayKwh,
@@ -823,7 +817,6 @@ function computeWeatherAdjustedDayTotal(args: {
       blendedBackTowardProfile: false,
       weatherAdjustmentModeUsed: adjustmentModeUsed,
       postDonorAdjustmentCoefficient: 1,
-      weatherEfficiencyScaleFactorUsed: null,
     };
   }
 
@@ -1015,7 +1008,6 @@ function computeWeatherAdjustedDayTotal(args: {
     blendedBackTowardProfile,
     weatherAdjustmentModeUsed: adjustmentModeUsed,
     postDonorAdjustmentCoefficient: weatherSeverityMultiplier,
-    weatherEfficiencyScaleFactorUsed: null,
   };
 }
 
@@ -1034,7 +1026,6 @@ export function buildPastDaySimulationContext(args: {
   shapeVariants?: PastDaySimulationContext["shapeVariants"];
   lowDataSyntheticDayKwhByMonthDayType?: PastDaySimulationContext["lowDataSyntheticDayKwhByMonthDayType"];
   lowDataWeatherEvidence?: PastDaySimulationContext["lowDataWeatherEvidence"];
-  weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
@@ -1046,7 +1037,6 @@ export function buildPastDaySimulationContext(args: {
     shapeVariants: args.shapeVariants ?? null,
     lowDataSyntheticDayKwhByMonthDayType: args.lowDataSyntheticDayKwhByMonthDayType ?? null,
     lowDataWeatherEvidence: args.lowDataWeatherEvidence ?? null,
-    weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
   };
 }
 
@@ -1152,21 +1142,6 @@ export function simulatePastDay(
           applianceProfile: applianceProfile ?? null,
         });
       })();
-  const sharedWeatherEfficiencyAdjustment = applySharedWeatherEfficiencySimulation({
-    derivedInput: context.weatherEfficiencyDerivedInput,
-    weatherForDay,
-    baseDayKwh: sel.targetDayKwh,
-    currentFinalDayKwh: adj.finalSelectedDayKwh,
-    currentWeatherSeverityMultiplier: adj.weatherSeverityMultiplier,
-    weatherModeUsed: adj.weatherModeUsed,
-    simulationMode: canUseLowDataSyntheticFastPath ? "low_data" : "actual_backed",
-  });
-  const finalAdjustedDayKwh = sharedWeatherEfficiencyAdjustment.finalDayKwh;
-  const finalWeatherSeverityMultiplier = sharedWeatherEfficiencyAdjustment.weatherSeverityMultiplier;
-  const finalWeatherAdjustmentModeUsed =
-    sharedWeatherEfficiencyAdjustment.weatherAdjustmentModeUsed ?? adj.weatherAdjustmentModeUsed;
-  const finalPostDonorAdjustmentCoefficient =
-    sharedWeatherEfficiencyAdjustment.postDonorAdjustmentCoefficient ?? adj.postDonorAdjustmentCoefficient;
 
   const weatherRegime: PastWeatherRegimeKey =
     adj.weatherModeUsed === "heating" || adj.weatherModeUsed === "cooling" ? adj.weatherModeUsed : "neutral";
@@ -1182,19 +1157,19 @@ export function simulatePastDay(
     ? applyLowDataShapeWeatherAmplitude({
         shape96: selectedShape.shape96,
         weatherRegime,
-        weatherSeverityMultiplier: finalWeatherSeverityMultiplier,
+        weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
         monthEvidence: lowDataMonthEvidence,
       })
     : selectedShape.shape96;
 
   const intervals = gridTimestamps.slice(0, INTERVALS_PER_DAY).map((ts, i) => ({
     timestamp: ts,
-    kwh: Math.max(0, (finalAdjustedDayKwh ?? 0) * (normShape[i] ?? 1 / INTERVALS_PER_DAY)),
+    kwh: Math.max(0, (adj.finalSelectedDayKwh ?? 0) * (normShape[i] ?? 1 / INTERVALS_PER_DAY)),
   }));
   const intervalSumKwh = intervals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
   const displayDayKwh = roundDayKwhDisplay(intervalSumKwh);
   const weatherAdjustedDayKwh =
-    adj.preBlendAdjustedDayKwh ?? (Number(sel.targetDayKwh) || 0) * (Number(finalWeatherSeverityMultiplier) || 0);
+    adj.preBlendAdjustedDayKwh ?? (Number(sel.targetDayKwh) || 0) * (Number(adj.weatherSeverityMultiplier) || 0);
 
   return {
     localDate,
@@ -1207,8 +1182,8 @@ export function simulatePastDay(
     targetDayKwhBeforeWeather: sel.targetDayKwh,
     weatherAdjustedDayKwh,
     profileSelectedDayKwh: sel.targetDayKwh,
-    finalDayKwh: finalAdjustedDayKwh,
-    weatherSeverityMultiplier: finalWeatherSeverityMultiplier,
+    finalDayKwh: adj.finalSelectedDayKwh,
+    weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
     weatherModeUsed: adj.weatherModeUsed,
     auxHeatKwhAdder: adj.auxHeatKwhAdder,
     poolFreezeProtectKwhAdder: adj.poolFreezeProtectKwhAdder,
@@ -1232,9 +1207,8 @@ export function simulatePastDay(
     donorPoolKwhVariance: sel.donorPoolKwhVariance,
     donorPoolMedianKwh: sel.donorPoolMedianKwh,
     donorVarianceGuardrailTriggered: sel.donorVarianceGuardrailTriggered,
-    weatherAdjustmentModeUsed: finalWeatherAdjustmentModeUsed,
-    postDonorAdjustmentCoefficient: finalPostDonorAdjustmentCoefficient,
-    weatherEfficiencyScaleFactorUsed: sharedWeatherEfficiencyAdjustment.weatherEfficiencyScaleFactorUsed,
+    weatherAdjustmentModeUsed: adj.weatherAdjustmentModeUsed,
+    postDonorAdjustmentCoefficient: adj.postDonorAdjustmentCoefficient,
     selectedFingerprintBucketMonth: selectedShape.selectedMonthKeyUsed ?? monthKey,
     shape96Used: normShape,
     auxHeatGate_minTempPassed: adj.auxHeatGate_minTempPassed,

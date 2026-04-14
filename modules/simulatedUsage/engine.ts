@@ -1610,7 +1610,6 @@ export function buildPastSimulatedBaselineV1(args: {
     weatherEvidenceSummary?: import("@/modules/simulatedUsage/pastDaySimulatorTypes").PastDaySimulationContext["lowDataWeatherEvidence"];
     manualTravelVacantDonorPoolMode?: "same_run_simulated_non_travel_days" | "source_derived_mode_unchanged" | null;
   } | null;
-  weatherEfficiencyDerivedInput?: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null;
   observability?: {
     correlationId?: string;
     houseId?: string;
@@ -2290,7 +2289,6 @@ export function buildPastSimulatedBaselineV1(args: {
     shapeVariants: shapeVariantsForContext,
     lowDataSyntheticDayKwhByMonthDayType,
     lowDataWeatherEvidence: lowDataSyntheticContext?.weatherEvidenceSummary ?? null,
-    weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
   });
   emitStage("buildPastSimulatedBaselineV1_stage_shape_context_ready", {
     elapsedMs: Date.now() - baselineStartedAt,
