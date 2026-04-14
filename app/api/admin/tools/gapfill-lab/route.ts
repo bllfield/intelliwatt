@@ -454,17 +454,18 @@ async function buildGapfillManualConstraintPayload(args: {
         : Array.isArray(sourceManualRec.payload?.travelRanges) && sourceManualRec.payload.travelRanges.length > 0
           ? sourceManualRec.payload.travelRanges
           : args.travelRangesForRecalc;
+  const resolvedAnchorEndDate = syntheticAnchorEndDate;
   const resolved = resolveSharedManualStageOneContract({
     mode: args.usageInputMode === "ANNUAL_FROM_SOURCE_INTERVALS" ? "ANNUAL" : "MONTHLY",
     sourcePayload: sourceManualRec.payload,
-    actualEndDate: syntheticAnchorEndDate,
+    actualEndDate: resolvedAnchorEndDate,
     // GapFill manual Stage 1 can use a synthetic anchor for interval-backed tuning runs,
     // but the active run contract must own travel ranges for the artifact being written.
     travelRanges: activeTravelRanges,
     dailyRows: sourceUsageDataset?.dataset?.daily ?? [],
     testHomePayload: authoritativeSavedPayload,
   });
-  if (!resolved.payload || !syntheticAnchorEndDate) {
+  if (!resolved.payload || !resolvedAnchorEndDate) {
     return resolved;
   }
   if (resolved.payloadSource === "test_home_saved_payload") {
@@ -482,7 +483,7 @@ async function buildGapfillManualConstraintPayload(args: {
               ? activeTravelRanges
               : resolved.payload.travelRanges,
         },
-        anchorEndDate: syntheticAnchorEndDate,
+        anchorEndDate: resolvedAnchorEndDate,
       }),
     };
   }
@@ -497,7 +498,7 @@ async function buildGapfillManualConstraintPayload(args: {
               ? activeTravelRanges
               : resolved.payload.travelRanges,
         },
-        anchorEndDate: syntheticAnchorEndDate,
+        anchorEndDate: resolvedAnchorEndDate,
       }),
     };
   }
@@ -1468,6 +1469,20 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+    const clearedManualPayload = await deleteManualUsageInputForUserHouse({
+      userId: labOwnerUserId,
+      houseId: String(replaced.testHomeHouseId),
+    });
+    if (!clearedManualPayload.ok) {
+      return NextResponse.json(
+        attachFailureContract({
+          ok: false,
+          error: "replace_test_home_manual_payload_clear_failed",
+          message: "GapFill could not clear the previous test-home manual payload after replace.",
+        }),
+        { status: 500 }
+      );
+    }
     try {
       const testHome = await (prisma as any).houseAddress.findUnique({
         where: { id: replaced.testHomeHouseId },
@@ -1532,6 +1547,7 @@ export async function POST(req: NextRequest) {
         effectiveTravelRangesForRecalc: effectiveTravelRanges,
         effectiveTravelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home_saved" : "source_house_fallback",
+        manualPayloadReset: true,
         travelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home" : "source_house_fallback",
         testHomeLink: refreshedLink,

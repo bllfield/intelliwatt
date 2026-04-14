@@ -188,6 +188,7 @@ describe("admin manual monthly route", () => {
     });
     mocks.getUserDefaultValidationSelectionMode.mockResolvedValue("stratified_weather_balanced");
     mocks.resolveUserValidationPolicy.mockReturnValue({
+      owner: "userValidationPolicy",
       selectionMode: "stratified_weather_balanced",
       validationDayCount: 21,
     });
@@ -519,6 +520,7 @@ describe("admin manual monthly route", () => {
         actualContextHouseId: "source-house-1",
         mode: "MANUAL_TOTALS",
         scenarioId: "past-lab-s1",
+        preLockboxTravelRanges: [],
       })
     );
     expect(mocks.getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();

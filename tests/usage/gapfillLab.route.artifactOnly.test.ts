@@ -3819,6 +3819,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.ok).toBe(true);
     expect(body.action).toBe("replace_test_home_from_source");
     expect(body.testHome?.label).toBe("Test Home");
+    expect(body.manualPayloadReset).toBe(true);
     expect(body.testHomeTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
     expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
     expect(body.effectiveTravelRangesForRecalc).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
@@ -3827,6 +3828,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       ownerUserId: "u1",
       sourceUserId: "u1",
       sourceHouseId: "h1",
+    });
+    expect(deleteManualUsageInputForUserHouse).toHaveBeenCalledWith({
+      userId: "u1",
+      houseId: "test-home-1",
     });
   });
 

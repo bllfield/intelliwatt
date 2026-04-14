@@ -102,6 +102,8 @@ async function buildReadResult(args: {
   exactArtifactInputHash?: string | null;
   requireExactArtifactMatch?: boolean;
   actualDataset?: any;
+  validationPolicyOwner?: string | null;
+  weatherLogicMode?: string | null;
 }) {
   return buildManualUsagePastSimReadResult({
     userId: args.userId,
@@ -113,6 +115,8 @@ async function buildReadResult(args: {
     requireExactArtifactMatch: args.requireExactArtifactMatch === true,
     callerType: "user_past",
     actualDataset: args.actualDataset,
+    validationPolicyOwner: args.validationPolicyOwner ?? null,
+    weatherLogicMode: args.weatherLogicMode ?? null,
   });
 }
 
@@ -330,6 +334,15 @@ async function buildLabPrefill(args: {
   };
 }
 
+async function resolveManualMonthlyLabPolicies(weatherPreference: WeatherPreference = "LAST_YEAR_WEATHER") {
+  const userWeatherLogic = resolveUserWeatherLogicSetting(weatherPreference);
+  const userValidationPolicy = resolveUserValidationPolicy({
+    defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
+    validationDayCount: 21,
+  });
+  return { userWeatherLogic, userValidationPolicy };
+}
+
 export async function POST(req: NextRequest) {
   const denied = gateManualMonthlyLabAdmin(req);
   if (denied) return denied;
@@ -386,6 +399,7 @@ export async function POST(req: NextRequest) {
 
     if (action === "load") {
       const sourceTravelRangesFromDb = await getTravelRangesFromDb(sourceResolved.userId, sourceResolved.selectedHouse.id);
+      const { userWeatherLogic, userValidationPolicy } = await resolveManualMonthlyLabPolicies();
       const replaced = await replaceGlobalManualMonthlyLabTestHomeFromSource({
         ownerUserId,
         sourceUserId: sourceResolved.userId,
@@ -439,6 +453,8 @@ export async function POST(req: NextRequest) {
           scenarioId,
           readMode: "artifact_only",
           actualDataset: sourceUsageHouse?.dataset ?? null,
+          validationPolicyOwner: userValidationPolicy.owner,
+          weatherLogicMode: userWeatherLogic.weatherLogicMode,
         }),
       ]);
 
@@ -496,11 +512,8 @@ export async function POST(req: NextRequest) {
         weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
           ? (weatherPreferenceRaw as WeatherPreference)
           : "LAST_YEAR_WEATHER";
-      const userWeatherLogic = resolveUserWeatherLogicSetting(weatherPreference);
-      const userValidationPolicy = resolveUserValidationPolicy({
-        defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
-        validationDayCount: 21,
-      });
+      const { userWeatherLogic, userValidationPolicy } = await resolveManualMonthlyLabPolicies(weatherPreference);
+      const sourceTravelRangesFromDb = await getTravelRangesFromDb(sourceResolved.userId, sourceResolved.selectedHouse.id);
       let dispatched: Awaited<ReturnType<typeof dispatchPastSimRecalc>>;
       try {
         dispatched = await dispatchPastSimRecalc({
@@ -512,6 +525,7 @@ export async function POST(req: NextRequest) {
           scenarioId,
           weatherPreference: userWeatherLogic.weatherPreference,
           persistPastSimBaseline: true,
+          preLockboxTravelRanges: sourceTravelRangesFromDb,
           validationDaySelectionMode: userValidationPolicy.selectionMode,
           validationDayCount: userValidationPolicy.validationDayCount,
           runContext: {
@@ -679,6 +693,12 @@ export async function POST(req: NextRequest) {
         sourceResolved.selectedHouse.esiid ?? null,
         { skipFullYearIntervalFetch: true }
       ).catch(() => ({ dataset: null }));
+      const weatherPreferenceRaw = typeof body?.weatherPreference === "string" ? body.weatherPreference.trim() : "";
+      const weatherPreference: WeatherPreference =
+        weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
+          ? (weatherPreferenceRaw as WeatherPreference)
+          : "LAST_YEAR_WEATHER";
+      const { userWeatherLogic, userValidationPolicy } = await resolveManualMonthlyLabPolicies(weatherPreference);
       const readResult = await buildReadResult({
         userId: ownerUserId,
         houseId: labHome.id,
@@ -688,6 +708,8 @@ export async function POST(req: NextRequest) {
         exactArtifactInputHash,
         requireExactArtifactMatch: exactArtifactInputHash != null,
         actualDataset: actualUsageResult?.dataset ?? null,
+        validationPolicyOwner: userValidationPolicy.owner,
+        weatherLogicMode: userWeatherLogic.weatherLogicMode,
       });
       if (readResult.ok) {
         logSimPipelineEvent("admin_manual_monthly_read_result_success", {
