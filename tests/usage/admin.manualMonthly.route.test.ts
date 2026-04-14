@@ -516,6 +516,7 @@ describe("admin manual monthly route", () => {
         userId: "admin-owner-1",
         houseId: "lab-home-1",
         esiid: null,
+        actualContextHouseId: "source-house-1",
         mode: "MANUAL_TOTALS",
         scenarioId: "past-lab-s1",
       })

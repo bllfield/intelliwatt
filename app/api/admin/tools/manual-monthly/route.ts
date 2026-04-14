@@ -507,6 +507,7 @@ export async function POST(req: NextRequest) {
           userId: ownerUserId,
           houseId: labHome.id,
           esiid: null,
+          actualContextHouseId: sourceResolved.selectedHouse.id,
           mode: "MANUAL_TOTALS",
           scenarioId,
           weatherPreference: userWeatherLogic.weatherPreference,
