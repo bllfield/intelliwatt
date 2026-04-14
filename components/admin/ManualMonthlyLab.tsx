@@ -213,6 +213,10 @@ export default function ManualMonthlyLab() {
   );
   const manualLabWeatherSensitivityScore = displayedReadResult?.dataset?.meta?.weatherSensitivityScore ?? null;
   const manualLabWeatherEfficiencyDerivedInput = displayedReadResult?.dataset?.meta?.weatherEfficiencyDerivedInput ?? null;
+  const manualLabWeatherUnavailableMessage =
+    displayedReadResult?.dataset && !manualLabWeatherSensitivityScore
+      ? "Weather Efficiency Score is not available for this shared artifact yet. It appears only when the shared actual-data or manual-bill-data contract is present."
+      : null;
 
   const sourceUsageOverride = useMemo(() => {
     if (!selectedSourceHouse) return null;
@@ -299,6 +303,14 @@ export default function ManualMonthlyLab() {
         : null,
     [displayedReadResult]
   );
+  const shouldShowManualCurveCompare =
+    Boolean(displayedReadResult?.ok) && (activeManualPayload?.mode ?? null) === "MONTHLY";
+  const manualCurveCompareReadStatus =
+    shouldShowManualCurveCompare && !dailyCurveCompareSummary
+      ? Array.isArray(displayedReadResult?.compareProjection?.rows) && displayedReadResult.compareProjection.rows.length > 0
+        ? "Daily curve compare is not available for this read yet. Shared compare rows exist, but compare-day interval payloads were not attached."
+        : "Daily curve compare is not available because this shared artifact does not currently expose compare days."
+      : null;
 
   async function callRoute(action: string, extra: Record<string, unknown> = {}) {
     const res = await fetch("/api/admin/tools/manual-monthly", {
@@ -719,12 +731,11 @@ export default function ManualMonthlyLab() {
                     dashboardVariant="PAST_SIMULATED_USAGE"
                     pastVariables={pastScenarioVariables}
                   />
-                  {manualLabWeatherSensitivityScore ? (
-                    <WeatherSensitivityAdminDiagnostics
-                      score={manualLabWeatherSensitivityScore}
-                      derivedInput={manualLabWeatherEfficiencyDerivedInput}
-                    />
-                  ) : null}
+                  <WeatherSensitivityAdminDiagnostics
+                    score={manualLabWeatherSensitivityScore}
+                    derivedInput={manualLabWeatherEfficiencyDerivedInput}
+                    unavailableMessage={manualLabWeatherUnavailableMessage}
+                  />
                 </div>
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
@@ -742,7 +753,9 @@ export default function ManualMonthlyLab() {
                 <ManualMonthlyReconciliationPanel reconciliation={displayedReadResult.manualMonthlyReconciliation} />
               </div>
             ) : null}
-            {dailyCurveCompareSummary ? <GapFillDailyCurveCompare summary={dailyCurveCompareSummary} /> : null}
+            {shouldShowManualCurveCompare ? (
+              <GapFillDailyCurveCompare summary={dailyCurveCompareSummary} rawReadStatus={manualCurveCompareReadStatus} />
+            ) : null}
           </div>
         ) : null}
 

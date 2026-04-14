@@ -29,11 +29,16 @@ const {
   prisma,
   getSimulatedUsageForHouseScenario,
   buildValidationCompareProjectionSidecar,
+  resolveIntervalsLayer,
+  getHomeProfileSimulatedByUserHouse,
+  getApplianceProfileSimulatedByUserHouse,
+  resolveSharedWeatherSensitivityEnvelope,
 } = vi.hoisted(() => ({
   cookiesMock: vi.fn(),
   prisma: {
     user: { findUnique: vi.fn() },
     manualUsageInput: { findUnique: vi.fn() },
+    houseAddress: { findFirst: vi.fn() },
   } as any,
   getSimulatedUsageForHouseScenario: vi.fn(),
   buildValidationCompareProjectionSidecar: vi.fn((dataset: any) => ({
@@ -43,6 +48,10 @@ const {
         ? dataset.meta.validationCompareMetrics
         : {},
   })),
+  resolveIntervalsLayer: vi.fn(),
+  getHomeProfileSimulatedByUserHouse: vi.fn(),
+  getApplianceProfileSimulatedByUserHouse: vi.fn(),
+  resolveSharedWeatherSensitivityEnvelope: vi.fn().mockResolvedValue({ score: null, derivedInput: null }),
 }));
 
 vi.mock("next/headers", () => ({
@@ -59,11 +68,28 @@ vi.mock("@/modules/usageSimulator/compareProjection", () => ({
 }));
 
 vi.mock("@/lib/usage/resolveIntervalsLayer", () => ({
-  resolveIntervalsLayer: vi.fn(),
+  resolveIntervalsLayer: (...args: any[]) => resolveIntervalsLayer(...args),
 }));
 
 vi.mock("@/modules/usageShapeProfile/autoBuild", () => ({
   ensureUsageShapeProfileForUserHouse: vi.fn(),
+}));
+
+vi.mock("@/modules/homeProfile/repo", () => ({
+  getHomeProfileSimulatedByUserHouse: (...args: any[]) => getHomeProfileSimulatedByUserHouse(...args),
+}));
+
+vi.mock("@/modules/applianceProfile/repo", () => ({
+  getApplianceProfileSimulatedByUserHouse: (...args: any[]) => getApplianceProfileSimulatedByUserHouse(...args),
+}));
+
+vi.mock("@/modules/applianceProfile/validation", () => ({
+  normalizeStoredApplianceProfile: (value: unknown) => value,
+}));
+
+vi.mock("@/modules/weatherSensitivity/shared", () => ({
+  buildWeatherEfficiencyDerivedInput: vi.fn((score: any) => score),
+  resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
 }));
 
 describe("user simulated house compare projection", () => {
@@ -75,6 +101,11 @@ describe("user simulated house compare projection", () => {
     });
     prisma.user.findUnique.mockResolvedValue({ id: "u1" });
     prisma.manualUsageInput.findUnique.mockResolvedValue(null);
+    prisma.houseAddress.findFirst.mockResolvedValue({ id: "h1", esiid: "esiid-1" });
+    resolveIntervalsLayer.mockResolvedValue({ dataset: { summary: { source: "ACTUAL" }, daily: [], series: { intervals15: [] } } });
+    getHomeProfileSimulatedByUserHouse.mockResolvedValue(null);
+    getApplianceProfileSimulatedByUserHouse.mockResolvedValue({ appliancesJson: null });
+    resolveSharedWeatherSensitivityEnvelope.mockResolvedValue({ score: null, derivedInput: null });
     getSimulatedUsageForHouseScenario.mockResolvedValue({
       ok: true,
       houseId: "h1",
@@ -562,8 +593,8 @@ describe("user simulated house compare projection", () => {
       },
     });
 
-    expect(pureManualReadout.sourceDerivedMonthlyTotalsKwhByMonth).toBe("—");
-    expect(pureManualReadout.sourceDerivedAnnualTotalKwh).toBe("—");
+    expect(pureManualReadout.sourceDerivedMonthlyTotalsKwhByMonth).toBe("not shown in this mode");
+    expect(pureManualReadout.sourceDerivedAnnualTotalKwh).toBe("not shown in this mode");
   });
 
   it("truthfully marks blank identities and zeroed artifact-only timings as unavailable", () => {

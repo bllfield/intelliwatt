@@ -1017,6 +1017,12 @@ export default function GapFillLabCanonicalClient() {
   const actualHouseWeatherEfficiencyDerivedInput = (actualHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null;
   const testHouseWeatherSensitivityScore = (testHouseBaselineDataset as any)?.meta?.weatherSensitivityScore ?? null;
   const testHouseWeatherEfficiencyDerivedInput = (testHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null;
+  const sharedWeatherUnavailableMessage =
+    "Weather Efficiency Score is not available for this shared artifact yet. It appears only when the shared actual-data or manual-bill-data contract is present.";
+  const actualHouseWeatherUnavailableMessage =
+    actualHouseBaselineDataset && !actualHouseWeatherSensitivityScore ? sharedWeatherUnavailableMessage : null;
+  const testHouseWeatherUnavailableMessage =
+    testHouseBaselineDataset && !testHouseWeatherSensitivityScore ? sharedWeatherUnavailableMessage : null;
   const testHouseCompareProjection = useMemo(
     () =>
       result?.ok
@@ -1214,7 +1220,9 @@ export default function GapFillLabCanonicalClient() {
       timezone,
     ]
   );
-  const showTestDayCurveCompare = dailyCurveCompareSummary != null;
+  const showTestDayCurveCompare =
+    dailyCurveCompareSummary != null ||
+    (selectedTreatmentMode === "MANUAL_MONTHLY" && Boolean(result?.ok && testHouseBaselineDataset));
   const exportPayloadBase = useMemo(
     () => ({
       workspace: "gapfill-lab-canonical-client",
@@ -1870,12 +1878,11 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {actualHouseWeatherSensitivityScore ? (
-              <WeatherSensitivityAdminDiagnostics
-                score={actualHouseWeatherSensitivityScore}
-                derivedInput={actualHouseWeatherEfficiencyDerivedInput}
-              />
-            ) : null}
+            <WeatherSensitivityAdminDiagnostics
+              score={actualHouseWeatherSensitivityScore}
+              derivedInput={actualHouseWeatherEfficiencyDerivedInput}
+              unavailableMessage={actualHouseWeatherUnavailableMessage}
+            />
             {actualHouseCompareProjection.rows.length > 0 ? (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
@@ -2034,12 +2041,11 @@ export default function GapFillLabCanonicalClient() {
               dashboardVariant="PAST_SIMULATED_USAGE"
               showHouseSelector={false}
             />
-            {testHouseWeatherSensitivityScore ? (
-              <WeatherSensitivityAdminDiagnostics
-                score={testHouseWeatherSensitivityScore}
-                derivedInput={testHouseWeatherEfficiencyDerivedInput}
-              />
-            ) : null}
+            <WeatherSensitivityAdminDiagnostics
+              score={testHouseWeatherSensitivityScore}
+              derivedInput={testHouseWeatherEfficiencyDerivedInput}
+              unavailableMessage={testHouseWeatherUnavailableMessage}
+            />
             {testHouseCompareProjection.rows.length > 0 ? (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>

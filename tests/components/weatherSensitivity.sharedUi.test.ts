@@ -19,6 +19,7 @@ describe("shared weather sensitivity UI surfaces", () => {
     expect(source).toContain("coolingSlopeKwhPerCDD");
     expect(source).toContain("derived input attached");
     expect(source).toContain("simulation active");
+    expect(source).toContain("unavailableMessage");
   });
 
   it("includes an Admin Tools card for the dedicated lab", () => {

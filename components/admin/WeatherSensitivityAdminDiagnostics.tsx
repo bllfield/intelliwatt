@@ -18,12 +18,23 @@ function metricRow(label: string, value: unknown) {
 export function WeatherSensitivityAdminDiagnostics(props: {
   score: WeatherSensitivityScore | null;
   derivedInput: WeatherEfficiencyDerivedInput | null;
+  unavailableMessage?: string | null;
+  title?: string;
 }) {
-  if (!props.score) return null;
+  const title = props.title ?? "Weather Efficiency Score";
+  if (!props.score) {
+    if (!props.unavailableMessage) return null;
+    return (
+      <section className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+        <div className="text-base font-semibold text-brand-navy">{title}</div>
+        <div className="text-sm text-amber-950">{props.unavailableMessage}</div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4 rounded-2xl border border-brand-blue/15 bg-white p-5 shadow-sm">
-      <WeatherSensitivityCard score={props.score} presentation="admin" title="Weather Efficiency Score" />
+      <WeatherSensitivityCard score={props.score} presentation="admin" title={title} />
 
       <details className="rounded-xl border border-brand-blue/10 bg-brand-blue/5">
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-brand-navy">

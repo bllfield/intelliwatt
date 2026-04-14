@@ -182,10 +182,14 @@ export async function GET(request: NextRequest) {
       });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
-      const [homeProfile, applianceProfileRec, manualUsageRec] = await Promise.all([
+      const [homeProfile, applianceProfileRec, manualUsageRec, house] = await Promise.all([
         getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
         getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
         getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
+        prisma.houseAddress.findFirst({
+          where: { id: houseId, userId: u.user.id, archivedAt: null },
+          select: { id: true, esiid: true },
+        }),
       ]);
       const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
       const persistedScore = (datasetAny?.meta as any)?.weatherSensitivityScore ?? null;
@@ -196,12 +200,27 @@ export async function GET(request: NextRequest) {
               score: persistedScore,
               derivedInput: persistedDerivedInput ?? buildWeatherEfficiencyDerivedInput(persistedScore),
             }
-          : await resolveSharedWeatherSensitivityEnvelope({
-              manualUsagePayload: manualUsageRec?.payload ?? null,
-              homeProfile,
-              applianceProfile,
-              weatherHouseId: houseId,
-            }).catch(() => ({ score: null, derivedInput: null }));
+          : await (async () => {
+              const actualDatasetForSharedScore =
+                house?.id != null
+                  ? (
+                      await resolveIntervalsLayer({
+                        userId: u.user.id,
+                        houseId: house.id,
+                        layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+                        scenarioId: null,
+                        esiid: house.esiid ?? null,
+                      }).catch(() => null)
+                    )?.dataset ?? null
+                  : null;
+              return resolveSharedWeatherSensitivityEnvelope({
+                actualDataset: actualDatasetForSharedScore,
+                manualUsagePayload: manualUsageRec?.payload ?? null,
+                homeProfile,
+                applianceProfile,
+                weatherHouseId: houseId,
+              }).catch(() => ({ score: null, derivedInput: null }));
+            })();
       const successBody = {
         ...out,
         compareProjection,

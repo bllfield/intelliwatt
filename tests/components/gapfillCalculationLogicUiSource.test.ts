@@ -109,6 +109,9 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).toContain("(actualHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput");
     expect(source).toContain("(testHouseBaselineDataset as any)?.meta?.weatherSensitivityScore");
     expect(source).toContain("(testHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput");
+    expect(source).toContain("sharedWeatherUnavailableMessage");
+    expect(source).toContain("unavailableMessage={actualHouseWeatherUnavailableMessage}");
+    expect(source).toContain("unavailableMessage={testHouseWeatherUnavailableMessage}");
     expect(source).not.toContain("/api/admin/tools/weather-sensitivity-lab");
     expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
   });

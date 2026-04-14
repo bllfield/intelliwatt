@@ -263,4 +263,32 @@ describe("weather sensitivity shared lockbox attachment", () => {
       nextDetailPromptType: expect.any(String),
     });
   });
+
+  it(
+    "also attaches shared interval-based weather inputs before non-baseline past sim runs",
+    async () => {
+    manualUsageInputFindUnique.mockResolvedValueOnce(null);
+
+    await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "house-1",
+      esiid: "esiid-1",
+      mode: "NEW_BUILD_ESTIMATE",
+      persistPastSimBaseline: false,
+      correlationId: "corr-weather-interval-universal",
+    });
+
+    const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
+    expect(getActualUsageDatasetForHouseMock).toHaveBeenCalled();
+    expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
+      derivedInputAttached: true,
+      simulationActive: false,
+      scoringMode: "INTERVAL_BASED",
+    });
+    expect(buildInputs.snapshots.weatherSensitivityScore).toMatchObject({
+      scoringMode: "INTERVAL_BASED",
+    });
+    },
+    15000
+  );
 });

@@ -100,6 +100,8 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("WeatherSensitivityAdminDiagnostics");
     expect(source).toContain("displayedReadResult?.dataset?.meta?.weatherSensitivityScore");
     expect(source).toContain("displayedReadResult?.dataset?.meta?.weatherEfficiencyDerivedInput");
+    expect(source).toContain("manualLabWeatherUnavailableMessage");
+    expect(source).toContain("unavailableMessage={manualLabWeatherUnavailableMessage}");
     expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
     expect(source).not.toContain("buildSharedWeatherSensitivityScore");
   });
@@ -113,5 +115,7 @@ describe("ManualMonthlyLab shared runtime payload wiring", () => {
     expect(source).toContain("displayedReadResult?.curveCompareSimulatedIntervals15");
     expect(source).toContain("displayedReadResult?.curveCompareSimulatedDailyRows");
     expect(source).toContain("displayedReadResult?.compareProjection?.rows");
+    expect(source).toContain("shouldShowManualCurveCompare");
+    expect(source).toContain("rawReadStatus={manualCurveCompareReadStatus}");
   });
 });

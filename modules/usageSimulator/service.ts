@@ -4149,10 +4149,11 @@ async function recalcSimulatorBuildImpl(args: {
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
   try {
-    const weatherSensitivityActualDataset =
-      mode === "SMT_BASELINE"
-        ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
-        : null;
+    const shouldLoadWeatherSensitivityActualDataset =
+      manualUsagePayload == null && typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
+    const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
+      ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
+      : null;
     const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
       actualDataset: weatherSensitivityActualDataset,
       manualUsagePayload: manualUsagePayload as any,
