@@ -36,7 +36,7 @@ import {
   buildStageTimingReadout,
   formatIdentityReadout,
 } from "./readoutTruth";
-import { buildGapfillExportPayload } from "./exportPayload";
+import { buildGapfillFullTuningPayload } from "@/modules/usageSimulator/tuningPayload";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
 type DateRange = { startDate: string; endDate: string };
@@ -1322,6 +1322,8 @@ export default function GapFillLabCanonicalClient() {
         actualHouseCompareProjection: actualHouseCompareProjection ?? null,
         testHouseCompareProjection: testHouseCompareProjection ?? null,
       },
+      calculationLogicSummary: calculationLogicSummary ?? null,
+      dailyCurveCompareSummary: dailyCurveCompareSummary ?? null,
       requestDebug,
     }),
     [
@@ -1339,6 +1341,8 @@ export default function GapFillLabCanonicalClient() {
       lastFailureFields,
       lastHttpStatus,
       loading,
+      calculationLogicSummary,
+      dailyCurveCompareSummary,
       pastSimSnapshot,
       randomMode,
       requestDebug,
@@ -1361,14 +1365,17 @@ export default function GapFillLabCanonicalClient() {
   );
 
   function buildExportPayload() {
-    return buildGapfillExportPayload(exportPayloadBase);
+    return buildGapfillFullTuningPayload(exportPayloadBase);
   }
 
-  async function onCopyAllData() {
-    const payloadText = JSON.stringify(buildExportPayload(), null, 2);
+  async function onCopyFullTuningPayload(pretty = true) {
+    const payloadText = JSON.stringify(buildExportPayload(), null, pretty ? 2 : 0);
+    const successMessage = pretty
+      ? "Copied full tuning payload to clipboard."
+      : "Copied full tuning payload JSON to clipboard.";
     try {
       await navigator.clipboard.writeText(payloadText);
-      setExportNotice("Copied full Gapfill data bundle to clipboard.");
+      setExportNotice(successMessage);
     } catch {
       try {
         const ta = document.createElement("textarea");
@@ -1380,7 +1387,30 @@ export default function GapFillLabCanonicalClient() {
         ta.select();
         document.execCommand("copy");
         document.body.removeChild(ta);
-        setExportNotice("Copied full Gapfill data bundle to clipboard.");
+        setExportNotice(successMessage);
+      } catch {
+        setExportNotice("Copy failed. Use Save all to file.");
+      }
+    }
+  }
+
+  async function onCopyAllData() {
+    const payloadText = JSON.stringify(buildExportPayload(), null, 2);
+    try {
+      await navigator.clipboard.writeText(payloadText);
+      setExportNotice("Copied full tuning payload to clipboard.");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = payloadText;
+        ta.setAttribute("readonly", "true");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setExportNotice("Copied full tuning payload to clipboard.");
       } catch {
         setExportNotice("Copy failed. Use Save all to file.");
       }
@@ -1390,7 +1420,7 @@ export default function GapFillLabCanonicalClient() {
   function onSaveAllToFile() {
     const payloadText = JSON.stringify(buildExportPayload(), null, 2);
     const nowIso = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `gapfill-lab-export-${nowIso}.json`;
+    const fileName = `gapfill-full-tuning-payload-${nowIso}.json`;
     const blob = new Blob([payloadText], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1400,7 +1430,7 @@ export default function GapFillLabCanonicalClient() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    setExportNotice(`Saved full Gapfill data bundle to ${fileName}.`);
+    setExportNotice(`Saved full tuning payload to ${fileName}.`);
   }
 
   return (
@@ -1862,6 +1892,22 @@ export default function GapFillLabCanonicalClient() {
             type="button"
           >
             Copy all data
+          </button>
+          <button
+            className="px-3 py-2 rounded border text-sm"
+            onClick={() => void onCopyFullTuningPayload(true)}
+            disabled={loading}
+            type="button"
+          >
+            Copy Full Tuning Payload
+          </button>
+          <button
+            className="px-3 py-2 rounded border text-sm"
+            onClick={() => void onCopyFullTuningPayload(false)}
+            disabled={loading}
+            type="button"
+          >
+            Copy Full Tuning Payload (JSON)
           </button>
           <button
             className="px-3 py-2 rounded border text-sm"

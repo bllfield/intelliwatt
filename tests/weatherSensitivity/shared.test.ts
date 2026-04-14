@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildSharedWeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
+import {
+  activateWeatherEfficiencyDerivedInputForSimulation,
+  buildSharedWeatherSensitivityScore,
+  buildWeatherEfficiencyDerivedInput,
+} from "@/modules/weatherSensitivity/shared";
 
 describe("shared weather sensitivity scoring owner", () => {
   it("uses only eligible actual interval-backed days and ignores compare rows", () => {
@@ -201,5 +205,47 @@ describe("shared weather sensitivity scoring owner", () => {
     expect(result?.weatherEfficiencyScore0to100).toBeGreaterThanOrEqual(0);
     expect(result?.scoreVersion).toBeTruthy();
     expect(result?.calculationVersion).toBeTruthy();
+  });
+
+  it("activates the existing shared derived input for simulation without changing the two-path scoring split", () => {
+    const score = buildSharedWeatherSensitivityScore({
+      actualDataset: {
+        summary: { intervalsCount: 96 * 3 },
+        daily: [
+          { date: "2025-02-01", kwh: 35, source: "ACTUAL" },
+          { date: "2025-04-01", kwh: 20, source: "ACTUAL" },
+          { date: "2025-08-01", kwh: 41, source: "ACTUAL" },
+        ],
+        dailyWeather: {
+          "2025-02-01": { tAvgF: 42, hdd65: 23, cdd65: 0 },
+          "2025-04-01": { tAvgF: 65, hdd65: 0, cdd65: 0 },
+          "2025-08-01": { tAvgF: 84, hdd65: 0, cdd65: 19 },
+        },
+      },
+      homeProfile: {
+        squareFeet: 1600,
+        fuelConfiguration: "all_electric",
+        hvacType: "central_air",
+        heatingType: "heat_pump",
+        summerTemp: 74,
+        winterTemp: 67,
+      },
+      applianceProfile: {
+        fuelConfiguration: { heating: "electric" },
+        appliances: [],
+      },
+    });
+
+    const derivedInput = buildWeatherEfficiencyDerivedInput(score);
+    const activated = activateWeatherEfficiencyDerivedInputForSimulation(derivedInput);
+
+    expect(derivedInput?.simulationActive).toBe(false);
+    expect(activated).toMatchObject({
+      derivedInputAttached: true,
+      simulationActive: true,
+      scoringMode: "INTERVAL_BASED",
+    });
+    expect(activated?.coolingSlopeKwhPerCDD).toBe(derivedInput?.coolingSlopeKwhPerCDD);
+    expect(activated?.heatingSlopeKwhPerHDD).toBe(derivedInput?.heatingSlopeKwhPerHDD);
   });
 });

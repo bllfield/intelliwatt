@@ -106,7 +106,10 @@ import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDi
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+import {
+  activateWeatherEfficiencyDerivedInputForSimulation,
+  resolveSharedWeatherSensitivityEnvelope,
+} from "@/modules/weatherSensitivity/shared";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -4994,6 +4997,9 @@ async function recalcSimulatorBuildImpl(args: {
         });
       }
       if (result.dataset !== null && result.stitchedCurve) {
+        weatherEfficiencyDerivedInput = activateWeatherEfficiencyDerivedInputForSimulation(
+          weatherEfficiencyDerivedInput
+        );
         logSimPipelineEvent("recalc_shared_post_baseline_handoff_complete", {
           correlationId: args.correlationId,
           houseId,
@@ -5049,6 +5055,9 @@ async function recalcSimulatorBuildImpl(args: {
     }
   }
 
+  weatherEfficiencyDerivedInput = activateWeatherEfficiencyDerivedInputForSimulation(
+    weatherEfficiencyDerivedInput
+  );
   const buildInputs: SimulatorBuildInputsV1 & {
     scenarioKey?: string;
     scenarioId?: string | null;

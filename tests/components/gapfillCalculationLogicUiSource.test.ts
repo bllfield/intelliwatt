@@ -122,6 +122,16 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
   });
 
+  it("adds the full tuning payload copy action through one shared shaper", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("Copy Full Tuning Payload");
+    expect(source).toContain("buildGapfillFullTuningPayload");
+    expect(source).toContain('from "@/modules/usageSimulator/tuningPayload"');
+    expect(source).not.toContain("function buildFullTuningPayload");
+    expect(source).not.toContain("const fullTuningPayload = {");
+  });
+
   it("adds a single canonical orchestration action that reuses the existing shared GapFill steps", () => {
     const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
 

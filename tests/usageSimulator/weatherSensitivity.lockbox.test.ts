@@ -241,7 +241,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     );
   });
 
-  it("attaches the shared derived input before simulation executes without activating simulation consumption", async () => {
+  it("activates the shared derived input through the shared simulation path", async () => {
     const result = await recalcSimulatorBuild({
       userId: "u1",
       houseId: "house-1",
@@ -255,7 +255,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     expect(upsertSimulatorBuild).toHaveBeenCalledTimes(1);
     expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
       derivedInputAttached: true,
-      simulationActive: false,
+      simulationActive: true,
       scoringMode: "INTERVAL_BASED",
     });
     expect(buildInputs.snapshots.weatherSensitivityScore).toMatchObject({
@@ -269,7 +269,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
       });
       expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
         derivedInputAttached: true,
-        simulationActive: false,
+        simulationActive: true,
         scoringMode: "INTERVAL_BASED",
       });
     }
@@ -293,7 +293,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     expect(getActualUsageDatasetForHouseMock).toHaveBeenCalled();
     expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
       derivedInputAttached: true,
-      simulationActive: false,
+      simulationActive: true,
       scoringMode: "INTERVAL_BASED",
     });
     expect(buildInputs.snapshots.weatherSensitivityScore).toMatchObject({

@@ -1,3 +1,5 @@
+import type { WeatherEfficiencyDerivedInput } from "@/modules/weatherSensitivity/shared";
+
 /**
  * Types for the shared Past day simulator.
  * Used by both GapFill Lab and user-facing Past baseline.
@@ -174,6 +176,7 @@ export type PastDaySimulationContext = {
   shapeVariants?: PastShapeVariants | null;
   lowDataSyntheticDayKwhByMonthDayType?: Record<string, { weekday: number; weekend: number }> | null;
   lowDataWeatherEvidence?: PastLowDataWeatherEvidenceSummary | null;
+  weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
 };
 
 /** Request to simulate one past day. */
@@ -236,8 +239,13 @@ export type SimulatedDayResult = {
   donorPoolKwhVariance?: number | null;
   donorPoolMedianKwh?: number | null;
   donorVarianceGuardrailTriggered?: boolean;
-  weatherAdjustmentModeUsed?: "legacy_training_stats" | "bounded_post_donor" | "manual_monthly_weather_evidence";
+  weatherAdjustmentModeUsed?:
+    | "legacy_training_stats"
+    | "bounded_post_donor"
+    | "manual_monthly_weather_evidence"
+    | "shared_weather_efficiency_blend";
   postDonorAdjustmentCoefficient?: number | null;
+  weatherEfficiencyScaleFactorUsed?: number | null;
   templateSelectionKind?: string;
   selectedFingerprintBucketMonth?: string;
   selectedFingerprintBucketDayType?: PastDayTypeKey;

@@ -931,6 +931,7 @@ export type SimulatorBuildInputsV1 = {
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   sharedProducerPathUsed?: boolean;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  weatherEfficiencySimulationSummary?: Record<string, unknown> | null;
   // Snapshots (for auditing / future UI): not required for regen.
   snapshots?: {
     manualUsagePayload?: any;
@@ -1087,6 +1088,7 @@ export type SimulatedUsageDatasetMeta = {
   sharedProducerPathUsed?: boolean;
   weatherSensitivityScore?: WeatherSensitivityScore | null;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  weatherEfficiencySimulationSummary?: Record<string, unknown> | null;
   /** Compare-only projection rows for validation/test days from this same canonical family. */
   validationCompareRows?: Array<{
     localDate: string;
@@ -1321,6 +1323,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
       sharedProducerPathUsed: false,
       weatherSensitivityScore: buildInputs.snapshots?.weatherSensitivityScore ?? null,
       weatherEfficiencyDerivedInput: buildInputs.weatherEfficiencyDerivedInput ?? null,
+      weatherEfficiencySimulationSummary: buildInputs.weatherEfficiencySimulationSummary ?? null,
     },
     usageBucketsByMonth,
     ...(intervals15m !== undefined && { intervals15m }),
@@ -1390,6 +1393,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     sharedProducerPathUsed?: boolean;
     weatherSensitivityScore?: WeatherSensitivityScore | null;
     weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+    weatherEfficiencySimulationSummary?: Record<string, unknown> | null;
   },
   options?: {
     excludedDateKeys?: Set<string>;
@@ -1718,6 +1722,7 @@ export function buildSimulatedUsageDatasetFromCurve(
       sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
       weatherSensitivityScore: meta.weatherSensitivityScore ?? null,
       weatherEfficiencyDerivedInput: meta.weatherEfficiencyDerivedInput ?? null,
+      weatherEfficiencySimulationSummary: meta.weatherEfficiencySimulationSummary ?? null,
       canonicalArtifactSimulatedDayTotalsByDate,
       simulatedTravelVacantDateKeysLocal,
       simulatedTestModeledDateKeysLocal,
