@@ -59,7 +59,7 @@ export type WeatherSensitivityScore = {
 
 export type WeatherEfficiencyDerivedInput = {
   derivedInputAttached: true;
-  simulationActive: false;
+  simulationActive: boolean;
   scoringMode: WeatherSensitivityScore["scoringMode"];
   weatherEfficiencyScore0to100: number;
   coolingSensitivityScore0to100: number;

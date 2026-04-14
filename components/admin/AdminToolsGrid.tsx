@@ -27,6 +27,11 @@ const TOOL_CARDS = [
     description: "Browser-based harness for the customer manual-monthly flow with diagnostics.",
   },
   {
+    href: "/admin/tools/one-path-sim",
+    title: "One Path Sim Admin",
+    description: "Canonical admin harness for shared interval, manual, annual, and new-build simulation runs.",
+  },
+  {
     href: "/admin/tools/usage-shape-profile",
     title: "Usage Shape Profile",
     description: "Derive and save usage shape from actual 15-minute intervals.",

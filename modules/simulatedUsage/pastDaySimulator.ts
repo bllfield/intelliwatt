@@ -117,6 +117,67 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+type SharedWeatherShapeModifier = {
+  applied: boolean;
+  weatherShapingMode: "none" | "interval_based_shared_modifier" | "billing_period_compressed_shared_modifier";
+  weatherAmplitudeCompressionFactor: number;
+  intradayPeakValleyCompressionFactor: number;
+  weatherResponsivenessScale: number;
+  dailyExtremaConfidence: number;
+};
+
+function resolveSharedWeatherShapeModifier(
+  derivedInput: PastDaySimulationContext["weatherEfficiencyDerivedInput"],
+  weatherModeUsed: "heating" | "cooling" | "neutral"
+): SharedWeatherShapeModifier {
+  if (!derivedInput || derivedInput.simulationActive !== true || weatherModeUsed === "neutral") {
+    return {
+      applied: false,
+      weatherShapingMode: "none",
+      weatherAmplitudeCompressionFactor: 1,
+      intradayPeakValleyCompressionFactor: 1,
+      weatherResponsivenessScale: 1,
+      dailyExtremaConfidence: 0,
+    };
+  }
+  const confidence = clampNumber((Number(derivedInput.confidenceScore0to100) || 0) / 100, 0.15, 1);
+  const loadShare = clampNumber(Number(derivedInput.estimatedWeatherDrivenLoadShare) || 0, 0.05, 0.85);
+  const scoreScale = clampNumber((Number(derivedInput.weatherEfficiencyScore0to100) || 0) / 100, 0.05, 1);
+  const responseScale = clampNumber(
+    ((Math.abs(Number(derivedInput.coolingResponseRatio) || 0) + Math.abs(Number(derivedInput.heatingResponseRatio) || 0)) / 2) || 0,
+    0.35,
+    1.4
+  );
+  if (derivedInput.scoringMode === "INTERVAL_BASED") {
+    return {
+      applied: true,
+      weatherShapingMode: "interval_based_shared_modifier",
+      weatherAmplitudeCompressionFactor: clampNumber(0.78 + confidence * 0.18 + (responseScale - 0.35) * 0.04, 0.78, 1),
+      intradayPeakValleyCompressionFactor: clampNumber(0.88 + confidence * 0.1, 0.88, 1),
+      weatherResponsivenessScale: clampNumber(0.72 + loadShare * 0.2 + scoreScale * 0.12, 0.72, 1.05),
+      dailyExtremaConfidence: clampNumber(0.68 + confidence * 0.32, 0.68, 1),
+    };
+  }
+  return {
+    applied: true,
+    weatherShapingMode: "billing_period_compressed_shared_modifier",
+    weatherAmplitudeCompressionFactor: clampNumber(0.42 + confidence * 0.18 + loadShare * 0.12 + scoreScale * 0.08, 0.42, 0.78),
+    intradayPeakValleyCompressionFactor: clampNumber(0.58 + confidence * 0.12 + loadShare * 0.08, 0.58, 0.82),
+    weatherResponsivenessScale: clampNumber(0.38 + loadShare * 0.18 + confidence * 0.14 + scoreScale * 0.08, 0.38, 0.78),
+    dailyExtremaConfidence: clampNumber(0.35 + confidence * 0.22, 0.35, 0.7),
+  };
+}
+
+function applySharedWeatherAdjustedDayTotal(args: {
+  baseDayKwh: number;
+  adjustedDayKwh: number;
+  modifier: SharedWeatherShapeModifier;
+}): number {
+  if (!args.modifier.applied) return args.adjustedDayKwh;
+  const delta = args.adjustedDayKwh - args.baseDayKwh;
+  return args.baseDayKwh + delta * args.modifier.weatherAmplitudeCompressionFactor * args.modifier.weatherResponsivenessScale;
+}
+
 function normalizeShape96Weights(shape: number[]): number[] {
   const nonNegative = shape.map((value) => Math.max(0, Number(value) || 0));
   const sum = nonNegative.reduce((acc, value) => acc + value, 0);
@@ -556,6 +617,7 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
   baseDayKwh: number;
   weatherForDay: PastDayWeatherFeatures | null;
   monthEvidence: PastLowDataWeatherEvidenceMonth | null;
+  weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
 }): {
   finalSelectedDayKwh: number;
   weatherSeverityMultiplier: number;
@@ -564,6 +626,11 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
   preBlendAdjustedDayKwh: number;
   weatherAdjustmentModeUsed: "manual_monthly_weather_evidence";
   postDonorAdjustmentCoefficient: number | null;
+  weatherEfficiencyApplied: boolean;
+  weatherShapingMode: SharedWeatherShapeModifier["weatherShapingMode"];
+  weatherAmplitudeCompressionFactor: number;
+  intradayPeakValleyCompressionFactor: number;
+  dailyExtremaConfidence: number;
 } {
   const baseDayKwh = Math.max(0, Number(args.baseDayKwh) || 0);
   const wx = args.weatherForDay;
@@ -577,6 +644,11 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
       preBlendAdjustedDayKwh: baseDayKwh,
       weatherAdjustmentModeUsed: "manual_monthly_weather_evidence",
       postDonorAdjustmentCoefficient: 1,
+      weatherEfficiencyApplied: false,
+      weatherShapingMode: "none",
+      weatherAmplitudeCompressionFactor: 1,
+      intradayPeakValleyCompressionFactor: 1,
+      dailyExtremaConfidence: 0,
     };
   }
 
@@ -595,7 +667,6 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
   const baseloadKwh = baseDayKwh * baseloadShare;
   const hvacResponsiveKwh = Math.max(0, baseDayKwh - baseloadKwh) * hvacMultiplier;
   const preBlendAdjustedDayKwh = baseloadKwh + hvacResponsiveKwh;
-  const weatherSeverityMultiplier = baseDayKwh > 1e-6 ? preBlendAdjustedDayKwh / baseDayKwh : 1;
 
   const weatherModeUsed: "heating" | "cooling" | "neutral" =
     Math.max(0, Number(wx.heatingDegreeSeverity) || 0) > Math.max(referenceDailyHdd + 1, Number(wx.coolingDegreeSeverity) || 0)
@@ -604,10 +675,17 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
         ? "cooling"
         : "neutral";
   const dayClassification: PastDayWeatherClassification =
-    Math.abs(weatherSeverityMultiplier - 1) >= 0.035 ? "weather_scaled_day" : "normal_day";
+    Math.abs((baseDayKwh > 1e-6 ? preBlendAdjustedDayKwh / baseDayKwh : 1) - 1) >= 0.035 ? "weather_scaled_day" : "normal_day";
+  const modifier = resolveSharedWeatherShapeModifier(args.weatherEfficiencyDerivedInput ?? null, weatherModeUsed);
+  const adjustedForDerivedInput = applySharedWeatherAdjustedDayTotal({
+    baseDayKwh,
+    adjustedDayKwh: preBlendAdjustedDayKwh,
+    modifier,
+  });
+  const weatherSeverityMultiplier = baseDayKwh > 1e-6 ? adjustedForDerivedInput / baseDayKwh : 1;
   const finalSelectedDayKwh =
     dayClassification === "weather_scaled_day"
-      ? baseDayKwh * WEATHER_SCALED_PROFILE_ANCHOR_FRAC + preBlendAdjustedDayKwh * (1 - WEATHER_SCALED_PROFILE_ANCHOR_FRAC)
+      ? baseDayKwh * WEATHER_SCALED_PROFILE_ANCHOR_FRAC + adjustedForDerivedInput * (1 - WEATHER_SCALED_PROFILE_ANCHOR_FRAC)
       : baseDayKwh;
 
   return {
@@ -615,9 +693,14 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
     weatherSeverityMultiplier,
     weatherModeUsed,
     dayClassification,
-    preBlendAdjustedDayKwh,
+    preBlendAdjustedDayKwh: adjustedForDerivedInput,
     weatherAdjustmentModeUsed: "manual_monthly_weather_evidence",
     postDonorAdjustmentCoefficient: weatherSeverityMultiplier,
+    weatherEfficiencyApplied: modifier.applied,
+    weatherShapingMode: modifier.weatherShapingMode,
+    weatherAmplitudeCompressionFactor: modifier.weatherAmplitudeCompressionFactor,
+    intradayPeakValleyCompressionFactor: modifier.intradayPeakValleyCompressionFactor,
+    dailyExtremaConfidence: modifier.dailyExtremaConfidence,
   };
 }
 
@@ -626,6 +709,7 @@ function applyLowDataShapeWeatherAmplitude(args: {
   weatherRegime: PastWeatherRegimeKey;
   weatherSeverityMultiplier: number;
   monthEvidence: PastLowDataWeatherEvidenceMonth | null;
+  weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
 }): number[] {
   const normalized = normalizeShape96Weights(args.shape96);
   if (args.weatherRegime === "neutral" || !args.monthEvidence) return normalized;
@@ -633,10 +717,16 @@ function applyLowDataShapeWeatherAmplitude(args: {
   const baseloadShare = clampNumber(Number(args.monthEvidence.baseloadShare) || 0, 0.15, 0.92);
   const deviation = Math.abs((Number(args.weatherSeverityMultiplier) || 1) - 1);
   if (deviation < 0.02) return normalized;
+  const modifier = resolveSharedWeatherShapeModifier(args.weatherEfficiencyDerivedInput ?? null, args.weatherRegime);
 
   const flat = 1 / INTERVALS_PER_DAY;
-  const amplitudeMultiplier = 1 + deviation * (0.6 + hvacShare * 0.9);
-  const flattenBlend = clampNumber(baseloadShare * 0.45, 0, 0.35);
+  const effectiveDeviation = deviation * modifier.weatherAmplitudeCompressionFactor * modifier.weatherResponsivenessScale;
+  const amplitudeMultiplier = 1 + effectiveDeviation * (0.45 + hvacShare * 0.55);
+  const flattenBlend = clampNumber(
+    baseloadShare * 0.45 + (1 - modifier.intradayPeakValleyCompressionFactor) * 0.4,
+    0,
+    0.5
+  );
   const adjusted = normalized.map((value) => {
     const amplified = flat + (value - flat) * amplitudeMultiplier;
     return flat * flattenBlend + amplified * (1 - flattenBlend);
@@ -759,6 +849,7 @@ function computeWeatherAdjustedDayTotal(args: {
   isWeekend: boolean;
   homeProfile?: PastDayHomeProfile | null;
   applianceProfile?: PastDayApplianceProfile | null;
+  weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
 }): {
   finalSelectedDayKwh: number;
   weatherSeverityMultiplier: number;
@@ -774,6 +865,11 @@ function computeWeatherAdjustedDayTotal(args: {
   blendedBackTowardProfile: boolean;
   weatherAdjustmentModeUsed: "legacy_training_stats" | "bounded_post_donor";
   postDonorAdjustmentCoefficient: number | null;
+  weatherEfficiencyApplied: boolean;
+  weatherShapingMode: SharedWeatherShapeModifier["weatherShapingMode"];
+  weatherAmplitudeCompressionFactor: number;
+  intradayPeakValleyCompressionFactor: number;
+  dailyExtremaConfidence: number;
 } {
   const {
     baseDayKwh,
@@ -785,6 +881,7 @@ function computeWeatherAdjustedDayTotal(args: {
     isWeekend,
     homeProfile,
     applianceProfile,
+    weatherEfficiencyDerivedInput,
   } = args;
   const wx = weatherByDateKey.get(localDate);
   const monthKey = localDate.slice(0, 7);
@@ -817,6 +914,11 @@ function computeWeatherAdjustedDayTotal(args: {
       blendedBackTowardProfile: false,
       weatherAdjustmentModeUsed: adjustmentModeUsed,
       postDonorAdjustmentCoefficient: 1,
+      weatherEfficiencyApplied: false,
+      weatherShapingMode: "none",
+      weatherAmplitudeCompressionFactor: 1,
+      intradayPeakValleyCompressionFactor: 1,
+      dailyExtremaConfidence: 0,
     };
   }
 
@@ -962,6 +1064,15 @@ function computeWeatherAdjustedDayTotal(args: {
     }
   }
 
+  const weatherModifier = resolveSharedWeatherShapeModifier(weatherEfficiencyDerivedInput ?? null, weatherModeUsed);
+  if (weatherModifier.applied) {
+    weatherSeverityMultiplier =
+      1 +
+      (weatherSeverityMultiplier - 1) *
+        weatherModifier.weatherAmplitudeCompressionFactor *
+        weatherModifier.weatherResponsivenessScale;
+  }
+
   const preBlendAdjustedDayKwh = baseDayKwh * weatherSeverityMultiplier;
   const fullEventKwh = preBlendAdjustedDayKwh + auxHeatKwhAdder + poolFreezeProtectKwhAdder;
 
@@ -1008,6 +1119,11 @@ function computeWeatherAdjustedDayTotal(args: {
     blendedBackTowardProfile,
     weatherAdjustmentModeUsed: adjustmentModeUsed,
     postDonorAdjustmentCoefficient: weatherSeverityMultiplier,
+    weatherEfficiencyApplied: weatherModifier.applied,
+    weatherShapingMode: weatherModifier.weatherShapingMode,
+    weatherAmplitudeCompressionFactor: weatherModifier.weatherAmplitudeCompressionFactor,
+    intradayPeakValleyCompressionFactor: weatherModifier.intradayPeakValleyCompressionFactor,
+    dailyExtremaConfidence: weatherModifier.dailyExtremaConfidence,
   };
 }
 
@@ -1026,6 +1142,7 @@ export function buildPastDaySimulationContext(args: {
   shapeVariants?: PastDaySimulationContext["shapeVariants"];
   lowDataSyntheticDayKwhByMonthDayType?: PastDaySimulationContext["lowDataSyntheticDayKwhByMonthDayType"];
   lowDataWeatherEvidence?: PastDaySimulationContext["lowDataWeatherEvidence"];
+  weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
@@ -1037,6 +1154,7 @@ export function buildPastDaySimulationContext(args: {
     shapeVariants: args.shapeVariants ?? null,
     lowDataSyntheticDayKwhByMonthDayType: args.lowDataSyntheticDayKwhByMonthDayType ?? null,
     lowDataWeatherEvidence: args.lowDataWeatherEvidence ?? null,
+    weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
   };
 }
 
@@ -1108,6 +1226,7 @@ export function simulatePastDay(
           baseDayKwh: sel.targetDayKwh,
           weatherForDay,
           monthEvidence: lowDataMonthEvidence,
+            weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
         });
         return {
           finalSelectedDayKwh: adjusted.finalSelectedDayKwh,
@@ -1124,6 +1243,11 @@ export function simulatePastDay(
           blendedBackTowardProfile: adjusted.dayClassification === "weather_scaled_day",
           weatherAdjustmentModeUsed: adjusted.weatherAdjustmentModeUsed,
           postDonorAdjustmentCoefficient: adjusted.postDonorAdjustmentCoefficient,
+            weatherEfficiencyApplied: adjusted.weatherEfficiencyApplied,
+            weatherShapingMode: adjusted.weatherShapingMode,
+            weatherAmplitudeCompressionFactor: adjusted.weatherAmplitudeCompressionFactor,
+            intradayPeakValleyCompressionFactor: adjusted.intradayPeakValleyCompressionFactor,
+            dailyExtremaConfidence: adjusted.dailyExtremaConfidence,
         };
       })()
     : (() => {
@@ -1140,6 +1264,7 @@ export function simulatePastDay(
           isWeekend,
           homeProfile: homeProfile ?? null,
           applianceProfile: applianceProfile ?? null,
+          weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
         });
       })();
 
@@ -1159,6 +1284,7 @@ export function simulatePastDay(
         weatherRegime,
         weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
         monthEvidence: lowDataMonthEvidence,
+          weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
       })
     : selectedShape.shape96;
 
@@ -1217,6 +1343,11 @@ export function simulatePastDay(
     referenceHeatingSeverity: adj.referenceHeatingSeverity,
     preBlendAdjustedDayKwh: adj.preBlendAdjustedDayKwh,
     blendedBackTowardProfile: adj.blendedBackTowardProfile,
+    weatherEfficiencyApplied: adj.weatherEfficiencyApplied,
+    weatherShapingMode: adj.weatherShapingMode,
+    weatherAmplitudeCompressionFactor: adj.weatherAmplitudeCompressionFactor,
+    intradayPeakValleyCompressionFactor: adj.intradayPeakValleyCompressionFactor,
+    dailyExtremaConfidence: adj.dailyExtremaConfidence,
   };
 }
 

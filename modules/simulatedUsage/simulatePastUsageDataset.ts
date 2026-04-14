@@ -1882,6 +1882,7 @@ export async function simulatePastUsageDataset(
         debug: { out: pastDayCounts as any },
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
         lowDataSyntheticContext,
+        weatherEfficiencyDerivedInput: buildInputs.weatherEfficiencyDerivedInput ?? null,
         observability: {
           correlationId,
           houseId,

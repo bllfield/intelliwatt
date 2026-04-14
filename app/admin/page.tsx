@@ -930,6 +930,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/tools/one-path-sim"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🛠️ One Path Sim Admin</div>
+              <div className="text-sm text-brand-navy/60">
+                Canonical shared simulation harness for interval, manual monthly, manual annual, and new-build runs
+              </div>
+            </a>
+            <a
               href="/admin/tools/usage-shape-profile"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

@@ -3,6 +3,8 @@
  * Used by both GapFill Lab and user-facing Past baseline.
  */
 
+import type { WeatherEfficiencyDerivedInput } from "@/modules/weatherSensitivity/shared";
+
 /** Daily weather features for one day (shared shape). */
 export type PastDayWeatherFeatures = {
   dailyAvgTempC: number | null;
@@ -174,6 +176,7 @@ export type PastDaySimulationContext = {
   shapeVariants?: PastShapeVariants | null;
   lowDataSyntheticDayKwhByMonthDayType?: Record<string, { weekday: number; weekend: number }> | null;
   lowDataWeatherEvidence?: PastLowDataWeatherEvidenceSummary | null;
+  weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
 };
 
 /** Request to simulate one past day. */
@@ -248,6 +251,11 @@ export type SimulatedDayResult = {
   dayTotalBeforeWeatherScale?: number;
   dayTotalAfterWeatherScale?: number;
   intervalShapeScalingMethod?: string;
+  weatherEfficiencyApplied?: boolean;
+  weatherShapingMode?: string;
+  weatherAmplitudeCompressionFactor?: number;
+  intradayPeakValleyCompressionFactor?: number;
+  dailyExtremaConfidence?: number;
   /** Diagnostics: why aux heat did or did not apply. */
   auxHeatGate_minTempPassed?: boolean;
   auxHeatGate_freezeHoursPassed?: boolean;

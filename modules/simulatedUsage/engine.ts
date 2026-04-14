@@ -1618,6 +1618,7 @@ export function buildPastSimulatedBaselineV1(args: {
     buildPathKind?: string;
     source?: string;
   };
+  weatherEfficiencyDerivedInput?: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
@@ -2289,6 +2290,7 @@ export function buildPastSimulatedBaselineV1(args: {
     shapeVariants: shapeVariantsForContext,
     lowDataSyntheticDayKwhByMonthDayType,
     lowDataWeatherEvidence: lowDataSyntheticContext?.weatherEvidenceSummary ?? null,
+    weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
   });
   emitStage("buildPastSimulatedBaselineV1_stage_shape_context_ready", {
     elapsedMs: Date.now() - baselineStartedAt,

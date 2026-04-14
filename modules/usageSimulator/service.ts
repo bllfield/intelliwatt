@@ -1363,45 +1363,11 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
 }
 
 function hasLegacyWeatherEfficiencySimulationActivation(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  const directInput = record.weatherEfficiencyDerivedInput;
-  if (
-    directInput &&
-    typeof directInput === "object" &&
-    !Array.isArray(directInput) &&
-    (directInput as Record<string, unknown>).simulationActive === true
-  ) {
-    return true;
-  }
-  const meta = record.meta;
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
-  const metaInput = (meta as Record<string, unknown>).weatherEfficiencyDerivedInput;
-  return (
-    !!metaInput &&
-    typeof metaInput === "object" &&
-    !Array.isArray(metaInput) &&
-    (metaInput as Record<string, unknown>).simulationActive === true
-  );
+  return false;
 }
 
 function normalizeLegacyWeatherEfficiencyBuildInputs<T extends Record<string, unknown>>(buildInputs: T): T {
-  const derivedInput = buildInputs?.weatherEfficiencyDerivedInput;
-  if (
-    !derivedInput ||
-    typeof derivedInput !== "object" ||
-    Array.isArray(derivedInput) ||
-    (derivedInput as Record<string, unknown>).simulationActive !== true
-  ) {
-    return buildInputs;
-  }
-  return {
-    ...buildInputs,
-    weatherEfficiencyDerivedInput: {
-      ...(derivedInput as Record<string, unknown>),
-      simulationActive: false,
-    },
-  } as T;
+  return buildInputs;
 }
 
 function restoreCachedArtifactDataset(args: {
@@ -4213,31 +4179,28 @@ async function recalcSimulatorBuildImpl(args: {
 
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
-  const shouldSkipManualMonthlyWeatherAttachment =
-    mode === "MANUAL_TOTALS" &&
-    (runContext.callerLabel === "gapfill_launcher" ||
-      runContext.callerLabel === "admin_manual_monthly_lab" ||
-      runContext.callerLabel === "user_recalc");
-  const shouldAttachPreSimWeatherSensitivity = !shouldSkipManualMonthlyWeatherAttachment;
-  if (shouldAttachPreSimWeatherSensitivity) {
-    try {
-      const shouldLoadWeatherSensitivityActualDataset =
-        typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
-      const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
-        ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
-        : null;
-      const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
-        actualDataset: weatherSensitivityActualDataset,
-        manualUsagePayload: manualUsagePayload as any,
-        homeProfile,
-        applianceProfile,
-        weatherHouseId: actualContextHouseId,
-      });
-      weatherSensitivityScore = weatherSensitivityEnvelope.score;
-      weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput;
-    } catch (error) {
-      console.warn("[usageSimulator] weather sensitivity pre-sim derivation failed", error);
-    }
+  try {
+    const shouldLoadWeatherSensitivityActualDataset =
+      typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
+    const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
+      ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
+      : null;
+    const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
+      actualDataset: weatherSensitivityActualDataset,
+      manualUsagePayload: manualUsagePayload as any,
+      homeProfile,
+      applianceProfile,
+      weatherHouseId: actualContextHouseId,
+    });
+    weatherSensitivityScore = weatherSensitivityEnvelope.score;
+    weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput
+      ? {
+          ...weatherSensitivityEnvelope.derivedInput,
+          simulationActive: true,
+        }
+      : null;
+  } catch (error) {
+    console.warn("[usageSimulator] weather sensitivity pre-sim derivation failed", error);
   }
 
   // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).

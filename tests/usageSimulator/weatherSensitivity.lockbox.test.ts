@@ -241,7 +241,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     );
   });
 
-  it("attaches the shared derived input before non-manual simulation executes without activating simulation consumption", async () => {
+  it("attaches the shared derived input before simulation executes and marks it active in the shared calc path", async () => {
     const result = await recalcSimulatorBuild({
       userId: "u1",
       houseId: "house-1",
@@ -255,7 +255,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     expect(upsertSimulatorBuild).toHaveBeenCalledTimes(1);
     expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
       derivedInputAttached: true,
-      simulationActive: false,
+      simulationActive: true,
       scoringMode: "INTERVAL_BASED",
     });
     expect(buildInputs.snapshots.weatherSensitivityScore).toMatchObject({
@@ -269,7 +269,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
       });
       expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
         derivedInputAttached: true,
-        simulationActive: false,
+        simulationActive: true,
         scoringMode: "INTERVAL_BASED",
       });
     }
@@ -293,7 +293,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     expect(getActualUsageDatasetForHouseMock).toHaveBeenCalled();
     expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
       derivedInputAttached: true,
-      simulationActive: false,
+      simulationActive: true,
       scoringMode: "INTERVAL_BASED",
     });
     expect(buildInputs.snapshots.weatherSensitivityScore).toMatchObject({
@@ -303,7 +303,7 @@ describe("weather sensitivity shared lockbox attachment", () => {
     15000
   );
 
-  it("does not attach weather sensitivity inputs for gapfill launcher past sim runs", async () => {
+  it("attaches shared weather inputs for gapfill launcher manual totals runs through the same shared producer", async () => {
     usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
     const result = await recalcSimulatorBuild({
       userId: "u1",
@@ -322,15 +322,23 @@ describe("weather sensitivity shared lockbox attachment", () => {
     });
 
     const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
-    expect(buildInputs.weatherEfficiencyDerivedInput).toBeUndefined();
-    expect(buildInputs.snapshots?.weatherSensitivityScore).toBeNull();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe("artifact_persist_failed");
+    expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
+      derivedInputAttached: true,
+      simulationActive: true,
+      scoringMode: "INTERVAL_BASED",
+    });
+    expect(buildInputs.snapshots?.weatherSensitivityScore).toMatchObject({
+      scoringMode: "INTERVAL_BASED",
+    });
+    if (result.ok) {
+      expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
+        derivedInputAttached: true,
+        simulationActive: true,
+      });
     }
   });
 
-  it("does not attach weather sensitivity inputs for admin manual monthly lab past sim runs", async () => {
+  it("attaches shared weather inputs for admin manual monthly lab past sim runs", async () => {
     usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
     const result = await recalcSimulatorBuild({
       userId: "u1",
@@ -349,15 +357,23 @@ describe("weather sensitivity shared lockbox attachment", () => {
     });
 
     const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
-    expect(buildInputs.weatherEfficiencyDerivedInput).toBeUndefined();
-    expect(buildInputs.snapshots?.weatherSensitivityScore).toBeNull();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe("artifact_persist_failed");
+    expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
+      derivedInputAttached: true,
+      simulationActive: true,
+      scoringMode: "INTERVAL_BASED",
+    });
+    expect(buildInputs.snapshots?.weatherSensitivityScore).toMatchObject({
+      scoringMode: "INTERVAL_BASED",
+    });
+    if (result.ok) {
+      expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
+        derivedInputAttached: true,
+        simulationActive: true,
+      });
     }
   });
 
-  it("does not attach weather sensitivity inputs for user manual monthly past sim runs", async () => {
+  it("attaches shared weather inputs for user manual monthly past sim runs", async () => {
     usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
     const result = await recalcSimulatorBuild({
       userId: "u1",
@@ -376,11 +392,19 @@ describe("weather sensitivity shared lockbox attachment", () => {
     });
 
     const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
-    expect(buildInputs.weatherEfficiencyDerivedInput).toBeUndefined();
-    expect(buildInputs.snapshots?.weatherSensitivityScore).toBeNull();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe("artifact_persist_failed");
+    expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
+      derivedInputAttached: true,
+      simulationActive: true,
+      scoringMode: "INTERVAL_BASED",
+    });
+    expect(buildInputs.snapshots?.weatherSensitivityScore).toMatchObject({
+      scoringMode: "INTERVAL_BASED",
+    });
+    if (result.ok) {
+      expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
+        derivedInputAttached: true,
+        simulationActive: true,
+      });
     }
   });
 });
