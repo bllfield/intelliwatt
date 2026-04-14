@@ -676,7 +676,9 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       message: "Past build inputs are missing. Rebuild Past first.",
     };
   }
-  const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+  const buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+    buildRec.buildInputs as SimulatorBuildInputsV1 & Record<string, unknown>
+  ) as SimulatorBuildInputsV1;
   const identityWindow = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
   if (!identityWindow) {
     return {
@@ -1360,6 +1362,48 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
   (dataset as any)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY] = { ...rootPrev, ...base };
 }
 
+function hasLegacyWeatherEfficiencySimulationActivation(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const directInput = record.weatherEfficiencyDerivedInput;
+  if (
+    directInput &&
+    typeof directInput === "object" &&
+    !Array.isArray(directInput) &&
+    (directInput as Record<string, unknown>).simulationActive === true
+  ) {
+    return true;
+  }
+  const meta = record.meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+  const metaInput = (meta as Record<string, unknown>).weatherEfficiencyDerivedInput;
+  return (
+    !!metaInput &&
+    typeof metaInput === "object" &&
+    !Array.isArray(metaInput) &&
+    (metaInput as Record<string, unknown>).simulationActive === true
+  );
+}
+
+function normalizeLegacyWeatherEfficiencyBuildInputs<T extends Record<string, unknown>>(buildInputs: T): T {
+  const derivedInput = buildInputs?.weatherEfficiencyDerivedInput;
+  if (
+    !derivedInput ||
+    typeof derivedInput !== "object" ||
+    Array.isArray(derivedInput) ||
+    (derivedInput as Record<string, unknown>).simulationActive !== true
+  ) {
+    return buildInputs;
+  }
+  return {
+    ...buildInputs,
+    weatherEfficiencyDerivedInput: {
+      ...(derivedInput as Record<string, unknown>),
+      simulationActive: false,
+    },
+  } as T;
+}
+
 function restoreCachedArtifactDataset(args: {
   cached: CachedPastDataset;
   useSelectedDaysLightweightArtifactRead: boolean;
@@ -1954,6 +1998,8 @@ export async function buildGapfillCompareSimShared(args: {
       artifactIntervalsRaw.length < expectedChartIntervalCount;
     const needsRebuildForOldCurveVersion =
       !rebuildArtifact && sharedPastArtifactMetaFailsCurveShapingStaleGuard(restoredMetaNormalized);
+    const needsRebuildForLegacyWeatherActivation =
+      !rebuildArtifact && hasLegacyWeatherEfficiencySimulationActivation(dataset);
     const excludedFingerprintFromMeta = String(restoredMetaNormalized?.excludedDateKeysFingerprint ?? "")
       .split(",")
       .map((dk) => String(dk).trim())
@@ -1962,7 +2008,12 @@ export async function buildGapfillCompareSimShared(args: {
     const shouldAutoRebuildNow =
       autoEnsureArtifact &&
       !artifactAutoRebuilt &&
-      (needsRebuildForStaleWindow || needsRebuildForOldCurveVersion || hasOwnershipScopeMismatch);
+      (
+        needsRebuildForStaleWindow ||
+        needsRebuildForOldCurveVersion ||
+        needsRebuildForLegacyWeatherActivation ||
+        hasOwnershipScopeMismatch
+      );
     if (shouldAutoRebuildNow) {
       const rebuilt = await rebuildSharedArtifactDataset();
       if (!rebuilt.ok) return rebuilt;
@@ -1994,6 +2045,20 @@ export async function buildGapfillCompareSimShared(args: {
           error: "artifact_stale_rebuild_required",
           message:
             "Saved shared Past artifact predates shared curve-shaping updates. Trigger explicit rebuildArtifact=true before compare.",
+          mode: "artifact_only",
+          scenarioId: sharedScenarioCacheId,
+        },
+      };
+    }
+    if (needsRebuildForLegacyWeatherActivation) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          ok: false,
+          error: "artifact_stale_rebuild_required",
+          message:
+            "Saved shared Past artifact was written during the reverted weather-efficiency simulation activation window. Trigger explicit rebuildArtifact=true before compare.",
           mode: "artifact_only",
           scenarioId: sharedScenarioCacheId,
         },
@@ -6452,7 +6517,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
 
-      const buildInputs = buildRec.buildInputs as Record<string, unknown>;
+      const buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+        buildRec.buildInputs as Record<string, unknown>
+      );
       const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
       if (!window) {
         return {
@@ -6512,6 +6579,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
         scenarioId: scenarioIdForCache,
         inputHash: resolvedInputHash,
       });
+      const exactCachedLegacyWeatherActivation =
+        !!exactCached && hasLegacyWeatherEfficiencySimulationActivation(exactCached.datasetJson);
+      if (exactCachedLegacyWeatherActivation) exactCached = null;
       if (exactCached && exactCached.intervalsCodec === INTERVAL_CODEC_V1) {
         logSimPipelineEvent("artifact_cache_hit", {
           correlationId,
@@ -6535,7 +6605,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ok: false,
           code: "ARTIFACT_MISSING",
           message:
-            "Exact persisted artifact not found for this house/scenario/input hash. Re-run canonical recalc.",
+            exactCachedLegacyWeatherActivation
+              ? "Exact persisted artifact was written during the reverted weather-efficiency simulation activation window. Re-run canonical recalc."
+              : "Exact persisted artifact not found for this house/scenario/input hash. Re-run canonical recalc.",
           inputHash: resolvedInputHash,
           engineVersion: PAST_ENGINE_VERSION,
         };
@@ -6693,7 +6765,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
       return { ok: false, code: "NO_BUILD", message: "Recalculate to generate this scenario." };
     }
 
-    let buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+    let buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+      buildRec.buildInputs as SimulatorBuildInputsV1 & Record<string, unknown>
+    ) as SimulatorBuildInputsV1;
     let effectiveBuildInputsHash = String(buildRec.buildInputsHash ?? "");
     // Backfill validation-day compare support on first read for older Past builds
     // that predate validation-key persistence.
@@ -6748,7 +6822,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
       if (!buildRec?.buildInputs) {
         return { ok: false, code: "NO_BUILD", message: "Recalculate to generate this scenario." };
       }
-      buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+      buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+        buildRec.buildInputs as SimulatorBuildInputsV1 & Record<string, unknown>
+      ) as SimulatorBuildInputsV1;
     }
     const mode = (buildInputs as any).mode;
     const timezone = String((buildInputs as any)?.timezone ?? "").trim();
@@ -7020,13 +7096,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 scenarioId: scenarioIdForCache,
                 inputHash,
               });
-          if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
-            const decoded = decodeIntervalsV1(cached.intervalsCompressed);
+          const usableCached =
+            cached && !hasLegacyWeatherEfficiencySimulationActivation(cached.datasetJson) ? cached : null;
+          if (usableCached && usableCached.intervalsCodec === INTERVAL_CODEC_V1) {
+            const decoded = decodeIntervalsV1(usableCached.intervalsCompressed);
             const restored = {
-              ...cached.datasetJson,
+              ...usableCached.datasetJson,
               series: {
-                ...(typeof (cached.datasetJson as any).series === "object" && (cached.datasetJson as any).series !== null
-                  ? (cached.datasetJson as any).series
+                ...(typeof (usableCached.datasetJson as any).series === "object" && (usableCached.datasetJson as any).series !== null
+                  ? (usableCached.datasetJson as any).series
                   : {}),
                 intervals15: decoded,
               },

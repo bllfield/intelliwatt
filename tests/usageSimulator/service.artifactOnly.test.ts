@@ -1409,6 +1409,75 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     ).toEqual(["2026-01-01"]);
   });
 
+  it("allow_rebuild ignores cached artifacts written during legacy weather-efficiency activation and rebuilds", async () => {
+    usageSimulatorBuildFindUnique.mockResolvedValueOnce({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+      },
+    });
+    getCachedPastDataset.mockResolvedValueOnce({
+      inputHash: "hash-past-expected",
+      updatedAt: new Date("2026-01-10T00:00:00.000Z"),
+      datasetJson: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          weatherEfficiencyDerivedInput: {
+            derivedInputAttached: true,
+            simulationActive: true,
+            scoringMode: "INTERVAL_BASED",
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.75, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    simulatePastUsageDataset.mockResolvedValueOnce({
+      dataset: {
+        summary: { source: "SIMULATED", intervalsCount: 2, totalKwh: 0.75, start: "2026-01-01", end: "2026-01-01" },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          canonicalArtifactSimulatedDayTotalsByDate: { "2026-01-01": 0.75 },
+          weatherEfficiencyDerivedInput: {
+            derivedInputAttached: true,
+            simulationActive: false,
+            scoringMode: "INTERVAL_BASED",
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 0.75, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "allow_rebuild",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(simulatePastUsageDataset).toHaveBeenCalledTimes(1);
+    if (out.ok) {
+      expect((out.dataset?.meta as any)?.artifactSource).toBe("rebuild");
+      expect((out.dataset?.meta as any)?.weatherEfficiencyDerivedInput?.simulationActive).toBe(false);
+    }
+  });
+
   it("allow_rebuild does not wait for stale scenario cache cleanup before returning the rebuilt artifact", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
@@ -2468,6 +2537,61 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       expect(out.status).toBe(409);
       expect((out.body as any)?.error).toBe("artifact_stale_rebuild_required");
       expect(String((out.body as any)?.message ?? "")).toContain("curve-shaping");
+    }
+  });
+
+  it("treats cached artifact with legacy weather-efficiency simulation activation as stale", async () => {
+    computePastInputHash.mockReturnValue("hash-exact-legacy-weather");
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-exact-legacy-weather",
+      updatedAt: new Date(),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 96,
+          totalKwh: 24,
+          start: "2026-01-01",
+          end: "2026-01-01",
+        },
+        meta: {
+          curveShapingVersion: "shared_curve_v2",
+          excludedDateKeysFingerprint: "",
+          weatherEfficiencyDerivedInput: {
+            derivedInputAttached: true,
+            simulationActive: true,
+            scoringMode: "INTERVAL_BASED",
+          },
+        },
+        daily: [{ date: "2026-01-01", kwh: 24, source: "SIMULATED" }],
+        monthly: [{ month: "2026-01", kwh: 24 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+    decodeIntervalsV1.mockReturnValue(oneDayIntervals96(0.25));
+
+    const out = await buildGapfillCompareSimShared({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      canonicalWindow: { startDate: "2026-01-01", endDate: "2026-01-01" },
+      testDateKeysLocal: new Set<string>(["2026-01-01"]),
+      rebuildArtifact: false,
+      autoEnsureArtifact: false,
+      compareFreshMode: "selected_days",
+      includeFreshCompareCalc: false,
+      selectedDaysLightweightArtifactRead: false,
+      artifactExactInputHash: "hash-exact-legacy-weather",
+      artifactExactScenarioId: "gapfill_lab",
+      requireExactArtifactMatch: true,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(409);
+      expect((out.body as any)?.error).toBe("artifact_stale_rebuild_required");
+      expect(String((out.body as any)?.message ?? "")).toContain("weather-efficiency");
     }
   });
 
