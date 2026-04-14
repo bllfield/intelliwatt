@@ -241,12 +241,12 @@ describe("weather sensitivity shared lockbox attachment", () => {
     );
   });
 
-  it("attaches the shared derived input before simulation executes without activating simulation consumption", async () => {
+  it("attaches the shared derived input before non-manual simulation executes without activating simulation consumption", async () => {
     const result = await recalcSimulatorBuild({
       userId: "u1",
       houseId: "house-1",
       esiid: "esiid-1",
-      mode: "MANUAL_TOTALS",
+      mode: "SMT_BASELINE",
       persistPastSimBaseline: false,
       correlationId: "corr-weather-lockbox",
     });
@@ -316,6 +316,60 @@ describe("weather sensitivity shared lockbox attachment", () => {
       correlationId: "corr-weather-gapfill-skip",
       runContext: {
         callerLabel: "gapfill_launcher",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
+    expect(buildInputs.weatherEfficiencyDerivedInput).toBeUndefined();
+    expect(buildInputs.snapshots?.weatherSensitivityScore).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("artifact_persist_failed");
+    }
+  });
+
+  it("does not attach weather sensitivity inputs for admin manual monthly lab past sim runs", async () => {
+    usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
+    const result = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "house-1",
+      actualContextHouseId: "source-house-1",
+      esiid: "esiid-1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "corr-weather-admin-lab-skip",
+      runContext: {
+        callerLabel: "admin_manual_monthly_lab",
+        buildPathKind: "recalc",
+        persistRequested: true,
+      },
+    });
+
+    const buildInputs = upsertSimulatorBuild.mock.calls[0]?.[0]?.buildInputs;
+    expect(buildInputs.weatherEfficiencyDerivedInput).toBeUndefined();
+    expect(buildInputs.snapshots?.weatherSensitivityScore).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("artifact_persist_failed");
+    }
+  });
+
+  it("does not attach weather sensitivity inputs for user manual monthly past sim runs", async () => {
+    usageSimulatorScenarioFindFirst.mockResolvedValueOnce({ id: "past-s1", name: "Past (Corrected)" });
+    const result = await recalcSimulatorBuild({
+      userId: "u1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      esiid: "esiid-1",
+      mode: "MANUAL_TOTALS",
+      scenarioId: "past-s1",
+      persistPastSimBaseline: true,
+      correlationId: "corr-weather-user-skip",
+      runContext: {
+        callerLabel: "user_recalc",
         buildPathKind: "recalc",
         persistRequested: true,
       },

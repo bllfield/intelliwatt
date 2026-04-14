@@ -4213,7 +4213,12 @@ async function recalcSimulatorBuildImpl(args: {
 
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
-  const shouldAttachPreSimWeatherSensitivity = runContext.callerLabel !== "gapfill_launcher";
+  const shouldSkipManualMonthlyWeatherAttachment =
+    mode === "MANUAL_TOTALS" &&
+    (runContext.callerLabel === "gapfill_launcher" ||
+      runContext.callerLabel === "admin_manual_monthly_lab" ||
+      runContext.callerLabel === "user_recalc");
+  const shouldAttachPreSimWeatherSensitivity = !shouldSkipManualMonthlyWeatherAttachment;
   if (shouldAttachPreSimWeatherSensitivity) {
     try {
       const shouldLoadWeatherSensitivityActualDataset =
