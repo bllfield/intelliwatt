@@ -268,9 +268,12 @@ export function buildManualUsageReadModel(args: {
   if (billPeriodTargets.length === 0) return null;
   const billPeriodTotalsKwhById = buildManualBillPeriodTotalsById(billPeriodTargets);
 
-  const simulatedIntervalTotalsByDate = buildIntervalTotalsByDate(args.dataset);
-  const simulatedDailyTotalsByDate =
-    simulatedIntervalTotalsByDate.size > 0 ? simulatedIntervalTotalsByDate : buildDailyTotalsByDate(args.dataset);
+  // Shared readback already persists day totals; prefer those over rescanning the full interval artifact.
+  const simulatedDailyTotalsByDate = buildDailyTotalsByDate(args.dataset);
+  const simulatedIntervalTotalsByDate =
+    simulatedDailyTotalsByDate.size > 0 ? new Map<string, number>() : buildIntervalTotalsByDate(args.dataset);
+  const simulatedStatementTotalsByDate =
+    simulatedDailyTotalsByDate.size > 0 ? simulatedDailyTotalsByDate : simulatedIntervalTotalsByDate;
 
   const actualDatasetTotalsByDate =
     args.actualDataset != null
@@ -305,7 +308,7 @@ export function buildManualUsageReadModel(args: {
     const stageOneTargetTotalKwh = round2(
       Number.isFinite(Number(billPeriodTotalsKwhById[period.id])) ? Number(billPeriodTotalsKwhById[period.id]) : period.enteredKwh ?? null
     );
-    const simulatedStatementTotalKwh = sumRangeTotals(period, simulatedDailyTotalsByDate);
+    const simulatedStatementTotalKwh = sumRangeTotals(period, simulatedStatementTotalsByDate);
     const isFilledLater = payload.mode === "MONTHLY" && filledMonths.has(period.month);
 
     let eligible = period.eligibleForConstraint;

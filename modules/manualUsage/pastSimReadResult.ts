@@ -74,6 +74,7 @@ export async function buildManualUsagePastSimReadResult(args: {
     | null;
 }) : Promise<ManualUsagePastSimReadResult> {
   const startedAt = Date.now();
+  const stepStartedAt = Date.now();
   const emit = (event: string, extra: Record<string, unknown> = {}) => {
     logSimPipelineEvent(event, {
       correlationId: args.correlationId ?? null,
@@ -168,6 +169,13 @@ export async function buildManualUsagePastSimReadResult(args: {
     actualReference: args.actualReference ?? null,
     correlationId: args.correlationId ?? null,
   });
+  emit("manual_readback_actual_dataset_ready", {
+    stepDurationMs: Date.now() - stepStartedAt,
+    actualIntervalCount: Array.isArray((resolvedActualDataset as any)?.series?.intervals15)
+      ? (resolvedActualDataset as any).series.intervals15.length
+      : 0,
+    actualDayCount: Array.isArray((resolvedActualDataset as any)?.daily) ? (resolvedActualDataset as any).daily.length : 0,
+  });
   const { compareProjection, manualReadModel, manualMonthlyReconciliation, sharedDiagnostics, manualUsagePayload } =
     await buildManualUsageReadDecorations({
       userId: args.userId,
@@ -188,6 +196,14 @@ export async function buildManualUsagePastSimReadResult(args: {
       actualDataset: resolvedActualDataset,
       displayDataset,
     });
+  emit("manual_readback_decorations_ready", {
+    stepDurationMs: Date.now() - stepStartedAt,
+    compareRowCount: Array.isArray(compareProjection?.rows) ? compareProjection.rows.length : 0,
+    reconciliationRowCount: Array.isArray((manualMonthlyReconciliation as any)?.rows)
+      ? (manualMonthlyReconciliation as any).rows.length
+      : 0,
+    readModelBillPeriodCount: Array.isArray(manualReadModel?.billPeriodTargets) ? manualReadModel.billPeriodTargets.length : 0,
+  });
   const manualParitySummary = buildManualParitySummary({
     scenarioId: args.scenarioId,
     payload: manualUsagePayload,
@@ -201,6 +217,12 @@ export async function buildManualUsagePastSimReadResult(args: {
     simulatedDataset: displayDataset,
     compareRows: compareProjection?.rows ?? [],
     timezone: displayDataset?.meta?.timezone ?? out.dataset?.meta?.timezone ?? "America/Chicago",
+  });
+  emit("manual_readback_curve_payload_ready", {
+    stepDurationMs: Date.now() - stepStartedAt,
+    curveCompareActualIntervalCount: curveComparePayload?.actualIntervals15.length ?? 0,
+    curveCompareSimIntervalCount: curveComparePayload?.simulatedIntervals15.length ?? 0,
+    curveCompareDailyRowCount: curveComparePayload?.simulatedDailyRows.length ?? 0,
   });
   emit("manual_readback_success", {
     compareRowCount: Array.isArray(compareProjection?.rows) ? compareProjection.rows.length : 0,
