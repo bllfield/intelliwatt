@@ -116,6 +116,19 @@ describe("GapFill calculation logic UI wiring", () => {
     expect(source).not.toContain("resolveSharedWeatherSensitivityEnvelope");
   });
 
+  it("adds a single canonical orchestration action that reuses the existing shared GapFill steps", () => {
+    const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+
+    expect(source).toContain("async function onRunCanonicalFlow()");
+    expect(source).toContain('await runAction("lookup_source_houses")');
+    expect(source).toContain('await runAction("replace_test_home_from_source")');
+    expect(source).toContain('await runAction("save_test_home_inputs"');
+    expect(source).toContain('const sourcePastSimResult = await runAction(');
+    expect(source).toContain('"run_source_home_past_sim_snapshot"');
+    expect(source).toContain("await onRunRecalc()");
+    expect(source).toContain("Run Canonical Flow");
+  });
+
   it("defines the modal sections for the admin-only calculation logic view", () => {
     const source = readRepoFile("components/admin/GapFillCalculationLogicModal.tsx");
 

@@ -4150,7 +4150,7 @@ async function recalcSimulatorBuildImpl(args: {
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
   try {
     const shouldLoadWeatherSensitivityActualDataset =
-      manualUsagePayload == null && typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
+      typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
     const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
       ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
       : null;

@@ -562,10 +562,12 @@ function buildBillingPeriodBasedScore(args: SharedScoreArgs, factors: FactorCont
 
 export function buildSharedWeatherSensitivityScore(args: SharedScoreArgs): WeatherSensitivityScore | null {
   const factors = buildFactorContext(args.homeProfile, args.applianceProfile);
+  const intervalScore = args.actualDataset != null ? buildIntervalBasedScore(args, factors) : null;
+  if (intervalScore) return intervalScore;
   const billingScore =
     args.manualUsagePayload != null ? buildBillingPeriodBasedScore(args, factors) : null;
   if (billingScore) return billingScore;
-  return buildIntervalBasedScore(args, factors);
+  return null;
 }
 
 export function buildWeatherEfficiencyDerivedInput(

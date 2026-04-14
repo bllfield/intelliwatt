@@ -117,6 +117,55 @@ describe("shared weather sensitivity scoring owner", () => {
     expect(result?.confidenceScore0to100).toBeGreaterThan(0);
   });
 
+  it("prefers interval-backed scoring over manual bill periods when actual interval truth exists", () => {
+    const result = buildSharedWeatherSensitivityScore({
+      actualDataset: {
+        summary: { intervalsCount: 96 * 4 },
+        daily: [
+          { date: "2025-01-10", kwh: 42, source: "ACTUAL" },
+          { date: "2025-04-15", kwh: 24, source: "ACTUAL" },
+          { date: "2025-07-20", kwh: 51, source: "ACTUAL" },
+          { date: "2025-12-05", kwh: 43, source: "ACTUAL" },
+        ],
+        dailyWeather: {
+          "2025-01-10": { tAvgF: 39, hdd65: 26, cdd65: 0 },
+          "2025-04-15": { tAvgF: 65, hdd65: 0, cdd65: 0 },
+          "2025-07-20": { tAvgF: 83, hdd65: 0, cdd65: 18 },
+          "2025-12-05": { tAvgF: 43, hdd65: 22, cdd65: 0 },
+        },
+      },
+      manualUsagePayload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-08-31",
+        monthlyKwh: [
+          { month: "2025-06", kwh: 900 },
+          { month: "2025-07", kwh: 1500 },
+        ],
+        statementRanges: [
+          { month: "2025-06", startDate: "2025-05-29", endDate: "2025-06-28" },
+          { month: "2025-07", startDate: "2025-06-29", endDate: "2025-07-28" },
+        ],
+        travelRanges: [],
+      },
+      homeProfile: {
+        squareFeet: 1800,
+        fuelConfiguration: "all_electric",
+        hvacType: "central_air",
+        heatingType: "heat_pump",
+        summerTemp: 71,
+        winterTemp: 69,
+      },
+      applianceProfile: {
+        fuelConfiguration: { heating: "electric" },
+        appliances: [],
+      },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.scoringMode).toBe("INTERVAL_BASED");
+    expect(result?.eligibleActualDayCount).toBe(4);
+  });
+
   it("does not require insulation or window details to compute the initial score", () => {
     const result = buildSharedWeatherSensitivityScore({
       actualDataset: {

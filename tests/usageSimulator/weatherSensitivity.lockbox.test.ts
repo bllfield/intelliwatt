@@ -256,21 +256,21 @@ describe("weather sensitivity shared lockbox attachment", () => {
     expect(buildInputs.weatherEfficiencyDerivedInput).toMatchObject({
       derivedInputAttached: true,
       simulationActive: false,
-      scoringMode: "BILLING_PERIOD_BASED",
+      scoringMode: "INTERVAL_BASED",
     });
     expect(buildInputs.snapshots.weatherSensitivityScore).toMatchObject({
-      scoringMode: "BILLING_PERIOD_BASED",
+      scoringMode: "INTERVAL_BASED",
       nextDetailPromptType: expect.any(String),
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect((result.dataset as any)?.meta?.weatherSensitivityScore).toMatchObject({
-        scoringMode: "BILLING_PERIOD_BASED",
+        scoringMode: "INTERVAL_BASED",
       });
       expect((result.dataset as any)?.meta?.weatherEfficiencyDerivedInput).toMatchObject({
         derivedInputAttached: true,
         simulationActive: false,
-        scoringMode: "BILLING_PERIOD_BASED",
+        scoringMode: "INTERVAL_BASED",
       });
     }
   });

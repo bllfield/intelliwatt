@@ -918,6 +918,55 @@ export default function GapFillLabCanonicalClient() {
     });
   }
 
+  async function onRunCanonicalFlow() {
+    const lookupResult = await runAction("lookup_source_houses");
+    if (!lookupResult.ok) return;
+
+    const selectedSourceHouseId = String((lookupResult as any)?.selectedSourceHouseId ?? sourceHouseId ?? "").trim();
+    const linkedSourceHouseId = String(((lookupResult as any)?.testHomeLink?.sourceHouseId ?? testHomeLink?.sourceHouseId ?? "")).trim();
+    const linkedTestHomeId = String(
+      ((lookupResult as any)?.testHomeLink?.testHomeHouseId ?? testHomeLink?.testHomeHouseId ?? testHome?.id ?? "")
+    ).trim();
+    const shouldReplaceFromSource =
+      !linkedTestHomeId || !selectedSourceHouseId || !linkedSourceHouseId || linkedSourceHouseId !== selectedSourceHouseId;
+
+    if (shouldReplaceFromSource) {
+      const replaceResult = await runAction("replace_test_home_from_source");
+      if (!replaceResult.ok) return;
+    }
+
+    const parsedHome = parseJsonSafe(homeProfileJson);
+    if (!parsedHome.ok) {
+      setError(`Home profile JSON invalid: ${parsedHome.error}`);
+      return;
+    }
+    const parsedAppliance = parseJsonSafe(applianceProfileJson);
+    if (!parsedAppliance.ok) {
+      setError(`Appliance profile JSON invalid: ${parsedAppliance.error}`);
+      return;
+    }
+
+    const saveResult = await runAction("save_test_home_inputs", {
+      homeProfile: parsedHome.value,
+      applianceProfile: parsedAppliance.value,
+      travelRanges,
+    });
+    if (!saveResult.ok) return;
+
+    const sourcePastSimResult = await runAction(
+      "run_source_home_past_sim_snapshot",
+      {
+        includeUsage365: false,
+        includeUserPipelineParity: false,
+        includeDiagnostics: false,
+      },
+      { setAsPrimaryResult: false }
+    );
+    if (!sourcePastSimResult.ok) return;
+
+    await onRunRecalc();
+  }
+
   async function onRunPastSimSnapshot() {
     await runAction(
       "run_source_home_past_sim_snapshot",
@@ -1781,6 +1830,9 @@ export default function GapFillLabCanonicalClient() {
 
         <div className="flex gap-2">
           <button className="px-3 py-2 rounded border text-sm" onClick={onSaveInputs} disabled={loading}>Save Canonical Inputs</button>
+          <button className="px-3 py-2 rounded bg-brand-navy text-white text-sm" onClick={onRunCanonicalFlow} disabled={loading}>
+            Run Canonical Flow
+          </button>
           <button className="px-3 py-2 rounded bg-brand-blue text-white text-sm" onClick={onRunRecalc} disabled={loading}>
             Recalc Canonical Past Sim
           </button>
