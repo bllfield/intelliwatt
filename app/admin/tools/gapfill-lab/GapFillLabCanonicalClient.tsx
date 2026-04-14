@@ -5,6 +5,7 @@ import UsageDashboard, { type HouseUsage } from "@/components/usage/UsageDashboa
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { WeatherSensitivityAdminDiagnostics } from "@/components/admin/WeatherSensitivityAdminDiagnostics";
+import { WeatherSensitivityComparePanel } from "@/components/admin/WeatherSensitivityComparePanel";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
@@ -1055,12 +1056,19 @@ export default function GapFillLabCanonicalClient() {
   const actualHouseWeatherEfficiencyDerivedInput = (actualHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null;
   const testHouseWeatherSensitivityScore = (testHouseBaselineDataset as any)?.meta?.weatherSensitivityScore ?? null;
   const testHouseWeatherEfficiencyDerivedInput = (testHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput ?? null;
+  const manualMonthlyWeatherCompare = result?.ok ? ((result as any).manualMonthlyWeatherCompare ?? null) : null;
   const sharedWeatherUnavailableMessage =
     "Weather Efficiency Score is not available for this shared artifact yet. It appears only when the shared actual-data or manual-bill-data contract is present.";
   const actualHouseWeatherUnavailableMessage =
     actualHouseBaselineDataset && !actualHouseWeatherSensitivityScore ? sharedWeatherUnavailableMessage : null;
   const testHouseWeatherUnavailableMessage =
     testHouseBaselineDataset && !testHouseWeatherSensitivityScore ? sharedWeatherUnavailableMessage : null;
+  const sourceIntervalWeatherCompareScore =
+    manualMonthlyWeatherCompare?.sourceInterval?.score ?? actualHouseWeatherSensitivityScore;
+  const sourceIntervalWeatherCompareDerivedInput =
+    manualMonthlyWeatherCompare?.sourceInterval?.derivedInput ?? actualHouseWeatherEfficiencyDerivedInput;
+  const manualMonthlyWeatherCompareScore = manualMonthlyWeatherCompare?.manualMonthly?.score ?? null;
+  const manualMonthlyWeatherCompareDerivedInput = manualMonthlyWeatherCompare?.manualMonthly?.derivedInput ?? null;
   const testHouseCompareProjection = useMemo(
     () =>
       result?.ok
@@ -1194,6 +1202,17 @@ export default function GapFillLabCanonicalClient() {
     };
   }, [result]);
   const selectedTreatmentMode = visibilityFromResult?.treatmentMode ?? adminLabTreatmentMode;
+  const manualMonthlyWeatherCompareUnavailableMessage =
+    selectedTreatmentMode === "MANUAL_MONTHLY" || selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS"
+      ? {
+          actual:
+            actualHouseBaselineDataset && !sourceIntervalWeatherCompareScore ? sharedWeatherUnavailableMessage : null,
+          manual:
+            result?.ok && !manualMonthlyWeatherCompareScore
+              ? "Manual-monthly weather diagnostics are not available for this saved Stage 1 contract yet."
+              : null,
+        }
+      : null;
   const showManualStageOne =
     selectedTreatmentMode === "MANUAL_MONTHLY" ||
     selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS" ||
@@ -2087,6 +2106,16 @@ export default function GapFillLabCanonicalClient() {
               derivedInput={testHouseWeatherEfficiencyDerivedInput}
               unavailableMessage={testHouseWeatherUnavailableMessage}
             />
+            {selectedTreatmentMode === "MANUAL_MONTHLY" || selectedTreatmentMode === "MONTHLY_FROM_SOURCE_INTERVALS" ? (
+              <WeatherSensitivityComparePanel
+                actualScore={sourceIntervalWeatherCompareScore}
+                actualDerivedInput={sourceIntervalWeatherCompareDerivedInput}
+                actualUnavailableMessage={manualMonthlyWeatherCompareUnavailableMessage?.actual ?? null}
+                manualScore={manualMonthlyWeatherCompareScore}
+                manualDerivedInput={manualMonthlyWeatherCompareDerivedInput}
+                manualUnavailableMessage={manualMonthlyWeatherCompareUnavailableMessage?.manual ?? null}
+              />
+            ) : null}
             {testHouseCompareProjection.rows.length > 0 ? (
               <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>

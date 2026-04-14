@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
 import {
@@ -11,6 +12,7 @@ import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDi
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
+import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 
 type SourceHouseRef = {
   id: string;
@@ -33,6 +35,26 @@ function withCanonicalExcludedOwnership(args: {
       ...baseMeta,
       excludedDateKeysCount: args.boundedExcludedDateKeysCount,
       excludedDateKeysFingerprint: args.boundedExcludedDateKeysFingerprint,
+    },
+  };
+}
+
+function attachWeatherSensitivityMeta(args: {
+  dataset: any;
+  score: any;
+  derivedInput: any;
+}) {
+  if (!args.dataset || typeof args.dataset !== "object") return args.dataset;
+  const baseMeta =
+    args.dataset.meta && typeof args.dataset.meta === "object"
+      ? (args.dataset.meta as Record<string, unknown>)
+      : {};
+  return {
+    ...args.dataset,
+    meta: {
+      ...baseMeta,
+      weatherSensitivityScore: args.score ?? (baseMeta.weatherSensitivityScore ?? null),
+      weatherEfficiencyDerivedInput: args.derivedInput ?? (baseMeta.weatherEfficiencyDerivedInput ?? null),
     },
   };
 }
@@ -116,7 +138,14 @@ export async function buildSourceHomePastSimSnapshot(args: {
     };
   }
 
-  const [canonicalWindow, sourceTravelRangesFromDb, sourceBuildRow, sourceProfiles, defaultValidationSelectionMode] =
+  const [
+    canonicalWindow,
+    sourceTravelRangesFromDb,
+    sourceBuildRow,
+    sourceProfiles,
+    defaultValidationSelectionMode,
+    sourceActualUsageResult,
+  ] =
     await Promise.all([
       getSharedPastCoverageWindowForHouse({
         userId: args.userId,
@@ -140,6 +169,9 @@ export async function buildSourceHomePastSimSnapshot(args: {
         houseId: args.sourceHouse.id,
       }).catch(() => ({ homeProfile: null, applianceProfile: null })),
       getUserDefaultValidationSelectionMode(),
+      getActualUsageDatasetForHouse(args.sourceHouse.id, args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null, {
+        skipFullYearIntervalFetch: true,
+      }).catch(() => ({ dataset: null })),
     ]);
 
   const userValidationPolicy = resolveUserValidationPolicy({
@@ -170,8 +202,21 @@ export async function buildSourceHomePastSimSnapshot(args: {
         boundedExcludedDateKeysFingerprint,
       })
     : null;
+  const sourceWeatherSensitivity = await resolveSharedWeatherSensitivityEnvelope({
+    actualDataset: sourceActualUsageResult?.dataset ?? null,
+    homeProfile: sourceProfiles.homeProfile,
+    applianceProfile: sourceProfiles.applianceProfile,
+    weatherHouseId: args.sourceHouse.id,
+  }).catch(() => ({ score: null, derivedInput: null }));
+  const baselineDatasetWithWeather = baselineDataset
+    ? attachWeatherSensitivityMeta({
+        dataset: baselineDataset,
+        score: sourceWeatherSensitivity.score,
+        derivedInput: sourceWeatherSensitivity.derivedInput,
+      })
+    : null;
   const baselineCompareProjection = baselineRead.ok
-    ? buildValidationCompareProjectionSidecar(baselineDataset)
+    ? buildValidationCompareProjectionSidecar(baselineDatasetWithWeather)
     : null;
 
   const sourceBuildInputs = ((sourceBuildRow as any)?.buildInputs as Record<string, unknown> | null | undefined) ?? null;
@@ -224,7 +269,7 @@ export async function buildSourceHomePastSimSnapshot(args: {
   const actualSharedDiagnostics = baselineDataset
     ? buildSharedPastSimDiagnostics({
         callerType: "gapfill_actual",
-        dataset: baselineDataset,
+        dataset: baselineDatasetWithWeather,
         scenarioId: String(pastScenario.id),
         correlationId: args.correlationId,
         compareProjection: baselineCompareProjection,
@@ -255,7 +300,7 @@ export async function buildSourceHomePastSimSnapshot(args: {
         baselineProjection: baselineRead.ok
           ? {
               ok: true,
-              dataset: baselineDataset,
+              dataset: baselineDatasetWithWeather,
               compareProjection: baselineCompareProjection,
             }
           : { ok: false, code: baselineRead.code, message: baselineRead.message },

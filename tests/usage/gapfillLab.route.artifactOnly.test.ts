@@ -32,6 +32,7 @@ const getMemoryRssMb = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
 const deleteManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
+const resolveSharedWeatherSensitivityEnvelope = vi.fn();
 
 const homeDetailsPrisma: any = {
   homeProfileSimulated: { upsert: vi.fn() },
@@ -131,6 +132,10 @@ vi.mock("@/modules/manualUsage/store", () => ({
   deleteManualUsageInputForUserHouse: (...args: any[]) => deleteManualUsageInputForUserHouse(...args),
   getManualUsageInputForUserHouse: (...args: any[]) => getManualUsageInputForUserHouse(...args),
   saveManualUsageInputForUserHouse: (...args: any[]) => saveManualUsageInputForUserHouse(...args),
+}));
+
+vi.mock("@/modules/weatherSensitivity/shared", () => ({
+  resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/validationSelection", () => ({
@@ -365,6 +370,106 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       updatedAt: "2026-04-10T18:00:00.000Z",
       payload,
     }));
+    resolveSharedWeatherSensitivityEnvelope.mockImplementation(async ({ actualDataset, manualUsagePayload }: any) => {
+      const score =
+        actualDataset
+          ? {
+              scoringMode: "INTERVAL_BASED",
+              weatherEfficiencyScore0to100: 33,
+              coolingSensitivityScore0to100: 100,
+              heatingSensitivityScore0to100: 88,
+              confidenceScore0to100: 100,
+              shoulderBaselineKwhPerDay: 20.66,
+              coolingSlopeKwhPerCDD: 1.57,
+              heatingSlopeKwhPerHDD: 0.91,
+              coolingResponseRatio: 2.38,
+              heatingResponseRatio: 1.78,
+              estimatedWeatherDrivenLoadShare: 0.62,
+              estimatedBaseloadShare: 0.38,
+              requiredInputAdjustmentsApplied: ["square_footage", "occupancy", "fuel_configuration", "hvac", "thermostat"],
+              poolAdjustmentApplied: false,
+              hvacAdjustmentApplied: true,
+              occupancyAdjustmentApplied: true,
+              thermostatAdjustmentApplied: true,
+              eligibleActualDayCount: 366,
+              excludedSimulatedDayCount: 0,
+              excludedTravelDayCount: 0,
+              excludedIncompleteMeterDayCount: 0,
+              scoreVersion: "weather-sensitivity-v1",
+              calculationVersion: "weather-sensitivity-v1",
+              recommendationFlags: {
+                appearsWeatherSensitive: true,
+                needsMoreApplianceDetail: false,
+                needsEnvelopeDetail: false,
+                confidenceLimited: false,
+              },
+              explanationSummary: "interval weather score",
+              nextDetailPromptType: "NONE",
+            }
+          : manualUsagePayload
+            ? {
+                scoringMode: "BILLING_PERIOD_BASED",
+                weatherEfficiencyScore0to100: 61,
+                coolingSensitivityScore0to100: 96,
+                heatingSensitivityScore0to100: 32,
+                confidenceScore0to100: 100,
+                shoulderBaselineKwhPerDay: 17.42,
+                coolingSlopeKwhPerCDD: 1.1,
+                heatingSlopeKwhPerHDD: 0.4,
+                coolingResponseRatio: 1.8,
+                heatingResponseRatio: 1.2,
+                estimatedWeatherDrivenLoadShare: 0.49,
+                estimatedBaseloadShare: 0.51,
+                requiredInputAdjustmentsApplied: ["square_footage", "occupancy", "fuel_configuration", "hvac", "thermostat"],
+                poolAdjustmentApplied: false,
+                hvacAdjustmentApplied: true,
+                occupancyAdjustmentApplied: true,
+                thermostatAdjustmentApplied: true,
+                eligibleBillPeriodCount: 12,
+                excludedSimulatedDayCount: 0,
+                excludedTravelBillPeriodCount: 0,
+                excludedIncompleteMeterDayCount: 0,
+                scoreVersion: "weather-sensitivity-v1",
+                calculationVersion: "weather-sensitivity-v1",
+                recommendationFlags: {
+                  appearsWeatherSensitive: true,
+                  needsMoreApplianceDetail: false,
+                  needsEnvelopeDetail: false,
+                  confidenceLimited: false,
+                },
+                explanationSummary: "manual monthly weather score",
+                nextDetailPromptType: "NONE",
+              }
+            : null;
+      return {
+        score,
+        derivedInput: score
+          ? {
+              derivedInputAttached: true,
+              simulationActive: false,
+              scoringMode: score.scoringMode,
+              weatherEfficiencyScore0to100: score.weatherEfficiencyScore0to100,
+              coolingSensitivityScore0to100: score.coolingSensitivityScore0to100,
+              heatingSensitivityScore0to100: score.heatingSensitivityScore0to100,
+              confidenceScore0to100: score.confidenceScore0to100,
+              shoulderBaselineKwhPerDay: score.shoulderBaselineKwhPerDay,
+              coolingSlopeKwhPerCDD: score.coolingSlopeKwhPerCDD,
+              heatingSlopeKwhPerHDD: score.heatingSlopeKwhPerHDD,
+              coolingResponseRatio: score.coolingResponseRatio,
+              heatingResponseRatio: score.heatingResponseRatio,
+              estimatedWeatherDrivenLoadShare: score.estimatedWeatherDrivenLoadShare,
+              estimatedBaseloadShare: score.estimatedBaseloadShare,
+              requiredInputAdjustmentsApplied: score.requiredInputAdjustmentsApplied,
+              poolAdjustmentApplied: score.poolAdjustmentApplied,
+              hvacAdjustmentApplied: score.hvacAdjustmentApplied,
+              occupancyAdjustmentApplied: score.occupancyAdjustmentApplied,
+              thermostatAdjustmentApplied: score.thermostatAdjustmentApplied,
+              scoreVersion: score.scoreVersion,
+              calculationVersion: score.calculationVersion,
+            }
+          : null,
+      };
+    });
     getUserDefaultValidationSelectionMode.mockResolvedValue("random_simple");
     setUserDefaultValidationSelectionMode.mockResolvedValue({ ok: true, mode: "random_simple" });
     getAdminLabDefaultValidationSelectionMode.mockReturnValue("stratified_weather_balanced");
@@ -1038,6 +1143,12 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxInput?.sourceContext?.sourceHouseId).toBe("h1");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.lockboxPerRunTrace?.inputHash).toBe("input-1");
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.fullChainHash).toBe("chain-1");
+    expect(body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.weatherSensitivityScore?.scoringMode).toBe(
+      "INTERVAL_BASED"
+    );
+    expect(
+      body.pastSimSnapshot?.reads?.baselineProjection?.dataset?.meta?.weatherEfficiencyDerivedInput?.derivedInputAttached
+    ).toBe(true);
     expect(body.pastSimSnapshot?.reads?.baselineProjection?.compareProjection?.metrics?.wape).toBe(5);
     expect(runSimulatorDiagnostic).not.toHaveBeenCalled();
     expect(body.pastSimSnapshot?.build?.buildInputsHash).toBe("hash-from-build-row");
@@ -3082,6 +3193,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
         normalizedMonthTarget: 275.89,
       })
     );
+    expect(body.manualMonthlyWeatherCompare?.sourceInterval?.score?.scoringMode).toBe("INTERVAL_BASED");
+    expect(body.manualMonthlyWeatherCompare?.manualMonthly?.score?.scoringMode).toBe("BILLING_PERIOD_BASED");
+    expect(body.manualMonthlyWeatherCompare?.sourceInterval?.score?.weatherEfficiencyScore0to100).toBe(33);
+    expect(body.manualMonthlyWeatherCompare?.manualMonthly?.score?.weatherEfficiencyScore0to100).toBe(61);
     expect(body.baselineDatasetProjection?.summary?.totalKwh).toBe(14866.6);
     expect(body.displayDatasetProjection?.summary?.totalKwh).toBe(15029.5);
   });

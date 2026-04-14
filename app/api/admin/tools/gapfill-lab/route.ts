@@ -94,6 +94,7 @@ import {
   getManualUsageInputForUserHouse,
   saveManualUsageInputForUserHouse,
 } from "@/modules/manualUsage/store";
+import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
@@ -503,6 +504,54 @@ async function buildGapfillManualConstraintPayload(args: {
   return resolved;
 }
 
+async function buildManualMonthlyWeatherCompare(args: {
+  sourceHouse: {
+    id: string;
+    esiid?: string | null;
+  };
+  sourceUserId: string;
+  testHomeHouseId: string;
+  sourceActualDataset: any;
+  manualUsagePayload: ManualUsagePayload | null;
+  testHomeProfile: unknown;
+  testHomeApplianceProfile: unknown;
+}) {
+  if (args.manualUsagePayload?.mode !== "MONTHLY") return null;
+
+  const sourceProfiles = await loadDisplayProfilesForHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouse.id,
+  }).catch(() => ({ homeProfile: null, applianceProfile: null }));
+
+  const [sourceInterval, manualMonthly] = await Promise.all([
+    resolveSharedWeatherSensitivityEnvelope({
+      actualDataset: args.sourceActualDataset,
+      homeProfile: sourceProfiles.homeProfile,
+      applianceProfile: sourceProfiles.applianceProfile,
+      weatherHouseId: args.sourceHouse.id,
+    }).catch(() => ({ score: null, derivedInput: null })),
+    resolveSharedWeatherSensitivityEnvelope({
+      manualUsagePayload: args.manualUsagePayload,
+      homeProfile: args.testHomeProfile,
+      applianceProfile: args.testHomeApplianceProfile,
+      weatherHouseId: args.sourceHouse.id,
+    }).catch(() => ({ score: null, derivedInput: null })),
+  ]);
+
+  return {
+    sourceInterval: {
+      houseId: args.sourceHouse.id,
+      score: sourceInterval.score,
+      derivedInput: sourceInterval.derivedInput,
+    },
+    manualMonthly: {
+      houseId: args.testHomeHouseId,
+      score: manualMonthly.score,
+      derivedInput: manualMonthly.derivedInput,
+    },
+  };
+}
+
 function hasAdminSessionCookie(request: NextRequest): boolean {
   const raw = request.cookies.get("intelliwatt_admin")?.value ?? "";
   const email = normalizeEmailSafe(raw);
@@ -684,6 +733,18 @@ async function buildGapfillManualUsageReadbackResponse(args: {
       : null;
   const manualDateSourceMode =
     readbackManualPayload?.mode === "MONTHLY" ? (readbackManualPayload.dateSourceMode ?? null) : null;
+  const manualMonthlyWeatherCompare =
+    args.testUsageInputMode === "MANUAL_MONTHLY" || args.testUsageInputMode === "MONTHLY_FROM_SOURCE_INTERVALS"
+      ? await buildManualMonthlyWeatherCompare({
+          sourceHouse: args.sourceHouse,
+          sourceUserId: args.sourceUserId,
+          testHomeHouseId: args.testHomeHouse.id,
+          sourceActualDataset: sourceActualUsageResult?.dataset ?? null,
+          manualUsagePayload: readbackManualPayload ?? null,
+          testHomeProfile: args.homeProfile,
+          testHomeApplianceProfile: args.applianceProfile,
+        })
+      : null;
   const baselineDailyRows = Array.isArray((readResultWithManualPayload.dataset as any)?.daily)
     ? ((readResultWithManualPayload.dataset as any).daily as Array<Record<string, unknown>>)
     : [];
@@ -831,6 +892,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     manualDateSourceMode,
     manualAnchorEndDate,
     manualBillEndDay,
+    manualMonthlyWeatherCompare,
     testRangesUsed: [],
     testSelectionMode: args.testSelectionMode,
     adminValidationMode: args.testSelectionMode,

@@ -103,12 +103,18 @@ describe("GapFill calculation logic UI wiring", () => {
 
   it("renders shared weather sensitivity diagnostics from existing GapFill dataset metadata", () => {
     const source = readRepoFile("app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx");
+    const compareSource = readRepoFile("components/admin/WeatherSensitivityComparePanel.tsx");
 
     expect(source).toContain("WeatherSensitivityAdminDiagnostics");
+    expect(source).toContain("WeatherSensitivityComparePanel");
     expect(source).toContain("(actualHouseBaselineDataset as any)?.meta?.weatherSensitivityScore");
     expect(source).toContain("(actualHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput");
     expect(source).toContain("(testHouseBaselineDataset as any)?.meta?.weatherSensitivityScore");
     expect(source).toContain("(testHouseBaselineDataset as any)?.meta?.weatherEfficiencyDerivedInput");
+    expect(source).toContain("manualMonthlyWeatherCompare");
+    expect(compareSource).toContain("Source Interval Weather");
+    expect(compareSource).toContain("Manual-Monthly Weather");
+    expect(compareSource).toContain("Tuning deltas");
     expect(source).toContain("sharedWeatherUnavailableMessage");
     expect(source).toContain("unavailableMessage={actualHouseWeatherUnavailableMessage}");
     expect(source).toContain("unavailableMessage={testHouseWeatherUnavailableMessage}");
