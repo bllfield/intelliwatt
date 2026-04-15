@@ -22,6 +22,9 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(source).toContain("buildOnePathTruthSummary");
     expect(source).toContain("resolveUpstreamUsageTruthForSimulation");
     expect(source).toContain("upstreamUsageTruth");
+    expect(source).toContain("exactArtifactInputHash");
+    expect(source).toContain("requireExactArtifactMatch");
+    expect(source).toContain("result.canonicalArtifactInputHash");
     expect(source).not.toContain("getActualUsageDatasetForHouse(");
     expect(source).toContain("stageBoundaryMap");
     expect(source).toContain("sharedDerivedInputs");

@@ -519,12 +519,15 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
 async function buildArtifactFromEngineInput(args: {
   engineInput: CanonicalSimulationEngineInput;
   callerType: SharedDiagnosticsCallerType;
+  exactArtifactInputHash?: string | null;
 }): Promise<CanonicalSimulationArtifact> {
   const datasetRead = await getSimulatedUsageForHouseScenario({
     userId: args.engineInput.runtime.userId,
     houseId: args.engineInput.houseId,
     scenarioId: args.engineInput.scenarioId,
     readMode: "artifact_only",
+    exactArtifactInputHash: args.exactArtifactInputHash ?? null,
+    requireExactArtifactMatch: typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.length > 0,
   });
   if (!datasetRead.ok) {
     throw new Error(datasetRead.message);
@@ -692,6 +695,7 @@ export async function runSharedSimulation(
   return buildArtifactFromEngineInput({
     engineInput,
     callerType: "user_past",
+    exactArtifactInputHash: result.canonicalArtifactInputHash ?? null,
   });
 }
 
