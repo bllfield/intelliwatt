@@ -33,6 +33,23 @@ SHARED SIM → DROPLET (SHIPPED 2026-03-27, EXTENDED)
 - **Shared pipeline (Gap-Fill):** canonical compare path recalcs Past once with validation-only keys, reads from canonical saved artifact family, then applies baseline-vs-accuracy projection only (no compare-only simulator as canonical truth).
 
 ========================================
+ONE PATH SIM RESCUE ARCHITECTURE
+========================================
+
+- **Canonical reference:** `docs/ONE_PATH_SIM_ARCHITECTURE.md`
+- **Current state:** One Path Sim Admin is the **pre-cutover** simulation proving harness / truth console. It is not yet proof that older simulation-facing surfaces have been fully rerouted.
+- **Usage stays upstream:** the existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production. Simulation starts only after usage truth exists.
+- **No new usage producer:** One Path Sim may read persisted usage truth, and when usage truth is missing it may request the existing shared usage orchestration / refresh path to seed it first. It must not become a new upstream usage producer.
+- **Canonical downstream pipeline:** `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
+- **One shared contracts family:** future readers must read the same persisted artifact family and the same canonical read model. Readers must not recompute core sim outputs or privately reshape parity, compare, chart, or source truth.
+- **Mode rule:** `INTERVAL`, `MANUAL_MONTHLY`, `MANUAL_ANNUAL`, and `NEW_BUILD` may differ before the adapter boundary, but everything after `CanonicalSimulationEngineInput` must stay shared.
+- **Weather rule:** one shared weather owner only, with exactly two scoring paths only: `INTERVAL_BASED` and `BILLING_PERIOD_BASED`. No third path, no caller-based weather branch, no page-local or route-local weather math.
+- **Weather derived-input rule:** `weatherEfficiencyDerivedInput` is consumed only inside the shared calculation path. It is a shape modifier, not a target setter. Manual monthly/annual must keep target parity authoritative and therefore use compressed weather-driven amplitude relative to interval-backed mode.
+- **Manual monthly rule:** GapFill monthly, Manual Lab monthly, user manual monthly, and One Path monthly must ultimately share the same manual-monthly calculation logic after normalization. No caller-specific Stage 2 sim behavior is allowed.
+- **GapFill source-home rule:** source-home views are read-only readers over persisted shared artifact/read-model truth. They must not own private source-home simulation behavior.
+- **Variable tuning rule:** shared simulation variable policy is the tuning/config owner. `effectiveSimulationVariablesUsed` belongs on canonical readback for the exact run identity.
+
+========================================
 USER MANUAL MONTHLY (AUTHORITATIVE)
 ========================================
 
@@ -153,8 +170,8 @@ Mandatory enforcement rules:
 - Tests must validate via the same shared modules or route contracts; no test-only duplicate business math.
 - Rebuild/parity/diagnostic paths must be explicit; default reads should be artifact/cache-first where possible.
 - If functionality already exists in one of the shared modules above, Cursor must use or extend that module instead of writing similar logic elsewhere.
-- If a new reusable module is created in the future, it must be added to this canonical registry in all three docs immediately.
-- If this task creates any new reusable shared module or shared helper, Cursor must update the canonical registry in all three docs in the same change before finishing.
+- If a new reusable module is created in the future, it must be added to the canonical architecture docs listed in the doc-alignment override below.
+- If this task creates any new reusable shared module or shared helper, Cursor must update the canonical architecture docs listed in the doc-alignment override below in the same change before finishing.
 - Any new route/tool/test that depends on GapFill or simulated usage must first check this canonical registry before adding logic.
 - No duplicate code is allowed for date/window logic, weather identity logic, interval source selection, artifact identity/hash logic, profile identity logic, simulation-day generation, stitched Past artifact building, or diagnostic orchestration.
 
@@ -671,9 +688,11 @@ If a block changes any of the above, that same block must also include:
 - tests or verification steps that match the new documented contract when applicable
 
 At minimum, scope-changing or architecture-changing blocks must review and update as needed:
+- docs/ONE_PATH_SIM_ARCHITECTURE.md
 - docs/USAGE_SIMULATION_PLAN.md
 - docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md
 - docs/PROJECT_PLAN.md
+- docs/PROJECT_CONTEXT.md
 - docs/CHAT_BOOTSTRAP.txt
 
 If a block changes implementation contract but does not include doc alignment, that block is incomplete and off-plan.

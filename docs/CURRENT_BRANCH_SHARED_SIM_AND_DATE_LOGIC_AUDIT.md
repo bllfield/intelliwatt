@@ -1,5 +1,12 @@
 # Current Branch Shared Sim And Date Logic Audit
 
+> Historical implementation audit only. This file documents point-in-time runtime/code analysis and is not the canonical written architecture contract.
+>
+> Canonical architecture references:
+> - `docs/ONE_PATH_SIM_ARCHITECTURE.md`
+> - `docs/USAGE_SIMULATION_PLAN.md`
+> - `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`
+
 Audited branch: `main`
 Audited commit: `c32726b5b57d6159f59638269dc34fd959376531`
 Working tree at audit start: `clean`

@@ -237,6 +237,13 @@ export function OnePathSimAdmin() {
     [validationOnlyDateKeysText]
   );
   const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
+  const upstreamUsageTruth = useMemo(
+    () =>
+      asRecord(runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth) ??
+      asRecord(runResult?.upstreamUsageTruth) ??
+      asRecord(lookup?.sourceContext?.upstreamUsageTruth),
+    [lookup?.sourceContext?.upstreamUsageTruth, runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth, runResult?.upstreamUsageTruth]
+  );
 
   const activeVariableFamilyView = useMemo(
     () =>
@@ -458,6 +465,19 @@ export function OnePathSimAdmin() {
     const json = await res.json().catch(() => null);
     setBusy(false);
     if (!res.ok || !json?.ok) {
+      if (json?.upstreamUsageTruth) {
+        setLookup((current) =>
+          current
+            ? {
+                ...current,
+                sourceContext: {
+                  ...(current.sourceContext ?? {}),
+                  upstreamUsageTruth: json.upstreamUsageTruth,
+                },
+              }
+            : current
+        );
+      }
       setStatus(null);
       setError(json?.error ?? `Run failed (${res.status})`);
       return;
@@ -755,6 +775,16 @@ export function OnePathSimAdmin() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
+          {!runResult && upstreamUsageTruth ? (
+            <div className="lg:col-span-2">
+              <TruthSummaryPanel
+                title={String(upstreamUsageTruth.title ?? "Upstream Usage Truth")}
+                summary={String(upstreamUsageTruth.summary ?? "")}
+                currentRun={asRecord(upstreamUsageTruth.currentRun)}
+                sharedOwners={Array.isArray(upstreamUsageTruth.sharedOwners) ? (upstreamUsageTruth.sharedOwners as any[]) : []}
+              />
+            </div>
+          ) : null}
           <SectionJson title="Loaded source context" value={lookup?.sourceContext ?? null} />
           <SectionJson
             title="Harness controls snapshot"
@@ -816,6 +846,12 @@ export function OnePathSimAdmin() {
                     ? runResult.readModel.sourceOfTruthSummary.stageBoundaryMap.sharedOwners
                     : []
                 }
+              />
+              <TruthSummaryPanel
+                title={String(upstreamUsageTruth?.title ?? "Upstream Usage Truth")}
+                summary={String(upstreamUsageTruth?.summary ?? "")}
+                currentRun={asRecord(upstreamUsageTruth?.currentRun)}
+                sharedOwners={Array.isArray(upstreamUsageTruth?.sharedOwners) ? (upstreamUsageTruth?.sharedOwners as any[]) : []}
               />
               <TruthSummaryPanel
                 title="Shared Derived Inputs Used By Run"

@@ -7,7 +7,6 @@ const requireAdmin = vi.fn();
 const lookupAdminHousesByEmail = vi.fn();
 const resolveAdminHouseSelection = vi.fn();
 const listScenarios = vi.fn();
-const getActualUsageDatasetForHouse = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const getHomeProfileSimulatedByUserHouse = vi.fn();
@@ -16,12 +15,26 @@ const normalizeStoredApplianceProfile = vi.fn();
 const resolveSharedWeatherSensitivityEnvelope = vi.fn();
 const getTravelRangesFromDb = vi.fn();
 const getSimulationVariablePolicy = vi.fn();
+const resolveUpstreamUsageTruthForSimulation = vi.fn();
 const adaptIntervalRawInput = vi.fn();
 const adaptManualMonthlyRawInput = vi.fn();
 const adaptManualAnnualRawInput = vi.fn();
 const adaptNewBuildRawInput = vi.fn();
 const runSharedSimulation = vi.fn();
 const buildSharedSimulationReadModel = vi.fn();
+class UpstreamUsageTruthMissingError extends Error {
+  code = "usage_truth_missing";
+  usageTruthSource: string;
+  seedResult: unknown;
+  upstreamUsageTruth: unknown;
+
+  constructor(args: { usageTruthSource: string; seedResult: unknown; upstreamUsageTruth: unknown }) {
+    super("Upstream usage truth is required before simulation can run.");
+    this.usageTruthSource = args.usageTruthSource;
+    this.seedResult = args.seedResult;
+    this.upstreamUsageTruth = args.upstreamUsageTruth;
+  }
+}
 
 vi.mock("@/lib/auth/admin", () => ({
   requireAdmin: (...args: any[]) => requireAdmin(...args),
@@ -34,10 +47,6 @@ vi.mock("@/lib/admin/adminHouseLookup", () => ({
 
 vi.mock("@/modules/usageSimulator/service", () => ({
   listScenarios: (...args: any[]) => listScenarios(...args),
-}));
-
-vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
-  getActualUsageDatasetForHouse: (...args: any[]) => getActualUsageDatasetForHouse(...args),
 }));
 
 vi.mock("@/modules/manualUsage/store", () => ({
@@ -69,6 +78,10 @@ vi.mock("@/modules/usageSimulator/simulationVariablePolicy", () => ({
   getSimulationVariablePolicy: (...args: any[]) => getSimulationVariablePolicy(...args),
 }));
 
+vi.mock("@/modules/usageSimulator/upstreamUsageTruth", () => ({
+  resolveUpstreamUsageTruthForSimulation: (...args: any[]) => resolveUpstreamUsageTruthForSimulation(...args),
+}));
+
 vi.mock("@/modules/usageSimulator/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
@@ -76,6 +89,7 @@ vi.mock("@/modules/usageSimulator/onePathSim", () => ({
   adaptNewBuildRawInput: (...args: any[]) => adaptNewBuildRawInput(...args),
   runSharedSimulation: (...args: any[]) => runSharedSimulation(...args),
   buildSharedSimulationReadModel: (...args: any[]) => buildSharedSimulationReadModel(...args),
+  UpstreamUsageTruthMissingError,
 }));
 
 function buildRequest(body: Record<string, unknown>, cookie = "brian@intellipath-solutions.com") {
@@ -95,7 +109,6 @@ describe("admin one path sim route", () => {
     lookupAdminHousesByEmail.mockReset();
     resolveAdminHouseSelection.mockReset();
     listScenarios.mockReset();
-    getActualUsageDatasetForHouse.mockReset();
     getManualUsageInputForUserHouse.mockReset();
     saveManualUsageInputForUserHouse.mockReset();
     getHomeProfileSimulatedByUserHouse.mockReset();
@@ -104,6 +117,7 @@ describe("admin one path sim route", () => {
     resolveSharedWeatherSensitivityEnvelope.mockReset();
     getTravelRangesFromDb.mockReset();
     getSimulationVariablePolicy.mockReset();
+    resolveUpstreamUsageTruthForSimulation.mockReset();
     adaptIntervalRawInput.mockReset();
     adaptManualMonthlyRawInput.mockReset();
     adaptManualAnnualRawInput.mockReset();
@@ -120,7 +134,26 @@ describe("admin one path sim route", () => {
     });
     resolveAdminHouseSelection.mockResolvedValue({ id: "house-1", label: "Primary", esiid: "esiid-1", isPrimary: true });
     listScenarios.mockResolvedValue({ ok: true, scenarios: [{ id: "scenario-1", name: "Past" }] });
-    getActualUsageDatasetForHouse.mockResolvedValue({ dataset: { summary: { totalKwh: 123 }, meta: { actualSource: "SMT" } } });
+    resolveUpstreamUsageTruthForSimulation.mockResolvedValue({
+      dataset: { summary: { totalKwh: 123 }, meta: { actualSource: "SMT" } },
+      alternatives: { smt: { totalKwh: 123 }, greenButton: null },
+      actualContextHouse: { id: "house-1", esiid: "esiid-1" },
+      usageTruthSource: "persisted_usage_output",
+      seedResult: null,
+      summary: {
+        title: "Upstream Usage Truth",
+        summary: "shared usage truth summary",
+        currentRun: {
+          statusSummary: {
+            usageTruthStatus: "existing_persisted_truth",
+            downstreamSimulationAllowed: true,
+            seedingAttempted: false,
+            seedingResult: "not_needed",
+          },
+        },
+        sharedOwners: [],
+      },
+    });
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: null, updatedAt: null });
     getHomeProfileSimulatedByUserHouse.mockResolvedValue({ squareFeet: 2000 });
     getApplianceProfileSimulatedByUserHouse.mockResolvedValue({ appliancesJson: { fuelConfiguration: "all_electric", appliances: [] } });
@@ -154,6 +187,12 @@ describe("admin one path sim route", () => {
     expect(json.ok).toBe(true);
     expect(json.selectedHouse.id).toBe("house-1");
     expect(json.sourceContext.actualDatasetSummary).toEqual({ totalKwh: 123 });
+    expect(json.sourceContext.upstreamUsageTruth.currentRun.statusSummary).toEqual({
+      usageTruthStatus: "existing_persisted_truth",
+      downstreamSimulationAllowed: true,
+      seedingAttempted: false,
+      seedingResult: "not_needed",
+    });
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
     expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
   });
@@ -178,13 +217,74 @@ describe("admin one path sim route", () => {
       })
     );
 
-    expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith("house-2", "esiid-2", { skipFullYearIntervalFetch: true });
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-2",
+      seedIfMissing: false,
+    });
     expect(resolveSharedWeatherSensitivityEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         weatherHouseId: "house-2",
         simulationVariablePolicy: { previewPolicy: "manual-monthly" },
       })
     );
+  });
+
+  it("returns upstream usage truth metadata on lookup without introducing page-local usage loading", async () => {
+    resolveUpstreamUsageTruthForSimulation.mockResolvedValue({
+      dataset: null,
+      alternatives: { smt: null, greenButton: null },
+      actualContextHouse: { id: "house-2", esiid: "esiid-2" },
+      usageTruthSource: "missing_usage_truth",
+      seedResult: null,
+      summary: {
+        title: "Upstream Usage Truth",
+        summary: "shared usage truth summary",
+        currentRun: {
+          statusSummary: {
+            usageTruthStatus: "unavailable",
+            downstreamSimulationAllowed: false,
+            seedingAttempted: false,
+            seedingResult: "not_needed",
+          },
+          orchestrationTrace: {
+            lookedForExistingUsageTruth: true,
+            existingUsageTruthFound: false,
+            refreshRequested: false,
+          },
+        },
+        sharedOwners: [],
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+        actualContextHouseId: "house-2",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.sourceContext.upstreamUsageTruth.currentRun.statusSummary).toEqual({
+      usageTruthStatus: "unavailable",
+      downstreamSimulationAllowed: false,
+      seedingAttempted: false,
+      seedingResult: "not_needed",
+    });
+    expect(json.sourceContext.upstreamUsageTruth.currentRun.orchestrationTrace).toEqual(
+      expect.objectContaining({
+        lookedForExistingUsageTruth: true,
+        existingUsageTruthFound: false,
+        refreshRequested: false,
+      })
+    );
+    expect(adaptManualMonthlyRawInput).not.toHaveBeenCalled();
   });
 
   it("routes interval runs through the shared adapter, producer, and read model", async () => {

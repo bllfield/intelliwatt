@@ -42,6 +42,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Manual Statement / Annual Logic");
     expect(source).toContain("Shared source-of-truth summary");
     expect(source).toContain("Stage Boundary Map");
+    expect(source).toContain("Upstream Usage Truth");
     expect(source).toContain("Shared Derived Inputs Used By Run");
     expect(source).toContain("Source Truth / Compare Truth Identity");
     expect(source).toContain("Constraint / Rebalance Logic");
@@ -59,6 +60,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("External surface classification");
     expect(source).toContain("Drift-risk watchlist");
     expect(source).toContain("runResult.readModel?.sourceOfTruthSummary?.stageBoundaryMap");
+    expect(source).toContain("runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth");
     expect(source).toContain("runResult.readModel?.sourceOfTruthSummary?.sharedDerivedInputs");
     expect(source).toContain("runResult.readModel?.sourceOfTruthSummary?.sourceTruthIdentity");
     expect(source).toContain("runResult.readModel?.sourceOfTruthSummary?.constraintRebalance");
@@ -80,6 +82,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("shared selector path");
     expect(source).toContain("<select");
     expect(source).toContain("sourceContext?.travelRangesFromDb");
+    expect(source).toContain("lookup?.sourceContext?.upstreamUsageTruth");
     expect(source).toContain("Shared calculation variable popups");
     expect(source).toContain("openVariableFamily");
     expect(source).toContain("Copy all variables for AI");
@@ -102,6 +105,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("explicit admin override");
     const presentationSource = readRepoFile("modules/usageSimulator/simulationVariablePresentation.ts");
     expect(presentationSource).toContain("curveShapingSummary");
+    expect(presentationSource).toContain("upstreamUsageTruth");
     expect(presentationSource).toContain("Highest-priority shape-sensitive shared variables first");
     const truthSummarySource = readRepoFile("modules/usageSimulator/onePathTruthSummary.ts");
     expect(truthSummarySource).toContain("resolveCanonicalUsage365CoverageWindow");
@@ -109,6 +113,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(truthSummarySource).toContain("resolveManualStageOnePresentation");
     expect(truthSummarySource).toContain("buildManualBillPeriodTargets");
     expect(truthSummarySource).toContain("stageBoundaryMap");
+    expect(truthSummarySource).toContain("upstreamUsageTruth");
     expect(truthSummarySource).toContain("sharedDerivedInputs");
     expect(truthSummarySource).toContain("sourceTruthIdentity");
     expect(truthSummarySource).toContain("constraintRebalance");

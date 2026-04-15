@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import {
@@ -9,6 +8,7 @@ import {
   adaptNewBuildRawInput,
   buildSharedSimulationReadModel,
   runSharedSimulation,
+  UpstreamUsageTruthMissingError,
   type CanonicalSimulationInputType,
 } from "@/modules/usageSimulator/onePathSim";
 import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
@@ -21,6 +21,7 @@ import {
   type SimulationVariableInputType,
   type SimulationVariablePolicy,
 } from "@/modules/usageSimulator/simulationVariablePolicy";
+import { resolveUpstreamUsageTruthForSimulation } from "@/modules/usageSimulator/upstreamUsageTruth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,9 +104,12 @@ export async function POST(request: NextRequest) {
     previewSimulationVariablePolicy = null;
   }
 
-  const [actualResult, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
-    getActualUsageDatasetForHouse(previewActualContextHouse.id, previewActualContextHouse.esiid ?? null, {
-      skipFullYearIntervalFetch: true,
+  const [usageTruth, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
+    resolveUpstreamUsageTruthForSimulation({
+      userId: resolved.userId,
+      houseId: resolved.selectedHouse.id,
+      actualContextHouseId: previewActualContextHouse.id,
+      seedIfMissing: false,
     }).catch(() => null),
     getManualUsageInputForUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
       payload: null,
@@ -117,7 +121,7 @@ export async function POST(request: NextRequest) {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const weatherEnvelope = await resolveSharedWeatherSensitivityEnvelope({
-    actualDataset: actualResult?.dataset ?? null,
+    actualDataset: usageTruth?.dataset ?? null,
     manualUsagePayload: manualUsage.payload ?? null,
     homeProfile,
     applianceProfile,
@@ -134,8 +138,11 @@ export async function POST(request: NextRequest) {
       selectedHouse: resolved.selectedHouse,
       scenarios: resolved.scenarios,
       sourceContext: {
-        actualDatasetSummary: actualResult?.dataset?.summary ?? null,
-        actualDatasetMeta: (actualResult?.dataset as any)?.meta ?? null,
+        actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
+        actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,
+        usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",
+        usageTruthSeedResult: usageTruth?.seedResult ?? null,
+        upstreamUsageTruth: usageTruth?.summary ?? null,
         manualUsagePayload: manualUsage.payload ?? null,
         manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
         travelRangesFromDb,
@@ -175,28 +182,45 @@ export async function POST(request: NextRequest) {
       travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : [],
       persistRequested: body?.persistRequested !== false,
     } as const;
-    const engineInput =
-      mode === "INTERVAL"
-        ? await adaptIntervalRawInput(rawInputBase)
-        : mode === "MANUAL_ANNUAL"
-          ? await adaptManualAnnualRawInput({
-              ...rawInputBase,
-              manualUsagePayload: manualUsage.payload ?? null,
-            })
-          : mode === "NEW_BUILD"
-            ? await adaptNewBuildRawInput(rawInputBase)
-            : await adaptManualMonthlyRawInput({
+    try {
+      const engineInput =
+        mode === "INTERVAL"
+          ? await adaptIntervalRawInput(rawInputBase)
+          : mode === "MANUAL_ANNUAL"
+            ? await adaptManualAnnualRawInput({
                 ...rawInputBase,
                 manualUsagePayload: manualUsage.payload ?? null,
-              });
-    const artifact = await runSharedSimulation(engineInput);
-    const readModel = buildSharedSimulationReadModel(artifact);
-    return NextResponse.json({
-      ok: true,
-      engineInput,
-      artifact,
-      readModel,
-    });
+              })
+            : mode === "NEW_BUILD"
+              ? await adaptNewBuildRawInput(rawInputBase)
+              : await adaptManualMonthlyRawInput({
+                  ...rawInputBase,
+                  manualUsagePayload: manualUsage.payload ?? null,
+                });
+      const artifact = await runSharedSimulation(engineInput);
+      const readModel = buildSharedSimulationReadModel(artifact);
+      return NextResponse.json({
+        ok: true,
+        engineInput,
+        artifact,
+        readModel,
+      });
+    } catch (error) {
+      if (error instanceof UpstreamUsageTruthMissingError) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: error.code,
+            usageTruthSource: error.usageTruthSource,
+            seedResult: error.seedResult,
+            upstreamUsageTruth: error.upstreamUsageTruth,
+            message: error.message,
+          },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
   }
 
   return NextResponse.json({ ok: false, error: "unsupported_action" }, { status: 400 });

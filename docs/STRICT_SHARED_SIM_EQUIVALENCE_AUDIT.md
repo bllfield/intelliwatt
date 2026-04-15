@@ -1,5 +1,12 @@
 # Strict Shared Sim Equivalence Audit
 
+> Historical implementation audit only. This file documents point-in-time runtime/code analysis and is not the canonical written architecture contract.
+>
+> Canonical architecture references:
+> - `docs/ONE_PATH_SIM_ARCHITECTURE.md`
+> - `docs/USAGE_SIMULATION_PLAN.md`
+> - `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`
+
 ## Exact invariant
 
 This audit uses one strict invariant:

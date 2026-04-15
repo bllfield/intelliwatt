@@ -15,6 +15,7 @@
 - **Exact run snapshot rule:** the canonical artifact/read model must expose `effectiveSimulationVariablesUsed` for the same run identity so admin tuning surfaces can inspect the resolved shared values and their value sources without reconstructing them in the page.
 - **Shared weather selector rule**: user Past owns `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home share `gapfillWeatherLogicSetting` within a run. The selector difference is pre-lockbox only; the resolver/path/display remain shared.
 - **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
+- **One Path Sim rescue architecture:** see `docs/ONE_PATH_SIM_ARCHITECTURE.md` for the current intended architecture. One Path Sim Admin is pre-cutover only. Usage remains upstream and untouched. One Path consumes persisted usage truth as input, uses one shared producer pipeline after adapter normalization, and must not introduce reader-owned recompute or private source-home/manual-monthly/weather branches.
 
 - No duplicate functional logic is allowed across files.
 - Shared behavior must be implemented once in a canonical module and imported everywhere else.
@@ -123,8 +124,8 @@ Mandatory enforcement rules:
 - Tests must validate via the same shared modules or route contracts; no test-only duplicate business math.
 - Rebuild/parity/diagnostic paths must be explicit; default reads should be artifact/cache-first where possible.
 - If functionality already exists in one of the shared modules above, Cursor must use or extend that module instead of writing similar logic elsewhere.
-- If a new reusable module is created in the future, it must be added to this canonical registry in all three docs immediately.
-- If this task creates any new reusable shared module or shared helper, Cursor must update the canonical registry in all three docs in the same change before finishing.
+- If a new reusable module is created in the future, it must be added to the canonical architecture docs listed in `docs/CHAT_BOOTSTRAP.txt` under the doc-alignment override.
+- If this task creates any new reusable shared module or shared helper, Cursor must update those canonical architecture docs in the same change before finishing.
 - Any new route/tool/test that depends on GapFill or simulated usage must first check this canonical registry before adding logic.
 - No duplicate code is allowed for date/window logic, weather identity logic, interval source selection, artifact identity/hash logic, profile identity logic, simulation-day generation, stitched Past artifact building, or diagnostic orchestration.
 
@@ -191,7 +192,7 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 
 ### Implemented (2026-03) — Droplet execution for shared sim (Gap-Fill compare + Past recalc)
 
-- **Why:** Full-window shared Past work + Gap-Fill compare can exceed practical Vercel memory/time; async handoff moves heavy execution off the serverless request when webhook env is set.
+- **Why:** Full-window shared Past recalc can exceed practical Vercel memory/time, so async handoff remains available for the shared Past recalc path when webhook env is set. Gap-Fill compare is documented separately below because its canonical truth path is inline, artifact-backed, and snapshot-reader-based rather than a second queued compare engine.
 - **Gap-Fill compare:** queued compare-core replay is retired. Canonical Gap-Fill compare runs inline through the shared recalc + persisted-artifact read path; staged heavy readers remain snapshot/read-only over `compareRunId`.
 - **Past recalc persistence:** `SimDropletJob` (usage DB) stores **`past_sim_recalc`** payload; worker runs **`recalcSimulatorBuild`** only—same function as synchronous routes. **`PAST_SIM_RECALC_INLINE=true`** or **`SIM_DROPLET_EXECUTION_INLINE=true`** forces inline recalc on Vercel.
 - **Webhook:** `deploy/droplet/webhook_server.py` — unified **`scripts/droplet/sim-job-run.ts`** for `gapfill_compare` and `past_sim_recalc`; same URL/secret as SMT triggers.

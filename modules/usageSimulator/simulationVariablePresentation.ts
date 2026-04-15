@@ -273,6 +273,9 @@ export function buildSimulationVariableCopyPayload(args: {
           stageBoundaryMap: args.readModel.sourceOfTruthSummary
             ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).stageBoundaryMap ?? null
             : null,
+          upstreamUsageTruth: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).upstreamUsageTruth ?? null
+            : null,
           sharedDerivedInputs: args.readModel.sourceOfTruthSummary
             ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).sharedDerivedInputs ?? null
             : null,
@@ -304,6 +307,9 @@ export function buildSimulationVariableCopyPayload(args: {
             ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).newBuildModeTruth ?? null
             : null,
         }
+      : null,
+    upstreamUsageTruth: args.readModel?.sourceOfTruthSummary
+      ? ((args.readModel.sourceOfTruthSummary as Record<string, unknown>).upstreamUsageTruth ?? null)
       : null,
     runResults: args.readModel
       ? {

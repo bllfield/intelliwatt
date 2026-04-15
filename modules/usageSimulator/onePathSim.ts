@@ -1,8 +1,13 @@
 import { prisma } from "@/lib/db";
-import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
+import {
+  resolveUpstreamUsageTruthForSimulation,
+  type UpstreamUsageTruthSeedResult,
+  type UpstreamUsageTruthSection,
+  type UpstreamUsageTruthSource,
+} from "@/modules/usageSimulator/upstreamUsageTruth";
 import { buildValidationCompareProjectionSidecar, type ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
@@ -78,6 +83,7 @@ export type CanonicalSimulationEngineInput = {
   sourceDerivedMode: string | null;
   manualTravelVacantDonorPoolMode: string | null;
   weatherEfficiencyDerivedInput: WeatherEfficiencyDerivedInput | null;
+  upstreamUsageTruth: UpstreamUsageTruthSection | null;
   runtime: {
     userId: string;
     houseId: string;
@@ -173,12 +179,33 @@ export type NewBuildRawInput = IntervalRawInput;
 type LoadedSharedContext = {
   house: { id: string; esiid: string | null };
   actualContextHouseId: string;
+  usageTruthSource: UpstreamUsageTruthSource;
+  usageTruthSeedResult: UpstreamUsageTruthSeedResult;
+  upstreamUsageTruth: UpstreamUsageTruthSection;
   actualDataset: any | null;
   manualUsagePayload: ManualUsagePayload | null;
   homeProfile: Record<string, unknown> | null;
   applianceProfile: Record<string, unknown> | null;
   weatherEnvelope: Awaited<ReturnType<typeof resolveSharedWeatherSensitivityEnvelope>>;
 };
+
+export class UpstreamUsageTruthMissingError extends Error {
+  code = "usage_truth_missing" as const;
+  usageTruthSource: UpstreamUsageTruthSource;
+  seedResult: UpstreamUsageTruthSeedResult;
+  upstreamUsageTruth: UpstreamUsageTruthSection;
+
+  constructor(args: {
+    usageTruthSource: UpstreamUsageTruthSource;
+    seedResult: UpstreamUsageTruthSeedResult;
+    upstreamUsageTruth: UpstreamUsageTruthSection;
+  }) {
+    super("Upstream usage truth is required before simulation can run.");
+    this.usageTruthSource = args.usageTruthSource;
+    this.seedResult = args.seedResult;
+    this.upstreamUsageTruth = args.upstreamUsageTruth;
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -217,20 +244,26 @@ async function loadSharedContext(args: {
   houseId: string;
   actualContextHouseId?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
+  seedUsageTruthIfMissing?: boolean;
 }): Promise<LoadedSharedContext> {
-  const house = await (prisma as any).houseAddress.findFirst({
-    where: { id: args.houseId, userId: args.userId, archivedAt: null },
-    select: { id: true, esiid: true },
+  const upstreamUsageTruth = await resolveUpstreamUsageTruthForSimulation({
+    userId: args.userId,
+    houseId: args.houseId,
+    actualContextHouseId: args.actualContextHouseId,
+    seedIfMissing: args.seedUsageTruthIfMissing === true,
   });
-  if (!house) throw new Error("house_not_found");
-  const actualContextHouseId = String(args.actualContextHouseId ?? args.houseId);
+  if (!upstreamUsageTruth.dataset) {
+    throw new UpstreamUsageTruthMissingError({
+      usageTruthSource: upstreamUsageTruth.usageTruthSource,
+      seedResult: upstreamUsageTruth.seedResult,
+      upstreamUsageTruth: upstreamUsageTruth.summary,
+    });
+  }
   const [
-    actualResult,
     manualUsageRecord,
     homeProfile,
     applianceProfileRecord,
   ] = await Promise.all([
-    getActualUsageDatasetForHouse(actualContextHouseId, house.esiid ?? null, { skipFullYearIntervalFetch: true }).catch(() => null),
     args.manualUsagePayload !== undefined
       ? Promise.resolve({ payload: args.manualUsagePayload ?? null })
       : getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => ({ payload: null })),
@@ -239,19 +272,22 @@ async function loadSharedContext(args: {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const weatherEnvelope = await resolveSharedWeatherSensitivityEnvelope({
-    actualDataset: actualResult?.dataset ?? null,
+    actualDataset: upstreamUsageTruth.dataset,
     manualUsagePayload: manualUsageRecord.payload ?? null,
     homeProfile,
     applianceProfile,
-    weatherHouseId: actualContextHouseId,
+    weatherHouseId: upstreamUsageTruth.actualContextHouse.id,
   }).catch(() => ({
     score: null,
     derivedInput: null,
   }));
   return {
-    house: { id: String(house.id), esiid: house.esiid ? String(house.esiid) : null },
-    actualContextHouseId,
-    actualDataset: actualResult?.dataset ?? null,
+    house: upstreamUsageTruth.selectedHouse,
+    actualContextHouseId: upstreamUsageTruth.actualContextHouse.id,
+    usageTruthSource: upstreamUsageTruth.usageTruthSource,
+    usageTruthSeedResult: upstreamUsageTruth.seedResult,
+    upstreamUsageTruth: upstreamUsageTruth.summary,
+    actualDataset: upstreamUsageTruth.dataset,
     manualUsagePayload: manualUsageRecord.payload ?? null,
     homeProfile: (homeProfile as Record<string, unknown> | null) ?? null,
     applianceProfile: (applianceProfile as Record<string, unknown> | null) ?? null,
@@ -365,9 +401,10 @@ function buildCanonicalEngineInput(args: {
     weatherLogicMode,
     weatherDaysReference: asRecord(args.loaded.actualDataset?.dailyWeather) ?? null,
     sharedProducerPathUsed: true,
-    sourceDerivedMode: null,
+    sourceDerivedMode: args.loaded.usageTruthSource,
     manualTravelVacantDonorPoolMode: null,
     weatherEfficiencyDerivedInput: derivedInput,
+    upstreamUsageTruth: args.loaded.upstreamUsageTruth,
     runtime: {
       userId: args.runtimeUserId,
       houseId: args.loaded.house.id,
@@ -398,6 +435,7 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    seedUsageTruthIfMissing: true,
   });
   return buildCanonicalEngineInput({
     inputType: "INTERVAL",
@@ -419,6 +457,7 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
     manualUsagePayload: raw.manualUsagePayload,
+    seedUsageTruthIfMissing: true,
   });
   return buildCanonicalEngineInput({
     inputType: "MANUAL_MONTHLY",
@@ -440,6 +479,7 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
     manualUsagePayload: raw.manualUsagePayload,
+    seedUsageTruthIfMissing: true,
   });
   return buildCanonicalEngineInput({
     inputType: "MANUAL_ANNUAL",
@@ -460,6 +500,7 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    seedUsageTruthIfMissing: true,
   });
   return buildCanonicalEngineInput({
     inputType: "NEW_BUILD",
@@ -508,11 +549,12 @@ async function buildArtifactFromEngineInput(args: {
     .catch(() => null);
   const actualDataset =
     (
-      await getActualUsageDatasetForHouse(
-        args.engineInput.actualContextHouseId,
-        args.engineInput.runtime.esiid ?? null,
-        { skipFullYearIntervalFetch: true }
-      ).catch(() => null)
+      await resolveUpstreamUsageTruthForSimulation({
+        userId: args.engineInput.runtime.userId,
+        houseId: args.engineInput.houseId,
+        actualContextHouseId: args.engineInput.actualContextHouseId,
+        seedIfMissing: false,
+      }).catch(() => null)
     )?.dataset ?? null;
   const compareProjection = buildValidationCompareProjectionSidecar(datasetRead.dataset);
   const manualReadResult =

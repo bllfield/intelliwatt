@@ -1,0 +1,183 @@
+# One Path Sim Architecture
+
+This document is the canonical written reference for the One Path Sim rescue architecture.
+
+Use it to answer:
+- what One Path Sim is right now
+- what it is not yet
+- what usage owns upstream
+- what simulation owns downstream
+- what weather owns
+- what readers are allowed and not allowed to do
+- what still remains pre-cutover
+
+When this document conflicts with older planning or audit language, this document wins unless a newer authoritative override explicitly replaces it.
+
+## Current state
+
+- One Path Sim Admin is currently a **pre-cutover proving harness / truth console**.
+- It is the place to define, inspect, and verify the canonical shared simulation architecture.
+- It is **not yet** the live source of truth for all existing simulation-facing surfaces.
+- Existing GapFill, Manual Lab, user Past/manual pages, and other readers are **not yet fully rerouted** just because One Path exists.
+- This phase is about locking ownership and contracts so later cutover can happen without drift.
+
+## Non-negotiable upstream / downstream boundary
+
+### Usage stays upstream
+
+- The existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production.
+- Simulation starts only **after** usage truth exists.
+- One Path Sim and future simulation consumers must treat persisted usage output as upstream input truth.
+- If usage truth is missing, simulation may request the **existing** usage orchestration / refresh path to seed usage truth first.
+- One Path Sim must **not** become a new upstream usage producer.
+- This architecture does **not** redesign, replace, or disconnect the current usage page flow.
+
+### Simulation stays downstream
+
+- Simulation consumes upstream usage truth plus normalized mode-specific raw input.
+- Simulation does not own upstream usage creation.
+- Simulation must not privately reinterpret raw usage before the existing usage flow has produced canonical usage truth.
+
+## Canonical shared producer pipeline
+
+The canonical One Path simulation pipeline is:
+
+`raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
+
+Rules:
+- Raw input may differ by mode or caller.
+- Adapter behavior may differ by mode before the engine input is finalized.
+- After `CanonicalSimulationEngineInput`, the path is shared.
+- No caller-specific simulation core is allowed after the adapter boundary.
+- No page-local or route-local post-sim formatter is allowed after the shared formatter boundary.
+
+## Canonical shared contracts
+
+The architecture owns one canonical simulation contract family:
+
+- `CanonicalSimulationEngineInput`
+- `CanonicalSimulationArtifact`
+- `CanonicalSimulationReadModel`
+
+Rules:
+- Future readers must read the same persisted artifact family.
+- Future readers must consume the same read model / output contract.
+- Readers must not recompute core simulation outputs.
+- Readers must not privately reshape parity, compare, chart series, source truth, or artifact identity.
+- Readers may project or format shared read truth for display, but they must not become second truth owners.
+
+## Supported modes
+
+The architecture supports four modes inside the same shared design:
+
+- `INTERVAL`
+- `MANUAL_MONTHLY`
+- `MANUAL_ANNUAL`
+- `NEW_BUILD`
+
+Rules:
+- These modes may differ in raw input and adapter normalization only.
+- Everything after `CanonicalSimulationEngineInput` belongs to the same shared downstream architecture.
+- Mode-aware behavior belongs in shared adapters, shared variable/config resolution, and shared diagnostics, not private caller forks.
+
+## Weather ownership
+
+Weather remains under one shared owner.
+
+Rules:
+- Exactly two weather scoring paths only:
+  - `INTERVAL_BASED`
+  - `BILLING_PERIOD_BASED`
+- No third weather scoring path is allowed.
+- No caller-based weather branches are allowed.
+- No page-local or route-local weather math is allowed.
+- `weatherEfficiencyDerivedInput` is consumed only inside the shared calculation path.
+- `weatherEfficiencyDerivedInput` acts as a shape modifier, not a target setter.
+- For `MANUAL_MONTHLY` and `MANUAL_ANNUAL`, weather-driven amplitude must remain compressed relative to interval-backed mode so bill-target / parity ownership remains authoritative.
+
+## Manual monthly rule
+
+- GapFill monthly, Manual Lab monthly, user manual monthly, and One Path monthly must ultimately use the same shared manual-monthly calculation logic.
+- No caller-specific calculation behavior is allowed.
+- No route-local post-sim formatter is allowed.
+- No page-local shaping differences are allowed.
+- Bill totals / parity remain authoritative.
+- Differences in Stage 1 entry/editor workflow do not justify differences in Stage 2 shared simulation logic.
+
+## GapFill source-home rule
+
+- GapFill source home should be read-only from the persisted shared artifact / read model.
+- GapFill source home must not own private source-home simulation behavior.
+- GapFill may expose read-only diagnostics or compare views, but it must not introduce a separate source-home producer or formatter.
+
+## Variable tuning ownership
+
+- The shared simulation variable policy is the tuning/config owner.
+- Variable families are mode-aware.
+- `effectiveSimulationVariablesUsed` must be surfaced from the canonical read model for the exact run identity.
+- Future tuning should primarily happen through shared variables/config, not scattered logic edits.
+- This does **not** guarantee that every hardcoded coefficient has already been migrated; docs and implementation should state migration status honestly instead of assuming completion.
+
+## One Path Sim Admin purpose
+
+One Path Sim Admin exists to expose shared simulation truth before cutover. It should surface:
+
+- inputs
+- adapter decisions
+- upstream usage truth
+- shared derived inputs
+- effective variables used by run
+- chart/window/display owners
+- manual statement / annual owners
+- donor / fallback / exclusion logic
+- intraday reconstruction logic
+- constraint / rebalance logic
+- artifact / read-model truth
+- compare / parity / tuning truth
+
+It is a proving harness and truth console. It is not yet proof that all other readers have been cut over.
+
+## Reader rules
+
+Readers are allowed to:
+- read persisted artifacts
+- read canonical read models
+- format shared truth for UI
+- attach clearly read-only diagnostics or operator context
+
+Readers are not allowed to:
+- recompute core sim truth
+- create alternate chart truth
+- create alternate parity truth
+- create alternate compare truth
+- create alternate source-truth summaries
+- create alternate weather scoring paths
+- bypass persisted shared truth when a canonical artifact/read model already exists
+
+## Future cutover sequencing
+
+Current intended sequence:
+
+1. Lock the architecture and truth surfaces in One Path Sim Admin.
+2. Verify ownership boundaries, adapters, derived inputs, artifact contracts, read model contracts, and tuning visibility.
+3. Remove or retire conflicting private behaviors in older surfaces as they are cut over.
+4. Reroute readers to the same persisted artifact + read model family only when the shared path is fully proven.
+
+Until that cutover is explicitly completed:
+- old surfaces are not assumed to be fully migrated
+- docs must not imply full cutover
+- new work must not introduce fresh private sim paths
+
+## Drift-prevention rule
+
+The following must never drift again:
+
+- usage remains upstream and simulation remains downstream
+- one shared producer pipeline after adapter normalization
+- one shared artifact contract
+- one shared read model
+- one shared weather owner
+- exactly two weather scoring paths
+- no reader-owned recompute of simulation truth
+- no private source-home behavior
+- no caller-specific manual-monthly calculation behavior

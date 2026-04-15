@@ -13,10 +13,16 @@ describe("one path sim canonical variable snapshot source", () => {
     const source = readRepoFile("modules/usageSimulator/onePathSim.ts");
     const policySource = readRepoFile("modules/usageSimulator/simulationVariablePolicy.ts");
     const truthSummarySource = readRepoFile("modules/usageSimulator/onePathTruthSummary.ts");
+    const upstreamUsageSource = readRepoFile("modules/usageSimulator/upstreamUsageTruth.ts");
+    const usageRouteSource = readRepoFile("app/api/user/usage/route.ts");
+    const usagePageSource = readRepoFile("app/dashboard/usage/page.tsx");
 
     expect(source).toContain("effectiveSimulationVariablesUsed");
     expect(source).toContain("sourceOfTruthSummary");
     expect(source).toContain("buildOnePathTruthSummary");
+    expect(source).toContain("resolveUpstreamUsageTruthForSimulation");
+    expect(source).toContain("upstreamUsageTruth");
+    expect(source).not.toContain("getActualUsageDatasetForHouse(");
     expect(source).toContain("stageBoundaryMap");
     expect(source).toContain("sharedDerivedInputs");
     expect(source).toContain("sourceTruthIdentity");
@@ -32,7 +38,20 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(policySource).toContain("resolvedCompareTuningThresholds");
     expect(truthSummarySource).toContain("resolveReportedCoverageWindow");
     expect(truthSummarySource).toContain("buildManualBillPeriodTargets");
+    expect(truthSummarySource).toContain("upstreamUsageTruth");
     expect(truthSummarySource).toContain("annualModeTruth");
     expect(truthSummarySource).toContain("newBuildModeTruth");
+    expect(upstreamUsageSource).toContain("resolveIntervalsLayer");
+    expect(upstreamUsageSource).toContain("requestUsageRefreshForUserHouse");
+    expect(upstreamUsageSource).toContain("buildUpstreamUsageTruthSummary");
+    expect(upstreamUsageSource).toContain("downstreamSimulationAllowed");
+    expect(upstreamUsageSource).toContain("existing_persisted_truth");
+    expect(upstreamUsageSource).toContain("seeded_via_existing_refresh");
+    expect(upstreamUsageSource).toContain("missing_after_seed_attempt");
+    expect(upstreamUsageSource).toContain("persisted_usage_output");
+    expect(upstreamUsageSource).toContain("seeded_via_existing_usage_orchestration");
+    expect(usageRouteSource).toContain("resolveIntervalsLayer");
+    expect(usagePageSource).toContain("UsageDashboard");
+    expect(usagePageSource).not.toContain("one-path-sim");
   });
 });

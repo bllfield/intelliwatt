@@ -1,5 +1,12 @@
 # Final Exact Parity And Shared Authority Audit
 
+> Historical implementation audit only. This file documents point-in-time runtime/code analysis and is not the canonical written architecture contract.
+>
+> Canonical architecture references:
+> - `docs/ONE_PATH_SIM_ARCHITECTURE.md`
+> - `docs/USAGE_SIMULATION_PLAN.md`
+> - `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`
+
 Audited branch: `main`
 
 Audited commit: `67dfead393e3c3f9154e378b05d9f5e6d02ca794`

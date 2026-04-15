@@ -4,6 +4,15 @@
 
 Single internal entrypoint for Past simulation and GapFill scoring, with one shared weather loader, one shared artifact identity/fingerprint, and truthful weather provenance. GapFill is scoring/reporting only and must consume output from the shared Past simulator path after persistence, not a separate compare artifact or compare-side fresh sim path.
 
+## One Path Sim architecture note
+
+- Canonical architecture reference: `docs/ONE_PATH_SIM_ARCHITECTURE.md`
+- One Path Sim Admin is currently **pre-cutover only**. It is the proving harness / truth console for the intended canonical path, not proof that every older surface has already been rerouted.
+- The existing usage page / usage pipeline remains upstream and untouched. Simulation begins only after persisted usage truth exists.
+- One Path and future simulation consumers must read persisted usage truth first and may request the existing shared usage refresh/orchestration path when that truth is missing. They must not become new usage producers.
+- The canonical downstream simulation pipeline is: `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
+- Future readers must consume the same persisted artifact family and canonical read model. They must not recompute core sim truth or privately reshape parity, compare, chart, or source truth.
+
 ## Manual-Usage Alignment (Authoritative)
 
 - Shared producer path after normalization remains the rule.
@@ -115,6 +124,7 @@ Summary:
 ## What changed to match the target (engineering checklist)
 
 - **Gap-Fill compare path:** producer ownership remains shared through `recalcSimulatorBuild` / `simulatePastUsageDataset` and persisted in canonical artifact storage. GapFill compare reads those stored outputs (including simulated test-day outputs) from the same canonical family used by user-facing Past.
+- **GapFill source-home rule:** source-home views are read-only over persisted shared artifact/read-model truth. GapFill source-home does not own private source-home simulation behavior.
 - **GapFill admin canonical recalc route (`run_test_home_canonical_recalc`):** After variable collection and normalization, the test house enters the same shared Past Sim recalc/persist chain as a normal user Past run. There is no special test-house simulator or artifact writer path after lockbox entry.
 - **UI / API truth:** GapFill actual-house and test-house panels read the same persisted Past artifact family and shared presentation modules used by the user page. Compare truth rows/metrics come from stored canonical compare sidecar fields (`validationCompareRows` / `validationCompareMetrics`) and persisted canonical day totals only.
 - **Docs/tests:** Route and service artifact tests assert persisted-artifact ownership and shared-window rules; shared-window ownership rules unchanged.

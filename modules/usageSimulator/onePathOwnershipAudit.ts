@@ -206,6 +206,28 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
           "Shows raw input, adapter choice, canonical engine input, derived inputs, shared producer stages, formatter output, and persisted artifact identity from shared readback only.",
       },
       {
+        section: "Upstream Usage Truth",
+        surfaceType: "truth_panel",
+        visibleOnPage: true,
+        editableOnPage: false,
+        copiedInAiPayload: true,
+        runRequired: false,
+        pageOnly: false,
+        backedBySharedOwner: true,
+        ownerFiles: [
+          "modules/usageSimulator/upstreamUsageTruth.ts",
+          "modules/usageSimulator/onePathTruthSummary.ts",
+          "app/api/admin/tools/one-path-sim/route.ts",
+        ],
+        ownerSymbols: [
+          "buildUpstreamUsageTruthSummary",
+          "buildOnePathTruthSummary",
+          "resolveUpstreamUsageTruthForSimulation",
+        ],
+        notes:
+          "Shows whether persisted usage truth already existed, whether the existing shared refresh path was requested, and whether downstream simulation was allowed to proceed.",
+      },
+      {
         section: "Shared Derived Inputs Used By Run",
         surfaceType: "truth_panel",
         visibleOnPage: true,
@@ -293,7 +315,17 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         ownerFiles: ["modules/usageSimulator/simulationVariablePresentation.ts", "modules/usageSimulator/onePathTruthSummary.ts"],
         ownerSymbols: ["buildSimulationVariableCopyPayload", "buildOnePathTruthSummary"],
         notes:
-          "Structured pre-cutover truth-console sections for stage boundaries, derived inputs, identity, rebalance, donor/fallback, intraday logic, output contract, and mode-specific truth.",
+          "Structured pre-cutover truth-console sections for upstream usage truth, stage boundaries, derived inputs, identity, rebalance, donor/fallback, intraday logic, output contract, and mode-specific truth.",
+      },
+      {
+        section: "upstreamUsageTruth",
+        includedInCopyPayload: true,
+        requiresRun: true,
+        sourcedFromSharedShaper: true,
+        ownerFiles: ["modules/usageSimulator/simulationVariablePresentation.ts", "modules/usageSimulator/upstreamUsageTruth.ts"],
+        ownerSymbols: ["buildSimulationVariableCopyPayload", "buildUpstreamUsageTruthSummary"],
+        notes:
+          "Structured upstream usage-truth status that proves simulation stayed downstream of persisted usage output and the existing shared refresh/orchestration path.",
       },
       {
         section: "engineInput",

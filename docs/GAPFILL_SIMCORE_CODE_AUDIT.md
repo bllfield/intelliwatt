@@ -1,5 +1,17 @@
 # GAPFILL Sim-Core Code Audit
 
+> Historical implementation audit only.
+>
+> This file records a point-in-time code audit and must not be treated as the canonical product/architecture contract for One Path Sim, usage-upstream ownership, cutover status, or reader/producer rules.
+>
+> Canonical architecture references:
+> - `docs/ONE_PATH_SIM_ARCHITECTURE.md`
+> - `docs/USAGE_SIMULATION_PLAN.md`
+> - `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`
+> - `docs/PROJECT_PLAN.md`
+> - `docs/PROJECT_CONTEXT.md`
+> - `docs/CHAT_BOOTSTRAP.txt`
+
 ## 1) Executive Summary
 
 - **Confirmed current code truth:** Past Sim and Gap-Fill compare both run through shared service/simulator modules (`buildGapfillCompareSimShared`, `simulatePast*Shared`, `loadWeatherForPastWindow`) rather than separate route-level simulation math.

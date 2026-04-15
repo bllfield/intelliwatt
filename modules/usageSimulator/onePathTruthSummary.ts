@@ -24,6 +24,7 @@ export type OnePathTruthSection = {
 export type OnePathTruthSummary = {
   preCutoverHarness: OnePathTruthSection;
   stageBoundaryMap: OnePathTruthSection;
+  upstreamUsageTruth: OnePathTruthSection;
   sharedDerivedInputs: OnePathTruthSection;
   sourceTruthIdentity: OnePathTruthSection;
   constraintRebalance: OnePathTruthSection;
@@ -354,6 +355,22 @@ export function buildOnePathTruthSummary(args: {
           whyItMatters: "Projects the persisted artifact into the same canonical read model the truth console consumes.",
         },
       ],
+    },
+    upstreamUsageTruth: args.engineInput.upstreamUsageTruth
+      ? (args.engineInput.upstreamUsageTruth as OnePathTruthSection)
+      : {
+      title: "Upstream Usage Truth",
+      summary:
+        "This panel should be published from the shared upstream-usage owner. When absent, treat that as missing shared truth rather than recomputing it in the page.",
+      currentRun: {
+        statusSummary: {
+          usageTruthStatus: "unavailable",
+          downstreamSimulationAllowed: false,
+          seedingAttempted: false,
+          seedingResult: "not_needed",
+        },
+      },
+      sharedOwners: [],
     },
     sharedDerivedInputs: {
       title: "Shared Derived Inputs Used By Run",
