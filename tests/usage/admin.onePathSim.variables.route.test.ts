@@ -15,7 +15,15 @@ vi.mock("@/app/api/admin/tools/one-path-sim/_helpers", () => ({
 
 vi.mock("@/modules/usageSimulator/simulationVariablePolicy", () => ({
   SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION: "OVERRIDE",
-  DEFAULT_SIMULATION_VARIABLE_POLICY: { pastDayCore: { minDaysMonthDayType: 4 } },
+  DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG: {
+    pastDayCore: {
+      sharedDefaults: { minDaysMonthDayType: 4 },
+      intervalOverrides: {},
+      manualMonthlyOverrides: {},
+      manualAnnualOverrides: {},
+      newBuildOverrides: {},
+    },
+  },
   SIMULATION_VARIABLE_POLICY_FAMILY_META: {
     pastDayCore: { title: "Past Day Core", description: "fallbacks" },
   },
@@ -42,10 +50,31 @@ describe("admin one path sim variables route", () => {
     resetSimulationVariableOverrides.mockReset();
 
     gateOnePathSimAdmin.mockReturnValue(null);
-    getSimulationVariableOverrides.mockResolvedValue({ pastDayCore: { minDaysMonthDayType: 9 } });
+    getSimulationVariableOverrides.mockResolvedValue({
+      pastDayCore: {
+        sharedDefaults: { minDaysMonthDayType: 9 },
+        intervalOverrides: {},
+        manualMonthlyOverrides: {},
+        manualAnnualOverrides: {},
+        newBuildOverrides: {},
+      },
+    });
     getSimulationVariablePolicy.mockResolvedValue({
-      effective: { pastDayCore: { minDaysMonthDayType: 9 } },
-      overrides: { pastDayCore: { minDaysMonthDayType: 9 } },
+      effectiveByMode: {
+        INTERVAL: { pastDayCore: { minDaysMonthDayType: 9 } },
+        MANUAL_MONTHLY: { pastDayCore: { minDaysMonthDayType: 10 } },
+        MANUAL_ANNUAL: { pastDayCore: { minDaysMonthDayType: 11 } },
+        NEW_BUILD: { pastDayCore: { minDaysMonthDayType: 12 } },
+      },
+      overrides: {
+        pastDayCore: {
+          sharedDefaults: { minDaysMonthDayType: 9 },
+          intervalOverrides: {},
+          manualMonthlyOverrides: {},
+          manualAnnualOverrides: {},
+          newBuildOverrides: {},
+        },
+      },
     });
   });
 
@@ -57,7 +86,8 @@ describe("admin one path sim variables route", () => {
     expect(res.status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.confirmationKeyword).toBe("OVERRIDE");
-    expect(json.effective.pastDayCore.minDaysMonthDayType).toBe(9);
+    expect(json.effectiveByMode.INTERVAL.pastDayCore.minDaysMonthDayType).toBe(9);
+    expect(json.defaults.pastDayCore.sharedDefaults.minDaysMonthDayType).toBe(4);
   });
 
   it("requires the OVERRIDE confirmation string before saving", async () => {

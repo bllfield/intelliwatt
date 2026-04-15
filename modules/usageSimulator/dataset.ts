@@ -13,7 +13,10 @@ import type {
 import { buildUniformMonthlyTotalsFromAnnualWindow } from "@/modules/usageSimulator/build";
 import type { ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
-import type { SimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
+import type {
+  EffectiveSimulationVariablesUsed,
+  SimulationVariablePolicy,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 import type {
   WeatherEfficiencyDerivedInput,
   WeatherSensitivityScore,
@@ -933,6 +936,7 @@ export type SimulatorBuildInputsV1 = {
   sharedProducerPathUsed?: boolean;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
   simulationVariablePolicy?: SimulationVariablePolicy | null;
+  effectiveSimulationVariablesUsed?: EffectiveSimulationVariablesUsed | null;
   // Snapshots (for auditing / future UI): not required for regen.
   snapshots?: {
     manualUsagePayload?: any;
@@ -1089,6 +1093,7 @@ export type SimulatedUsageDatasetMeta = {
   sharedProducerPathUsed?: boolean;
   weatherSensitivityScore?: WeatherSensitivityScore | null;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  effectiveSimulationVariablesUsed?: EffectiveSimulationVariablesUsed | null;
   /** Compare-only projection rows for validation/test days from this same canonical family. */
   validationCompareRows?: Array<{
     localDate: string;

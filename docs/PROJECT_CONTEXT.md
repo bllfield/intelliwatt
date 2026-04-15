@@ -171,6 +171,8 @@
 - Gap-Fill Lab must fail explicitly when a run claims DB travel/vacant parity validation or exact shared artifact proof but the canonical artifact day totals or fresh shared compare day totals needed for that proof are missing.
 - Gap-Fill Lab exact compare requests that inherit identity from `same_run_artifact_ensure` must prove exact hash ownership before compare proceeds: `artifactSourceMode` must be exact, `requestedInputHash` must equal `artifactInputHashUsed`, and fallback identity handoff must fail early with `artifact_exact_identity_unresolved` / `ARTIFACT_ENSURE_EXACT_HANDOFF_FAILED`.
 - Gap-Fill Lab travel/vacant parity must read canonical artifact references from the exact artifact row's persisted `canonicalArtifactSimulatedDayTotalsByDate`; if exact identity is unresolved, do not continue into travel/vacant parity validation.
+- Shared tuning config is now expected to live in the shared simulation variable policy store with mode-aware buckets only (`sharedDefaults`, `intervalOverrides`, `manualMonthlyOverrides`, `manualAnnualOverrides`, `newBuildOverrides`). Admin tooling may edit that shared config, but must not add route-local or page-local calculation variables.
+- Canonical readback should expose `effectiveSimulationVariablesUsed` for the exact run/artifact identity so tuning surfaces can inspect resolved values and whether each came from a shared default, a mode override, or an explicit admin override.
 
 ### Active Focus (Runtime)
 

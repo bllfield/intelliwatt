@@ -91,6 +91,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - **Metadata**
   - dataset.meta includes: buildPathKind, sourceOfDaySimulationCore, simVersion, derivationVersion, weatherKindUsed, weatherSourceSummary, weatherFallbackReason, weatherProviderName, weatherCoverageStart/End, weatherStubRowCount, weatherActualRowCount, dailyRowCount, intervalCount, coverageStart/End, actualDayCount, simulatedDayCount, stitchedDayCount, actualIntervalsCount, referenceDaysCount, shapeMonthsPresent, excludedDateKeysCount, leadingMissingDaysCount, usageShapeProfileDiag, etc.
   - Manual constrained shared runs may also carry `manualMonthlyInputState`, `manualMonthlyWeatherEvidenceSummary`, and `SIMULATED_MANUAL_CONSTRAINED` source-detail mapping on the artifact.
+  - Shared runs now also carry `effectiveSimulationVariablesUsed` on persisted metadata/readback so tuning surfaces can inspect the exact resolved policy values and their value sources for that artifact identity.
   - Shared parity/tuning diagnostics now normalize to one contract: `identityContext`, `sourceTruthContext`, `lockboxExecutionSummary`, `projectionReadSummary`, and `tuningSummary`.
 - **UsageDashboard**
   - `getWeatherBasisLabel(meta)` surfaces weatherFallbackReason for stub/mixed (e.g. "no coordinates", "partial coverage", "API unavailable"); does not imply actual weather when summary is stub_only, mixed, or unknown.

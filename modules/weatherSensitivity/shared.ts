@@ -647,7 +647,8 @@ async function maybeLoadWeatherRecord(args: ResolveSharedScoreArgs): Promise<Rec
 export async function resolveSharedWeatherSensitivityEnvelope(
   args: ResolveSharedScoreArgs
 ): Promise<WeatherSensitivityEnvelope> {
-  const simulationVariablePolicy = args.simulationVariablePolicy ?? (await getSimulationVariablePolicy()).effective;
+  const simulationVariablePolicy =
+    args.simulationVariablePolicy ?? (await getSimulationVariablePolicy()).effectiveByMode.INTERVAL;
   const dailyWeather = await maybeLoadWeatherRecord(args);
   const score = buildSharedWeatherSensitivityScore({
     ...args,

@@ -186,10 +186,172 @@ export type SimulationVariablePolicy = {
     lowDataDaySensitivityMax: number;
     lowDataScaledDayThreshold: number;
   };
+  adapterCanonicalInput: {
+    canonicalCoverageLagDays: number;
+    canonicalCoverageTotalDays: number;
+    manualMonthlyDefaultBillEndDay: number;
+    manualAnnualWindowDays: number;
+    longTermWeatherBaselineStartYear: number;
+    longTermWeatherBaselineEndYear: number;
+  };
+  constraintRebalance: {
+    weatherModifierConfidenceMin: number;
+    weatherModifierConfidenceMax: number;
+    weatherModifierLoadShareMin: number;
+    weatherModifierLoadShareMax: number;
+    weatherModifierScoreMin: number;
+    weatherModifierScoreMax: number;
+    weatherModifierResponseMin: number;
+    weatherModifierResponseMax: number;
+    intervalResponsivenessMax: number;
+    billingAmplitudeMax: number;
+    billingPeakValleyMax: number;
+    billingResponsivenessMax: number;
+    billingDailyExtremaMax: number;
+    lowDataHvacMultiplierMin: number;
+    lowDataHvacMultiplierMax: number;
+    lowDataReferenceDegreeFloor: number;
+    lowDataWeatherTieBias: number;
+    shapeSkipThreshold: number;
+    shapeFlattenBlendMin: number;
+    shapeFlattenBlendMax: number;
+    postDonorHeatingSeverityFloor: number;
+    postDonorCoolingSeverityFloor: number;
+    postDonorHeatingMultiplierMin: number;
+    postDonorHeatingMultiplierMax: number;
+    postDonorHeatingNonEventMin: number;
+    postDonorHeatingNonEventMax: number;
+    postDonorCoolingMultiplierMin: number;
+    postDonorCoolingMultiplierMax: number;
+    postDonorCoolingNonEventMin: number;
+    postDonorCoolingNonEventMax: number;
+    postDonorNeutralMin: number;
+    postDonorNeutralMax: number;
+    weekdayWeekendProfileRatioMin: number;
+    weekdayWeekendProfileRatioMax: number;
+  };
+  donorFallbackExclusions: {
+    donorVarianceGuardrailMinSampleCount: number;
+    weatherDistanceDefaultDayOfMonth: number;
+    monthDistanceInvalidFallback: number;
+    nearestWeatherPickCount: number;
+    nearestWeatherMinimumCandidates: number;
+    nearestWeatherHvacBlendWeight: number;
+    weatherSensitivityMinimumIntervalFitPoints: number;
+  };
+  intradayShapeReconstruction: {
+    coolingBoostHoursStart: number;
+    coolingBoostHoursEnd: number;
+    heatingMorningBoostHoursStart: number;
+    heatingMorningBoostHoursEnd: number;
+    heatingEveningBoostHoursStart: number;
+    heatingEveningBoostHoursEnd: number;
+    weatherAwareHvacSetpointClampMin: number;
+    weatherAwareHvacSetpointClampMax: number;
+    weatherAwareHvacSummerReferenceF: number;
+    weatherAwareHvacWinterReferenceF: number;
+    freezeDayMinTempC: number;
+    freezeDayHoursCount: number;
+    syntheticSqftMin: number;
+    syntheticSqftMax: number;
+    syntheticSqftFallback: number;
+    syntheticEvDailyCapKwh: number;
+    syntheticBaseLoadIntercept: number;
+    syntheticBaseLoadSqftDivisor: number;
+    syntheticBaseLoadSqftMultiplier: number;
+    syntheticEvBlendWeight: number;
+    syntheticPoolAdderKwh: number;
+    syntheticWeekdayMinKwh: number;
+    syntheticWeekdayMaxKwh: number;
+    syntheticWeekendBlendWeight: number;
+    syntheticWinterSeasonMultiplier: number;
+    syntheticSummerSeasonMultiplier: number;
+    syntheticFallbackMonthKeyYear: number;
+    syntheticFallbackMonthKeyMonth: number;
+  };
+  compareTuningMetrics: {
+    thermostatSummerReferenceF: number;
+    thermostatWinterReferenceF: number;
+    squareFootageReference: number;
+    squareFootageFactorMin: number;
+    squareFootageFactorMax: number;
+    occupancyCoolingCountCap: number;
+    occupancyHeatingHomeAllDayCap: number;
+    hvacAgePenaltyThresholdYears: number;
+    hvacLowSeerThreshold: number;
+    hvacHighSeerThreshold: number;
+    applianceDetailRichMinimumCount: number;
+    weatherEfficiencyScoreAnchor: number;
+    lowConfidencePenaltyReference: number;
+    appearsSensitiveCoolingThreshold: number;
+    appearsSensitiveHeatingThreshold: number;
+    simulatedDayDiagnosticsSampleLimit: number;
+  };
+};
+
+export type SimulationVariableInputType = "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+export type SimulationVariablePolicyModeBucketKey =
+  | "sharedDefaults"
+  | "intervalOverrides"
+  | "manualMonthlyOverrides"
+  | "manualAnnualOverrides"
+  | "newBuildOverrides";
+
+export type SimulationVariableFamilyConfig<T extends Record<string, unknown>> = {
+  sharedDefaults: T;
+  intervalOverrides: Partial<T>;
+  manualMonthlyOverrides: Partial<T>;
+  manualAnnualOverrides: Partial<T>;
+  newBuildOverrides: Partial<T>;
+};
+
+export type SimulationVariablePolicyConfig = {
+  [K in keyof SimulationVariablePolicy]: SimulationVariableFamilyConfig<SimulationVariablePolicy[K]>;
 };
 
 export type SimulationVariablePolicyOverrides = {
-  [K in keyof SimulationVariablePolicy]?: Partial<SimulationVariablePolicy[K]>;
+  [K in keyof SimulationVariablePolicy]?: Partial<SimulationVariableFamilyConfig<SimulationVariablePolicy[K]>>;
+};
+
+export type SimulationVariableValueSource =
+  | "shared default"
+  | "interval override"
+  | "manual monthly override"
+  | "manual annual override"
+  | "new build override"
+  | "explicit admin override";
+
+export type EffectiveSimulationVariableFamilySnapshot<T extends Record<string, unknown>> = {
+  resolvedValues: T;
+  valuesByKey: {
+    [K in keyof T]: {
+      value: T[K];
+      valueSource: SimulationVariableValueSource;
+    };
+  };
+  modeBucketUsed: Exclude<SimulationVariableValueSource, "shared default" | "explicit admin override"> | null;
+  explicitAdminOverrideKeys: Array<keyof T>;
+};
+
+export type EffectiveSimulationVariablesUsed = {
+  inputType: SimulationVariableInputType;
+  runIdentityLinkage: {
+    artifactId: string | null;
+    artifactInputHash: string | null;
+    buildInputsHash: string | null;
+    engineVersion: string | null;
+    houseId: string | null;
+    actualContextHouseId: string | null;
+    scenarioId: string | null;
+  };
+  familyByFamilyResolvedValues: {
+    [K in keyof SimulationVariablePolicy]: EffectiveSimulationVariableFamilySnapshot<SimulationVariablePolicy[K]>;
+  };
+  resolvedWeatherShapingMode: string;
+  resolvedRebalanceMode: string;
+  resolvedFallbackMode: string;
+  resolvedIntradayReconstructionControls: SimulationVariablePolicy["intradayShapeReconstruction"];
+  resolvedCompareTuningThresholds: SimulationVariablePolicy["compareTuningMetrics"];
 };
 
 export const DEFAULT_SIMULATION_VARIABLE_POLICY: SimulationVariablePolicy = {
@@ -375,6 +537,107 @@ export const DEFAULT_SIMULATION_VARIABLE_POLICY: SimulationVariablePolicy = {
     lowDataDaySensitivityMax: 1.8,
     lowDataScaledDayThreshold: 0.035,
   },
+  adapterCanonicalInput: {
+    canonicalCoverageLagDays: 2,
+    canonicalCoverageTotalDays: 365,
+    manualMonthlyDefaultBillEndDay: 15,
+    manualAnnualWindowDays: 365,
+    longTermWeatherBaselineStartYear: 1991,
+    longTermWeatherBaselineEndYear: 2020,
+  },
+  constraintRebalance: {
+    weatherModifierConfidenceMin: 0.15,
+    weatherModifierConfidenceMax: 1,
+    weatherModifierLoadShareMin: 0.05,
+    weatherModifierLoadShareMax: 0.85,
+    weatherModifierScoreMin: 0.05,
+    weatherModifierScoreMax: 1,
+    weatherModifierResponseMin: 0.35,
+    weatherModifierResponseMax: 1.4,
+    intervalResponsivenessMax: 1.05,
+    billingAmplitudeMax: 0.78,
+    billingPeakValleyMax: 0.82,
+    billingResponsivenessMax: 0.78,
+    billingDailyExtremaMax: 0.7,
+    lowDataHvacMultiplierMin: 0.3,
+    lowDataHvacMultiplierMax: 2.25,
+    lowDataReferenceDegreeFloor: 6,
+    lowDataWeatherTieBias: 1,
+    shapeSkipThreshold: 0.02,
+    shapeFlattenBlendMin: 0,
+    shapeFlattenBlendMax: 0.5,
+    postDonorHeatingSeverityFloor: 8,
+    postDonorCoolingSeverityFloor: 8,
+    postDonorHeatingMultiplierMin: 0.88,
+    postDonorHeatingMultiplierMax: 1.15,
+    postDonorHeatingNonEventMin: 0.92,
+    postDonorHeatingNonEventMax: 1.08,
+    postDonorCoolingMultiplierMin: 0.9,
+    postDonorCoolingMultiplierMax: 1.12,
+    postDonorCoolingNonEventMin: 0.94,
+    postDonorCoolingNonEventMax: 1.08,
+    postDonorNeutralMin: 0.97,
+    postDonorNeutralMax: 1.03,
+    weekdayWeekendProfileRatioMin: 0.82,
+    weekdayWeekendProfileRatioMax: 1.18,
+  },
+  donorFallbackExclusions: {
+    donorVarianceGuardrailMinSampleCount: 3,
+    weatherDistanceDefaultDayOfMonth: 15,
+    monthDistanceInvalidFallback: 12,
+    nearestWeatherPickCount: 7,
+    nearestWeatherMinimumCandidates: 4,
+    nearestWeatherHvacBlendWeight: 0.5,
+    weatherSensitivityMinimumIntervalFitPoints: 3,
+  },
+  intradayShapeReconstruction: {
+    coolingBoostHoursStart: 14,
+    coolingBoostHoursEnd: 19,
+    heatingMorningBoostHoursStart: 6,
+    heatingMorningBoostHoursEnd: 9,
+    heatingEveningBoostHoursStart: 17,
+    heatingEveningBoostHoursEnd: 22,
+    weatherAwareHvacSetpointClampMin: 0.8,
+    weatherAwareHvacSetpointClampMax: 1.2,
+    weatherAwareHvacSummerReferenceF: 72,
+    weatherAwareHvacWinterReferenceF: 68,
+    freezeDayMinTempC: 0,
+    freezeDayHoursCount: 24,
+    syntheticSqftMin: 500,
+    syntheticSqftMax: 20000,
+    syntheticSqftFallback: 2000,
+    syntheticEvDailyCapKwh: 80,
+    syntheticBaseLoadIntercept: 10,
+    syntheticBaseLoadSqftDivisor: 2500,
+    syntheticBaseLoadSqftMultiplier: 28,
+    syntheticEvBlendWeight: 0.35,
+    syntheticPoolAdderKwh: 3,
+    syntheticWeekdayMinKwh: 8,
+    syntheticWeekdayMaxKwh: 120,
+    syntheticWeekendBlendWeight: 0.93,
+    syntheticWinterSeasonMultiplier: 1.12,
+    syntheticSummerSeasonMultiplier: 1.08,
+    syntheticFallbackMonthKeyYear: 2000,
+    syntheticFallbackMonthKeyMonth: 1,
+  },
+  compareTuningMetrics: {
+    thermostatSummerReferenceF: 74,
+    thermostatWinterReferenceF: 68,
+    squareFootageReference: 2000,
+    squareFootageFactorMin: 0.7,
+    squareFootageFactorMax: 1.7,
+    occupancyCoolingCountCap: 6,
+    occupancyHeatingHomeAllDayCap: 3,
+    hvacAgePenaltyThresholdYears: 15,
+    hvacLowSeerThreshold: 14,
+    hvacHighSeerThreshold: 18,
+    applianceDetailRichMinimumCount: 2,
+    weatherEfficiencyScoreAnchor: 88,
+    lowConfidencePenaltyReference: 60,
+    appearsSensitiveCoolingThreshold: 70,
+    appearsSensitiveHeatingThreshold: 70,
+    simulatedDayDiagnosticsSampleLimit: 40,
+  },
 };
 
 export const SIMULATION_VARIABLE_POLICY_FAMILY_META = {
@@ -398,7 +661,65 @@ export const SIMULATION_VARIABLE_POLICY_FAMILY_META = {
     title: "Low-Data Weather Evidence",
     description: "Manual monthly/annual evidence regression priors, blend thresholds, and low-data weather-response clamps.",
   },
+  adapterCanonicalInput: {
+    title: "Adapter / Canonical Input",
+    description: "Shared canonical window, anchor, bill-end, and pre-engine normalization knobs used before the shared producer runs.",
+  },
+  constraintRebalance: {
+    title: "Constraint / Rebalance",
+    description: "Shared tolerances, clamps, and parity-preservation controls that bound shaping and rebalance behavior.",
+  },
+  donorFallbackExclusions: {
+    title: "Donor / Fallback / Exclusions",
+    description: "Shared donor-pool selection, fallback, and exclusion thresholds used when direct evidence is weak or unavailable.",
+  },
+  intradayShapeReconstruction: {
+    title: "Intraday Shape Reconstruction",
+    description: "Shared post-daily-total intraday weighting, setpoint clamps, synthetic-shape defaults, and hour-block controls.",
+  },
+  compareTuningMetrics: {
+    title: "Compare / Tuning Metrics",
+    description: "Shared compare/tuning thresholds, efficiency score calibration, and diagnostic sampling controls.",
+  },
 } satisfies Record<keyof SimulationVariablePolicy, { title: string; description: string }>;
+
+const SIMULATION_VARIABLE_POLICY_MODE_BUCKETS: SimulationVariablePolicyModeBucketKey[] = [
+  "sharedDefaults",
+  "intervalOverrides",
+  "manualMonthlyOverrides",
+  "manualAnnualOverrides",
+  "newBuildOverrides",
+];
+
+const MODE_BUCKET_SOURCE_LABEL: Record<Exclude<SimulationVariablePolicyModeBucketKey, "sharedDefaults">, Exclude<SimulationVariableValueSource, "shared default" | "explicit admin override">> = {
+  intervalOverrides: "interval override",
+  manualMonthlyOverrides: "manual monthly override",
+  manualAnnualOverrides: "manual annual override",
+  newBuildOverrides: "new build override",
+};
+
+function createFamilyConfig<T extends Record<string, unknown>>(sharedDefaults: T): SimulationVariableFamilyConfig<T> {
+  return {
+    sharedDefaults,
+    intervalOverrides: {},
+    manualMonthlyOverrides: {},
+    manualAnnualOverrides: {},
+    newBuildOverrides: {},
+  };
+}
+
+export const DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG: SimulationVariablePolicyConfig = {
+  pastDayCore: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.pastDayCore),
+  weatherShaping: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.weatherShaping),
+  engineProfile: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.engineProfile),
+  weatherSensitivityScoring: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.weatherSensitivityScoring),
+  lowDataWeatherEvidence: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.lowDataWeatherEvidence),
+  adapterCanonicalInput: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.adapterCanonicalInput),
+  constraintRebalance: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.constraintRebalance),
+  donorFallbackExclusions: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.donorFallbackExclusions),
+  intradayShapeReconstruction: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.intradayShapeReconstruction),
+  compareTuningMetrics: createFamilyConfig(DEFAULT_SIMULATION_VARIABLE_POLICY.compareTuningMetrics),
+};
 
 function isNumberArray(value: unknown): value is number[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "number" && Number.isFinite(entry));
@@ -439,39 +760,232 @@ function pickKnownOverrideValues<T extends Record<string, unknown>>(
   return next;
 }
 
-export function mergeSimulationVariablePolicyOverrides(
-  overrides: SimulationVariablePolicyOverrides | null | undefined
-): SimulationVariablePolicy {
+function resolveModeBucketKey(inputType: SimulationVariableInputType): Exclude<SimulationVariablePolicyModeBucketKey, "sharedDefaults"> {
+  switch (inputType) {
+    case "MANUAL_MONTHLY":
+      return "manualMonthlyOverrides";
+    case "MANUAL_ANNUAL":
+      return "manualAnnualOverrides";
+    case "NEW_BUILD":
+      return "newBuildOverrides";
+    case "INTERVAL":
+    default:
+      return "intervalOverrides";
+  }
+}
+
+function familyConfigFor<T extends Record<string, unknown>>(
+  familyKey: keyof SimulationVariablePolicy
+): SimulationVariableFamilyConfig<T> {
+  return DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG[familyKey] as unknown as SimulationVariableFamilyConfig<T>;
+}
+
+function sanitizeFamilyOverride<T extends Record<string, unknown>>(
+  config: SimulationVariableFamilyConfig<T>,
+  raw: unknown
+): Partial<SimulationVariableFamilyConfig<T>> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const incoming = raw as Record<string, unknown>;
   return {
-    pastDayCore: mergeKnownValues(DEFAULT_SIMULATION_VARIABLE_POLICY.pastDayCore, overrides?.pastDayCore as Record<string, unknown> | undefined),
-    weatherShaping: mergeKnownValues(DEFAULT_SIMULATION_VARIABLE_POLICY.weatherShaping, overrides?.weatherShaping as Record<string, unknown> | undefined),
-    engineProfile: mergeKnownValues(DEFAULT_SIMULATION_VARIABLE_POLICY.engineProfile, overrides?.engineProfile as Record<string, unknown> | undefined),
-    weatherSensitivityScoring: mergeKnownValues(
-      DEFAULT_SIMULATION_VARIABLE_POLICY.weatherSensitivityScoring,
-      overrides?.weatherSensitivityScoring as Record<string, unknown> | undefined
-    ),
-    lowDataWeatherEvidence: mergeKnownValues(
-      DEFAULT_SIMULATION_VARIABLE_POLICY.lowDataWeatherEvidence,
-      overrides?.lowDataWeatherEvidence as Record<string, unknown> | undefined
-    ),
+    sharedDefaults: pickKnownOverrideValues(config.sharedDefaults, incoming.sharedDefaults as Record<string, unknown> | undefined),
+    intervalOverrides: pickKnownOverrideValues(config.sharedDefaults, incoming.intervalOverrides as Record<string, unknown> | undefined),
+    manualMonthlyOverrides: pickKnownOverrideValues(config.sharedDefaults, incoming.manualMonthlyOverrides as Record<string, unknown> | undefined),
+    manualAnnualOverrides: pickKnownOverrideValues(config.sharedDefaults, incoming.manualAnnualOverrides as Record<string, unknown> | undefined),
+    newBuildOverrides: pickKnownOverrideValues(config.sharedDefaults, incoming.newBuildOverrides as Record<string, unknown> | undefined),
+  } as Partial<SimulationVariableFamilyConfig<T>>;
+}
+
+function resolveFamilyForMode<T extends Record<string, unknown>>(args: {
+  config: SimulationVariableFamilyConfig<T>;
+  overrides: Partial<SimulationVariableFamilyConfig<T>> | undefined;
+  modeBucketKey: Exclude<SimulationVariablePolicyModeBucketKey, "sharedDefaults">;
+}): EffectiveSimulationVariableFamilySnapshot<T> {
+  const resolved = {
+    ...args.config.sharedDefaults,
+  } as Record<string, unknown>;
+  const valueSources = {} as Record<string, { value: unknown; valueSource: SimulationVariableValueSource }>;
+  const modeSource = MODE_BUCKET_SOURCE_LABEL[args.modeBucketKey];
+  const explicitAdminOverrideKeys = new Set<keyof T>();
+
+  for (const key of Object.keys(args.config.sharedDefaults) as Array<keyof T>) {
+    resolved[key as string] = args.config.sharedDefaults[key];
+    valueSources[key as string] = {
+      value: args.config.sharedDefaults[key],
+      valueSource: "shared default",
+    };
+  }
+
+  const builtInModeOverrides = (args.config[args.modeBucketKey] ?? {}) as Partial<T>;
+  for (const key of Object.keys(args.config.sharedDefaults) as Array<keyof T>) {
+    const builtInValue = builtInModeOverrides[key];
+    if (typeof builtInValue === "number" && Number.isFinite(builtInValue)) {
+      resolved[key as string] = builtInValue;
+      valueSources[key as string] = { value: builtInValue, valueSource: modeSource };
+    }
+  }
+
+  const adminShared = (args.overrides?.sharedDefaults ?? {}) as Partial<T>;
+  const adminMode = (args.overrides?.[args.modeBucketKey] ?? {}) as Partial<T>;
+  for (const incoming of [adminShared, adminMode]) {
+    for (const key of Object.keys(args.config.sharedDefaults) as Array<keyof T>) {
+      const adminValue = incoming[key];
+      if (typeof adminValue === "number" && Number.isFinite(adminValue)) {
+        resolved[key as string] = adminValue;
+        valueSources[key as string] = { value: adminValue, valueSource: "explicit admin override" };
+        explicitAdminOverrideKeys.add(key);
+      }
+    }
+  }
+
+  return {
+    resolvedValues: resolved as T,
+    valuesByKey: valueSources as EffectiveSimulationVariableFamilySnapshot<T>["valuesByKey"],
+    modeBucketUsed: modeSource,
+    explicitAdminOverrideKeys: Array.from(explicitAdminOverrideKeys),
   };
+}
+
+export function mergeSimulationVariablePolicyOverrides(
+  overrides: SimulationVariablePolicyOverrides | null | undefined,
+  inputType: SimulationVariableInputType = "INTERVAL"
+): SimulationVariablePolicy {
+  return resolveSimulationVariablePolicyForInputType(inputType, overrides).effective;
 }
 
 export function sanitizeSimulationVariableOverrides(raw: unknown): SimulationVariablePolicyOverrides {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const overrides = raw as Record<string, unknown>;
   return {
-    pastDayCore: pickKnownOverrideValues(DEFAULT_SIMULATION_VARIABLE_POLICY.pastDayCore, overrides.pastDayCore as Record<string, unknown> | undefined),
-    weatherShaping: pickKnownOverrideValues(DEFAULT_SIMULATION_VARIABLE_POLICY.weatherShaping, overrides.weatherShaping as Record<string, unknown> | undefined),
-    engineProfile: pickKnownOverrideValues(DEFAULT_SIMULATION_VARIABLE_POLICY.engineProfile, overrides.engineProfile as Record<string, unknown> | undefined),
-    weatherSensitivityScoring: pickKnownOverrideValues(
-      DEFAULT_SIMULATION_VARIABLE_POLICY.weatherSensitivityScoring,
-      overrides.weatherSensitivityScoring as Record<string, unknown> | undefined
-    ),
-    lowDataWeatherEvidence: pickKnownOverrideValues(
-      DEFAULT_SIMULATION_VARIABLE_POLICY.lowDataWeatherEvidence,
-      overrides.lowDataWeatherEvidence as Record<string, unknown> | undefined
-    ),
+    pastDayCore: sanitizeFamilyOverride(familyConfigFor("pastDayCore"), overrides.pastDayCore),
+    weatherShaping: sanitizeFamilyOverride(familyConfigFor("weatherShaping"), overrides.weatherShaping),
+    engineProfile: sanitizeFamilyOverride(familyConfigFor("engineProfile"), overrides.engineProfile),
+    weatherSensitivityScoring: sanitizeFamilyOverride(familyConfigFor("weatherSensitivityScoring"), overrides.weatherSensitivityScoring),
+    lowDataWeatherEvidence: sanitizeFamilyOverride(familyConfigFor("lowDataWeatherEvidence"), overrides.lowDataWeatherEvidence),
+    adapterCanonicalInput: sanitizeFamilyOverride(familyConfigFor("adapterCanonicalInput"), overrides.adapterCanonicalInput),
+    constraintRebalance: sanitizeFamilyOverride(familyConfigFor("constraintRebalance"), overrides.constraintRebalance),
+    donorFallbackExclusions: sanitizeFamilyOverride(familyConfigFor("donorFallbackExclusions"), overrides.donorFallbackExclusions),
+    intradayShapeReconstruction: sanitizeFamilyOverride(familyConfigFor("intradayShapeReconstruction"), overrides.intradayShapeReconstruction),
+    compareTuningMetrics: sanitizeFamilyOverride(familyConfigFor("compareTuningMetrics"), overrides.compareTuningMetrics),
+  };
+}
+
+export function resolveSimulationVariablePolicyForInputType(
+  inputType: SimulationVariableInputType,
+  rawOverrides?: SimulationVariablePolicyOverrides | null
+): {
+  effective: SimulationVariablePolicy;
+  effectiveSimulationVariablesUsed: EffectiveSimulationVariablesUsed;
+} {
+  const overrides = sanitizeSimulationVariableOverrides(rawOverrides ?? {});
+  const modeBucketKey = resolveModeBucketKey(inputType);
+  const pastDayCore = resolveFamilyForMode({ config: familyConfigFor("pastDayCore"), overrides: overrides.pastDayCore, modeBucketKey });
+  const weatherShaping = resolveFamilyForMode({ config: familyConfigFor("weatherShaping"), overrides: overrides.weatherShaping, modeBucketKey });
+  const engineProfile = resolveFamilyForMode({ config: familyConfigFor("engineProfile"), overrides: overrides.engineProfile, modeBucketKey });
+  const weatherSensitivityScoring = resolveFamilyForMode({
+    config: familyConfigFor("weatherSensitivityScoring"),
+    overrides: overrides.weatherSensitivityScoring,
+    modeBucketKey,
+  });
+  const lowDataWeatherEvidence = resolveFamilyForMode({
+    config: familyConfigFor("lowDataWeatherEvidence"),
+    overrides: overrides.lowDataWeatherEvidence,
+    modeBucketKey,
+  });
+  const adapterCanonicalInput = resolveFamilyForMode({
+    config: familyConfigFor("adapterCanonicalInput"),
+    overrides: overrides.adapterCanonicalInput,
+    modeBucketKey,
+  });
+  const constraintRebalance = resolveFamilyForMode({
+    config: familyConfigFor("constraintRebalance"),
+    overrides: overrides.constraintRebalance,
+    modeBucketKey,
+  });
+  const donorFallbackExclusions = resolveFamilyForMode({
+    config: familyConfigFor("donorFallbackExclusions"),
+    overrides: overrides.donorFallbackExclusions,
+    modeBucketKey,
+  });
+  const intradayShapeReconstruction = resolveFamilyForMode({
+    config: familyConfigFor("intradayShapeReconstruction"),
+    overrides: overrides.intradayShapeReconstruction,
+    modeBucketKey,
+  });
+  const compareTuningMetrics = resolveFamilyForMode({
+    config: familyConfigFor("compareTuningMetrics"),
+    overrides: overrides.compareTuningMetrics,
+    modeBucketKey,
+  });
+
+  const effective = {
+    pastDayCore: pastDayCore.resolvedValues,
+    weatherShaping: weatherShaping.resolvedValues,
+    engineProfile: engineProfile.resolvedValues,
+    weatherSensitivityScoring: weatherSensitivityScoring.resolvedValues,
+    lowDataWeatherEvidence: lowDataWeatherEvidence.resolvedValues,
+    adapterCanonicalInput: adapterCanonicalInput.resolvedValues,
+    constraintRebalance: constraintRebalance.resolvedValues,
+    donorFallbackExclusions: donorFallbackExclusions.resolvedValues,
+    intradayShapeReconstruction: intradayShapeReconstruction.resolvedValues,
+    compareTuningMetrics: compareTuningMetrics.resolvedValues,
+  } as SimulationVariablePolicy;
+
+  const effectiveSimulationVariablesUsed: EffectiveSimulationVariablesUsed = {
+    inputType,
+    runIdentityLinkage: {
+      artifactId: null,
+      artifactInputHash: null,
+      buildInputsHash: null,
+      engineVersion: null,
+      houseId: null,
+      actualContextHouseId: null,
+      scenarioId: null,
+    },
+    familyByFamilyResolvedValues: {
+      pastDayCore,
+      weatherShaping,
+      engineProfile,
+      weatherSensitivityScoring,
+      lowDataWeatherEvidence,
+      adapterCanonicalInput,
+      constraintRebalance,
+      donorFallbackExclusions,
+      intradayShapeReconstruction,
+      compareTuningMetrics,
+    } as EffectiveSimulationVariablesUsed["familyByFamilyResolvedValues"],
+    resolvedWeatherShapingMode:
+      inputType === "INTERVAL" ? "interval_based_shared_path" : inputType === "NEW_BUILD" ? "shared_weather_path_without_interval_score" : "billing_period_shared_path",
+    resolvedRebalanceMode:
+      inputType === "INTERVAL" ? "interval_reference_authoritative" : inputType === "NEW_BUILD" ? "synthetic_target_authoritative" : "manual_target_authoritative",
+    resolvedFallbackMode: "shared_donor_fallback_exclusion_ladder",
+    resolvedIntradayReconstructionControls:
+      intradayShapeReconstruction.resolvedValues as SimulationVariablePolicy["intradayShapeReconstruction"],
+    resolvedCompareTuningThresholds:
+      compareTuningMetrics.resolvedValues as SimulationVariablePolicy["compareTuningMetrics"],
+  };
+
+  return { effective, effectiveSimulationVariablesUsed };
+}
+
+export function attachRunIdentityToEffectiveSimulationVariablesUsed(
+  snapshot: EffectiveSimulationVariablesUsed | null | undefined,
+  runIdentityLinkage: EffectiveSimulationVariablesUsed["runIdentityLinkage"]
+): EffectiveSimulationVariablesUsed | null {
+  if (!snapshot) return null;
+  return {
+    ...snapshot,
+    runIdentityLinkage,
+  };
+}
+
+export function buildEffectivePoliciesByMode(
+  overrides: SimulationVariablePolicyOverrides | null | undefined
+): Record<SimulationVariableInputType, SimulationVariablePolicy> {
+  return {
+    INTERVAL: resolveSimulationVariablePolicyForInputType("INTERVAL", overrides).effective,
+    MANUAL_MONTHLY: resolveSimulationVariablePolicyForInputType("MANUAL_MONTHLY", overrides).effective,
+    MANUAL_ANNUAL: resolveSimulationVariablePolicyForInputType("MANUAL_ANNUAL", overrides).effective,
+    NEW_BUILD: resolveSimulationVariablePolicyForInputType("NEW_BUILD", overrides).effective,
   };
 }
 
@@ -486,12 +1000,12 @@ export async function getSimulationVariableOverrides(): Promise<SimulationVariab
 }
 
 export async function getSimulationVariablePolicy(): Promise<{
-  effective: SimulationVariablePolicy;
+  effectiveByMode: Record<SimulationVariableInputType, SimulationVariablePolicy>;
   overrides: SimulationVariablePolicyOverrides;
 }> {
   const overrides = await getSimulationVariableOverrides();
   return {
-    effective: mergeSimulationVariablePolicyOverrides(overrides),
+    effectiveByMode: buildEffectivePoliciesByMode(overrides),
     overrides,
   };
 }

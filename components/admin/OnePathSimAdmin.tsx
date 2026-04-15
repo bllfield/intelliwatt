@@ -20,7 +20,7 @@ type VariablePolicyResponse = {
   confirmationKeyword: string;
   familyMeta: Record<string, { title: string; description: string }>;
   defaults: Record<string, unknown>;
-  effective: Record<string, unknown>;
+  effectiveByMode: Record<string, Record<string, unknown>>;
   overrides: Record<string, unknown>;
 };
 
@@ -501,7 +501,8 @@ export function OnePathSimAdmin() {
             }}
           />
           <SectionJson title="Shared simulation variable overrides" value={variablePolicy?.overrides ?? null} />
-          <SectionJson title="Shared simulation variable effective policy" value={variablePolicy?.effective ?? null} />
+          <SectionJson title="Shared simulation variable defaults" value={variablePolicy?.defaults ?? null} />
+          <SectionJson title={`Shared simulation variables for ${mode}`} value={variablePolicy?.effectiveByMode?.[mode] ?? null} />
         </div>
 
         {runResult ? (
@@ -510,6 +511,14 @@ export function OnePathSimAdmin() {
             <SectionJson title="Canonical artifact" value={runResult.artifact} />
             <SectionJson title="Canonical read model" value={runResult.readModel} />
             <SectionJson title="Read model dataset summary" value={runResult.readModel?.dataset?.summary ?? null} />
+            <SectionJson title="Effective Variables Used By Last Run" value={runResult.readModel?.effectiveSimulationVariablesUsed ?? null} />
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-sm font-semibold text-brand-navy">Effective Variables Used By Last Run</div>
+              <p className="mt-2 text-xs text-slate-600">
+                Value sources are resolved in the shared canonical read model only. Labels include default, mode override,
+                and explicit admin override.
+              </p>
+            </div>
           </div>
         ) : null}
       </div>
@@ -613,7 +622,8 @@ export function OnePathSimAdmin() {
             <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
               {variablePolicy?.familyMeta?.[variableFamilyOpen]?.description ?? "Shared module variables."}
             </div>
-            <SectionJson title="Effective values" value={variablePolicy?.effective?.[variableFamilyOpen] ?? null} />
+            <SectionJson title="Shared defaults" value={variablePolicy?.defaults?.[variableFamilyOpen] ?? null} />
+            <SectionJson title={`Resolved values for ${mode}`} value={variablePolicy?.effectiveByMode?.[mode]?.[variableFamilyOpen] ?? null} />
             <SectionJson title="Current overrides" value={variablePolicy?.overrides?.[variableFamilyOpen] ?? {}} />
             <label className="block text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Editable override JSON</div>

@@ -11,6 +11,8 @@
 - **GapFill Actual Home** must remain identical to the normal user Past flow: same user-owned validation policy, same source truth, same sealed lockbox chain, same artifact family, same shared display path.
 - **GapFill Test Home** may diverge only before lockbox entry via admin-owned validation policy and the usage input modes (`EXACT_INTERVALS`, `MANUAL_MONTHLY`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`, `PROFILE_ONLY_NEW_BUILD`). No post-entry branch is allowed.
 - **Shared diagnostics contract** must drive parity/tuning surfaces for user Past, GapFill Actual Home, GapFill Test Home, and compare read-side views. Thin UI wrappers are fine; separate truth-bearing diagnostics shapes are not.
+- **Shared tuning-config rule:** meaningful shared simulation coefficients and thresholds must live in the shared simulation variable policy store with mode-aware buckets only (`sharedDefaults`, `intervalOverrides`, `manualMonthlyOverrides`, `manualAnnualOverrides`, `newBuildOverrides`). New page-local or route-local tuning variables are not allowed.
+- **Exact run snapshot rule:** the canonical artifact/read model must expose `effectiveSimulationVariablesUsed` for the same run identity so admin tuning surfaces can inspect the resolved shared values and their value sources without reconstructing them in the page.
 - **Shared weather selector rule**: user Past owns `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home share `gapfillWeatherLogicSetting` within a run. The selector difference is pre-lockbox only; the resolver/path/display remain shared.
 - **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
 

@@ -128,7 +128,12 @@ import {
   resolveSimFingerprintWithContext,
 } from "@/modules/usageSimulator/fingerprintOrchestration";
 import { createRecalcIntervalPreloadContext } from "@/modules/usageSimulator/recalcIntervalPreload";
-import { getSimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
+import {
+  attachRunIdentityToEffectiveSimulationVariablesUsed,
+  getSimulationVariableOverrides,
+  resolveSimulationVariablePolicyForInputType,
+  type SimulationVariableInputType,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 import {
   applyAdminLabTreatmentToResolvedFingerprint,
   isAdminLabManualConstraintTreatmentMode,
@@ -4180,7 +4185,20 @@ async function recalcSimulatorBuildImpl(args: {
 
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
-  const { effective: simulationVariablePolicy } = await getSimulationVariablePolicy();
+  const simulationVariableInputType: SimulationVariableInputType =
+    mode === "NEW_BUILD_ESTIMATE"
+      ? "NEW_BUILD"
+      : mode === "MANUAL_TOTALS" && String((manualUsagePayload as any)?.mode ?? "").trim().toUpperCase() === "ANNUAL"
+        ? "MANUAL_ANNUAL"
+        : mode === "MANUAL_TOTALS"
+          ? "MANUAL_MONTHLY"
+          : "INTERVAL";
+  const simulationVariableOverrides = await getSimulationVariableOverrides();
+  const simulationVariableResolution = resolveSimulationVariablePolicyForInputType(
+    simulationVariableInputType,
+    simulationVariableOverrides
+  );
+  const simulationVariablePolicy = simulationVariableResolution.effective;
   try {
     const shouldLoadWeatherSensitivityActualDataset =
       typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
@@ -5139,6 +5157,7 @@ async function recalcSimulatorBuildImpl(args: {
     manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
     sharedProducerPathUsed: shouldUseSharedPastProducer,
     simulationVariablePolicy,
+    effectiveSimulationVariablesUsed: simulationVariableResolution.effectiveSimulationVariablesUsed,
     ...(weatherEfficiencyDerivedInput ? { weatherEfficiencyDerivedInput } : {}),
     ...(pastSimulatedMonths != null ? { pastSimulatedMonths } : {}),
     snapshots: {
@@ -5576,6 +5595,18 @@ async function recalcSimulatorBuildImpl(args: {
         testHomeId: finalizedLockboxInput.profileContext.testHomeId,
       };
       if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
+      (dataset.meta as any).effectiveSimulationVariablesUsed = attachRunIdentityToEffectiveSimulationVariablesUsed(
+        simulationVariableResolution.effectiveSimulationVariablesUsed,
+        {
+          artifactId: null,
+          artifactInputHash,
+          buildInputsHash,
+          engineVersion: PAST_ENGINE_VERSION,
+          houseId,
+          actualContextHouseId,
+          scenarioId,
+        }
+      );
       (dataset.meta as any).lockboxInput = finalizedLockboxInput;
       (dataset.meta as any).lockboxRunContext = runContext;
       (dataset.meta as any).lockboxPerRunTrace = perRunTrace;
@@ -5586,6 +5617,7 @@ async function recalcSimulatorBuildImpl(args: {
         canonicalArtifactSimulatedDayTotalsByDate,
         meta: {
           ...((dataset as any)?.meta ?? {}),
+          effectiveSimulationVariablesUsed: (dataset.meta as any).effectiveSimulationVariablesUsed,
           canonicalArtifactSimulatedDayTotalsByDate,
           lockboxInput: finalizedLockboxInput,
           lockboxRunContext: runContext,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { gateOnePathSimAdmin } from "../_helpers";
 import {
-  DEFAULT_SIMULATION_VARIABLE_POLICY,
+  DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG,
   SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION,
   SIMULATION_VARIABLE_POLICY_FAMILY_META,
   getSimulationVariablePolicy,
@@ -15,19 +15,19 @@ import {
 type FamilyKey = keyof SimulationVariablePolicy;
 
 function isFamilyKey(value: unknown): value is FamilyKey {
-  return typeof value === "string" && value in DEFAULT_SIMULATION_VARIABLE_POLICY;
+  return typeof value === "string" && value in DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG;
 }
 
 export async function GET(request: NextRequest) {
   const gate = gateOnePathSimAdmin(request);
   if (gate) return gate;
-  const { effective, overrides } = await getSimulationVariablePolicy();
+  const { effectiveByMode, overrides } = await getSimulationVariablePolicy();
   return NextResponse.json({
     ok: true,
     confirmationKeyword: SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION,
     familyMeta: SIMULATION_VARIABLE_POLICY_FAMILY_META,
-    defaults: DEFAULT_SIMULATION_VARIABLE_POLICY,
-    effective,
+    defaults: DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG,
+    effectiveByMode,
     overrides,
   });
 }
@@ -66,13 +66,13 @@ export async function POST(request: NextRequest) {
     await saveSimulationVariableOverrides(nextOverrides);
   }
 
-  const { effective, overrides } = await getSimulationVariablePolicy();
+  const { effectiveByMode, overrides } = await getSimulationVariablePolicy();
   return NextResponse.json({
     ok: true,
     confirmationKeyword: SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION,
     familyMeta: SIMULATION_VARIABLE_POLICY_FAMILY_META,
-    defaults: DEFAULT_SIMULATION_VARIABLE_POLICY,
-    effective,
+    defaults: DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG,
+    effectiveByMode,
     overrides,
   });
 }

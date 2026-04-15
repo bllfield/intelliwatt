@@ -22,6 +22,7 @@ describe("One Path Sim Admin harness wiring", () => {
 
   it("keeps the harness thin and reuses shared editors", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const policySource = readRepoFile("modules/usageSimulator/simulationVariablePolicy.ts");
 
     expect(source).toContain("Home Details popup/editor");
     expect(source).toContain("Appliance Details popup/editor");
@@ -43,5 +44,13 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("OVERRIDE field");
     expect(source).toContain('fetch("/api/admin/tools/one-path-sim/variables"');
     expect(source).toContain("Save shared override");
+    expect(policySource).toContain("Adapter / Canonical Input");
+    expect(policySource).toContain("Constraint / Rebalance");
+    expect(policySource).toContain("Donor / Fallback / Exclusions");
+    expect(policySource).toContain("Intraday Shape Reconstruction");
+    expect(policySource).toContain("Compare / Tuning Metrics");
+    expect(source).toContain("Effective Variables Used By Last Run");
+    expect(source).toContain("runResult.readModel?.effectiveSimulationVariablesUsed");
+    expect(source).toContain("explicit admin override");
   });
 });

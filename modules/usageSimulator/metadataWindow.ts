@@ -1,4 +1,5 @@
 import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { DEFAULT_SIMULATION_VARIABLE_POLICY, type SimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
 
 export type CoverageWindow = { startDate: string; endDate: string };
 
@@ -53,11 +54,14 @@ export function boundDateKeysToCoverageWindow(
  * Canonical usage dashboard coverage window (365 inclusive days in America/Chicago).
  * This is the single shared source used for metadata framing to avoid route/UI drift.
  */
-export function resolveCanonicalUsage365CoverageWindow(now: Date = new Date()): CoverageWindow {
+export function resolveCanonicalUsage365CoverageWindow(
+  now: Date = new Date(),
+  policy: SimulationVariablePolicy["adapterCanonicalInput"] = DEFAULT_SIMULATION_VARIABLE_POLICY.adapterCanonicalInput
+): CoverageWindow {
   const win = canonicalUsageWindowChicago({
     now,
-    reliableLagDays: 2,
-    totalDays: 365,
+    reliableLagDays: policy.canonicalCoverageLagDays,
+    totalDays: policy.canonicalCoverageTotalDays,
   });
   return {
     startDate: String(win.startDate).slice(0, 10),

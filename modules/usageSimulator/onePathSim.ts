@@ -6,6 +6,10 @@ import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { buildValidationCompareProjectionSidecar, type ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import {
+  attachRunIdentityToEffectiveSimulationVariablesUsed,
+  type EffectiveSimulationVariablesUsed,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 import { buildSharedPastSimDiagnostics, type SharedDiagnosticsCallerType } from "@/modules/usageSimulator/sharedDiagnostics";
 import {
   getSimulatedUsageForHouseScenario,
@@ -121,6 +125,7 @@ export type CanonicalSimulationArtifact = {
   manualMonthlyReconciliation: unknown;
   manualParitySummary: unknown;
   sharedDiagnostics: Record<string, unknown> | null;
+  effectiveSimulationVariablesUsed: EffectiveSimulationVariablesUsed | null;
 };
 
 export type CanonicalSimulationReadModel = {
@@ -135,6 +140,7 @@ export type CanonicalSimulationReadModel = {
   curveCompareSimulatedDailyRows: any[];
   dailyShapeTuning: Record<string, unknown>;
   tuningSummary: Record<string, unknown>;
+  effectiveSimulationVariablesUsed: EffectiveSimulationVariablesUsed | null;
   failureCode: string | null;
   failureMessage: string | null;
 };
@@ -540,6 +546,26 @@ async function buildArtifactFromEngineInput(args: {
           compareProjection,
           manualMonthlyReconciliation: null,
         });
+  const effectiveSimulationVariablesUsed = attachRunIdentityToEffectiveSimulationVariablesUsed(
+    ((datasetRead.dataset as any)?.meta?.effectiveSimulationVariablesUsed as EffectiveSimulationVariablesUsed | null | undefined) ?? null,
+    {
+      artifactId: buildRec?.id ? String(buildRec.id) : null,
+      artifactInputHash:
+        typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
+          ? String((datasetRead.dataset as any).meta.artifactInputHash)
+          : null,
+      buildInputsHash: buildRec?.buildInputsHash ? String(buildRec.buildInputsHash) : null,
+      engineVersion:
+        typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
+          ? String((datasetRead.dataset as any).meta.engineVersion)
+          : typeof (datasetRead.dataset as any)?.meta?.simVersion === "string"
+            ? String((datasetRead.dataset as any).meta.simVersion)
+            : null,
+      houseId: args.engineInput.houseId,
+      actualContextHouseId: args.engineInput.actualContextHouseId,
+      scenarioId: args.engineInput.scenarioId,
+    }
+  );
   return {
     artifactId: buildRec?.id ? String(buildRec.id) : null,
     artifactInputHash:
@@ -590,6 +616,7 @@ async function buildArtifactFromEngineInput(args: {
     manualMonthlyReconciliation: manualReadResult && manualReadResult.ok ? manualReadResult.manualMonthlyReconciliation : null,
     manualParitySummary: manualReadResult && manualReadResult.ok ? manualReadResult.manualParitySummary : null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
+    effectiveSimulationVariablesUsed,
   };
 }
 
@@ -698,6 +725,7 @@ export function buildSharedSimulationReadModel(
         compareRowsCount: artifact.compareProjection?.rows?.length ?? 0,
         monthlyTargetConstructionDiagnosticsCount: artifact.monthlyTargetConstructionDiagnostics?.length ?? 0,
       } as Record<string, unknown>),
+    effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed,
     failureCode: null,
     failureMessage: null,
   };
