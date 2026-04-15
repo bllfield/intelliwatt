@@ -11,5 +11,15 @@ describe("past corrected baseline guardrails", () => {
     expect(src).not.toContain("mirroredFromBaseline: true");
     expect(src).not.toContain("const baselineRes = await getSimulatedUsageForHouseScenario({");
   });
+
+  it("keeps SMT baseline packaging on canonical coverage instead of raw anchor periods", () => {
+    const servicePath = resolve(process.cwd(), "modules/usageSimulator/service.ts");
+    const src = readFileSync(servicePath, "utf8");
+
+    expect(src).toContain('simMode === "SMT_BASELINE"');
+    expect(src).toContain('id: "canonical_usage_365_coverage"');
+    expect(src).not.toContain(": smtAnchorPeriods ?? undefined,");
+    expect(src).toContain('recalc_post_baseline_direct_builder_window');
+  });
 });
 

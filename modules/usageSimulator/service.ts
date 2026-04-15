@@ -5127,9 +5127,11 @@ async function recalcSimulatorBuildImpl(args: {
               endDate: sharedPastRecalcWindow?.endDate ?? resolveCanonicalUsage365CoverageWindow().endDate,
             },
           ]
+        : simMode === "SMT_BASELINE"
+          ? undefined
         : manualCanonicalPeriods.length
           ? manualCanonicalPeriods
-          : smtAnchorPeriods ?? undefined,
+          : undefined,
     weatherPreference,
     weatherLogicMode: resolveWeatherLogicModeFromBuildInputs({ weatherPreference }),
     weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
@@ -5210,6 +5212,56 @@ async function recalcSimulatorBuildImpl(args: {
     versions,
   });
 
+  const datasetPackagingPath =
+    pastPatchedDataset != null
+      ? "reuse_shared_dataset"
+      : pastPatchedCurve != null
+        ? "reuse_shared_curve"
+        : "direct_build_inputs";
+  if (datasetPackagingPath === "direct_build_inputs") {
+    const directBuilderPeriodStart =
+      Array.isArray(buildInputs.canonicalPeriods) && buildInputs.canonicalPeriods.length > 0
+        ? String(buildInputs.canonicalPeriods[0]?.startDate ?? "").slice(0, 10) || null
+        : null;
+    const directBuilderPeriodEnd =
+      Array.isArray(buildInputs.canonicalPeriods) && buildInputs.canonicalPeriods.length > 0
+        ? String(buildInputs.canonicalPeriods[buildInputs.canonicalPeriods.length - 1]?.endDate ?? "").slice(0, 10) || null
+        : null;
+    const directBuilderCanonicalWindow = canonicalWindowDateRange(buildInputs.canonicalMonths);
+    const directBuilderWindowStart = directBuilderPeriodStart ?? directBuilderCanonicalWindow?.start ?? null;
+    const directBuilderWindowEnd = directBuilderPeriodEnd ?? directBuilderCanonicalWindow?.end ?? null;
+    const directBuilderWindowSpanDays =
+      directBuilderWindowStart && directBuilderWindowEnd
+        ? Math.round(
+            (new Date(`${directBuilderWindowEnd}T12:00:00.000Z`).getTime() -
+              new Date(`${directBuilderWindowStart}T12:00:00.000Z`).getTime()) /
+              (24 * 60 * 60 * 1000)
+          ) + 1
+        : undefined;
+    logSimPipelineEvent("recalc_post_baseline_direct_builder_window", {
+      correlationId: args.correlationId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      scenarioId,
+      mode: simMode,
+      buildInputsHash,
+      windowSource: directBuilderPeriodStart && directBuilderPeriodEnd ? "canonical_periods" : "canonical_months",
+      windowStartDate: directBuilderWindowStart,
+      windowEndDate: directBuilderWindowEnd,
+      windowSpanDays: directBuilderWindowSpanDays,
+      canonicalMonthCount: Array.isArray(buildInputs.canonicalMonths) ? buildInputs.canonicalMonths.length : 0,
+      canonicalMonthStart: buildInputs.canonicalMonths[0] ?? null,
+      canonicalMonthEnd: buildInputs.canonicalMonths[buildInputs.canonicalMonths.length - 1] ?? null,
+      canonicalPeriodCount: Array.isArray(buildInputs.canonicalPeriods) ? buildInputs.canonicalPeriods.length : 0,
+      validationOnlyDateCount: Array.isArray(buildInputs.validationOnlyDateKeysLocal)
+        ? buildInputs.validationOnlyDateKeysLocal.length
+        : 0,
+      travelRangeCount: Array.isArray(buildInputs.travelRanges) ? buildInputs.travelRanges.length : 0,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+  }
+
   const datasetPackagingStartedAt = Date.now();
   logSimPipelineEvent("recalc_post_baseline_dataset_packaging_start", {
     correlationId: args.correlationId,
@@ -5218,6 +5270,7 @@ async function recalcSimulatorBuildImpl(args: {
     scenarioId,
     mode: simMode,
     buildInputsHash,
+    datasetPackagingPath,
     reusedSharedDataset: pastPatchedDataset != null,
     reusedSharedCurve: pastPatchedDataset == null && pastPatchedCurve != null,
     source: "recalcSimulatorBuildImpl",
