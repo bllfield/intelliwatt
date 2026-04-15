@@ -4726,9 +4726,11 @@ async function recalcSimulatorBuildImpl(args: {
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
-  const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
+  const isOnePathSimAdminRun = args.runContext?.callerLabel === "one_path_sim_admin";
+  const shouldUseSharedPastProducer =
+    (scenario?.name === WORKSPACE_PAST_NAME || isOnePathSimAdminRun) && pastSharedSimChainModes.includes(simMode);
   const recalcIntervalPreload =
-    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
+    simMode === "SMT_BASELINE" && (scenario?.name === WORKSPACE_PAST_NAME || isOnePathSimAdminRun)
       ? createRecalcIntervalPreloadContext({
           houseId: actualContextHouseId,
           esiid: esiid ?? null,
@@ -5487,7 +5489,7 @@ async function recalcSimulatorBuildImpl(args: {
   let canonicalArtifactInputHash: string | null = null;
   const shouldPersistCanonicalPastArtifact =
     args.persistPastSimBaseline === true &&
-    scenario?.name === WORKSPACE_PAST_NAME &&
+    (scenario?.name === WORKSPACE_PAST_NAME || isOnePathSimAdminRun) &&
     (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS" || simMode === "NEW_BUILD_ESTIMATE");
   if (shouldPersistCanonicalPastArtifact) {
     const intervals15 = (
@@ -5935,7 +5937,7 @@ async function recalcSimulatorBuildImpl(args: {
   // Persist usage buckets for Past/Future so plan costing can use simulated usage.
   const shouldPersistPastSeries =
     args.persistPastSimBaseline === true &&
-    scenario?.name === WORKSPACE_PAST_NAME &&
+    (scenario?.name === WORKSPACE_PAST_NAME || isOnePathSimAdminRun) &&
     (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS");
   const shouldDeferManualPostArtifactPersistence =
     isLeanManualTotalsMode(simMode) && canonicalArtifactInputHash != null;
