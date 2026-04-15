@@ -39,6 +39,12 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Chart / Window / Display Logic");
     expect(source).toContain("Manual Statement / Annual Logic");
     expect(source).toContain("Shared source-of-truth summary");
+    expect(source).toContain("One Path Hard Audit");
+    expect(source).toContain("One Path surface audit matrix");
+    expect(source).toContain("AI copy payload inventory");
+    expect(source).toContain("Shared wiring flow");
+    expect(source).toContain("External surface classification");
+    expect(source).toContain("Drift-risk watchlist");
     expect(source).toContain('value: "random_simple"');
     expect(source).toContain('value: "customer_style_seasonal_mix"');
     expect(source).toContain('value: "stratified_weather_balanced"');
@@ -78,5 +84,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(truthSummarySource).toContain("projectBaselineFromCanonicalDataset");
     expect(truthSummarySource).toContain("resolveManualStageOnePresentation");
     expect(truthSummarySource).toContain("buildManualBillPeriodTargets");
+    const ownershipAuditSource = readRepoFile("modules/usageSimulator/onePathOwnershipAudit.ts");
+    expect(ownershipAuditSource).toContain("buildOnePathOwnershipAudit");
+    expect(ownershipAuditSource).toContain("pageSurfaceAuditMatrix");
   });
 });

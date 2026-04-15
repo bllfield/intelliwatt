@@ -3,6 +3,7 @@ import type {
   SimulationVariableInputType,
   SimulationVariableValueSource,
 } from "@/modules/usageSimulator/simulationVariablePolicy";
+import { buildOnePathOwnershipAudit } from "@/modules/usageSimulator/onePathOwnershipAudit";
 
 export type SimulationVariablePolicyResponseShape = {
   familyMeta: Record<string, { title: string; description: string }>;
@@ -294,6 +295,7 @@ export function buildSimulationVariableCopyPayload(args: {
       note: "Highest-priority shape-sensitive shared variables first. Use this section before the full family dump when tuning curves with AI.",
       items: buildCurveShapingSummary(variableFamilies),
     },
+    ownershipAudit: buildOnePathOwnershipAudit(),
     variableFamilies,
     rawEffectiveSimulationVariablesUsed: args.runSnapshot ?? null,
     rawReadModel: args.readModel ?? null,

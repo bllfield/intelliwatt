@@ -15,6 +15,7 @@ const getApplianceProfileSimulatedByUserHouse = vi.fn();
 const normalizeStoredApplianceProfile = vi.fn();
 const resolveSharedWeatherSensitivityEnvelope = vi.fn();
 const getTravelRangesFromDb = vi.fn();
+const getSimulationVariablePolicy = vi.fn();
 const adaptIntervalRawInput = vi.fn();
 const adaptManualMonthlyRawInput = vi.fn();
 const adaptManualAnnualRawInput = vi.fn();
@@ -64,6 +65,10 @@ vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", () => ({
   getTravelRangesFromDb: (...args: any[]) => getTravelRangesFromDb(...args),
 }));
 
+vi.mock("@/modules/usageSimulator/simulationVariablePolicy", () => ({
+  getSimulationVariablePolicy: (...args: any[]) => getSimulationVariablePolicy(...args),
+}));
+
 vi.mock("@/modules/usageSimulator/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
@@ -98,6 +103,7 @@ describe("admin one path sim route", () => {
     normalizeStoredApplianceProfile.mockReset();
     resolveSharedWeatherSensitivityEnvelope.mockReset();
     getTravelRangesFromDb.mockReset();
+    getSimulationVariablePolicy.mockReset();
     adaptIntervalRawInput.mockReset();
     adaptManualMonthlyRawInput.mockReset();
     adaptManualAnnualRawInput.mockReset();
@@ -121,6 +127,15 @@ describe("admin one path sim route", () => {
     normalizeStoredApplianceProfile.mockReturnValue({ fuelConfiguration: "all_electric", appliances: [] });
     resolveSharedWeatherSensitivityEnvelope.mockResolvedValue({ score: { scoringMode: "INTERVAL_BASED" }, derivedInput: null });
     getTravelRangesFromDb.mockResolvedValue([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
+    getSimulationVariablePolicy.mockResolvedValue({
+      effectiveByMode: {
+        INTERVAL: { previewPolicy: "interval" },
+        MANUAL_MONTHLY: { previewPolicy: "manual-monthly" },
+        MANUAL_ANNUAL: { previewPolicy: "manual-annual" },
+        NEW_BUILD: { previewPolicy: "new-build" },
+      },
+      overrides: {},
+    });
     adaptIntervalRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "INTERVAL" });
     adaptManualMonthlyRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_MONTHLY" });
     adaptManualAnnualRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_ANNUAL" });
@@ -141,6 +156,35 @@ describe("admin one path sim route", () => {
     expect(json.sourceContext.actualDatasetSummary).toEqual({ totalKwh: 123 });
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
     expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
+  });
+
+  it("uses the selected mode policy and actual context house for lookup weather preview", async () => {
+    lookupAdminHousesByEmail.mockResolvedValue({
+      ok: true,
+      email: "customer@example.com",
+      userId: "user-1",
+      houses: [
+        { id: "house-1", label: "Primary", esiid: "esiid-1", isPrimary: true },
+        { id: "house-2", label: "Actual", esiid: "esiid-2", isPrimary: false },
+      ],
+    });
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        mode: "MANUAL_MONTHLY",
+        actualContextHouseId: "house-2",
+      })
+    );
+
+    expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith("house-2", "esiid-2", { skipFullYearIntervalFetch: true });
+    expect(resolveSharedWeatherSensitivityEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        weatherHouseId: "house-2",
+        simulationVariablePolicy: { previewPolicy: "manual-monthly" },
+      })
+    );
   });
 
   it("routes interval runs through the shared adapter, producer, and read model", async () => {

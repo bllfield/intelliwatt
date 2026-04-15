@@ -16,6 +16,7 @@ import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProf
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { gateOnePathSimAdmin, resolveOnePathSimUserSelection } from "./_helpers";
 import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
+import { getSimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,8 +77,25 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const previewMode = normalizeMode(body?.mode);
+  const previewActualContextHouse =
+    resolved.houses.find(
+      (house) =>
+        house.id ===
+        (typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+          ? body.actualContextHouseId.trim()
+          : resolved.selectedHouse.id)
+    ) ?? resolved.selectedHouse;
+  let previewSimulationVariablePolicy: Awaited<ReturnType<typeof getSimulationVariablePolicy>>["effectiveByMode"][CanonicalSimulationInputType] | null =
+    null;
+  try {
+    previewSimulationVariablePolicy = (await getSimulationVariablePolicy()).effectiveByMode[previewMode];
+  } catch {
+    previewSimulationVariablePolicy = null;
+  }
+
   const [actualResult, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
-    getActualUsageDatasetForHouse(resolved.selectedHouse.id, resolved.selectedHouse.esiid ?? null, {
+    getActualUsageDatasetForHouse(previewActualContextHouse.id, previewActualContextHouse.esiid ?? null, {
       skipFullYearIntervalFetch: true,
     }).catch(() => null),
     getManualUsageInputForUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
@@ -94,7 +112,8 @@ export async function POST(request: NextRequest) {
     manualUsagePayload: manualUsage.payload ?? null,
     homeProfile,
     applianceProfile,
-    weatherHouseId: resolved.selectedHouse.id,
+    weatherHouseId: previewActualContextHouse.id,
+    simulationVariablePolicy: previewSimulationVariablePolicy,
   }).catch(() => ({ score: null, derivedInput: null }));
 
   if (action === "lookup" || !action) {

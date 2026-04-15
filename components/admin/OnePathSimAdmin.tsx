@@ -8,6 +8,7 @@ import {
   buildSimulationVariableCopyPayload,
   buildSimulationVariableFamilyAdminView,
 } from "@/modules/usageSimulator/simulationVariablePresentation";
+import { buildOnePathOwnershipAudit } from "@/modules/usageSimulator/onePathOwnershipAudit";
 
 type LookupResponse = {
   ok: true;
@@ -229,6 +230,13 @@ export function OnePathSimAdmin() {
     () => asRecord(variableDraftParsed?.[modeToOverrideBucketKey(mode)]) ?? {},
     [mode, variableDraftParsed]
   );
+  const effectiveHouseId = selectedHouseId || lookup?.selectedHouse?.id || "";
+  const effectiveActualContextHouseId = actualContextHouseId || effectiveHouseId;
+  const validationOnlyDateKeysLocal = useMemo(
+    () => parseManualValidationDateKeys(validationOnlyDateKeysText),
+    [validationOnlyDateKeysText]
+  );
+  const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
 
   const activeVariableFamilyView = useMemo(
     () =>
@@ -375,12 +383,6 @@ export function OnePathSimAdmin() {
     setStatus(`Shared override reset for ${variableFamilyOpen}.`);
   }, [variableConfirmation, variableFamilyOpen, variablePolicy]);
 
-  const effectiveHouseId = selectedHouseId || lookup?.selectedHouse?.id || "";
-  const effectiveActualContextHouseId = actualContextHouseId || effectiveHouseId;
-  const validationOnlyDateKeysLocal = useMemo(
-    () => parseManualValidationDateKeys(validationOnlyDateKeysText),
-    [validationOnlyDateKeysText]
-  );
   const loadLookup = useCallback(
     async (houseIdOverride?: string) => {
       const trimmedEmail = email.trim();
@@ -398,6 +400,8 @@ export function OnePathSimAdmin() {
           action: "lookup",
           email: trimmedEmail,
           houseId: houseIdOverride ?? effectiveHouseId ?? "",
+          mode,
+          actualContextHouseId: effectiveActualContextHouseId || null,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -409,7 +413,10 @@ export function OnePathSimAdmin() {
       }
       setLookup(json);
       setSelectedHouseId(json.selectedHouse?.id ?? "");
-      setActualContextHouseId(json.selectedHouse?.id ?? "");
+      setActualContextHouseId((current) => {
+        if (current && (json.houses ?? []).some((house: { id: string }) => house.id === current)) return current;
+        return json.selectedHouse?.id ?? "";
+      });
       setSelectedScenarioId("");
       const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
         ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
@@ -418,7 +425,7 @@ export function OnePathSimAdmin() {
       setBusy(false);
       setStatus("Lookup loaded.");
     },
-    [email, effectiveHouseId]
+    [effectiveActualContextHouseId, effectiveHouseId, email, mode]
   );
 
   const runSimulation = useCallback(async () => {
@@ -760,6 +767,15 @@ export function OnePathSimAdmin() {
           <SectionJson title="Shared simulation variable overrides" value={variablePolicy?.overrides ?? null} />
           <SectionJson title="Shared simulation variable defaults" value={variablePolicy?.defaults ?? null} />
           <SectionJson title={`Shared simulation variables for ${mode}`} value={variablePolicy?.effectiveByMode?.[mode] ?? null} />
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2">
+            <div className="text-sm font-semibold text-brand-navy">One Path Hard Audit</div>
+            <p className="mt-2 text-sm text-slate-600">{ownershipAudit.overview}</p>
+          </div>
+          <SectionJson title="One Path surface audit matrix" value={ownershipAudit.pageSurfaceAuditMatrix} />
+          <SectionJson title="AI copy payload inventory" value={ownershipAudit.aiCopyPayloadInventory} />
+          <SectionJson title="Shared wiring flow" value={ownershipAudit.sharedWiringFlow} />
+          <SectionJson title="External surface classification" value={ownershipAudit.externalSurfaceClassification} />
+          <SectionJson title="Drift-risk watchlist" value={ownershipAudit.driftRiskWatchlist} />
         </div>
 
         {runResult ? (
