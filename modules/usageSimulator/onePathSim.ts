@@ -6,6 +6,7 @@ import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { buildValidationCompareProjectionSidecar, type ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { buildOnePathTruthSummary, type OnePathTruthSummary } from "@/modules/usageSimulator/onePathTruthSummary";
 import {
   attachRunIdentityToEffectiveSimulationVariablesUsed,
   type EffectiveSimulationVariablesUsed,
@@ -141,6 +142,7 @@ export type CanonicalSimulationReadModel = {
   dailyShapeTuning: Record<string, unknown>;
   tuningSummary: Record<string, unknown>;
   effectiveSimulationVariablesUsed: EffectiveSimulationVariablesUsed | null;
+  sourceOfTruthSummary: OnePathTruthSummary;
   failureCode: string | null;
   failureMessage: string | null;
 };
@@ -726,6 +728,16 @@ export function buildSharedSimulationReadModel(
         monthlyTargetConstructionDiagnosticsCount: artifact.monthlyTargetConstructionDiagnostics?.length ?? 0,
       } as Record<string, unknown>),
     effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed,
+    sourceOfTruthSummary: buildOnePathTruthSummary({
+      inputType: artifact.inputType,
+      engineInput: artifact.engineInput as Record<string, unknown>,
+      artifact: artifact as unknown as Record<string, unknown>,
+      readModel: {
+        compareProjection: artifact.compareProjection,
+        manualParitySummary: artifact.manualParitySummary,
+        effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed,
+      },
+    }),
     failureCode: null,
     failureMessage: null,
   };

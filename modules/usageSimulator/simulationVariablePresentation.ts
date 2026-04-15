@@ -276,6 +276,7 @@ export function buildSimulationVariableCopyPayload(args: {
           manualParitySummary: args.readModel.manualParitySummary ?? null,
           manualMonthlyReconciliation: args.readModel.manualMonthlyReconciliation ?? null,
           sharedDiagnostics: args.readModel.sharedDiagnostics ?? null,
+          sourceOfTruthSummary: args.readModel.sourceOfTruthSummary ?? null,
           readModelRunIdentity: args.readModel.runIdentity ?? null,
           artifactSummary: args.artifact
             ? {

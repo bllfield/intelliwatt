@@ -41,7 +41,7 @@ const VALIDATION_SELECTION_MODE_DETAILS = [
     title: "manual",
     howItWorks: "Uses only explicitly supplied validation date keys and excludes travel/vacant dates from that set.",
     adminAdjustments:
-      "Best when you already know the exact days you want to score. This page currently adjusts the shared mode and day count, but does not provide a dedicated manual date-key picker.",
+      "Best when you already know the exact days you want to score. This page lets admin set the shared mode, day count, and explicit manual validation date keys.",
   },
   {
     value: "random_simple",
@@ -103,6 +103,56 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
+function parseManualValidationDateKeys(value: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map((entry) => entry.trim().slice(0, 10))
+    .filter((entry, index, all) => /^\d{4}-\d{2}-\d{2}$/.test(entry) && all.indexOf(entry) === index);
+}
+
+function formatTruthValue(value: unknown): string {
+  if (value == null) return "not set";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.length === 0 ? "none" : JSON.stringify(value);
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function TruthSummaryPanel(props: {
+  title: string;
+  summary: string;
+  currentRun: Record<string, unknown> | null | undefined;
+  sharedOwners?: Array<{ label?: unknown; owner?: unknown; whyItMatters?: unknown }> | null;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
+      <p className="mt-2 text-sm text-slate-600">{props.summary}</p>
+      {props.sharedOwners?.length ? (
+        <div className="mt-4 grid gap-3">
+          {props.sharedOwners.map((owner, index) => (
+            <div key={`${index}:${String(owner.owner ?? owner.label ?? "")}`} className="rounded-lg bg-slate-50 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {String(owner.label ?? "Shared owner")}
+              </div>
+              <div className="mt-1 text-sm font-semibold text-brand-navy">{String(owner.owner ?? "")}</div>
+              <div className="mt-1 text-xs text-slate-600">{String(owner.whyItMatters ?? "")}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {Object.entries(props.currentRun ?? {}).map(([key, value]) => (
+          <div key={key} className="rounded-lg border border-slate-200 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{key}</div>
+            <div className="mt-1 text-sm text-slate-800 break-words">{formatTruthValue(value)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function modeToOverrideBucketKey(mode: string): "intervalOverrides" | "manualMonthlyOverrides" | "manualAnnualOverrides" | "newBuildOverrides" {
   if (mode === "MANUAL_MONTHLY") return "manualMonthlyOverrides";
   if (mode === "MANUAL_ANNUAL") return "manualAnnualOverrides";
@@ -114,6 +164,7 @@ export function OnePathSimAdmin() {
   const [email, setEmail] = useState("");
   const [lookup, setLookup] = useState<LookupResponse | null>(null);
   const [selectedHouseId, setSelectedHouseId] = useState("");
+  const [actualContextHouseId, setActualContextHouseId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [mode, setMode] = useState<"INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD">("INTERVAL");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
@@ -121,6 +172,7 @@ export function OnePathSimAdmin() {
   );
   const [validationSelectionMode, setValidationSelectionMode] = useState("stratified_weather_balanced");
   const [validationDayCount, setValidationDayCount] = useState("14");
+  const [validationOnlyDateKeysText, setValidationOnlyDateKeysText] = useState("");
   const [persistRequested, setPersistRequested] = useState(true);
   const [runReason, setRunReason] = useState("one_path_admin_harness");
   const [travelRanges, setTravelRanges] = useState<Array<{ startDate: string; endDate: string }>>([]);
@@ -225,16 +277,18 @@ export function OnePathSimAdmin() {
       artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
       currentControls: {
         mode,
+        actualContextHouseId: effectiveActualContextHouseId || null,
         weatherPreference,
         validationSelectionMode,
         validationDayCount,
+        validationOnlyDateKeysLocal,
         persistRequested,
         runReason,
       },
     });
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
     setStatus("All simulation variables copied for AI.");
-  }, [mode, persistRequested, runReason, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, validationDayCount, validationSelectionMode, variablePolicy, weatherPreference]);
+  }, [effectiveActualContextHouseId, mode, persistRequested, runReason, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, validationDayCount, validationOnlyDateKeysLocal, validationSelectionMode, variablePolicy, weatherPreference]);
 
   const copyCurrentFamilyForAi = useCallback(async () => {
     if (!variablePolicy || !variableFamilyOpen) return;
@@ -247,6 +301,8 @@ export function OnePathSimAdmin() {
       artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
       currentControls: {
         mode,
+        actualContextHouseId: effectiveActualContextHouseId || null,
+        validationOnlyDateKeysLocal,
         selectedFamily: variableFamilyOpen,
       },
     });
@@ -258,7 +314,7 @@ export function OnePathSimAdmin() {
     };
     await navigator.clipboard.writeText(JSON.stringify(filteredPayload, null, 2));
     setStatus(`Copied ${variableFamilyOpen} variables for AI.`);
-  }, [mode, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, variableFamilyOpen, variablePolicy]);
+  }, [effectiveActualContextHouseId, mode, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, validationOnlyDateKeysLocal, variableFamilyOpen, variablePolicy]);
 
   const saveVariableFamily = useCallback(async () => {
     if (!variableFamilyOpen) return;
@@ -320,6 +376,11 @@ export function OnePathSimAdmin() {
   }, [variableConfirmation, variableFamilyOpen, variablePolicy]);
 
   const effectiveHouseId = selectedHouseId || lookup?.selectedHouse?.id || "";
+  const effectiveActualContextHouseId = actualContextHouseId || effectiveHouseId;
+  const validationOnlyDateKeysLocal = useMemo(
+    () => parseManualValidationDateKeys(validationOnlyDateKeysText),
+    [validationOnlyDateKeysText]
+  );
   const loadLookup = useCallback(
     async (houseIdOverride?: string) => {
       const trimmedEmail = email.trim();
@@ -348,6 +409,7 @@ export function OnePathSimAdmin() {
       }
       setLookup(json);
       setSelectedHouseId(json.selectedHouse?.id ?? "");
+      setActualContextHouseId(json.selectedHouse?.id ?? "");
       setSelectedScenarioId("");
       const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
         ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
@@ -376,9 +438,11 @@ export function OnePathSimAdmin() {
         houseId: effectiveHouseId,
         scenarioId: selectedScenarioId || null,
         mode,
+        actualContextHouseId: effectiveActualContextHouseId || null,
         weatherPreference,
         validationSelectionMode,
         validationDayCount: Number(validationDayCount) || null,
+        validationOnlyDateKeysLocal,
         travelRanges,
         persistRequested,
         runReason,
@@ -394,6 +458,7 @@ export function OnePathSimAdmin() {
     setRunResult(json);
     setStatus("Shared run completed and read back from the canonical artifact/read-model path.");
   }, [
+    effectiveActualContextHouseId,
     effectiveHouseId,
     lookup,
     mode,
@@ -403,6 +468,7 @@ export function OnePathSimAdmin() {
     travelRanges,
     validationDayCount,
     validationSelectionMode,
+    validationOnlyDateKeysLocal,
     weatherPreference,
   ]);
 
@@ -531,6 +597,21 @@ export function OnePathSimAdmin() {
                 onChange={(event) => setValidationDayCount(event.target.value)}
               />
             </label>
+            <label className="text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">Actual context house</div>
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={effectiveActualContextHouseId}
+                onChange={(event) => setActualContextHouseId(event.target.value)}
+              >
+                <option value="">Use selected house</option>
+                {(lookup?.houses ?? []).map((house) => (
+                  <option key={house.id} value={house.id}>
+                    {house.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -570,6 +651,19 @@ export function OnePathSimAdmin() {
               Persist requested
             </label>
           </div>
+
+          <label className="mt-4 block text-sm text-slate-700">
+            <div className="font-semibold text-brand-navy">Manual validation date keys</div>
+            <textarea
+              className="mt-1 min-h-[88px] w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={validationOnlyDateKeysText}
+              onChange={(event) => setValidationOnlyDateKeysText(event.target.value)}
+              placeholder="YYYY-MM-DD, one per line or comma-separated"
+            />
+            <div className="mt-2 text-xs text-slate-500">
+              Shared manual validation keys sent through the canonical adapter path. Current parsed count: {validationOnlyDateKeysLocal.length}
+            </div>
+          </label>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <button
@@ -651,11 +745,13 @@ export function OnePathSimAdmin() {
             value={{
               email: lookup?.email ?? email,
               selectedHouseId: effectiveHouseId || null,
+              actualContextHouseId: effectiveActualContextHouseId || null,
               selectedScenarioId: selectedScenarioId || null,
               mode,
               weatherPreference,
               validationSelectionMode,
               validationDayCount,
+              validationOnlyDateKeysLocal,
               persistRequested,
               runReason,
               travelRanges,
@@ -673,6 +769,31 @@ export function OnePathSimAdmin() {
             <SectionJson title="Canonical read model" value={runResult.readModel} />
             <SectionJson title="Read model dataset summary" value={runResult.readModel?.dataset?.summary ?? null} />
             <SectionJson title="Effective Variables Used By Last Run" value={runResult.readModel?.effectiveSimulationVariablesUsed ?? null} />
+            <TruthSummaryPanel
+              title="Chart / Window / Display Logic"
+              summary={String(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.summary ?? "")}
+              currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.currentRun)}
+              sharedOwners={
+                Array.isArray(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.sharedOwners)
+                  ? runResult.readModel.sourceOfTruthSummary.chartWindowDisplay.sharedOwners
+                  : []
+              }
+            />
+            <TruthSummaryPanel
+              title="Manual Statement / Annual Logic"
+              summary={String(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.summary ?? "")}
+              currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.currentRun)}
+              sharedOwners={
+                Array.isArray(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.sharedOwners)
+                  ? runResult.readModel.sourceOfTruthSummary.manualStatementAnnual.sharedOwners
+                  : []
+              }
+            />
+            <TruthSummaryPanel
+              title="Shared source-of-truth summary"
+              summary={String(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.summary ?? "")}
+              currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.currentRun)}
+            />
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-sm font-semibold text-brand-navy">Effective Variables Used By Last Run</div>
               <p className="mt-2 text-xs text-slate-600">
@@ -780,6 +901,7 @@ export function OnePathSimAdmin() {
             value={{
               selectedMode: validationSelectionMode,
               validationDayCount,
+              validationOnlyDateKeysLocal,
               adminDefaultValidationSelectionMode: "stratified_weather_balanced",
             }}
           />
@@ -789,6 +911,15 @@ export function OnePathSimAdmin() {
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
               value={validationDayCount}
               onChange={(event) => setValidationDayCount(event.target.value)}
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            <div className="font-semibold text-brand-navy">Manual validation date keys</div>
+            <textarea
+              className="mt-1 min-h-[88px] w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={validationOnlyDateKeysText}
+              onChange={(event) => setValidationOnlyDateKeysText(event.target.value)}
+              placeholder="YYYY-MM-DD, one per line or comma-separated"
             />
           </label>
           <div className="grid gap-3">

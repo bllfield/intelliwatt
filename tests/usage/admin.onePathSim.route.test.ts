@@ -162,6 +162,29 @@ describe("admin one path sim route", () => {
     expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
   });
 
+  it("passes actual context house and manual validation date keys through the shared adapter", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        actualContextHouseId: "house-2",
+        validationSelectionMode: "manual",
+        validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
+      })
+    );
+
+    expect(adaptIntervalRawInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actualContextHouseId: "house-2",
+        validationSelectionMode: "manual",
+        validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
+      })
+    );
+  });
+
   it("routes manual save through the shared manual input store", async () => {
     saveManualUsageInputForUserHouse.mockResolvedValue({
       ok: true,

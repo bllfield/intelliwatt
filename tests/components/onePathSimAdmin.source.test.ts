@@ -34,6 +34,11 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain('fetch("/api/admin/tools/one-path-sim"');
     expect(source).toContain("render from the shared read model only");
     expect(source).toContain("VALIDATION_SELECTION_OPTIONS");
+    expect(source).toContain("Actual context house");
+    expect(source).toContain("Manual validation date keys");
+    expect(source).toContain("Chart / Window / Display Logic");
+    expect(source).toContain("Manual Statement / Annual Logic");
+    expect(source).toContain("Shared source-of-truth summary");
     expect(source).toContain('value: "random_simple"');
     expect(source).toContain('value: "customer_style_seasonal_mix"');
     expect(source).toContain('value: "stratified_weather_balanced"');
@@ -68,5 +73,10 @@ describe("One Path Sim Admin harness wiring", () => {
     const presentationSource = readRepoFile("modules/usageSimulator/simulationVariablePresentation.ts");
     expect(presentationSource).toContain("curveShapingSummary");
     expect(presentationSource).toContain("Highest-priority shape-sensitive shared variables first");
+    const truthSummarySource = readRepoFile("modules/usageSimulator/onePathTruthSummary.ts");
+    expect(truthSummarySource).toContain("resolveCanonicalUsage365CoverageWindow");
+    expect(truthSummarySource).toContain("projectBaselineFromCanonicalDataset");
+    expect(truthSummarySource).toContain("resolveManualStageOnePresentation");
+    expect(truthSummarySource).toContain("buildManualBillPeriodTargets");
   });
 });
