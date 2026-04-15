@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
+import {
+  buildSimulationVariableCopyPayload,
+  buildSimulationVariableFamilyAdminView,
+} from "@/modules/usageSimulator/simulationVariablePresentation";
 
 type LookupResponse = {
   ok: true;
@@ -29,6 +33,38 @@ const VALIDATION_SELECTION_OPTIONS = [
   { value: "random_simple", label: "random_simple" },
   { value: "customer_style_seasonal_mix", label: "customer_style_seasonal_mix" },
   { value: "stratified_weather_balanced", label: "stratified_weather_balanced" },
+] as const;
+
+const VALIDATION_SELECTION_MODE_DETAILS = [
+  {
+    value: "manual",
+    title: "manual",
+    howItWorks: "Uses only explicitly supplied validation date keys and excludes travel/vacant dates from that set.",
+    adminAdjustments:
+      "Best when you already know the exact days you want to score. This page currently adjusts the shared mode and day count, but does not provide a dedicated manual date-key picker.",
+  },
+  {
+    value: "random_simple",
+    title: "random_simple",
+    howItWorks: "Randomly samples clean candidate days from the shared pool without month or weekend stratification.",
+    adminAdjustments:
+      "Good for quick spot checks. Admin can mainly adjust the requested validation day count and compare it against other shared selector modes.",
+  },
+  {
+    value: "customer_style_seasonal_mix",
+    title: "customer_style_seasonal_mix",
+    howItWorks: "Randomly samples clean days while stratifying by month and weekday/weekend mix.",
+    adminAdjustments:
+      "Useful when you want a broader customer-style seasonal spread without the stricter shared stratified bucket balancing.",
+  },
+  {
+    value: "stratified_weather_balanced",
+    title: "stratified_weather_balanced",
+    howItWorks:
+      "Uses the shared round-robin bucket selector across winter, summer, shoulder, weekday, and weekend buckets, with explicit fallback diagnostics when buckets run short.",
+    adminAdjustments:
+      "This is the admin-default shared selector. Adjust the validation day count to widen or tighten the balanced scored-day set for tuning runs.",
+  },
 ] as const;
 
 function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
@@ -63,6 +99,17 @@ function SectionJson(props: { title: string; value: unknown }) {
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function modeToOverrideBucketKey(mode: string): "intervalOverrides" | "manualMonthlyOverrides" | "manualAnnualOverrides" | "newBuildOverrides" {
+  if (mode === "MANUAL_MONTHLY") return "manualMonthlyOverrides";
+  if (mode === "MANUAL_ANNUAL") return "manualAnnualOverrides";
+  if (mode === "NEW_BUILD") return "newBuildOverrides";
+  return "intervalOverrides";
+}
+
 export function OnePathSimAdmin() {
   const [email, setEmail] = useState("");
   const [lookup, setLookup] = useState<LookupResponse | null>(null);
@@ -72,7 +119,7 @@ export function OnePathSimAdmin() {
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
     "LAST_YEAR_WEATHER"
   );
-  const [validationSelectionMode, setValidationSelectionMode] = useState("manual");
+  const [validationSelectionMode, setValidationSelectionMode] = useState("stratified_weather_balanced");
   const [validationDayCount, setValidationDayCount] = useState("14");
   const [persistRequested, setPersistRequested] = useState(true);
   const [runReason, setRunReason] = useState("one_path_admin_harness");
@@ -91,6 +138,7 @@ export function OnePathSimAdmin() {
   const [variableConfirmation, setVariableConfirmation] = useState("");
   const [variableBusy, setVariableBusy] = useState(false);
   const [variableError, setVariableError] = useState<string | null>(null);
+  const [validationInfoOpen, setValidationInfoOpen] = useState(false);
 
   const loadVariablePolicy = useCallback(async () => {
     const res = await fetch("/api/admin/tools/one-path-sim/variables");
@@ -117,6 +165,101 @@ export function OnePathSimAdmin() {
     [variablePolicy]
   );
 
+  const variableDraftParsed = useMemo(() => {
+    try {
+      return asRecord(JSON.parse(variableDraft || "{}"));
+    } catch {
+      return null;
+    }
+  }, [variableDraft]);
+
+  const variableDraftModeOverrides = useMemo(
+    () => asRecord(variableDraftParsed?.[modeToOverrideBucketKey(mode)]) ?? {},
+    [mode, variableDraftParsed]
+  );
+
+  const activeVariableFamilyView = useMemo(
+    () =>
+      variableFamilyOpen && variablePolicy
+        ? buildSimulationVariableFamilyAdminView({
+            familyKey: variableFamilyOpen,
+            mode,
+            response: variablePolicy,
+            runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
+          })
+        : null,
+    [mode, runResult?.readModel?.effectiveSimulationVariablesUsed, variableFamilyOpen, variablePolicy]
+  );
+
+  const updateVariableDraftField = useCallback(
+    (fieldKey: string, rawValue: string) => {
+      const bucketKey = modeToOverrideBucketKey(mode);
+      const nextDraft = { ...(variableDraftParsed ?? {}) };
+      const bucket = { ...(asRecord(nextDraft[bucketKey]) ?? {}) };
+      const trimmed = rawValue.trim();
+      if (!trimmed) {
+        delete bucket[fieldKey];
+      } else {
+        const numericValue = Number(trimmed);
+        if (!Number.isFinite(numericValue)) {
+          setVariableError("Override values must be numeric.");
+          return;
+        }
+        bucket[fieldKey] = numericValue;
+      }
+      nextDraft[bucketKey] = bucket;
+      setVariableDraft(JSON.stringify(nextDraft, null, 2));
+      setVariableError(null);
+    },
+    [mode, variableDraftParsed]
+  );
+
+  const copyAllVariablesForAi = useCallback(async () => {
+    if (!variablePolicy) return;
+    const payload = buildSimulationVariableCopyPayload({
+      mode,
+      response: variablePolicy,
+      runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
+      engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
+      readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
+      artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+      currentControls: {
+        mode,
+        weatherPreference,
+        validationSelectionMode,
+        validationDayCount,
+        persistRequested,
+        runReason,
+      },
+    });
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    setStatus("All simulation variables copied for AI.");
+  }, [mode, persistRequested, runReason, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, validationDayCount, validationSelectionMode, variablePolicy, weatherPreference]);
+
+  const copyCurrentFamilyForAi = useCallback(async () => {
+    if (!variablePolicy || !variableFamilyOpen) return;
+    const payload = buildSimulationVariableCopyPayload({
+      mode,
+      response: variablePolicy,
+      runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
+      engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
+      readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
+      artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+      currentControls: {
+        mode,
+        selectedFamily: variableFamilyOpen,
+      },
+    });
+    const filteredPayload = {
+      ...payload,
+      variableFamilies: Array.isArray(payload.variableFamilies)
+        ? payload.variableFamilies.filter((family: any) => family?.familyKey === variableFamilyOpen)
+        : [],
+    };
+    await navigator.clipboard.writeText(JSON.stringify(filteredPayload, null, 2));
+    setStatus(`Copied ${variableFamilyOpen} variables for AI.`);
+  }, [mode, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, variableFamilyOpen, variablePolicy]);
+
   const saveVariableFamily = useCallback(async () => {
     if (!variableFamilyOpen) return;
     let parsed: Record<string, unknown>;
@@ -134,6 +277,7 @@ export function OnePathSimAdmin() {
       body: JSON.stringify({
         family: variableFamilyOpen,
         override: parsed,
+        modeBucket: modeToOverrideBucketKey(mode),
         confirmation: variableConfirmation,
       }),
     });
@@ -145,7 +289,7 @@ export function OnePathSimAdmin() {
     }
     setVariablePolicy(json);
     setStatus(`Shared override saved for ${variableFamilyOpen}.`);
-  }, [variableConfirmation, variableDraft, variableFamilyOpen]);
+  }, [mode, variableConfirmation, variableDraft, variableFamilyOpen]);
 
   const resetVariableFamily = useCallback(async () => {
     if (!variableFamilyOpen || !variablePolicy) return;
@@ -391,7 +535,16 @@ export function OnePathSimAdmin() {
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             <label className="text-sm text-slate-700">
-              <div className="font-semibold text-brand-navy">Validation selection mode</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-semibold text-brand-navy">Validation selection mode</div>
+                <button
+                  type="button"
+                  onClick={() => setValidationInfoOpen(true)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-brand-navy"
+                >
+                  Validation mode popup
+                </button>
+              </div>
               <select
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={validationSelectionMode}
@@ -466,6 +619,14 @@ export function OnePathSimAdmin() {
               These edit the shared module variables directly. A change here affects the shared calculation owners that read this policy.
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void copyAllVariablesForAi()}
+                disabled={!variablePolicy}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
+              >
+                Copy all variables for AI
+              </button>
               {Object.entries(variablePolicy?.familyMeta ?? {}).map(([familyKey, meta]) => (
                 <button
                   key={familyKey}
@@ -605,6 +766,58 @@ export function OnePathSimAdmin() {
       </Modal>
 
       <Modal
+        open={validationInfoOpen}
+        title="Validation selection mode popup"
+        onClose={() => setValidationInfoOpen(false)}
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+            These are the shared validation selection modes used by the shared selector path. This popup explains how each
+            option works and gives the admin a thin control surface for mode and day-count adjustments only.
+          </div>
+          <SectionJson
+            title="Current admin adjustments"
+            value={{
+              selectedMode: validationSelectionMode,
+              validationDayCount,
+              adminDefaultValidationSelectionMode: "stratified_weather_balanced",
+            }}
+          />
+          <label className="block text-sm text-slate-700">
+            <div className="font-semibold text-brand-navy">Adjust validation day count</div>
+            <input
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={validationDayCount}
+              onChange={(event) => setValidationDayCount(event.target.value)}
+            />
+          </label>
+          <div className="grid gap-3">
+            {VALIDATION_SELECTION_MODE_DETAILS.map((detail) => (
+              <div key={detail.value} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-brand-navy">{detail.title}</div>
+                    <div className="mt-1 text-xs text-slate-600">{detail.howItWorks}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setValidationSelectionMode(detail.value);
+                      setValidationInfoOpen(false);
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-brand-navy"
+                  >
+                    Use this mode
+                  </button>
+                </div>
+                <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{detail.adminAdjustments}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={Boolean(variableFamilyOpen)}
         title={
           variableFamilyOpen
@@ -622,17 +835,85 @@ export function OnePathSimAdmin() {
             <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
               {variablePolicy?.familyMeta?.[variableFamilyOpen]?.description ?? "Shared module variables."}
             </div>
-            <SectionJson title="Shared defaults" value={variablePolicy?.defaults?.[variableFamilyOpen] ?? null} />
-            <SectionJson title={`Resolved values for ${mode}`} value={variablePolicy?.effectiveByMode?.[mode]?.[variableFamilyOpen] ?? null} />
-            <SectionJson title="Current overrides" value={variablePolicy?.overrides?.[variableFamilyOpen] ?? {}} />
-            <label className="block text-sm text-slate-700">
-              <div className="font-semibold text-brand-navy">Editable override JSON</div>
-              <textarea
-                className="mt-1 min-h-[220px] w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
-                value={variableDraft}
-                onChange={(event) => setVariableDraft(event.target.value)}
-              />
-            </label>
+            <div className="rounded-xl border border-brand-blue/10 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-base font-semibold text-brand-navy">{activeVariableFamilyView?.title ?? variableFamilyOpen}</div>
+                  <div className="mt-1 text-sm text-slate-600">{activeVariableFamilyView?.adminSummary}</div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-700 md:grid-cols-2">
+                    <div>
+                      <span className="font-semibold text-brand-navy">Viewing mode:</span> {activeVariableFamilyView?.modeLabel ?? mode}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-brand-navy">Admin override bucket:</span>{" "}
+                      {activeVariableFamilyView?.modeOverrideBucketLabel ?? modeToOverrideBucketKey(mode)}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void copyCurrentFamilyForAi()}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy"
+                >
+                  Copy this family for AI
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-4">
+              {activeVariableFamilyView?.fields.map((field) => (
+                <div key={field.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="max-w-3xl">
+                      <div className="text-sm font-semibold text-brand-navy">{field.label}</div>
+                      <div className="mt-1 text-sm text-slate-700">{field.description}</div>
+                      <div className="mt-2 text-xs text-slate-600">{field.tuningHint}</div>
+                    </div>
+                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{field.valueSource}</div>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="text-xs font-semibold text-brand-navy">Resolved value used by sim</div>
+                      <div className="mt-1 text-sm text-slate-800">{field.resolvedValue ?? "not set"}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="text-xs font-semibold text-brand-navy">Current admin override</div>
+                      <div className="mt-1 text-sm text-slate-800">
+                        {field.currentModeOverrideValue == null ? "none for this mode" : field.currentModeOverrideValue}
+                      </div>
+                    </div>
+                    <label className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                      <div className="text-xs font-semibold text-brand-navy">Adjust this value</div>
+                      <input
+                        className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2"
+                        value={
+                          typeof variableDraftModeOverrides[field.key] === "number"
+                            ? String(variableDraftModeOverrides[field.key])
+                            : ""
+                        }
+                        onChange={(event) => updateVariableDraftField(field.key, event.target.value)}
+                        placeholder="Leave blank for no explicit admin override"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <details className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-brand-navy">Raw code / JSON editor</summary>
+              <div className="mt-4 space-y-4">
+                <SectionJson title="Shared defaults" value={variablePolicy?.defaults?.[variableFamilyOpen] ?? null} />
+                <SectionJson title={`Resolved values for ${mode}`} value={variablePolicy?.effectiveByMode?.[mode]?.[variableFamilyOpen] ?? null} />
+                <SectionJson title="Current overrides" value={variablePolicy?.overrides?.[variableFamilyOpen] ?? {}} />
+                <label className="block text-sm text-slate-700">
+                  <div className="font-semibold text-brand-navy">Editable override JSON</div>
+                  <textarea
+                    className="mt-1 min-h-[220px] w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+                    value={variableDraft}
+                    onChange={(event) => setVariableDraft(event.target.value)}
+                  />
+                </label>
+              </div>
+            </details>
             <label className="block text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">
                 OVERRIDE field

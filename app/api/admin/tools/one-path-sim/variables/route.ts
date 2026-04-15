@@ -18,6 +18,16 @@ function isFamilyKey(value: unknown): value is FamilyKey {
   return typeof value === "string" && value in DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG;
 }
 
+function isModeBucketKey(value: unknown): value is "sharedDefaults" | "intervalOverrides" | "manualMonthlyOverrides" | "manualAnnualOverrides" | "newBuildOverrides" {
+  return (
+    value === "sharedDefaults" ||
+    value === "intervalOverrides" ||
+    value === "manualMonthlyOverrides" ||
+    value === "manualAnnualOverrides" ||
+    value === "newBuildOverrides"
+  );
+}
+
 export async function GET(request: NextRequest) {
   const gate = gateOnePathSimAdmin(request);
   if (gate) return gate;
@@ -54,9 +64,19 @@ export async function POST(request: NextRequest) {
     const existing = await getSimulationVariableOverrides();
     let nextOverrides: SimulationVariablePolicyOverrides = existing;
     if (isFamilyKey(body?.family)) {
+      const rawOverride = body?.override && typeof body.override === "object" ? (body.override as Record<string, unknown>) : {};
+      const familyOverride =
+        isModeBucketKey(body?.modeBucket) &&
+        !("sharedDefaults" in rawOverride) &&
+        !("intervalOverrides" in rawOverride) &&
+        !("manualMonthlyOverrides" in rawOverride) &&
+        !("manualAnnualOverrides" in rawOverride) &&
+        !("newBuildOverrides" in rawOverride)
+          ? { [body.modeBucket]: rawOverride }
+          : rawOverride;
       nextOverrides = {
         ...existing,
-        [body.family]: body?.override && typeof body.override === "object" ? (body.override as Record<string, unknown>) : {},
+        [body.family]: familyOverride,
       };
     } else if (body?.overrides && typeof body.overrides === "object") {
       nextOverrides = body.overrides as SimulationVariablePolicyOverrides;

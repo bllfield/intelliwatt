@@ -115,6 +115,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 - `modules/usageSimulator/dailyCurveCompareSummary.ts`
 - `modules/usageSimulator/profileDisplay.ts`
 - `modules/usageSimulator/simulationDataAlerts.ts`
+- `modules/usageSimulator/simulationVariablePresentation.ts`
 - `modules/usageSimulator/repo.ts`
 
 Mandatory enforcement rules:
