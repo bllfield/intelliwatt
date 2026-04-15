@@ -128,6 +128,7 @@ import {
   resolveSimFingerprintWithContext,
 } from "@/modules/usageSimulator/fingerprintOrchestration";
 import { createRecalcIntervalPreloadContext } from "@/modules/usageSimulator/recalcIntervalPreload";
+import { getSimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
 import {
   applyAdminLabTreatmentToResolvedFingerprint,
   isAdminLabManualConstraintTreatmentMode,
@@ -4179,6 +4180,7 @@ async function recalcSimulatorBuildImpl(args: {
 
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
+  const { effective: simulationVariablePolicy } = await getSimulationVariablePolicy();
   try {
     const shouldLoadWeatherSensitivityActualDataset =
       typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
@@ -4191,6 +4193,7 @@ async function recalcSimulatorBuildImpl(args: {
       homeProfile,
       applianceProfile,
       weatherHouseId: actualContextHouseId,
+      simulationVariablePolicy,
     });
     weatherSensitivityScore = weatherSensitivityEnvelope.score;
     weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput
@@ -5135,6 +5138,7 @@ async function recalcSimulatorBuildImpl(args: {
     manualBillPeriods: built.manualBillPeriods ?? [],
     manualBillPeriodTotalsKwhById: built.manualBillPeriodTotalsKwhById ?? null,
     sharedProducerPathUsed: shouldUseSharedPastProducer,
+    simulationVariablePolicy,
     ...(weatherEfficiencyDerivedInput ? { weatherEfficiencyDerivedInput } : {}),
     ...(pastSimulatedMonths != null ? { pastSimulatedMonths } : {}),
     snapshots: {

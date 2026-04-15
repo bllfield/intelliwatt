@@ -14,6 +14,7 @@ const getHomeProfileSimulatedByUserHouse = vi.fn();
 const getApplianceProfileSimulatedByUserHouse = vi.fn();
 const normalizeStoredApplianceProfile = vi.fn();
 const resolveSharedWeatherSensitivityEnvelope = vi.fn();
+const getTravelRangesFromDb = vi.fn();
 const adaptIntervalRawInput = vi.fn();
 const adaptManualMonthlyRawInput = vi.fn();
 const adaptManualAnnualRawInput = vi.fn();
@@ -59,6 +60,10 @@ vi.mock("@/modules/weatherSensitivity/shared", () => ({
   resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
 }));
 
+vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", () => ({
+  getTravelRangesFromDb: (...args: any[]) => getTravelRangesFromDb(...args),
+}));
+
 vi.mock("@/modules/usageSimulator/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
@@ -92,6 +97,7 @@ describe("admin one path sim route", () => {
     getApplianceProfileSimulatedByUserHouse.mockReset();
     normalizeStoredApplianceProfile.mockReset();
     resolveSharedWeatherSensitivityEnvelope.mockReset();
+    getTravelRangesFromDb.mockReset();
     adaptIntervalRawInput.mockReset();
     adaptManualMonthlyRawInput.mockReset();
     adaptManualAnnualRawInput.mockReset();
@@ -114,6 +120,7 @@ describe("admin one path sim route", () => {
     getApplianceProfileSimulatedByUserHouse.mockResolvedValue({ appliancesJson: { fuelConfiguration: "all_electric", appliances: [] } });
     normalizeStoredApplianceProfile.mockReturnValue({ fuelConfiguration: "all_electric", appliances: [] });
     resolveSharedWeatherSensitivityEnvelope.mockResolvedValue({ score: { scoringMode: "INTERVAL_BASED" }, derivedInput: null });
+    getTravelRangesFromDb.mockResolvedValue([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
     adaptIntervalRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "INTERVAL" });
     adaptManualMonthlyRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_MONTHLY" });
     adaptManualAnnualRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_ANNUAL" });
@@ -133,6 +140,7 @@ describe("admin one path sim route", () => {
     expect(json.selectedHouse.id).toBe("house-1");
     expect(json.sourceContext.actualDatasetSummary).toEqual({ totalKwh: 123 });
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
+    expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
   });
 
   it("routes interval runs through the shared adapter, producer, and read model", async () => {

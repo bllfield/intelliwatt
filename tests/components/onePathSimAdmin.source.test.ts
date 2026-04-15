@@ -32,5 +32,16 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("ManualUsageEntry");
     expect(source).toContain('fetch("/api/admin/tools/one-path-sim"');
     expect(source).toContain("render from the shared read model only");
+    expect(source).toContain("VALIDATION_SELECTION_OPTIONS");
+    expect(source).toContain('value: "random_simple"');
+    expect(source).toContain('value: "customer_style_seasonal_mix"');
+    expect(source).toContain('value: "stratified_weather_balanced"');
+    expect(source).toContain("<select");
+    expect(source).toContain("sourceContext?.travelRangesFromDb");
+    expect(source).toContain("Shared calculation variable popups");
+    expect(source).toContain("openVariableFamily");
+    expect(source).toContain("OVERRIDE field");
+    expect(source).toContain('fetch("/api/admin/tools/one-path-sim/variables"');
+    expect(source).toContain("Save shared override");
   });
 });

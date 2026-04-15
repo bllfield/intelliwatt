@@ -4,6 +4,7 @@
  */
 
 import type { WeatherEfficiencyDerivedInput } from "@/modules/weatherSensitivity/shared";
+import type { SimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
 
 /** Daily weather features for one day (shared shape). */
 export type PastDayWeatherFeatures = {
@@ -177,6 +178,7 @@ export type PastDaySimulationContext = {
   lowDataSyntheticDayKwhByMonthDayType?: Record<string, { weekday: number; weekend: number }> | null;
   lowDataWeatherEvidence?: PastLowDataWeatherEvidenceSummary | null;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 };
 
 /** Request to simulate one past day. */

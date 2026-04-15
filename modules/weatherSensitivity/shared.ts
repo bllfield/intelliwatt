@@ -2,6 +2,11 @@ import { buildManualBillPeriodTargets, buildManualBillPeriodTotalsById } from "@
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import {
+  DEFAULT_SIMULATION_VARIABLE_POLICY,
+  getSimulationVariablePolicy,
+  type SimulationVariablePolicy,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 
 const SCORE_VERSION = "weather-sensitivity-v1";
 const CALCULATION_VERSION = "weather-sensitivity-v1";
@@ -94,6 +99,7 @@ type SharedScoreArgs = {
   compareProjection?: Record<string, unknown> | null;
   homeProfile?: any;
   applianceProfile?: any;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 };
 
 type ResolveSharedScoreArgs = SharedScoreArgs & {
@@ -230,7 +236,7 @@ function buildFactorContext(homeProfile: any, applianceProfile: any): FactorCont
   };
 }
 
-function buildAdjustmentContext(factors: FactorContext) {
+function buildAdjustmentContext(factors: FactorContext, policy: SimulationVariablePolicy["weatherSensitivityScoring"]) {
   const requiredInputAdjustmentsApplied: string[] = [];
   let expectedCoolingFactor = 1;
   let expectedHeatingFactor = 1;
@@ -246,43 +252,46 @@ function buildAdjustmentContext(factors: FactorContext) {
     requiredInputAdjustmentsApplied.push("square_footage");
   }
   if (factors.occupantCount > 0 || factors.occupantsHomeAllDay > 0) {
-    const occupancyFactor = 1 + Math.min(factors.occupantCount, 6) * 0.04 + Math.min(factors.occupantsHomeAllDay, 3) * 0.06;
+    const occupancyFactor =
+      1 +
+      Math.min(factors.occupantCount, 6) * policy.occupancyCoolingPerOccupant +
+      Math.min(factors.occupantsHomeAllDay, 3) * policy.occupancyCoolingHomeAllDayPerOccupant;
     expectedCoolingFactor *= occupancyFactor;
-    expectedHeatingFactor *= 1 + Math.min(factors.occupantsHomeAllDay, 3) * 0.03;
+    expectedHeatingFactor *= 1 + Math.min(factors.occupantsHomeAllDay, 3) * policy.occupancyHeatingHomeAllDayPerOccupant;
     occupancyAdjustmentApplied = true;
     requiredInputAdjustmentsApplied.push("occupancy");
   }
   if (factors.heatingFuel) {
-    if (factors.heatingFuel.includes("gas")) expectedHeatingFactor *= 0.72;
-    else if (factors.heatingFuel.includes("electric")) expectedHeatingFactor *= 1.14;
-    else if (factors.heatingType.includes("heat_pump")) expectedHeatingFactor *= 0.95;
+    if (factors.heatingFuel.includes("gas")) expectedHeatingFactor *= policy.gasHeatingFactor;
+    else if (factors.heatingFuel.includes("electric")) expectedHeatingFactor *= policy.electricHeatingFactor;
+    else if (factors.heatingType.includes("heat_pump")) expectedHeatingFactor *= policy.heatPumpHeatingFactor;
     requiredInputAdjustmentsApplied.push("fuel_configuration");
   }
   if (factors.hasPool) {
-    expectedCoolingFactor *= 1.12 + Math.max(0, (factors.poolPumpHp ?? 0) - 1) * 0.04;
+    expectedCoolingFactor *= policy.poolCoolingBase + Math.max(0, (factors.poolPumpHp ?? 0) - 1) * policy.poolCoolingPerHp;
     poolAdjustmentApplied = true;
     requiredInputAdjustmentsApplied.push("pool");
   }
   if (factors.hasEv) {
-    expectedCoolingFactor *= 1.03;
-    expectedHeatingFactor *= 1.03;
+    expectedCoolingFactor *= policy.evCoolingFactor;
+    expectedHeatingFactor *= policy.evHeatingFactor;
     requiredInputAdjustmentsApplied.push("ev");
   }
   if (factors.hvacType || factors.heatingType || factors.hvacAgeYears != null || factors.hvacSeer != null) {
-    const agePenalty = factors.hvacAgeYears != null && factors.hvacAgeYears > 15 ? 1.08 : 1;
+    const agePenalty = factors.hvacAgeYears != null && factors.hvacAgeYears > 15 ? policy.hvacAgePenalty : 1;
     const seerFactor =
-      factors.hvacSeer == null ? 1 : factors.hvacSeer < 14 ? 1.1 : factors.hvacSeer >= 18 ? 0.93 : 1;
+      factors.hvacSeer == null ? 1 : factors.hvacSeer < 14 ? policy.hvacLowSeerFactor : factors.hvacSeer >= 18 ? policy.hvacHighSeerFactor : 1;
     expectedCoolingFactor *= agePenalty * seerFactor;
-    expectedHeatingFactor *= factors.heatingType.includes("resistance") ? 1.1 : 1;
+    expectedHeatingFactor *= factors.heatingType.includes("resistance") ? policy.electricResistanceHeatingFactor : 1;
     hvacAdjustmentApplied = true;
     requiredInputAdjustmentsApplied.push("hvac");
   }
   if (factors.thermostatSummerF != null || factors.thermostatWinterF != null) {
     if (factors.thermostatSummerF != null) {
-      expectedCoolingFactor *= 1 + Math.max(0, 74 - factors.thermostatSummerF) * 0.05;
+      expectedCoolingFactor *= 1 + Math.max(0, 74 - factors.thermostatSummerF) * policy.thermostatSummerPerDegree;
     }
     if (factors.thermostatWinterF != null) {
-      expectedHeatingFactor *= 1 + Math.max(0, factors.thermostatWinterF - 68) * 0.04;
+      expectedHeatingFactor *= 1 + Math.max(0, factors.thermostatWinterF - 68) * policy.thermostatWinterPerDegree;
     }
     thermostatAdjustmentApplied = true;
     requiredInputAdjustmentsApplied.push("thermostat");
@@ -299,14 +308,17 @@ function buildAdjustmentContext(factors: FactorContext) {
   };
 }
 
-function computeBaseline(points: FitPoint[]): { baseline: number; shoulderPoints: number } {
-  const shoulder = points.filter((point) => point.hdd65 <= 3 && point.cdd65 <= 3);
+function computeBaseline(
+  points: FitPoint[],
+  policy: SimulationVariablePolicy["weatherSensitivityScoring"]
+): { baseline: number; shoulderPoints: number } {
+  const shoulder = points.filter((point) => point.hdd65 <= policy.shoulderDegreeThreshold && point.cdd65 <= policy.shoulderDegreeThreshold);
   const basis =
     shoulder.length > 0
       ? shoulder
       : [...points]
           .sort((a, b) => a.hdd65 + a.cdd65 - (b.hdd65 + b.cdd65))
-          .slice(0, Math.max(1, Math.ceil(points.length * 0.25)));
+          .slice(0, Math.max(1, Math.ceil(points.length * policy.baselineFallbackSliceFraction)));
   const baseline = basis.reduce((sum, point) => sum + point.kwhPerDay, 0) / Math.max(1, basis.length);
   return { baseline: round2(baseline), shoulderPoints: basis.length };
 }
@@ -336,8 +348,8 @@ function computeSlope(points: FitPoint[], degreeKey: "hdd65" | "cdd65", baseline
   };
 }
 
-function computeFit(points: FitPoint[]): FitSummary {
-  const { baseline, shoulderPoints } = computeBaseline(points);
+function computeFit(points: FitPoint[], policy: SimulationVariablePolicy["weatherSensitivityScoring"]): FitSummary {
+  const { baseline, shoulderPoints } = computeBaseline(points, policy);
   const cooling = computeSlope(points.filter((point) => point.cdd65 > 0), "cdd65", baseline);
   const heating = computeSlope(points.filter((point) => point.hdd65 > 0), "hdd65", baseline);
   return {
@@ -385,42 +397,47 @@ function finalizeScore(args: {
   excludedTravelDayCount?: number;
   excludedTravelBillPeriodCount?: number;
   excludedIncompleteMeterDayCount: number;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 }): WeatherSensitivityScore {
-  const adjustments = buildAdjustmentContext(args.factors);
-  const expectedCoolingSlope = round2(0.75 * adjustments.expectedCoolingFactor);
-  const expectedHeatingSlope = round2(0.6 * adjustments.expectedHeatingFactor);
+  const policy = args.simulationVariablePolicy?.weatherSensitivityScoring ?? DEFAULT_SIMULATION_VARIABLE_POLICY.weatherSensitivityScoring;
+  const adjustments = buildAdjustmentContext(args.factors, policy);
+  const expectedCoolingSlope = round2(policy.expectedCoolingSlopeBase * adjustments.expectedCoolingFactor);
+  const expectedHeatingSlope = round2(policy.expectedHeatingSlopeBase * adjustments.expectedHeatingFactor);
   const coolingResponseRatio = expectedCoolingSlope > 0 ? round2(args.fit.coolingSlope / expectedCoolingSlope) : 0;
   const heatingResponseRatio = expectedHeatingSlope > 0 ? round2(args.fit.heatingSlope / expectedHeatingSlope) : 0;
   const coolingSensitivityScore0to100 = clamp(
-    Math.round(coolingResponseRatio * 42 + args.fit.coolingShare * 35),
+    Math.round(coolingResponseRatio * policy.responseRatioScoreWeight + args.fit.coolingShare * policy.weatherShareScoreWeight),
     0,
     100
   );
   const heatingSensitivityScore0to100 = clamp(
-    Math.round(heatingResponseRatio * 42 + args.fit.heatingShare * 35),
+    Math.round(heatingResponseRatio * policy.responseRatioScoreWeight + args.fit.heatingShare * policy.weatherShareScoreWeight),
     0,
     100
   );
   const estimatedWeatherDrivenLoadShare = round2(clamp(Math.max(args.fit.coolingShare, args.fit.heatingShare), 0, 1));
   const estimatedBaseloadShare = round2(clamp(1 - estimatedWeatherDrivenLoadShare, 0, 1));
   const eligibleCount = Math.max(args.eligibleActualDayCount ?? 0, args.eligibleBillPeriodCount ?? 0);
-  const coverageScore = clamp(eligibleCount * 6, 0, 55);
-  const seasonScore = (args.fit.coolingPoints > 0 ? 15 : 0) + (args.fit.heatingPoints > 0 ? 15 : 0) + (args.fit.shoulderPoints > 0 ? 10 : 0);
+  const coverageScore = clamp(eligibleCount * policy.coverageScorePerPoint, 0, policy.coverageScoreMax);
+  const seasonScore =
+    (args.fit.coolingPoints > 0 ? policy.seasonPresenceScorePerBucket : 0) +
+    (args.fit.heatingPoints > 0 ? policy.seasonPresenceScorePerBucket : 0) +
+    (args.fit.shoulderPoints > 0 ? policy.shoulderPresenceScore : 0);
   const factorCompletenessScore =
-    (args.factors.squareFeet != null ? 5 : 0) +
-    (args.factors.hvacType || args.factors.heatingType ? 5 : 0) +
-    (args.factors.thermostatSummerF != null || args.factors.thermostatWinterF != null ? 5 : 0) +
-    (args.factors.heatingFuel !== "unknown" ? 5 : 0);
+    (args.factors.squareFeet != null ? policy.factorCompletenessScorePerField : 0) +
+    (args.factors.hvacType || args.factors.heatingType ? policy.factorCompletenessScorePerField : 0) +
+    (args.factors.thermostatSummerF != null || args.factors.thermostatWinterF != null ? policy.factorCompletenessScorePerField : 0) +
+    (args.factors.heatingFuel !== "unknown" ? policy.factorCompletenessScorePerField : 0);
   const confidenceScore0to100 = clamp(Math.round(coverageScore + seasonScore + factorCompletenessScore), 0, 100);
   const inefficiencyPenalty =
-    Math.max(coolingResponseRatio - 1, 0) * 20 +
-    Math.max(heatingResponseRatio - 1, 0) * 20 +
-    estimatedWeatherDrivenLoadShare * 22 +
-    Math.max(0, 60 - confidenceScore0to100) * 0.2;
+    Math.max(coolingResponseRatio - 1, 0) * policy.inefficiencyResponsePenaltyWeight +
+    Math.max(heatingResponseRatio - 1, 0) * policy.inefficiencyResponsePenaltyWeight +
+    estimatedWeatherDrivenLoadShare * policy.inefficiencyWeatherSharePenaltyWeight +
+    Math.max(0, 60 - confidenceScore0to100) * policy.inefficiencyLowConfidencePenaltyWeight;
   const weatherEfficiencyScore0to100 = clamp(Math.round(88 - inefficiencyPenalty), 0, 100);
   const appearsWeatherSensitive =
-    weatherEfficiencyScore0to100 <= 45 || coolingSensitivityScore0to100 >= 70 || heatingSensitivityScore0to100 >= 70;
-  const confidenceLimited = confidenceScore0to100 < 55;
+    weatherEfficiencyScore0to100 <= policy.appearsSensitiveEfficiencyThreshold || coolingSensitivityScore0to100 >= 70 || heatingSensitivityScore0to100 >= 70;
+  const confidenceLimited = confidenceScore0to100 < policy.confidenceLimitedThreshold;
   const needsMoreApplianceDetail = appearsWeatherSensitive && confidenceLimited && !args.factors.applianceDetailRich;
   const needsEnvelopeDetail = appearsWeatherSensitive && (!args.factors.insulationKnown || !args.factors.windowsKnown);
   const nextDetailPromptType =
@@ -500,7 +517,7 @@ function buildIntervalBasedScore(args: SharedScoreArgs, factors: FactorContext):
     points.push({ kwhPerDay: kwh, tAvgF, hdd65, cdd65 });
   }
   if (points.length < 3) return null;
-  const fit = computeFit(points);
+  const fit = computeFit(points, (args.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY).weatherSensitivityScoring);
   return finalizeScore({
     scoringMode: "INTERVAL_BASED",
     fit,
@@ -509,6 +526,7 @@ function buildIntervalBasedScore(args: SharedScoreArgs, factors: FactorContext):
     excludedSimulatedDayCount,
     excludedTravelDayCount,
     excludedIncompleteMeterDayCount,
+    simulationVariablePolicy: args.simulationVariablePolicy,
   });
 }
 
@@ -548,7 +566,7 @@ function buildBillingPeriodBasedScore(args: SharedScoreArgs, factors: FactorCont
     });
   }
   if (points.length === 0) return null;
-  const fit = computeFit(points);
+  const fit = computeFit(points, (args.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY).weatherSensitivityScoring);
   return finalizeScore({
     scoringMode: "BILLING_PERIOD_BASED",
     fit,
@@ -557,6 +575,7 @@ function buildBillingPeriodBasedScore(args: SharedScoreArgs, factors: FactorCont
     excludedTravelBillPeriodCount,
     excludedSimulatedDayCount: 0,
     excludedIncompleteMeterDayCount: 0,
+    simulationVariablePolicy: args.simulationVariablePolicy,
   });
 }
 
@@ -628,9 +647,11 @@ async function maybeLoadWeatherRecord(args: ResolveSharedScoreArgs): Promise<Rec
 export async function resolveSharedWeatherSensitivityEnvelope(
   args: ResolveSharedScoreArgs
 ): Promise<WeatherSensitivityEnvelope> {
+  const simulationVariablePolicy = args.simulationVariablePolicy ?? (await getSimulationVariablePolicy()).effective;
   const dailyWeather = await maybeLoadWeatherRecord(args);
   const score = buildSharedWeatherSensitivityScore({
     ...args,
+    simulationVariablePolicy,
     dailyWeather,
   });
   return {

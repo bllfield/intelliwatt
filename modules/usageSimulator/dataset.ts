@@ -13,6 +13,7 @@ import type {
 import { buildUniformMonthlyTotalsFromAnnualWindow } from "@/modules/usageSimulator/build";
 import type { ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
+import type { SimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
 import type {
   WeatherEfficiencyDerivedInput,
   WeatherSensitivityScore,
@@ -931,6 +932,7 @@ export type SimulatorBuildInputsV1 = {
   manualBillPeriodTotalsKwhById?: Record<string, number> | null;
   sharedProducerPathUsed?: boolean;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
   // Snapshots (for auditing / future UI): not required for regen.
   snapshots?: {
     manualUsagePayload?: any;

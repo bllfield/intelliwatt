@@ -23,6 +23,10 @@ import type {
   PastWeatherDonorContribution,
   PastLowDataWeatherEvidenceMonth,
 } from "./pastDaySimulatorTypes";
+import {
+  DEFAULT_SIMULATION_VARIABLE_POLICY,
+  type SimulationVariablePolicy,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
 export type { PastDaySimulationContext, PastDaySimulationRequest, PastDaySimulationResult, SimulatedDayResult } from "./pastDaySimulatorTypes";
@@ -91,6 +95,7 @@ function parseLocalDayOfMonth(localDate: string): number | null {
 function weightedNeighborDayKwh(args: {
   targetDayOfMonth: number | null;
   samples: PastNeighborDaySample[] | undefined;
+  policy: SimulationVariablePolicy["pastDayCore"];
 }): number | null {
   const dom = args.targetDayOfMonth;
   if (dom == null || !Array.isArray(args.samples) || args.samples.length === 0) return null;
@@ -100,13 +105,13 @@ function weightedNeighborDayKwh(args: {
       const dayKwh = Number(s?.dayKwh);
       if (!Number.isFinite(sampleDom) || !Number.isFinite(dayKwh) || dayKwh <= 0) return null;
       const dist = Math.abs(sampleDom - dom);
-      if (dist > NEIGHBOR_DOM_RADIUS) return null;
+      if (dist > args.policy.neighborDomRadius) return null;
       const weight = 1 / (1 + dist);
       return { weight, dayKwh };
     })
     .filter((x): x is { weight: number; dayKwh: number } => Boolean(x))
     .sort((a, b) => b.weight - a.weight);
-  if (scored.length < MIN_DAYS_NEIGHBOR_DAYTYPE) return null;
+  if (scored.length < args.policy.minDaysNeighborDayType) return null;
   const wSum = scored.reduce((s, r) => s + r.weight, 0);
   if (!Number.isFinite(wSum) || wSum <= 0) return null;
   const kwh = scored.reduce((s, r) => s + r.dayKwh * r.weight, 0) / wSum;
@@ -128,7 +133,8 @@ type SharedWeatherShapeModifier = {
 
 function resolveSharedWeatherShapeModifier(
   derivedInput: PastDaySimulationContext["weatherEfficiencyDerivedInput"],
-  weatherModeUsed: "heating" | "cooling" | "neutral"
+  weatherModeUsed: "heating" | "cooling" | "neutral",
+  policy: SimulationVariablePolicy["weatherShaping"]
 ): SharedWeatherShapeModifier {
   if (!derivedInput || derivedInput.simulationActive !== true || weatherModeUsed === "neutral") {
     return {
@@ -152,19 +158,63 @@ function resolveSharedWeatherShapeModifier(
     return {
       applied: true,
       weatherShapingMode: "interval_based_shared_modifier",
-      weatherAmplitudeCompressionFactor: clampNumber(0.78 + confidence * 0.18 + (responseScale - 0.35) * 0.04, 0.78, 1),
-      intradayPeakValleyCompressionFactor: clampNumber(0.88 + confidence * 0.1, 0.88, 1),
-      weatherResponsivenessScale: clampNumber(0.72 + loadShare * 0.2 + scoreScale * 0.12, 0.72, 1.05),
-      dailyExtremaConfidence: clampNumber(0.68 + confidence * 0.32, 0.68, 1),
+      weatherAmplitudeCompressionFactor: clampNumber(
+        policy.intervalAmplitudeBase +
+          confidence * policy.intervalAmplitudeConfidenceWeight +
+          (responseScale - 0.35) * policy.intervalAmplitudeResponseWeight,
+        policy.intervalAmplitudeBase,
+        1
+      ),
+      intradayPeakValleyCompressionFactor: clampNumber(
+        policy.intervalPeakValleyBase + confidence * policy.intervalPeakValleyConfidenceWeight,
+        policy.intervalPeakValleyBase,
+        1
+      ),
+      weatherResponsivenessScale: clampNumber(
+        policy.intervalResponsivenessBase +
+          loadShare * policy.intervalResponsivenessLoadShareWeight +
+          scoreScale * policy.intervalResponsivenessScoreWeight,
+        policy.intervalResponsivenessBase,
+        1.05
+      ),
+      dailyExtremaConfidence: clampNumber(
+        policy.intervalDailyExtremaBase + confidence * policy.intervalDailyExtremaConfidenceWeight,
+        policy.intervalDailyExtremaBase,
+        1
+      ),
     };
   }
   return {
     applied: true,
     weatherShapingMode: "billing_period_compressed_shared_modifier",
-    weatherAmplitudeCompressionFactor: clampNumber(0.42 + confidence * 0.18 + loadShare * 0.12 + scoreScale * 0.08, 0.42, 0.78),
-    intradayPeakValleyCompressionFactor: clampNumber(0.58 + confidence * 0.12 + loadShare * 0.08, 0.58, 0.82),
-    weatherResponsivenessScale: clampNumber(0.38 + loadShare * 0.18 + confidence * 0.14 + scoreScale * 0.08, 0.38, 0.78),
-    dailyExtremaConfidence: clampNumber(0.35 + confidence * 0.22, 0.35, 0.7),
+    weatherAmplitudeCompressionFactor: clampNumber(
+      policy.billingAmplitudeBase +
+        confidence * policy.billingAmplitudeConfidenceWeight +
+        loadShare * policy.billingAmplitudeLoadShareWeight +
+        scoreScale * policy.billingAmplitudeScoreWeight,
+      policy.billingAmplitudeBase,
+      0.78
+    ),
+    intradayPeakValleyCompressionFactor: clampNumber(
+      policy.billingPeakValleyBase +
+        confidence * policy.billingPeakValleyConfidenceWeight +
+        loadShare * policy.billingPeakValleyLoadShareWeight,
+      policy.billingPeakValleyBase,
+      0.82
+    ),
+    weatherResponsivenessScale: clampNumber(
+      policy.billingResponsivenessBase +
+        loadShare * policy.billingResponsivenessLoadShareWeight +
+        confidence * policy.billingResponsivenessConfidenceWeight +
+        scoreScale * policy.billingResponsivenessScoreWeight,
+      policy.billingResponsivenessBase,
+      0.78
+    ),
+    dailyExtremaConfidence: clampNumber(
+      policy.billingDailyExtremaBase + confidence * policy.billingDailyExtremaConfidenceWeight,
+      policy.billingDailyExtremaBase,
+      0.7
+    ),
   };
 }
 
@@ -198,11 +248,14 @@ function dayTypeKeyFromWeekend(isWeekend: boolean): PastDayTypeKey {
   return isWeekend ? "weekend" : "weekday";
 }
 
-function weatherRegimeFromWeather(wx: PastDayWeatherFeatures | null | undefined): PastWeatherRegimeKey {
+function weatherRegimeFromWeather(
+  wx: PastDayWeatherFeatures | null | undefined,
+  policy: SimulationVariablePolicy["pastDayCore"]
+): PastWeatherRegimeKey {
   const heating = Math.max(0, Number(wx?.heatingDegreeSeverity) || 0);
   const cooling = Math.max(0, Number(wx?.coolingDegreeSeverity) || 0);
-  if (heating > cooling && heating > WEATHER_SEVERITY_THRESHOLD) return "heating";
-  if (cooling > heating && cooling > WEATHER_SEVERITY_THRESHOLD) return "cooling";
+  if (heating > cooling && heating > policy.weatherSeverityThreshold) return "heating";
+  if (cooling > heating && cooling > policy.weatherSeverityThreshold) return "cooling";
   return "neutral";
 }
 
@@ -235,6 +288,7 @@ function weatherDistanceScore(args: {
   targetMonthKey: string;
   targetDayOfMonth: number | null;
   targetRegime: PastWeatherRegimeKey;
+  policy: SimulationVariablePolicy["pastDayCore"];
 }): number {
   const targetSpread = spreadForWeather(args.target) ?? 0;
   const donorSpread = Number(args.donor.tempSpreadC);
@@ -249,12 +303,37 @@ function weatherDistanceScore(args: {
   const domDiff = Math.abs((donorDayOfMonth ?? 15) - (args.targetDayOfMonth ?? 15));
 
   if (args.targetRegime === "heating") {
-    return heatingDiff * 3.4 + minDiff * 1.1 + avgDiff * 0.45 + maxDiff * 0.18 + spreadDiff * 0.12 + monthDiff * 0.28 + domDiff * 0.03;
+    return (
+      heatingDiff * args.policy.heatingDistanceHeatingDiffWeight +
+      minDiff * args.policy.heatingDistanceMinTempWeight +
+      avgDiff * args.policy.heatingDistanceAvgTempWeight +
+      maxDiff * args.policy.heatingDistanceMaxTempWeight +
+      spreadDiff * args.policy.heatingDistanceSpreadWeight +
+      monthDiff * args.policy.heatingDistanceMonthWeight +
+      domDiff * args.policy.heatingDistanceDayOfMonthWeight
+    );
   }
   if (args.targetRegime === "cooling") {
-    return coolingDiff * 3.1 + avgDiff * 0.75 + maxDiff * 0.45 + minDiff * 0.2 + spreadDiff * 0.18 + monthDiff * 0.32 + domDiff * 0.03;
+    return (
+      coolingDiff * args.policy.coolingDistanceCoolingDiffWeight +
+      avgDiff * args.policy.coolingDistanceAvgTempWeight +
+      maxDiff * args.policy.coolingDistanceMaxTempWeight +
+      minDiff * args.policy.coolingDistanceMinTempWeight +
+      spreadDiff * args.policy.coolingDistanceSpreadWeight +
+      monthDiff * args.policy.coolingDistanceMonthWeight +
+      domDiff * args.policy.coolingDistanceDayOfMonthWeight
+    );
   }
-  return avgDiff * 0.95 + spreadDiff * 0.28 + maxDiff * 0.3 + minDiff * 0.3 + heatingDiff * 0.8 + coolingDiff * 0.8 + monthDiff * 0.35 + domDiff * 0.04;
+  return (
+    avgDiff * args.policy.neutralDistanceAvgTempWeight +
+    spreadDiff * args.policy.neutralDistanceSpreadWeight +
+    maxDiff * args.policy.neutralDistanceMaxTempWeight +
+    minDiff * args.policy.neutralDistanceMinTempWeight +
+    heatingDiff * args.policy.neutralDistanceHeatingWeight +
+    coolingDiff * args.policy.neutralDistanceCoolingWeight +
+    monthDiff * args.policy.neutralDistanceMonthWeight +
+    domDiff * args.policy.neutralDistanceDayOfMonthWeight
+  );
 }
 
 function selectWeatherSimilarDonor(args: {
@@ -263,6 +342,7 @@ function selectWeatherSimilarDonor(args: {
   isWeekend: boolean;
   weatherForDay: PastDayWeatherFeatures | null;
   weatherDonorSamples?: PastWeatherDonorSample[] | null;
+  policy: SimulationVariablePolicy["pastDayCore"];
 }):
   | {
       targetDayKwh: number;
@@ -287,19 +367,19 @@ function selectWeatherSimilarDonor(args: {
   const weatherForDay = args.weatherForDay;
   if (!weatherForDay || !Array.isArray(args.weatherDonorSamples) || args.weatherDonorSamples.length === 0) return null;
   const dayType = dayTypeKeyFromWeekend(args.isWeekend);
-  const targetRegime = weatherRegimeFromWeather(weatherForDay);
+  const targetRegime = weatherRegimeFromWeather(weatherForDay, args.policy);
   const targetDayOfMonth = parseLocalDayOfMonth(args.localDate);
   const sameDayType = args.weatherDonorSamples.filter(
     (sample) => sample.dayType === dayType && Number(sample.dayKwh) > 0
   );
-  if (sameDayType.length < MIN_DAYS_WEATHER_DONOR_SAME_DAYTYPE) return null;
+  if (sameDayType.length < args.policy.minDaysWeatherDonorSameDayType) return null;
   const sameRegime = sameDayType.filter((sample) => sample.weatherRegime === targetRegime);
   const candidatePool =
-    sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME
+    sameRegime.length >= args.policy.minDaysWeatherDonorSameRegime
       ? sameRegime
       : sameDayType;
-  const sameRegimeDonorPoolAvailable = sameRegime.length >= MIN_DAYS_WEATHER_DONOR_SAME_REGIME;
-  if (candidatePool.length < MIN_DAYS_WEATHER_DONOR_SAME_DAYTYPE) return null;
+  const sameRegimeDonorPoolAvailable = sameRegime.length >= args.policy.minDaysWeatherDonorSameRegime;
+  if (candidatePool.length < args.policy.minDaysWeatherDonorSameDayType) return null;
 
   const scored = candidatePool
     .map((donor) => ({
@@ -310,14 +390,15 @@ function selectWeatherSimilarDonor(args: {
         targetMonthKey: args.monthKey,
         targetDayOfMonth,
         targetRegime,
+          policy: args.policy,
       }),
     }))
     .sort((a, b) => a.distance - b.distance || a.donor.localDate.localeCompare(b.donor.localDate));
   if (scored.length === 0) return null;
-  const picked = scored.slice(0, Math.min(WEATHER_DONOR_PICK_COUNT, scored.length));
+  const picked = scored.slice(0, Math.min(args.policy.weatherDonorPickCount, scored.length));
   const weightedBase = picked.map((entry) => ({
     ...entry,
-    weight: 1 / Math.pow(0.35 + Math.max(0, entry.distance), 2),
+    weight: 1 / Math.pow(args.policy.weatherDonorDistanceWeightBase + Math.max(0, entry.distance), 2),
   }));
   const donorDayKwhs = picked.map((entry) => Number(entry.donor.dayKwh) || 0).filter((value) => value > 0);
   const donorPoolMedianKwh = medianOfNumbers(donorDayKwhs);
@@ -334,12 +415,13 @@ function selectWeatherSimilarDonor(args: {
       : 0;
   const donorVarianceGuardrailTriggered =
     picked.length >= 3 &&
-    (donorCv > DONOR_VARIANCE_CV_TRIGGER || donorSpreadRatio > DONOR_SPREAD_TO_MEDIAN_TRIGGER);
+    (donorCv > args.policy.donorVarianceCvTrigger || donorSpreadRatio > args.policy.donorSpreadToMedianTrigger);
   const weighted = weightedBase.map((entry) => ({
     ...entry,
     adjustedDayKwh:
       donorVarianceGuardrailTriggered && donorPoolMedianKwh != null
-        ? (Number(entry.donor.dayKwh) || 0) * 0.7 + donorPoolMedianKwh * 0.3
+        ? (Number(entry.donor.dayKwh) || 0) * args.policy.weatherDonorVarianceBlendWeight +
+          donorPoolMedianKwh * args.policy.weatherDonorMedianBlendWeight
         : Number(entry.donor.dayKwh) || 0,
   }));
   const weightSum = weighted.reduce((sum, entry) => sum + entry.weight, 0);
@@ -410,6 +492,7 @@ function selectPastDayTotalWithFallback(args: {
     weekendByMonth?: Record<string, PastNeighborDaySample[]> | null;
   } | null;
   weatherDonorSamples?: PastDaySimulationContext["weatherDonorSamples"];
+  policy: SimulationVariablePolicy["pastDayCore"];
 }): {
   targetDayKwh: number;
   fallbackLevel: PastDayFallbackLevel;
@@ -487,7 +570,7 @@ function selectPastDayTotalWithFallback(args: {
   const neighborSamples = isWeekend
     ? (neighborDayTotals?.weekendByMonth?.[monthKey] ?? [])
     : (neighborDayTotals?.weekdayByMonth?.[monthKey] ?? []);
-  const neighborKwh = weightedNeighborDayKwh({ targetDayOfMonth: dom, samples: neighborSamples });
+  const neighborKwh = weightedNeighborDayKwh({ targetDayOfMonth: dom, samples: neighborSamples, policy: args.policy });
   const weatherDonorSelection =
     args.modeledDaySelectionStrategy === "weather_donor_first"
       ? selectWeatherSimilarDonor({
@@ -496,6 +579,7 @@ function selectPastDayTotalWithFallback(args: {
           isWeekend,
           weatherForDay: args.weatherForDay,
           weatherDonorSamples: args.weatherDonorSamples,
+          policy: args.policy,
         })
       : null;
 
@@ -520,7 +604,7 @@ function selectPastDayTotalWithFallback(args: {
   } else if (neighborKwh != null && Number.isFinite(neighborKwh) && neighborKwh > 0) {
     rawKwh = neighborKwh;
     level = "month_daytype_neighbor";
-  } else if (sameDayTypeCount >= MIN_DAYS_MONTH_DAYTYPE && Number.isFinite(dayTypeAvg) && dayTypeAvg > 0) {
+  } else if (sameDayTypeCount >= args.policy.minDaysMonthDayType && Number.isFinite(dayTypeAvg) && dayTypeAvg > 0) {
     rawKwh = dayTypeAvg;
     level = "month_daytype";
   } else {
@@ -535,12 +619,12 @@ function selectPastDayTotalWithFallback(args: {
       prevIdx >= 0 ? (isWeekend ? avgKwhPerDayWeekendByMonth[prevIdx] : avgKwhPerDayWeekdayByMonth[prevIdx]) : 0;
     const nextAvg =
       nextIdx >= 0 ? (isWeekend ? avgKwhPerDayWeekendByMonth[nextIdx] : avgKwhPerDayWeekdayByMonth[nextIdx]) : 0;
-    if (adjCount >= MIN_DAYS_ADJACENT && (Number.isFinite(prevAvg) || Number.isFinite(nextAvg))) {
+    if (adjCount >= args.policy.minDaysAdjacent && (Number.isFinite(prevAvg) || Number.isFinite(nextAvg))) {
       const total = prevDayTypeCount + nextDayTypeCount;
       rawKwh =
         total > 0 ? ((prevAvg ?? 0) * prevDayTypeCount + (nextAvg ?? 0) * nextDayTypeCount) / total : globalAvgDayType;
       level = "adjacent_month_daytype";
-    } else if ((monthOverallCountByMonth[monthKey] ?? 0) >= MIN_DAYS_MONTH_OVERALL) {
+    } else if ((monthOverallCountByMonth[monthKey] ?? 0) >= args.policy.minDaysMonthOverall) {
       rawKwh = monthOverallAvgByMonth[monthKey] ?? globalOverallAvg;
       level = "month_overall";
     } else {
@@ -549,7 +633,7 @@ function selectPastDayTotalWithFallback(args: {
         (s, k) => s + (weekdayCountByMonth[k] ?? 0) + (weekendCountByMonth[k] ?? 0),
         0
       );
-      if (seasonCount >= MIN_DAYS_SEASON) {
+      if (seasonCount >= args.policy.minDaysSeason) {
         let sum = 0;
         let cnt = 0;
         for (const k of seasonKeys) {
@@ -561,7 +645,7 @@ function selectPastDayTotalWithFallback(args: {
         }
         rawKwh = cnt > 0 ? sum / cnt : globalOverallAvg;
         level = "season_overall";
-      } else if (globalCountDayType >= MIN_DAYS_GLOBAL_DAYTYPE) {
+      } else if (globalCountDayType >= args.policy.minDaysGlobalDayType) {
         rawKwh = globalAvgDayType;
         level = "global_daytype";
       } else {
@@ -574,11 +658,11 @@ function selectPastDayTotalWithFallback(args: {
   let targetDayKwh = rawKwh;
   let clampApplied = false;
   if (Number.isFinite(globalAvgDayType) && globalAvgDayType > 1e-6) {
-    if (rawKwh > globalAvgDayType * GUARDRAIL_MAX_MULT) {
-      targetDayKwh = globalAvgDayType * GUARDRAIL_MAX_MULT;
+    if (rawKwh > globalAvgDayType * args.policy.guardrailMaxMult) {
+      targetDayKwh = globalAvgDayType * args.policy.guardrailMaxMult;
       clampApplied = true;
-    } else if (rawKwh < globalAvgDayType * GUARDRAIL_MIN_MULT) {
-      targetDayKwh = globalAvgDayType * GUARDRAIL_MIN_MULT;
+    } else if (rawKwh < globalAvgDayType * args.policy.guardrailMinMult) {
+      targetDayKwh = globalAvgDayType * args.policy.guardrailMinMult;
       clampApplied = true;
     }
   }
@@ -618,6 +702,7 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
   weatherForDay: PastDayWeatherFeatures | null;
   monthEvidence: PastLowDataWeatherEvidenceMonth | null;
   weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 }): {
   finalSelectedDayKwh: number;
   weatherSeverityMultiplier: number;
@@ -652,10 +737,13 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
     };
   }
 
-  const baseloadShare = clampNumber(Number(evidence.baseloadShare) || 0, 0.15, 0.92);
-  const hvacShare = clampNumber(Number(evidence.hvacShare) || 0, 0.08, 0.85);
-  const heatingSensitivity = clampNumber(Number(evidence.heatingSensitivity) || 0, 0, 1.8);
-  const coolingSensitivity = clampNumber(Number(evidence.coolingSensitivity) || 0, 0, 1.8);
+  const lowDataPolicy = args.simulationVariablePolicy?.lowDataWeatherEvidence ?? DEFAULT_SIMULATION_VARIABLE_POLICY.lowDataWeatherEvidence;
+  const weatherShapingPolicy = args.simulationVariablePolicy?.weatherShaping ?? DEFAULT_SIMULATION_VARIABLE_POLICY.weatherShaping;
+  const pastDayPolicy = args.simulationVariablePolicy?.pastDayCore ?? DEFAULT_SIMULATION_VARIABLE_POLICY.pastDayCore;
+  const baseloadShare = clampNumber(Number(evidence.baseloadShare) || 0, lowDataPolicy.lowDataDayBaseloadShareMin, lowDataPolicy.lowDataDayBaseloadShareMax);
+  const hvacShare = clampNumber(Number(evidence.hvacShare) || 0, lowDataPolicy.lowDataDayHvacShareMin, lowDataPolicy.lowDataDayHvacShareMax);
+  const heatingSensitivity = clampNumber(Number(evidence.heatingSensitivity) || 0, lowDataPolicy.lowDataDaySensitivityMin, lowDataPolicy.lowDataDaySensitivityMax);
+  const coolingSensitivity = clampNumber(Number(evidence.coolingSensitivity) || 0, lowDataPolicy.lowDataDaySensitivityMin, lowDataPolicy.lowDataDaySensitivityMax);
   const referenceDailyHdd = Math.max(0, Number(evidence.referenceDailyHdd) || 0);
   const referenceDailyCdd = Math.max(0, Number(evidence.referenceDailyCdd) || 0);
 
@@ -675,8 +763,8 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
         ? "cooling"
         : "neutral";
   const dayClassification: PastDayWeatherClassification =
-    Math.abs((baseDayKwh > 1e-6 ? preBlendAdjustedDayKwh / baseDayKwh : 1) - 1) >= 0.035 ? "weather_scaled_day" : "normal_day";
-  const modifier = resolveSharedWeatherShapeModifier(args.weatherEfficiencyDerivedInput ?? null, weatherModeUsed);
+    Math.abs((baseDayKwh > 1e-6 ? preBlendAdjustedDayKwh / baseDayKwh : 1) - 1) >= lowDataPolicy.lowDataScaledDayThreshold ? "weather_scaled_day" : "normal_day";
+  const modifier = resolveSharedWeatherShapeModifier(args.weatherEfficiencyDerivedInput ?? null, weatherModeUsed, weatherShapingPolicy);
   const adjustedForDerivedInput = applySharedWeatherAdjustedDayTotal({
     baseDayKwh,
     adjustedDayKwh: preBlendAdjustedDayKwh,
@@ -685,7 +773,7 @@ function computeLowDataWeatherAdjustedDayTotal(args: {
   const weatherSeverityMultiplier = baseDayKwh > 1e-6 ? adjustedForDerivedInput / baseDayKwh : 1;
   const finalSelectedDayKwh =
     dayClassification === "weather_scaled_day"
-      ? baseDayKwh * WEATHER_SCALED_PROFILE_ANCHOR_FRAC + adjustedForDerivedInput * (1 - WEATHER_SCALED_PROFILE_ANCHOR_FRAC)
+      ? baseDayKwh * pastDayPolicy.weatherScaledProfileAnchorFrac + adjustedForDerivedInput * (1 - pastDayPolicy.weatherScaledProfileAnchorFrac)
       : baseDayKwh;
 
   return {
@@ -710,20 +798,27 @@ function applyLowDataShapeWeatherAmplitude(args: {
   weatherSeverityMultiplier: number;
   monthEvidence: PastLowDataWeatherEvidenceMonth | null;
   weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 }): number[] {
   const normalized = normalizeShape96Weights(args.shape96);
   if (args.weatherRegime === "neutral" || !args.monthEvidence) return normalized;
-  const hvacShare = clampNumber(Number(args.monthEvidence.hvacShare) || 0, 0.08, 0.85);
-  const baseloadShare = clampNumber(Number(args.monthEvidence.baseloadShare) || 0, 0.15, 0.92);
+  const lowDataPolicy = args.simulationVariablePolicy?.lowDataWeatherEvidence ?? DEFAULT_SIMULATION_VARIABLE_POLICY.lowDataWeatherEvidence;
+  const weatherShapingPolicy = args.simulationVariablePolicy?.weatherShaping ?? DEFAULT_SIMULATION_VARIABLE_POLICY.weatherShaping;
+  const hvacShare = clampNumber(Number(args.monthEvidence.hvacShare) || 0, lowDataPolicy.lowDataDayHvacShareMin, lowDataPolicy.lowDataDayHvacShareMax);
+  const baseloadShare = clampNumber(Number(args.monthEvidence.baseloadShare) || 0, lowDataPolicy.lowDataDayBaseloadShareMin, lowDataPolicy.lowDataDayBaseloadShareMax);
   const deviation = Math.abs((Number(args.weatherSeverityMultiplier) || 1) - 1);
   if (deviation < 0.02) return normalized;
-  const modifier = resolveSharedWeatherShapeModifier(args.weatherEfficiencyDerivedInput ?? null, args.weatherRegime);
+  const modifier = resolveSharedWeatherShapeModifier(args.weatherEfficiencyDerivedInput ?? null, args.weatherRegime, weatherShapingPolicy);
 
   const flat = 1 / INTERVALS_PER_DAY;
   const effectiveDeviation = deviation * modifier.weatherAmplitudeCompressionFactor * modifier.weatherResponsivenessScale;
-  const amplitudeMultiplier = 1 + effectiveDeviation * (0.45 + hvacShare * 0.55);
+  const amplitudeMultiplier =
+    1 +
+    effectiveDeviation *
+      (weatherShapingPolicy.shapeAmplitudeBase + hvacShare * weatherShapingPolicy.shapeAmplitudeHvacShareWeight);
   const flattenBlend = clampNumber(
-    baseloadShare * 0.45 + (1 - modifier.intradayPeakValleyCompressionFactor) * 0.4,
+    baseloadShare * weatherShapingPolicy.shapeAmplitudeBase +
+      (1 - modifier.intradayPeakValleyCompressionFactor) * weatherShapingPolicy.shapeFlattenBlendWeight,
     0,
     0.5
   );
@@ -850,6 +945,7 @@ function computeWeatherAdjustedDayTotal(args: {
   homeProfile?: PastDayHomeProfile | null;
   applianceProfile?: PastDayApplianceProfile | null;
   weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 }): {
   finalSelectedDayKwh: number;
   weatherSeverityMultiplier: number;
@@ -882,7 +978,10 @@ function computeWeatherAdjustedDayTotal(args: {
     homeProfile,
     applianceProfile,
     weatherEfficiencyDerivedInput,
+    simulationVariablePolicy,
   } = args;
+  const pastDayPolicy = simulationVariablePolicy?.pastDayCore ?? DEFAULT_SIMULATION_VARIABLE_POLICY.pastDayCore;
+  const weatherShapingPolicy = simulationVariablePolicy?.weatherShaping ?? DEFAULT_SIMULATION_VARIABLE_POLICY.weatherShaping;
   const wx = weatherByDateKey.get(localDate);
   const monthKey = localDate.slice(0, 7);
   const season = getSeasonBucket(monthKey);
@@ -942,7 +1041,7 @@ function computeWeatherAdjustedDayTotal(args: {
 
   if (adjustmentModeUsed === "bounded_post_donor") {
     const testSpreadC = spreadForWeather(wx) ?? 0;
-    if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
+    if (testHdd > testCdd && testHdd > pastDayPolicy.weatherSeverityThreshold) {
       weatherModeUsed = "heating";
       const severityDelta = refHdd > 1e-6 ? (testHdd - refHdd) / Math.max(refHdd, 8) : 0;
       const tempDelta = refAvgTempC != null && wx.dailyAvgTempC != null ? (refAvgTempC - wx.dailyAvgTempC) / 22 : 0;
@@ -957,7 +1056,7 @@ function computeWeatherAdjustedDayTotal(args: {
       const spreadDelta = refSpreadC != null ? (testSpreadC - refSpreadC) / 20 : 0;
       weatherSeverityMultiplier =
         1 + clampNumber(severityDelta * 0.52 + minTempDelta * 0.22 + tempDelta * 0.1 + maxTempDelta * 0.04 + spreadDelta * 0.04, -0.11, 0.15);
-    } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
+    } else if (testCdd > testHdd && testCdd > pastDayPolicy.weatherSeverityThreshold) {
       weatherModeUsed = "cooling";
       const severityDelta = refCdd > 1e-6 ? (testCdd - refCdd) / Math.max(refCdd, 8) : 0;
       const tempDelta = refAvgTempC != null && wx.dailyAvgTempC != null ? (wx.dailyAvgTempC - refAvgTempC) / 18 : 0;
@@ -969,21 +1068,21 @@ function computeWeatherAdjustedDayTotal(args: {
     }
   } else {
     // Apply deadbands: heating >30% deviation, cooling >25% deviation before scaling
-    if (testHdd > testCdd && testHdd > WEATHER_SEVERITY_THRESHOLD) {
+    if (testHdd > testCdd && testHdd > pastDayPolicy.weatherSeverityThreshold) {
       weatherModeUsed = "heating";
       if (refHdd != null && refHdd > 1e-6) {
         const ratio = testHdd / refHdd;
-        if (ratio >= 1 - HEATING_DEADBAND_PCT && ratio <= 1 + HEATING_DEADBAND_PCT) {
+        if (ratio >= 1 - pastDayPolicy.heatingDeadbandPct && ratio <= 1 + pastDayPolicy.heatingDeadbandPct) {
           weatherSeverityMultiplier = 1;
         } else {
           weatherSeverityMultiplier = ratio;
         }
       }
-    } else if (testCdd > testHdd && testCdd > WEATHER_SEVERITY_THRESHOLD) {
+    } else if (testCdd > testHdd && testCdd > pastDayPolicy.weatherSeverityThreshold) {
       weatherModeUsed = "cooling";
       if (refCdd != null && refCdd > 1e-6) {
         const ratio = testCdd / refCdd;
-        if (ratio >= 1 - COOLING_DEADBAND_PCT && ratio <= 1 + COOLING_DEADBAND_PCT) {
+        if (ratio >= 1 - pastDayPolicy.coolingDeadbandPct && ratio <= 1 + pastDayPolicy.coolingDeadbandPct) {
           weatherSeverityMultiplier = 1;
         } else {
           weatherSeverityMultiplier = ratio;
@@ -997,11 +1096,11 @@ function computeWeatherAdjustedDayTotal(args: {
   const isElectricHeat =
     homeProfile?.fuelConfiguration === "all_electric" || homeProfile?.heatingType === "electric";
   const referenceHeatingSeverity = refHdd ?? 0;
-  const auxHeatGate_minTempPassed = wx.dailyMinTempC != null && wx.dailyMinTempC <= AUX_MIN_TEMP_C;
-  const auxHeatGate_freezeHoursPassed = wx.freezeHoursCount >= AUX_FREEZE_HOURS_MIN;
+  const auxHeatGate_minTempPassed = wx.dailyMinTempC != null && wx.dailyMinTempC <= pastDayPolicy.auxMinTempC;
+  const auxHeatGate_freezeHoursPassed = wx.freezeHoursCount >= pastDayPolicy.auxFreezeHoursMin;
   const auxHeatGate_severityPassed =
     referenceHeatingSeverity > 1e-6 &&
-    wx.heatingDegreeSeverity >= referenceHeatingSeverity * AUX_HDD_RATIO;
+    wx.heatingDegreeSeverity >= referenceHeatingSeverity * pastDayPolicy.auxHddRatio;
   const allAuxGatesPassed =
     isElectricHeat &&
     auxHeatGate_minTempPassed &&
@@ -1011,7 +1110,7 @@ function computeWeatherAdjustedDayTotal(args: {
     const ref = Math.max(referenceHeatingSeverity, 1);
     auxHeatKwhAdder = Math.max(
       0,
-      Math.min(AUX_HEAT_KWH_CAP, (wx.heatingDegreeSeverity - ref) * AUX_HEAT_SLOPE)
+      Math.min(pastDayPolicy.auxHeatKwhCap, (wx.heatingDegreeSeverity - ref) * pastDayPolicy.auxHeatSlope)
     );
   }
 
@@ -1021,15 +1120,15 @@ function computeWeatherAdjustedDayTotal(args: {
   const pumpHp =
     homeProfile?.pool?.pumpHp ??
     (applianceProfile?.appliances ?? []).find((a) => a?.type === "pool")?.data?.pump_hp;
-  const freezeHoursOk = wx.freezeHoursCount >= POOL_FREEZE_HOURS_MIN;
-  const dailyMinOkForPool = wx.dailyMinTempC != null && wx.dailyMinTempC <= POOL_FREEZE_MIN_TEMP_C;
+  const freezeHoursOk = wx.freezeHoursCount >= pastDayPolicy.poolFreezeHoursMin;
+  const dailyMinOkForPool = wx.dailyMinTempC != null && wx.dailyMinTempC <= pastDayPolicy.poolFreezeMinTempC;
   if (hasPool && freezeHoursOk && dailyMinOkForPool) {
     const hp = pumpHp != null && Number.isFinite(Number(pumpHp)) ? Number(pumpHp) : 1;
     poolFreezeProtectKwhAdder = Math.max(
       0,
       Math.min(
-        POOL_FREEZE_KWH_CAP,
-        hp * POOL_FREEZE_HP_FACTOR * Math.max(1, wx.freezeHoursCount / 4)
+        pastDayPolicy.poolFreezeKwhCap,
+        hp * pastDayPolicy.poolFreezeHpFactor * Math.max(1, wx.freezeHoursCount / 4)
       )
     );
   }
@@ -1046,25 +1145,25 @@ function computeWeatherAdjustedDayTotal(args: {
     }
   } else if (weatherModeUsed === "heating") {
     if (isEventDay) {
-      weatherSeverityMultiplier = Math.max(HEATING_MULT_MIN, Math.min(HEATING_MULT_MAX, weatherSeverityMultiplier));
+      weatherSeverityMultiplier = Math.max(pastDayPolicy.heatingMultMin, Math.min(pastDayPolicy.heatingMultMax, weatherSeverityMultiplier));
     } else {
       weatherSeverityMultiplier = Math.max(
-        HEATING_MULT_MIN_NON_EVENT,
-        Math.min(HEATING_MULT_MAX_NON_EVENT, weatherSeverityMultiplier)
+        pastDayPolicy.heatingMultMinNonEvent,
+        Math.min(pastDayPolicy.heatingMultMaxNonEvent, weatherSeverityMultiplier)
       );
     }
   } else if (weatherModeUsed === "cooling") {
     if (isEventDay) {
-      weatherSeverityMultiplier = Math.max(COOLING_MULT_MIN, Math.min(COOLING_MULT_MAX, weatherSeverityMultiplier));
+      weatherSeverityMultiplier = Math.max(pastDayPolicy.coolingMultMin, Math.min(pastDayPolicy.coolingMultMax, weatherSeverityMultiplier));
     } else {
       weatherSeverityMultiplier = Math.max(
-        COOLING_MULT_MIN_NON_EVENT,
-        Math.min(COOLING_MULT_MAX_NON_EVENT, weatherSeverityMultiplier)
+        pastDayPolicy.coolingMultMinNonEvent,
+        Math.min(pastDayPolicy.coolingMultMaxNonEvent, weatherSeverityMultiplier)
       );
     }
   }
 
-  const weatherModifier = resolveSharedWeatherShapeModifier(weatherEfficiencyDerivedInput ?? null, weatherModeUsed);
+  const weatherModifier = resolveSharedWeatherShapeModifier(weatherEfficiencyDerivedInput ?? null, weatherModeUsed, weatherShapingPolicy);
   if (weatherModifier.applied) {
     weatherSeverityMultiplier =
       1 +
@@ -1099,8 +1198,8 @@ function computeWeatherAdjustedDayTotal(args: {
   } else {
     // weather_scaled_day: temperature-response primary; light profile anchor
     finalSelectedDayKwh =
-      baseDayKwh * WEATHER_SCALED_PROFILE_ANCHOR_FRAC +
-      preBlendAdjustedDayKwh * (1 - WEATHER_SCALED_PROFILE_ANCHOR_FRAC);
+      baseDayKwh * pastDayPolicy.weatherScaledProfileAnchorFrac +
+      preBlendAdjustedDayKwh * (1 - pastDayPolicy.weatherScaledProfileAnchorFrac);
     blendedBackTowardProfile = true;
   }
 
@@ -1143,6 +1242,7 @@ export function buildPastDaySimulationContext(args: {
   lowDataSyntheticDayKwhByMonthDayType?: PastDaySimulationContext["lowDataSyntheticDayKwhByMonthDayType"];
   lowDataWeatherEvidence?: PastDaySimulationContext["lowDataWeatherEvidence"];
   weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
+  simulationVariablePolicy?: PastDaySimulationContext["simulationVariablePolicy"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
@@ -1155,6 +1255,7 @@ export function buildPastDaySimulationContext(args: {
     lowDataSyntheticDayKwhByMonthDayType: args.lowDataSyntheticDayKwhByMonthDayType ?? null,
     lowDataWeatherEvidence: args.lowDataWeatherEvidence ?? null,
     weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
+    simulationVariablePolicy: args.simulationVariablePolicy ?? null,
   };
 }
 
@@ -1169,6 +1270,7 @@ export function simulatePastDay(
   shapeByMonth96?: Record<string, number[]> | null
 ): SimulatedDayResult {
   const { localDate, isWeekend, gridTimestamps, weatherForDay } = request;
+  const simulationVariablePolicy = context.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY;
   const monthKey = localDate.slice(0, 7);
   const dayTypeUsed: PastDayTypeKey = isWeekend ? "weekend" : "weekday";
   const lowDataMonthBucket = context.lowDataSyntheticDayKwhByMonthDayType?.[monthKey] ?? null;
@@ -1218,6 +1320,7 @@ export function simulatePastDay(
         modeledDaySelectionStrategy: context.modeledDaySelectionStrategy,
         neighborDayTotals: context.neighborDayTotals,
         weatherDonorSamples: context.weatherDonorSamples,
+        policy: simulationVariablePolicy.pastDayCore,
       });
 
   const adj = canUseLowDataSyntheticFastPath
@@ -1226,7 +1329,8 @@ export function simulatePastDay(
           baseDayKwh: sel.targetDayKwh,
           weatherForDay,
           monthEvidence: lowDataMonthEvidence,
-            weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
+          weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
+          simulationVariablePolicy,
         });
         return {
           finalSelectedDayKwh: adjusted.finalSelectedDayKwh,
@@ -1265,6 +1369,7 @@ export function simulatePastDay(
           homeProfile: homeProfile ?? null,
           applianceProfile: applianceProfile ?? null,
           weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
+          simulationVariablePolicy,
         });
       })();
 
@@ -1284,7 +1389,8 @@ export function simulatePastDay(
         weatherRegime,
         weatherSeverityMultiplier: adj.weatherSeverityMultiplier,
         monthEvidence: lowDataMonthEvidence,
-          weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
+        weatherEfficiencyDerivedInput: context.weatherEfficiencyDerivedInput ?? null,
+        simulationVariablePolicy,
       })
     : selectedShape.shape96;
 

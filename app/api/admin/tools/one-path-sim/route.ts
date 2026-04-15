@@ -15,6 +15,7 @@ import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensit
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { gateOnePathSimAdmin, resolveOnePathSimUserSelection } from "./_helpers";
+import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const [actualResult, manualUsage, homeProfile, applianceProfileRecord] = await Promise.all([
+  const [actualResult, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
     getActualUsageDatasetForHouse(resolved.selectedHouse.id, resolved.selectedHouse.esiid ?? null, {
       skipFullYearIntervalFetch: true,
     }).catch(() => null),
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
     })),
     getHomeProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
     getApplianceProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
+    getTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const weatherEnvelope = await resolveSharedWeatherSensitivityEnvelope({
@@ -108,6 +110,7 @@ export async function POST(request: NextRequest) {
         actualDatasetMeta: (actualResult?.dataset as any)?.meta ?? null,
         manualUsagePayload: manualUsage.payload ?? null,
         manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
+        travelRangesFromDb,
         homeProfile: homeProfile ?? null,
         applianceProfile: applianceProfile ?? null,
         weatherScore: weatherEnvelope.score ?? null,

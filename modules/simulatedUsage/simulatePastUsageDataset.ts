@@ -53,6 +53,10 @@ import {
   normalizePastProducerBuildPathKind,
   type PastProducerBuildPathKind,
 } from "@/modules/simulatedUsage/pastProducerBuildPath";
+import {
+  DEFAULT_SIMULATION_VARIABLE_POLICY,
+  type SimulationVariablePolicy,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 
 export type BuildPathKind = PastProducerBuildPathKind;
 export { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
@@ -184,7 +188,9 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
   weatherByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
   homeProfile: Record<string, unknown> | null;
   applianceProfile: Record<string, unknown> | null;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 }): PastLowDataWeatherEvidenceSummary | null {
+  const policy = args.simulationVariablePolicy?.lowDataWeatherEvidence ?? DEFAULT_SIMULATION_VARIABLE_POLICY.lowDataWeatherEvidence;
   type BillPeriodWeatherEvidenceRow = {
     id: string;
     monthKey: string;
@@ -381,27 +387,46 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     String((args.homeProfile as any)?.hvacType ?? "").trim().length > 0 ||
     Array.isArray((args.applianceProfile as any)?.appliances);
   const heatingPriorSensitivity =
-    fuelConfiguration === "all_electric" || heatingType === "electric" ? 0.95 : 0.45;
-  const coolingPriorSensitivity = hasCoolingPriors ? 0.75 : 0.45;
-  const evidenceWeight = rows.length >= 5 ? 0.9 : rows.length >= 3 ? 0.7 : rows.length > 0 ? 0.45 : 0;
+    fuelConfiguration === "all_electric" || heatingType === "electric"
+      ? policy.electricHeatingPriorSensitivity
+      : policy.defaultHeatingPriorSensitivity;
+  const coolingPriorSensitivity = hasCoolingPriors
+    ? policy.coolingPriorSensitivityWithCoolingPriors
+    : policy.coolingPriorSensitivityDefault;
+  const evidenceWeight =
+    rows.length >= policy.evidenceWeightHighThreshold
+      ? policy.evidenceWeightHigh
+      : rows.length >= policy.evidenceWeightMediumThreshold
+        ? policy.evidenceWeightMedium
+        : rows.length > 0
+          ? policy.evidenceWeightLow
+          : 0;
   const wholeHomePriorFallbackWeight = 1 - evidenceWeight;
 
-  const baseloadDaily = clampNumberForEvidence(Number(solved[0]) || meanTarget * 0.55, meanTarget * 0.18, meanTarget * 0.92);
+  const baseloadDaily = clampNumberForEvidence(
+    Number(solved[0]) || meanTarget * policy.baseloadMeanFallbackMultiplier,
+    meanTarget * policy.baseloadDailyMinMultiplier,
+    meanTarget * policy.baseloadDailyMaxMultiplier
+  );
   const hvacDaily = Math.max(0, meanTarget - baseloadDaily);
   const rawHeatingSensitivity = meanHdd > 1e-6 && hvacDaily > 1e-6 ? ((Number(solved[1]) || 0) * meanHdd) / hvacDaily : 0;
   const rawCoolingSensitivity = meanCdd > 1e-6 && hvacDaily > 1e-6 ? ((Number(solved[2]) || 0) * meanCdd) / hvacDaily : 0;
   const heatingSensitivity = clampNumberForEvidence(
     rawHeatingSensitivity * evidenceWeight + heatingPriorSensitivity * (1 - evidenceWeight),
-    0.12,
-    1.8
+    policy.sensitivityMin,
+    policy.sensitivityMax
   );
   const coolingSensitivity = clampNumberForEvidence(
     rawCoolingSensitivity * evidenceWeight + coolingPriorSensitivity * (1 - evidenceWeight),
-    0.12,
-    1.8
+    policy.sensitivityMin,
+    policy.sensitivityMax
   );
-  const baseloadShare = clampNumberForEvidence(baseloadDaily / Math.max(meanTarget, 1e-6), 0.18, 0.9);
-  const hvacShare = clampNumberForEvidence(1 - baseloadShare, 0.1, 0.82);
+  const baseloadShare = clampNumberForEvidence(
+    baseloadDaily / Math.max(meanTarget, 1e-6),
+    policy.baseloadShareMin,
+    policy.baseloadShareMax
+  );
+  const hvacShare = clampNumberForEvidence(1 - baseloadShare, policy.hvacShareMin, policy.hvacShareMax);
   const eligibleBillPeriodsUsed = rows.map((row) => ({
     id: row.id,
     monthKey: row.monthKey,
@@ -421,8 +446,8 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
           aggregate != null ? (Number(solved[0]) || 0) + (Number(solved[1]) || 0) * aggregate.avgHdd + (Number(solved[2]) || 0) * aggregate.avgCdd : meanTarget;
         const inferredDailyTarget = clampNumberForEvidence(
           predictedDailyTargetRaw * evidenceWeight + meanTarget * wholeHomePriorFallbackWeight,
-          meanTarget * 0.35,
-          meanTarget * 1.85
+          meanTarget * policy.inferredDailyTargetMinMultiplier,
+          meanTarget * policy.inferredDailyTargetMaxMultiplier
         );
         const targetAvgDailyKwh = reference ? reference.avgDailyTarget : inferredDailyTarget;
         const referenceDailyHdd = reference?.avgHdd ?? aggregate?.avgHdd ?? meanHdd;
@@ -481,9 +506,10 @@ function buildManualMonthlyWeatherEvidenceSummary(args: {
     heatingSensitivity,
     coolingSensitivity,
     dailyWeatherResponsiveness:
-      hvacShare >= 0.48 || Math.max(heatingSensitivity, coolingSensitivity) >= 0.9
+      hvacShare >= policy.weatherDrivenHvacShareThreshold ||
+      Math.max(heatingSensitivity, coolingSensitivity) >= policy.weatherDrivenSensitivityThreshold
         ? "weather_driven"
-        : hvacShare <= 0.24
+        : hvacShare <= policy.mixedBaseloadThreshold
           ? "mostly_baseload_driven"
           : "mixed",
     byMonth,
@@ -1654,6 +1680,7 @@ export async function simulatePastUsageDataset(
       weatherByDateKey: weatherByDateKeyForSimulation,
       homeProfile: homeProfileForPast as Record<string, unknown> | null,
       applianceProfile: applianceProfileForPast as Record<string, unknown> | null,
+      simulationVariablePolicy: buildInputs.simulationVariablePolicy ?? null,
     });
     const lowDataSyntheticContext =
       lowDataSyntheticContextBase == null
@@ -1883,6 +1910,7 @@ export async function simulatePastUsageDataset(
         resolvedSimFingerprint: (buildInputs as SimulatorBuildInputsV1).resolvedSimFingerprint ?? undefined,
         lowDataSyntheticContext,
         weatherEfficiencyDerivedInput: buildInputs.weatherEfficiencyDerivedInput ?? null,
+        simulationVariablePolicy: buildInputs.simulationVariablePolicy ?? null,
         observability: {
           correlationId,
           houseId,

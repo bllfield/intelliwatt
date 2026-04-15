@@ -24,6 +24,10 @@ import { buildTrainingWeatherStats } from "@/lib/admin/gapfillLab";
 import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
 import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import {
+  DEFAULT_SIMULATION_VARIABLE_POLICY,
+  type SimulationVariablePolicy,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
@@ -1132,7 +1136,9 @@ function weatherAwareHvacKwh(args: {
   wx: { hdd65: number; cdd65: number } | null;
   homeProfile: any;
   applianceProfile: any;
+  policy?: SimulationVariablePolicy["engineProfile"];
 }): { hvacKwh: number; electricHeat: boolean } {
+  const policy = args.policy ?? DEFAULT_SIMULATION_VARIABLE_POLICY.engineProfile;
   if (!args.wx || (!hasHvacAppliance(args.applianceProfile) && !hasHomeHvacSignal(args.homeProfile))) {
     return { hvacKwh: 0, electricHeat: false };
   }
@@ -1145,24 +1151,25 @@ function weatherAwareHvacKwh(args: {
   const heatingTypeFromAppliance = parseHeatingType(args.applianceProfile);
   const heatingType = heatingTypeFromHome !== "UNKNOWN" ? heatingTypeFromHome : heatingTypeFromAppliance;
 
-  let kHeat = gasHeat ? 0.02 : 0.16;
-  if (electricHeat && heatingType === "HEAT_STRIP") kHeat = 0.30;
-  if (electricHeat && heatingType === "HEAT_PUMP") kHeat = 0.18;
-  let kCool = 0.12;
+  let kHeat = gasHeat ? policy.weatherAwareHvacGasHeatK : policy.weatherAwareHvacElectricHeatK;
+  if (electricHeat && heatingType === "HEAT_STRIP") kHeat = policy.weatherAwareHvacHeatStripK;
+  if (electricHeat && heatingType === "HEAT_PUMP") kHeat = policy.weatherAwareHvacHeatPumpK;
+  let kCool = policy.weatherAwareHvacCoolingK;
 
   const summerTemp = Number(args.homeProfile?.summerTemp);
   const winterTemp = Number(args.homeProfile?.winterTemp);
-  const coolAdj = Number.isFinite(summerTemp) ? Math.max(0.8, Math.min(1.2, 1 - (summerTemp - 72) * 0.01)) : 1;
-  const heatAdj = Number.isFinite(winterTemp) ? Math.max(0.8, Math.min(1.2, 1 - (68 - winterTemp) * 0.01)) : 1;
+  const coolAdj = Number.isFinite(summerTemp) ? Math.max(0.8, Math.min(1.2, 1 - (summerTemp - 72) * policy.weatherAwareHvacSummerSetpointWeight)) : 1;
+  const heatAdj = Number.isFinite(winterTemp) ? Math.max(0.8, Math.min(1.2, 1 - (68 - winterTemp) * policy.weatherAwareHvacWinterSetpointWeight)) : 1;
   kCool *= coolAdj;
   kHeat *= heatAdj;
 
   const hvacRaw = kHeat * hdd65 + kCool * cdd65;
-  const hvacKwh = Math.max(0, Math.min(60, hvacRaw)); // Temporary guardrail while tuning.
+  const hvacKwh = Math.max(0, Math.min(policy.weatherAwareHvacMaxCapKwh, hvacRaw)); // Temporary guardrail while tuning.
   return { hvacKwh, electricHeat };
 }
 
-function poolSeasonalKwh(args: { dateKey: string; homeProfile: any }): number {
+function poolSeasonalKwh(args: { dateKey: string; homeProfile: any; policy?: SimulationVariablePolicy["engineProfile"] }): number {
+  const policy = args.policy ?? DEFAULT_SIMULATION_VARIABLE_POLICY.engineProfile;
   if (!args?.homeProfile?.hasPool) return 0;
   const pumpType = String(args.homeProfile?.poolPumpType ?? "").toLowerCase();
   const hpRaw = Number(args.homeProfile?.poolPumpHp);
@@ -1172,9 +1179,9 @@ function poolSeasonalKwh(args: { dateKey: string; homeProfile: any }): number {
   const summerRun = Number.isFinite(summerRunRaw) ? Math.max(0, Math.min(24, summerRunRaw)) : 8;
   const winterRun = Number.isFinite(winterRunRaw) ? Math.max(0, Math.min(24, winterRunRaw)) : 2;
 
-  let pumpKwPerHp = 0.75;
-  if (pumpType === "dual_speed") pumpKwPerHp = 0.65;
-  if (pumpType === "variable_speed") pumpKwPerHp = 0.45;
+  let pumpKwPerHp = policy.poolPumpKwPerHpSingleSpeed;
+  if (pumpType === "dual_speed") pumpKwPerHp = policy.poolPumpKwPerHpDualSpeed;
+  if (pumpType === "variable_speed") pumpKwPerHp = policy.poolPumpKwPerHpVariableSpeed;
   const pumpKw = hp * pumpKwPerHp;
 
   const month = Number(String(args.dateKey ?? "").slice(5, 7));
@@ -1185,16 +1192,21 @@ function poolSeasonalKwh(args: { dateKey: string; homeProfile: any }): number {
 
   const hasHeater = Boolean(args.homeProfile?.hasPoolHeater);
   const heaterType = String(args.homeProfile?.poolHeaterType ?? "").toLowerCase();
-  const heaterAdder = hasHeater && (heaterType === "electric" || heaterType === "heat_pump") && summerMonths.has(month) ? 1.25 : 0;
+  const heaterAdder =
+    hasHeater && (heaterType === "electric" || heaterType === "heat_pump") && summerMonths.has(month)
+      ? policy.poolHeaterAdderKwh
+      : 0;
 
-  return Math.max(0, Math.min(40, pumpKwh + heaterAdder));
+  return Math.max(0, Math.min(policy.poolSeasonalMaxCapKwh, pumpKwh + heaterAdder));
 }
 
 function applyWeatherTiltHourWeights(args: {
   hourWeights: number[];
   wx: { hdd65: number; cdd65: number } | null;
   electricHeat: boolean;
+  policy?: SimulationVariablePolicy["engineProfile"];
 }): number[] {
+  const policy = args.policy ?? DEFAULT_SIMULATION_VARIABLE_POLICY.engineProfile;
   const base = Array.isArray(args.hourWeights) && args.hourWeights.length === 24 ? [...args.hourWeights] : Array.from({ length: 24 }, () => 1 / 24);
   const wx = args.wx;
   if (!wx) return base;
@@ -1202,11 +1214,11 @@ function applyWeatherTiltHourWeights(args: {
   const cdd65 = Math.max(0, Number(wx.cdd65) || 0);
   const hdd65 = Math.max(0, Number(wx.hdd65) || 0);
 
-  const afternoonBoost = 1 + Math.min(0.55, cdd65 * 0.015);
+  const afternoonBoost = 1 + Math.min(policy.weatherTiltCoolingMaxBoost, cdd65 * policy.weatherTiltCoolingPerCdd);
   for (const h of [14, 15, 16, 17, 18, 19]) base[h] *= afternoonBoost;
 
-  const heatScale = args.electricHeat ? 0.015 : 0.006;
-  const heatBoost = 1 + Math.min(0.45, hdd65 * heatScale);
+  const heatScale = args.electricHeat ? policy.weatherTiltHeatingElectricPerHdd : policy.weatherTiltHeatingGasPerHdd;
+  const heatBoost = 1 + Math.min(policy.weatherTiltHeatingMaxBoost, hdd65 * heatScale);
   for (const h of [6, 7, 8, 9, 17, 18, 19, 20, 21, 22]) base[h] *= heatBoost;
 
   const s = base.reduce((a, b) => a + b, 0);
@@ -1619,10 +1631,13 @@ export function buildPastSimulatedBaselineV1(args: {
     source?: string;
   };
   weatherEfficiencyDerivedInput?: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
 }): {
   intervals: Array<{ timestamp: string; kwh: number }>;
   dayResults: SimulatedDayResult[];
 } {
+  const simulationVariablePolicy = args.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY;
+  const engineProfilePolicy = simulationVariablePolicy.engineProfile;
   const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
   const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
@@ -1794,6 +1809,7 @@ export function buildPastSimulatedBaselineV1(args: {
         wx,
         homeProfile: args.homeProfile,
         applianceProfile: args.applianceProfile,
+        policy: engineProfilePolicy,
       });
       referenceDays.push({
         dayStartMs,
@@ -1960,7 +1976,7 @@ export function buildPastSimulatedBaselineV1(args: {
   // When usageShapeProfile is provided, merge it so excluded months get profile-based daily totals (then weather-scaled).
   // Otherwise months with few reference days (e.g. one day in March during travel) produce a flat repeated value.
   // Profile month keys are from the training window (e.g. 2024-03..2025-02); simulation may use 2025-03. Use same-calendar-month fallback.
-  const MIN_DAYS_FOR_PROFILE_USE = 4;
+  const MIN_DAYS_FOR_PROFILE_USE = engineProfilePolicy.minDaysForProfileUse;
   const profileMonthFallback = (ym: string, kind: "weekday" | "weekend"): number | undefined => {
     const map = kind === "weekday" ? args.usageShapeProfile?.weekdayAvgByMonthKey : args.usageShapeProfile?.weekendAvgByMonthKey;
     if (!map) return undefined;
@@ -2291,6 +2307,7 @@ export function buildPastSimulatedBaselineV1(args: {
     lowDataSyntheticDayKwhByMonthDayType,
     lowDataWeatherEvidence: lowDataSyntheticContext?.weatherEvidenceSummary ?? null,
     weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
+    simulationVariablePolicy,
   });
   emitStage("buildPastSimulatedBaselineV1_stage_shape_context_ready", {
     elapsedMs: Date.now() - baselineStartedAt,

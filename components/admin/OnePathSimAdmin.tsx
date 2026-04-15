@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
@@ -14,6 +14,22 @@ type LookupResponse = {
   scenarios: Array<{ id: string; name: string }>;
   sourceContext: Record<string, unknown>;
 };
+
+type VariablePolicyResponse = {
+  ok: true;
+  confirmationKeyword: string;
+  familyMeta: Record<string, { title: string; description: string }>;
+  defaults: Record<string, unknown>;
+  effective: Record<string, unknown>;
+  overrides: Record<string, unknown>;
+};
+
+const VALIDATION_SELECTION_OPTIONS = [
+  { value: "manual", label: "manual" },
+  { value: "random_simple", label: "random_simple" },
+  { value: "customer_style_seasonal_mix", label: "customer_style_seasonal_mix" },
+  { value: "stratified_weather_balanced", label: "stratified_weather_balanced" },
+] as const;
 
 function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
   if (!props.open) return null;
@@ -69,6 +85,95 @@ export function OnePathSimAdmin() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<any | null>(null);
+  const [variablePolicy, setVariablePolicy] = useState<VariablePolicyResponse | null>(null);
+  const [variableFamilyOpen, setVariableFamilyOpen] = useState<string | null>(null);
+  const [variableDraft, setVariableDraft] = useState("{}");
+  const [variableConfirmation, setVariableConfirmation] = useState("");
+  const [variableBusy, setVariableBusy] = useState(false);
+  const [variableError, setVariableError] = useState<string | null>(null);
+
+  const loadVariablePolicy = useCallback(async () => {
+    const res = await fetch("/api/admin/tools/one-path-sim/variables");
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) {
+      setVariableError(json?.error ?? `Variables load failed (${res.status})`);
+      return;
+    }
+    setVariablePolicy(json);
+    setVariableError(null);
+  }, []);
+
+  useEffect(() => {
+    void loadVariablePolicy();
+  }, [loadVariablePolicy]);
+
+  const openVariableFamily = useCallback(
+    (familyKey: string) => {
+      setVariableFamilyOpen(familyKey);
+      setVariableDraft(JSON.stringify((variablePolicy?.overrides?.[familyKey] as Record<string, unknown> | undefined) ?? {}, null, 2));
+      setVariableConfirmation("");
+      setVariableError(null);
+    },
+    [variablePolicy]
+  );
+
+  const saveVariableFamily = useCallback(async () => {
+    if (!variableFamilyOpen) return;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(variableDraft || "{}");
+    } catch {
+      setVariableError("Override JSON is invalid.");
+      return;
+    }
+    setVariableBusy(true);
+    setVariableError(null);
+    const res = await fetch("/api/admin/tools/one-path-sim/variables", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        family: variableFamilyOpen,
+        override: parsed,
+        confirmation: variableConfirmation,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    setVariableBusy(false);
+    if (!res.ok || !json?.ok) {
+      setVariableError(json?.error ?? `Override save failed (${res.status})`);
+      return;
+    }
+    setVariablePolicy(json);
+    setStatus(`Shared override saved for ${variableFamilyOpen}.`);
+  }, [variableConfirmation, variableDraft, variableFamilyOpen]);
+
+  const resetVariableFamily = useCallback(async () => {
+    if (!variableFamilyOpen || !variablePolicy) return;
+    if (variableConfirmation !== variablePolicy.confirmationKeyword) {
+      setVariableError("Enter the OVERRIDE keyword to reset this family.");
+      return;
+    }
+    setVariableDraft("{}");
+    setVariableError(null);
+    const nextOverrides = { ...(variablePolicy.overrides ?? {}), [variableFamilyOpen]: {} };
+    setVariableBusy(true);
+    const res = await fetch("/api/admin/tools/one-path-sim/variables", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        overrides: nextOverrides,
+        confirmation: variableConfirmation,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    setVariableBusy(false);
+    if (!res.ok || !json?.ok) {
+      setVariableError(json?.error ?? `Override reset failed (${res.status})`);
+      return;
+    }
+    setVariablePolicy(json);
+    setStatus(`Shared override reset for ${variableFamilyOpen}.`);
+  }, [variableConfirmation, variableFamilyOpen, variablePolicy]);
 
   const effectiveHouseId = selectedHouseId || lookup?.selectedHouse?.id || "";
   const loadLookup = useCallback(
@@ -100,8 +205,8 @@ export function OnePathSimAdmin() {
       setLookup(json);
       setSelectedHouseId(json.selectedHouse?.id ?? "");
       setSelectedScenarioId("");
-      const sourceTravelRanges = Array.isArray((json.sourceContext?.manualUsagePayload as any)?.travelRanges)
-        ? ((json.sourceContext?.manualUsagePayload as any).travelRanges as Array<{ startDate: string; endDate: string }>)
+      const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
+        ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
         : [];
       setTravelRanges(sourceTravelRanges);
       setBusy(false);
@@ -287,11 +392,17 @@ export function OnePathSimAdmin() {
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             <label className="text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Validation selection mode</div>
-              <input
+              <select
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={validationSelectionMode}
                 onChange={(event) => setValidationSelectionMode(event.target.value)}
-              />
+              >
+                {VALIDATION_SELECTION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Run reason</div>
@@ -349,6 +460,25 @@ export function OnePathSimAdmin() {
             </button>
           </div>
 
+          <div className="mt-6 rounded-xl border border-brand-blue/10 bg-slate-50 p-4">
+            <div className="text-sm font-semibold text-brand-navy">Shared calculation variable popups</div>
+            <p className="mt-1 text-xs text-slate-600">
+              These edit the shared module variables directly. A change here affects the shared calculation owners that read this policy.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              {Object.entries(variablePolicy?.familyMeta ?? {}).map(([familyKey, meta]) => (
+                <button
+                  key={familyKey}
+                  type="button"
+                  onClick={() => openVariableFamily(familyKey)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy"
+                >
+                  {meta.title} variables
+                </button>
+              ))}
+            </div>
+          </div>
+
           {status ? <div className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{status}</div> : null}
           {error ? <div className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
         </div>
@@ -370,6 +500,8 @@ export function OnePathSimAdmin() {
               travelRanges,
             }}
           />
+          <SectionJson title="Shared simulation variable overrides" value={variablePolicy?.overrides ?? null} />
+          <SectionJson title="Shared simulation variable effective policy" value={variablePolicy?.effective ?? null} />
         </div>
 
         {runResult ? (
@@ -461,6 +593,68 @@ export function OnePathSimAdmin() {
             Add travel range
           </button>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(variableFamilyOpen)}
+        title={
+          variableFamilyOpen
+            ? `${variablePolicy?.familyMeta?.[variableFamilyOpen]?.title ?? variableFamilyOpen} variables`
+            : "Shared variables"
+        }
+        onClose={() => {
+          setVariableFamilyOpen(null);
+          setVariableConfirmation("");
+          setVariableError(null);
+        }}
+      >
+        {variableFamilyOpen ? (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+              {variablePolicy?.familyMeta?.[variableFamilyOpen]?.description ?? "Shared module variables."}
+            </div>
+            <SectionJson title="Effective values" value={variablePolicy?.effective?.[variableFamilyOpen] ?? null} />
+            <SectionJson title="Current overrides" value={variablePolicy?.overrides?.[variableFamilyOpen] ?? {}} />
+            <label className="block text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">Editable override JSON</div>
+              <textarea
+                className="mt-1 min-h-[220px] w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+                value={variableDraft}
+                onChange={(event) => setVariableDraft(event.target.value)}
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">
+                OVERRIDE field
+              </div>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={variableConfirmation}
+                onChange={(event) => setVariableConfirmation(event.target.value)}
+                placeholder={variablePolicy?.confirmationKeyword ?? "OVERRIDE"}
+              />
+            </label>
+            {variableError ? <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{variableError}</div> : null}
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void saveVariableFamily()}
+                disabled={variableBusy || variableConfirmation !== (variablePolicy?.confirmationKeyword ?? "OVERRIDE")}
+                className="rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                Save shared override
+              </button>
+              <button
+                type="button"
+                onClick={() => void resetVariableFamily()}
+                disabled={variableBusy || variableConfirmation !== (variablePolicy?.confirmationKeyword ?? "OVERRIDE")}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
+              >
+                Reset this family
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );
