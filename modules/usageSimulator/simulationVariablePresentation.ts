@@ -265,6 +265,46 @@ export function buildSimulationVariableCopyPayload(args: {
     currentControls: args.currentControls ?? {},
     runIdentity: args.runSnapshot?.runIdentityLinkage ?? null,
     engineInput: args.engineInput ?? null,
+    truthConsole: args.readModel
+      ? {
+          preCutoverHarness: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).preCutoverHarness ?? null
+            : null,
+          stageBoundaryMap: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).stageBoundaryMap ?? null
+            : null,
+          sharedDerivedInputs: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).sharedDerivedInputs ?? null
+            : null,
+          sourceTruthIdentity: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).sourceTruthIdentity ?? null
+            : null,
+          constraintRebalance: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).constraintRebalance ?? null
+            : null,
+          donorFallbackExclusions: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).donorFallbackExclusions ?? null
+            : null,
+          intradayReconstruction: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).intradayReconstruction ?? null
+            : null,
+          finalSharedOutputContract: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).finalSharedOutputContract ?? null
+            : null,
+          chartWindowDisplay: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).chartWindowDisplay ?? null
+            : null,
+          manualStatementAnnual: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).manualStatementAnnual ?? null
+            : null,
+          annualModeTruth: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).annualModeTruth ?? null
+            : null,
+          newBuildModeTruth: args.readModel.sourceOfTruthSummary
+            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).newBuildModeTruth ?? null
+            : null,
+        }
+      : null,
     runResults: args.readModel
       ? {
           datasetSummary: args.readModel.dataset && typeof args.readModel.dataset === "object"

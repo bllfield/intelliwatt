@@ -17,6 +17,13 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(source).toContain("effectiveSimulationVariablesUsed");
     expect(source).toContain("sourceOfTruthSummary");
     expect(source).toContain("buildOnePathTruthSummary");
+    expect(source).toContain("stageBoundaryMap");
+    expect(source).toContain("sharedDerivedInputs");
+    expect(source).toContain("sourceTruthIdentity");
+    expect(source).toContain("constraintRebalance");
+    expect(source).toContain("donorFallbackExclusions");
+    expect(source).toContain("intradayReconstruction");
+    expect(source).toContain("finalSharedOutputContract");
     expect(policySource).toContain("valueSource");
     expect(policySource).toContain("resolvedWeatherShapingMode");
     expect(policySource).toContain("resolvedRebalanceMode");
@@ -25,5 +32,7 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(policySource).toContain("resolvedCompareTuningThresholds");
     expect(truthSummarySource).toContain("resolveReportedCoverageWindow");
     expect(truthSummarySource).toContain("buildManualBillPeriodTargets");
+    expect(truthSummarySource).toContain("annualModeTruth");
+    expect(truthSummarySource).toContain("newBuildModeTruth");
   });
 });

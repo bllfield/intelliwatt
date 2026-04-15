@@ -29,8 +29,15 @@ describe("one path ownership audit source", () => {
     expect(pageSource).toContain("Shared wiring flow");
     expect(pageSource).toContain("External surface classification");
     expect(pageSource).toContain("Drift-risk watchlist");
+    expect(pageSource).toContain("pre-cutover canonical simulation truth console");
+    expect(pageSource).toContain("Older surfaces are not rerouted to this harness yet.");
+    expect(auditSource).toContain("Pre-cutover harness status");
+    expect(auditSource).toContain("Stage Boundary Map");
+    expect(auditSource).toContain("Shared Derived Inputs Used By Run");
+    expect(auditSource).toContain("Final Shared Output Contract");
     expect(copySource).toContain("ownershipAudit");
     expect(copySource).toContain("buildOnePathOwnershipAudit");
+    expect(copySource).toContain("truthConsole");
   });
 
   it("reuses the shared travel-range helper in the gapfill source-home route", () => {

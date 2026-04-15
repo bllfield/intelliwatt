@@ -16,7 +16,11 @@ import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProf
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { gateOnePathSimAdmin, resolveOnePathSimUserSelection } from "./_helpers";
 import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
-import { getSimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
+import {
+  getSimulationVariablePolicy,
+  type SimulationVariableInputType,
+  type SimulationVariablePolicy,
+} from "@/modules/usageSimulator/simulationVariablePolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,10 +90,15 @@ export async function POST(request: NextRequest) {
           ? body.actualContextHouseId.trim()
           : resolved.selectedHouse.id)
     ) ?? resolved.selectedHouse;
-  let previewSimulationVariablePolicy: Awaited<ReturnType<typeof getSimulationVariablePolicy>>["effectiveByMode"][CanonicalSimulationInputType] | null =
-    null;
+  let previewSimulationVariablePolicy: SimulationVariablePolicy | null = null;
   try {
-    previewSimulationVariablePolicy = (await getSimulationVariablePolicy()).effectiveByMode[previewMode];
+    const sharedSimulationVariablePolicy = await getSimulationVariablePolicy();
+    previewSimulationVariablePolicy =
+      (
+        sharedSimulationVariablePolicy.effectiveByMode as Partial<
+          Record<SimulationVariableInputType, SimulationVariablePolicy>
+        >
+      )[previewMode as SimulationVariableInputType] ?? null;
   } catch {
     previewSimulationVariablePolicy = null;
   }

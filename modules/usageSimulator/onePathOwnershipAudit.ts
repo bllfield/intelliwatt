@@ -69,6 +69,20 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
       "Read-only architecture audit for the One Path admin harness. This inventory tracks what is visible on the page, what is copied for AI, how the shared simulation chain is wired, and which external surfaces still orbit the same shared simulation owners.",
     pageSurfaceAuditMatrix: [
       {
+        section: "Pre-cutover harness status",
+        surfaceType: "truth_panel",
+        visibleOnPage: true,
+        editableOnPage: false,
+        copiedInAiPayload: true,
+        runRequired: false,
+        pageOnly: false,
+        backedBySharedOwner: true,
+        ownerFiles: ["components/admin/OnePathSimAdmin.tsx", "modules/usageSimulator/onePathTruthSummary.ts"],
+        ownerSymbols: ["OnePathSimAdmin", "buildOnePathTruthSummary"],
+        notes:
+          "Explicitly states this is the pre-cutover canonical harness only and that older surfaces are not rerouted in this pass.",
+      },
+      {
         section: "Lookup and run controls",
         surfaceType: "control",
         visibleOnPage: true,
@@ -178,6 +192,48 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
           "Read-only audit panels for shared date/window ownership, manual statement ownership, and thin admin control ownership.",
       },
       {
+        section: "Stage Boundary Map",
+        surfaceType: "truth_panel",
+        visibleOnPage: true,
+        editableOnPage: false,
+        copiedInAiPayload: true,
+        runRequired: true,
+        pageOnly: false,
+        backedBySharedOwner: true,
+        ownerFiles: ["modules/usageSimulator/onePathTruthSummary.ts", "modules/usageSimulator/onePathSim.ts"],
+        ownerSymbols: ["buildOnePathTruthSummary", "buildSharedSimulationReadModel"],
+        notes:
+          "Shows raw input, adapter choice, canonical engine input, derived inputs, shared producer stages, formatter output, and persisted artifact identity from shared readback only.",
+      },
+      {
+        section: "Shared Derived Inputs Used By Run",
+        surfaceType: "truth_panel",
+        visibleOnPage: true,
+        editableOnPage: false,
+        copiedInAiPayload: true,
+        runRequired: true,
+        pageOnly: false,
+        backedBySharedOwner: true,
+        ownerFiles: ["modules/usageSimulator/onePathTruthSummary.ts", "modules/weatherSensitivity/shared.ts"],
+        ownerSymbols: ["buildOnePathTruthSummary", "resolveSharedWeatherSensitivityEnvelope"],
+        notes:
+          "Surfaces weather-efficiency input, donor/fallback modes, rebalance mode, intraday controls, and compare thresholds from shared diagnostics and effective run snapshot.",
+      },
+      {
+        section: "Final Shared Output Contract",
+        surfaceType: "truth_panel",
+        visibleOnPage: true,
+        editableOnPage: false,
+        copiedInAiPayload: true,
+        runRequired: true,
+        pageOnly: false,
+        backedBySharedOwner: true,
+        ownerFiles: ["modules/usageSimulator/onePathTruthSummary.ts", "modules/usageSimulator/onePathSim.ts"],
+        ownerSymbols: ["buildOnePathTruthSummary", "CanonicalSimulationReadModel"],
+        notes:
+          "Breaks the final shared output into named contract sections instead of forcing admins to rely on one giant JSON blob.",
+      },
+      {
         section: "Home, appliance, manual usage, and travel popups",
         surfaceType: "modal",
         visibleOnPage: true,
@@ -228,6 +284,16 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         ownerFiles: ["modules/usageSimulator/simulationVariablePresentation.ts"],
         ownerSymbols: ["buildSimulationVariableCopyPayload"],
         notes: "Taken from effectiveSimulationVariablesUsed.runIdentityLinkage when a canonical run snapshot exists.",
+      },
+      {
+        section: "truthConsole",
+        includedInCopyPayload: true,
+        requiresRun: true,
+        sourcedFromSharedShaper: true,
+        ownerFiles: ["modules/usageSimulator/simulationVariablePresentation.ts", "modules/usageSimulator/onePathTruthSummary.ts"],
+        ownerSymbols: ["buildSimulationVariableCopyPayload", "buildOnePathTruthSummary"],
+        notes:
+          "Structured pre-cutover truth-console sections for stage boundaries, derived inputs, identity, rebalance, donor/fallback, intraday logic, output contract, and mode-specific truth.",
       },
       {
         section: "engineInput",

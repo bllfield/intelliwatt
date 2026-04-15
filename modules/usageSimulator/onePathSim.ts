@@ -693,20 +693,55 @@ export function buildSharedSimulationReadModel(
     compareRows: artifact.compareProjection?.rows ?? [],
     timezone: String((meta as any)?.timezone ?? "America/Chicago"),
   });
-  return {
-    runIdentity: {
-      artifactId: artifact.artifactId,
-      artifactInputHash: artifact.artifactInputHash,
-      engineVersion: artifact.engineVersion,
-      buildInputsHash: artifact.buildInputsHash,
-      inputType: artifact.inputType,
-      simulatorMode: artifact.simulatorMode,
-      houseId: artifact.houseId,
-      actualContextHouseId: artifact.actualContextHouseId,
-      scenarioId: artifact.scenarioId,
-      weatherLogicMode: artifact.engineInput.weatherLogicMode,
-      sharedProducerPathUsed: artifact.engineInput.sharedProducerPathUsed,
+  const runIdentity = {
+    artifactId: artifact.artifactId,
+    artifactInputHash: artifact.artifactInputHash,
+    engineVersion: artifact.engineVersion,
+    buildInputsHash: artifact.buildInputsHash,
+    inputType: artifact.inputType,
+    simulatorMode: artifact.simulatorMode,
+    houseId: artifact.houseId,
+    actualContextHouseId: artifact.actualContextHouseId,
+    scenarioId: artifact.scenarioId,
+    weatherLogicMode: artifact.engineInput.weatherLogicMode,
+    sharedProducerPathUsed: artifact.engineInput.sharedProducerPathUsed,
+  };
+  const sourceOfTruthSummary = buildOnePathTruthSummary({
+    inputType: artifact.inputType,
+    engineInput: artifact.engineInput as Record<string, unknown>,
+    artifact: artifact as unknown as Record<string, unknown>,
+    readModel: {
+      runIdentity,
+      compareProjection: artifact.compareProjection,
+      manualMonthlyReconciliation: artifact.manualMonthlyReconciliation,
+      manualParitySummary: artifact.manualParitySummary,
+      sharedDiagnostics: artifact.sharedDiagnostics,
+      dailyShapeTuning: {
+        simulatedDayResultsCount: artifact.simulatedDayResults.length,
+        manualBillPeriodCount: artifact.manualBillPeriods.length,
+        intervalCount: artifact.dataset.series.intervals15.length,
+        dailyRowCount: artifact.dataset.daily.length,
+      },
+      tuningSummary:
+        (artifact.sharedDiagnostics?.tuningSummary as Record<string, unknown> | undefined) ??
+        ({
+          compareRowsCount: artifact.compareProjection?.rows?.length ?? 0,
+          monthlyTargetConstructionDiagnosticsCount: artifact.monthlyTargetConstructionDiagnostics?.length ?? 0,
+        } as Record<string, unknown>),
+      effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed,
+      sourceOfTruthSummary: {
+        stageBoundaryMap: null,
+        sharedDerivedInputs: null,
+        sourceTruthIdentity: null,
+        constraintRebalance: null,
+        donorFallbackExclusions: null,
+        intradayReconstruction: null,
+        finalSharedOutputContract: null,
+      },
     },
+  });
+  return {
+    runIdentity,
     dataset: artifact.dataset,
     compareProjection: artifact.compareProjection,
     manualMonthlyReconciliation: artifact.manualMonthlyReconciliation,
@@ -728,16 +763,7 @@ export function buildSharedSimulationReadModel(
         monthlyTargetConstructionDiagnosticsCount: artifact.monthlyTargetConstructionDiagnostics?.length ?? 0,
       } as Record<string, unknown>),
     effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed,
-    sourceOfTruthSummary: buildOnePathTruthSummary({
-      inputType: artifact.inputType,
-      engineInput: artifact.engineInput as Record<string, unknown>,
-      artifact: artifact as unknown as Record<string, unknown>,
-      readModel: {
-        compareProjection: artifact.compareProjection,
-        manualParitySummary: artifact.manualParitySummary,
-        effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed,
-      },
-    }),
+    sourceOfTruthSummary,
     failureCode: null,
     failureMessage: null,
   };

@@ -516,12 +516,21 @@ export function OnePathSimAdmin() {
         <div className="rounded-2xl bg-brand-white p-6 shadow-lg">
           <div className="text-2xl font-semibold text-brand-navy">One Path Sim Admin</div>
           <p className="mt-2 max-w-4xl text-sm text-slate-600">
-            Thin admin harness for the canonical shared simulation path. All four modes adapt into one shared producer
-            pipeline, persist one artifact family, and render from the shared read model only.
+            Thin admin harness for the pre-cutover canonical simulation truth console. All four modes adapt into one
+            shared producer pipeline, persist one artifact family, and render from the shared read model only. Older
+            surfaces are not rerouted to this harness yet.
           </p>
+          <div className="mt-2 text-xs text-slate-500">Older surfaces are not rerouted to this harness yet.</div>
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-lg">
+          <div className="mb-4 rounded-xl border border-brand-blue/10 bg-slate-50 p-4">
+            <div className="text-sm font-semibold text-brand-navy">Editable Shared Config / Inputs</div>
+            <p className="mt-1 text-xs text-slate-600">
+              Pre-cutover harness controls only. These feed the shared adapter path and shared policy store, but this
+              pass does not cut older surfaces over.
+            </p>
+          </div>
           <div className="grid gap-4 lg:grid-cols-4">
             <label className="text-sm text-slate-700 lg:col-span-2">
               <div className="font-semibold text-brand-navy">User email lookup</div>
@@ -779,43 +788,161 @@ export function OnePathSimAdmin() {
         </div>
 
         {runResult ? (
-          <div className="grid gap-4 lg:grid-cols-2">
-            <SectionJson title="Canonical engine input" value={runResult.engineInput} />
-            <SectionJson title="Canonical artifact" value={runResult.artifact} />
-            <SectionJson title="Canonical read model" value={runResult.readModel} />
-            <SectionJson title="Read model dataset summary" value={runResult.readModel?.dataset?.summary ?? null} />
-            <SectionJson title="Effective Variables Used By Last Run" value={runResult.readModel?.effectiveSimulationVariablesUsed ?? null} />
-            <TruthSummaryPanel
-              title="Chart / Window / Display Logic"
-              summary={String(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.summary ?? "")}
-              currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.currentRun)}
-              sharedOwners={
-                Array.isArray(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.sharedOwners)
-                  ? runResult.readModel.sourceOfTruthSummary.chartWindowDisplay.sharedOwners
-                  : []
-              }
-            />
-            <TruthSummaryPanel
-              title="Manual Statement / Annual Logic"
-              summary={String(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.summary ?? "")}
-              currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.currentRun)}
-              sharedOwners={
-                Array.isArray(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.sharedOwners)
-                  ? runResult.readModel.sourceOfTruthSummary.manualStatementAnnual.sharedOwners
-                  : []
-              }
-            />
-            <TruthSummaryPanel
-              title="Shared source-of-truth summary"
-              summary={String(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.summary ?? "")}
-              currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.currentRun)}
-            />
+          <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="text-sm font-semibold text-brand-navy">Effective Variables Used By Last Run</div>
-              <p className="mt-2 text-xs text-slate-600">
-                Value sources are resolved in the shared canonical read model only. Labels include default, mode override,
-                and explicit admin override.
+              <div className="text-sm font-semibold text-brand-navy">Read-Only Shared Run Truth</div>
+              <p className="mt-2 text-sm text-slate-600">
+                These panels come from shared readback owners only. They make the full producer chain, derived inputs,
+                shared owners, and final output contract auditable without cutting older surfaces over yet.
               </p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <TruthSummaryPanel
+                title="Pre-Cutover Harness Status"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.preCutoverHarness?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.preCutoverHarness?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.preCutoverHarness?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.preCutoverHarness.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Stage Boundary Map"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.stageBoundaryMap?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.stageBoundaryMap?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.stageBoundaryMap?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.stageBoundaryMap.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Shared Derived Inputs Used By Run"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.sharedDerivedInputs?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.sharedDerivedInputs?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.sharedDerivedInputs?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.sharedDerivedInputs.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Source Truth / Compare Truth Identity"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.sourceTruthIdentity?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.sourceTruthIdentity?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.sourceTruthIdentity?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.sourceTruthIdentity.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Constraint / Rebalance Logic"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.constraintRebalance?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.constraintRebalance?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.constraintRebalance?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.constraintRebalance.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Donor / Fallback / Exclusion Logic"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.donorFallbackExclusions?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.donorFallbackExclusions?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.donorFallbackExclusions?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.donorFallbackExclusions.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Intraday Reconstruction Logic"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.intradayReconstruction?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.intradayReconstruction?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.intradayReconstruction?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.intradayReconstruction.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Chart / Window / Display Logic"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.chartWindowDisplay?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.chartWindowDisplay.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Manual Statement / Annual Logic"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.manualStatementAnnual?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.manualStatementAnnual.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Annual Shared Truth"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.annualModeTruth?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.annualModeTruth?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.annualModeTruth?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.annualModeTruth.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="New Build Shared Truth"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.newBuildModeTruth?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.newBuildModeTruth?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.newBuildModeTruth?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.newBuildModeTruth.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Final Shared Output Contract"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.finalSharedOutputContract?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.finalSharedOutputContract?.currentRun)}
+                sharedOwners={
+                  Array.isArray(runResult.readModel?.sourceOfTruthSummary?.finalSharedOutputContract?.sharedOwners)
+                    ? runResult.readModel.sourceOfTruthSummary.finalSharedOutputContract.sharedOwners
+                    : []
+                }
+              />
+              <TruthSummaryPanel
+                title="Shared source-of-truth summary"
+                summary={String(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.summary ?? "")}
+                currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.currentRun)}
+              />
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-sm font-semibold text-brand-navy">Effective Variables Used By Last Run</div>
+                <p className="mt-2 text-xs text-slate-600">
+                  Value sources are resolved in the shared canonical read model only. Labels include default, mode
+                  override, and explicit admin override.
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-sm font-semibold text-brand-navy">Deep inspection JSON</div>
+              <p className="mt-2 text-xs text-slate-600">
+                Raw JSON is still available for deep inspection, but the structured truth panels above are the primary
+                read-only truth console surfaces.
+              </p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SectionJson title="Canonical engine input" value={runResult.engineInput} />
+              <SectionJson title="Canonical artifact" value={runResult.artifact} />
+              <SectionJson title="Canonical read model" value={runResult.readModel} />
+              <SectionJson title="Read model dataset summary" value={runResult.readModel?.dataset?.summary ?? null} />
+              <SectionJson title="Effective Variables Used By Last Run" value={runResult.readModel?.effectiveSimulationVariablesUsed ?? null} />
             </div>
           </div>
         ) : null}
