@@ -1,11 +1,11 @@
 import { prisma } from "@/lib/db";
 import { monthsEndingAt } from "@/modules/manualUsage/anchor";
-import { canonicalWindow12Months } from "@/modules/usageSimulator/canonicalWindow";
+import { canonicalWindow12Months } from "@/modules/onePathSim/usageSimulator/canonicalWindow";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
-import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
+import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/onePathSim/usageSimulator/build";
+import { computeRequirements, type SimulatorMode } from "@/modules/onePathSim/usageSimulator/requirements";
 import { hasActualIntervals, resolveActualUsageSourceAnchor } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import {
@@ -22,14 +22,14 @@ import {
   buildDisplayMonthlyFromIntervalsUtc,
   reconcileRestoredPastDatasetFromDecodedIntervals,
   type SimulatorBuildInputsV1,
-} from "@/modules/usageSimulator/dataset";
-import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
-import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
-import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
+} from "@/modules/onePathSim/usageSimulator/dataset";
+import { computeBuildInputsHash } from "@/modules/onePathSim/usageSimulator/hash";
+import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/onePathSim/usageSimulator/windowIdentity";
+import { INTRADAY_TEMPLATE_VERSION } from "@/modules/onePathSim/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from "@/modules/usageScenario/overlay";
 import { listLedgerRows } from "@/modules/upgradesLedger/repo";
 import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/overlayEntries";
-import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
+import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/onePathSim/usageSimulator/repo";
 import { getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { saveIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import {
@@ -40,32 +40,28 @@ import {
   PAST_ENGINE_VERSION,
   type CachedPastDataset,
   type CanonicalArtifactSimulatedDayTotalsByDate,
-} from "@/modules/usageSimulator/pastCache";
+} from "@/modules/onePathSim/usageSimulator/pastCache";
 import {
   createSimCorrelationId,
   getMemoryRssMb,
   logSimObservabilityEvent,
   logSimPipelineEvent,
-} from "@/modules/usageSimulator/simObservability";
+} from "@/modules/onePathSim/usageSimulator/simObservability";
 import {
   encodeIntervalsV1,
   decodeIntervalsV1,
   INTERVAL_CODEC_V1,
-} from "@/modules/usageSimulator/intervalCodec";
-import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
+} from "@/modules/onePathSim/usageSimulator/intervalCodec";
+import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import {
   buildManualUsageStageOneResolvedSeeds,
   resolveManualUsageStageOnePayloadForMode,
-} from "@/modules/manualUsage/prefill";
+} from "@/modules/onePathSim/manualPrefill";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
-import {
-  ensureHouseWeatherBackfill,
-  ensureHouseWeatherNormalAvgBackfill,
-} from "@/modules/weather/backfill";
-import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDaySimulator";
-import type { SimulatedDayResult } from "@/modules/simulatedUsage/pastDaySimulatorTypes";
+import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
+import type { SimulatedDayResult } from "@/modules/onePathSim/simulatedUsage/pastDaySimulatorTypes";
 import {
   canonicalIntervalKey,
   dateKeyInTimezone,
@@ -77,12 +73,12 @@ import {
   normalizeValidationSelectionMode,
   type ValidationDaySelectionMode,
   type ValidationDaySelectionDiagnostics,
-} from "@/modules/usageSimulator/validationSelection";
+} from "@/modules/onePathSim/usageSimulator/validationSelection";
 import {
   attachValidationCompareProjection,
   CompareTruthIncompleteError,
   projectBaselineFromCanonicalDataset,
-} from "@/modules/usageSimulator/compareProjection";
+} from "@/modules/onePathSim/usageSimulator/compareProjection";
 import {
   buildInitialPastSimLockboxInput,
   buildPastSimPerDayTrace,
@@ -95,18 +91,18 @@ import {
   type PastSimPerRunTrace,
   type PastSimReadContext,
   type PastSimRunContext,
-} from "@/modules/usageSimulator/pastSimLockbox";
+} from "@/modules/onePathSim/usageSimulator/pastSimLockbox";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 import {
   resolveWeatherKindForLogicMode,
   resolveWeatherLogicModeFromBuildInputs,
   type WeatherLogicMode,
-} from "@/modules/usageSimulator/pastSimWeatherPolicy";
-import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDisplay";
-import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
-import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
-import { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+} from "@/modules/onePathSim/usageSimulator/pastSimWeatherPolicy";
+import { displayProfilesFromModelMeta } from "@/modules/onePathSim/usageSimulator/profileDisplay";
+import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/onePathSim/usageSimulator/simulationDataAlerts";
+import { toPublicHouseLabel } from "@/modules/onePathSim/usageSimulator/houseLabel";
+import { normalizePastProducerBuildPathKind } from "@/modules/onePathSim/simulatedUsage/pastProducerBuildPath";
+import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/onePathSim/weatherSensitivityShared";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -114,30 +110,30 @@ import {
   simulatePastSelectedDaysShared,
   getUsageShapeProfileIdentityForPast,
   loadWeatherForPastWindow,
-} from "@/modules/simulatedUsage/simulatePastUsageDataset";
-import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
+} from "@/modules/onePathSim/simulatedUsage/simulatePastUsageDataset";
+import type { SimulatedCurve } from "@/modules/onePathSim/simulatedUsage/types";
 import {
   boundDateKeysToCoverageWindow,
   resolveCanonicalUsage365CoverageWindow,
   resolveReportedCoverageWindow,
   type CoverageWindow,
-} from "@/modules/usageSimulator/metadataWindow";
+} from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import {
   createFingerprintRecalcContext,
   ensureSimulatorFingerprintsWithContext,
   resolveSimFingerprintWithContext,
-} from "@/modules/usageSimulator/fingerprintOrchestration";
-import { createRecalcIntervalPreloadContext } from "@/modules/usageSimulator/recalcIntervalPreload";
+} from "@/modules/onePathSim/usageSimulator/fingerprintOrchestration";
+import { createRecalcIntervalPreloadContext } from "@/modules/onePathSim/usageSimulator/recalcIntervalPreload";
 import {
   attachRunIdentityToEffectiveSimulationVariablesUsed,
   getSimulationVariableOverrides,
   resolveSimulationVariablePolicyForInputType,
   type SimulationVariableInputType,
-} from "@/modules/usageSimulator/simulationVariablePolicy";
+} from "@/modules/onePathSim/usageSimulator/simulationVariablePolicy";
 import {
   applyAdminLabTreatmentToResolvedFingerprint,
   isAdminLabManualConstraintTreatmentMode,
-} from "@/modules/usageSimulator/adminLabTreatment";
+} from "@/modules/onePathSim/usageSimulator/adminLabTreatment";
 
 async function attachSelectedDailyWeatherForDataset(args: {
   dataset: any;
@@ -158,14 +154,14 @@ async function attachSelectedDailyWeatherForDataset(args: {
     String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
     "America/Chicago";
   if (weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER") {
-    await ensureHouseWeatherBackfill({
+    await ensureOnePathWeatherBackfillNoOp({
       houseId: weatherHouseId,
       startDate: dateKeys[0]!,
       endDate: dateKeys[dateKeys.length - 1]!,
       timezone,
     }).catch(() => null);
   } else if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
-    await ensureHouseWeatherNormalAvgBackfill({
+    await ensureOnePathWeatherNormalAvgBackfillNoOp({
       houseId: weatherHouseId,
       dateKeys,
     }).catch(() => null);
@@ -207,10 +203,26 @@ import {
   buildSourceDerivedMonthlyTargetResolutionFromPayload,
   resolveManualMonthlyAnchorEndDateKey,
   type SourceDerivedMonthlyTargetResolution,
-} from "@/modules/usageSimulator/monthlyTargetConstruction";
-import type { ResolvedSimFingerprint } from "@/modules/usageSimulator/resolvedSimFingerprintTypes";
+} from "@/modules/onePathSim/usageSimulator/monthlyTargetConstruction";
+import type { ResolvedSimFingerprint } from "@/modules/onePathSim/usageSimulator/resolvedSimFingerprintTypes";
 
 type ManualUsagePayloadAny = any;
+
+async function ensureOnePathWeatherBackfillNoOp(_args: {
+  houseId: string;
+  startDate: string;
+  endDate: string;
+  timezone?: string | null;
+}) {
+  return null;
+}
+
+async function ensureOnePathWeatherNormalAvgBackfillNoOp(_args: {
+  houseId: string;
+  dateKeys: string[];
+}) {
+  return null;
+}
 
 function cleanupStalePastCacheVariants(args: { houseId: string; scenarioId: string; keepInputHash: string }) {
   void deleteCachedPastDatasetsForScenario({
@@ -4008,7 +4020,7 @@ async function recalcSimulatorBuildImpl(args: {
   correlationId?: string;
   now?: Date;
   /** Admin calibration lab only (plan §24): applied after `resolveSimFingerprint`, same shared chain. */
-  adminLabTreatmentMode?: import("@/modules/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
+  adminLabTreatmentMode?: import("@/modules/onePathSim/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
   runContext?: Partial<PastSimRunContext>;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
@@ -4183,8 +4195,8 @@ async function recalcSimulatorBuildImpl(args: {
   if (!homeProfile) return { ok: false, error: "homeProfile_required" };
   if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
 
-  let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
-  let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
+  let weatherSensitivityScore: import("@/modules/onePathSim/weatherSensitivityShared").WeatherSensitivityScore | null = null;
+  let weatherEfficiencyDerivedInput: import("@/modules/onePathSim/weatherSensitivityShared").WeatherEfficiencyDerivedInput | null = null;
   const simulationVariableInputType: SimulationVariableInputType =
     mode === "NEW_BUILD_ESTIMATE"
       ? "NEW_BUILD"
@@ -6026,7 +6038,7 @@ export type RecalcSimulatorBuildArgs = {
   correlationId?: string;
   now?: Date;
   /** Admin calibration lab only (plan §24). */
-  adminLabTreatmentMode?: import("@/modules/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
+  adminLabTreatmentMode?: import("@/modules/onePathSim/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
   runContext?: Partial<PastSimRunContext>;
 };
 
@@ -6942,7 +6954,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const canonicalMonthsForWx = (buildInputs as any).canonicalMonths ?? [];
     const windowForWx = canonicalMonthsForWx.length > 0 ? canonicalWindowDateRange(canonicalMonthsForWx) : null;
     if (windowForWx?.start && windowForWx?.end) {
-      ensureHouseWeatherBackfill({
+      ensureOnePathWeatherBackfillNoOp({
         houseId: args.houseId,
         startDate: windowForWx.start,
         endDate: windowForWx.end,

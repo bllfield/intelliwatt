@@ -1,0 +1,308 @@
+/**
+ * Types for the shared Past day simulator.
+ * Used by both GapFill Lab and user-facing Past baseline.
+ */
+
+import type { WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weatherSensitivityShared";
+import type { SimulationVariablePolicy } from "@/modules/onePathSim/usageSimulator/simulationVariablePolicy";
+
+/** Daily weather features for one day (shared shape). */
+export type PastDayWeatherFeatures = {
+  dailyAvgTempC: number | null;
+  dailyMinTempC: number | null;
+  dailyMaxTempC: number | null;
+  heatingDegreeSeverity: number;
+  coolingDegreeSeverity: number;
+  freezeHoursCount: number;
+  solarRadiationDailyTotal?: number;
+  cloudcoverAvg?: number | null;
+  extremeCold?: boolean;
+  freezeDay?: boolean;
+};
+
+/** Minimal profile for day-total selection: per-month per-daytype averages and counts. */
+export type PastDayProfileLite = {
+  monthKeys: string[];
+  avgKwhPerDayWeekdayByMonth: number[];
+  avgKwhPerDayWeekendByMonth: number[];
+  weekdayCountByMonth: Record<string, number>;
+  weekendCountByMonth: Record<string, number>;
+  monthOverallAvgByMonth: Record<string, number>;
+  monthOverallCountByMonth: Record<string, number>;
+};
+
+export type PastDayTypeKey = "weekday" | "weekend";
+export type PastWeatherRegimeKey = "heating" | "cooling" | "neutral";
+
+export type PastShapeBucket = {
+  weekday?: number[] | null;
+  weekend?: number[] | null;
+};
+
+export type PastShapeWeatherBucket = {
+  heating?: number[] | null;
+  cooling?: number[] | null;
+  neutral?: number[] | null;
+};
+
+export type PastShapeWeatherDayTypeBucket = {
+  weekday?: PastShapeWeatherBucket | null;
+  weekend?: PastShapeWeatherBucket | null;
+};
+
+export type PastShapeVariants = {
+  byMonth96?: Record<string, number[]> | null;
+  byMonthDayType96?: Record<string, PastShapeBucket> | null;
+  byMonthWeatherDayType96?: Record<string, PastShapeWeatherDayTypeBucket> | null;
+  weekdayWeekend96?: PastShapeBucket | null;
+  weekdayWeekendWeather96?: PastShapeWeatherDayTypeBucket | null;
+};
+
+export type PastNeighborDaySample = {
+  localDate: string;
+  dayOfMonth: number;
+  dayKwh: number;
+};
+
+export type PastNeighborDayTotals = {
+  weekdayByMonth?: Record<string, PastNeighborDaySample[]> | null;
+  weekendByMonth?: Record<string, PastNeighborDaySample[]> | null;
+};
+
+export type PastWeatherDonorSample = {
+  localDate: string;
+  monthKey: string;
+  dayType: PastDayTypeKey;
+  weatherRegime: PastWeatherRegimeKey;
+  dayKwh: number;
+  dailyAvgTempC: number | null;
+  dailyMinTempC: number | null;
+  dailyMaxTempC: number | null;
+  tempSpreadC: number | null;
+  heatingDegreeSeverity: number;
+  coolingDegreeSeverity: number;
+};
+
+export type PastWeatherDonorContribution = {
+  localDate: string;
+  monthKey: string;
+  weatherRegime: PastWeatherRegimeKey;
+  dayKwh: number;
+  distance: number;
+  weight: number;
+};
+
+export type PastModeledDaySelectionStrategy = "calendar_first" | "weather_donor_first";
+
+export type PastLowDataWeatherEvidenceMonth = {
+  monthKey: string;
+  targetAvgDailyKwh: number;
+  evidenceSource: "eligible_bill_period" | "inferred_from_eligible_periods";
+  drivingBillPeriodIds: string[];
+  eligibleNonTravelDayCount: number;
+  excludedTravelDayCount: number;
+  eligibleBillPeriodCount: number;
+  excludedTravelTouchedBillPeriodCount: number;
+  baseloadShare: number;
+  hvacShare: number;
+  heatingSensitivity: number;
+  coolingSensitivity: number;
+  referenceDailyHdd: number;
+  referenceDailyCdd: number;
+  referenceAvgTempC: number | null;
+};
+
+export type PastLowDataWeatherEvidenceSummary = {
+  inputMonthKeys: string[];
+  missingMonthKeys: string[];
+  explicitTravelRangesUsed: Array<{ startDate: string; endDate: string }>;
+  eligibleBillPeriodsUsed: Array<{
+    id: string;
+    monthKey: string;
+    startDate: string;
+    endDate: string;
+    targetKwh: number;
+    eligibleNonTravelDayCount: number;
+  }>;
+  excludedTravelTouchedBillPeriods: Array<{
+    id: string;
+    monthKey: string;
+    startDate: string;
+    endDate: string;
+    targetKwh: number | null;
+    travelVacantDayCount: number;
+  }>;
+  monthlyWeatherPressureInputsUsed: Array<{
+    billPeriodId: string;
+    monthKey: string;
+    avgDailyTargetKwh: number;
+    avgHdd: number;
+    avgCdd: number;
+    avgTempC: number | null;
+  }>;
+  evidenceWeight: number;
+  wholeHomePriorFallbackWeight: number;
+  baseloadShare: number;
+  hvacShare: number;
+  heatingSensitivity: number;
+  coolingSensitivity: number;
+  dailyWeatherResponsiveness: "weather_driven" | "mixed" | "mostly_baseload_driven";
+  byMonth: Record<string, PastLowDataWeatherEvidenceMonth>;
+};
+
+/** Training weather aggregates by bucket (month+daytype, season+daytype, global). */
+export type PastDayTrainingWeatherStats = {
+  byMonthDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
+  bySeasonDaytype: Map<string, { avgDayKwh: number; avgHdd: number; avgCdd: number; count: number }>;
+  global: {
+    avgDayKwhWd: number;
+    avgDayKwhWe: number;
+    avgHddWd: number;
+    avgHddWe: number;
+    avgCddWd: number;
+    avgCddWe: number;
+    countWd: number;
+    countWe: number;
+  };
+};
+
+/** Reusable context for simulating past days (profile + weather stats + weather by date). */
+export type PastDaySimulationContext = {
+  profile: PastDayProfileLite;
+  trainingWeatherStats: PastDayTrainingWeatherStats | null;
+  weatherByDateKey: Map<string, PastDayWeatherFeatures>;
+  neighborDayTotals?: PastNeighborDayTotals | null;
+  weatherDonorSamples?: PastWeatherDonorSample[] | null;
+  modeledDaySelectionStrategy?: PastModeledDaySelectionStrategy;
+  shapeVariants?: PastShapeVariants | null;
+  lowDataSyntheticDayKwhByMonthDayType?: Record<string, { weekday: number; weekend: number }> | null;
+  lowDataWeatherEvidence?: PastLowDataWeatherEvidenceSummary | null;
+  weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  simulationVariablePolicy?: SimulationVariablePolicy | null;
+};
+
+/** Request to simulate one past day. */
+export type PastDaySimulationRequest = {
+  localDate: string;
+  isWeekend: boolean;
+  /** 96 ISO timestamps for the day (slot 0..95). */
+  gridTimestamps: string[];
+  weatherForDay: PastDayWeatherFeatures | null;
+};
+
+/** Canonical artifact for one simulated day. */
+export type SimulatedDayResult = {
+  localDate: string;
+  source: "simulated_vacant_day";
+  /**
+   * Shared post-sim reason tag used by downstream consumers to separate
+   * travel/vacant simulation from test-day modeled output.
+   */
+  /** Producer-owned; TRAVEL_VACANT vs TEST (TEST_MODELED_KEEP_REF | FORCED_SELECTED_DAY) per architecture override. */
+  simulatedReasonCode?:
+    | "TRAVEL_VACANT"
+    | "TEST_MODELED_KEEP_REF"
+    | "MANUAL_CONSTRAINED_DAY"
+    | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+    | "FORCED_SELECTED_DAY"
+    | "INCOMPLETE_METER_DAY"
+    | "LEADING_MISSING_DAY";
+  intervals: Array<{ timestamp: string; kwh: number }>;
+  intervals15: number[];
+  intervalSumKwh: number;
+  displayDayKwh: number;
+  rawDayKwh: number;
+  weatherAdjustedDayKwh: number;
+  profileSelectedDayKwh: number;
+  finalDayKwh: number;
+  weatherSeverityMultiplier: number;
+  weatherModeUsed: "heating" | "cooling" | "neutral";
+  auxHeatKwhAdder: number;
+  poolFreezeProtectKwhAdder: number;
+  dayClassification: PastDayWeatherClassification;
+  fallbackLevel: PastDayFallbackLevel;
+  clampApplied: boolean;
+  shape96Used: number[];
+  dayTypeUsed?: PastDayTypeKey;
+  shapeVariantUsed?: string;
+  weatherRegimeUsed?: PastWeatherRegimeKey;
+  targetDayKwhBeforeWeather?: number;
+  donorSelectionModeUsed?: string;
+  donorCandidatePoolSize?: number;
+  selectedDonorLocalDates?: string[];
+  selectedDonorWeights?: PastWeatherDonorContribution[];
+  donorWeatherRegimeUsed?: PastWeatherRegimeKey | null;
+  donorMonthKeyUsed?: string | null;
+  thermalDistanceScore?: number | null;
+  broadFallbackUsed?: boolean;
+  sameRegimeDonorPoolAvailable?: boolean;
+  donorPoolBlendStrategy?: "distance_weighted_blend" | "variance_dampened_blend";
+  donorPoolKwhSpread?: number | null;
+  donorPoolKwhVariance?: number | null;
+  donorPoolMedianKwh?: number | null;
+  donorVarianceGuardrailTriggered?: boolean;
+  weatherAdjustmentModeUsed?: "legacy_training_stats" | "bounded_post_donor" | "manual_monthly_weather_evidence";
+  postDonorAdjustmentCoefficient?: number | null;
+  templateSelectionKind?: string;
+  selectedFingerprintBucketMonth?: string;
+  selectedFingerprintBucketDayType?: PastDayTypeKey;
+  selectedFingerprintWeatherBucket?: PastWeatherRegimeKey;
+  selectedFingerprintIdentity?: string;
+  selectedReferencePoolCount?: number;
+  weatherScalingCoefficientUsed?: number;
+  dayTotalBeforeWeatherScale?: number;
+  dayTotalAfterWeatherScale?: number;
+  intervalShapeScalingMethod?: string;
+  weatherEfficiencyApplied?: boolean;
+  weatherShapingMode?: string;
+  weatherAmplitudeCompressionFactor?: number;
+  intradayPeakValleyCompressionFactor?: number;
+  dailyExtremaConfidence?: number;
+  /** Diagnostics: why aux heat did or did not apply. */
+  auxHeatGate_minTempPassed?: boolean;
+  auxHeatGate_freezeHoursPassed?: boolean;
+  auxHeatGate_severityPassed?: boolean;
+  /** Reference heating severity (ref HDD) used for aux gate and ratio. */
+  referenceHeatingSeverity?: number;
+  /** Pre-blend adjusted total (profile × weatherSeverityMultiplier, before aux/pool adders and blend). */
+  preBlendAdjustedDayKwh?: number;
+  /** True when day was weather_scaled_day and a small profile anchor was blended with temperature-primary total. */
+  blendedBackTowardProfile?: boolean;
+};
+
+/** Backward-compatible alias used by existing callers during migration. */
+export type PastDaySimulationResult = SimulatedDayResult;
+
+export type PastDayWeatherClassification =
+  | "normal_day"
+  | "weather_scaled_day"
+  | "extreme_cold_event_day"
+  | "freeze_protect_day";
+
+export type PastDayFallbackLevel =
+  | "weather_nearest_daytype_regime"
+  | "weather_nearest_daytype"
+  | "month_daytype_neighbor"
+  | "month_daytype"
+  | "adjacent_month_daytype"
+  | "month_overall"
+  | "season_overall"
+  | "global_daytype"
+  | "global_overall";
+
+/** Minimal home profile for weather adjustment (all-electric / electric heat / pool). */
+export type PastDayHomeProfile = {
+  fuelConfiguration?: string | null;
+  heatingType?: string | null;
+  hvacType?: string | null;
+  pool?: { hasPool?: boolean; pumpType?: string | null; pumpHp?: number | null } | null;
+};
+
+export type PastDayApplianceProfile = {
+  appliances?: Array<{ type?: string; data?: Record<string, unknown> }> | null;
+};
+
+/** Lightweight metadata to prove both paths use the same core. */
+export const PAST_DAY_SIMULATOR_VERSION = "1.0.0";
+export const SOURCE_OF_DAY_SIMULATION_CORE = "shared_past_day_simulator";
+

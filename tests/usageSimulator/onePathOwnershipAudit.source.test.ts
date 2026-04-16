@@ -10,9 +10,10 @@ function readRepoFile(relativePath: string): string {
 
 describe("one path ownership audit source", () => {
   it("defines a shared ownership audit used by the page and AI copy payload", () => {
-    const auditSource = readRepoFile("modules/usageSimulator/onePathOwnershipAudit.ts");
+    const auditSource = readRepoFile("modules/onePathSim/onePathOwnershipAudit.ts");
+    const isolatedAuditEntrySource = readRepoFile("modules/onePathSim/onePathOwnershipAudit.ts");
     const pageSource = readRepoFile("components/admin/OnePathSimAdmin.tsx");
-    const copySource = readRepoFile("modules/usageSimulator/simulationVariablePresentation.ts");
+    const copySource = readRepoFile("modules/onePathSim/simulationVariablePresentation.ts");
 
     expect(auditSource).toContain("pageSurfaceAuditMatrix");
     expect(auditSource).toContain("aiCopyPayloadInventory");
@@ -22,6 +23,7 @@ describe("one path ownership audit source", () => {
     expect(auditSource).toContain("app/api/admin/tools/gapfill-lab/route.ts");
     expect(auditSource).toContain("app/api/user/usage/simulated/house/route.ts");
     expect(auditSource).toContain("app/api/admin/tools/weather-sensitivity-lab/route.ts");
+    expect(isolatedAuditEntrySource).toContain("buildOnePathOwnershipAudit");
     expect(pageSource).toContain("buildOnePathOwnershipAudit");
     expect(pageSource).toContain("One Path Hard Audit");
     expect(pageSource).toContain("One Path surface audit matrix");

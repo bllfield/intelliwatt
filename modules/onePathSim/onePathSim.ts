@@ -1,32 +1,32 @@
 import { prisma } from "@/lib/db";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
-import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import {
-  resolveUpstreamUsageTruthForSimulation,
+  attachOnePathRunIdentityToEffectiveSimulationVariablesUsed,
+  buildOnePathDailyCurveComparePayload,
+  buildOnePathSharedPastSimDiagnostics,
+  buildOnePathValidationCompareProjectionSidecar,
+  buildOnePathWeatherEfficiencyDerivedInput,
+  getOnePathManualUsageInput,
+  resolveOnePathCanonicalUsage365CoverageWindow,
+  resolveOnePathUpstreamUsageTruthForSimulation,
+  resolveOnePathWeatherSensitivityEnvelope,
   type UpstreamUsageTruthSeedResult,
   type UpstreamUsageTruthSection,
   type UpstreamUsageTruthSource,
-} from "@/modules/usageSimulator/upstreamUsageTruth";
-import { buildValidationCompareProjectionSidecar, type ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
-import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
-import { buildOnePathTruthSummary, type OnePathTruthSummary } from "@/modules/usageSimulator/onePathTruthSummary";
+} from "@/modules/onePathSim/runtime";
+import { buildOnePathManualArtifactDecorations } from "@/modules/onePathSim/manualArtifactDecorations";
+import { buildOnePathTruthSummary, type OnePathTruthSummary } from "@/modules/onePathSim/onePathTruthSummary";
 import {
-  attachRunIdentityToEffectiveSimulationVariablesUsed,
   type EffectiveSimulationVariablesUsed,
-} from "@/modules/usageSimulator/simulationVariablePolicy";
-import { buildSharedPastSimDiagnostics, type SharedDiagnosticsCallerType } from "@/modules/usageSimulator/sharedDiagnostics";
+} from "@/modules/onePathSim/simulationVariablePolicy";
 import {
-  getSimulatedUsageForHouseScenario,
-  recalcSimulatorBuild,
   type RecalcSimulatorBuildArgs,
-} from "@/modules/usageSimulator/service";
-import {
-  buildWeatherEfficiencyDerivedInput,
-  resolveSharedWeatherSensitivityEnvelope,
-  type WeatherEfficiencyDerivedInput,
-} from "@/modules/weatherSensitivity/shared";
+  type SharedDiagnosticsCallerType,
+  type ValidationCompareProjectionSidecar,
+  readOnePathSimulatedUsageScenario,
+  runOnePathSimulatorBuild,
+} from "@/modules/onePathSim/serviceBridge";
+import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weatherSensitivityShared";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
@@ -186,7 +186,7 @@ type LoadedSharedContext = {
   manualUsagePayload: ManualUsagePayload | null;
   homeProfile: Record<string, unknown> | null;
   applianceProfile: Record<string, unknown> | null;
-  weatherEnvelope: Awaited<ReturnType<typeof resolveSharedWeatherSensitivityEnvelope>>;
+  weatherEnvelope: Awaited<ReturnType<typeof resolveOnePathWeatherSensitivityEnvelope>>;
 };
 
 export class UpstreamUsageTruthMissingError extends Error {
@@ -201,9 +201,24 @@ export class UpstreamUsageTruthMissingError extends Error {
     upstreamUsageTruth: UpstreamUsageTruthSection;
   }) {
     super("Upstream usage truth is required before simulation can run.");
+    this.name = "UpstreamUsageTruthMissingError";
+    Object.setPrototypeOf(this, new.target.prototype);
     this.usageTruthSource = args.usageTruthSource;
     this.seedResult = args.seedResult;
     this.upstreamUsageTruth = args.upstreamUsageTruth;
+  }
+}
+
+export class SharedSimulationRunError extends Error {
+  code: string;
+  missingItems: string[];
+
+  constructor(args: { code: string; missingItems?: string[] }) {
+    super(args.code);
+    this.name = "SharedSimulationRunError";
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.code = args.code;
+    this.missingItems = Array.isArray(args.missingItems) ? args.missingItems : [];
   }
 }
 
@@ -246,7 +261,7 @@ async function loadSharedContext(args: {
   manualUsagePayload?: ManualUsagePayload | null;
   seedUsageTruthIfMissing?: boolean;
 }): Promise<LoadedSharedContext> {
-  const upstreamUsageTruth = await resolveUpstreamUsageTruthForSimulation({
+  const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
@@ -266,12 +281,12 @@ async function loadSharedContext(args: {
   ] = await Promise.all([
     args.manualUsagePayload !== undefined
       ? Promise.resolve({ payload: args.manualUsagePayload ?? null })
-      : getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => ({ payload: null })),
+      : getOnePathManualUsageInput({ userId: args.userId, houseId: args.houseId }).catch(() => ({ payload: null })),
     getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null),
     getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
-  const weatherEnvelope = await resolveSharedWeatherSensitivityEnvelope({
+  const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
     actualDataset: upstreamUsageTruth.dataset,
     manualUsagePayload: manualUsageRecord.payload ?? null,
     homeProfile,
@@ -307,7 +322,7 @@ function buildCanonicalEngineInput(args: {
   loaded: LoadedSharedContext;
   runtimeUserId: string;
 }): CanonicalSimulationEngineInput {
-  const coverageWindow = resolveCanonicalUsage365CoverageWindow();
+  const coverageWindow = resolveOnePathCanonicalUsage365CoverageWindow();
   const manualUsagePayload = args.loaded.manualUsagePayload;
   const actualMeta = asRecord(args.loaded.actualDataset?.meta) ?? {};
   const statementRanges = Array.isArray((manualUsagePayload as any)?.statementRanges) ? (manualUsagePayload as any).statementRanges : [];
@@ -318,7 +333,7 @@ function buildCanonicalEngineInput(args: {
       .filter((entry: [string, number]) => /^\d{4}-\d{2}$/.test(entry[0]) && Number.isFinite(entry[1]))
   ) as Record<string, number>;
   const derivedInput =
-    args.loaded.weatherEnvelope.derivedInput ?? buildWeatherEfficiencyDerivedInput(args.loaded.weatherEnvelope.score ?? null);
+    args.loaded.weatherEnvelope.derivedInput ?? buildOnePathWeatherEfficiencyDerivedInput(args.loaded.weatherEnvelope.score ?? null);
   const actualMonthlyRows = Array.isArray(args.loaded.actualDataset?.monthly) ? args.loaded.actualDataset.monthly : [];
   const actualMonthlyReference = Object.fromEntries(
     actualMonthlyRows
@@ -521,7 +536,7 @@ async function buildArtifactFromEngineInput(args: {
   callerType: SharedDiagnosticsCallerType;
   exactArtifactInputHash?: string | null;
 }): Promise<CanonicalSimulationArtifact> {
-  const datasetRead = await getSimulatedUsageForHouseScenario({
+  const datasetRead = await readOnePathSimulatedUsageScenario({
     userId: args.engineInput.runtime.userId,
     houseId: args.engineInput.houseId,
     scenarioId: args.engineInput.scenarioId,
@@ -552,36 +567,41 @@ async function buildArtifactFromEngineInput(args: {
     .catch(() => null);
   const actualDataset =
     (
-      await resolveUpstreamUsageTruthForSimulation({
+      await resolveOnePathUpstreamUsageTruthForSimulation({
         userId: args.engineInput.runtime.userId,
         houseId: args.engineInput.houseId,
         actualContextHouseId: args.engineInput.actualContextHouseId,
         seedIfMissing: false,
       }).catch(() => null)
     )?.dataset ?? null;
-  const compareProjection = buildValidationCompareProjectionSidecar(datasetRead.dataset);
+  const compareProjection = buildOnePathValidationCompareProjectionSidecar(datasetRead.dataset);
   const manualReadResult =
     args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
-      ? await buildManualUsagePastSimReadResult({
+      ? await buildOnePathManualArtifactDecorations({
           userId: args.engineInput.runtime.userId,
           houseId: args.engineInput.houseId,
           scenarioId: args.engineInput.scenarioId,
-          readMode: "artifact_only",
+          dataset: datasetRead.dataset,
+          displayDataset: datasetRead.dataset,
           callerType: args.callerType,
           usageInputMode: args.engineInput.inputType,
           weatherLogicMode: args.engineInput.weatherLogicMode,
+          artifactId: buildRec?.id ? String(buildRec.id) : null,
+          artifactInputHash:
+            typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
+              ? String((datasetRead.dataset as any).meta.artifactInputHash)
+              : null,
+          artifactEngineVersion:
+            typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
+              ? String((datasetRead.dataset as any).meta.engineVersion)
+              : null,
           actualDataset,
-          actualReference: {
-            userId: args.engineInput.runtime.userId,
-            houseId: args.engineInput.actualContextHouseId,
-            scenarioId: null,
-          },
         })
       : null;
   const sharedDiagnostics =
-    manualReadResult && manualReadResult.ok
+    manualReadResult
       ? manualReadResult.sharedDiagnostics
-      : buildSharedPastSimDiagnostics({
+      : buildOnePathSharedPastSimDiagnostics({
           callerType: args.callerType,
           dataset: datasetRead.dataset,
           scenarioId: args.engineInput.scenarioId,
@@ -593,7 +613,7 @@ async function buildArtifactFromEngineInput(args: {
           compareProjection,
           manualMonthlyReconciliation: null,
         });
-  const effectiveSimulationVariablesUsed = attachRunIdentityToEffectiveSimulationVariablesUsed(
+  const effectiveSimulationVariablesUsed = attachOnePathRunIdentityToEffectiveSimulationVariablesUsed(
     ((datasetRead.dataset as any)?.meta?.effectiveSimulationVariablesUsed as EffectiveSimulationVariablesUsed | null | undefined) ?? null,
     {
       artifactId: buildRec?.id ? String(buildRec.id) : null,
@@ -660,8 +680,8 @@ async function buildArtifactFromEngineInput(args: {
     sourceDerivedMonthlyTotalsKwhByMonth:
       (asRecord((datasetRead.dataset as any)?.meta?.sourceDerivedMonthlyTotalsKwhByMonth) as Record<string, number> | null) ?? {},
     compareProjection,
-    manualMonthlyReconciliation: manualReadResult && manualReadResult.ok ? manualReadResult.manualMonthlyReconciliation : null,
-    manualParitySummary: manualReadResult && manualReadResult.ok ? manualReadResult.manualParitySummary : null,
+    manualMonthlyReconciliation: manualReadResult ? manualReadResult.manualMonthlyReconciliation : null,
+    manualParitySummary: manualReadResult ? manualReadResult.manualParitySummary : null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
     effectiveSimulationVariablesUsed,
   };
@@ -688,9 +708,12 @@ export async function runSharedSimulation(
       callerLabel: "one_path_sim_admin",
     },
   };
-  const result = await recalcSimulatorBuild(recalcArgs);
+  const result = await runOnePathSimulatorBuild(recalcArgs);
   if (!result.ok) {
-    throw new Error(result.error);
+    throw new SharedSimulationRunError({
+      code: result.error,
+      missingItems: result.missingItems,
+    });
   }
   return buildArtifactFromEngineInput({
     engineInput,
@@ -733,7 +756,7 @@ export function buildSharedSimulationReadModel(
   artifact: CanonicalSimulationArtifact
 ): CanonicalSimulationReadModel {
   const meta = artifact.dataset.meta ?? {};
-  const curvePayload = buildDailyCurveComparePayload({
+  const curvePayload = buildOnePathDailyCurveComparePayload({
     actualDataset: null,
     simulatedDataset: artifact.dataset,
     compareRows: artifact.compareProjection?.rows ?? [],

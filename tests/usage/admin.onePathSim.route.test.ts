@@ -36,6 +36,17 @@ class UpstreamUsageTruthMissingError extends Error {
   }
 }
 
+class SharedSimulationRunError extends Error {
+  code: string;
+  missingItems: string[];
+
+  constructor(args: { code: string; missingItems?: string[] }) {
+    super(args.code);
+    this.code = args.code;
+    this.missingItems = Array.isArray(args.missingItems) ? args.missingItems : [];
+  }
+}
+
 vi.mock("@/lib/auth/admin", () => ({
   requireAdmin: (...args: any[]) => requireAdmin(...args),
 }));
@@ -47,11 +58,6 @@ vi.mock("@/lib/admin/adminHouseLookup", () => ({
 
 vi.mock("@/modules/usageSimulator/service", () => ({
   listScenarios: (...args: any[]) => listScenarios(...args),
-}));
-
-vi.mock("@/modules/manualUsage/store", () => ({
-  getManualUsageInputForUserHouse: (...args: any[]) => getManualUsageInputForUserHouse(...args),
-  saveManualUsageInputForUserHouse: (...args: any[]) => saveManualUsageInputForUserHouse(...args),
 }));
 
 vi.mock("@/modules/homeProfile/repo", () => ({
@@ -66,29 +72,23 @@ vi.mock("@/modules/applianceProfile/validation", () => ({
   normalizeStoredApplianceProfile: (...args: any[]) => normalizeStoredApplianceProfile(...args),
 }));
 
-vi.mock("@/modules/weatherSensitivity/shared", () => ({
-  resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  getOnePathManualUsageInput: (...args: any[]) => getManualUsageInputForUserHouse(...args),
+  saveOnePathManualUsageInput: (...args: any[]) => saveManualUsageInputForUserHouse(...args),
+  resolveOnePathWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
+  getOnePathTravelRangesFromDb: (...args: any[]) => getTravelRangesFromDb(...args),
+  getOnePathSimulationVariablePolicy: (...args: any[]) => getSimulationVariablePolicy(...args),
+  resolveOnePathUpstreamUsageTruthForSimulation: (...args: any[]) => resolveUpstreamUsageTruthForSimulation(...args),
 }));
 
-vi.mock("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers", () => ({
-  getTravelRangesFromDb: (...args: any[]) => getTravelRangesFromDb(...args),
-}));
-
-vi.mock("@/modules/usageSimulator/simulationVariablePolicy", () => ({
-  getSimulationVariablePolicy: (...args: any[]) => getSimulationVariablePolicy(...args),
-}));
-
-vi.mock("@/modules/usageSimulator/upstreamUsageTruth", () => ({
-  resolveUpstreamUsageTruthForSimulation: (...args: any[]) => resolveUpstreamUsageTruthForSimulation(...args),
-}));
-
-vi.mock("@/modules/usageSimulator/onePathSim", () => ({
+vi.mock("@/modules/onePathSim/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
   adaptManualAnnualRawInput: (...args: any[]) => adaptManualAnnualRawInput(...args),
   adaptNewBuildRawInput: (...args: any[]) => adaptNewBuildRawInput(...args),
   runSharedSimulation: (...args: any[]) => runSharedSimulation(...args),
   buildSharedSimulationReadModel: (...args: any[]) => buildSharedSimulationReadModel(...args),
+  SharedSimulationRunError,
   UpstreamUsageTruthMissingError,
 }));
 
@@ -327,6 +327,88 @@ describe("admin one path sim route", () => {
         validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
       })
     );
+  });
+
+  it("fails manual runs early when no saved manual payload exists", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(adaptManualMonthlyRawInput).not.toHaveBeenCalled();
+    expect(runSharedSimulation).not.toHaveBeenCalled();
+    expect(json).toEqual({
+      ok: false,
+      error: "requirements_unmet",
+      missingItems: ["Save manual usage totals (monthly or annual)."],
+      message: "requirements_unmet: Save manual usage totals (monthly or annual).",
+    });
+  });
+
+  it("returns shared recalc requirement failures without masking the missing manual payload", async () => {
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: { mode: "MONTHLY", anchorEndDate: "2026-03-31", monthlyKwh: [{ month: "2026-03", kwh: 500 }] },
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+    runSharedSimulation.mockRejectedValueOnce(
+      new SharedSimulationRunError({
+        code: "requirements_unmet",
+        missingItems: ["Save manual usage totals (monthly or annual)."],
+      })
+    );
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json).toEqual({
+      ok: false,
+      error: "requirements_unmet",
+      missingItems: ["Save manual usage totals (monthly or annual)."],
+      message: "requirements_unmet: Save manual usage totals (monthly or annual).",
+    });
+  });
+
+  it("maps plain requirements_unmet errors to a structured 409 response", async () => {
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: { mode: "MONTHLY", anchorEndDate: "2026-03-31", monthlyKwh: [{ month: "2026-03", kwh: 500 }] },
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+    runSharedSimulation.mockRejectedValueOnce(new Error("requirements_unmet"));
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json).toEqual({
+      ok: false,
+      error: "requirements_unmet",
+      missingItems: [],
+      message: "requirements_unmet",
+    });
   });
 
   it("routes manual save through the shared manual input store", async () => {

@@ -13,9 +13,9 @@ vi.mock("@/app/api/admin/tools/one-path-sim/_helpers", () => ({
   gateOnePathSimAdmin: (...args: any[]) => gateOnePathSimAdmin(...args),
 }));
 
-vi.mock("@/modules/usageSimulator/simulationVariablePolicy", () => ({
-  SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION: "OVERRIDE",
-  DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG: {
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  ONE_PATH_SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION: "OVERRIDE",
+  ONE_PATH_DEFAULT_SIMULATION_VARIABLE_POLICY_CONFIG: {
     pastDayCore: {
       sharedDefaults: { minDaysMonthDayType: 4 },
       intervalOverrides: {},
@@ -24,13 +24,13 @@ vi.mock("@/modules/usageSimulator/simulationVariablePolicy", () => ({
       newBuildOverrides: {},
     },
   },
-  SIMULATION_VARIABLE_POLICY_FAMILY_META: {
+  ONE_PATH_SIMULATION_VARIABLE_POLICY_FAMILY_META: {
     pastDayCore: { title: "Past Day Core", description: "fallbacks" },
   },
-  getSimulationVariablePolicy: (...args: any[]) => getSimulationVariablePolicy(...args),
-  getSimulationVariableOverrides: (...args: any[]) => getSimulationVariableOverrides(...args),
-  saveSimulationVariableOverrides: (...args: any[]) => saveSimulationVariableOverrides(...args),
-  resetSimulationVariableOverrides: (...args: any[]) => resetSimulationVariableOverrides(...args),
+  getOnePathSimulationVariablePolicy: (...args: any[]) => getSimulationVariablePolicy(...args),
+  getOnePathSimulationVariableOverrides: (...args: any[]) => getSimulationVariableOverrides(...args),
+  saveOnePathSimulationVariableOverrides: (...args: any[]) => saveSimulationVariableOverrides(...args),
+  resetOnePathSimulationVariableOverrides: (...args: any[]) => resetSimulationVariableOverrides(...args),
 }));
 
 function buildRequest(method: "GET" | "POST", body?: Record<string, unknown>) {

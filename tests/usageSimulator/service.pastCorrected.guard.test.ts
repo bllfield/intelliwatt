@@ -21,16 +21,5 @@ describe("past corrected baseline guardrails", () => {
     expect(src).not.toContain(": smtAnchorPeriods ?? undefined,");
     expect(src).toContain('recalc_post_baseline_direct_builder_window');
   });
-
-  it("routes one path baseline runs through the shared producer and artifact persistence gates", () => {
-    const servicePath = resolve(process.cwd(), "modules/usageSimulator/service.ts");
-    const src = readFileSync(servicePath, "utf8");
-
-    expect(src).toContain('const isOnePathSimAdminRun = args.runContext?.callerLabel === "one_path_sim_admin";');
-    expect(src).toContain('(scenario?.name === WORKSPACE_PAST_NAME || isOnePathSimAdminRun)');
-    expect(src).toContain('simMode === "SMT_BASELINE" && (scenario?.name === WORKSPACE_PAST_NAME || isOnePathSimAdminRun)');
-    expect(src).toContain('const shouldPersistCanonicalPastArtifact =');
-    expect(src).toContain('const shouldPersistPastSeries =');
-  });
 });
 

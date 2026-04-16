@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import {
   adaptIntervalRawInput,
   adaptManualAnnualRawInput,
@@ -8,23 +7,55 @@ import {
   adaptNewBuildRawInput,
   buildSharedSimulationReadModel,
   runSharedSimulation,
+  SharedSimulationRunError,
   UpstreamUsageTruthMissingError,
   type CanonicalSimulationInputType,
-} from "@/modules/usageSimulator/onePathSim";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+} from "@/modules/onePathSim/onePathSim";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { gateOnePathSimAdmin, resolveOnePathSimUserSelection } from "./_helpers";
-import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import {
-  getSimulationVariablePolicy,
+  getOnePathManualUsageInput,
+  getOnePathSimulationVariablePolicy,
+  getOnePathTravelRangesFromDb,
+  resolveOnePathUpstreamUsageTruthForSimulation,
+  resolveOnePathWeatherSensitivityEnvelope,
+  saveOnePathManualUsageInput,
   type SimulationVariableInputType,
   type SimulationVariablePolicy,
-} from "@/modules/usageSimulator/simulationVariablePolicy";
-import { resolveUpstreamUsageTruthForSimulation } from "@/modules/usageSimulator/upstreamUsageTruth";
+} from "@/modules/onePathSim/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function isUpstreamUsageTruthMissingFailure(
+  error: unknown
+): error is {
+  code: "usage_truth_missing";
+  usageTruthSource: unknown;
+  seedResult: unknown;
+  upstreamUsageTruth: unknown;
+  message: string;
+} {
+  if (error instanceof UpstreamUsageTruthMissingError) return true;
+  if (!error || typeof error !== "object") return false;
+  return (error as { code?: unknown }).code === "usage_truth_missing";
+}
+
+function isSharedSimulationRunFailure(
+  error: unknown
+): error is {
+  code: string;
+  missingItems?: string[];
+  message?: string;
+} {
+  if (error instanceof SharedSimulationRunError) return true;
+  if (error instanceof Error && error.message === "requirements_unmet") return true;
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  const message = (error as { message?: unknown }).message;
+  return typeof code === "string" || message === "requirements_unmet";
+}
 
 function normalizeMode(value: unknown): CanonicalSimulationInputType {
   switch (String(value ?? "").trim().toUpperCase()) {
@@ -55,7 +86,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "load_manual") {
-    const manual = await getManualUsageInputForUserHouse({
+    const manual = await getOnePathManualUsageInput({
       userId: resolved.userId,
       houseId: resolved.selectedHouse.id,
     }).catch(() => ({ payload: null, updatedAt: null }));
@@ -68,7 +99,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "save_manual") {
-    const saved = await saveManualUsageInputForUserHouse({
+    const saved = await saveOnePathManualUsageInput({
       userId: resolved.userId,
       houseId: resolved.selectedHouse.id,
       payload: body?.payload,
@@ -93,7 +124,7 @@ export async function POST(request: NextRequest) {
     ) ?? resolved.selectedHouse;
   let previewSimulationVariablePolicy: SimulationVariablePolicy | null = null;
   try {
-    const sharedSimulationVariablePolicy = await getSimulationVariablePolicy();
+    const sharedSimulationVariablePolicy = await getOnePathSimulationVariablePolicy();
     previewSimulationVariablePolicy =
       (
         sharedSimulationVariablePolicy.effectiveByMode as Partial<
@@ -105,22 +136,22 @@ export async function POST(request: NextRequest) {
   }
 
   const [usageTruth, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
-    resolveUpstreamUsageTruthForSimulation({
+    resolveOnePathUpstreamUsageTruthForSimulation({
       userId: resolved.userId,
       houseId: resolved.selectedHouse.id,
       actualContextHouseId: previewActualContextHouse.id,
       seedIfMissing: false,
     }).catch(() => null),
-    getManualUsageInputForUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
+    getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
       payload: null,
       updatedAt: null,
     })),
     getHomeProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
     getApplianceProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
-    getTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
+    getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
-  const weatherEnvelope = await resolveSharedWeatherSensitivityEnvelope({
+  const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
     actualDataset: usageTruth?.dataset ?? null,
     manualUsagePayload: manualUsage.payload ?? null,
     homeProfile,
@@ -156,6 +187,17 @@ export async function POST(request: NextRequest) {
 
   if (action === "run") {
     const mode = normalizeMode(body?.mode);
+    if ((mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL") && !manualUsage.payload) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "requirements_unmet",
+          missingItems: ["Save manual usage totals (monthly or annual)."],
+          message: "requirements_unmet: Save manual usage totals (monthly or annual).",
+        },
+        { status: 409 }
+      );
+    }
     const rawInputBase = {
       userId: resolved.userId,
       houseId: resolved.selectedHouse.id,
@@ -206,7 +248,7 @@ export async function POST(request: NextRequest) {
         readModel,
       });
     } catch (error) {
-      if (error instanceof UpstreamUsageTruthMissingError) {
+      if (isUpstreamUsageTruthMissingFailure(error)) {
         return NextResponse.json(
           {
             ok: false,
@@ -215,6 +257,30 @@ export async function POST(request: NextRequest) {
             seedResult: error.seedResult,
             upstreamUsageTruth: error.upstreamUsageTruth,
             message: error.message,
+          },
+          { status: 409 }
+        );
+      }
+      if (isSharedSimulationRunFailure(error)) {
+        const code =
+          typeof (error as { code?: unknown }).code === "string"
+            ? String((error as { code?: unknown }).code)
+            : "requirements_unmet";
+        const missingItems = Array.isArray((error as { missingItems?: unknown }).missingItems)
+          ? ((error as { missingItems?: unknown }).missingItems as unknown[]).map((item) => String(item))
+          : [];
+        const message =
+          missingItems.length > 0
+            ? `${code}: ${missingItems.join("; ")}`
+            : error instanceof Error && error.message
+              ? error.message
+              : code;
+        return NextResponse.json(
+          {
+            ok: false,
+            error: code,
+            missingItems,
+            message,
           },
           { status: 409 }
         );

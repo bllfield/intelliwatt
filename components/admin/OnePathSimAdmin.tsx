@@ -7,8 +7,8 @@ import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import {
   buildSimulationVariableCopyPayload,
   buildSimulationVariableFamilyAdminView,
-} from "@/modules/usageSimulator/simulationVariablePresentation";
-import { buildOnePathOwnershipAudit } from "@/modules/usageSimulator/onePathOwnershipAudit";
+} from "@/modules/onePathSim/simulationVariablePresentation";
+import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 
 type LookupResponse = {
   ok: true;

@@ -2,8 +2,8 @@ import type {
   EffectiveSimulationVariablesUsed,
   SimulationVariableInputType,
   SimulationVariableValueSource,
-} from "@/modules/usageSimulator/simulationVariablePolicy";
-import { buildOnePathOwnershipAudit } from "@/modules/usageSimulator/onePathOwnershipAudit";
+} from "@/modules/onePathSim/simulationVariablePolicy";
+import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 
 export type SimulationVariablePolicyResponseShape = {
   familyMeta: Record<string, { title: string; description: string }>;

@@ -1,12 +1,10 @@
 import {
-  buildManualBillPeriodTargets,
-  resolveManualStageOnePresentation,
-} from "@/modules/manualUsage/statementRanges";
+  buildOnePathManualBillPeriodTargets,
+  resolveOnePathCanonicalUsage365CoverageWindow,
+  resolveOnePathManualStageOnePresentation,
+  resolveOnePathReportedCoverageWindow,
+} from "@/modules/onePathSim/runtime";
 import type { ManualUsagePayload, ManualStatementRange } from "@/modules/simulatedUsage/types";
-import {
-  resolveCanonicalUsage365CoverageWindow,
-  resolveReportedCoverageWindow,
-} from "@/modules/usageSimulator/metadataWindow";
 
 export type OnePathTruthOwner = {
   label: string;
@@ -188,7 +186,7 @@ export function buildOnePathTruthSummary(args: {
   const adapterTotalDays = pickAdapterNumber(runSnapshot, "canonicalCoverageTotalDays");
   const canonicalWindowFromPolicy =
     adapterLagDays != null && adapterTotalDays != null
-      ? resolveCanonicalUsage365CoverageWindow(new Date(), {
+      ? resolveOnePathCanonicalUsage365CoverageWindow(new Date(), {
           canonicalCoverageLagDays: adapterLagDays,
           canonicalCoverageTotalDays: adapterTotalDays,
           manualMonthlyDefaultBillEndDay: 15,
@@ -197,7 +195,7 @@ export function buildOnePathTruthSummary(args: {
           longTermWeatherBaselineEndYear: 2020,
         })
       : null;
-  const reportedWindow = resolveReportedCoverageWindow({
+  const reportedWindow = resolveOnePathReportedCoverageWindow({
     dataset,
     fallbackStartDate: String(args.engineInput.coverageWindowStart ?? datasetSummary.start ?? ""),
     fallbackEndDate: String(args.engineInput.coverageWindowEnd ?? datasetSummary.end ?? ""),
@@ -213,11 +211,11 @@ export function buildOnePathTruthSummary(args: {
   const projectionReadSummary = asRecord(sharedDiagnostics.projectionReadSummary);
   const tuningSummary = asRecord(sharedDiagnostics.tuningSummary);
   const manualPayload = buildManualPayload(args);
-  const stageOnePresentation = resolveManualStageOnePresentation({
+  const stageOnePresentation = resolveOnePathManualStageOnePresentation({
     surface: "admin_manual_monthly_stage_one",
     payload: manualPayload,
   });
-  const manualBillTargets = manualPayload ? buildManualBillPeriodTargets(manualPayload) : [];
+  const manualBillTargets = manualPayload ? buildOnePathManualBillPeriodTargets(manualPayload) : [];
   const manualParitySummary = asRecord(args.readModel?.manualParitySummary);
   const runIdentity = asRecord(args.readModel?.runIdentity);
   const constraintRebalance = pickFamilyResolvedValues(runSnapshot, "constraintRebalance");

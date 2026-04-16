@@ -10,9 +10,9 @@ function readRepoFile(relativePath: string): string {
 
 describe("one path sim canonical variable snapshot source", () => {
   it("publishes effectiveSimulationVariablesUsed on the shared artifact and read model", () => {
-    const source = readRepoFile("modules/usageSimulator/onePathSim.ts");
+    const source = readRepoFile("modules/onePathSim/onePathSim.ts");
     const policySource = readRepoFile("modules/usageSimulator/simulationVariablePolicy.ts");
-    const truthSummarySource = readRepoFile("modules/usageSimulator/onePathTruthSummary.ts");
+    const truthSummarySource = readRepoFile("modules/onePathSim/onePathTruthSummary.ts");
     const upstreamUsageSource = readRepoFile("modules/usageSimulator/upstreamUsageTruth.ts");
     const usageRouteSource = readRepoFile("app/api/user/usage/route.ts");
     const usagePageSource = readRepoFile("app/dashboard/usage/page.tsx");
@@ -20,7 +20,7 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(source).toContain("effectiveSimulationVariablesUsed");
     expect(source).toContain("sourceOfTruthSummary");
     expect(source).toContain("buildOnePathTruthSummary");
-    expect(source).toContain("resolveUpstreamUsageTruthForSimulation");
+    expect(source).toContain("resolveOnePathUpstreamUsageTruthForSimulation");
     expect(source).toContain("upstreamUsageTruth");
     expect(source).toContain("exactArtifactInputHash");
     expect(source).toContain("requireExactArtifactMatch");
