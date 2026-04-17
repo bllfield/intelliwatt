@@ -4983,7 +4983,7 @@ async function recalcSimulatorBuildImpl(args: {
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastPatchedDataset: ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs> | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
-  const failClosedPastSharedProducer = isPastScenario && simMode === "SMT_BASELINE";
+  const failClosedPastSharedProducer = shouldUseSharedPastProducer && simMode === "SMT_BASELINE";
   const producerBuildPathKind =
     runContext.buildPathKind === "cache_restore" ? "recalc" : runContext.buildPathKind;
   if (shouldUseSharedPastProducer) {

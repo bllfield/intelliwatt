@@ -10,7 +10,9 @@ describe("one path recalc fail-closed source guard", () => {
       "utf8"
     );
 
-    expect(source).toContain("const failClosedPastSharedProducer = isPastScenario && simMode === \"SMT_BASELINE\";");
+    expect(source).toContain(
+      "const failClosedPastSharedProducer = shouldUseSharedPastProducer && simMode === \"SMT_BASELINE\";"
+    );
     expect(source).toContain('"past_shared_producer_no_dataset"');
     expect(source).toContain('simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer');
   });
