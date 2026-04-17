@@ -24,6 +24,8 @@ const adaptManualAnnualRawInput = vi.fn();
 const adaptNewBuildRawInput = vi.fn();
 const runSharedSimulation = vi.fn();
 const buildSharedSimulationReadModel = vi.fn();
+const readOnePathSimulatedUsageScenario = vi.fn();
+const listOnePathScenarioEvents = vi.fn();
 class UpstreamUsageTruthMissingError extends Error {
   code = "usage_truth_missing";
   usageTruthSource: string;
@@ -103,6 +105,11 @@ vi.mock("@/modules/onePathSim/onePathSim", () => ({
   UpstreamUsageTruthMissingError,
 }));
 
+vi.mock("@/modules/onePathSim/serviceBridge", () => ({
+  readOnePathSimulatedUsageScenario: (...args: any[]) => readOnePathSimulatedUsageScenario(...args),
+  listOnePathScenarioEvents: (...args: any[]) => listOnePathScenarioEvents(...args),
+}));
+
 function buildRequest(body: Record<string, unknown>, cookie = "brian@intellipath-solutions.com") {
   return new NextRequest("http://localhost/api/admin/tools/one-path-sim", {
     method: "POST",
@@ -137,6 +144,8 @@ describe("admin one path sim route", () => {
     adaptNewBuildRawInput.mockReset();
     runSharedSimulation.mockReset();
     buildSharedSimulationReadModel.mockReset();
+    readOnePathSimulatedUsageScenario.mockReset();
+    listOnePathScenarioEvents.mockReset();
     vi.stubEnv("HOME_DETAILS_DATABASE_URL", "");
     vi.stubEnv("APPLIANCES_DATABASE_URL", "");
     vi.stubEnv("USAGE_DATABASE_URL", "");
@@ -255,6 +264,72 @@ describe("admin one path sim route", () => {
           completenessRule: "test",
         },
       },
+    });
+    readOnePathSimulatedUsageScenario.mockResolvedValue({
+      ok: true,
+      houseId: "house-1",
+      scenarioKey: "scenario-1",
+      scenarioId: "scenario-1",
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+          totalKwh: 15008.06,
+          start: "2025-04-16",
+          end: "2026-04-15",
+        },
+        meta: {
+          source: "SIMULATED",
+          weatherSensitivityScore: { scoringMode: "INTERVAL_BASED" },
+          validationCompareRows: [
+            {
+              localDate: "2026-04-15",
+              dayType: "weekday",
+              actualDayKwh: 40,
+              simulatedDayKwh: 41.12,
+              errorKwh: 1.12,
+              percentError: 2.8,
+            },
+          ],
+          validationCompareMetrics: { wape: 2.8, mae: 1.12, rmse: 1.12 },
+          stitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-04",
+            haveDaysThrough: 15,
+            missingDaysFrom: 16,
+            missingDaysTo: 30,
+            borrowedFromYearMonth: "2025-04",
+            completenessRule: "test",
+          },
+        },
+        monthly: [{ month: "2026-04", kwh: 15008.06 }],
+        daily: [{ date: "2026-04-15", kwh: 41.12, source: "SIMULATED" }],
+        dailyWeather: {
+          "2026-04-15": { tAvgF: 63, tMinF: 54, tMaxF: 71, hdd65: 2, cdd65: 0 },
+        },
+        totals: {
+          importKwh: 15008.06,
+          exportKwh: 0,
+          netKwh: 15008.06,
+        },
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 10000, weekend: 5008.06 },
+          timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 3200 }],
+        },
+      },
+    });
+    listOnePathScenarioEvents.mockResolvedValue({
+      ok: true,
+      events: [
+        {
+          id: "event-1",
+          scenarioId: "scenario-1",
+          kind: "TRAVEL_RANGE",
+          effectiveMonth: "2026-04",
+          payloadJson: { startDate: "2026-04-10", endDate: "2026-04-15" },
+        },
+      ],
     });
     buildUserUsageHouseContract.mockResolvedValue({
       houseId: "house-1",
@@ -495,6 +570,7 @@ describe("admin one path sim route", () => {
         houseId: "house-1",
         mode: "INTERVAL",
         scenarioId: "scenario-1",
+        includeDebugDiagnostics: true,
       })
     );
     const json = await res.json();
@@ -549,8 +625,34 @@ describe("admin one path sim route", () => {
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.runType).toBe("PAST_SIM");
     expect(json.runDisplayView).toBeTruthy();
+    expect(json.runDisplayView.pastVariables).toEqual([
+      {
+        kind: "TRAVEL_RANGE",
+        effectiveMonth: "2026-04",
+        payloadJson: { startDate: "2026-04-10", endDate: "2026-04-15" },
+      },
+    ]);
     expect(json.artifact ?? null).toBeNull();
     expect(json.readModel ?? null).toBeNull();
+    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      scenarioId: "scenario-1",
+      readMode: "allow_rebuild",
+      projectionMode: "baseline",
+      readContext: {
+        artifactReadMode: "allow_rebuild",
+        projectionMode: "baseline",
+        compareSidecarRequest: true,
+      },
+    });
+    expect(listOnePathScenarioEvents).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      scenarioId: "scenario-1",
+    });
+    expect(runSharedSimulation).not.toHaveBeenCalled();
+    expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
   });
 
   it("passes actual context house and manual validation date keys through the shared adapter", async () => {

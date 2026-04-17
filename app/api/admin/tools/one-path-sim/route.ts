@@ -12,6 +12,7 @@ import {
   UpstreamUsageTruthMissingError,
   type CanonicalSimulationInputType,
 } from "@/modules/onePathSim/onePathSim";
+import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { gateOnePathSimAdmin, resolveOnePathSimUserSelection } from "./_helpers";
@@ -29,6 +30,7 @@ import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselinePa
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
+import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 
 export const runtime = "nodejs";
@@ -82,6 +84,23 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function includeDebugDiagnosticsByDefault(value: unknown): boolean {
   return value === true;
+}
+
+function asScenarioVariable(value: unknown): {
+  kind: string;
+  effectiveMonth?: string;
+  payloadJson?: Record<string, unknown>;
+} | null {
+  const item = asRecord(value);
+  if (!item) return null;
+  const kind = String(item.kind ?? "").trim();
+  if (!kind) return null;
+  const effectiveMonth = String(item.effectiveMonth ?? "").slice(0, 7);
+  return {
+    kind,
+    effectiveMonth: /^\d{4}-\d{2}$/.test(effectiveMonth) ? effectiveMonth : undefined,
+    payloadJson: asRecord(item.payloadJson) ?? undefined,
+  };
 }
 
 function buildEnvironmentVisibility() {
@@ -195,6 +214,67 @@ export async function POST(request: NextRequest) {
       persistRequested: body?.persistRequested !== false,
     } as const;
     try {
+      if (!includeDebugDiagnostics && rawInputBase.scenarioId) {
+        const readback = await readOnePathSimulatedUsageScenario({
+          userId: resolved.userId,
+          houseId: resolved.selectedHouse.id,
+          scenarioId: rawInputBase.scenarioId,
+          readMode: "allow_rebuild",
+          projectionMode: "baseline",
+          readContext: {
+            artifactReadMode: "allow_rebuild",
+            projectionMode: "baseline",
+            compareSidecarRequest: true,
+          },
+        });
+        if (!readback.ok) {
+          const status =
+            readback.code === "NO_BUILD" || readback.code === "ARTIFACT_MISSING" || readback.code === "SCENARIO_NOT_FOUND"
+              ? 404
+              : readback.code === "COMPARE_TRUTH_INCOMPLETE"
+                ? 409
+                : 500;
+          return NextResponse.json(
+            {
+              ok: false,
+              error: readback.code,
+              message: readback.message,
+            },
+            { status }
+          );
+        }
+        const compareProjection = buildValidationCompareProjectionSidecar(readback.dataset);
+        const scenarioEvents = await listOnePathScenarioEvents({
+          userId: resolved.userId,
+          houseId: resolved.selectedHouse.id,
+          scenarioId: rawInputBase.scenarioId,
+        }).catch(() => ({ ok: false as const, events: [] as unknown[] }));
+        const runDisplayViewBase =
+          buildOnePathRunReadOnlyView({
+            dataset: asRecord(readback.dataset),
+            readModel: { compareProjection },
+          }) ?? null;
+        const pastVariables =
+          scenarioEvents.ok && Array.isArray(scenarioEvents.events)
+            ? scenarioEvents.events
+                .map((event) => asScenarioVariable(event))
+                .filter((event): event is NonNullable<ReturnType<typeof asScenarioVariable>> => event != null)
+            : [];
+        return NextResponse.json({
+          ok: true,
+          debugDiagnosticsIncluded: false,
+          runType: "PAST_SIM",
+          runDisplayView:
+            runDisplayViewBase != null
+              ? {
+                  ...runDisplayViewBase,
+                  pastVariables,
+                }
+              : null,
+          artifact: null,
+          readModel: null,
+        });
+      }
       const engineInput =
         mode === "INTERVAL"
           ? await adaptIntervalRawInput(rawInputBase)

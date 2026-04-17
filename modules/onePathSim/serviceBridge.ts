@@ -1,5 +1,6 @@
 import {
   getSimulatedUsageForHouseScenario,
+  listScenarioEvents,
   recalcSimulatorBuild,
   type RecalcSimulatorBuildArgs,
 } from "@/modules/onePathSim/usageSimulator/service";
@@ -14,4 +15,8 @@ export async function runOnePathSimulatorBuild(args: RecalcSimulatorBuildArgs) {
 
 export async function readOnePathSimulatedUsageScenario(args: Parameters<typeof getSimulatedUsageForHouseScenario>[0]) {
   return getSimulatedUsageForHouseScenario(args);
+}
+
+export async function listOnePathScenarioEvents(args: Parameters<typeof listScenarioEvents>[0]) {
+  return listScenarioEvents(args);
 }
