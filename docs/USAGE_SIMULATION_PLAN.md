@@ -15,9 +15,11 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 ## Core principles / guardrails
 - **One Path Sim rescue architecture:** `docs/ONE_PATH_SIM_ARCHITECTURE.md` is the canonical written architecture reference for One Path Sim. One Path Sim Admin is currently pre-cutover only. It is the proving harness / truth console, not proof that all older surfaces are already rerouted.
 - **Usage upstream rule:** the existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production. Simulation begins only after usage truth exists, and One Path must consume persisted usage truth as upstream input rather than becoming a new usage producer.
-- **Current One Path quarantine rule:** active One Path behavior is fail-closed when persisted usage truth is missing. It does not call the live usage refresh/orchestration owner directly from inside the lockbox.
+- **Current One Path baseline rule:** baseline is usage passthrough only for `INTERVAL`, `MANUAL_MONTHLY`, and `MANUAL_ANNUAL`. Baseline must not simulate, must not fabricate a synthetic curve/dataset, and must not do final normalized chart/output structuring.
+- **Current One Path seeding rule:** when persisted upstream usage truth is missing, One Path baseline may call the existing shared usage refresh/orchestration owner, then retry the persisted read. It still fails if that upstream truth cannot be obtained.
 - **Current One Path isolation rule:** live app surfaces remain untouched, and `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
 - **Canonical simulation pipeline rule:** `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
+- **Past Sim first-simulation rule:** Past Sim remains the first place shared simulation and final chart/output structuring happen.
 - **Reader rule:** readers must consume persisted artifact + read-model truth. They must not recompute core sim outputs or privately reshape parity, compare, chart series, or source truth.
 - **Compare / sim integrity (GapFill & shared Past)**: No hidden fallbacks in compare or fresh shared simulation. Missing canonical simulated values stay missing (null / explicit reason codes). **Actual usage must never be copied into simulated-side fields** for scoring or parity. **Invariant violations** (e.g. simulated-day `localDate` vs interval-derived local dates) must surface explicitly; compare fails with `SIMULATED_DAY_LOCAL_DATE_INTERVAL_INVARIANT_VIOLATION` rather than preferring one authority silently.
 - **Serverless memory (diagnostics only)**: `simulatePastUsageDataset` clears the engine patched-interval buffer after `buildCurveFromPatchedIntervals` (the curve owns a copy). Any `lab_validation` tagging is diagnostics-only and must not create a separate pre-DB producer truth path.
@@ -82,6 +84,7 @@ This section is authoritative for future manual-usage implementation and handoff
 
 ### Stage 2: Shared Past Sim Normalization and Simulation
 
+- Baseline is not Stage 2. Baseline stays a passthrough/read-model stage only.
 - After the Stage 1 manual input is built, it must normalize into the same shared Past Sim coverage window used by the rest of the system.
 - Do not invent a separate manual-monthly sim window.
 - Do not collapse bill-cycle input semantics into the normalized shared Past Sim window semantics.
@@ -89,6 +92,7 @@ This section is authoritative for future manual-usage implementation and handoff
 - Shared helpers derive normalized `ManualBillPeriodTarget[]` metadata and bill-period totals from the manual payload before Stage 2 shaping.
 - Statement/bill ranges remain Stage 1 bill-period constraint inputs plus reconciliation metadata. They may shape Stage 2 constraints, but they are not travel ranges, not travel-vacant ownership, and not incomplete-meter ownership.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
+- Manual monthly and manual annual baseline may reuse saved manual Stage 1/read-model truth for display, but they must not privately simulate or become the first final-chart structuring stage.
 - Manual monthly / annual admin recalc now returns once the canonical artifact is ready. Rich compare/reconciliation stays on persisted readback:
   - recalc may return `readbackPending: true`
   - `canonicalArtifactInputHash` identifies the exact artifact the client must read back

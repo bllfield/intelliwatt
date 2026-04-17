@@ -30,8 +30,8 @@ When this document conflicts with older planning or audit language, this documen
 
 - The existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production.
 - Simulation starts only **after** usage truth exists.
-- One Path Sim and future simulation consumers must treat persisted usage output as upstream input truth.
-- Current quarantine implementation does **not** request the live usage orchestration / refresh path directly from inside One Path. It fails closed and reports missing usage truth instead.
+- One Path baseline must reuse persisted upstream usage truth for that mode instead of simulating a baseline.
+- When persisted upstream usage truth is missing, baseline may request the existing shared usage refresh/orchestration owner, then retry the persisted read.
 - One Path Sim must **not** become a new upstream usage producer.
 - This architecture does **not** redesign, replace, or disconnect the current usage page flow.
 
@@ -48,6 +48,8 @@ The canonical One Path simulation pipeline is:
 `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
 
 Rules:
+- Baseline is outside this simulation pipeline. Baseline is usage passthrough only and must not privately enter the shared simulation core.
+- Past Sim is the first place the shared simulation core and final chart/output structuring are allowed to run.
 - Raw input may differ by mode or caller.
 - Adapter behavior may differ by mode before the engine input is finalized.
 - After `CanonicalSimulationEngineInput`, the path is shared.
@@ -106,6 +108,7 @@ Rules:
 - No page-local shaping differences are allowed.
 - Bill totals / parity remain authoritative.
 - Differences in Stage 1 entry/editor workflow do not justify differences in Stage 2 shared simulation logic.
+- Manual monthly and manual annual baseline are still passthrough-only stages. They may reuse saved manual truth/read-model wrappers, but they must not simulate or become the first place final chart structuring happens.
 
 ## GapFill source-home rule
 
@@ -119,7 +122,8 @@ Rules:
 - One Path is **externally quarantined** from live consumer surfaces.
 - One Path is also now **internally sealed** against live behavior-owner imports from the old shared sim/manual namespaces listed above.
 - The active upstream truth owner inside One Path is `modules/onePathSim/upstreamUsageTruth.ts`.
-- Current quarantine behavior is **fail-closed** on missing usage truth. One Path does not trigger the live usage refresh/orchestration owner directly.
+- Current verified baseline behavior is **usage passthrough first**: One Path reads persisted upstream usage truth, may request the existing shared usage refresh/orchestration owner when truth is missing, and still fails if that upstream truth cannot be obtained.
+- Current verified baseline behavior is also **non-simulating**: baseline does not run synthetic dataset packaging, does not build a direct simulated dataset, and does not become the first final-chart structuring stage.
 - This document must describe the verified code state, not an older intended state.
 
 ## Variable tuning ownership

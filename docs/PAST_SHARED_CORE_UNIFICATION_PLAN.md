@@ -9,9 +9,10 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - Canonical architecture reference: `docs/ONE_PATH_SIM_ARCHITECTURE.md`
 - One Path Sim Admin is currently **pre-cutover only**. It is the proving harness / truth console for the intended canonical path, not proof that every older surface has already been rerouted.
 - The existing usage page / usage pipeline remains upstream and untouched. Simulation begins only after persisted usage truth exists.
-- One Path and future simulation consumers must read persisted usage truth first. Current One Path quarantine implementation does **not** request the existing shared usage refresh/orchestration path directly when that truth is missing; it fails closed and reports missing usage truth instead. They must not become new usage producers.
+- One Path and future simulation consumers must read persisted usage truth first. One Path baseline is usage passthrough only: it may request the existing shared usage refresh/orchestration path when that truth is missing, but it must not simulate a replacement baseline or become a new usage producer.
 - Current verified repo state: live app surfaces remain quarantined from One Path, and `modules/onePathSim/**` is internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
 - The canonical downstream simulation pipeline is: `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
+- Past Sim remains the first place shared simulation and final chart/output structuring happen.
 - Future readers must consume the same persisted artifact family and canonical read model. They must not recompute core sim truth or privately reshape parity, compare, chart, or source truth.
 
 ## Lockstep docs/process rule
