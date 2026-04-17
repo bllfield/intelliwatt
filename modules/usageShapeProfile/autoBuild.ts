@@ -12,6 +12,7 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   userId: string;
   houseId: string;
   timezone?: string | null;
+  coverageWindow?: { startDate: string; endDate: string } | null;
 }): Promise<
   | {
       ok: true;
@@ -38,7 +39,7 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   });
   if (!house) return { ok: false, reason: "house_not_found" };
 
-  const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
+  const canonicalWindow = args.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
   const actual = await getActualIntervalsForUsageShapeProfile({
     houseId: house.id,
     esiid: house.esiid ?? null,

@@ -24,6 +24,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { buildMonthKeyedDailyAverages } from "@/modules/usageShapeProfile/derive";
+import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { PAST_ENGINE_VERSION } from "@/modules/onePathSim/usageSimulator/pastCache";
 import {
@@ -1421,10 +1422,29 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
   let ensuredProfileId: string | null = null;
 
   if (contractFailure && timezoneResolved) {
-    ensureAttempted = false;
-    ensuredReason = "one_path_quarantine_no_autobuild";
-    ensureFailedReason = contractFailure;
-    usageShapeProfileSnap = null;
+    ensureAttempted = true;
+    ensuredReason = contractFailure;
+    const ensured = await ensureUsageShapeProfileForUserHouse({
+      userId: args.userId,
+      houseId: args.houseId,
+      timezone: timezoneResolved,
+      coverageWindow: canonicalCoverage,
+    });
+    if (ensured.ok) {
+      profileAutoBuilt = true;
+      ensuredProfileId = String(ensured.profileId ?? "");
+      shapeProfileRow = await getLatestUsageShapeProfile(args.houseId).catch(() => null);
+      usageShapeProfileSnap = usageShapeProfileSnapFromRow(shapeProfileRow);
+      contractFailure = usageShapeProfileContractFailure({
+        row: shapeProfileRow,
+        timezone: timezoneResolved,
+        canonicalCoverage,
+      });
+      if (contractFailure) ensureFailedReason = contractFailure;
+    } else {
+      ensureFailedReason = ensured.reason;
+      usageShapeProfileSnap = null;
+    }
   }
 
   const reasonNotUsed = usageShapeProfileSnap ? null : ensureFailedReason ?? contractFailure ?? "missing";
