@@ -417,6 +417,16 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         notes: "Copied when the page has the read-only Interval Past blocker trace available.",
       },
       {
+        section: "readOnlyAudit",
+        includedInCopyPayload: true,
+        requiresRun: false,
+        sourcedFromSharedShaper: true,
+        ownerFiles: ["app/api/admin/tools/one-path-sim/route.ts", "modules/onePathSim/simulationVariablePresentation.ts"],
+        ownerSymbols: ["POST", "buildSimulationVariableCopyPayload"],
+        notes:
+          "Explicit top-level read-only prereq audit section carrying readiness flags, blocking reasons, baseline/compare runnable state, and validatorAudit details from lookup-time source context.",
+      },
+      {
         section: "runIdentity",
         includedInCopyPayload: true,
         requiresRun: true,

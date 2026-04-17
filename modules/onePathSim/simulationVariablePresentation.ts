@@ -263,6 +263,7 @@ export function buildSimulationVariableCopyPayload(args: {
   baselineParityAudit?: Record<string, unknown> | null;
   runtimeEnvParityTrace?: Record<string, unknown> | null;
   intervalPastReadinessTrace?: Record<string, unknown> | null;
+  readOnlyAudit?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const inputType = modeToInputType(args.mode);
   const loadedSourceContext = asRecord(args.loadedSourceContext);
@@ -365,6 +366,7 @@ export function buildSimulationVariableCopyPayload(args: {
   const baselineParityAudit = args.baselineParityAudit ?? loadedSourceContext.baselineParityAudit ?? null;
   const runtimeEnvParityTrace = args.runtimeEnvParityTrace ?? loadedSourceContext.runtimeEnvParityTrace ?? null;
   const intervalPastReadinessTrace = args.intervalPastReadinessTrace ?? null;
+  const readOnlyAudit = args.readOnlyAudit ?? loadedSourceContext.readOnlyAudit ?? null;
   const lookupOnly = !Object.keys(readModel).length && !Object.keys(artifact).length && !args.runSnapshot;
   const baselinePassthrough =
     !lookupOnly &&
@@ -390,6 +392,7 @@ export function buildSimulationVariableCopyPayload(args: {
       includesDashboardViewModel: Boolean(copiedDashboardViewModel),
       includesParitySections: Boolean(baselineParityReport || baselineParityAudit),
       includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
+      includesReadOnlyAudit: Boolean(readOnlyAudit),
     },
     currentControls: args.currentControls ?? {},
     knownScenario: args.knownScenario ?? null,
@@ -401,6 +404,7 @@ export function buildSimulationVariableCopyPayload(args: {
     displayTotalsAudit,
     runtimeEnvParityTrace,
     intervalPastReadinessTrace,
+    readOnlyAudit,
     tuningCycleSummary: buildOnePathTuningCycleSummary({
       knownScenario: args.knownScenario,
       sandboxSummary: args.sandboxSummary,

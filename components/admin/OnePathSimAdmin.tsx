@@ -385,6 +385,7 @@ export function OnePathSimAdmin() {
       baselineParityAudit: lookupBaselineParityAudit,
       runtimeEnvParityTrace: runtimeEnvParityTrace,
       intervalPastReadinessTrace: intervalPastReadinessTrace,
+      readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
       currentControls: {
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
@@ -436,6 +437,7 @@ export function OnePathSimAdmin() {
       baselineParityAudit: lookupBaselineParityAudit,
       runtimeEnvParityTrace: runtimeEnvParityTrace,
       intervalPastReadinessTrace: intervalPastReadinessTrace,
+      readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
       currentControls: {
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,

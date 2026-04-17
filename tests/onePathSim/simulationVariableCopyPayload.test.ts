@@ -104,6 +104,19 @@ describe("one path simulation variable copy payload", () => {
         compareCapableNow: false,
         classification: "unreadable_field_in_past_path_only",
       } as any,
+      readOnlyAudit: {
+        homeDetailsReady: true,
+        manualMonthlyPayloadReady: false,
+        manualAnnualPayloadReady: false,
+        usageTruthReady: true,
+        compareCapableNow: false,
+        blockingReasons: ["Complete Home Details (required fields)."],
+        applianceProfileReady: true,
+        baselineRunnableNow: true,
+        validatorAudit: {
+          homeDetails: { ready: true },
+        },
+      } as any,
     } as any);
 
     expect(payload).toHaveProperty("loadedSourceContext");
@@ -113,8 +126,16 @@ describe("one path simulation variable copy payload", () => {
     expect(payload).toHaveProperty("displayTotalsAudit");
     expect(payload).toHaveProperty("runtimeEnvParityTrace");
     expect(payload).toHaveProperty("intervalPastReadinessTrace");
+    expect(payload).toHaveProperty("readOnlyAudit");
     expect(payload).toHaveProperty("aiPayloadMeta");
     expect((payload.loadedSourceContext as any).actualDatasetSummary).toEqual({ totalKwh: 10 });
+    expect((payload.readOnlyAudit as any)).toEqual(
+      expect.objectContaining({
+        homeDetailsReady: true,
+        usageTruthReady: true,
+        compareCapableNow: false,
+      })
+    );
     expect((payload.userUsageDashboardViewModel as any).coverage).toEqual(
       expect.objectContaining({
         source: "SMT",
@@ -125,6 +146,13 @@ describe("one path simulation variable copy payload", () => {
     expect((payload.userUsageDashboardViewModel as any).fifteenMinuteCurve).toEqual(
       expect.objectContaining({
         rowsCount: 2,
+      })
+    );
+    expect((payload.displayTotalsAudit as any)).toEqual(
+      expect.objectContaining({
+        rawIntervalTotalKwh: 10,
+        summaryTotalKwh: 10,
+        datasetTotalsNetKwh: 10,
       })
     );
     expect((payload.aiPayloadMeta as any)).toEqual(

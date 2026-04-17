@@ -37,6 +37,11 @@ function pickFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function sumKwhRows(rows: Array<Record<string, unknown>>): number | null {
+  if (!rows.length) return null;
+  return round2(rows.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
+}
+
 export type UsageDisplayTotalsAudit = {
   rawIntervalTotalKwh: number | null;
   summaryTotalKwh: number | null;
@@ -66,16 +71,18 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
   const series = asRecord(dataset.series);
   const stitchedMonth = asRecord(insights.stitchedMonth);
   const intervals15 = asArray<Record<string, unknown>>(series.intervals15);
+  const dailyRows = asArray<Record<string, unknown>>(dataset.daily);
   const displayedMonthlyRows = buildDisplayedMonthlyRows(dataset as never);
   const weekdayWeekend = asRecord(insights.weekdayVsWeekend);
   const timeOfDayBuckets = asArray<Record<string, unknown>>(insights.timeOfDayBuckets);
 
-  const rawIntervalTotalKwh = intervals15.length
+  const previewIntervalTotalKwh = intervals15.length
     ? round2(intervals15.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0))
     : null;
   const summaryTotalKwh = pickFiniteNumber(summary.totalKwh);
   const datasetTotalsImportKwh = pickFiniteNumber(totals.importKwh);
   const datasetTotalsNetKwh = pickFiniteNumber(totals.netKwh);
+  const rawTotalFromDailyKwh = sumKwhRows(dailyRows);
   const monthlyDisplayedTotalKwh = displayedMonthlyRows.length
     ? round2(displayedMonthlyRows.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0))
     : null;
@@ -99,13 +106,18 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
       ? deriveTotalsFromRows(displayedMonthlyRows.map((row) => ({ kwh: Number(row.kwh) || 0 })))
       : null;
   const totalsFromSeries =
-    rawIntervalTotalKwh != null
+    previewIntervalTotalKwh != null
       ? {
-          importKwh: rawIntervalTotalKwh,
+          importKwh: previewIntervalTotalKwh,
           exportKwh: 0,
-          netKwh: rawIntervalTotalKwh,
+          netKwh: previewIntervalTotalKwh,
         }
       : null;
+
+  const rawIntervalTotalKwh =
+    rawTotalFromDailyKwh != null
+      ? rawTotalFromDailyKwh
+      : previewIntervalTotalKwh ?? datasetTotalsNetKwh ?? summaryTotalKwh;
 
   let dashboardHeadlineTotalKwh: number | null = null;
   let dashboardHeadlineTotalOwner = "UsageDashboard.tsx :: interval fallback";

@@ -60,8 +60,10 @@ import {
 } from "@/modules/onePathSim/manualPrefill";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { ensureHouseWeatherBackfill, ensureHouseWeatherNormalAvgBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/onePathSim/simulatedUsage/pastDaySimulatorTypes";
+import { summarizeOnePathWeatherAvailability } from "@/modules/onePathSim/weatherAvailability";
 import {
   canonicalIntervalKey,
   dateKeyInTimezone,
@@ -153,51 +155,68 @@ async function attachSelectedDailyWeatherForDataset(args: {
   const timezone =
     String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
     "America/Chicago";
+  let skippedLatLng = false;
   if (weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER") {
-    await ensureOnePathWeatherBackfillNoOp({
+    const backfill = await ensureHouseWeatherBackfill({
       houseId: weatherHouseId,
       startDate: dateKeys[0]!,
       endDate: dateKeys[dateKeys.length - 1]!,
       timezone,
-    }).catch(() => null);
+    });
+    skippedLatLng = backfill.skippedLatLng === true;
   } else if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
-    await ensureOnePathWeatherNormalAvgBackfillNoOp({
+    const backfill = await ensureHouseWeatherNormalAvgBackfill({
       houseId: weatherHouseId,
       dateKeys,
-    }).catch(() => null);
+    });
+    skippedLatLng = backfill.skippedLatLng === true;
   }
+  const weatherKind = resolveWeatherKindForLogicMode(weatherLogicMode);
   const wxMap = await getHouseWeatherDays({
     houseId: weatherHouseId,
     dateKeys,
-    kind: resolveWeatherKindForLogicMode(weatherLogicMode),
-  }).catch(() => new Map());
-  if (!(wxMap instanceof Map) || wxMap.size === 0) return;
+    kind: weatherKind,
+  });
+  const weatherAvailability = summarizeOnePathWeatherAvailability({
+    expectedDateKeys: dateKeys,
+    wxMap,
+    weatherLogicMode,
+    skippedLatLng,
+  });
+  if (!weatherAvailability.available) {
+    throw new Error(
+      weatherAvailability.failureMessage ??
+        "Shared simulation weather guard failed: required real weather coverage is unavailable."
+    );
+  }
   (dataset as any).dailyWeather = Object.fromEntries(
-    Array.from(wxMap.entries()).map(([dateKey, w]: [string, any]) => [
-      dateKey,
-      {
-        tAvgF: Number(w?.tAvgF) || 0,
-        tMinF: Number(w?.tMinF) || 0,
-        tMaxF: Number(w?.tMaxF) || 0,
-        hdd65: Number(w?.hdd65) || 0,
-        cdd65: Number(w?.cdd65) || 0,
-        source: String(w?.source ?? "").trim() || null,
-      },
-    ])
+    dateKeys.map((dateKey: string) => {
+      const w = wxMap.get(dateKey)!;
+      return [
+        dateKey,
+        {
+          tAvgF: Number(w?.tAvgF) || 0,
+          tMinF: Number(w?.tMinF) || 0,
+          tMaxF: Number(w?.tMaxF) || 0,
+          hdd65: Number(w?.hdd65) || 0,
+          cdd65: Number(w?.cdd65) || 0,
+          source: String(w?.source ?? "").trim() || null,
+        },
+      ];
+    })
   );
   if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") {
     (dataset as any).meta = {};
   }
   (dataset as any).meta.weatherLogicMode = weatherLogicMode;
-  if (
-    weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER" &&
-    (dataset as any).meta.weatherSourceSummary == null
-  ) {
-    (dataset as any).meta.weatherSourceSummary = "actual_only";
-  }
-  if ((dataset as any).meta.weatherFallbackReason == null) {
-    (dataset as any).meta.weatherFallbackReason = null;
-  }
+  (dataset as any).meta.weatherKindUsed = weatherKind;
+  (dataset as any).meta.weatherSourceSummary = weatherAvailability.weatherSourceSummary;
+  (dataset as any).meta.weatherFallbackReason = weatherAvailability.weatherFallbackReason;
+  (dataset as any).meta.weatherProviderName = weatherAvailability.weatherProviderName;
+  (dataset as any).meta.weatherCoverageStart = weatherAvailability.weatherCoverageStart;
+  (dataset as any).meta.weatherCoverageEnd = weatherAvailability.weatherCoverageEnd;
+  (dataset as any).meta.weatherStubRowCount = weatherAvailability.weatherStubRowCount;
+  (dataset as any).meta.weatherActualRowCount = weatherAvailability.weatherActualRowCount;
 }
 import {
   buildSourceDerivedMonthlyTargetResolutionFromPayload,
@@ -207,22 +226,6 @@ import {
 import type { ResolvedSimFingerprint } from "@/modules/onePathSim/usageSimulator/resolvedSimFingerprintTypes";
 
 type ManualUsagePayloadAny = any;
-
-async function ensureOnePathWeatherBackfillNoOp(_args: {
-  houseId: string;
-  startDate: string;
-  endDate: string;
-  timezone?: string | null;
-}) {
-  return null;
-}
-
-async function ensureOnePathWeatherNormalAvgBackfillNoOp(_args: {
-  houseId: string;
-  dateKeys: string[];
-}) {
-  return null;
-}
 
 function cleanupStalePastCacheVariants(args: { houseId: string; scenarioId: string; keepInputHash: string }) {
   void deleteCachedPastDatasetsForScenario({
@@ -6975,12 +6978,20 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const canonicalMonthsForWx = (buildInputs as any).canonicalMonths ?? [];
     const windowForWx = canonicalMonthsForWx.length > 0 ? canonicalWindowDateRange(canonicalMonthsForWx) : null;
     if (windowForWx?.start && windowForWx?.end) {
-      ensureOnePathWeatherBackfillNoOp({
-        houseId: args.houseId,
-        startDate: windowForWx.start,
-        endDate: windowForWx.end,
-        timezone: timezone ?? undefined,
-      }).catch(() => {});
+      const weatherLogicModeForPrefetch = resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>);
+      if (weatherLogicModeForPrefetch === "LONG_TERM_AVERAGE_WEATHER") {
+        ensureHouseWeatherNormalAvgBackfill({
+          houseId: args.houseId,
+          dateKeys: localDateKeysInRange(windowForWx.start, windowForWx.end, timezone ?? "America/Chicago"),
+        }).catch(() => {});
+      } else {
+        ensureHouseWeatherBackfill({
+          houseId: args.houseId,
+          startDate: windowForWx.start,
+          endDate: windowForWx.end,
+          timezone: timezone ?? undefined,
+        }).catch(() => {});
+      }
     }
 
     let dataset: any;

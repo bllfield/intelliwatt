@@ -116,6 +116,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Interval / compare visibility snapshot");
     expect(source).toContain("Baseline parity audit");
     expect(source).toContain("Household energy insights");
+    expect(source.indexOf("Household energy insights")).toBeLessThan(source.indexOf('title=\"Loaded source context\"'));
     expect(source).toContain("Monthly usage");
     expect(source).toContain("Daily usage");
     expect(source).toContain("15-minute load curve");

@@ -82,4 +82,47 @@ describe("one path usage display totals audit", () => {
     expect(audit.firstDivergenceOwner).toBe(null);
     expect(audit.mismatchClassification).toBe("aligned");
   });
+
+  it("uses the full baseline truth total instead of a preview fifteen-minute slice", () => {
+    const audit = buildUsageDisplayTotalsAudit({
+      dataset: {
+        summary: {
+          totalKwh: 13539.41,
+        },
+        daily: [
+          { date: "2026-04-13", kwh: 6769.7 },
+          { date: "2026-04-14", kwh: 6769.71 },
+        ],
+        series: {
+          intervals15: [
+            { timestamp: "2026-04-14T00:00:00.000Z", kwh: 20.25 },
+            { timestamp: "2026-04-14T00:15:00.000Z", kwh: 20.25 },
+            { timestamp: "2026-04-14T00:30:00.000Z", kwh: 20.25 },
+            { timestamp: "2026-04-14T00:45:00.000Z", kwh: 20.25 },
+          ],
+        },
+        monthly: [
+          { month: "2026-04", kwh: 13539.41 },
+        ],
+        insights: {
+          stitchedMonth: null,
+          weekdayVsWeekend: {
+            weekday: 10000,
+            weekend: 3539.41,
+          },
+          timeOfDayBuckets: [{ key: "all", label: "All day", kwh: 13539.41 }],
+        },
+        totals: {
+          importKwh: 13539.41,
+          exportKwh: 0,
+          netKwh: 13539.41,
+        },
+      },
+    });
+
+    expect(audit.rawIntervalTotalKwh).toBe(13539.41);
+    expect(audit.summaryTotalKwh).toBe(13539.41);
+    expect(audit.datasetTotalsNetKwh).toBe(13539.41);
+    expect(audit.firstDivergenceOwner).toBe(null);
+  });
 });

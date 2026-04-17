@@ -49,6 +49,7 @@ describe("one path ownership audit source", () => {
     expect(copySource).toContain("displayTotalsAudit");
     expect(copySource).toContain("runtimeEnvParityTrace");
     expect(copySource).toContain("intervalPastReadinessTrace");
+    expect(copySource).toContain("readOnlyAudit");
     expect(copySource).toContain("aiPayloadMeta");
     expect(auditSource).toContain('section: "Loaded source context"');
     expect(auditSource).toContain("copiedInAiPayload: true");
@@ -59,6 +60,7 @@ describe("one path ownership audit source", () => {
     expect(auditSource).toContain('section: "displayTotalsAudit"');
     expect(auditSource).toContain('section: "runtimeEnvParityTrace"');
     expect(auditSource).toContain('section: "intervalPastReadinessTrace"');
+    expect(auditSource).toContain('section: "readOnlyAudit"');
     expect(auditSource).toContain('section: "aiPayloadMeta"');
   });
 
