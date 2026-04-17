@@ -16,6 +16,46 @@ function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+function asStitchedMonthRecord(
+  value: unknown
+):
+  | {
+      mode: "PRIOR_YEAR_TAIL";
+      yearMonth: string;
+      haveDaysThrough: number;
+      missingDaysFrom: number;
+      missingDaysTo: number;
+      borrowedFromYearMonth: string;
+      completenessRule: string;
+    }
+  | null {
+  const item = asRecord(value);
+  const yearMonth = String(item?.yearMonth ?? "").slice(0, 7);
+  const borrowedFromYearMonth = String(item?.borrowedFromYearMonth ?? "").slice(0, 7);
+  const haveDaysThrough = Number(item?.haveDaysThrough);
+  const missingDaysFrom = Number(item?.missingDaysFrom);
+  const missingDaysTo = Number(item?.missingDaysTo);
+  if (
+    item?.mode !== "PRIOR_YEAR_TAIL" ||
+    !/^\d{4}-\d{2}$/.test(yearMonth) ||
+    !/^\d{4}-\d{2}$/.test(borrowedFromYearMonth) ||
+    !Number.isFinite(haveDaysThrough) ||
+    !Number.isFinite(missingDaysFrom) ||
+    !Number.isFinite(missingDaysTo)
+  ) {
+    return null;
+  }
+  return {
+    mode: "PRIOR_YEAR_TAIL",
+    yearMonth,
+    haveDaysThrough,
+    missingDaysFrom,
+    missingDaysTo,
+    borrowedFromYearMonth,
+    completenessRule: String(item?.completenessRule ?? ""),
+  };
+}
+
 function buildFifteenMinuteAveragesFromIntervals15(
   value: unknown
 ): Array<{ hhmm: string; avgKw: number }> {
@@ -140,9 +180,24 @@ export function buildOnePathRunReadOnlyView(args: {
   const meta = asRecord(dataset.meta);
   const engineInput = asRecord(args.engineInput);
   const readModel = asRecord(args.readModel) ?? {};
+  const sharedDiagnostics = asRecord(readModel.sharedDiagnostics) ?? {};
+  const datasetInsights = asRecord(dataset.insights) ?? {};
+  const stitchedMonth =
+    asStitchedMonthRecord(datasetInsights.stitchedMonth) ??
+    asStitchedMonthRecord(sharedDiagnostics.simulatedChartStitchedMonth);
+  const datasetForDisplay =
+    stitchedMonth && !asStitchedMonthRecord(datasetInsights.stitchedMonth)
+      ? {
+          ...dataset,
+          insights: {
+            ...datasetInsights,
+            stitchedMonth,
+          },
+        }
+      : dataset;
   const weatherScore = (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null;
   const viewModel = buildUserUsageDashboardViewModel({
-    dataset,
+    dataset: datasetForDisplay,
     weatherSensitivityScore: weatherScore,
   });
   if (!viewModel) return null;

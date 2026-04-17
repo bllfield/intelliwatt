@@ -159,6 +159,61 @@ describe("buildOnePathRunReadOnlyView", () => {
     ]);
   });
 
+  it("reuses shared stitched-month display metadata so One Path monthly rows match the user chart contract", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+        },
+        monthly: [
+          { month: "2025-04", kwh: 523.53 },
+          { month: "2025-05", kwh: 100 },
+          { month: "2026-04", kwh: 419.69 },
+        ],
+        daily: [{ date: "2026-04-16", kwh: 10, source: "SIMULATED" }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 10, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 0.8,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+        },
+      },
+      readModel: {
+        sharedDiagnostics: {
+          simulatedChartStitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-04",
+            haveDaysThrough: 15,
+            missingDaysFrom: 16,
+            missingDaysTo: 30,
+            borrowedFromYearMonth: "2025-04",
+            completenessRule: "borrow_prior_year_tail",
+          },
+        },
+      },
+    });
+
+    expect(view?.monthlyRows).toEqual([
+      { month: "2025-05", kwh: 100 },
+      { month: "2026-04", kwh: 943.22 },
+    ]);
+    expect(view?.stitchedMonth).toEqual({
+      mode: "PRIOR_YEAR_TAIL",
+      yearMonth: "2026-04",
+      haveDaysThrough: 15,
+      missingDaysFrom: 16,
+      missingDaysTo: 30,
+      borrowedFromYearMonth: "2025-04",
+      completenessRule: "borrow_prior_year_tail",
+    });
+  });
+
   it("binds validation compare rows and metrics from the persisted read model", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
