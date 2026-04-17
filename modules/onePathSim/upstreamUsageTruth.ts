@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/db";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
+import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
 import { resolveReportedCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 
 export type UpstreamUsageTruthOwner = {
   label: string;
@@ -24,6 +26,7 @@ export type UpstreamUsageTruthSeedResult = {
 
 export type UpstreamUsageTruthSource =
   | "persisted_usage_output"
+  | "seeded_via_existing_usage_orchestration"
   | "missing_usage_truth";
 
 export type UpstreamUsageTruthResult = {
@@ -96,7 +99,7 @@ export function buildUpstreamUsageTruthSummary(args: {
   return {
     title: "Upstream Usage Truth",
     summary:
-      "This panel makes the hard lock explicit: usage stays upstream, simulation stays downstream, and the isolated One Path harness only consumes persisted usage truth.",
+      "This panel makes the baseline passthrough rule explicit: usage stays upstream, simulation stays downstream, and One Path baseline reuses persisted usage truth or requests the existing shared usage refresh owner before failing.",
     currentRun: {
       statusSummary: {
         usageTruthStatus: status.usageTruthStatus,
@@ -140,7 +143,7 @@ export function buildUpstreamUsageTruthSummary(args: {
         lookedForExistingUsageTruth: status.lookedForExistingUsageTruth,
         existingUsageTruthFound: status.existingUsageTruthFound,
         refreshRequested: status.refreshRequested,
-        refreshOwner: "live usage refresh route remains external to the isolated One Path harness",
+        refreshOwner: "lib/usage/userUsageRefresh.ts -> requestUsageRefreshForUserHouse",
         refreshCompleted: status.refreshCompleted,
         refreshFailureReason: status.refreshFailureReason,
       },
@@ -149,7 +152,7 @@ export function buildUpstreamUsageTruthSummary(args: {
       {
         label: "Upstream truth resolver",
         owner: "modules/onePathSim/upstreamUsageTruth.ts",
-        whyItMatters: "Reads persisted usage truth first and prevents One Path from becoming a second upstream usage producer.",
+        whyItMatters: "Reads persisted usage truth first for baseline passthrough and uses the existing shared refresh owner only when upstream truth is still missing.",
       },
       {
         label: "Shared usage layer",
@@ -157,12 +160,43 @@ export function buildUpstreamUsageTruthSummary(args: {
         whyItMatters: "Keeps usage truth ownership on the same shared actual-usage layer used by the existing usage page.",
       },
       {
+        label: "Shared refresh owner",
+        owner: "lib/usage/userUsageRefresh.ts",
+        whyItMatters: "When baseline truth is missing, seeding requests the existing shared usage refresh/orchestration path instead of inventing a second actual-usage producer.",
+      },
+      {
         label: "Existing usage route owner",
         owner: "app/api/user/usage/refresh/route.ts",
-        whyItMatters: "The user-facing usage refresh route remains the existing orchestration entrypoint; the isolated One Path harness does not call it directly in quarantine mode.",
+        whyItMatters: "The user-facing usage refresh route remains the shared orchestration entrypoint owned outside One Path.",
       },
     ],
   };
+}
+
+function logBaselineUsageTruthEvent(
+  event: string,
+  args: {
+    userId: string;
+    selectedHouseId: string;
+    actualContextHouseId: string;
+    usageTruthAlreadyExists?: boolean;
+    seedingAttempted?: boolean;
+    usageTruthSource?: UpstreamUsageTruthSource;
+    seedResult?: UpstreamUsageTruthSeedResult;
+  }
+) {
+  logSimPipelineEvent(event, {
+    userId: args.userId,
+    houseId: args.selectedHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.selectedHouseId ? args.actualContextHouseId : undefined,
+    upstreamTruthAlreadyExists: args.usageTruthAlreadyExists,
+    seedingAttempted: args.seedingAttempted,
+    usageTruthSource: args.usageTruthSource,
+    seedOk: args.seedResult?.ok,
+    seedMessage: args.seedResult?.message,
+    source: "resolveUpstreamUsageTruthForSimulation",
+    memoryRssMb: getMemoryRssMb(),
+  });
 }
 
 async function loadHouseForUser(args: { userId: string; houseId: string }) {
@@ -208,12 +242,31 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     houseId: String(args.actualContextHouseId ?? args.houseId),
   });
 
+  if (args.seedIfMissing) {
+    logBaselineUsageTruthEvent("baseline_upstream_usage_truth_lookup_start", {
+      userId: args.userId,
+      selectedHouseId: selectedHouse.id,
+      actualContextHouseId: actualContextHouse.id,
+      seedingAttempted: false,
+    });
+  }
+
   let resolved = await readPersistedUsageTruth({
     userId: args.userId,
     houseId: actualContextHouse.id,
     esiid: actualContextHouse.esiid,
   });
   if (resolved?.dataset) {
+    if (args.seedIfMissing) {
+      logBaselineUsageTruthEvent("baseline_upstream_usage_truth_lookup_success", {
+        userId: args.userId,
+        selectedHouseId: selectedHouse.id,
+        actualContextHouseId: actualContextHouse.id,
+        usageTruthAlreadyExists: true,
+        seedingAttempted: false,
+        usageTruthSource: "persisted_usage_output",
+      });
+    }
     return {
       selectedHouse,
       actualContextHouse,
@@ -232,6 +285,14 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   }
 
   if (!args.seedIfMissing) {
+    logBaselineUsageTruthEvent("baseline_upstream_usage_truth_lookup_failure", {
+      userId: args.userId,
+      selectedHouseId: selectedHouse.id,
+      actualContextHouseId: actualContextHouse.id,
+      usageTruthAlreadyExists: false,
+      seedingAttempted: false,
+      usageTruthSource: "missing_usage_truth",
+    });
     return {
       selectedHouse,
       actualContextHouse,
@@ -249,24 +310,80 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     };
   }
 
-  const seedResult: UpstreamUsageTruthSeedResult = {
-    ok: false,
-    homeId: actualContextHouse.id,
-    message: "One Path quarantine mode does not trigger the live usage refresh owner directly.",
-  };
+  logBaselineUsageTruthEvent("baseline_upstream_usage_seed_start", {
+    userId: args.userId,
+    selectedHouseId: selectedHouse.id,
+    actualContextHouseId: actualContextHouse.id,
+    usageTruthAlreadyExists: false,
+    seedingAttempted: true,
+    usageTruthSource: "missing_usage_truth",
+  });
+
+  const refreshResult = await requestUsageRefreshForUserHouse({
+    userId: args.userId,
+    houseId: actualContextHouse.id,
+  });
+
+  const seedResult: UpstreamUsageTruthSeedResult = refreshResult.ok
+    ? {
+        ok: true,
+        homeId: actualContextHouse.id,
+        message: "existing usage orchestration requested",
+      }
+    : {
+        ok: false,
+        homeId: actualContextHouse.id,
+        message: refreshResult.message ?? refreshResult.error,
+      };
+
+  logBaselineUsageTruthEvent(
+    seedResult.ok ? "baseline_upstream_usage_seed_success" : "baseline_upstream_usage_seed_failure",
+    {
+      userId: args.userId,
+      selectedHouseId: selectedHouse.id,
+      actualContextHouseId: actualContextHouse.id,
+      usageTruthAlreadyExists: false,
+      seedingAttempted: true,
+      usageTruthSource: "missing_usage_truth",
+      seedResult,
+    }
+  );
+
+  resolved = await readPersistedUsageTruth({
+    userId: args.userId,
+    houseId: actualContextHouse.id,
+    esiid: actualContextHouse.esiid,
+  });
+
+  const usageTruthSource: UpstreamUsageTruthSource = resolved?.dataset
+    ? "seeded_via_existing_usage_orchestration"
+    : "missing_usage_truth";
+
+  logBaselineUsageTruthEvent(
+    resolved?.dataset ? "baseline_upstream_usage_truth_lookup_success" : "baseline_upstream_usage_truth_lookup_failure",
+    {
+      userId: args.userId,
+      selectedHouseId: selectedHouse.id,
+      actualContextHouseId: actualContextHouse.id,
+      usageTruthAlreadyExists: false,
+      seedingAttempted: true,
+      usageTruthSource,
+      seedResult,
+    }
+  );
 
   return {
     selectedHouse,
     actualContextHouse,
-    dataset: null,
+    dataset: resolved?.dataset ?? null,
     alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
-    usageTruthSource: "missing_usage_truth",
+    usageTruthSource,
     seedResult,
     summary: buildUpstreamUsageTruthSummary({
       selectedHouseId: selectedHouse.id,
       actualContextHouseId: actualContextHouse.id,
-      dataset: null,
-      usageTruthSource: "missing_usage_truth",
+      dataset: resolved?.dataset ?? null,
+      usageTruthSource,
       seedResult,
     }),
   };

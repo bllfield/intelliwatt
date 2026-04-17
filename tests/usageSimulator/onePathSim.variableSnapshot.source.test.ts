@@ -50,8 +50,10 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(upstreamUsageSource).toContain("existing_persisted_truth");
     expect(upstreamUsageSource).toContain("persisted_usage_output");
     expect(upstreamUsageSource).toContain("missing_after_seed_attempt");
-    expect(upstreamUsageSource).toContain("One Path quarantine mode does not trigger the live usage refresh owner directly.");
-    expect(upstreamUsageSource).not.toContain("requestUsageRefreshForUserHouse");
+    expect(upstreamUsageSource).toContain("requestUsageRefreshForUserHouse");
+    expect(upstreamUsageSource).toContain("baseline_upstream_usage_seed_start");
+    expect(upstreamUsageSource).toContain("baseline_upstream_usage_seed_success");
+    expect(upstreamUsageSource).toContain("baseline_upstream_usage_seed_failure");
     expect(usageRouteSource).toContain("resolveIntervalsLayer");
     expect(usagePageSource).toContain("UsageDashboard");
     expect(usagePageSource).not.toContain("one-path-sim");

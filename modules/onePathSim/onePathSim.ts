@@ -3,11 +3,13 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   attachOnePathRunIdentityToEffectiveSimulationVariablesUsed,
   buildOnePathDailyCurveComparePayload,
+  buildOnePathManualBillPeriodTargets,
   buildOnePathSharedPastSimDiagnostics,
   buildOnePathValidationCompareProjectionSidecar,
   buildOnePathWeatherEfficiencyDerivedInput,
   getOnePathManualUsageInput,
   resolveOnePathCanonicalUsage365CoverageWindow,
+  resolveOnePathManualStageOnePresentation,
   resolveOnePathUpstreamUsageTruthForSimulation,
   resolveOnePathWeatherSensitivityEnvelope,
   type UpstreamUsageTruthSeedResult,
@@ -26,6 +28,7 @@ import {
   readOnePathSimulatedUsageScenario,
   runOnePathSimulatorBuild,
 } from "@/modules/onePathSim/serviceBridge";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weatherSensitivityShared";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -252,6 +255,330 @@ function deriveWeatherLogicMode(
 
 function toScenarioKey(scenarioId: string | null | undefined): string {
   return scenarioId && scenarioId.trim() ? scenarioId.trim() : "BASELINE";
+}
+
+function isBaselinePassthroughInput(engineInput: CanonicalSimulationEngineInput): boolean {
+  return engineInput.scenarioId == null && engineInput.inputType !== "NEW_BUILD";
+}
+
+function buildMonthlyTotalsRecord(rows: unknown): Record<string, number> {
+  if (!Array.isArray(rows)) return {};
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    const month = String((row as any)?.month ?? "").slice(0, 7);
+    const kwh = Number((row as any)?.kwh ?? Number.NaN);
+    if (/^\d{4}-\d{2}$/.test(month) && Number.isFinite(kwh)) {
+      acc[month] = kwh;
+    }
+    return acc;
+  }, {});
+}
+
+function buildIntervalBaselinePassthroughDataset(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
+}) {
+  const sourceDataset = args.upstreamUsageTruth.dataset ?? {};
+  const summary = asRecord((sourceDataset as any).summary) ?? {};
+  const meta = asRecord((sourceDataset as any).meta) ?? {};
+  const monthlyRows = Array.isArray((sourceDataset as any).monthly) ? (sourceDataset as any).monthly : [];
+  const totalKwh =
+    typeof summary.totalKwh === "number"
+      ? summary.totalKwh
+      : monthlyRows.reduce((sum: number, row: any) => sum + (Number(row?.kwh) || 0), 0);
+
+  return {
+    ...sourceDataset,
+    summary: {
+      ...summary,
+      source: summary.source ?? args.engineInput.actualSource ?? "ACTUAL",
+      totalKwh,
+      start: summary.start ?? args.engineInput.coverageWindowStart ?? null,
+      end: summary.end ?? args.engineInput.coverageWindowEnd ?? null,
+      latest: summary.latest ?? summary.end ?? args.engineInput.coverageWindowEnd ?? null,
+    },
+    daily: Array.isArray((sourceDataset as any).daily) ? (sourceDataset as any).daily : [],
+    monthly: monthlyRows,
+    series: {
+      ...((sourceDataset as any).series ?? {}),
+      intervals15: Array.isArray((sourceDataset as any)?.series?.intervals15)
+        ? (sourceDataset as any).series.intervals15
+        : [],
+    },
+    meta: {
+      ...meta,
+      datasetKind: meta.datasetKind ?? "ACTUAL",
+      scenarioKey: "BASELINE",
+      scenarioId: null,
+      baselinePassthrough: true,
+      baselinePassthroughMode: "INTERVAL",
+      baselineSource: "upstream_usage_truth",
+      baselineSimulationBlocked: true,
+      sharedProducerPathUsed: false,
+      inputType: args.engineInput.inputType,
+      simulatorMode: args.engineInput.simulatorMode,
+      actualContextHouseId: args.engineInput.actualContextHouseId,
+      usageTruthSource: args.upstreamUsageTruth.usageTruthSource,
+      usageTruthSeedResult: args.upstreamUsageTruth.seedResult,
+      coverageStart: meta.coverageStart ?? args.engineInput.coverageWindowStart ?? summary.start ?? null,
+      coverageEnd: meta.coverageEnd ?? args.engineInput.coverageWindowEnd ?? summary.end ?? null,
+      canonicalMonths:
+        Array.isArray(meta.canonicalMonths) && meta.canonicalMonths.length > 0
+          ? meta.canonicalMonths
+          : args.engineInput.canonicalMonths,
+      lockboxExecutionMode: "baseline_passthrough_only",
+    },
+  };
+}
+
+function buildManualBaselinePassthroughDataset(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
+  manualUsagePayload: ManualUsagePayload | null;
+}) {
+  const monthlyRows =
+    args.manualUsagePayload?.mode === "MONTHLY"
+      ? Object.entries(args.engineInput.monthlyTotalsKwhByMonth)
+          .map(([month, kwh]) => ({ month, kwh: Number(kwh) || 0 }))
+          .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
+          .sort((a, b) => (a.month < b.month ? -1 : 1))
+      : [];
+  const annualTotalKwh =
+    args.manualUsagePayload?.mode === "ANNUAL"
+      ? Math.max(0, Number(args.manualUsagePayload.annualKwh ?? args.engineInput.annualTargetKwh ?? 0) || 0)
+      : monthlyRows.reduce((sum, row) => sum + row.kwh, 0);
+  const firstStatementRange = Array.isArray(args.engineInput.statementRanges) ? (args.engineInput.statementRanges[0] as any) : null;
+  const lastStatementRange = Array.isArray(args.engineInput.statementRanges)
+    ? (args.engineInput.statementRanges[args.engineInput.statementRanges.length - 1] as any)
+    : null;
+  const startDate =
+    typeof lastStatementRange?.startDate === "string"
+      ? String(lastStatementRange.startDate).slice(0, 10)
+      : args.engineInput.coverageWindowStart ?? null;
+  const endDate =
+    typeof firstStatementRange?.endDate === "string"
+      ? String(firstStatementRange.endDate).slice(0, 10)
+      : args.engineInput.anchorEndDate ?? args.engineInput.coverageWindowEnd ?? null;
+  const presentation = resolveOnePathManualStageOnePresentation({
+    surface: "admin_manual_monthly_stage_one",
+    payload: args.manualUsagePayload,
+  });
+  const billPeriods =
+    args.manualUsagePayload != null ? buildOnePathManualBillPeriodTargets(args.manualUsagePayload) : [];
+  const annualSeriesTimestamp =
+    (endDate ?? args.engineInput.coverageWindowEnd ?? `${new Date().getUTCFullYear()}-12-31`).slice(0, 4) +
+    "-01-01T00:00:00.000Z";
+
+  return {
+    summary: {
+      source: "MANUAL",
+      intervalsCount: 0,
+      totalKwh: annualTotalKwh,
+      start: startDate,
+      end: endDate,
+      latest: endDate,
+    },
+    daily: [],
+    monthly: monthlyRows,
+    series: {
+      intervals15: [],
+      daily: [],
+      monthly: monthlyRows.map((row) => ({
+        timestamp: `${row.month}-01T00:00:00.000Z`,
+        kwh: row.kwh,
+      })),
+      annual: [{ timestamp: annualSeriesTimestamp, kwh: annualTotalKwh }],
+    },
+    meta: {
+      datasetKind: "MANUAL_BASELINE_PASSTHROUGH",
+      scenarioKey: "BASELINE",
+      scenarioId: null,
+      baselinePassthrough: true,
+      baselinePassthroughMode: args.engineInput.inputType,
+      baselineSource: "upstream_manual_usage_truth",
+      baselineSimulationBlocked: true,
+      sharedProducerPathUsed: false,
+      inputType: args.engineInput.inputType,
+      simulatorMode: args.engineInput.simulatorMode,
+      actualContextHouseId: args.engineInput.actualContextHouseId,
+      usageTruthSource: args.upstreamUsageTruth.usageTruthSource,
+      usageTruthSeedResult: args.upstreamUsageTruth.seedResult,
+      coverageStart: startDate ?? args.engineInput.coverageWindowStart ?? null,
+      coverageEnd: endDate ?? args.engineInput.coverageWindowEnd ?? null,
+      canonicalMonths: args.engineInput.canonicalMonths,
+      timezone: args.engineInput.timezone,
+      statementRanges: args.engineInput.statementRanges,
+      manualBillPeriods: billPeriods,
+      manualBillPeriodTotalsKwhById: args.engineInput.manualBillPeriodTotalsKwhById,
+      manualStageOnePresentation: presentation,
+      manualPayloadMode: args.manualUsagePayload?.mode ?? null,
+      lockboxExecutionMode: "baseline_passthrough_only",
+    },
+  };
+}
+
+async function buildBaselinePassthroughArtifact(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  callerType: SharedDiagnosticsCallerType;
+}): Promise<CanonicalSimulationArtifact> {
+  const startedAt = Date.now();
+  logSimPipelineEvent("baseline_dataset_passthrough_start", {
+    userId: args.engineInput.runtime.userId,
+    houseId: args.engineInput.houseId,
+    sourceHouseId:
+      args.engineInput.actualContextHouseId !== args.engineInput.houseId
+        ? args.engineInput.actualContextHouseId
+        : undefined,
+    mode: args.engineInput.simulatorMode,
+    inputType: args.engineInput.inputType,
+    scenarioId: null,
+    source: "buildBaselinePassthroughArtifact",
+    memoryRssMb: getMemoryRssMb(),
+  });
+
+  const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
+    userId: args.engineInput.runtime.userId,
+    houseId: args.engineInput.houseId,
+    actualContextHouseId: args.engineInput.actualContextHouseId,
+    seedIfMissing: true,
+  });
+
+  if (!upstreamUsageTruth.dataset) {
+    logSimPipelineEvent("baseline_dataset_passthrough_failure", {
+      userId: args.engineInput.runtime.userId,
+      houseId: args.engineInput.houseId,
+      sourceHouseId:
+        args.engineInput.actualContextHouseId !== args.engineInput.houseId
+          ? args.engineInput.actualContextHouseId
+          : undefined,
+      mode: args.engineInput.simulatorMode,
+      inputType: args.engineInput.inputType,
+      scenarioId: null,
+      usageTruthSource: upstreamUsageTruth.usageTruthSource,
+      seedOk: upstreamUsageTruth.seedResult?.ok,
+      failureMessage: "baseline_upstream_usage_truth_missing_after_seed",
+      source: "buildBaselinePassthroughArtifact",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    throw new UpstreamUsageTruthMissingError({
+      usageTruthSource: upstreamUsageTruth.usageTruthSource,
+      seedResult: upstreamUsageTruth.seedResult,
+      upstreamUsageTruth: upstreamUsageTruth.summary,
+    });
+  }
+
+  const manualUsagePayload =
+    args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
+      ? (await getOnePathManualUsageInput({
+          userId: args.engineInput.runtime.userId,
+          houseId: args.engineInput.houseId,
+        }).catch(() => ({ payload: null }))).payload ?? null
+      : null;
+
+  const dataset =
+    args.engineInput.inputType === "INTERVAL"
+      ? buildIntervalBaselinePassthroughDataset({
+          engineInput: args.engineInput,
+          upstreamUsageTruth,
+        })
+      : buildManualBaselinePassthroughDataset({
+          engineInput: args.engineInput,
+          upstreamUsageTruth,
+          manualUsagePayload,
+        });
+
+  const compareProjection = buildOnePathValidationCompareProjectionSidecar(dataset);
+  const manualReadResult =
+    args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
+      ? await buildOnePathManualArtifactDecorations({
+          userId: args.engineInput.runtime.userId,
+          houseId: args.engineInput.houseId,
+          scenarioId: null,
+          dataset,
+          displayDataset: dataset,
+          callerType: args.callerType,
+          usageInputMode: args.engineInput.inputType,
+          weatherLogicMode: args.engineInput.weatherLogicMode,
+          artifactId: null,
+          artifactInputHash: null,
+          artifactEngineVersion: "baseline_passthrough_v1",
+          actualDataset: upstreamUsageTruth.dataset,
+        })
+      : null;
+  const sharedDiagnostics =
+    manualReadResult?.sharedDiagnostics ??
+    buildOnePathSharedPastSimDiagnostics({
+      callerType: args.callerType,
+      dataset,
+      scenarioId: null,
+      usageInputMode: args.engineInput.inputType,
+      weatherLogicMode: args.engineInput.weatherLogicMode,
+      artifactId: null,
+      artifactInputHash: "",
+      artifactEngineVersion: "baseline_passthrough_v1",
+      compareProjection,
+      manualMonthlyReconciliation: null,
+    });
+
+  logSimPipelineEvent("baseline_dataset_passthrough_success", {
+    userId: args.engineInput.runtime.userId,
+    houseId: args.engineInput.houseId,
+    sourceHouseId:
+      args.engineInput.actualContextHouseId !== args.engineInput.houseId
+        ? args.engineInput.actualContextHouseId
+        : undefined,
+    mode: args.engineInput.simulatorMode,
+    inputType: args.engineInput.inputType,
+    scenarioId: null,
+    usageTruthSource: upstreamUsageTruth.usageTruthSource,
+    seedingAttempted: upstreamUsageTruth.seedResult != null,
+    intervalCount: Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15.length : 0,
+    dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
+    monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
+    durationMs: Date.now() - startedAt,
+    source: "buildBaselinePassthroughArtifact",
+    memoryRssMb: getMemoryRssMb(),
+  });
+
+  return {
+    artifactId: null,
+    artifactInputHash: null,
+    engineVersion: "baseline_passthrough_v1",
+    buildInputsHash: null,
+    createdAt: null,
+    updatedAt: null,
+    houseId: args.engineInput.houseId,
+    scenarioId: null,
+    actualContextHouseId: args.engineInput.actualContextHouseId,
+    inputType: args.engineInput.inputType,
+    simulatorMode: args.engineInput.simulatorMode,
+    engineInput: args.engineInput,
+    dataset: {
+      summary: (dataset as any)?.summary ?? {},
+      daily: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [],
+      monthly: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly : [],
+      series: {
+        intervals15: Array.isArray((dataset as any)?.series?.intervals15)
+          ? (dataset as any).series.intervals15
+          : [],
+      },
+      meta: (asRecord((dataset as any)?.meta) ?? {}) as Record<string, unknown>,
+    },
+    simulatedDayResults: [],
+    stitchedCurve: [],
+    monthlyTargetConstructionDiagnostics: null,
+    manualMonthlyInputState: (dataset as any)?.meta?.manualMonthlyInputState ?? null,
+    manualBillPeriods: Array.isArray((dataset as any)?.meta?.manualBillPeriods)
+      ? (dataset as any).meta.manualBillPeriods
+      : [],
+    manualBillPeriodTotalsKwhById:
+      ((dataset as any)?.meta?.manualBillPeriodTotalsKwhById as Record<string, number> | undefined) ?? {},
+    sourceDerivedMonthlyTotalsKwhByMonth: buildMonthlyTotalsRecord((dataset as any)?.monthly),
+    compareProjection,
+    manualMonthlyReconciliation: manualReadResult?.manualMonthlyReconciliation ?? null,
+    manualParitySummary: manualReadResult?.manualParitySummary ?? null,
+    sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
+    effectiveSimulationVariablesUsed: null,
+  };
 }
 
 async function loadSharedContext(args: {
@@ -536,6 +863,12 @@ async function buildArtifactFromEngineInput(args: {
   callerType: SharedDiagnosticsCallerType;
   exactArtifactInputHash?: string | null;
 }): Promise<CanonicalSimulationArtifact> {
+  if (isBaselinePassthroughInput(args.engineInput)) {
+    return buildBaselinePassthroughArtifact({
+      engineInput: args.engineInput,
+      callerType: args.callerType,
+    });
+  }
   const datasetRead = await readOnePathSimulatedUsageScenario({
     userId: args.engineInput.runtime.userId,
     houseId: args.engineInput.houseId,
@@ -690,6 +1023,12 @@ async function buildArtifactFromEngineInput(args: {
 export async function runSharedSimulation(
   engineInput: CanonicalSimulationEngineInput
 ): Promise<CanonicalSimulationArtifact> {
+  if (isBaselinePassthroughInput(engineInput)) {
+    return buildArtifactFromEngineInput({
+      engineInput,
+      callerType: "user_past",
+    });
+  }
   const recalcArgs: RecalcSimulatorBuildArgs = {
     userId: engineInput.runtime.userId,
     houseId: engineInput.runtime.houseId,
@@ -733,6 +1072,7 @@ export async function readSharedSimulationArtifact(args: {
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
+    seedUsageTruthIfMissing: (args.scenarioId ?? null) == null && args.inputType !== "NEW_BUILD",
   });
   const engineInput = buildCanonicalEngineInput({
     inputType: args.inputType,

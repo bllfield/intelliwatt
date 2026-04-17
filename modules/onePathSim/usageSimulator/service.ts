@@ -4027,6 +4027,27 @@ async function recalcSimulatorBuildImpl(args: {
   const actualContextHouseId = String(args.actualContextHouseId ?? houseId);
   const scenarioKey = normalizeScenarioKey(args.scenarioId);
   const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
+  const isBaselineSyntheticInvariantMode =
+    scenarioId == null && (mode === "SMT_BASELINE" || mode === "MANUAL_TOTALS");
+  if (isBaselineSyntheticInvariantMode) {
+    logSimPipelineEvent("baseline_invariant_violation_synthetic_packaging_attempt", {
+      correlationId: args.correlationId,
+      userId,
+      houseId,
+      sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+      mode,
+      scenarioId: null,
+      source: "recalcSimulatorBuildImpl",
+      memoryRssMb: getMemoryRssMb(),
+    });
+    return {
+      ok: false,
+      error: "baseline_passthrough_required",
+      missingItems: [
+        "Baseline is usage passthrough only. Synthetic packaging is blocked; Past Sim is the first place simulation runs.",
+      ],
+    };
+  }
   const requestedValidationOnlyDateKeysLocal = normalizeValidationOnlyDateKeysLocal(
     args.validationOnlyDateKeysLocal
   );

@@ -25,12 +25,14 @@ describe("upstream usage truth owner boundaries", () => {
     expect(liveTestSource).not.toContain("One Path");
   });
 
-  it("keeps the One Path owner explicitly fail-closed and separate from the live shared owner", () => {
+  it("keeps the One Path owner explicitly baseline-seeded and separate from the live shared owner", () => {
     const onePathSource = readRepoFile("modules/onePathSim/upstreamUsageTruth.ts");
     const onePathSnapshotTestSource = readRepoFile("tests/usageSimulator/onePathSim.variableSnapshot.source.test.ts");
 
-    expect(onePathSource).toContain("One Path quarantine mode does not trigger the live usage refresh owner directly.");
-    expect(onePathSource).not.toContain("requestUsageRefreshForUserHouse");
-    expect(onePathSnapshotTestSource).toContain("One Path quarantine mode does not trigger the live usage refresh owner directly.");
+    expect(onePathSource).toContain("requestUsageRefreshForUserHouse");
+    expect(onePathSource).toContain("baseline_upstream_usage_truth_lookup_start");
+    expect(onePathSource).toContain("baseline_upstream_usage_seed_start");
+    expect(onePathSource).toContain("existing shared usage refresh owner");
+    expect(onePathSnapshotTestSource).toContain("baseline_upstream_usage_seed_success");
   });
 });
