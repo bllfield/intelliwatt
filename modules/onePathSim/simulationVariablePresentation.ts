@@ -5,6 +5,7 @@ import type {
 } from "@/modules/onePathSim/simulationVariablePolicy";
 import type { OnePathKnownScenario } from "@/modules/onePathSim/knownHouseScenarios";
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
+import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 
 export type SimulationVariablePolicyResponseShape = {
   familyMeta: Record<string, { title: string; description: string }>;
@@ -268,6 +269,11 @@ export function buildSimulationVariableCopyPayload(args: {
     currentControls: args.currentControls ?? {},
     knownScenario: args.knownScenario ?? null,
     sandboxSummary: args.sandboxSummary ?? null,
+    tuningCycleSummary: buildOnePathTuningCycleSummary({
+      knownScenario: args.knownScenario,
+      sandboxSummary: args.sandboxSummary,
+      selectedMode: inputType,
+    }),
     runIdentity: args.runSnapshot?.runIdentityLinkage ?? null,
     engineInput: args.engineInput ?? null,
     truthConsole: args.readModel

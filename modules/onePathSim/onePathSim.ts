@@ -32,6 +32,7 @@ import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageS
 import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weatherSensitivityShared";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { hasUsableAnnualPayload, hasUsableMonthlyPayload } from "@/modules/onePathSim/manualPrefill";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 
 export type CanonicalSimulationInputType =
@@ -239,6 +240,24 @@ function normalizeTravelRanges(value: unknown): Array<{ startDate: string; endDa
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(row.endDate));
 }
 
+function requireUsableManualPayload(args: {
+  inputType: "MANUAL_MONTHLY" | "MANUAL_ANNUAL";
+  manualUsagePayload?: ManualUsagePayload | null;
+}): void {
+  if (args.inputType === "MANUAL_MONTHLY") {
+    if (hasUsableMonthlyPayload(args.manualUsagePayload)) return;
+    throw new SharedSimulationRunError({
+      code: "requirements_unmet",
+      missingItems: ["Save filled manual monthly usage totals before running MANUAL_MONTHLY."],
+    });
+  }
+  if (hasUsableAnnualPayload(args.manualUsagePayload)) return;
+  throw new SharedSimulationRunError({
+    code: "requirements_unmet",
+    missingItems: ["Save a MANUAL_ANNUAL payload before running MANUAL_ANNUAL."],
+  });
+}
+
 function normalizeWeatherPreference(
   value: unknown
 ): CanonicalSimulationEngineInput["weatherPreference"] {
@@ -347,6 +366,7 @@ function buildManualBaselinePassthroughDataset(args: {
   upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
   manualUsagePayload: ManualUsagePayload | null;
 }) {
+  type ManualMonthlyRow = { month: string; kwh: number };
   const statementRanges =
     Array.isArray((args.manualUsagePayload as any)?.statementRanges)
       ? ((args.manualUsagePayload as any).statementRanges as unknown[])
@@ -361,17 +381,17 @@ function buildManualBaselinePassthroughDataset(args: {
             ? (args.manualUsagePayload as any).monthlyKwh
             : Object.entries(args.engineInput.monthlyTotalsKwhByMonth).map(([month, kwh]) => ({ month, kwh }))
         )
-          .map((row: any) => ({
+          .map((row: any): ManualMonthlyRow => ({
             month: String(row?.month ?? "").slice(0, 7),
             kwh: Number(row?.kwh ?? 0) || 0,
           }))
-          .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
-          .sort((a, b) => (a.month < b.month ? -1 : 1))
+          .filter((row: ManualMonthlyRow) => /^\d{4}-\d{2}$/.test(row.month))
+          .sort((a: ManualMonthlyRow, b: ManualMonthlyRow) => (a.month < b.month ? -1 : 1))
       : [];
   const annualTotalKwh =
     args.manualUsagePayload?.mode === "ANNUAL"
       ? Math.max(0, Number(args.manualUsagePayload.annualKwh ?? args.engineInput.annualTargetKwh ?? 0) || 0)
-      : monthlyRows.reduce((sum, row) => sum + row.kwh, 0);
+      : monthlyRows.reduce((sum: number, row: ManualMonthlyRow) => sum + row.kwh, 0);
   const firstStatementRange = Array.isArray(statementRanges) ? (statementRanges[0] as any) : null;
   const lastStatementRange = Array.isArray(statementRanges)
     ? (statementRanges[statementRanges.length - 1] as any)
@@ -414,7 +434,7 @@ function buildManualBaselinePassthroughDataset(args: {
     series: {
       intervals15: [],
       daily: [],
-      monthly: monthlyRows.map((row) => ({
+      monthly: monthlyRows.map((row: ManualMonthlyRow) => ({
         timestamp: `${row.month}-01T00:00:00.000Z`,
         kwh: row.kwh,
       })),
@@ -826,6 +846,10 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
 }
 
 export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Promise<CanonicalSimulationEngineInput> {
+  requireUsableManualPayload({
+    inputType: "MANUAL_MONTHLY",
+    manualUsagePayload: raw.manualUsagePayload,
+  });
   const loaded = await loadSharedContext({
     userId: raw.userId,
     houseId: raw.houseId,
@@ -848,6 +872,10 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
 }
 
 export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Promise<CanonicalSimulationEngineInput> {
+  requireUsableManualPayload({
+    inputType: "MANUAL_ANNUAL",
+    manualUsagePayload: raw.manualUsagePayload,
+  });
   const loaded = await loadSharedContext({
     userId: raw.userId,
     houseId: raw.houseId,

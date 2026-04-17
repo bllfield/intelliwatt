@@ -93,6 +93,7 @@ describe("one path simulation variable copy payload", () => {
 
     expect(payload).toHaveProperty("knownScenario");
     expect(payload).toHaveProperty("sandboxSummary");
+    expect(payload).toHaveProperty("tuningCycleSummary");
     expect(payload.knownScenario).toEqual({
       scenarioKey: "interval-past-primary",
       label: "Interval Past Primary",
@@ -105,5 +106,29 @@ describe("one path simulation variable copy payload", () => {
       },
     });
     expect((payload.sandboxSummary as any).monthlyTruthCompare.compareProjectionMetrics).toEqual({ maePct: 4.2 });
+    expect(payload.tuningCycleSummary).toEqual({
+      presetName: "Interval Past Primary",
+      presetKey: "interval-past-primary",
+      mode: "INTERVAL",
+      runType: "PAST_SIM",
+      compareMetrics: {
+        wape: null,
+        mae: null,
+        rmse: null,
+      },
+      biggestDriftReason: "Expected compare surfaces are not available for this preset yet.",
+      thresholdStatus: {
+        baselineParity: false,
+        compareAvailability: false,
+        wape: null,
+        mae: null,
+        rmse: null,
+      },
+      keyVariablesUsed: {
+        resolvedWeatherShapingMode: null,
+        resolvedIntradayReconstructionControls: null,
+        weatherEfficiencyDerivedInput: { coolingWeight: 0.77 },
+      },
+    });
   });
 });

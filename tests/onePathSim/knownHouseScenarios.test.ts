@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_BRIAN_KNOWN_SCENARIO_KEY,
   KNOWN_HOUSE_SCENARIOS,
+  PRIMARY_BRIAN_SANDBOX_CONTEXT,
   getKnownHouseScenarioByKey,
   resolveKnownHouseScenarioSelection,
 } from "@/modules/onePathSim/knownHouseScenarios";
@@ -16,27 +18,42 @@ describe("one path known-house scenario registry", () => {
     expect(KNOWN_HOUSE_SCENARIOS.some((scenario) => scenario.scenarioType === "NEW_BUILD_OPTIONAL")).toBe(true);
   });
 
+  it("anchors the Brian sandbox presets to one resolved primary house/context", () => {
+    expect(PRIMARY_BRIAN_SANDBOX_CONTEXT.email).toBe("brian@intellipath-solutions.com");
+    expect(PRIMARY_BRIAN_SANDBOX_CONTEXT.houseId).toBe("8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8");
+    expect(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY).toBe("keeper-interval-past-primary");
+    const brianPresets = KNOWN_HOUSE_SCENARIOS.filter(
+      (scenario) => scenario.sourceUserEmail === PRIMARY_BRIAN_SANDBOX_CONTEXT.email && scenario.active
+    );
+    expect(brianPresets.length).toBeGreaterThanOrEqual(5);
+    expect(brianPresets.every((scenario) => scenario.sourceHouseId === PRIMARY_BRIAN_SANDBOX_CONTEXT.houseId)).toBe(true);
+    expect(brianPresets.every((scenario) => scenario.actualContextHouseId === PRIMARY_BRIAN_SANDBOX_CONTEXT.actualContextHouseId)).toBe(true);
+    expect(brianPresets.some((scenario) => scenario.scenarioKey === "keeper-brian-interval-baseline-primary")).toBe(true);
+    expect(brianPresets.some((scenario) => scenario.scenarioKey === "keeper-manual-annual-baseline-primary")).toBe(true);
+    expect(brianPresets.some((scenario) => scenario.scenarioKey === "keeper-manual-annual-past-primary")).toBe(true);
+  });
+
   it("looks scenarios up by stable key", () => {
     const first = KNOWN_HOUSE_SCENARIOS[0];
     expect(getKnownHouseScenarioByKey(first.scenarioKey)).toEqual(first);
     expect(getKnownHouseScenarioByKey("missing-scenario-key")).toBeNull();
   });
 
-  it("resolves lookup-driven house/context/scenario ids from a preset", () => {
+  it("resolves lookup-driven house/context/scenario ids from a preset and fuzzy-matches scenario hints", () => {
     const scenario = {
       scenarioKey: "interval-past",
       label: "Interval Past",
       active: true,
       mode: "INTERVAL",
       scenarioType: "INTERVAL_TRUTH" as const,
-      sourceUserEmail: "omoneo@o2epcm.com",
+      sourceUserEmail: "brian@intellipath-solutions.com",
       sourceUserId: null,
-      sourceHouseId: null,
-      actualContextHouseId: null,
+      sourceHouseId: "house-source",
+      actualContextHouseId: "house-actual",
       scenarioId: null,
       scenarioNameHint: "Past",
       scenarioSelectionStrategy: "scenario_name" as const,
-      houseSelectionStrategy: "selected_house" as const,
+      houseSelectionStrategy: "source_house_id" as const,
       baselineType: "interval_truth" as const,
       validationSelectionMode: "stratified_weather_balanced",
       validationDayCount: 14,
@@ -58,17 +75,17 @@ describe("one path known-house scenario registry", () => {
         selectedHouse: { id: "house-selected" },
         houses: [
           { id: "house-selected", label: "Primary" },
-          { id: "house-2", label: "Backup" },
+          { id: "house-source", label: "Sandbox House" },
         ],
         scenarios: [
-          { id: "past-scenario-id", name: "Past" },
+          { id: "past-scenario-id", name: "Past (Corrected)" },
           { id: "future-scenario-id", name: "Future" },
         ],
       },
     });
 
-    expect(resolved.selectedHouseId).toBe("house-selected");
-    expect(resolved.actualContextHouseId).toBe("house-selected");
+    expect(resolved.selectedHouseId).toBe("house-source");
+    expect(resolved.actualContextHouseId).toBe("house-actual");
     expect(resolved.selectedScenarioId).toBe("past-scenario-id");
   });
 });

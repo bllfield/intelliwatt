@@ -9,11 +9,15 @@ import {
   buildSimulationVariableFamilyAdminView,
 } from "@/modules/onePathSim/simulationVariablePresentation";
 import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHarnessSummary";
+import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import {
+  DEFAULT_BRIAN_KNOWN_SCENARIO_KEY,
   KNOWN_HOUSE_SCENARIOS,
+  PRIMARY_BRIAN_SANDBOX_CONTEXT,
   getKnownHouseScenarioByKey,
   resolveKnownHouseScenarioSelection,
 } from "@/modules/onePathSim/knownHouseScenarios";
+import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 
 type LookupResponse = {
@@ -173,7 +177,7 @@ export function OnePathSimAdmin() {
   const [selectedHouseId, setSelectedHouseId] = useState("");
   const [actualContextHouseId, setActualContextHouseId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
-  const [selectedKnownScenarioKey, setSelectedKnownScenarioKey] = useState("");
+  const [selectedKnownScenarioKey, setSelectedKnownScenarioKey] = useState(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY);
   const [lastRunKnownScenarioKey, setLastRunKnownScenarioKey] = useState("");
   const [mode, setMode] = useState<"INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD">("INTERVAL");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
@@ -252,6 +256,17 @@ export function OnePathSimAdmin() {
     () => getKnownHouseScenarioByKey(lastRunKnownScenarioKey),
     [lastRunKnownScenarioKey]
   );
+  const orderedKnownScenarios = useMemo(() => {
+    const brianEmail = PRIMARY_BRIAN_SANDBOX_CONTEXT.email;
+    return [...KNOWN_HOUSE_SCENARIOS].sort((left, right) => {
+      if (left.scenarioKey === DEFAULT_BRIAN_KNOWN_SCENARIO_KEY) return -1;
+      if (right.scenarioKey === DEFAULT_BRIAN_KNOWN_SCENARIO_KEY) return 1;
+      if (left.sourceUserEmail === brianEmail && right.sourceUserEmail !== brianEmail) return -1;
+      if (right.sourceUserEmail === brianEmail && left.sourceUserEmail !== brianEmail) return 1;
+      if (left.active !== right.active) return left.active ? -1 : 1;
+      return left.label.localeCompare(right.label);
+    });
+  }, []);
   const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
   const upstreamUsageTruth = useMemo(
     () =>
@@ -268,6 +283,24 @@ export function OnePathSimAdmin() {
         knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
       }),
     [lastRunKnownScenario, lookup?.sourceContext, runResult, selectedKnownScenario]
+  );
+  const tuningCycleSummary = useMemo(
+    () =>
+      buildOnePathTuningCycleSummary({
+        knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+        sandboxSummary: sandboxHarnessSummary,
+        selectedMode: mode,
+        runError: error,
+      }),
+    [error, lastRunKnownScenario, mode, sandboxHarnessSummary, selectedKnownScenario]
+  );
+  const knownScenarioPrereqStatus = useMemo(
+    () =>
+      buildKnownHouseScenarioPrereqStatus({
+        scenario: selectedKnownScenario ?? lastRunKnownScenario,
+        lookupSourceContext: asRecord(lookup?.sourceContext),
+      }),
+    [lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
   );
 
   const activeVariableFamilyView = useMemo(
@@ -526,6 +559,7 @@ export function OnePathSimAdmin() {
       setError("Choose a known-house scenario preset first.");
       return;
     }
+    setRunResult(null);
     setEmail(selectedKnownScenario.sourceUserEmail);
     setMode(selectedKnownScenario.mode);
     setWeatherPreference(selectedKnownScenario.weatherPreference);
@@ -563,6 +597,7 @@ export function OnePathSimAdmin() {
       setError("Load a user and select a house first.");
       return;
     }
+    setRunResult(null);
     setBusy(true);
     setError(null);
     setStatus(`Running canonical ${mode} through the shared producer pipeline...`);
@@ -716,13 +751,16 @@ export function OnePathSimAdmin() {
           <div className="mt-6 grid gap-4 lg:grid-cols-4">
             <label className="text-sm text-slate-700 lg:col-span-2">
               <div className="font-semibold text-brand-navy">Known-house scenario preset</div>
+              <div className="mt-1 text-xs text-slate-500">
+                Brian sandbox house is the default tuning context: {PRIMARY_BRIAN_SANDBOX_CONTEXT.houseLabel}
+              </div>
               <select
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={selectedKnownScenarioKey}
                 onChange={(event) => setSelectedKnownScenarioKey(event.target.value)}
               >
                 <option value="">Select sandbox preset</option>
-                {KNOWN_HOUSE_SCENARIOS.map((scenario) => (
+                {orderedKnownScenarios.map((scenario) => (
                   <option key={scenario.scenarioKey} value={scenario.scenarioKey}>
                     {scenario.label} {scenario.active ? "" : "(inactive)"}
                   </option>
@@ -937,6 +975,15 @@ export function OnePathSimAdmin() {
           ) : null}
           <SectionJson title="Loaded source context" value={lookup?.sourceContext ?? null} />
           <SectionJson
+            title="Known scenario prerequisite status"
+            value={{
+              brianSandboxContext: PRIMARY_BRIAN_SANDBOX_CONTEXT,
+              selectedKnownScenarioKey: selectedKnownScenarioKey || null,
+              selectedKnownScenarioLabel: selectedKnownScenario?.label ?? null,
+              ...knownScenarioPrereqStatus,
+            }}
+          />
+          <SectionJson
             title="Harness controls snapshot"
             value={{
               email: lookup?.email ?? email,
@@ -1136,6 +1183,7 @@ export function OnePathSimAdmin() {
                     : null
                 }
               />
+              <SectionJson title="Tuning cycle summary" value={tuningCycleSummary} />
               <SectionJson title="Sandbox run status" value={sandboxHarnessSummary.runStatus} />
               <SectionJson title="Monthly truth / compare snapshot" value={sandboxHarnessSummary.monthlyTruthCompare} />
               <SectionJson title="Weather / daily-shape snapshot" value={sandboxHarnessSummary.weatherAndShape} />
