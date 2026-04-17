@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
@@ -103,16 +103,15 @@ function Modal(props: { open: boolean; title: string; onClose: () => void; child
   );
 }
 
-function SectionJson(props: { title: string; value: unknown }) {
+const SectionJson = memo(function SectionJson(props: { title: string; value: unknown }) {
+  const formatted = useMemo(() => JSON.stringify(props.value, null, 2), [props.value]);
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="text-sm font-semibold text-brand-navy">{props.title}</div>
-      <pre className="mt-3 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
-        {JSON.stringify(props.value, null, 2)}
-      </pre>
+      <pre className="mt-3 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{formatted}</pre>
     </div>
   );
-}
+});
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -178,6 +177,7 @@ function modeToOverrideBucketKey(mode: string): "intervalOverrides" | "manualMon
 export function OnePathSimAdmin() {
   const [email, setEmail] = useState("");
   const [lookup, setLookup] = useState<LookupResponse | null>(null);
+  const [debugDiagnosticsEnabled, setDebugDiagnosticsEnabled] = useState(true);
   const [selectedHouseId, setSelectedHouseId] = useState("");
   const [actualContextHouseId, setActualContextHouseId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
@@ -274,19 +274,36 @@ export function OnePathSimAdmin() {
   const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
   const upstreamUsageTruth = useMemo(
     () =>
-      asRecord(runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth) ??
-      asRecord(runResult?.upstreamUsageTruth) ??
-      asRecord(lookup?.sourceContext?.upstreamUsageTruth),
-    [lookup?.sourceContext?.upstreamUsageTruth, runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth, runResult?.upstreamUsageTruth]
+      debugDiagnosticsEnabled
+        ? asRecord(runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth) ??
+          asRecord(runResult?.upstreamUsageTruth) ??
+          asRecord(lookup?.sourceContext?.upstreamUsageTruth)
+        : null,
+    [
+      debugDiagnosticsEnabled,
+      lookup?.sourceContext?.upstreamUsageTruth,
+      runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth,
+      runResult?.upstreamUsageTruth,
+    ]
   );
   const sandboxHarnessSummary = useMemo(
     () =>
-      buildOnePathSandboxHarnessSummary({
-        lookupSourceContext: asRecord(lookup?.sourceContext),
-        runResult: asRecord(runResult),
-        knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
-      }),
-    [lastRunKnownScenario, lookup?.sourceContext, runResult, selectedKnownScenario]
+      debugDiagnosticsEnabled
+        ? buildOnePathSandboxHarnessSummary({
+            lookupSourceContext: asRecord(lookup?.sourceContext),
+            runResult: asRecord(runResult),
+            knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+          })
+        : {
+            runStatus: {
+              runType:
+                runResult?.runType ?? (selectedScenarioId ? "PAST_SIM" : runResult?.runDisplayView ? "PAST_SIM" : "BASELINE_OR_UNSET"),
+            },
+            monthlyTruthCompare: {},
+            weatherAndShape: {},
+            compareVisibility: {},
+          },
+    [debugDiagnosticsEnabled, lastRunKnownScenario, lookup?.sourceContext, runResult, selectedKnownScenario, selectedScenarioId]
   );
   const tuningCycleSummary = useMemo(
     () =>
@@ -300,42 +317,51 @@ export function OnePathSimAdmin() {
   );
   const knownScenarioPrereqStatus = useMemo(
     () =>
-      buildKnownHouseScenarioPrereqStatus({
-        scenario: selectedKnownScenario ?? lastRunKnownScenario,
-        lookupSourceContext: asRecord(lookup?.sourceContext),
-      }),
-    [lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
+      debugDiagnosticsEnabled
+        ? buildKnownHouseScenarioPrereqStatus({
+            scenario: selectedKnownScenario ?? lastRunKnownScenario,
+            lookupSourceContext: asRecord(lookup?.sourceContext),
+          })
+        : null,
+    [debugDiagnosticsEnabled, lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
   );
   const intervalPastReadinessTrace = useMemo(
     () =>
-      buildIntervalPastReadinessTrace({
-        scenario: selectedKnownScenario ?? lastRunKnownScenario,
-        lookupSourceContext: asRecord(lookup?.sourceContext),
-        baselineParityReport: asRecord(lookup?.sourceContext?.baselineParityReport),
-        environmentVisibility: asRecord(lookup?.sourceContext?.environmentVisibility),
-      }),
-    [lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
+      debugDiagnosticsEnabled
+        ? buildIntervalPastReadinessTrace({
+            scenario: selectedKnownScenario ?? lastRunKnownScenario,
+            lookupSourceContext: asRecord(lookup?.sourceContext),
+            baselineParityReport: asRecord(lookup?.sourceContext?.baselineParityReport),
+            environmentVisibility: asRecord(lookup?.sourceContext?.environmentVisibility),
+          })
+        : null,
+    [debugDiagnosticsEnabled, lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
   );
   const runtimeEnvParityTrace = useMemo(
     () =>
-      buildRuntimeEnvParityTrace({
-        environmentVisibility: asRecord(lookup?.sourceContext?.environmentVisibility),
-      }),
-    [lookup?.sourceContext?.environmentVisibility]
+      debugDiagnosticsEnabled
+        ? buildRuntimeEnvParityTrace({
+            environmentVisibility: asRecord(lookup?.sourceContext?.environmentVisibility),
+          })
+        : null,
+    [debugDiagnosticsEnabled, lookup?.sourceContext?.environmentVisibility]
   );
   const lookupUserUsageBaselineContract = useMemo(() => {
+    if (!debugDiagnosticsEnabled) return null;
     const contract = lookup?.sourceContext?.userUsageBaselineContract;
     return contract && typeof contract === "object" ? contract : null;
-  }, [lookup?.sourceContext?.userUsageBaselineContract]);
+  }, [debugDiagnosticsEnabled, lookup?.sourceContext?.userUsageBaselineContract]);
   const lookupBaselineParityAudit = useMemo(
-    () => asRecord(lookup?.sourceContext?.baselineParityAudit),
-    [lookup?.sourceContext?.baselineParityAudit]
+    () => (debugDiagnosticsEnabled ? asRecord(lookup?.sourceContext?.baselineParityAudit) : null),
+    [debugDiagnosticsEnabled, lookup?.sourceContext?.baselineParityAudit]
   );
   const lookupBaselineParityReport = useMemo(
-    () => asRecord(lookup?.sourceContext?.baselineParityReport),
-    [lookup?.sourceContext?.baselineParityReport]
+    () => (debugDiagnosticsEnabled ? asRecord(lookup?.sourceContext?.baselineParityReport) : null),
+    [debugDiagnosticsEnabled, lookup?.sourceContext?.baselineParityReport]
   );
-  const isPastSimRun = sandboxHarnessSummary.runStatus.runType === "PAST_SIM";
+  const runDisplayView = useMemo(() => asRecord(runResult?.runDisplayView), [runResult?.runDisplayView]);
+  const isPastSimRun =
+    sandboxHarnessSummary.runStatus.runType === "PAST_SIM" || runResult?.runType === "PAST_SIM" || runDisplayView != null;
   const runReadOnlyDataset = useMemo(
     () => asRecord(runResult?.readModel?.dataset),
     [runResult?.readModel?.dataset]
@@ -584,6 +610,7 @@ export function OnePathSimAdmin() {
           houseId: args?.houseId ?? effectiveHouseId ?? "",
           mode: args?.mode ?? mode,
           actualContextHouseId: args?.actualContextHouseId ?? effectiveActualContextHouseId ?? null,
+          includeDebugDiagnostics: debugDiagnosticsEnabled,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -596,7 +623,7 @@ export function OnePathSimAdmin() {
       setBusy(false);
       return json as LookupResponse;
     },
-    [effectiveActualContextHouseId, effectiveHouseId, email, mode]
+    [debugDiagnosticsEnabled, effectiveActualContextHouseId, effectiveHouseId, email, mode]
   );
 
   const loadLookup = useCallback(
@@ -678,6 +705,7 @@ export function OnePathSimAdmin() {
         travelRanges,
         persistRequested,
         runReason,
+        includeDebugDiagnostics: debugDiagnosticsEnabled,
       }),
     });
     const json = await res.json().catch(() => null);
@@ -704,6 +732,7 @@ export function OnePathSimAdmin() {
     setLastRunKnownScenarioKey(selectedKnownScenario?.scenarioKey ?? "");
     setStatus("Shared run completed and read back from the canonical artifact/read-model path.");
   }, [
+    debugDiagnosticsEnabled,
     effectiveActualContextHouseId,
     effectiveHouseId,
     lookup,
@@ -899,6 +928,14 @@ export function OnePathSimAdmin() {
           </div>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={debugDiagnosticsEnabled}
+                onChange={(event) => setDebugDiagnosticsEnabled(event.target.checked)}
+              />
+              Debug diagnostics
+            </label>
             <label className="text-sm text-slate-700">
               <div className="flex items-center justify-between gap-3">
                 <div className="font-semibold text-brand-navy">Validation selection mode</div>
@@ -1000,7 +1037,7 @@ export function OnePathSimAdmin() {
               <button
                 type="button"
                 onClick={() => void copyAllVariablesForAi()}
-                disabled={!variablePolicy}
+                disabled={!variablePolicy || !debugDiagnosticsEnabled}
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
               >
                 Copy all variables for AI
@@ -1022,11 +1059,12 @@ export function OnePathSimAdmin() {
           {error ? <div className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
         </div>
 
-        {isPastSimRun && runReadOnlyDataset ? (
+        {isPastSimRun && (runDisplayView || runReadOnlyDataset) ? (
           <OnePathRunReadOnlyView
-            dataset={runReadOnlyDataset}
+            view={(runDisplayView as any) ?? null}
+            dataset={runDisplayView ? null : runReadOnlyDataset}
             engineInput={asRecord(runResult?.engineInput)}
-            readModel={asRecord(runResult?.readModel)}
+            readModel={runDisplayView ? null : asRecord(runResult?.readModel)}
           />
         ) : lookupUserUsageBaselineContract ? (
           <div className="space-y-4">
@@ -1045,7 +1083,8 @@ export function OnePathSimAdmin() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        {debugDiagnosticsEnabled ? (
+          <div className="grid gap-4 lg:grid-cols-2">
           {!runResult && upstreamUsageTruth ? (
             <div className="lg:col-span-2">
               <TruthSummaryPanel
@@ -1106,9 +1145,10 @@ export function OnePathSimAdmin() {
           <SectionJson title="Shared wiring flow" value={ownershipAudit.sharedWiringFlow} />
           <SectionJson title="External surface classification" value={ownershipAudit.externalSurfaceClassification} />
           <SectionJson title="Drift-risk watchlist" value={ownershipAudit.driftRiskWatchlist} />
-        </div>
+          </div>
+        ) : null}
 
-        {runResult ? (
+        {debugDiagnosticsEnabled && runResult ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-sm font-semibold text-brand-navy">Read-Only Shared Run Truth</div>
@@ -1472,6 +1512,7 @@ export function OnePathSimAdmin() {
                 <button
                   type="button"
                   onClick={() => void copyCurrentFamilyForAi()}
+                  disabled={!debugDiagnosticsEnabled}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy"
                 >
                   Copy this family for AI

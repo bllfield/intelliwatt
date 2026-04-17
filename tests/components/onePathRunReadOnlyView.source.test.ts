@@ -14,6 +14,8 @@ describe("OnePathRunReadOnlyView source contract", () => {
     const chartsSource = readRepoFile("components/usage/UsageChartsPanel.tsx");
     const compareSource = readRepoFile("components/usage/ValidationComparePanel.tsx");
 
+    expect(source).toContain("useMemo(");
+    expect(source).toContain("buildOnePathRunReadOnlyView({");
     expect(source).toContain("UsageChartsPanel");
     expect(source).toContain("WeatherSensitivityCard");
     expect(source).toContain("Past simulated usage");

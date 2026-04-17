@@ -191,7 +191,71 @@ describe("admin one path sim route", () => {
     adaptManualAnnualRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_ANNUAL" });
     adaptNewBuildRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "NEW_BUILD" });
     runSharedSimulation.mockResolvedValue({ artifactId: "artifact-1" });
-    buildSharedSimulationReadModel.mockReturnValue({ runIdentity: { artifactId: "artifact-1" } });
+    buildSharedSimulationReadModel.mockReturnValue({
+      runIdentity: { artifactId: "artifact-1" },
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+          totalKwh: 15008.06,
+          start: "2025-04-16",
+          end: "2026-04-15",
+        },
+        meta: {
+          source: "SIMULATED",
+          weatherSensitivityScore: { scoringMode: "INTERVAL_BASED" },
+        },
+        monthly: [{ month: "2026-04", kwh: 15008.06 }],
+        daily: [{ date: "2026-04-15", kwh: 41.12, source: "SIMULATED" }],
+        totals: {
+          importKwh: 15008.06,
+          exportKwh: 0,
+          netKwh: 15008.06,
+        },
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 10000, weekend: 5008.06 },
+          timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 3200 }],
+        },
+      },
+      compareProjection: {
+        rows: [
+          {
+            localDate: "2026-04-15",
+            dayType: "weekday",
+            actualDayKwh: 40,
+            simulatedDayKwh: 41.12,
+            errorKwh: 1.12,
+            percentError: 2.8,
+          },
+        ],
+        metrics: { wape: 2.8, mae: 1.12, rmse: 1.12 },
+      },
+      tuningSummary: {
+        selectedValidationRows: [
+          {
+            localDate: "2026-04-15",
+            dayType: "weekday",
+            actualDayKwh: 40,
+            simulatedDayKwh: 41.12,
+            errorKwh: 1.12,
+            percentError: 2.8,
+          },
+        ],
+        validationMetricsSummary: { wape: 2.8, mae: 1.12, rmse: 1.12 },
+      },
+      sharedDiagnostics: {
+        simulatedChartStitchedMonth: {
+          mode: "PRIOR_YEAR_TAIL",
+          yearMonth: "2026-04",
+          haveDaysThrough: 15,
+          missingDaysFrom: 16,
+          missingDaysTo: 30,
+          borrowedFromYearMonth: "2025-04",
+          completenessRule: "test",
+        },
+      },
+    });
     buildUserUsageHouseContract.mockResolvedValue({
       houseId: "house-1",
       label: "Home",
@@ -225,7 +289,7 @@ describe("admin one path sim route", () => {
 
   it("allows the browser admin cookie for lookup and returns source context", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com" }));
+    const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com", includeDebugDiagnostics: true }));
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -327,6 +391,7 @@ describe("admin one path sim route", () => {
         email: "customer@example.com",
         mode: "MANUAL_MONTHLY",
         actualContextHouseId: "house-2",
+        includeDebugDiagnostics: true,
       })
     );
 
@@ -379,6 +444,7 @@ describe("admin one path sim route", () => {
         houseId: "house-1",
         mode: "MANUAL_MONTHLY",
         actualContextHouseId: "house-2",
+        includeDebugDiagnostics: true,
       })
     );
     const json = await res.json();
@@ -408,6 +474,7 @@ describe("admin one path sim route", () => {
         email: "customer@example.com",
         houseId: "house-1",
         mode: "INTERVAL",
+        includeDebugDiagnostics: true,
       })
     );
     const json = await res.json();
@@ -417,6 +484,73 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).toHaveBeenCalledWith({ sharedProducerPathUsed: true, inputType: "INTERVAL" });
     expect(buildSharedSimulationReadModel).toHaveBeenCalledWith({ artifactId: "artifact-1" });
     expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
+  });
+
+  it("keeps interval run requests off the lookup-only preview and baseline contract path", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
+    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
+    expect(resolveUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();
+    expect(resolveSharedWeatherSensitivityEnvelope).not.toHaveBeenCalled();
+    expect(getHomeProfileReadOnlyByUserHouse).not.toHaveBeenCalled();
+    expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(getTravelRangesFromDb).not.toHaveBeenCalled();
+    expect(getSimulationVariablePolicy).not.toHaveBeenCalled();
+    expect(buildUserUsageHouseContract).not.toHaveBeenCalled();
+  });
+
+  it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.sourceContext).toEqual({
+      debugDiagnosticsIncluded: false,
+      travelRangesFromDb: [{ startDate: "2026-03-01", endDate: "2026-03-05" }],
+    });
+    expect(resolveUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();
+    expect(resolveSharedWeatherSensitivityEnvelope).not.toHaveBeenCalled();
+    expect(getHomeProfileReadOnlyByUserHouse).not.toHaveBeenCalled();
+    expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(getSimulationVariablePolicy).not.toHaveBeenCalled();
+    expect(buildUserUsageHouseContract).not.toHaveBeenCalled();
+  });
+
+  it("defaults interval runs to the lean debug-off response when debug is not requested", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.debugDiagnosticsIncluded).toBe(false);
+    expect(json.runType).toBe("PAST_SIM");
+    expect(json.runDisplayView).toBeTruthy();
+    expect(json.artifact ?? null).toBeNull();
+    expect(json.readModel ?? null).toBeNull();
   });
 
   it("passes actual context house and manual validation date keys through the shared adapter", async () => {

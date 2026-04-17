@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
-import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
+import { buildOnePathRunReadOnlyView, type OnePathRunReadOnlyView as OnePathRunReadOnlyModel } from "@/modules/onePathSim/runReadOnlyView";
 import { PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED } from "@/modules/onePathSim/usageSimulator/pastCompareUiDefaults";
 
 function formatScenarioVariable(value: {
@@ -35,6 +35,7 @@ function MetricCard(props: { label: string; value: string; note?: string }) {
 }
 
 export function OnePathRunReadOnlyView(props: {
+  view?: OnePathRunReadOnlyModel | null;
   dataset?: Record<string, unknown> | null;
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
@@ -42,11 +43,16 @@ export function OnePathRunReadOnlyView(props: {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
   const [compareExpanded, setCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
-  const view = buildOnePathRunReadOnlyView({
-    dataset: props.dataset ?? null,
-    engineInput: props.engineInput ?? null,
-    readModel: props.readModel ?? null,
-  });
+  const derivedView = useMemo(
+    () =>
+      buildOnePathRunReadOnlyView({
+        dataset: props.dataset ?? null,
+        engineInput: props.engineInput ?? null,
+        readModel: props.readModel ?? null,
+      }),
+    [props.dataset, props.engineInput, props.readModel]
+  );
+  const view = props.view ?? derivedView;
 
   if (!view) return null;
 

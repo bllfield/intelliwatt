@@ -28,6 +28,7 @@ import {
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
+import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 
 export const runtime = "nodejs";
@@ -75,6 +76,14 @@ function normalizeMode(value: unknown): CanonicalSimulationInputType {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function includeDebugDiagnosticsByDefault(value: unknown): boolean {
+  return value === true;
+}
+
 function buildEnvironmentVisibility() {
   return {
     homeDetails: {
@@ -101,6 +110,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}));
   const action = String(body?.action ?? "").trim().toLowerCase();
+  const includeDebugDiagnostics = includeDebugDiagnosticsByDefault(body?.includeDebugDiagnostics);
   const resolved = await resolveOnePathSimUserSelection({
     email: typeof body?.email === "string" ? body.email : null,
     houseId: typeof body?.houseId === "string" ? body.houseId : null,
@@ -135,6 +145,150 @@ export async function POST(request: NextRequest) {
       houseId: resolved.selectedHouse.id,
       payload: saved.payload,
       updatedAt: saved.updatedAt,
+    });
+  }
+
+  if (action === "run") {
+    const mode = normalizeMode(body?.mode);
+    const manualUsage =
+      mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+        ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
+            payload: null,
+            updatedAt: null,
+          }))
+        : { payload: null, updatedAt: null };
+    if ((mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL") && !manualUsage.payload) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "requirements_unmet",
+          missingItems: ["Save manual usage totals (monthly or annual)."],
+          message: "requirements_unmet: Save manual usage totals (monthly or annual).",
+        },
+        { status: 409 }
+      );
+    }
+    const rawInputBase = {
+      userId: resolved.userId,
+      houseId: resolved.selectedHouse.id,
+      actualContextHouseId:
+        typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+          ? body.actualContextHouseId.trim()
+          : resolved.selectedHouse.id,
+      scenarioId: typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null,
+      weatherPreference:
+        body?.weatherPreference === "NONE" || body?.weatherPreference === "LONG_TERM_AVERAGE"
+          ? body.weatherPreference
+          : "LAST_YEAR_WEATHER",
+      validationSelectionMode:
+        typeof body?.validationSelectionMode === "string" && body.validationSelectionMode.trim()
+          ? body.validationSelectionMode.trim()
+          : null,
+      validationDayCount:
+        typeof body?.validationDayCount === "number" && Number.isFinite(body.validationDayCount)
+          ? body.validationDayCount
+          : null,
+      validationOnlyDateKeysLocal: Array.isArray(body?.validationOnlyDateKeysLocal)
+        ? body.validationOnlyDateKeysLocal.map((value: unknown) => String(value ?? "").slice(0, 10))
+        : [],
+      travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : [],
+      persistRequested: body?.persistRequested !== false,
+    } as const;
+    try {
+      const engineInput =
+        mode === "INTERVAL"
+          ? await adaptIntervalRawInput(rawInputBase)
+          : mode === "MANUAL_ANNUAL"
+            ? await adaptManualAnnualRawInput({
+                ...rawInputBase,
+                manualUsagePayload: manualUsage.payload ?? null,
+              })
+            : mode === "NEW_BUILD"
+              ? await adaptNewBuildRawInput(rawInputBase)
+              : await adaptManualMonthlyRawInput({
+                  ...rawInputBase,
+                  manualUsagePayload: manualUsage.payload ?? null,
+                });
+      const artifact = await runSharedSimulation(engineInput);
+      const readModel = buildSharedSimulationReadModel(artifact);
+      if (!includeDebugDiagnostics) {
+        return NextResponse.json({
+          ok: true,
+          debugDiagnosticsIncluded: false,
+          runType: rawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
+          engineInput,
+          runDisplayView:
+            buildOnePathRunReadOnlyView({
+              dataset: asRecord(readModel.dataset),
+              engineInput: asRecord(engineInput),
+              readModel: asRecord(readModel),
+            }) ?? null,
+          artifact: null,
+          readModel: null,
+        });
+      }
+      return NextResponse.json({
+        ok: true,
+        debugDiagnosticsIncluded: true,
+        engineInput,
+        artifact,
+        readModel,
+      });
+    } catch (error) {
+      if (isUpstreamUsageTruthMissingFailure(error)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: error.code,
+            usageTruthSource: error.usageTruthSource,
+            seedResult: error.seedResult,
+            upstreamUsageTruth: error.upstreamUsageTruth,
+            message: error.message,
+          },
+          { status: 409 }
+        );
+      }
+      if (isSharedSimulationRunFailure(error)) {
+        const code =
+          typeof (error as { code?: unknown }).code === "string"
+            ? String((error as { code?: unknown }).code)
+            : "requirements_unmet";
+        const missingItems = Array.isArray((error as { missingItems?: unknown }).missingItems)
+          ? ((error as { missingItems?: unknown }).missingItems as unknown[]).map((item) => String(item))
+          : [];
+        const message =
+          missingItems.length > 0
+            ? `${code}: ${missingItems.join("; ")}`
+            : error instanceof Error && error.message
+              ? error.message
+              : code;
+        return NextResponse.json(
+          {
+            ok: false,
+            error: code,
+            missingItems,
+            message,
+          },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
+  }
+
+  if ((action === "lookup" || !action) && !includeDebugDiagnostics) {
+    const travelRangesFromDb = await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []);
+    return NextResponse.json({
+      ok: true,
+      email: resolved.email,
+      userId: resolved.userId,
+      houses: resolved.houses,
+      selectedHouse: resolved.selectedHouse,
+      scenarios: resolved.scenarios,
+      sourceContext: {
+        debugDiagnosticsIncluded: false,
+        travelRangesFromDb,
+      },
     });
   }
 
@@ -247,6 +401,7 @@ export async function POST(request: NextRequest) {
   if (action === "lookup" || !action) {
     return NextResponse.json({
       ok: true,
+      debugDiagnosticsIncluded: true,
       email: resolved.email,
       userId: resolved.userId,
       houses: resolved.houses,
@@ -263,110 +418,6 @@ export async function POST(request: NextRequest) {
         readOnlyAudit,
       },
     });
-  }
-
-  if (action === "run") {
-    const mode = normalizeMode(body?.mode);
-    if ((mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL") && !manualUsage.payload) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "requirements_unmet",
-          missingItems: ["Save manual usage totals (monthly or annual)."],
-          message: "requirements_unmet: Save manual usage totals (monthly or annual).",
-        },
-        { status: 409 }
-      );
-    }
-    const rawInputBase = {
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
-      actualContextHouseId:
-        typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
-          ? body.actualContextHouseId.trim()
-          : resolved.selectedHouse.id,
-      scenarioId: typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null,
-      weatherPreference:
-        body?.weatherPreference === "NONE" || body?.weatherPreference === "LONG_TERM_AVERAGE"
-          ? body.weatherPreference
-          : "LAST_YEAR_WEATHER",
-      validationSelectionMode:
-        typeof body?.validationSelectionMode === "string" && body.validationSelectionMode.trim()
-          ? body.validationSelectionMode.trim()
-          : null,
-      validationDayCount:
-        typeof body?.validationDayCount === "number" && Number.isFinite(body.validationDayCount)
-          ? body.validationDayCount
-          : null,
-      validationOnlyDateKeysLocal: Array.isArray(body?.validationOnlyDateKeysLocal)
-        ? body.validationOnlyDateKeysLocal.map((value: unknown) => String(value ?? "").slice(0, 10))
-        : [],
-      travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : [],
-      persistRequested: body?.persistRequested !== false,
-    } as const;
-    try {
-      const engineInput =
-        mode === "INTERVAL"
-          ? await adaptIntervalRawInput(rawInputBase)
-          : mode === "MANUAL_ANNUAL"
-            ? await adaptManualAnnualRawInput({
-                ...rawInputBase,
-                manualUsagePayload: manualUsage.payload ?? null,
-              })
-            : mode === "NEW_BUILD"
-              ? await adaptNewBuildRawInput(rawInputBase)
-              : await adaptManualMonthlyRawInput({
-                  ...rawInputBase,
-                  manualUsagePayload: manualUsage.payload ?? null,
-                });
-      const artifact = await runSharedSimulation(engineInput);
-      const readModel = buildSharedSimulationReadModel(artifact);
-      return NextResponse.json({
-        ok: true,
-        engineInput,
-        artifact,
-        readModel,
-      });
-    } catch (error) {
-      if (isUpstreamUsageTruthMissingFailure(error)) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: error.code,
-            usageTruthSource: error.usageTruthSource,
-            seedResult: error.seedResult,
-            upstreamUsageTruth: error.upstreamUsageTruth,
-            message: error.message,
-          },
-          { status: 409 }
-        );
-      }
-      if (isSharedSimulationRunFailure(error)) {
-        const code =
-          typeof (error as { code?: unknown }).code === "string"
-            ? String((error as { code?: unknown }).code)
-            : "requirements_unmet";
-        const missingItems = Array.isArray((error as { missingItems?: unknown }).missingItems)
-          ? ((error as { missingItems?: unknown }).missingItems as unknown[]).map((item) => String(item))
-          : [];
-        const message =
-          missingItems.length > 0
-            ? `${code}: ${missingItems.join("; ")}`
-            : error instanceof Error && error.message
-              ? error.message
-              : code;
-        return NextResponse.json(
-          {
-            ok: false,
-            error: code,
-            missingItems,
-            message,
-          },
-          { status: 409 }
-        );
-      }
-      throw error;
-    }
   }
 
   return NextResponse.json({ ok: false, error: "unsupported_action" }, { status: 400 });

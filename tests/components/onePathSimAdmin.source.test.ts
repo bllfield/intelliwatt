@@ -41,6 +41,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Known-house scenario preset");
     expect(source).toContain("Brian sandbox house is the default tuning context");
     expect(source).toContain('useState(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY)');
+    expect(source).toContain("Debug diagnostics");
+    expect(source).toContain("useState(true)");
     expect(source).toContain("Load known scenario preset");
     expect(source).toContain("Chart / Window / Display Logic");
     expect(source).toContain("Manual Statement / Annual Logic");
@@ -87,6 +89,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("<select");
     expect(source).toContain("sourceContext?.travelRangesFromDb");
     expect(source).toContain("lookup?.sourceContext?.upstreamUsageTruth");
+    expect(source).toContain("includeDebugDiagnostics: debugDiagnosticsEnabled");
     expect(source).toContain("Shared calculation variable popups");
     expect(source).toContain("buildOnePathSandboxHarnessSummary");
     expect(source).toContain("getKnownHouseScenarioByKey");
@@ -117,6 +120,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Baseline parity audit");
     expect(source).toContain("Household energy insights");
     expect(source.indexOf("Household energy insights")).toBeLessThan(source.indexOf('title=\"Loaded source context\"'));
+    expect(source).toContain("memo(function SectionJson");
+    expect(source).toContain("const formatted = useMemo(() => JSON.stringify(props.value, null, 2), [props.value])");
     expect(source).toContain("Monthly usage");
     expect(source).toContain("Daily usage");
     expect(source).toContain("15-minute load curve");
@@ -130,6 +135,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Known scenario / expectations");
     expect(source).toContain("Tuning cycle summary");
     expect(source).toContain("runResult.readModel?.effectiveSimulationVariablesUsed");
+    expect(source).toContain("debugDiagnosticsEnabled ? (");
     expect(source).toContain("explicit admin override");
     const presentationSource = readRepoFile("modules/onePathSim/simulationVariablePresentation.ts");
     const isolatedPresentationEntrySource = readRepoFile("modules/onePathSim/simulationVariablePresentation.ts");
@@ -190,7 +196,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(runReadOnlyViewSource).toContain("Past simulated usage");
     expect(runReadOnlyViewSource).toContain("Scenario variables");
     expect(runReadOnlyViewSource).toContain("Validation / Test Day Compare");
-    expect(source).toContain("readModel={asRecord(runResult?.readModel)}");
+    expect(source).toContain("readModel={runDisplayView ? null : asRecord(runResult?.readModel)}");
     expect(presentationSource).toContain("knownScenario");
     expect(presentationSource).toContain("sandboxSummary");
     expect(presentationSource).toContain("tuningCycleSummary");
