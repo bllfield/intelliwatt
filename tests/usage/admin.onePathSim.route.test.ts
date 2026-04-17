@@ -264,6 +264,17 @@ describe("admin one path sim route", () => {
         envVarPresent: false,
       }),
     });
+    expect(json.sourceContext.runtimeEnvParityTrace).toEqual(
+      expect.objectContaining({
+        routeRuntimeParity: true,
+        envVisibility: {
+          homeDetails: false,
+          appliances: false,
+          usage: false,
+        },
+        parityStatus: "local_env_not_populated",
+      })
+    );
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
     expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
     expect(json.sourceContext.userUsageBaselineContract).toEqual(

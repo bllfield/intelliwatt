@@ -19,7 +19,9 @@ import {
   resolveKnownHouseScenarioSelection,
 } from "@/modules/onePathSim/knownHouseScenarios";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
+import { buildIntervalPastReadinessTrace } from "@/modules/onePathSim/intervalPastReadinessTrace";
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
+import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 
 type LookupResponse = {
   ok: true;
@@ -302,6 +304,23 @@ export function OnePathSimAdmin() {
         lookupSourceContext: asRecord(lookup?.sourceContext),
       }),
     [lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
+  );
+  const intervalPastReadinessTrace = useMemo(
+    () =>
+      buildIntervalPastReadinessTrace({
+        scenario: selectedKnownScenario ?? lastRunKnownScenario,
+        lookupSourceContext: asRecord(lookup?.sourceContext),
+        baselineParityReport: asRecord(lookup?.sourceContext?.baselineParityReport),
+        environmentVisibility: asRecord(lookup?.sourceContext?.environmentVisibility),
+      }),
+    [lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
+  );
+  const runtimeEnvParityTrace = useMemo(
+    () =>
+      buildRuntimeEnvParityTrace({
+        environmentVisibility: asRecord(lookup?.sourceContext?.environmentVisibility),
+      }),
+    [lookup?.sourceContext?.environmentVisibility]
   );
   const lookupUserUsageBaselineContract = useMemo(() => {
     const contract = lookup?.sourceContext?.userUsageBaselineContract;
@@ -995,6 +1014,14 @@ export function OnePathSimAdmin() {
               selectedKnownScenarioLabel: selectedKnownScenario?.label ?? null,
               ...knownScenarioPrereqStatus,
             }}
+          />
+          <SectionJson
+            title="Interval Past blocker trace"
+            value={intervalPastReadinessTrace}
+          />
+          <SectionJson
+            title="Runtime / env parity trace"
+            value={runtimeEnvParityTrace}
           />
           <SectionJson
             title="Harness controls snapshot"

@@ -28,6 +28,7 @@ import {
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
+import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -239,6 +240,9 @@ export async function POST(request: NextRequest) {
     lookupSourceContext: previewLookupSourceContext,
   });
   const environmentVisibility = buildEnvironmentVisibility();
+  const runtimeEnvParityTrace = buildRuntimeEnvParityTrace({
+    environmentVisibility,
+  });
 
   if (action === "lookup" || !action) {
     return NextResponse.json({
@@ -255,6 +259,7 @@ export async function POST(request: NextRequest) {
         baselineParityAudit,
         baselineParityReport,
         environmentVisibility,
+        runtimeEnvParityTrace,
         readOnlyAudit,
       },
     });

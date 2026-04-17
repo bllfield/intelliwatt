@@ -167,6 +167,10 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(knownScenarioSource).toContain("scenarioKey");
     expect(source).toContain("orderedKnownScenarios");
     expect(source).toContain("Known scenario prerequisite status");
+    expect(source).toContain("Interval Past blocker trace");
+    expect(source).toContain("buildIntervalPastReadinessTrace");
+    expect(source).toContain("Runtime / env parity trace");
+    expect(source).toContain("buildRuntimeEnvParityTrace");
     expect(source).toContain("buildKnownHouseScenarioPrereqStatus");
     expect(knownScenarioPrereqSource).toContain("buildKnownHouseScenarioPrereqStatus");
     expect(knownScenarioPrereqSource).toContain("homeDetailsReady");
