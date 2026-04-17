@@ -1,6 +1,6 @@
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
-import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
+import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -11,14 +11,26 @@ function asDateKey(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
+export type OnePathPastScenarioVariable = {
+  kind: string;
+  effectiveMonth?: string;
+  payloadJson?: Record<string, unknown>;
+};
+
 export type OnePathRunReadOnlyView = {
   summary: {
     source: string | null;
     coverageStart: string | null;
     coverageEnd: string | null;
     intervalsCount: number | null;
+    weatherBasisLabel: string | null;
+    sourceOfDaySimulationCore: string | null;
+    hasSimulatedFill: boolean;
     totals: { importKwh: number; exportKwh: number; netKwh: number };
+    avgDailyKwh: number;
     baseload: number | null;
+    baseloadDaily: number | null;
+    baseloadMonthly: number | null;
     peakDay: { date: string; kwh: number } | null;
     peakHour: { hour: number; kw: number } | null;
     weekdayKwh: number;
@@ -27,21 +39,50 @@ export type OnePathRunReadOnlyView = {
   };
   monthlyRows: Array<{ month: string; kwh: number }>;
   dailyRows: Array<{ date: string; kwh: number; source?: string; sourceDetail?: string }>;
+  dailyWeather: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
   fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+  stitchedMonth: {
+    mode: "PRIOR_YEAR_TAIL";
+    yearMonth: string;
+    haveDaysThrough: number;
+    missingDaysFrom: number;
+    missingDaysTo: number;
+    borrowedFromYearMonth: string;
+    completenessRule: string;
+  } | null;
+  weatherScore: WeatherSensitivityScore | null;
+  pastVariables: OnePathPastScenarioVariable[];
 };
 
 export function buildOnePathRunReadOnlyView(args: {
   dataset?: Record<string, unknown> | null;
+  engineInput?: Record<string, unknown> | null;
 }): OnePathRunReadOnlyView | null {
   const dataset = asRecord(args.dataset);
   if (!dataset) return null;
 
-  const viewModel = buildUserUsageDashboardViewModel({ dataset });
+  const meta = asRecord(dataset.meta);
+  const engineInput = asRecord(args.engineInput);
+  const weatherScore = (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null;
+  const viewModel = buildUserUsageDashboardViewModel({
+    dataset,
+    weatherSensitivityScore: weatherScore,
+  });
   if (!viewModel) return null;
 
-  const summary = asRecord(dataset.summary);
-  const meta = asRecord(dataset.meta);
-  const insights = asRecord(dataset.insights);
+  const pastVariables = Array.isArray(engineInput?.travelRanges)
+    ? engineInput.travelRanges
+        .map((value) => asRecord(value))
+        .filter((value): value is Record<string, unknown> => value != null)
+        .map((range) => ({
+          kind: "TRAVEL_RANGE",
+          payloadJson: {
+            startDate: String(range.startDate ?? "").slice(0, 10),
+            endDate: String(range.endDate ?? "").slice(0, 10),
+          },
+        }))
+        .filter((value) => value.payloadJson.startDate && value.payloadJson.endDate)
+    : [];
   const dailyRows = Array.isArray(dataset.daily)
     ? dataset.daily
         .map((row) => {
@@ -57,35 +98,33 @@ export function buildOnePathRunReadOnlyView(args: {
         })
         .filter((row): row is ReturnType<typeof dailyRowFieldsFromSourceRow> => row != null)
     : viewModel.derived.daily;
-  const fifteenMinuteAverages = Array.isArray(insights?.fifteenMinuteAverages)
-    ? (insights.fifteenMinuteAverages as Array<Record<string, unknown>>)
-        .map((row) => ({
-          hhmm: String(row.hhmm ?? ""),
-          avgKw: Number(row.avgKw ?? 0),
-        }))
-        .filter((row) => /^\d{2}:\d{2}$/.test(row.hhmm) && Number.isFinite(row.avgKw))
-        .sort((left, right) => left.hhmm.localeCompare(right.hhmm))
-    : viewModel.derived.fifteenCurve;
 
   return {
     summary: {
       source: viewModel.coverage.source,
-      coverageStart: asDateKey(summary?.start) ?? asDateKey(meta?.coverageStart) ?? viewModel.coverage.start,
-      coverageEnd: asDateKey(summary?.end) ?? asDateKey(meta?.coverageEnd) ?? viewModel.coverage.end,
-      intervalsCount:
-        typeof summary?.intervalsCount === "number" && Number.isFinite(summary.intervalsCount)
-          ? (summary.intervalsCount as number)
-          : viewModel.coverage.intervalsCount,
+      coverageStart: viewModel.coverage.start,
+      coverageEnd: viewModel.coverage.end,
+      intervalsCount: viewModel.coverage.intervalsCount,
+      weatherBasisLabel: viewModel.coverage.weatherBasisLabel,
+      sourceOfDaySimulationCore: viewModel.coverage.sourceOfDaySimulationCore,
+      hasSimulatedFill: viewModel.coverage.hasSimulatedFill,
       totals: viewModel.derived.totals,
+      avgDailyKwh: viewModel.derived.avgDailyKwh,
       baseload: viewModel.derived.baseload,
+      baseloadDaily: viewModel.derived.baseloadDaily,
+      baseloadMonthly: viewModel.derived.baseloadMonthly,
       peakDay: viewModel.derived.peakDay,
       peakHour: viewModel.derived.peakHour,
       weekdayKwh: viewModel.derived.weekdayKwh,
       weekendKwh: viewModel.derived.weekendKwh,
       timeOfDayBuckets: viewModel.derived.timeOfDayBuckets,
     },
-    monthlyRows: buildDisplayedMonthlyRows(dataset),
+    monthlyRows: viewModel.derived.monthly,
     dailyRows,
-    fifteenMinuteAverages,
+    dailyWeather: (viewModel.derived.dailyWeather as OnePathRunReadOnlyView["dailyWeather"]) ?? null,
+    fifteenMinuteAverages: viewModel.derived.fifteenCurve,
+    stitchedMonth: viewModel.derived.stitchedMonth,
+    weatherScore,
+    pastVariables,
   };
 }

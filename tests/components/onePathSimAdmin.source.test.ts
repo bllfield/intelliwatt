@@ -184,8 +184,11 @@ describe("One Path Sim Admin harness wiring", () => {
     const runReadOnlyViewSource = readRepoFile("components/admin/OnePathRunReadOnlyView.tsx");
     expect(source).toContain("intervalPastReadinessTrace?.applicableToCurrentPreset !== false");
     expect(baselineReadOnlyViewSource).toContain("display-owner split");
-    expect(runReadOnlyViewSource).toContain("canonical simulated run result");
-    expect(runReadOnlyViewSource).toContain("baseline contract");
+    expect(runReadOnlyViewSource).toContain("UsageChartsPanel");
+    expect(runReadOnlyViewSource).toContain("WeatherSensitivityCard");
+    expect(runReadOnlyViewSource).toContain("Past simulated usage");
+    expect(runReadOnlyViewSource).toContain("Scenario variables");
+    expect(source).toContain("<OnePathRunReadOnlyView dataset={runReadOnlyDataset} engineInput={asRecord(runResult?.engineInput)} />");
     expect(presentationSource).toContain("knownScenario");
     expect(presentationSource).toContain("sandboxSummary");
     expect(presentationSource).toContain("tuningCycleSummary");
