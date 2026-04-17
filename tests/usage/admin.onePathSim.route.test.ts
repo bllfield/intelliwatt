@@ -131,6 +131,9 @@ describe("admin one path sim route", () => {
     adaptNewBuildRawInput.mockReset();
     runSharedSimulation.mockReset();
     buildSharedSimulationReadModel.mockReset();
+    vi.stubEnv("HOME_DETAILS_DATABASE_URL", "");
+    vi.stubEnv("APPLIANCES_DATABASE_URL", "");
+    vi.stubEnv("USAGE_DATABASE_URL", "");
 
     requireAdmin.mockReturnValue({ ok: false, status: 401, body: { error: "Unauthorized" } });
     lookupAdminHousesByEmail.mockResolvedValue({
@@ -212,6 +215,20 @@ describe("admin one path sim route", () => {
         sameBackingStoreAsUserSite: true,
       })
     );
+    expect(json.sourceContext.environmentVisibility).toEqual({
+      homeDetails: expect.objectContaining({
+        envVarName: "HOME_DETAILS_DATABASE_URL",
+        envVarPresent: false,
+      }),
+      appliances: expect.objectContaining({
+        envVarName: "APPLIANCES_DATABASE_URL",
+        envVarPresent: false,
+      }),
+      usage: expect.objectContaining({
+        envVarName: "USAGE_DATABASE_URL",
+        envVarPresent: false,
+      }),
+    });
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
     expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
     expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });

@@ -92,6 +92,17 @@ function pickFirstNonNull(...values: unknown[]): unknown {
   return null;
 }
 
+function extractIntervalBounds(value: unknown): { minTimestamp: string | null; maxTimestamp: string | null } {
+  const timestamps = asArray<Record<string, unknown>>(value)
+    .map((row) => String(row.timestamp ?? "").trim())
+    .filter((timestamp) => timestamp.length > 0)
+    .sort();
+  return {
+    minTimestamp: timestamps[0] ?? null,
+    maxTimestamp: timestamps[timestamps.length - 1] ?? null,
+  };
+}
+
 function pickFamilyResolvedValues(
   snapshot: Record<string, unknown>,
   familyKey: string
@@ -205,6 +216,7 @@ export function buildOnePathTruthSummary(args: {
   );
   const compareProjection = asRecord(args.readModel?.compareProjection);
   const sharedDiagnostics = asRecord(args.readModel?.sharedDiagnostics);
+  const intervalBounds = extractIntervalBounds(asRecord(dataset.series).intervals15);
   const identityContext = asRecord(sharedDiagnostics.identityContext);
   const sourceTruthContext = asRecord(sharedDiagnostics.sourceTruthContext);
   const lockboxExecutionSummary = asRecord(sharedDiagnostics.lockboxExecutionSummary);
@@ -644,6 +656,13 @@ export function buildOnePathTruthSummary(args: {
         datasetSummaryEnd: datasetSummary.end ?? null,
         datasetMetaCoverageStart: datasetMeta.coverageStart ?? null,
         datasetMetaCoverageEnd: datasetMeta.coverageEnd ?? null,
+        upstreamDatasetSummaryStart: datasetMeta.upstreamDatasetSummaryStart ?? null,
+        upstreamDatasetSummaryEnd: datasetMeta.upstreamDatasetSummaryEnd ?? null,
+        upstreamDatasetLatest: datasetMeta.upstreamDatasetLatest ?? null,
+        rawIntervalMinTimestamp: intervalBounds.minTimestamp,
+        rawIntervalMaxTimestamp: intervalBounds.maxTimestamp,
+        baselineCoverageDisplayOwner: datasetMeta.baselineCoverageDisplayOwner ?? null,
+        baselineCoverageRawOwner: datasetMeta.baselineCoverageRawOwner ?? null,
         reportedWindowStart: reportedWindow.startDate,
         reportedWindowEnd: reportedWindow.endDate,
         validationSelectionMode: args.engineInput.validationSelectionMode ?? null,

@@ -311,6 +311,7 @@ function buildIntervalBaselinePassthroughDataset(args: {
   const sourceDataset = args.upstreamUsageTruth.dataset ?? {};
   const summary = asRecord((sourceDataset as any).summary) ?? {};
   const meta = asRecord((sourceDataset as any).meta) ?? {};
+  const displayCoverageWindow = resolveOnePathCanonicalUsage365CoverageWindow();
   const monthlyRows = Array.isArray((sourceDataset as any).monthly) ? (sourceDataset as any).monthly : [];
   const totalKwh =
     typeof summary.totalKwh === "number"
@@ -323,9 +324,9 @@ function buildIntervalBaselinePassthroughDataset(args: {
       ...summary,
       source: summary.source ?? args.engineInput.actualSource ?? "ACTUAL",
       totalKwh,
-      start: summary.start ?? args.engineInput.coverageWindowStart ?? null,
-      end: summary.end ?? args.engineInput.coverageWindowEnd ?? null,
-      latest: summary.latest ?? summary.end ?? args.engineInput.coverageWindowEnd ?? null,
+      start: displayCoverageWindow.startDate,
+      end: displayCoverageWindow.endDate,
+      latest: summary.latest ?? displayCoverageWindow.endDate,
     },
     daily: Array.isArray((sourceDataset as any).daily) ? (sourceDataset as any).daily : [],
     monthly: monthlyRows,
@@ -350,8 +351,13 @@ function buildIntervalBaselinePassthroughDataset(args: {
       actualContextHouseId: args.engineInput.actualContextHouseId,
       usageTruthSource: args.upstreamUsageTruth.usageTruthSource,
       usageTruthSeedResult: args.upstreamUsageTruth.seedResult,
-      coverageStart: meta.coverageStart ?? args.engineInput.coverageWindowStart ?? summary.start ?? null,
-      coverageEnd: meta.coverageEnd ?? args.engineInput.coverageWindowEnd ?? summary.end ?? null,
+      coverageStart: displayCoverageWindow.startDate,
+      coverageEnd: displayCoverageWindow.endDate,
+      upstreamDatasetSummaryStart: summary.start ?? null,
+      upstreamDatasetSummaryEnd: summary.end ?? null,
+      upstreamDatasetLatest: summary.latest ?? null,
+      baselineCoverageDisplayOwner: "resolveCanonicalUsage365CoverageWindow",
+      baselineCoverageRawOwner: "resolveIntervalsLayer ACTUAL_USAGE_INTERVALS dataset.summary",
       canonicalMonths:
         Array.isArray(meta.canonicalMonths) && meta.canonicalMonths.length > 0
           ? meta.canonicalMonths

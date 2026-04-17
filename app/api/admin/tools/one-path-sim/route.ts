@@ -71,6 +71,26 @@ function normalizeMode(value: unknown): CanonicalSimulationInputType {
   }
 }
 
+function buildEnvironmentVisibility() {
+  return {
+    homeDetails: {
+      envVarName: "HOME_DETAILS_DATABASE_URL",
+      envVarPresent: Boolean(process.env.HOME_DETAILS_DATABASE_URL),
+      owner: "lib/db/homeDetailsClient.ts -> @prisma/home-details-client",
+    },
+    appliances: {
+      envVarName: "APPLIANCES_DATABASE_URL",
+      envVarPresent: Boolean(process.env.APPLIANCES_DATABASE_URL),
+      owner: "lib/db/appliancesClient.ts -> @prisma/appliances-client",
+    },
+    usage: {
+      envVarName: "USAGE_DATABASE_URL",
+      envVarPresent: Boolean(process.env.USAGE_DATABASE_URL),
+      owner: "lib/db/usageClient.ts -> .prisma/usage-client",
+    },
+  };
+}
+
 export async function POST(request: NextRequest) {
   const denied = gateOnePathSimAdmin(request);
   if (denied) return denied;
@@ -182,6 +202,7 @@ export async function POST(request: NextRequest) {
     },
     lookupSourceContext: previewLookupSourceContext,
   });
+  const environmentVisibility = buildEnvironmentVisibility();
 
   if (action === "lookup" || !action) {
     return NextResponse.json({
@@ -193,6 +214,7 @@ export async function POST(request: NextRequest) {
       scenarios: resolved.scenarios,
       sourceContext: {
         ...previewLookupSourceContext,
+        environmentVisibility,
         readOnlyAudit,
       },
     });

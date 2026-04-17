@@ -9,6 +9,7 @@ const buildOnePathDailyCurveComparePayload = vi.fn();
 const buildOnePathValidationCompareProjectionSidecar = vi.fn();
 const buildOnePathSharedPastSimDiagnostics = vi.fn();
 const buildOnePathManualArtifactDecorations = vi.fn();
+const resolveOnePathCanonicalUsage365CoverageWindow = vi.fn();
 const runOnePathSimulatorBuild = vi.fn();
 const readOnePathSimulatedUsageScenario = vi.fn();
 const logSimPipelineEvent = vi.fn();
@@ -43,10 +44,8 @@ vi.mock("@/modules/onePathSim/runtime", () => ({
     buildOnePathValidationCompareProjectionSidecar(...args),
   buildOnePathWeatherEfficiencyDerivedInput: vi.fn(() => null),
   getOnePathManualUsageInput: (...args: any[]) => getOnePathManualUsageInput(...args),
-  resolveOnePathCanonicalUsage365CoverageWindow: vi.fn(() => ({
-    startDate: "2025-05-01",
-    endDate: "2026-04-30",
-  })),
+  resolveOnePathCanonicalUsage365CoverageWindow: (...args: any[]) =>
+    resolveOnePathCanonicalUsage365CoverageWindow(...args),
   resolveOnePathManualStageOnePresentation: (...args: any[]) => resolveOnePathManualStageOnePresentation(...args),
   resolveOnePathUpstreamUsageTruthForSimulation: (...args: any[]) =>
     resolveOnePathUpstreamUsageTruthForSimulation(...args),
@@ -179,6 +178,7 @@ describe("one path baseline passthrough", () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockReset();
     getOnePathManualUsageInput.mockReset();
     resolveOnePathManualStageOnePresentation.mockReset();
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReset();
     buildOnePathDailyCurveComparePayload.mockReset();
     buildOnePathValidationCompareProjectionSidecar.mockReset();
     buildOnePathSharedPastSimDiagnostics.mockReset();
@@ -217,6 +217,10 @@ describe("one path baseline passthrough", () => {
       mode: "MONTHLY",
       surface: "admin_manual_monthly_stage_one",
       rows: [],
+    });
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
+      startDate: "2025-05-01",
+      endDate: "2026-04-30",
     });
     prismaUsageSimulatorBuildFindUnique.mockResolvedValue({
       id: "build-1",
@@ -277,6 +281,46 @@ describe("one path baseline passthrough", () => {
         inputType: "INTERVAL",
       })
     );
+  });
+
+  it("uses the same canonical coverage-label owner as the user dashboard while preserving upstream interval counts", async () => {
+    const upstreamDataset = {
+      summary: {
+        source: "SMT",
+        totalKwh: 13546.27,
+        start: "2025-04-14",
+        end: "2026-04-14",
+        latest: "2026-04-14T23:45:00.000Z",
+        intervalsCount: 34823,
+      },
+      daily: [{ date: "2026-04-14", kwh: 31.2 }],
+      monthly: [{ month: "2026-04", kwh: 1110 }],
+      series: {
+        intervals15: [{ timestamp: "2026-04-14T23:45:00.000Z", kwh: 0.3 }],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "SMT",
+      },
+    };
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
+      startDate: "2025-04-15",
+      endDate: "2026-04-14",
+    });
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(buildBaseEngineInput());
+
+    expect(artifact.dataset.summary.intervalsCount).toBe(34823);
+    expect(artifact.dataset.series.intervals15).toHaveLength(1);
+    expect(artifact.dataset.summary.start).toBe("2025-04-15");
+    expect(artifact.dataset.summary.end).toBe("2026-04-14");
+    expect(artifact.dataset.meta.coverageStart).toBe("2025-04-15");
+    expect(artifact.dataset.meta.coverageEnd).toBe("2026-04-14");
+    expect(artifact.dataset.meta.upstreamDatasetSummaryStart).toBe("2025-04-14");
+    expect(artifact.dataset.meta.upstreamDatasetSummaryEnd).toBe("2026-04-14");
+    expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
   });
 
   it("reuses saved manual monthly truth for baseline without drifting to normalized engine input values", async () => {
