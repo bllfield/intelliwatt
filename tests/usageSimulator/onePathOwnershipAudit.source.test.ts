@@ -42,6 +42,24 @@ describe("one path ownership audit source", () => {
     expect(copySource).toContain("buildOnePathOwnershipAudit");
     expect(copySource).toContain("truthConsole");
     expect(copySource).toContain("upstreamUsageTruth");
+    expect(copySource).toContain("loadedSourceContext");
+    expect(copySource).toContain("userUsageDashboardViewModel");
+    expect(copySource).toContain("baselineParityReport");
+    expect(copySource).toContain("baselineParityAudit");
+    expect(copySource).toContain("displayTotalsAudit");
+    expect(copySource).toContain("runtimeEnvParityTrace");
+    expect(copySource).toContain("intervalPastReadinessTrace");
+    expect(copySource).toContain("aiPayloadMeta");
+    expect(auditSource).toContain('section: "Loaded source context"');
+    expect(auditSource).toContain("copiedInAiPayload: true");
+    expect(auditSource).toContain('section: "loadedSourceContext"');
+    expect(auditSource).toContain('section: "userUsageDashboardViewModel"');
+    expect(auditSource).toContain('section: "baselineParityReport"');
+    expect(auditSource).toContain('section: "baselineParityAudit"');
+    expect(auditSource).toContain('section: "displayTotalsAudit"');
+    expect(auditSource).toContain('section: "runtimeEnvParityTrace"');
+    expect(auditSource).toContain('section: "intervalPastReadinessTrace"');
+    expect(auditSource).toContain('section: "aiPayloadMeta"');
   });
 
   it("reuses the shared travel-range helper in the gapfill source-home route", () => {

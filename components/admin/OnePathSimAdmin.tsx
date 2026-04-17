@@ -380,6 +380,11 @@ export function OnePathSimAdmin() {
       engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
       readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
       artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+      loadedSourceContext: asRecord(lookup?.sourceContext),
+      baselineParityReport: lookupBaselineParityReport,
+      baselineParityAudit: lookupBaselineParityAudit,
+      runtimeEnvParityTrace: runtimeEnvParityTrace,
+      intervalPastReadinessTrace: intervalPastReadinessTrace,
       currentControls: {
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
@@ -398,11 +403,15 @@ export function OnePathSimAdmin() {
   }, [
     effectiveActualContextHouseId,
     lastRunKnownScenario,
+    lookup?.sourceContext,
+    lookupBaselineParityAudit,
+    lookupBaselineParityReport,
     mode,
     persistRequested,
     runReason,
     runResult?.engineInput,
     runResult?.readModel?.effectiveSimulationVariablesUsed,
+    runtimeEnvParityTrace,
     sandboxHarnessSummary,
     selectedKnownScenario,
     validationDayCount,
@@ -410,6 +419,7 @@ export function OnePathSimAdmin() {
     validationSelectionMode,
     variablePolicy,
     weatherPreference,
+    intervalPastReadinessTrace,
   ]);
 
   const copyCurrentFamilyForAi = useCallback(async () => {
@@ -421,6 +431,11 @@ export function OnePathSimAdmin() {
       engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
       readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
       artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+      loadedSourceContext: asRecord(lookup?.sourceContext),
+      baselineParityReport: lookupBaselineParityReport,
+      baselineParityAudit: lookupBaselineParityAudit,
+      runtimeEnvParityTrace: runtimeEnvParityTrace,
+      intervalPastReadinessTrace: intervalPastReadinessTrace,
       currentControls: {
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
@@ -441,14 +456,19 @@ export function OnePathSimAdmin() {
   }, [
     effectiveActualContextHouseId,
     lastRunKnownScenario,
+    lookup?.sourceContext,
+    lookupBaselineParityAudit,
+    lookupBaselineParityReport,
     mode,
     runResult?.engineInput,
     runResult?.readModel?.effectiveSimulationVariablesUsed,
+    runtimeEnvParityTrace,
     sandboxHarnessSummary,
     selectedKnownScenario,
     validationOnlyDateKeysLocal,
     variableFamilyOpen,
     variablePolicy,
+    intervalPastReadinessTrace,
   ]);
 
   const saveVariableFamily = useCallback(async () => {
@@ -994,6 +1014,23 @@ export function OnePathSimAdmin() {
           {error ? <div className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
         </div>
 
+        {lookupUserUsageBaselineContract ? (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
+              <div className="text-sm font-semibold text-brand-navy">Household energy insights</div>
+              <p className="mt-2 text-sm text-slate-600">
+                Baseline parity audit, Monthly usage, Daily usage, and 15-minute load curve below render from the same
+                user usage baseline contract the selected house already uses.
+              </p>
+            </div>
+            <OnePathBaselineReadOnlyView
+              houseContract={lookupUserUsageBaselineContract as any}
+              parityAudit={lookupBaselineParityAudit as any}
+              parityReport={lookupBaselineParityReport as any}
+            />
+          </div>
+        ) : null}
+
         <div className="grid gap-4 lg:grid-cols-2">
           {!runResult && upstreamUsageTruth ? (
             <div className="lg:col-span-2">
@@ -1057,21 +1094,6 @@ export function OnePathSimAdmin() {
 
         {runResult ? (
           <div className="space-y-4">
-            {lookupUserUsageBaselineContract ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
-                <div className="text-sm font-semibold text-brand-navy">Household energy insights</div>
-                <p className="mt-2 text-sm text-slate-600">
-                  Baseline parity audit, Monthly usage, Daily usage, and 15-minute load curve below render from the same user usage baseline contract the selected house already uses.
-                </p>
-              </div>
-            ) : null}
-            {lookupUserUsageBaselineContract ? (
-              <OnePathBaselineReadOnlyView
-                houseContract={lookupUserUsageBaselineContract as any}
-                parityAudit={lookupBaselineParityAudit as any}
-                parityReport={lookupBaselineParityReport as any}
-              />
-            ) : null}
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-sm font-semibold text-brand-navy">Read-Only Shared Run Truth</div>
               <p className="mt-2 text-sm text-slate-600">

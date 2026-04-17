@@ -1,3 +1,5 @@
+import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
+import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import type {
   EffectiveSimulationVariablesUsed,
   SimulationVariableInputType,
@@ -6,6 +8,7 @@ import type {
 import type { OnePathKnownScenario } from "@/modules/onePathSim/knownHouseScenarios";
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
+import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
 
 export type SimulationVariablePolicyResponseShape = {
   familyMeta: Record<string, { title: string; description: string }>;
@@ -43,6 +46,14 @@ type CurveShapingSummaryItem = {
   valueSource: SimulationVariableValueSource;
   whyItMatters: string;
 };
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
 
 function humanizeKey(key: string): string {
   return key
@@ -247,10 +258,25 @@ export function buildSimulationVariableCopyPayload(args: {
   artifact?: Record<string, unknown> | null;
   knownScenario?: Partial<OnePathKnownScenario> | null;
   sandboxSummary?: Record<string, unknown> | null;
+  loadedSourceContext?: Record<string, unknown> | null;
+  baselineParityReport?: Record<string, unknown> | null;
+  baselineParityAudit?: Record<string, unknown> | null;
+  runtimeEnvParityTrace?: Record<string, unknown> | null;
+  intervalPastReadinessTrace?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const inputType = modeToInputType(args.mode);
+  const loadedSourceContext = asRecord(args.loadedSourceContext);
+  const readModel = asRecord(args.readModel);
+  const artifact = asRecord(args.artifact);
+  const sandboxRunStatus = asRecord(asRecord(args.sandboxSummary).runStatus);
+  const source =
+    args.runSnapshot?.inputType === inputType
+      ? "canonical_last_run_snapshot"
+      : Object.keys(loadedSourceContext).length
+        ? "lookup_source_context"
+        : "current_admin_mode_resolution";
   const familyKeys = Object.keys(args.response.familyMeta ?? {});
-  const compareProjection = (args.readModel?.compareProjection as Record<string, unknown> | undefined) ?? null;
+  const compareProjection = (readModel.compareProjection as Record<string, unknown> | undefined) ?? null;
   const rows = Array.isArray(compareProjection?.rows) ? compareProjection.rows : [];
   const variableFamilies = familyKeys
     .map((familyKey) =>
@@ -262,13 +288,119 @@ export function buildSimulationVariableCopyPayload(args: {
       })
     )
     .filter(Boolean) as SimulationVariableFamilyAdminView[];
+  const copiedLoadedSourceContext = Object.keys(loadedSourceContext).length
+    ? {
+        actualDatasetSummary: loadedSourceContext.actualDatasetSummary ?? null,
+        actualDatasetMeta: loadedSourceContext.actualDatasetMeta ?? null,
+        usageTruthSource: loadedSourceContext.usageTruthSource ?? null,
+        usageTruthSeedResult: loadedSourceContext.usageTruthSeedResult ?? null,
+        upstreamUsageTruth: loadedSourceContext.upstreamUsageTruth ?? null,
+        manualUsagePayload: loadedSourceContext.manualUsagePayload ?? null,
+        manualUsageUpdatedAt: loadedSourceContext.manualUsageUpdatedAt ?? null,
+        travelRangesFromDb: loadedSourceContext.travelRangesFromDb ?? [],
+        homeProfile: loadedSourceContext.homeProfile ?? null,
+        applianceProfile: loadedSourceContext.applianceProfile ?? null,
+        weatherScore: loadedSourceContext.weatherScore ?? null,
+        weatherDerivedInput: loadedSourceContext.weatherDerivedInput ?? null,
+        userUsagePageBaselineContract: loadedSourceContext.userUsagePageBaselineContract ?? null,
+      }
+    : null;
+  const dashboardContract =
+    loadedSourceContext.userUsagePageBaselineContract ?? loadedSourceContext.userUsageBaselineContract ?? null;
+  const dashboardViewModel = buildUserUsageDashboardViewModel((dashboardContract as any) ?? null);
+  const weatherScore = asRecord(asRecord(dashboardContract).weatherSensitivityScore);
+  const copiedDashboardViewModel = dashboardViewModel
+    ? {
+        coverage: dashboardViewModel.coverage,
+        headlineTotals: {
+          totalKwh: dashboardViewModel.derived.totalKwh,
+          totals: dashboardViewModel.derived.totals,
+          avgDailyKwh: dashboardViewModel.derived.avgDailyKwh,
+          baseload: dashboardViewModel.derived.baseload,
+          baseloadDaily: dashboardViewModel.derived.baseloadDaily,
+          baseloadMonthly: dashboardViewModel.derived.baseloadMonthly,
+          peakDay: dashboardViewModel.derived.peakDay,
+          peakHour: dashboardViewModel.derived.peakHour,
+          weekdayKwh: dashboardViewModel.derived.weekdayKwh,
+          weekendKwh: dashboardViewModel.derived.weekendKwh,
+          timeOfDayBuckets: dashboardViewModel.derived.timeOfDayBuckets,
+        },
+        breakdownNote: buildWeekdayWeekendBreakdownNote({
+          weekdayKwh: dashboardViewModel.derived.weekdayKwh,
+          weekendKwh: dashboardViewModel.derived.weekendKwh,
+          summaryTotalKwh: dashboardViewModel.derived.totalKwh,
+        }),
+        monthlyRows: dashboardViewModel.derived.monthly,
+        dailyRows: dashboardViewModel.derived.daily,
+        dailyRowsCount: dashboardViewModel.derived.daily.length,
+        fifteenMinuteCurve: {
+          rowsCount: dashboardViewModel.derived.fifteenCurve.length,
+          preview: dashboardViewModel.derived.fifteenCurve.slice(0, 12),
+          sourceOfDaySimulationCore: dashboardViewModel.coverage?.sourceOfDaySimulationCore ?? null,
+          weatherBasisLabel: dashboardViewModel.coverage?.weatherBasisLabel ?? null,
+          sourceOwner: "buildUserUsageDashboardViewModel(...).derived.fifteenCurve",
+        },
+        weatherScoreDisplay: Object.keys(weatherScore).length
+          ? {
+              scoringMode: weatherScore.scoringMode ?? null,
+              scoringModeLabel:
+                weatherScore.scoringMode === "BILLING_PERIOD_BASED" ? "Billing-period based" : "Interval based",
+              weatherEfficiencyScore0to100: weatherScore.weatherEfficiencyScore0to100 ?? null,
+              explanationSummary: weatherScore.explanationSummary ?? null,
+              estimatedWeatherDrivenLoadShare: weatherScore.estimatedWeatherDrivenLoadShare ?? null,
+              estimatedBaseloadShare: weatherScore.estimatedBaseloadShare ?? null,
+            }
+          : null,
+      }
+    : null;
+  const displayTotalsDataset =
+    asRecord(asRecord(dashboardContract).dataset).summary != null
+      ? asRecord(dashboardContract).dataset
+      : readModel.dataset ?? null;
+  const displayTotalsAudit =
+    displayTotalsDataset && Object.keys(asRecord(displayTotalsDataset)).length
+      ? buildUsageDisplayTotalsAudit({ dataset: displayTotalsDataset })
+      : null;
+  const baselineParityReport = args.baselineParityReport ?? loadedSourceContext.baselineParityReport ?? null;
+  const baselineParityAudit = args.baselineParityAudit ?? loadedSourceContext.baselineParityAudit ?? null;
+  const runtimeEnvParityTrace = args.runtimeEnvParityTrace ?? loadedSourceContext.runtimeEnvParityTrace ?? null;
+  const intervalPastReadinessTrace = args.intervalPastReadinessTrace ?? null;
+  const lookupOnly = !Object.keys(readModel).length && !Object.keys(artifact).length && !args.runSnapshot;
+  const baselinePassthrough =
+    !lookupOnly &&
+    (sandboxRunStatus.runType === "BASELINE_PASSTHROUGH" ||
+      asRecord(readModel.dataset).meta != null &&
+        Boolean(asRecord(asRecord(readModel.dataset).meta).baselinePassthrough) ||
+      Boolean(asRecord(asRecord(artifact.dataset).meta).baselinePassthrough) ||
+      artifact.engineVersion === "baseline_passthrough_v1");
+  const pastSim = !lookupOnly && !baselinePassthrough;
+  const runType = lookupOnly ? "LOOKUP_ONLY" : baselinePassthrough ? "BASELINE_PASSTHROUGH" : "PAST_SIM";
   return {
     purpose: "Copyable shared simulation variable payload for AI-assisted tuning and curve-shaping review.",
     selectedMode: inputType,
-    source: args.runSnapshot?.inputType === inputType ? "canonical_last_run_snapshot" : "current_admin_mode_resolution",
+    source,
+    aiPayloadMeta: {
+      payloadVersion: "one-path-ai-copy-v2",
+      selectedMode: inputType,
+      runType,
+      sourceKind: copiedLoadedSourceContext?.usageTruthSource ?? source,
+      lookupOnly,
+      baselinePassthrough,
+      pastSim,
+      includesDashboardViewModel: Boolean(copiedDashboardViewModel),
+      includesParitySections: Boolean(baselineParityReport || baselineParityAudit),
+      includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
+    },
     currentControls: args.currentControls ?? {},
     knownScenario: args.knownScenario ?? null,
     sandboxSummary: args.sandboxSummary ?? null,
+    loadedSourceContext: copiedLoadedSourceContext,
+    userUsageDashboardViewModel: copiedDashboardViewModel,
+    baselineParityReport,
+    baselineParityAudit,
+    displayTotalsAudit,
+    runtimeEnvParityTrace,
+    intervalPastReadinessTrace,
     tuningCycleSummary: buildOnePathTuningCycleSummary({
       knownScenario: args.knownScenario,
       sandboxSummary: args.sandboxSummary,
@@ -278,72 +410,72 @@ export function buildSimulationVariableCopyPayload(args: {
     engineInput: args.engineInput ?? null,
     truthConsole: args.readModel
       ? {
-          preCutoverHarness: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).preCutoverHarness ?? null
+          preCutoverHarness: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).preCutoverHarness ?? null
             : null,
-          stageBoundaryMap: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).stageBoundaryMap ?? null
+          stageBoundaryMap: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).stageBoundaryMap ?? null
             : null,
-          upstreamUsageTruth: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).upstreamUsageTruth ?? null
+          upstreamUsageTruth: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).upstreamUsageTruth ?? null
             : null,
-          sharedDerivedInputs: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).sharedDerivedInputs ?? null
+          sharedDerivedInputs: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).sharedDerivedInputs ?? null
             : null,
-          sourceTruthIdentity: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).sourceTruthIdentity ?? null
+          sourceTruthIdentity: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).sourceTruthIdentity ?? null
             : null,
-          constraintRebalance: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).constraintRebalance ?? null
+          constraintRebalance: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).constraintRebalance ?? null
             : null,
-          donorFallbackExclusions: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).donorFallbackExclusions ?? null
+          donorFallbackExclusions: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).donorFallbackExclusions ?? null
             : null,
-          intradayReconstruction: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).intradayReconstruction ?? null
+          intradayReconstruction: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).intradayReconstruction ?? null
             : null,
-          finalSharedOutputContract: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).finalSharedOutputContract ?? null
+          finalSharedOutputContract: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).finalSharedOutputContract ?? null
             : null,
-          chartWindowDisplay: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).chartWindowDisplay ?? null
+          chartWindowDisplay: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).chartWindowDisplay ?? null
             : null,
-          manualStatementAnnual: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).manualStatementAnnual ?? null
+          manualStatementAnnual: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).manualStatementAnnual ?? null
             : null,
-          annualModeTruth: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).annualModeTruth ?? null
+          annualModeTruth: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).annualModeTruth ?? null
             : null,
-          newBuildModeTruth: args.readModel.sourceOfTruthSummary
-            ? (args.readModel.sourceOfTruthSummary as Record<string, unknown>).newBuildModeTruth ?? null
+          newBuildModeTruth: readModel.sourceOfTruthSummary
+            ? (readModel.sourceOfTruthSummary as Record<string, unknown>).newBuildModeTruth ?? null
             : null,
         }
       : null,
-    upstreamUsageTruth: args.readModel?.sourceOfTruthSummary
-      ? ((args.readModel.sourceOfTruthSummary as Record<string, unknown>).upstreamUsageTruth ?? null)
+    upstreamUsageTruth: readModel.sourceOfTruthSummary
+      ? ((readModel.sourceOfTruthSummary as Record<string, unknown>).upstreamUsageTruth ?? null)
       : null,
     runResults: args.readModel
       ? {
-          datasetSummary: args.readModel.dataset && typeof args.readModel.dataset === "object"
-            ? ((args.readModel.dataset as Record<string, unknown>).summary ?? null)
+          datasetSummary: readModel.dataset && typeof readModel.dataset === "object"
+            ? ((readModel.dataset as Record<string, unknown>).summary ?? null)
             : null,
           compareProjectionMetrics: compareProjection?.metrics ?? null,
           compareProjectionRowsCount: rows.length,
-          tuningSummary: args.readModel.tuningSummary ?? null,
-          dailyShapeTuning: args.readModel.dailyShapeTuning ?? null,
-          manualParitySummary: args.readModel.manualParitySummary ?? null,
-          manualMonthlyReconciliation: args.readModel.manualMonthlyReconciliation ?? null,
-          sharedDiagnostics: args.readModel.sharedDiagnostics ?? null,
-          sourceOfTruthSummary: args.readModel.sourceOfTruthSummary ?? null,
-          readModelRunIdentity: args.readModel.runIdentity ?? null,
+          tuningSummary: readModel.tuningSummary ?? null,
+          dailyShapeTuning: readModel.dailyShapeTuning ?? null,
+          manualParitySummary: readModel.manualParitySummary ?? null,
+          manualMonthlyReconciliation: readModel.manualMonthlyReconciliation ?? null,
+          sharedDiagnostics: readModel.sharedDiagnostics ?? null,
+          sourceOfTruthSummary: readModel.sourceOfTruthSummary ?? null,
+          readModelRunIdentity: readModel.runIdentity ?? null,
           artifactSummary: args.artifact
             ? {
-                artifactId: args.artifact.artifactId ?? null,
-                artifactInputHash: args.artifact.artifactInputHash ?? null,
-                buildInputsHash: args.artifact.buildInputsHash ?? null,
-                engineVersion: args.artifact.engineVersion ?? null,
-                inputType: args.artifact.inputType ?? null,
-                simulatorMode: args.artifact.simulatorMode ?? null,
+                artifactId: artifact.artifactId ?? null,
+                artifactInputHash: artifact.artifactInputHash ?? null,
+                buildInputsHash: artifact.buildInputsHash ?? null,
+                engineVersion: artifact.engineVersion ?? null,
+                inputType: artifact.inputType ?? null,
+                simulatorMode: artifact.simulatorMode ?? null,
               }
             : null,
         }
