@@ -655,6 +655,114 @@ describe("admin one path sim route", () => {
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
   });
 
+  it("returns a lean manual Stage 1 preview on manual lookup without falling back to the user manual page path", async () => {
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-03-31",
+        dateSourceMode: "AUTO_DATES",
+        monthlyKwh: [
+          { month: "2026-02", kwh: 420 },
+          { month: "2026-03", kwh: 510 },
+        ],
+        statementRanges: [
+          { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+          { month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" },
+        ],
+        travelRanges: [{ startDate: "2026-03-10", endDate: "2026-03-12" }],
+      },
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.sourceContext.debugDiagnosticsIncluded).toBe(false);
+    expect(json.sourceContext.manualStageOneView).toMatchObject({
+      mode: "MONTHLY",
+      source: "saved_payload_preview",
+    });
+    expect(json.sourceContext.manualStageOneView?.stageOnePresentation).toMatchObject({
+      mode: "MONTHLY",
+    });
+    expect(json.sourceContext.manualStageOneView?.billPeriodCompare ?? null).toBeNull();
+    expect(json.sourceContext.manualUsageUpdatedAt).toBe("2026-04-09T00:00:00.000Z");
+    expect(resolveUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();
+    expect(runSharedSimulation).not.toHaveBeenCalled();
+  });
+
+  it("keeps manual debug-off runs on the same lean readback path and returns Stage 1 plus Stage 2 display data", async () => {
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-03-31",
+        dateSourceMode: "AUTO_DATES",
+        monthlyKwh: [
+          { month: "2026-02", kwh: 420 },
+          { month: "2026-03", kwh: 510 },
+        ],
+        statementRanges: [
+          { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+          { month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" },
+        ],
+        travelRanges: [{ startDate: "2026-03-10", endDate: "2026-03-12" }],
+      },
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+        scenarioId: "scenario-1",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.debugDiagnosticsIncluded).toBe(false);
+    expect(json.runType).toBe("PAST_SIM");
+    expect(json.manualStageOneView).toMatchObject({
+      mode: "MONTHLY",
+      source: "artifact_backed_read_model",
+    });
+    expect(json.manualStageOneView?.stageOnePresentation).toMatchObject({
+      mode: "MONTHLY",
+    });
+    expect(json.manualStageOneView?.billPeriodCompare).toBeTruthy();
+    expect(json.runDisplayView).toBeTruthy();
+    expect(json.artifact ?? null).toBeNull();
+    expect(json.readModel ?? null).toBeNull();
+    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      scenarioId: "scenario-1",
+      readMode: "allow_rebuild",
+      projectionMode: "baseline",
+      readContext: {
+        artifactReadMode: "allow_rebuild",
+        projectionMode: "baseline",
+        compareSidecarRequest: true,
+      },
+    });
+    expect(runSharedSimulation).not.toHaveBeenCalled();
+    expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
+  });
+
   it("passes actual context house and manual validation date keys through the shared adapter", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     await POST(

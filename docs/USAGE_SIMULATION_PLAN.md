@@ -94,6 +94,8 @@ This section is authoritative for future manual-usage implementation and handoff
 - Statement/bill ranges remain Stage 1 bill-period constraint inputs plus reconciliation metadata. They may shape Stage 2 constraints, but they are not travel ranges, not travel-vacant ownership, and not incomplete-meter ownership.
 - The normalized run then enters the same shared weather path, lockbox path, persistence path, and artifact read path used by other Past Sim flows.
 - Manual monthly and manual annual baseline may reuse saved manual Stage 1/read-model truth for display, but they must not privately simulate or become the first final-chart structuring stage.
+- One Path manual admin/read surfaces must publish Stage 1 from One Path-owned manual read wrappers, not from the current user manual page.
+- One Path manual lean reads should return the same manual Stage 1 contract plus the same Stage 2 display-ready Past readback the future lightweight user-style manual path will use. Debug-only payloads are additive only.
 - Manual monthly / annual admin recalc now returns once the canonical artifact is ready. Rich compare/reconciliation stays on persisted readback:
   - recalc may return `readbackPending: true`
   - `canonicalArtifactInputHash` identifies the exact artifact the client must read back

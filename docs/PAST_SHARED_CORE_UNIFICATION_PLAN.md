@@ -48,6 +48,7 @@ Required same-pass workflow:
 - Statement/bill ranges remain Stage 1 bill-period constraint inputs plus reconciliation metadata. They may shape Stage 2 constraints, but they are not promoted into travel-vacant ownership, incomplete-meter ownership, or silent exclusions.
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
 - Manual monthly user Past and admin manual-monthly lab are required to stay identical from normalized input submission through chart rendering.
+- One Path manual admin/read surfaces should now mirror that split with a dedicated Stage 1 contract view plus the same Stage 2 display-ready readback contract, while still keeping One Path-owned display wrappers separate from the current user manual page.
 - Allowed admin-only divergence begins only after the shared Past result is accepted for display:
   - bill-period parity compare
   - extra diagnostics

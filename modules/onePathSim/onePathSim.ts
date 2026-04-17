@@ -22,6 +22,7 @@ import { buildOnePathBaselineParityAudit, type OnePathBaselineParityAudit } from
 import {
   type EffectiveSimulationVariablesUsed,
 } from "@/modules/onePathSim/simulationVariablePolicy";
+import { type OnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import {
   type RecalcSimulatorBuildArgs,
   type SharedDiagnosticsCallerType,
@@ -145,6 +146,7 @@ export type CanonicalSimulationArtifact = {
   compareProjection: ValidationCompareProjectionSidecar | null;
   manualMonthlyReconciliation: unknown;
   manualParitySummary: unknown;
+  manualStageOneView: OnePathManualStageOneView | null;
   sharedDiagnostics: Record<string, unknown> | null;
   effectiveSimulationVariablesUsed: EffectiveSimulationVariablesUsed | null;
 };
@@ -155,6 +157,7 @@ export type CanonicalSimulationReadModel = {
   compareProjection: ValidationCompareProjectionSidecar | null;
   manualMonthlyReconciliation: unknown;
   manualParitySummary: unknown;
+  manualStageOneView: OnePathManualStageOneView | null;
   sharedDiagnostics: Record<string, unknown> | null;
   curveCompareActualIntervals15: any[];
   curveCompareSimulatedIntervals15: any[];
@@ -672,6 +675,7 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
     compareProjection,
     manualMonthlyReconciliation: manualReadResult?.manualMonthlyReconciliation ?? null,
     manualParitySummary: manualReadResult?.manualParitySummary ?? null,
+    manualStageOneView: manualReadResult?.manualStageOneView ?? null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
     effectiveSimulationVariablesUsed: null,
   };
@@ -1211,6 +1215,7 @@ async function buildArtifactFromEngineInput(args: {
     compareProjection,
     manualMonthlyReconciliation: manualReadResult ? manualReadResult.manualMonthlyReconciliation : null,
     manualParitySummary: manualReadResult ? manualReadResult.manualParitySummary : null,
+    manualStageOneView: manualReadResult ? manualReadResult.manualStageOneView : null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
     effectiveSimulationVariablesUsed,
   };
@@ -1326,6 +1331,7 @@ export function buildSharedSimulationReadModel(
       compareProjection: artifact.compareProjection,
       manualMonthlyReconciliation: artifact.manualMonthlyReconciliation,
       manualParitySummary: artifact.manualParitySummary,
+      manualStageOneView: artifact.manualStageOneView,
       sharedDiagnostics: artifact.sharedDiagnostics,
       dailyShapeTuning: {
         simulatedDayResultsCount: artifact.simulatedDayResults.length,
@@ -1357,6 +1363,7 @@ export function buildSharedSimulationReadModel(
     compareProjection: artifact.compareProjection,
     manualMonthlyReconciliation: artifact.manualMonthlyReconciliation,
     manualParitySummary: artifact.manualParitySummary,
+    manualStageOneView: artifact.manualStageOneView,
     sharedDiagnostics: artifact.sharedDiagnostics,
     curveCompareActualIntervals15: curvePayload?.actualIntervals15 ?? [],
     curveCompareSimulatedIntervals15: curvePayload?.simulatedIntervals15 ?? [],

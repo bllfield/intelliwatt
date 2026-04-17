@@ -3,6 +3,7 @@ import {
   buildManualUsageReadModel,
   type ManualUsageReadModel,
 } from "@/modules/onePathSim/manualReadModel";
+import { buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import {
   buildValidationCompareProjectionFromDatasets,
@@ -198,6 +199,11 @@ export async function buildOnePathManualArtifactDecorations(args: {
     dataset: args.dataset,
     actualDataset: args.actualDataset,
   });
+  const manualStageOneView = buildOnePathManualStageOneView({
+    payload: manualUsageRecord.payload,
+    dataset: args.dataset,
+    actualDataset: args.actualDataset,
+  });
   const usageInputMode =
     args.usageInputMode ??
     (manualUsageRecord.payload?.mode === "ANNUAL"
@@ -233,6 +239,7 @@ export async function buildOnePathManualArtifactDecorations(args: {
   return {
     compareProjection,
     manualReadModel,
+    manualStageOneView,
     manualMonthlyReconciliation,
     sharedDiagnostics,
     manualUsagePayload: manualUsageRecord.payload,

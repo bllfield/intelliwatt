@@ -22,6 +22,7 @@ describe("One Path Sim Admin harness wiring", () => {
 
   it("keeps the harness thin and reuses shared editors", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const manualStageViewSource = readRepoFile("components/admin/OnePathManualStageView.tsx");
     const policySource = readRepoFile("modules/usageSimulator/simulationVariablePolicy.ts");
 
     expect(source).toContain("Home Details popup/editor");
@@ -127,6 +128,11 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("15-minute load curve");
     expect(source).toContain("OnePathBaselineReadOnlyView");
     expect(source).toContain("OnePathRunReadOnlyView");
+    expect(source).toContain("OnePathManualStageView");
+    expect(source).toContain("Manual Stage 2 simulated result");
+    expect(source).toContain("manualStageOneView");
+    expect(source).not.toContain("/api/user/manual-usage");
+    expect(source).not.toContain("user_usage_manual_monthly_stage_one");
     expect(source).toContain("userUsageBaselineContract");
     expect(source).toContain("baselineParityAudit");
     expect(source).toContain("baselineParityReport");
@@ -196,6 +202,14 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(runReadOnlyViewSource).toContain("Past simulated usage");
     expect(runReadOnlyViewSource).toContain("Scenario variables");
     expect(runReadOnlyViewSource).toContain("Validation / Test Day Compare");
+    expect(manualStageViewSource).toContain("Manual Stage 1 contract");
+    expect(manualStageViewSource).toContain("Manual monthly parity / reconciliation");
+    expect(manualStageViewSource).toContain("UsageChartsPanel");
+    expect(manualStageViewSource).toContain("ManualMonthlyReconciliationPanel");
+    expect(manualStageViewSource).toContain("bill-period / statement-total semantics");
+    expect(manualStageViewSource).toContain("annual-total semantics");
+    expect(manualStageViewSource).not.toContain("/api/user/manual-usage");
+    expect(manualStageViewSource).not.toContain("user_usage_manual_monthly_stage_one");
     expect(source).toContain("readModel={runDisplayView ? null : asRecord(runResult?.readModel)}");
     expect(presentationSource).toContain("knownScenario");
     expect(presentationSource).toContain("sandboxSummary");

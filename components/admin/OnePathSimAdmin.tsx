@@ -5,6 +5,7 @@ import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { OnePathBaselineReadOnlyView } from "@/components/admin/OnePathBaselineReadOnlyView";
+import { OnePathManualStageView } from "@/components/admin/OnePathManualStageView";
 import { OnePathRunReadOnlyView } from "@/components/admin/OnePathRunReadOnlyView";
 import {
   buildSimulationVariableCopyPayload,
@@ -362,6 +363,18 @@ export function OnePathSimAdmin() {
   const runDisplayView = useMemo(() => asRecord(runResult?.runDisplayView), [runResult?.runDisplayView]);
   const isPastSimRun =
     sandboxHarnessSummary.runStatus.runType === "PAST_SIM" || runResult?.runType === "PAST_SIM" || runDisplayView != null;
+  const manualStageOneView = useMemo(
+    () =>
+      (runResult?.manualStageOneView ??
+        runResult?.readModel?.manualStageOneView ??
+        lookup?.sourceContext?.manualStageOneView ??
+        null) as any,
+    [lookup?.sourceContext?.manualStageOneView, runResult?.manualStageOneView, runResult?.readModel?.manualStageOneView]
+  );
+  const shouldShowManualStageOneView = useMemo(() => {
+    const activeInputType = String(runResult?.engineInput?.inputType ?? mode);
+    return (activeInputType === "MANUAL_MONTHLY" || activeInputType === "MANUAL_ANNUAL") && manualStageOneView;
+  }, [manualStageOneView, mode, runResult?.engineInput?.inputType]);
   const runReadOnlyDataset = useMemo(
     () => asRecord(runResult?.readModel?.dataset),
     [runResult?.readModel?.dataset]
@@ -1061,13 +1074,26 @@ export function OnePathSimAdmin() {
           {error ? <div className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
         </div>
 
+        {shouldShowManualStageOneView ? <OnePathManualStageView view={shouldShowManualStageOneView} /> : null}
+
         {isPastSimRun && (runDisplayView || runReadOnlyDataset) ? (
-          <OnePathRunReadOnlyView
-            view={(runDisplayView as any) ?? null}
-            dataset={runDisplayView ? null : runReadOnlyDataset}
-            engineInput={asRecord(runResult?.engineInput)}
-            readModel={runDisplayView ? null : asRecord(runResult?.readModel)}
-          />
+          <div className="space-y-4">
+            {shouldShowManualStageOneView ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-sm font-semibold text-brand-navy">Manual Stage 2 simulated result</div>
+                <p className="mt-2 text-sm text-slate-600">
+                  One Path-owned Past Sim output rendered through the same lean display-ready contract and read-only view used
+                  by the interval harness where it remains truthful to manual mode.
+                </p>
+              </div>
+            ) : null}
+            <OnePathRunReadOnlyView
+              view={(runDisplayView as any) ?? null}
+              dataset={runDisplayView ? null : runReadOnlyDataset}
+              engineInput={asRecord(runResult?.engineInput)}
+              readModel={runDisplayView ? null : asRecord(runResult?.readModel)}
+            />
+          </div>
         ) : lookupUserUsageBaselineContract ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">

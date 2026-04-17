@@ -109,6 +109,8 @@ Rules:
 - Bill totals / parity remain authoritative.
 - Differences in Stage 1 entry/editor workflow do not justify differences in Stage 2 shared simulation logic.
 - Manual monthly and manual annual baseline are still passthrough-only stages. They may reuse saved manual truth/read-model wrappers, but they must not simulate or become the first place final chart structuring happens.
+- One Path manual Stage 1 display must be published from One Path-owned wrappers/read models under `modules/onePathSim/**`; it must not reuse the current user manual page as a behavior/display source of truth.
+- For manual modes, the lean read path should return the same manual Stage 1 contract plus the same Stage 2 display-ready readback the future lightweight user-style manual path will use; debug-only surfaces may add diagnostics, but not a second core operation.
 
 ## GapFill source-home rule
 
@@ -151,6 +153,8 @@ One Path Sim Admin exists to expose shared simulation truth before cutover. It s
 - constraint / rebalance logic
 - artifact / read-model truth
 - compare / parity / tuning truth
+- manual Stage 1 contract truth for `MANUAL_MONTHLY` and `MANUAL_ANNUAL`
+- manual Stage 2 Past display truth through the same display-ready contract used by the lean path when supported
 
 It is a proving harness and truth console. It is not yet proof that all other readers have been cut over.
 

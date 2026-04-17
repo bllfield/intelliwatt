@@ -29,6 +29,7 @@ import {
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
+import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
@@ -249,6 +250,22 @@ export async function POST(request: NextRequest) {
           houseId: resolved.selectedHouse.id,
           scenarioId: rawInputBase.scenarioId,
         }).catch(() => ({ ok: false as const, events: [] as unknown[] }));
+        const manualStageOneView =
+          mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+            ? buildOnePathManualStageOneView({
+                payload: manualUsage.payload ?? null,
+                dataset: readback.dataset,
+                actualDataset:
+                  (
+                    await resolveOnePathUpstreamUsageTruthForSimulation({
+                      userId: resolved.userId,
+                      houseId: resolved.selectedHouse.id,
+                      actualContextHouseId: rawInputBase.actualContextHouseId,
+                      seedIfMissing: false,
+                    }).catch(() => null)
+                  )?.dataset ?? null,
+              })
+            : null;
         const runDisplayViewBase =
           buildOnePathRunReadOnlyView({
             dataset: asRecord(readback.dataset),
@@ -264,6 +281,7 @@ export async function POST(request: NextRequest) {
           ok: true,
           debugDiagnosticsIncluded: false,
           runType: "PAST_SIM",
+          manualStageOneView,
           runDisplayView:
             runDisplayViewBase != null
               ? {
@@ -297,6 +315,7 @@ export async function POST(request: NextRequest) {
           debugDiagnosticsIncluded: false,
           runType: rawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
           engineInput,
+          manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView:
             buildOnePathRunReadOnlyView({
               dataset: asRecord(readModel.dataset),
@@ -313,6 +332,7 @@ export async function POST(request: NextRequest) {
         engineInput,
         artifact,
         readModel,
+        manualStageOneView: readModel.manualStageOneView ?? null,
       });
     } catch (error) {
       if (isUpstreamUsageTruthMissingFailure(error)) {
@@ -356,8 +376,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const previewMode = normalizeMode(body?.mode);
+
   if ((action === "lookup" || !action) && !includeDebugDiagnostics) {
     const travelRangesFromDb = await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []);
+    const manualUsage =
+      previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
+        ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
+            payload: null,
+            updatedAt: null,
+          }))
+        : { payload: null, updatedAt: null };
     return NextResponse.json({
       ok: true,
       email: resolved.email,
@@ -368,11 +397,16 @@ export async function POST(request: NextRequest) {
       sourceContext: {
         debugDiagnosticsIncluded: false,
         travelRangesFromDb,
+        ...(manualUsage.payload
+          ? {
+              manualStageOneView: buildOnePathManualStageOnePreview(manualUsage.payload),
+              manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
+            }
+          : {}),
       },
     });
   }
 
-  const previewMode = normalizeMode(body?.mode);
   const previewActualContextHouse =
     resolved.houses.find(
       (house) =>
@@ -426,6 +460,7 @@ export async function POST(request: NextRequest) {
     upstreamUsageTruth: usageTruth?.summary ?? null,
     manualUsagePayload: manualUsage.payload ?? null,
     manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
+    manualStageOneView: buildOnePathManualStageOnePreview(manualUsage.payload ?? null),
     travelRangesFromDb,
     homeProfile: homeProfile ?? null,
     applianceProfile: applianceProfile ?? null,
