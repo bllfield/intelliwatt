@@ -47,6 +47,42 @@ function buildContract() {
 }
 
 describe("buildIntervalPastReadinessTrace", () => {
+  it("marks baseline presets as not applicable instead of showing an active blocker", () => {
+    const trace = buildIntervalPastReadinessTrace({
+      scenario: {
+        scenarioKey: "baseline-brian-primary",
+        mode: "INTERVAL",
+        scenarioSelectionStrategy: "baseline",
+      },
+      lookupSourceContext: {
+        usageTruthSource: "persisted_usage_output",
+        upstreamUsageTruth: {
+          currentRun: {
+            statusSummary: {
+              downstreamSimulationAllowed: true,
+            },
+          },
+        },
+        homeProfile: null,
+        applianceProfile: null,
+      },
+      baselineParityReport: {
+        overallMatch: true,
+        firstDivergenceField: null,
+      },
+      environmentVisibility: {
+        homeDetails: { envVarPresent: false },
+        appliances: { envVarPresent: false },
+      },
+    });
+
+    expect(trace.applicableToCurrentPreset).toBe(false);
+    expect(trace.status).toBe("not_applicable_for_baseline");
+    expect(trace.compareCapableNow).toBeNull();
+    expect(trace.exactBlocker).toBeNull();
+    expect(trace.classification).toBeNull();
+  });
+
   it("shows baseline parity can pass while interval Past compare is still blocked", () => {
     const parityReport = buildBaselineParityReport({
       userUsagePageContract: buildContract(),
@@ -79,6 +115,8 @@ describe("buildIntervalPastReadinessTrace", () => {
     });
 
     expect(trace.baselineParity.overallMatch).toBe(true);
+    expect(trace.applicableToCurrentPreset).toBe(true);
+    expect(trace.status).toBe("blocked_for_interval_past");
     expect(trace.compareCapableNow).toBe(false);
     expect(trace.exactBlocker).toMatchObject({
       category: "homeDetails",

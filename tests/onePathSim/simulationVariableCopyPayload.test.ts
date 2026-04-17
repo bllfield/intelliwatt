@@ -295,4 +295,48 @@ describe("one path simulation variable copy payload", () => {
       },
     });
   });
+
+  it("keeps baseline closeout audits informational in the AI copy payload", () => {
+    const payload = buildSimulationVariableCopyPayload({
+      mode: "INTERVAL",
+      response: {
+        familyMeta: {},
+        defaults: {},
+        effectiveByMode: { INTERVAL: {} },
+        overrides: {},
+      },
+      baselineParityReport: {
+        overallMatch: true,
+        firstDivergenceField: null,
+        matchedKeys: ["source", "coverageStart"],
+        mismatchedKeys: [],
+      } as any,
+      baselineParityAudit: {
+        parityStatus: "baseline_truth_match_with_display_owner_split",
+        dailyParity: false,
+        displayOwnerSplitInformational: true,
+        displayOwnerSplitNote: "Informational display-owner split only.",
+      } as any,
+      intervalPastReadinessTrace: {
+        applicableToCurrentPreset: false,
+        status: "not_applicable_for_baseline",
+        compareCapableNow: null,
+        classification: null,
+      } as any,
+    } as any);
+
+    expect((payload.baselineParityAudit as any)).toEqual(
+      expect.objectContaining({
+        parityStatus: "baseline_truth_match_with_display_owner_split",
+        displayOwnerSplitInformational: true,
+      })
+    );
+    expect((payload.intervalPastReadinessTrace as any)).toEqual(
+      expect.objectContaining({
+        applicableToCurrentPreset: false,
+        status: "not_applicable_for_baseline",
+        compareCapableNow: null,
+      })
+    );
+  });
 });

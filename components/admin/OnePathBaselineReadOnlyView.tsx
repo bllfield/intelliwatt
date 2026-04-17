@@ -90,6 +90,12 @@ export function OnePathBaselineReadOnlyView(props: {
         <p className="mt-2 text-sm text-slate-600">
           This baseline preview renders from the same shared user-usage output contract the baseline usage page already uses.
         </p>
+        {view.parityAudit?.displayOwnerSplitInformational ? (
+          <p className="mt-2 text-sm text-amber-700">
+            {view.parityAudit.displayOwnerSplitNote ??
+              "Baseline truth parity passed. The remaining daily/headline difference is an informational display-owner split."}
+          </p>
+        ) : null}
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard label="Parity status" value={view.parityAudit?.parityStatus ?? "missing"} />
           <MetricCard label="Interval count parity" value={String(view.parityAudit?.intervalCountParity ?? "unknown")} />

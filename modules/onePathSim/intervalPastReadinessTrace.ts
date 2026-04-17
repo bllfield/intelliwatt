@@ -41,6 +41,7 @@ export function buildIntervalPastReadinessTrace(args: {
     scenario,
     lookupSourceContext,
   });
+  const applicableToCurrentPreset = String(scenario.scenarioSelectionStrategy ?? "") !== "baseline";
 
   const homeProfile = asRecord(lookupSourceContext.homeProfile);
   const applianceProfile = asRecord(lookupSourceContext.applianceProfile);
@@ -65,10 +66,8 @@ export function buildIntervalPastReadinessTrace(args: {
     },
   };
 
-  let classification: TraceClassification = "unknown";
-  if (String(scenario.scenarioSelectionStrategy ?? "") === "baseline") {
-    classification = "scenario_config_issue";
-  } else if (homeBlocker) {
+  let classification: TraceClassification | null = applicableToCurrentPreset ? "unknown" : null;
+  if (applicableToCurrentPreset && homeBlocker) {
     const homeEnvPresent = Boolean(asRecord(environmentVisibility.homeDetails).envVarPresent);
     if (!homeEnvPresent && !Object.keys(homeProfile).length) {
       classification = "unreadable_field_in_past_path_only";
@@ -79,7 +78,7 @@ export function buildIntervalPastReadinessTrace(args: {
     } else {
       classification = "real_bad_brian_data";
     }
-  } else if (applianceBlocker) {
+  } else if (applicableToCurrentPreset && applianceBlocker) {
     const applianceEnvPresent = Boolean(asRecord(environmentVisibility.appliances).envVarPresent);
     if (!applianceEnvPresent && !Object.keys(applianceProfile).length) {
       classification = "unreadable_field_in_past_path_only";
@@ -88,22 +87,29 @@ export function buildIntervalPastReadinessTrace(args: {
     } else {
       classification = "real_bad_brian_data";
     }
-  } else if (baselineParityReport.firstDivergenceField != null) {
+  } else if (applicableToCurrentPreset && baselineParityReport.firstDivergenceField != null) {
     classification = "mapping_drift";
   }
 
-  const exactBlocker = homeBlocker ?? applianceBlocker;
+  const exactBlocker = applicableToCurrentPreset ? homeBlocker ?? applianceBlocker : null;
+  const status = !applicableToCurrentPreset
+    ? "not_applicable_for_baseline"
+    : prereqStatus.compareCapableNow
+      ? "ready_for_interval_past"
+      : "blocked_for_interval_past";
   return {
     scenario: {
       scenarioKey: scenario.scenarioKey ?? null,
       mode: scenario.mode ?? null,
       scenarioSelectionStrategy: scenario.scenarioSelectionStrategy ?? null,
     },
+    applicableToCurrentPreset,
+    status,
     baselineParity: {
       overallMatch: baselineParityReport.overallMatch === true,
       firstDivergenceField: baselineParityReport.firstDivergenceField ?? null,
     },
-    compareCapableNow: prereqStatus.compareCapableNow,
+    compareCapableNow: applicableToCurrentPreset ? prereqStatus.compareCapableNow : null,
     exactBlocker: exactBlocker
       ? {
           ...exactBlocker,

@@ -1054,10 +1054,12 @@ export function OnePathSimAdmin() {
               ...knownScenarioPrereqStatus,
             }}
           />
-          <SectionJson
-            title="Interval Past blocker trace"
-            value={intervalPastReadinessTrace}
-          />
+          {intervalPastReadinessTrace?.applicableToCurrentPreset !== false ? (
+            <SectionJson
+              title="Interval Past blocker trace"
+              value={intervalPastReadinessTrace}
+            />
+          ) : null}
           <SectionJson
             title="Runtime / env parity trace"
             value={runtimeEnvParityTrace}

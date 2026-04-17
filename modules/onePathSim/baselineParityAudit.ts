@@ -35,11 +35,14 @@ export type OnePathBaselineParityAudit = {
   parityStatus:
     | "matched_shared_baseline_truth"
     | "missing_shared_baseline_truth"
-    | "summary_mismatch_detected";
+    | "summary_mismatch_detected"
+    | "baseline_truth_match_with_display_owner_split";
   intervalCountParity: boolean | null;
   totalKwhParity: boolean | null;
   monthlyParity: boolean | null;
   dailyParity: boolean | null;
+  displayOwnerSplitInformational: boolean;
+  displayOwnerSplitNote: string | null;
   lookupIntervalsCount: number | null;
   readModelIntervalsCount: number | null;
   lookupTotalKwh: number | null;
@@ -71,11 +74,18 @@ export function buildOnePathBaselineParityAudit(args: {
   const totalKwhParity = approxEqual(lookupTotalKwh, readModelTotalKwh);
   const monthlyParity = approxEqual(readModelTotalKwh, readModelMonthlyTotalKwh);
   const dailyParity = approxEqual(readModelTotalKwh, readModelDailyTotalKwh);
+  const displayOwnerSplitInformational =
+    intervalCountParity !== false && totalKwhParity !== false && monthlyParity !== false && dailyParity === false;
+  const displayOwnerSplitNote = displayOwnerSplitInformational
+    ? "Baseline truth parity passed. The daily total difference is an informational display-owner split, not a baseline mismatch."
+    : null;
 
   const parityStatus =
     readModelTotalKwh == null
       ? "missing_shared_baseline_truth"
-      : intervalCountParity !== false && totalKwhParity !== false && monthlyParity !== false && dailyParity !== false
+      : displayOwnerSplitInformational
+        ? "baseline_truth_match_with_display_owner_split"
+        : intervalCountParity !== false && totalKwhParity !== false && monthlyParity !== false && dailyParity !== false
         ? "matched_shared_baseline_truth"
         : "summary_mismatch_detected";
 
@@ -87,6 +97,8 @@ export function buildOnePathBaselineParityAudit(args: {
     totalKwhParity,
     monthlyParity,
     dailyParity,
+    displayOwnerSplitInformational,
+    displayOwnerSplitNote,
     lookupIntervalsCount,
     readModelIntervalsCount,
     lookupTotalKwh,

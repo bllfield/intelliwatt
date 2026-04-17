@@ -177,6 +177,9 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(knownScenarioPrereqSource).toContain("homeDetailsReady");
     expect(knownScenarioPrereqSource).toContain("compareCapableNow");
     expect(knownScenarioPrereqSource).toContain("blockingReasons");
+    const baselineReadOnlyViewSource = readRepoFile("components/admin/OnePathBaselineReadOnlyView.tsx");
+    expect(source).toContain("intervalPastReadinessTrace?.applicableToCurrentPreset !== false");
+    expect(baselineReadOnlyViewSource).toContain("display-owner split");
     expect(presentationSource).toContain("knownScenario");
     expect(presentationSource).toContain("sandboxSummary");
     expect(presentationSource).toContain("tuningCycleSummary");
