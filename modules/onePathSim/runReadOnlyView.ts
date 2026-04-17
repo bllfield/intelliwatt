@@ -39,7 +39,7 @@ export type OnePathRunReadOnlyView = {
     timeOfDayBuckets: Array<{ key: string; label: string; kwh: number }>;
   };
   monthlyRows: Array<{ month: string; kwh: number }>;
-  dailyRows: Array<{ date: string; kwh: number; source?: string; sourceDetail?: string }>;
+  dailyRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
   dailyWeather: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
   fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
   stitchedMonth: {
@@ -65,11 +65,11 @@ function asArray<T = unknown>(value: unknown): T[] {
 }
 
 function asCompareRows(value: unknown): ValidationCompareProjectionSidecar["rows"] {
-  return asArray<Record<string, unknown>>(value)
-    .map((row) => {
+  const rows = asArray<Record<string, unknown>>(value)
+    .map((row): ValidationCompareProjectionSidecar["rows"][number] | null => {
       const localDate = String(row.localDate ?? row.date ?? "").slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) return null;
-      const dayType = row.dayType === "weekend" ? "weekend" : "weekday";
+      const dayType: "weekday" | "weekend" = row.dayType === "weekend" ? "weekend" : "weekday";
       const actualDayKwh = Number(row.actualDayKwh ?? row.actualKwh);
       const simulatedDayKwh = Number(row.simulatedDayKwh ?? row.simKwh);
       const errorKwh = Number(row.errorKwh ?? row.error);
@@ -99,6 +99,7 @@ function asCompareRows(value: unknown): ValidationCompareProjectionSidecar["rows
       };
     })
     .filter((row): row is ValidationCompareProjectionSidecar["rows"][number] => row != null);
+  return rows;
 }
 
 export function buildOnePathRunReadOnlyView(args: {
@@ -167,7 +168,7 @@ export function buildOnePathRunReadOnlyView(args: {
       intervalsCount: viewModel.coverage.intervalsCount,
       weatherBasisLabel: viewModel.coverage.weatherBasisLabel,
       sourceOfDaySimulationCore: viewModel.coverage.sourceOfDaySimulationCore,
-      hasSimulatedFill: viewModel.coverage.hasSimulatedFill,
+      hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
       totals: viewModel.derived.totals,
       avgDailyKwh: viewModel.derived.avgDailyKwh,
       baseload: viewModel.derived.baseload,
