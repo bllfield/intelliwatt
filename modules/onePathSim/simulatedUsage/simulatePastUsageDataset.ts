@@ -1330,6 +1330,10 @@ function usageShapeProfileWindowDateKey(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : null;
 }
 
+function formatUsageShapeCoverageWindow(startDate: string | null, endDate: string | null): string {
+  return `${startDate ?? "unknown"}..${endDate ?? "unknown"}`;
+}
+
 function usageShapeProfileContractFailure(args: {
   row: any;
   timezone: string | null;
@@ -1357,6 +1361,28 @@ function usageShapeProfileContractFailure(args: {
   return null;
 }
 
+function buildUsageShapeProfileContractError(args: {
+  reasonNotUsed: string | null;
+  canonicalCoverage: { startDate: string; endDate: string };
+  row: any;
+}): string | null {
+  if (!args.reasonNotUsed) return null;
+  if (args.reasonNotUsed !== "coverage_window_mismatch") {
+    return `usage_shape_profile_required:${args.reasonNotUsed}`;
+  }
+
+  const storedWindowStart = usageShapeProfileWindowDateKey(args.row?.windowStartUtc);
+  const storedWindowEnd = usageShapeProfileWindowDateKey(args.row?.windowEndUtc);
+  return [
+    "usage_shape_profile_required:coverage_window_mismatch",
+    `requestedCoverageWindow=${formatUsageShapeCoverageWindow(
+      args.canonicalCoverage.startDate,
+      args.canonicalCoverage.endDate
+    )}`,
+    `storedCoverageWindow=${formatUsageShapeCoverageWindow(storedWindowStart, storedWindowEnd)}`,
+  ].join(" ");
+}
+
 function usageShapeProfileSnapFromRow(row: any): UsageShapeProfileSnapForSimulation | null {
   if (!row?.shapeByMonth96) return null;
   const profileMonthKeys = parseMonthKeysFromShapeByMonth(row.shapeByMonth96);
@@ -1372,13 +1398,14 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
   houseId: string;
   timezone: string | undefined;
   canonicalMonths?: string[] | null;
+  simCoverageWindow?: { startDate: string; endDate: string } | null;
 }): Promise<{
   usageShapeProfileSnap: UsageShapeProfileSnapForSimulation | null;
   usageShapeProfileDiag: SharedSimUsageShapeProfileDiag;
   profileAutoBuilt: boolean;
   error: string | null;
 }> {
-  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const canonicalCoverage = args.simCoverageWindow ?? resolveCanonicalUsage365CoverageWindow();
   const timezoneResolved = String(args.timezone ?? "").trim() || null;
   let shapeProfileRow = await getLatestUsageShapeProfile(args.houseId).catch(() => null);
   let usageShapeProfileSnap = usageShapeProfileSnapFromRow(shapeProfileRow);
@@ -1401,6 +1428,11 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
   }
 
   const reasonNotUsed = usageShapeProfileSnap ? null : ensureFailedReason ?? contractFailure ?? "missing";
+  const error = buildUsageShapeProfileContractError({
+    reasonNotUsed,
+    canonicalCoverage,
+    row: shapeProfileRow,
+  });
   return {
     usageShapeProfileSnap,
     usageShapeProfileDiag: {
@@ -1434,7 +1466,7 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
       canonicalCoverageEndDate: canonicalCoverage.endDate,
     },
     profileAutoBuilt,
-    error: reasonNotUsed ? `usage_shape_profile_required:${reasonNotUsed}` : null,
+    error,
   };
 }
 
@@ -1796,6 +1828,7 @@ export async function simulatePastUsageDataset(
           houseId: actualHouseId,
           timezone,
           canonicalMonths,
+          simCoverageWindow: { startDate, endDate },
         }),
       ]);
       homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : homeProfileForPast;

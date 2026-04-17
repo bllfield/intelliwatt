@@ -728,6 +728,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     houseId: args.houseId,
     timezone,
     canonicalMonths: ((buildInputs as any).canonicalMonths ?? []) as string[],
+    simCoverageWindow: identityWindowResolved,
   });
   if (ensuredUsageShape.error) {
     return {
@@ -4982,6 +4983,7 @@ async function recalcSimulatorBuildImpl(args: {
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastPatchedDataset: ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs> | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
+  const failClosedPastSharedProducer = isPastScenario && simMode === "SMT_BASELINE";
   const producerBuildPathKind =
     runContext.buildPathKind === "cache_restore" ? "recalc" : runContext.buildPathKind;
   if (shouldUseSharedPastProducer) {
@@ -5131,22 +5133,24 @@ async function recalcSimulatorBuildImpl(args: {
             ? "Manual monthly: shared Past producer built the normalized artifact."
             : "Past: baseline patched for excluded + leading-missing days"
         );
-      } else if (simMode === "MANUAL_TOTALS") {
+      } else if (simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer) {
         const producerError =
           "error" in result && typeof result.error === "string"
             ? result.error
-            : "Shared MANUAL_TOTALS producer returned no dataset.";
+            : failClosedPastSharedProducer
+              ? "Shared Past producer returned no dataset."
+              : "Shared MANUAL_TOTALS producer returned no dataset.";
         return {
           ok: false,
-          error: "manual_monthly_shared_producer_no_dataset",
+          error: failClosedPastSharedProducer ? "past_shared_producer_no_dataset" : "manual_monthly_shared_producer_no_dataset",
           missingItems: [producerError],
         };
       }
     } catch (e) {
-      if (simMode === "MANUAL_TOTALS") {
+      if (simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer) {
         return {
           ok: false,
-          error: "manual_monthly_shared_producer_no_dataset",
+          error: failClosedPastSharedProducer ? "past_shared_producer_no_dataset" : "manual_monthly_shared_producer_no_dataset",
           missingItems: [e instanceof Error ? e.message : String(e)],
         };
       }
