@@ -3,6 +3,7 @@ import type {
   SimulationVariableInputType,
   SimulationVariableValueSource,
 } from "@/modules/onePathSim/simulationVariablePolicy";
+import type { OnePathKnownScenario } from "@/modules/onePathSim/knownHouseScenarios";
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 
 export type SimulationVariablePolicyResponseShape = {
@@ -243,6 +244,8 @@ export function buildSimulationVariableCopyPayload(args: {
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
   artifact?: Record<string, unknown> | null;
+  knownScenario?: Partial<OnePathKnownScenario> | null;
+  sandboxSummary?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const inputType = modeToInputType(args.mode);
   const familyKeys = Object.keys(args.response.familyMeta ?? {});
@@ -263,6 +266,8 @@ export function buildSimulationVariableCopyPayload(args: {
     selectedMode: inputType,
     source: args.runSnapshot?.inputType === inputType ? "canonical_last_run_snapshot" : "current_admin_mode_resolution",
     currentControls: args.currentControls ?? {},
+    knownScenario: args.knownScenario ?? null,
+    sandboxSummary: args.sandboxSummary ?? null,
     runIdentity: args.runSnapshot?.runIdentityLinkage ?? null,
     engineInput: args.engineInput ?? null,
     truthConsole: args.readModel

@@ -139,6 +139,7 @@ Rules:
 One Path Sim Admin exists to expose shared simulation truth before cutover. It should surface:
 
 - inputs
+- known-house sandbox scenario presets/expectations for repeated tuning runs
 - adapter decisions
 - upstream usage truth
 - shared derived inputs
@@ -152,6 +153,12 @@ One Path Sim Admin exists to expose shared simulation truth before cutover. It s
 - compare / parity / tuning truth
 
 It is a proving harness and truth console. It is not yet proof that all other readers have been cut over.
+
+Known-house scenario rule:
+- repeated tuning runs should use a sandbox-only, code-backed scenario registry inside `modules/onePathSim/**`
+- the registry may preload keeper-user email, house/context selection strategy, scenario selection strategy, validation inputs, travel ranges, expected truth source, and review expectations
+- One Path Sim Admin may load those presets into the existing harness controls and attach the selected preset identity to sandbox summaries / AI copy payloads
+- this registry is for pre-cutover operator repeatability only; it is not a live user-facing storage system and must not wire into live app surfaces
 
 ## Reader rules
 

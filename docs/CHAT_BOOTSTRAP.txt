@@ -52,6 +52,7 @@ ONE PATH SIM RESCUE ARCHITECTURE
 - **Manual monthly rule:** GapFill monthly, Manual Lab monthly, user manual monthly, and One Path monthly must ultimately share the same manual-monthly calculation logic after normalization. No caller-specific Stage 2 sim behavior is allowed.
 - **GapFill source-home rule:** source-home views are read-only readers over persisted shared artifact/read-model truth. They must not own private source-home simulation behavior.
 - **Variable tuning rule:** shared simulation variable policy is the tuning/config owner. `effectiveSimulationVariablesUsed` belongs on canonical readback for the exact run identity.
+- **Known-house sandbox tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry/preset loader under `modules/onePathSim/**`. Presets may preload keeper-user identity, house/context selection, scenario selection, validation inputs, travel ranges, expected truth source, and review expectations into the existing One Path Admin controls and AI copy payload, but they must not add live persistence or touch live app surfaces.
 
 ========================================
 USER MANUAL MONTHLY (AUTHORITATIVE)

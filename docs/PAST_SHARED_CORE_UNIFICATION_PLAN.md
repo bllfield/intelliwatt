@@ -13,6 +13,7 @@ Single internal entrypoint for Past simulation and GapFill scoring, with one sha
 - Current verified repo state: live app surfaces remain quarantined from One Path, and `modules/onePathSim/**` is internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
 - The canonical downstream simulation pipeline is: `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
 - Past Sim remains the first place shared simulation and final chart/output structuring happen.
+- Repeated sandbox tuning runs should use the code-backed known-house scenario registry/preset loader under `modules/onePathSim/**` so One Path Admin can reload stable keeper-user cases, expected truth source, and review expectations without live persistence or live-surface wiring.
 - Future readers must consume the same persisted artifact family and canonical read model. They must not recompute core sim truth or privately reshape parity, compare, chart, or source truth.
 
 ## Lockstep docs/process rule

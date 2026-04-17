@@ -8,6 +8,12 @@ import {
   buildSimulationVariableCopyPayload,
   buildSimulationVariableFamilyAdminView,
 } from "@/modules/onePathSim/simulationVariablePresentation";
+import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHarnessSummary";
+import {
+  KNOWN_HOUSE_SCENARIOS,
+  getKnownHouseScenarioByKey,
+  resolveKnownHouseScenarioSelection,
+} from "@/modules/onePathSim/knownHouseScenarios";
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 
 type LookupResponse = {
@@ -167,6 +173,8 @@ export function OnePathSimAdmin() {
   const [selectedHouseId, setSelectedHouseId] = useState("");
   const [actualContextHouseId, setActualContextHouseId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
+  const [selectedKnownScenarioKey, setSelectedKnownScenarioKey] = useState("");
+  const [lastRunKnownScenarioKey, setLastRunKnownScenarioKey] = useState("");
   const [mode, setMode] = useState<"INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD">("INTERVAL");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
     "LAST_YEAR_WEATHER"
@@ -236,6 +244,14 @@ export function OnePathSimAdmin() {
     () => parseManualValidationDateKeys(validationOnlyDateKeysText),
     [validationOnlyDateKeysText]
   );
+  const selectedKnownScenario = useMemo(
+    () => getKnownHouseScenarioByKey(selectedKnownScenarioKey),
+    [selectedKnownScenarioKey]
+  );
+  const lastRunKnownScenario = useMemo(
+    () => getKnownHouseScenarioByKey(lastRunKnownScenarioKey),
+    [lastRunKnownScenarioKey]
+  );
   const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
   const upstreamUsageTruth = useMemo(
     () =>
@@ -243,6 +259,15 @@ export function OnePathSimAdmin() {
       asRecord(runResult?.upstreamUsageTruth) ??
       asRecord(lookup?.sourceContext?.upstreamUsageTruth),
     [lookup?.sourceContext?.upstreamUsageTruth, runResult?.readModel?.sourceOfTruthSummary?.upstreamUsageTruth, runResult?.upstreamUsageTruth]
+  );
+  const sandboxHarnessSummary = useMemo(
+    () =>
+      buildOnePathSandboxHarnessSummary({
+        lookupSourceContext: asRecord(lookup?.sourceContext),
+        runResult: asRecord(runResult),
+        knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+      }),
+    [lastRunKnownScenario, lookup?.sourceContext, runResult, selectedKnownScenario]
   );
 
   const activeVariableFamilyView = useMemo(
@@ -300,10 +325,27 @@ export function OnePathSimAdmin() {
         persistRequested,
         runReason,
       },
+      knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+      sandboxSummary: sandboxHarnessSummary,
     });
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
     setStatus("All simulation variables copied for AI.");
-  }, [effectiveActualContextHouseId, mode, persistRequested, runReason, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, validationDayCount, validationOnlyDateKeysLocal, validationSelectionMode, variablePolicy, weatherPreference]);
+  }, [
+    effectiveActualContextHouseId,
+    lastRunKnownScenario,
+    mode,
+    persistRequested,
+    runReason,
+    runResult?.engineInput,
+    runResult?.readModel?.effectiveSimulationVariablesUsed,
+    sandboxHarnessSummary,
+    selectedKnownScenario,
+    validationDayCount,
+    validationOnlyDateKeysLocal,
+    validationSelectionMode,
+    variablePolicy,
+    weatherPreference,
+  ]);
 
   const copyCurrentFamilyForAi = useCallback(async () => {
     if (!variablePolicy || !variableFamilyOpen) return;
@@ -320,6 +362,8 @@ export function OnePathSimAdmin() {
         validationOnlyDateKeysLocal,
         selectedFamily: variableFamilyOpen,
       },
+      knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+      sandboxSummary: sandboxHarnessSummary,
     });
     const filteredPayload = {
       ...payload,
@@ -329,7 +373,18 @@ export function OnePathSimAdmin() {
     };
     await navigator.clipboard.writeText(JSON.stringify(filteredPayload, null, 2));
     setStatus(`Copied ${variableFamilyOpen} variables for AI.`);
-  }, [effectiveActualContextHouseId, mode, runResult?.engineInput, runResult?.readModel?.effectiveSimulationVariablesUsed, validationOnlyDateKeysLocal, variableFamilyOpen, variablePolicy]);
+  }, [
+    effectiveActualContextHouseId,
+    lastRunKnownScenario,
+    mode,
+    runResult?.engineInput,
+    runResult?.readModel?.effectiveSimulationVariablesUsed,
+    sandboxHarnessSummary,
+    selectedKnownScenario,
+    validationOnlyDateKeysLocal,
+    variableFamilyOpen,
+    variablePolicy,
+  ]);
 
   const saveVariableFamily = useCallback(async () => {
     if (!variableFamilyOpen) return;
@@ -390,12 +445,39 @@ export function OnePathSimAdmin() {
     setStatus(`Shared override reset for ${variableFamilyOpen}.`);
   }, [variableConfirmation, variableFamilyOpen, variablePolicy]);
 
-  const loadLookup = useCallback(
-    async (houseIdOverride?: string) => {
-      const trimmedEmail = email.trim();
+  const applyLookupResponse = useCallback(
+    (
+      json: LookupResponse,
+      overrides?: {
+        selectedHouseId?: string;
+        actualContextHouseId?: string;
+        selectedScenarioId?: string;
+        travelRanges?: Array<{ startDate: string; endDate: string }>;
+      }
+    ) => {
+      setLookup(json);
+      setSelectedHouseId(overrides?.selectedHouseId ?? json.selectedHouse?.id ?? "");
+      setActualContextHouseId(overrides?.actualContextHouseId ?? json.selectedHouse?.id ?? "");
+      setSelectedScenarioId(overrides?.selectedScenarioId ?? "");
+      const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
+        ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
+        : [];
+      setTravelRanges(overrides?.travelRanges ?? sourceTravelRanges);
+    },
+    []
+  );
+
+  const requestLookup = useCallback(
+    async (args?: {
+      email?: string;
+      houseId?: string;
+      mode?: "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+      actualContextHouseId?: string | null;
+    }) => {
+      const trimmedEmail = (args?.email ?? email).trim();
       if (!trimmedEmail) {
         setError("Enter a user email.");
-        return;
+        return null;
       }
       setBusy(true);
       setError(null);
@@ -406,9 +488,9 @@ export function OnePathSimAdmin() {
         body: JSON.stringify({
           action: "lookup",
           email: trimmedEmail,
-          houseId: houseIdOverride ?? effectiveHouseId ?? "",
-          mode,
-          actualContextHouseId: effectiveActualContextHouseId || null,
+          houseId: args?.houseId ?? effectiveHouseId ?? "",
+          mode: args?.mode ?? mode,
+          actualContextHouseId: args?.actualContextHouseId ?? effectiveActualContextHouseId ?? null,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -416,24 +498,65 @@ export function OnePathSimAdmin() {
         setBusy(false);
         setStatus(null);
         setError(json?.error ?? `Lookup failed (${res.status})`);
-        return;
+        return null;
       }
-      setLookup(json);
-      setSelectedHouseId(json.selectedHouse?.id ?? "");
-      setActualContextHouseId((current) => {
-        if (current && (json.houses ?? []).some((house: { id: string }) => house.id === current)) return current;
-        return json.selectedHouse?.id ?? "";
-      });
-      setSelectedScenarioId("");
-      const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
-        ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
-        : [];
-      setTravelRanges(sourceTravelRanges);
       setBusy(false);
-      setStatus("Lookup loaded.");
+      return json as LookupResponse;
     },
     [effectiveActualContextHouseId, effectiveHouseId, email, mode]
   );
+
+  const loadLookup = useCallback(
+    async (houseIdOverride?: string) => {
+      const json = await requestLookup({ houseId: houseIdOverride });
+      if (!json) return;
+      applyLookupResponse(json, {
+        actualContextHouseId:
+          actualContextHouseId && (json.houses ?? []).some((house: { id: string }) => house.id === actualContextHouseId)
+            ? actualContextHouseId
+            : json.selectedHouse?.id ?? "",
+      });
+      setStatus("Lookup loaded.");
+    },
+    [actualContextHouseId, applyLookupResponse, requestLookup]
+  );
+
+  const loadKnownScenarioPreset = useCallback(async () => {
+    if (!selectedKnownScenario) {
+      setError("Choose a known-house scenario preset first.");
+      return;
+    }
+    setEmail(selectedKnownScenario.sourceUserEmail);
+    setMode(selectedKnownScenario.mode);
+    setWeatherPreference(selectedKnownScenario.weatherPreference);
+    setValidationSelectionMode(selectedKnownScenario.validationSelectionMode ?? "stratified_weather_balanced");
+    setValidationDayCount(String(selectedKnownScenario.validationDayCount ?? 14));
+    setValidationOnlyDateKeysText(selectedKnownScenario.validationOnlyDateKeysLocal.join("\n"));
+    setPersistRequested(selectedKnownScenario.persistRequested);
+    setRunReason(`known_house:${selectedKnownScenario.scenarioKey}`);
+    const json = await requestLookup({
+      email: selectedKnownScenario.sourceUserEmail,
+      houseId: selectedKnownScenario.sourceHouseId ?? undefined,
+      mode: selectedKnownScenario.mode,
+      actualContextHouseId: selectedKnownScenario.actualContextHouseId,
+    });
+    if (!json) return;
+    const resolvedSelection = resolveKnownHouseScenarioSelection({
+      scenario: selectedKnownScenario,
+      lookup: json,
+    });
+    applyLookupResponse(json, {
+      selectedHouseId: resolvedSelection.selectedHouseId,
+      actualContextHouseId: resolvedSelection.actualContextHouseId,
+      selectedScenarioId: resolvedSelection.selectedScenarioId,
+      travelRanges: selectedKnownScenario.travelRanges.length
+        ? selectedKnownScenario.travelRanges
+        : Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
+          ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
+          : [],
+    });
+    setStatus(`Known-house scenario preset loaded: ${selectedKnownScenario.label}.`);
+  }, [applyLookupResponse, requestLookup, selectedKnownScenario]);
 
   const runSimulation = useCallback(async () => {
     if (!lookup || !effectiveHouseId) {
@@ -483,6 +606,7 @@ export function OnePathSimAdmin() {
       return;
     }
     setRunResult(json);
+    setLastRunKnownScenarioKey(selectedKnownScenario?.scenarioKey ?? "");
     setStatus("Shared run completed and read back from the canonical artifact/read-model path.");
   }, [
     effectiveActualContextHouseId,
@@ -491,6 +615,7 @@ export function OnePathSimAdmin() {
     mode,
     persistRequested,
     runReason,
+    selectedKnownScenario,
     selectedScenarioId,
     travelRanges,
     validationDayCount,
@@ -589,6 +714,31 @@ export function OnePathSimAdmin() {
           </div>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-4">
+            <label className="text-sm text-slate-700 lg:col-span-2">
+              <div className="font-semibold text-brand-navy">Known-house scenario preset</div>
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={selectedKnownScenarioKey}
+                onChange={(event) => setSelectedKnownScenarioKey(event.target.value)}
+              >
+                <option value="">Select sandbox preset</option>
+                {KNOWN_HOUSE_SCENARIOS.map((scenario) => (
+                  <option key={scenario.scenarioKey} value={scenario.scenarioKey}>
+                    {scenario.label} {scenario.active ? "" : "(inactive)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => void loadKnownScenarioPreset()}
+                disabled={busy || !selectedKnownScenarioKey}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
+              >
+                Load known scenario preset
+              </button>
+            </div>
             <label className="text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Mode</div>
               <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={mode} onChange={(event) => setMode(event.target.value as any)}>
@@ -793,6 +943,7 @@ export function OnePathSimAdmin() {
               selectedHouseId: effectiveHouseId || null,
               actualContextHouseId: effectiveActualContextHouseId || null,
               selectedScenarioId: selectedScenarioId || null,
+              selectedKnownScenarioKey: selectedKnownScenarioKey || null,
               mode,
               weatherPreference,
               validationSelectionMode,
@@ -972,6 +1123,23 @@ export function OnePathSimAdmin() {
                 Raw JSON is still available for deep inspection, but the structured truth panels above are the primary
                 read-only truth console surfaces.
               </p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SectionJson
+                title="Known scenario / expectations"
+                value={
+                  lastRunKnownScenario ?? selectedKnownScenario
+                    ? {
+                        ...(lastRunKnownScenario ?? selectedKnownScenario),
+                        selectedScenarioId: selectedScenarioId || null,
+                      }
+                    : null
+                }
+              />
+              <SectionJson title="Sandbox run status" value={sandboxHarnessSummary.runStatus} />
+              <SectionJson title="Monthly truth / compare snapshot" value={sandboxHarnessSummary.monthlyTruthCompare} />
+              <SectionJson title="Weather / daily-shape snapshot" value={sandboxHarnessSummary.weatherAndShape} />
+              <SectionJson title="Interval / compare visibility snapshot" value={sandboxHarnessSummary.compareVisibility} />
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
               <SectionJson title="Canonical engine input" value={runResult.engineInput} />
