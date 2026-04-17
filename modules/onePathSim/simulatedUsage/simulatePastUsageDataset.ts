@@ -18,6 +18,7 @@ import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestam
 import { buildPastSimulatedBaselineV1 } from "@/modules/onePathSim/simulatedUsage/engine";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
+import { ensureHouseWeatherBackfill, ensureHouseWeatherNormalAvgBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -55,21 +56,6 @@ import {
 
 export type BuildPathKind = PastProducerBuildPathKind;
 export { normalizePastProducerBuildPathKind } from "@/modules/onePathSim/simulatedUsage/pastProducerBuildPath";
-
-async function ensureOnePathWeatherBackfillNoOp(_args: {
-  houseId: string;
-  startDate: string;
-  endDate: string;
-}) {
-  return null;
-}
-
-async function ensureOnePathWeatherNormalAvgBackfillNoOp(_args: {
-  houseId: string;
-  dateKeys: string[];
-}) {
-  return null;
-}
 
 function resolveManualAnnualMonthlyTotalsForSimulation(buildInputs: SimulatorBuildInputsV1): Record<string, number> | null {
   const payload = (buildInputs.snapshots?.manualUsagePayload ?? null) as
@@ -827,6 +813,81 @@ function collectMissingOrStubWeatherDateKeys(args: {
   });
 }
 
+function prevDateKey(dateKey: string): string | null {
+  const key = String(dateKey ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const date = new Date(`${key}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function buildPastWindowWeatherGapDetails(args: {
+  requestedStartDate: string;
+  requestedEndDate: string;
+  canonicalDateKeys: string[];
+  selectedWeatherByDateKey: HouseWeatherDayMap;
+  missingDateKeys: string[];
+  weatherLogicMode: WeatherLogicMode;
+  backfillAttempted: boolean;
+}) {
+  const requestedStartDate = String(args.requestedStartDate ?? "").slice(0, 10);
+  const requestedEndDate = String(args.requestedEndDate ?? "").slice(0, 10);
+  const canonicalDateKeys = (args.canonicalDateKeys ?? [])
+    .map((dateKey) => String(dateKey ?? "").slice(0, 10))
+    .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey));
+  const missingDateKeys = (args.missingDateKeys ?? [])
+    .map((dateKey) => String(dateKey ?? "").slice(0, 10))
+    .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey));
+  const selectedRows = canonicalDateKeys.filter((dateKey) => {
+    const row = args.selectedWeatherByDateKey.get(dateKey);
+    const source = String(row?.source ?? "").trim();
+    return source.length > 0 && source !== WEATHER_STUB_SOURCE;
+  });
+  const foundCoverageStart = selectedRows[0] ?? null;
+  const foundCoverageEnd = selectedRows[selectedRows.length - 1] ?? null;
+  const latestExpectedDateKey = canonicalDateKeys[canonicalDateKeys.length - 1] ?? null;
+  const latestMissingOnly = missingDateKeys.length === 1 && latestExpectedDateKey != null && missingDateKeys[0] === latestExpectedDateKey;
+  const weatherWindowOffByOneDay =
+    latestMissingOnly && foundCoverageEnd != null && prevDateKey(latestExpectedDateKey) === foundCoverageEnd;
+
+  return {
+    requestedWeatherWindowStart: requestedStartDate,
+    requestedWeatherWindowEnd: requestedEndDate,
+    expectedWeatherLocalDateKeysCount: canonicalDateKeys.length,
+    actualWeatherRowsFoundCount: selectedRows.length,
+    exactMissingLocalDateKeys: missingDateKeys,
+    missingLatestWeatherDay: latestExpectedDateKey != null && missingDateKeys.includes(latestExpectedDateKey),
+    weatherWindowOffByOneDay,
+    timezoneConversionInvolved: false,
+    backfillAttempted: args.backfillAttempted,
+    backfillAttemptedWindowStart: requestedStartDate,
+    backfillAttemptedWindowEnd: requestedEndDate,
+    weatherLogicMode: args.weatherLogicMode,
+    classification:
+      latestMissingOnly || weatherWindowOffByOneDay
+        ? "latest_weather_day_not_available_or_not_requested"
+        : "weather_coverage_gap_after_backfill",
+    foundWeatherCoverageStart: foundCoverageStart,
+    foundWeatherCoverageEnd: foundCoverageEnd,
+  };
+}
+
+function formatPastWindowWeatherGapDetails(details: ReturnType<typeof buildPastWindowWeatherGapDetails>): string {
+  return [
+    `requestedWeatherWindow=${details.requestedWeatherWindowStart}..${details.requestedWeatherWindowEnd}`,
+    `expectedWeatherLocalDateKeysCount=${details.expectedWeatherLocalDateKeysCount}`,
+    `actualWeatherRowsFoundCount=${details.actualWeatherRowsFoundCount}`,
+    `missingDateKeys=${details.exactMissingLocalDateKeys.join(",") || "none"}`,
+    `missingLatestWeatherDay=${details.missingLatestWeatherDay}`,
+    `weatherWindowOffByOneDay=${details.weatherWindowOffByOneDay}`,
+    `timezoneConversionInvolved=${details.timezoneConversionInvolved}`,
+    `backfillAttempted=${details.backfillAttempted}`,
+    `backfillAttemptedWindow=${details.backfillAttemptedWindowStart}..${details.backfillAttemptedWindowEnd}`,
+    `classification=${details.classification}`,
+  ].join(" ");
+}
+
 function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
   canonicalDayStartsMs: number[];
   canonicalDateKeys: string[];
@@ -1043,14 +1104,23 @@ export async function loadWeatherForPastWindow(args: {
   const lon = house?.lng != null && Number.isFinite(house.lng) ? house.lng : null;
 
   if (lat == null || lon == null) {
+    const details = buildPastWindowWeatherGapDetails({
+      requestedStartDate: startDate,
+      requestedEndDate: endDate,
+      canonicalDateKeys,
+      selectedWeatherByDateKey: selectedWeatherBeforeBackfill,
+      missingDateKeys: missingSelectedWxKeys,
+      weatherLogicMode,
+      backfillAttempted: false,
+    });
     throw new Error(
-      "Shared weather load failed: house lat/lng is missing, so real weather backfill cannot run."
+      `Shared weather load failed: house lat/lng is missing, so real weather backfill cannot run. ${formatPastWindowWeatherGapDetails(details)}`
     );
   }
   if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
-    await ensureOnePathWeatherNormalAvgBackfillNoOp({ houseId, dateKeys: canonicalDateKeys });
+    await ensureHouseWeatherNormalAvgBackfill({ houseId, dateKeys: canonicalDateKeys });
   } else {
-    await ensureOnePathWeatherBackfillNoOp({ houseId, startDate, endDate });
+    await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
   }
   const [actualWx2, normalWx2] = await Promise.all([
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
@@ -1063,10 +1133,19 @@ export async function loadWeatherForPastWindow(args: {
     canonicalDateKeys,
   });
   if (missingSelectedAfterBackfill.length > 0) {
+    const details = buildPastWindowWeatherGapDetails({
+      requestedStartDate: startDate,
+      requestedEndDate: endDate,
+      canonicalDateKeys,
+      selectedWeatherByDateKey: selectedWeatherAfterBackfill,
+      missingDateKeys: missingSelectedAfterBackfill,
+      weatherLogicMode,
+      backfillAttempted: true,
+    });
     throw new Error(
       weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-        ? "Shared weather load failed: NORMAL_AVG rows are unavailable after real historical backfill."
-        : "Shared weather load failed: ACTUAL_LAST_YEAR coverage is still missing after real API backfill."
+        ? `Shared weather load failed: NORMAL_AVG rows are unavailable after real historical backfill. ${formatPastWindowWeatherGapDetails(details)}`
+        : `Shared weather load failed: ACTUAL_LAST_YEAR coverage is still missing after real API backfill. ${formatPastWindowWeatherGapDetails(details)}`
     );
   }
   return {
