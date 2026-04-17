@@ -4,6 +4,7 @@ import {
   resolveOnePathManualStageOnePresentation,
   resolveOnePathReportedCoverageWindow,
 } from "@/modules/onePathSim/runtime";
+import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
 import type { ManualUsagePayload, ManualStatementRange } from "@/modules/onePathSim/simulatedUsage/types";
 
 export type OnePathTruthOwner = {
@@ -238,6 +239,7 @@ export function buildOnePathTruthSummary(args: {
   const simulatedDayResultsSummary = summarizeSimulatedDayResults(args.artifact.simulatedDayResults);
   const finalOutputContract = {
     datasetSummary: dataset.summary ?? null,
+    displayTotalsAudit: buildUsageDisplayTotalsAudit({ dataset }),
     datasetDaily: {
       rowCount: asArray(dataset.daily).length,
       sourceClassifications: tuningSummary.dailySourceClassificationsSummary ?? null,

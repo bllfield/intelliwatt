@@ -5,6 +5,7 @@ import {
   adaptManualAnnualRawInput,
   adaptManualMonthlyRawInput,
   adaptNewBuildRawInput,
+  buildReadOnlyIntervalBaselinePreview,
   buildSharedSimulationReadModel,
   runSharedSimulation,
   SharedSimulationRunError,
@@ -194,6 +195,27 @@ export async function POST(request: NextRequest) {
     weatherScore: weatherEnvelope.score ?? null,
     weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
   } as const;
+  const baselinePreview = usageTruth?.dataset
+    ? await buildReadOnlyIntervalBaselinePreview({
+        runtimeUserId: resolved.userId,
+        selectedHouse: {
+          id: resolved.selectedHouse.id,
+          esiid: resolved.selectedHouse.esiid ?? null,
+        },
+        actualContextHouse: {
+          id: previewActualContextHouse.id,
+          esiid: previewActualContextHouse.esiid ?? null,
+        },
+        actualDataset: usageTruth.dataset,
+        usageTruthSource: usageTruth.usageTruthSource,
+        usageTruthSeedResult: usageTruth.seedResult,
+        upstreamUsageTruth: usageTruth.summary,
+        manualUsagePayload: manualUsage.payload ?? null,
+        homeProfile: homeProfile ?? null,
+        applianceProfile: applianceProfile ?? null,
+        weatherEnvelope,
+      }).catch(() => null)
+    : null;
   const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({
     scenario: {
       mode: previewMode,
@@ -214,6 +236,7 @@ export async function POST(request: NextRequest) {
       scenarios: resolved.scenarios,
       sourceContext: {
         ...previewLookupSourceContext,
+        baselinePreview,
         environmentVisibility,
         readOnlyAudit,
       },

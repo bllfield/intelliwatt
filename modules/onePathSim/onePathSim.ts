@@ -18,6 +18,7 @@ import {
 } from "@/modules/onePathSim/runtime";
 import { buildOnePathManualArtifactDecorations } from "@/modules/onePathSim/manualArtifactDecorations";
 import { buildOnePathTruthSummary, type OnePathTruthSummary } from "@/modules/onePathSim/onePathTruthSummary";
+import { buildOnePathBaselineParityAudit, type OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import {
   type EffectiveSimulationVariablesUsed,
 } from "@/modules/onePathSim/simulationVariablePolicy";
@@ -191,6 +192,16 @@ type LoadedSharedContext = {
   homeProfile: Record<string, unknown> | null;
   applianceProfile: Record<string, unknown> | null;
   weatherEnvelope: Awaited<ReturnType<typeof resolveOnePathWeatherSensitivityEnvelope>>;
+};
+
+type ResolvedUpstreamUsageTruth = Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
+
+export type ReadOnlyIntervalBaselinePreview = {
+  engineInput: CanonicalSimulationEngineInput;
+  artifact: CanonicalSimulationArtifact;
+  readModel: CanonicalSimulationReadModel;
+  weatherScore: Awaited<ReturnType<typeof resolveOnePathWeatherSensitivityEnvelope>>["score"];
+  parityAudit: OnePathBaselineParityAudit;
 };
 
 export class UpstreamUsageTruthMissingError extends Error {
@@ -532,6 +543,24 @@ async function buildBaselinePassthroughArtifact(args: {
         }).catch(() => ({ payload: null }))).payload ?? null
       : null;
 
+  return buildBaselinePassthroughArtifactFromResolvedTruth({
+    engineInput: args.engineInput,
+    callerType: args.callerType,
+    upstreamUsageTruth,
+    manualUsagePayload,
+    startedAt,
+  });
+}
+
+async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  callerType: SharedDiagnosticsCallerType;
+  upstreamUsageTruth: ResolvedUpstreamUsageTruth;
+  manualUsagePayload: ManualUsagePayload | null;
+  startedAt: number;
+}): Promise<CanonicalSimulationArtifact> {
+  const upstreamUsageTruth = args.upstreamUsageTruth;
+
   const dataset =
     args.engineInput.inputType === "INTERVAL"
       ? buildIntervalBaselinePassthroughDataset({
@@ -541,7 +570,7 @@ async function buildBaselinePassthroughArtifact(args: {
       : buildManualBaselinePassthroughDataset({
           engineInput: args.engineInput,
           upstreamUsageTruth,
-          manualUsagePayload,
+          manualUsagePayload: args.manualUsagePayload,
         });
 
   const compareProjection = buildOnePathValidationCompareProjectionSidecar(dataset);
@@ -592,7 +621,7 @@ async function buildBaselinePassthroughArtifact(args: {
     intervalCount: Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15.length : 0,
     dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
     monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
-    durationMs: Date.now() - startedAt,
+    durationMs: Date.now() - args.startedAt,
     source: "buildBaselinePassthroughArtifact",
     memoryRssMb: getMemoryRssMb(),
   });
@@ -636,6 +665,74 @@ async function buildBaselinePassthroughArtifact(args: {
     manualParitySummary: manualReadResult?.manualParitySummary ?? null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
     effectiveSimulationVariablesUsed: null,
+  };
+}
+
+export async function buildReadOnlyIntervalBaselinePreview(args: {
+  runtimeUserId: string;
+  selectedHouse: { id: string; esiid: string | null };
+  actualContextHouse: { id: string; esiid: string | null };
+  actualDataset: any | null;
+  usageTruthSource: UpstreamUsageTruthSource;
+  usageTruthSeedResult: UpstreamUsageTruthSeedResult;
+  upstreamUsageTruth: UpstreamUsageTruthSection;
+  manualUsagePayload: ManualUsagePayload | null;
+  homeProfile: Record<string, unknown> | null;
+  applianceProfile: Record<string, unknown> | null;
+  weatherEnvelope: Awaited<ReturnType<typeof resolveOnePathWeatherSensitivityEnvelope>>;
+}): Promise<ReadOnlyIntervalBaselinePreview | null> {
+  if (!args.actualDataset) return null;
+  const loaded: LoadedSharedContext = {
+    house: args.selectedHouse,
+    actualContextHouseId: args.actualContextHouse.id,
+    usageTruthSource: args.usageTruthSource,
+    usageTruthSeedResult: args.usageTruthSeedResult,
+    upstreamUsageTruth: args.upstreamUsageTruth,
+    actualDataset: args.actualDataset,
+    manualUsagePayload: args.manualUsagePayload,
+    homeProfile: args.homeProfile,
+    applianceProfile: args.applianceProfile,
+    weatherEnvelope: args.weatherEnvelope,
+  };
+  const engineInput = buildCanonicalEngineInput({
+    inputType: "INTERVAL",
+    scenarioId: null,
+    weatherPreference: "LAST_YEAR_WEATHER",
+    validationSelectionMode: null,
+    validationDayCount: null,
+    validationOnlyDateKeysLocal: [],
+    travelRanges: [],
+    persistRequested: true,
+    loaded,
+    runtimeUserId: args.runtimeUserId,
+  });
+  const upstreamUsageTruth: ResolvedUpstreamUsageTruth = {
+    selectedHouse: args.selectedHouse,
+    actualContextHouse: args.actualContextHouse,
+    dataset: args.actualDataset,
+    alternatives: { smt: null, greenButton: null },
+    usageTruthSource: args.usageTruthSource,
+    seedResult: args.usageTruthSeedResult,
+    summary: args.upstreamUsageTruth,
+  };
+  const artifact = await buildBaselinePassthroughArtifactFromResolvedTruth({
+    engineInput,
+    callerType: "user_past",
+    upstreamUsageTruth,
+    manualUsagePayload: null,
+    startedAt: Date.now(),
+  });
+  const readModel = buildSharedSimulationReadModel(artifact);
+  const parityAudit = buildOnePathBaselineParityAudit({
+    lookupActualDatasetSummary: args.actualDataset?.summary ?? null,
+    readModel,
+  });
+  return {
+    engineInput,
+    artifact,
+    readModel,
+    weatherScore: args.weatherEnvelope.score ?? null,
+    parityAudit,
   };
 }
 
