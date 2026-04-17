@@ -270,7 +270,7 @@ export function buildOnePathTruthSummary(args: {
     preCutoverHarness: {
       title: "Pre-Cutover Harness Status",
       summary:
-        "This page is the pre-cutover canonical simulation truth console only. It proves the shared owners, boundaries, inputs, and outputs without rerouting older admin or user surfaces yet.",
+        "This page is the pre-cutover canonical simulation truth console only. It proves One Path-owned interval calculations live inside modules/onePathSim/** while shared/live inputs stay read-only and shared display reuse stays presentation-only. Older admin and user surfaces are not rerouted here yet.",
       currentRun: {
         status: "pre-cutover canonical harness",
         rerouteStatus: "Older surfaces are not rerouted to this harness yet.",
@@ -284,19 +284,19 @@ export function buildOnePathTruthSummary(args: {
         {
           label: "Canonical harness owner",
           owner: "runSharedSimulation",
-          whyItMatters: "Keeps the harness on the same shared producer/readback chain without cutting older pages over in this pass.",
+          whyItMatters: "Keeps the harness on the One Path-owned interval path without cutting older pages over in this pass.",
         },
         {
           label: "Persisted read-model owner",
           owner: "buildSharedSimulationReadModel",
-          whyItMatters: "All truth panels read from shared artifact/readback output instead of page-local recompute.",
+          whyItMatters: "All truth panels read from the One Path artifact/readback output instead of page-local recompute.",
         },
       ],
     },
     stageBoundaryMap: {
       title: "Stage Boundary Map",
       summary:
-        "This maps the selected run through the one shared producer chain: raw harness input, shared adapter choice, canonical engine input, shared derived inputs, shared simulation stages, post-sim formatter output, and persisted artifact identity.",
+        "This maps the selected run through the One Path-owned interval path: raw harness input, One Path adapter choice, canonical engine input, read-only input snapshots, One Path simulation stages, post-sim formatter output, and persisted artifact identity.",
       currentRun: {
         rawInputSnapshot: {
           selectedHouseId: args.engineInput.houseId ?? null,
@@ -352,19 +352,19 @@ export function buildOnePathTruthSummary(args: {
       },
       sharedOwners: [
         {
-          label: "Shared adapter owner",
+          label: "One Path adapter owner",
           owner: "adapt*RawInput",
-          whyItMatters: "All modes normalize into one canonical engine-input contract before the producer runs.",
+          whyItMatters: "All modes normalize into one canonical engine-input contract before the One Path calculation stages run.",
         },
         {
-          label: "Shared producer owner",
-          owner: "recalcSimulatorBuild -> simulatePastUsageDataset",
-          whyItMatters: "Keeps the stage boundary between normalized input and persisted simulation truth shared across entrypoints.",
+          label: "One Path interval calculation owner",
+          owner: "recalcSimulatorBuild -> simulatePastUsageDataset (modules/onePathSim/**)",
+          whyItMatters: "Keeps the stage boundary between normalized input and persisted simulation truth inside One Path-owned code.",
         },
         {
-          label: "Readback owner",
+          label: "One Path readback owner",
           owner: "buildSharedSimulationReadModel",
-          whyItMatters: "Projects the persisted artifact into the same canonical read model the truth console consumes.",
+          whyItMatters: "Projects the persisted artifact into the canonical read model the truth console consumes.",
         },
       ],
     },
@@ -373,7 +373,7 @@ export function buildOnePathTruthSummary(args: {
       : {
       title: "Upstream Usage Truth",
       summary:
-        "This panel should be published from the shared upstream-usage owner. When absent, treat that as missing shared truth rather than recomputing it in the page.",
+        "This panel should be published from the read-only upstream-usage owner. When absent, treat that as missing input truth rather than recomputing it in the page.",
       currentRun: {
         statusSummary: {
           usageTruthStatus: "unavailable",
@@ -385,9 +385,9 @@ export function buildOnePathTruthSummary(args: {
       sharedOwners: [],
     },
     sharedDerivedInputs: {
-      title: "Shared Derived Inputs Used By Run",
+      title: "Read-Only Inputs and Resolved Controls Used By Run",
       summary:
-        "These are the shared derived inputs and resolved tuning controls actually consumed by the selected run. They are surfaced from shared readback and shared diagnostics, not rebuilt in the page.",
+        "Shared/live inputs are read-only. Shared display reuse is presentation-only. This panel surfaces the input snapshots and resolved tuning controls actually consumed by the selected run without rebuilding them in the page.",
       currentRun: {
         weatherEfficiencyDerivedInput:
           args.engineInput.weatherEfficiencyDerivedInput ?? datasetMeta.weatherEfficiencyDerivedInput ?? null,
@@ -415,26 +415,26 @@ export function buildOnePathTruthSummary(args: {
       },
       sharedOwners: [
         {
-          label: "Derived weather-input owner",
+          label: "Read-only weather/input snapshot owner",
           owner: "resolveSharedWeatherSensitivityEnvelope / buildWeatherEfficiencyDerivedInput",
-          whyItMatters: "Attaches shared weather-efficiency truth before the producer runs.",
+          whyItMatters: "Attaches read-only weather/input truth before the One Path calculation stages run.",
         },
         {
-          label: "Simulation variable owner",
+          label: "One Path simulation variable owner",
           owner: "resolveSimulationVariablePolicyForInputType",
-          whyItMatters: "Publishes the exact resolved shared config and value sources used for the run.",
+          whyItMatters: "Publishes the exact resolved One Path config and value sources used for the run.",
         },
         {
-          label: "Shared diagnostics owner",
+          label: "One Path diagnostics owner",
           owner: "buildSharedPastSimDiagnostics",
-          whyItMatters: "Carries shared evidence summaries and execution diagnostics through readback.",
+          whyItMatters: "Carries evidence summaries and execution diagnostics through One Path readback.",
         },
       ],
     },
     sourceTruthIdentity: {
       title: "Source Truth / Compare Truth Identity",
       summary:
-        "This panel pins the selected run to the exact source, profile, weather, fingerprint, validation, and artifact identities used by the shared producer and later readers.",
+        "This panel pins the selected run to the exact source, profile, weather, fingerprint, validation, and artifact identities used by the One Path runtime and later read-only displays.",
       currentRun: {
         selectedHouseId: args.engineInput.houseId ?? null,
         sourceHouseId: identityContext.sourceHouseId ?? sourceTruthContext.sourceHouseId ?? null,
@@ -461,12 +461,12 @@ export function buildOnePathTruthSummary(args: {
         {
           label: "Identity context owner",
           owner: "buildSharedPastSimDiagnostics.identityContext",
-          whyItMatters: "Publishes the caller/source/profile/run identity used by the shared producer.",
+          whyItMatters: "Publishes the caller/source/profile/run identity used by the One Path runtime.",
         },
         {
           label: "Source truth context owner",
           owner: "buildSharedPastSimDiagnostics.sourceTruthContext",
-          whyItMatters: "Carries fingerprint, weather, validation, and travel identities through shared readback.",
+          whyItMatters: "Carries fingerprint, weather, validation, and travel identities through One Path readback.",
         },
       ],
     },

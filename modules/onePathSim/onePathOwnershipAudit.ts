@@ -38,6 +38,7 @@ export type ExternalSurfaceClassificationRow = {
   classification:
     | "shared_reader"
     | "shared_run_orchestrator"
+    | "one_path_run_orchestrator"
     | "local_summarizer"
     | "duplicate_owner_risk"
     | "adjacent_shared_scorer";
@@ -66,7 +67,7 @@ export type OnePathOwnershipAudit = {
 export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
   return {
     overview:
-      "Read-only architecture audit for the One Path admin harness. This inventory tracks what is visible on the page, what is copied for AI, how the shared simulation chain is wired, and which external surfaces still orbit the same shared simulation owners.",
+      "Read-only architecture audit for the One Path admin harness. One Path-owned interval calculations live inside modules/onePathSim/**. This inventory tracks what is visible on the page, what is copied for AI, which shared/live dependencies stay read-only, and where presentation-only display reuse still exists.",
     pageSurfaceAuditMatrix: [
       {
         section: "Pre-cutover harness status",
@@ -94,7 +95,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         ownerFiles: ["components/admin/OnePathSimAdmin.tsx", "app/api/admin/tools/one-path-sim/route.ts"],
         ownerSymbols: ["OnePathSimAdmin", "POST"],
         notes:
-          "Email, house, mode, scenario, weather preference, actual context house, validation mode/day count, manual validation keys, and persist flag all flow into the shared one-path route.",
+          "Email, house, mode, scenario, weather preference, actual context house, validation mode/day count, manual validation keys, and persist flag all flow into the One Path route.",
       },
       {
         section: "Run reason",
@@ -166,7 +167,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
           "Both page traces are copied as named top-level AI payload sections when present so AI can reason about env parity and Past readiness without scraping JSON panels.",
       },
       {
-        section: "Shared variable defaults, overrides, and effective-by-mode JSON",
+        section: "One Path variable defaults, overrides, and effective-by-mode JSON",
         surfaceType: "json_panel",
         visibleOnPage: true,
         editableOnPage: false,
@@ -176,7 +177,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         backedBySharedOwner: true,
         ownerFiles: ["modules/onePathSim/simulationVariablePolicy.ts", "app/api/admin/tools/one-path-sim/variables/route.ts"],
         ownerSymbols: ["SIMULATION_VARIABLE_POLICY_FAMILY_META", "GET"],
-        notes: "Read-only JSON mirrors the same shared policy store consumed by the simulation producer.",
+        notes: "Read-only JSON mirrors the One Path policy store consumed by the One Path calculation path.",
       },
       {
         section: "Variable family popup cards",
@@ -190,7 +191,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         ownerFiles: ["modules/onePathSim/simulationVariablePresentation.ts", "components/admin/OnePathSimAdmin.tsx"],
         ownerSymbols: ["buildSimulationVariableFamilyAdminView", "openVariableFamily"],
         notes:
-          "Human-readable variable descriptions, value sources, current overrides, edit inputs, raw JSON, and OVERRIDE-gated save/reset all sit on top of the shared variable policy owner.",
+          "Human-readable variable descriptions, value sources, current overrides, edit inputs, raw JSON, and OVERRIDE-gated save/reset all sit on top of the One Path variable policy owner.",
       },
       {
         section: "Canonical engine input, artifact, read model",
@@ -200,10 +201,10 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         copiedInAiPayload: true,
         runRequired: true,
         pageOnly: false,
-        backedBySharedOwner: true,
+        backedBySharedOwner: false,
         ownerFiles: ["modules/onePathSim/onePathSim.ts"],
         ownerSymbols: ["runSharedSimulation", "buildSharedSimulationReadModel"],
-        notes: "Post-run canonical outputs read back from the shared persisted artifact path.",
+        notes: "Post-run canonical outputs read back from the One Path persisted artifact path.",
       },
       {
         section: "Effective Variables Used By Last Run",
@@ -213,11 +214,11 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         copiedInAiPayload: true,
         runRequired: true,
         pageOnly: false,
-        backedBySharedOwner: true,
+        backedBySharedOwner: false,
         ownerFiles: ["modules/onePathSim/simulationVariablePolicy.ts", "modules/onePathSim/onePathSim.ts"],
         ownerSymbols: ["resolveSimulationVariablePolicyForInputType", "buildSharedSimulationReadModel"],
         notes:
-          "Run-linked resolved variable snapshot with per-field value sources from the shared artifact/read-model pipeline.",
+          "Run-linked resolved variable snapshot with per-field value sources from the One Path artifact/read-model pipeline.",
       },
       {
         section: "Chart / Window / Display Logic and Manual Statement / Annual Logic",
@@ -227,11 +228,11 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         copiedInAiPayload: true,
         runRequired: true,
         pageOnly: false,
-        backedBySharedOwner: true,
+        backedBySharedOwner: false,
         ownerFiles: ["modules/onePathSim/onePathTruthSummary.ts"],
         ownerSymbols: ["buildOnePathTruthSummary"],
         notes:
-          "Read-only audit panels for shared date/window ownership, manual statement ownership, and thin admin control ownership.",
+          "Read-only audit panels for One Path date/window ownership, manual statement ownership, and thin admin control ownership.",
       },
       {
         section: "Stage Boundary Map",
@@ -241,11 +242,11 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         copiedInAiPayload: true,
         runRequired: true,
         pageOnly: false,
-        backedBySharedOwner: true,
+        backedBySharedOwner: false,
         ownerFiles: ["modules/onePathSim/onePathTruthSummary.ts", "modules/onePathSim/onePathSim.ts"],
         ownerSymbols: ["buildOnePathTruthSummary", "buildSharedSimulationReadModel"],
         notes:
-          "Shows raw input, adapter choice, canonical engine input, derived inputs, shared producer stages, formatter output, and persisted artifact identity from shared readback only.",
+          "Shows raw input, adapter choice, canonical engine input, read-only input snapshots, One Path calculation stages, formatter output, and persisted artifact identity from One Path readback only.",
       },
       {
         section: "Upstream Usage Truth",
@@ -270,7 +271,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
           "Shows whether persisted usage truth already existed, whether the isolated harness stayed read-only, and whether downstream simulation was allowed to proceed.",
       },
       {
-        section: "Shared Derived Inputs Used By Run",
+        section: "Read-Only Inputs and Resolved Controls Used By Run",
         surfaceType: "truth_panel",
         visibleOnPage: true,
         editableOnPage: false,
@@ -281,10 +282,10 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         ownerFiles: ["modules/onePathSim/onePathTruthSummary.ts", "modules/onePathSim/weatherSensitivityShared.ts"],
         ownerSymbols: ["buildOnePathTruthSummary", "resolveSharedWeatherSensitivityEnvelope"],
         notes:
-          "Surfaces weather-efficiency input, donor/fallback modes, rebalance mode, intraday controls, and compare thresholds from shared diagnostics and effective run snapshot.",
+          "Surfaces weather-efficiency input, donor/fallback modes, rebalance mode, intraday controls, and compare thresholds from read-only inputs and the effective One Path run snapshot.",
       },
       {
-        section: "Final Shared Output Contract",
+        section: "Final One Path Output Contract",
         surfaceType: "truth_panel",
         visibleOnPage: true,
         editableOnPage: false,
@@ -295,7 +296,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         ownerFiles: ["modules/onePathSim/onePathTruthSummary.ts", "modules/onePathSim/onePathSim.ts"],
         ownerSymbols: ["buildOnePathTruthSummary", "CanonicalSimulationReadModel"],
         notes:
-          "Breaks the final shared output into named contract sections instead of forcing admins to rely on one giant JSON blob.",
+          "Breaks the final One Path output into named contract sections instead of forcing admins to rely on one giant JSON blob.",
       },
       {
         section: "Home, appliance, manual usage, and travel popups",
@@ -534,53 +535,53 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
       },
       {
         step: 3,
-        label: "Shared adapters build canonical engine input",
+        label: "One Path adapters build canonical engine input",
         from: "rawInputBase",
         to: "CanonicalSimulationEngineInput",
         ownerFile: "modules/onePathSim/onePathSim.ts",
         ownerSymbol: "adaptIntervalRawInput / adaptManualMonthlyRawInput / adaptManualAnnualRawInput / adaptNewBuildRawInput",
-        sharedOwner: true,
+        sharedOwner: false,
         notes: "All four modes adapt into one canonical engine-input contract.",
       },
       {
         step: 4,
-        label: "Canonical engine input dispatches shared recalc",
+        label: "Canonical engine input dispatches One Path interval calculations",
         from: "CanonicalSimulationEngineInput",
         to: "recalcSimulatorBuild",
         ownerFile: "modules/onePathSim/onePathSim.ts",
         ownerSymbol: "runSharedSimulation",
-        sharedOwner: true,
-        notes: "One Path maps engineInput.runtime into RecalcSimulatorBuildArgs and stays on the shared producer family.",
+        sharedOwner: false,
+        notes: "One Path maps engineInput.runtime into RecalcSimulatorBuildArgs and stays inside the One Path-owned interval path.",
       },
       {
         step: 5,
-        label: "Shared recalc resolves profiles, policy, weather envelope, and statement targets",
+        label: "One Path recalc resolves profiles, policy, weather envelope, and statement targets",
         from: "RecalcSimulatorBuildArgs",
         to: "simulator build inputs",
-        ownerFile: "modules/usageSimulator/service.ts",
+        ownerFile: "modules/onePathSim/usageSimulator/service.ts",
         ownerSymbol: "recalcSimulatorBuild",
-        sharedOwner: true,
+        sharedOwner: false,
         notes:
           "This is where policy, manual bill-period targets, weather sensitivity envelope, and effectiveSimulationVariablesUsed are resolved.",
       },
       {
         step: 6,
-        label: "Shared past producer simulates canonical dataset",
+        label: "One Path past producer simulates canonical dataset",
         from: "simulator build inputs",
         to: "persisted past dataset artifact",
-        ownerFile: "modules/simulatedUsage/simulatePastUsageDataset.ts",
+        ownerFile: "modules/onePathSim/simulatedUsage/simulatePastUsageDataset.ts",
         ownerSymbol: "simulatePastUsageDataset",
-        sharedOwner: true,
+        sharedOwner: false,
         notes: "Owns day simulation, weather loading, stitched curves, and dataset packaging for past-sim scenarios.",
       },
       {
         step: 7,
-        label: "Shared service persists build and artifact metadata",
+        label: "One Path service persists build and artifact metadata",
         from: "simulated dataset",
         to: "usageSimulatorBuild + cached artifact",
-        ownerFile: "modules/usageSimulator/service.ts",
+        ownerFile: "modules/onePathSim/usageSimulator/service.ts",
         ownerSymbol: "upsertSimulatorBuild flow",
-        sharedOwner: true,
+        sharedOwner: false,
         notes: "Applies canonical coverage metadata and stores effective variable snapshots in dataset meta.",
       },
       {
@@ -590,28 +591,28 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         to: "CanonicalSimulationArtifact",
         ownerFile: "modules/onePathSim/onePathSim.ts",
         ownerSymbol: "buildArtifactFromEngineInput",
-        sharedOwner: true,
+        sharedOwner: false,
         notes: "Reads artifact-only data and attaches run identity to effectiveSimulationVariablesUsed.",
       },
       {
         step: 9,
-        label: "Shared read model decorates artifact for admin review",
+        label: "One Path read model decorates artifact for admin review",
         from: "CanonicalSimulationArtifact",
         to: "CanonicalSimulationReadModel",
         ownerFile: "modules/onePathSim/onePathSim.ts",
         ownerSymbol: "buildSharedSimulationReadModel",
-        sharedOwner: true,
+        sharedOwner: false,
         notes: "Adds compare sidecars, curve compare payloads, tuning summary, truth summary, and run-linked variable snapshot.",
       },
       {
         step: 10,
-        label: "Shared read-only shapers feed page and AI copy",
+        label: "Read-only shapers feed page and AI copy",
         from: "CanonicalSimulationReadModel",
         to: "admin truth panels and AI payload",
         ownerFile: "modules/onePathSim/simulationVariablePresentation.ts",
         ownerSymbol: "buildSimulationVariableCopyPayload",
-        sharedOwner: true,
-        notes: "The page renders shared shaper output; the copy payload comes from the same shared shaper.",
+        sharedOwner: false,
+        notes: "The page renders One Path shaper output; any shared display reuse is presentation-only, and the AI copy payload comes from the same One Path shaper.",
       },
     ],
     externalSurfaceClassification: [
@@ -641,7 +642,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         classification: "shared_run_orchestrator",
         ownerFiles: ["app/api/admin/tools/manual-monthly/route.ts", "modules/manualUsage/pastSimReadResult.ts"],
         ownerSymbols: ["POST", "buildManualUsagePastSimReadResult"],
-        notes: "Uses shared recalc/readback and shared manual read-model decorations rather than page-local simulation.",
+        notes: "Uses the live shared run/readback path and shared manual read-model decorations rather than page-local simulation.",
       },
       {
         surface: "User simulated-house route",
@@ -666,10 +667,10 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
       },
       {
         surface: "One Path Sim Admin",
-        classification: "shared_run_orchestrator",
+        classification: "one_path_run_orchestrator",
         ownerFiles: ["app/api/admin/tools/one-path-sim/route.ts", "modules/onePathSim/onePathSim.ts"],
         ownerSymbols: ["POST", "runSharedSimulation", "buildSharedSimulationReadModel"],
-        notes: "Admin audit/tuning harness for the same shared producer family used elsewhere.",
+        notes: "Admin audit/tuning harness for One Path-owned interval calculations; shared/live dependencies are limited to read-only inputs and display reuse.",
       },
     ],
     driftRiskWatchlist: [
@@ -685,7 +686,7 @@ export function buildOnePathOwnershipAudit(): OnePathOwnershipAudit {
         currentState: "tightened_in_this_pass",
         ownerFiles: ["app/api/admin/tools/one-path-sim/route.ts", "modules/onePathSim/simulationVariablePolicy.ts"],
         ownerSymbols: ["POST", "getSimulationVariablePolicy"],
-        notes: "Lookup preview should resolve the same mode-aware policy bucket used by the shared recalc path.",
+        notes: "Lookup preview should resolve the same mode-aware policy bucket used by the One Path interval path.",
       },
       {
         risk: "One Path actual-context preview can drift if lookup ignores actualContextHouseId",

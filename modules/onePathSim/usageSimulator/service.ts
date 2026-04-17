@@ -4024,7 +4024,7 @@ async function recalcSimulatorBuildImpl(args: {
   persistPastSimBaseline?: boolean;
   /**
    * Canonical Gap-Fill validation-only scored days.
-   * These keys are simulated in the same shared recalc run and persisted on the same build/artifact family.
+   * These keys are simulated in the same One Path recalc run and persisted on the same build/artifact family.
    */
   validationOnlyDateKeysLocal?: Set<string> | string[];
   preLockboxTravelRanges?: Array<{ startDate: string; endDate: string }>;
@@ -4106,7 +4106,7 @@ async function recalcSimulatorBuildImpl(args: {
   });
 
   // Manual totals runs under a very small Prisma pool in admin environments, so avoid
-  // fan-out here and keep the shared recalc lean before the persisted readback loads richer diagnostics.
+  // fan-out here and keep the One Path recalc lean before the persisted readback loads richer diagnostics.
   const manualRec = await (prisma as any).manualUsageInput
     .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
     .catch(() => null);
@@ -6207,7 +6207,7 @@ export async function getPastSimulatedDatasetForHouse(args: {
   endDate: string;
   /** When set, excluded days use weekday/weekend avg from UsageShapeProfile (local timezone). */
   timezone?: string;
-  /** Optional producer mode; default stays on shared recalc producer path. */
+  /** Optional producer mode; default stays on the One Path recalc producer path. */
   buildPathKind?: "cold_build" | "recalc" | "lab_validation";
   /** Optional local test-day keys kept in reference pool while modeled outputs are emitted. */
   forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
@@ -7098,7 +7098,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ensureBaselineMonthlyFromBuild(dataset, buildInputs);
         }
       }
-      // Build through the shared producer when the authoritative runtime path owns truth there.
+      // Build through the One Path producer when the authoritative runtime path owns truth there.
       const shouldUseSharedProducerRead =
         !dataset &&
         (mode === "MANUAL_TOTALS" || (isPastScenario && isSmtBaselineMode));

@@ -663,7 +663,7 @@ export const SIMULATION_VARIABLE_POLICY_FAMILY_META = {
   },
   adapterCanonicalInput: {
     title: "Adapter / Canonical Input",
-    description: "Shared canonical window, anchor, bill-end, and pre-engine normalization knobs used before the shared producer runs.",
+    description: "Canonical window, anchor, bill-end, and pre-engine normalization knobs used before the One Path producer runs.",
   },
   constraintRebalance: {
     title: "Constraint / Rebalance",

@@ -687,7 +687,7 @@ export function OnePathSimAdmin() {
     setRunResult(null);
     setBusy(true);
     setError(null);
-    setStatus(`Running canonical ${mode} through the shared producer pipeline...`);
+    setStatus(`Running canonical ${mode} through the One Path-owned interval calculations...`);
     const res = await fetch("/api/admin/tools/one-path-sim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -730,7 +730,7 @@ export function OnePathSimAdmin() {
     }
     setRunResult(json);
     setLastRunKnownScenarioKey(selectedKnownScenario?.scenarioKey ?? "");
-    setStatus("Shared run completed and read back from the canonical artifact/read-model path.");
+    setStatus("One Path run completed and read back from the canonical artifact/read-model path.");
   }, [
     debugDiagnosticsEnabled,
     effectiveActualContextHouseId,
@@ -785,9 +785,10 @@ export function OnePathSimAdmin() {
         <div className="rounded-2xl bg-brand-white p-6 shadow-lg">
           <div className="text-2xl font-semibold text-brand-navy">One Path Sim Admin</div>
           <p className="mt-2 max-w-4xl text-sm text-slate-600">
-            Thin admin harness for the pre-cutover canonical simulation truth console. All four modes adapt into one
-            shared producer pipeline, persist one artifact family, and render from the shared read model only. Older
-            surfaces are not rerouted to this harness yet.
+            Thin admin harness for the pre-cutover canonical simulation truth console. All four modes adapt into
+            One Path-owned interval calculations, persist one artifact family, and render from the One Path read model
+            only. Shared/live inputs stay read-only, and shared display reuse stays presentation-only. Older surfaces
+            are not rerouted to this harness yet.
           </p>
           <div className="mt-2 text-xs text-slate-500">Older surfaces are not rerouted to this harness yet.</div>
         </div>
@@ -796,8 +797,8 @@ export function OnePathSimAdmin() {
           <div className="mb-4 rounded-xl border border-brand-blue/10 bg-slate-50 p-4">
             <div className="text-sm font-semibold text-brand-navy">Editable Shared Config / Inputs</div>
             <p className="mt-1 text-xs text-slate-600">
-              Pre-cutover harness controls only. These feed the shared adapter path and shared policy store, but this
-              pass does not cut older surfaces over.
+              Pre-cutover harness controls only. These feed the One Path selector path and One Path policy store while
+              leaving shared/live dependencies read-only. This pass does not cut older surfaces over.
             </p>
           </div>
           <div className="grid gap-4 lg:grid-cols-4">
@@ -982,7 +983,7 @@ export function OnePathSimAdmin() {
               placeholder="YYYY-MM-DD, one per line or comma-separated"
             />
             <div className="mt-2 text-xs text-slate-500">
-              Shared manual validation keys sent through the canonical adapter path. Current parsed count: {validationOnlyDateKeysLocal.length}
+              One Path manual validation keys sent through the canonical adapter path. Current parsed count: {validationOnlyDateKeysLocal.length}
             </div>
           </label>
 
@@ -1024,14 +1025,15 @@ export function OnePathSimAdmin() {
               disabled={busy || !lookup || !effectiveHouseId}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
             >
-              Run shared producer
+              Run One Path interval path
             </button>
           </div>
 
           <div className="mt-6 rounded-xl border border-brand-blue/10 bg-slate-50 p-4">
-            <div className="text-sm font-semibold text-brand-navy">Shared calculation variable popups</div>
+            <div className="text-sm font-semibold text-brand-navy">One Path calculation variable popups</div>
             <p className="mt-1 text-xs text-slate-600">
-              These edit the shared module variables directly. A change here affects the shared calculation owners that read this policy.
+              These edit the One Path module variables directly. A change here affects the One Path-owned interval calculations
+              that read this policy.
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
               <button
@@ -1142,7 +1144,7 @@ export function OnePathSimAdmin() {
           </div>
           <SectionJson title="One Path surface audit matrix" value={ownershipAudit.pageSurfaceAuditMatrix} />
           <SectionJson title="AI copy payload inventory" value={ownershipAudit.aiCopyPayloadInventory} />
-          <SectionJson title="Shared wiring flow" value={ownershipAudit.sharedWiringFlow} />
+          <SectionJson title="One Path wiring flow" value={ownershipAudit.sharedWiringFlow} />
           <SectionJson title="External surface classification" value={ownershipAudit.externalSurfaceClassification} />
           <SectionJson title="Drift-risk watchlist" value={ownershipAudit.driftRiskWatchlist} />
           </div>
@@ -1151,7 +1153,7 @@ export function OnePathSimAdmin() {
         {debugDiagnosticsEnabled && runResult ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="text-sm font-semibold text-brand-navy">Read-Only Shared Run Truth</div>
+              <div className="text-sm font-semibold text-brand-navy">Read-Only One Path Run Truth</div>
               <p className="mt-2 text-sm text-slate-600">
                 These panels come from shared readback owners only. They make the full producer chain, derived inputs,
                 shared owners, and final output contract auditable without cutting older surfaces over yet.
@@ -1185,7 +1187,7 @@ export function OnePathSimAdmin() {
                 sharedOwners={Array.isArray(upstreamUsageTruth?.sharedOwners) ? (upstreamUsageTruth?.sharedOwners as any[]) : []}
               />
               <TruthSummaryPanel
-                title="Shared Derived Inputs Used By Run"
+                title="Read-Only Inputs and Resolved Controls Used By Run"
                 summary={String(runResult.readModel?.sourceOfTruthSummary?.sharedDerivedInputs?.summary ?? "")}
                 currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.sharedDerivedInputs?.currentRun)}
                 sharedOwners={
@@ -1255,7 +1257,7 @@ export function OnePathSimAdmin() {
                 }
               />
               <TruthSummaryPanel
-                title="Annual Shared Truth"
+                title="Annual One Path Truth"
                 summary={String(runResult.readModel?.sourceOfTruthSummary?.annualModeTruth?.summary ?? "")}
                 currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.annualModeTruth?.currentRun)}
                 sharedOwners={
@@ -1265,7 +1267,7 @@ export function OnePathSimAdmin() {
                 }
               />
               <TruthSummaryPanel
-                title="New Build Shared Truth"
+                title="New Build One Path Truth"
                 summary={String(runResult.readModel?.sourceOfTruthSummary?.newBuildModeTruth?.summary ?? "")}
                 currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.newBuildModeTruth?.currentRun)}
                 sharedOwners={
@@ -1275,7 +1277,7 @@ export function OnePathSimAdmin() {
                 }
               />
               <TruthSummaryPanel
-                title="Final Shared Output Contract"
+                title="Final One Path Output Contract"
                 summary={String(runResult.readModel?.sourceOfTruthSummary?.finalSharedOutputContract?.summary ?? "")}
                 currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.finalSharedOutputContract?.currentRun)}
                 sharedOwners={
@@ -1285,14 +1287,14 @@ export function OnePathSimAdmin() {
                 }
               />
               <TruthSummaryPanel
-                title="Shared source-of-truth summary"
+                title="One Path source-of-truth summary"
                 summary={String(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.summary ?? "")}
                 currentRun={asRecord(runResult.readModel?.sourceOfTruthSummary?.controlSurface?.currentRun)}
               />
               <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Effective Variables Used By Last Run</div>
                 <p className="mt-2 text-xs text-slate-600">
-                  Value sources are resolved in the shared canonical read model only. Labels include default, mode
+                  Value sources are resolved in the One Path canonical read model only. Labels include default, mode
                   override, and explicit admin override.
                 </p>
               </div>
@@ -1421,7 +1423,7 @@ export function OnePathSimAdmin() {
       >
         <div className="space-y-4">
           <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-            These are the shared validation selection modes used by the shared selector path. This popup explains how each
+            These are the shared validation selection modes used by the One Path selector path. This popup explains how each
             option works and gives the admin a thin control surface for mode and day-count adjustments only.
           </div>
           <SectionJson

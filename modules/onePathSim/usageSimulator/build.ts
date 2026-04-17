@@ -107,7 +107,7 @@ function manualMonthlyTotals(
     }
     if (filledMonths.length > 0) {
       notes.push(
-        `Manual monthly Stage 2 completed ${filledMonths.length} missing bill-cycle month(s) using the shared estimation path before the shared producer run.`
+        `Manual monthly Stage 2 completed ${filledMonths.length} missing bill-cycle month(s) using the One Path estimation path before the One Path producer run.`
       );
     }
     return {

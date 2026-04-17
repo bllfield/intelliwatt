@@ -403,14 +403,14 @@ function monthlyLayerSummary(args: {
         simulatedOrDerived: ["Monthly allocation", "Daily totals", "Interval curves"],
         modeSpecificRules: [
           "Month targets are derived from the annual constraint instead of monthly statement entries.",
-          "Annual allocation still flows into the same shared Stage 2 producer path.",
+          "Annual allocation still flows into the same One Path Stage 2 producer path.",
         ],
       };
     case "actual_backed":
       return {
         summary: "Monthly totals are aggregated from source intervals; there is no manual total constraint layer ahead of daily/interval truth.",
         preservedOrLocked: ["Actual interval-derived energy"],
-        simulatedOrDerived: ["Only modeled keep-ref/test outputs where the shared producer requires them"],
+        simulatedOrDerived: ["Only modeled keep-ref/test outputs where the One Path producer requires them"],
         modeSpecificRules: [
           "The actual-backed branch preserves source interval truth as the baseline input.",
         ],
@@ -958,7 +958,7 @@ export function buildGapfillCalculationLogicSummary(args: {
           : monthlyLayer.preservedOrLocked,
       simulatedOrDerived:
         modeInfo.modeFamily === "actual_backed"
-          ? ["Modeled keep-ref/test outputs only where the shared producer requires them"]
+          ? ["Modeled keep-ref/test outputs only where the One Path producer requires them"]
           : monthlyLayer.simulatedOrDerived,
       fallbackOrder: [],
       modeSpecificRules: [
@@ -982,15 +982,15 @@ export function buildGapfillCalculationLogicSummary(args: {
           ? [
               pureManualMonthlyMode
                 ? "Saved manual monthly payload is the first and only Stage 1 driver for this mode"
-                : "Shared monthly payload precedence first",
+                : "Saved monthly payload precedence first",
               pureManualMonthlyMode
                 ? "Source actual usage stays compare-only after Stage 1 is locked"
                 : "Actual-derived seeded statement ranges when usable source monthly payload is missing",
-              "Stage 2 still uses the shared producer path after normalization",
+              "Stage 2 still uses the One Path producer path after normalization",
             ]
           : modeInfo.modeFamily === "manual_annual"
             ? [
-                "Shared annual payload precedence first",
+                "Saved annual payload precedence first",
                 "Actual-derived annual seed when a usable annual payload is missing",
                 "No monthly bill-range reconciliation is injected into annual mode",
               ]
@@ -1028,8 +1028,8 @@ export function buildGapfillCalculationLogicSummary(args: {
       title: "4. Daily Total Selection Layer",
       summary:
         modeInfo.modeFamily === "actual_backed"
-          ? "The shared day selector now starts from a bounded K-nearest weather-similar donor blend inside the reference pool. Variance guardrails damp noisy donor cohorts before any true calendar fallback is used."
-          : "The shared day selector chooses a target daily kWh from the strongest available same-shape history, then falls back step-by-step when that evidence is weak.",
+          ? "The One Path day selector now starts from a bounded K-nearest weather-similar donor blend inside the reference pool. Variance guardrails damp noisy donor cohorts before any true calendar fallback is used."
+          : "The One Path day selector chooses a target daily kWh from the strongest available same-shape history, then falls back step-by-step when that evidence is weak.",
       variablesUsed: [
         modeInfo.modeFamily === "actual_backed" ? "Trusted donor-day weather similarity and weighted donor blending" : "Month/day-type history",
         modeInfo.modeFamily === "actual_backed" ? "Weekday/weekend donor separation" : "Neighbor day-of-month samples",
@@ -1089,8 +1089,8 @@ export function buildGapfillCalculationLogicSummary(args: {
       title: "6. Interval Shape Layer",
       summary:
         modeInfo.modeFamily === "actual_backed"
-          ? "Once the donor-led day total is set, the shared shape selector stays on the same shared bucket path but can prefer the donor month bucket before broadening."
-          : "Once the day total is set, the shared shape selector chooses the strongest available 96-slot profile for that month/day-type/weather regime combination.",
+          ? "Once the donor-led day total is set, the One Path shape selector stays on the same bucket path but can prefer the donor month bucket before broadening."
+          : "Once the day total is set, the One Path shape selector chooses the strongest available 96-slot profile for that month/day-type/weather regime combination.",
       variablesUsed: ["Usage shape profile identity", "Month/day-type/weather buckets", "Per-day shape variant selection"],
       preservedOrLocked: ["Daily total chosen in the previous layer"],
       simulatedOrDerived: ["96-slot interval shape", "Per-interval kWh allocation"],
@@ -1113,13 +1113,13 @@ export function buildGapfillCalculationLogicSummary(args: {
       key: "stitch-layer",
       title: "7. Stitch / Final Output Layer",
       summary:
-        "The shared producer writes the final daily, monthly, interval, and artifact metadata once the lockbox run completes; GapFill only reads that persisted truth.",
-      variablesUsed: ["Shared producer path flag", "Artifact input hash", "Full chain hash", "Projection read mode"],
-      preservedOrLocked: ["Shared Stage 2 producer path"],
+        "The One Path producer writes the final daily, monthly, interval, and artifact metadata once the lockbox run completes; GapFill only reads that persisted truth.",
+      variablesUsed: ["One Path producer path flag", "Artifact input hash", "Full chain hash", "Projection read mode"],
+      preservedOrLocked: ["One Path Stage 2 producer path"],
       simulatedOrDerived: ["Persisted baseline projection and display rows"],
       fallbackOrder: [],
       modeSpecificRules: [
-        `Shared producer path used: ${sharedProducerPathUsed ? "true" : "false"}`,
+        `One Path producer path used: ${sharedProducerPathUsed ? "true" : "false"}`,
         `Artifact input hash: ${String(lockboxExecutionSummary.artifactInputHash ?? "not attached")}`,
         `Read mode / projection mode: ${joinNonEmpty([
           String(projectionReadSummary.readMode ?? ""),
@@ -1131,7 +1131,7 @@ export function buildGapfillCalculationLogicSummary(args: {
       key: "compare-layer",
       title: "8. Compare / Scoring Layer",
       summary:
-        "GapFill scoring stays read-only and artifact-backed. Persisted validation/test compare rows and metrics are read after the shared producer finishes; no route-local simulator path is introduced.",
+        "GapFill scoring stays read-only and artifact-backed. Persisted validation/test compare rows and metrics are read after the One Path producer finishes; no route-local simulator path is introduced.",
       variablesUsed: ["Validation/test keys", "Persisted compare rows", "Persisted compare metrics", "Diagnostics verdict"],
       preservedOrLocked: ["Compare/scoring semantics"],
       simulatedOrDerived: ["Error metrics and row-level deltas"],

@@ -28,7 +28,7 @@ describe("one path ownership audit source", () => {
     expect(pageSource).toContain("One Path Hard Audit");
     expect(pageSource).toContain("One Path surface audit matrix");
     expect(pageSource).toContain("AI copy payload inventory");
-    expect(pageSource).toContain("Shared wiring flow");
+    expect(pageSource).toContain("One Path wiring flow");
     expect(pageSource).toContain("External surface classification");
     expect(pageSource).toContain("Drift-risk watchlist");
     expect(pageSource).toContain("pre-cutover canonical simulation truth console");
@@ -36,8 +36,12 @@ describe("one path ownership audit source", () => {
     expect(auditSource).toContain("Pre-cutover harness status");
     expect(auditSource).toContain("Stage Boundary Map");
     expect(auditSource).toContain("Upstream Usage Truth");
-    expect(auditSource).toContain("Shared Derived Inputs Used By Run");
-    expect(auditSource).toContain("Final Shared Output Contract");
+    expect(auditSource).toContain("Read-Only Inputs and Resolved Controls Used By Run");
+    expect(auditSource).toContain("Final One Path Output Contract");
+    expect(auditSource).toContain("One Path-owned interval calculations live inside modules/onePathSim/**");
+    expect(auditSource).not.toContain("shared simulation chain");
+    expect(auditSource).not.toContain("shared simulation owners");
+    expect(auditSource).not.toContain("dispatches shared recalc");
     expect(copySource).toContain("ownershipAudit");
     expect(copySource).toContain("buildOnePathOwnershipAudit");
     expect(copySource).toContain("truthConsole");
