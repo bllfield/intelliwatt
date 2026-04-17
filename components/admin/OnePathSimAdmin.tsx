@@ -5,6 +5,7 @@ import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { OnePathBaselineReadOnlyView } from "@/components/admin/OnePathBaselineReadOnlyView";
+import { OnePathRunReadOnlyView } from "@/components/admin/OnePathRunReadOnlyView";
 import {
   buildSimulationVariableCopyPayload,
   buildSimulationVariableFamilyAdminView,
@@ -333,6 +334,11 @@ export function OnePathSimAdmin() {
   const lookupBaselineParityReport = useMemo(
     () => asRecord(lookup?.sourceContext?.baselineParityReport),
     [lookup?.sourceContext?.baselineParityReport]
+  );
+  const isPastSimRun = sandboxHarnessSummary.runStatus.runType === "PAST_SIM";
+  const runReadOnlyDataset = useMemo(
+    () => asRecord(runResult?.readModel?.dataset),
+    [runResult?.readModel?.dataset]
   );
 
   const activeVariableFamilyView = useMemo(
@@ -1016,7 +1022,9 @@ export function OnePathSimAdmin() {
           {error ? <div className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
         </div>
 
-        {lookupUserUsageBaselineContract ? (
+        {isPastSimRun && runReadOnlyDataset ? (
+          <OnePathRunReadOnlyView dataset={runReadOnlyDataset} />
+        ) : lookupUserUsageBaselineContract ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
               <div className="text-sm font-semibold text-brand-navy">Household energy insights</div>
@@ -1278,13 +1286,6 @@ export function OnePathSimAdmin() {
               <SectionJson title="Effective Variables Used By Last Run" value={runResult.readModel?.effectiveSimulationVariablesUsed ?? null} />
             </div>
           </div>
-        ) : null}
-        {!runResult && lookupUserUsageBaselineContract ? (
-          <OnePathBaselineReadOnlyView
-            houseContract={lookupUserUsageBaselineContract as any}
-            parityAudit={lookupBaselineParityAudit as any}
-            parityReport={lookupBaselineParityReport as any}
-          />
         ) : null}
       </div>
 

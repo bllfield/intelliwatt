@@ -121,9 +121,12 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Daily usage");
     expect(source).toContain("15-minute load curve");
     expect(source).toContain("OnePathBaselineReadOnlyView");
+    expect(source).toContain("OnePathRunReadOnlyView");
     expect(source).toContain("userUsageBaselineContract");
     expect(source).toContain("baselineParityAudit");
     expect(source).toContain("baselineParityReport");
+    expect(source).toContain('sandboxHarnessSummary.runStatus.runType === "PAST_SIM"');
+    expect(source).toContain("runResult?.readModel?.dataset");
     expect(source).toContain("Known scenario / expectations");
     expect(source).toContain("Tuning cycle summary");
     expect(source).toContain("runResult.readModel?.effectiveSimulationVariablesUsed");
@@ -178,8 +181,11 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(knownScenarioPrereqSource).toContain("compareCapableNow");
     expect(knownScenarioPrereqSource).toContain("blockingReasons");
     const baselineReadOnlyViewSource = readRepoFile("components/admin/OnePathBaselineReadOnlyView.tsx");
+    const runReadOnlyViewSource = readRepoFile("components/admin/OnePathRunReadOnlyView.tsx");
     expect(source).toContain("intervalPastReadinessTrace?.applicableToCurrentPreset !== false");
     expect(baselineReadOnlyViewSource).toContain("display-owner split");
+    expect(runReadOnlyViewSource).toContain("canonical simulated run result");
+    expect(runReadOnlyViewSource).toContain("baseline contract");
     expect(presentationSource).toContain("knownScenario");
     expect(presentationSource).toContain("sandboxSummary");
     expect(presentationSource).toContain("tuningCycleSummary");
