@@ -42,6 +42,34 @@ const EV_SELECT = {
   evSmartCharger: true,
 } as const;
 
+const HOME_PROFILE_SELECT = {
+  homeAge: true,
+  homeStyle: true,
+  squareFeet: true,
+  stories: true,
+  insulationType: true,
+  windowType: true,
+  foundation: true,
+  ledLights: true,
+  smartThermostat: true,
+  summerTemp: true,
+  winterTemp: true,
+  occupantsWork: true,
+  occupantsSchool: true,
+  occupantsHomeAllDay: true,
+  fuelConfiguration: true,
+  hvacType: true,
+  heatingType: true,
+  hasPool: true,
+  poolPumpType: true,
+  poolPumpHp: true,
+  poolSummerRunHoursPerDay: true,
+  poolWinterRunHoursPerDay: true,
+  hasPoolHeater: true,
+  poolHeaterType: true,
+  ...EV_SELECT,
+} as const;
+
 function recToEv(rec: Record<string, unknown> | null): import("@/modules/homeProfile/validation").HomeProfileEv | undefined {
   if (!rec || !rec.evHasVehicle) return undefined;
   return {
@@ -79,6 +107,30 @@ function evApplianceDataToFlat(data: Record<string, any>): Record<string, unknow
   };
 }
 
+function materializeHomeProfileRecord(rec: Record<string, unknown> | null): HomeProfileSimulatedForSimulator | null {
+  if (!rec) return null;
+  const r = rec as any;
+  return {
+    ...r,
+    ev: recToEv(r),
+  } as HomeProfileSimulatedForSimulator;
+}
+
+export async function getHomeProfileReadOnlyByUserHouse(args: {
+  userId: string;
+  houseId: string;
+}): Promise<HomeProfileSimulatedForSimulator | null> {
+  try {
+    const rec = await homeDetailsPrisma.homeProfileSimulated.findUnique({
+      where: { userId_houseId: { userId: args.userId, houseId: args.houseId } },
+      select: HOME_PROFILE_SELECT,
+    });
+    return materializeHomeProfileRecord((rec as Record<string, unknown> | null) ?? null);
+  } catch {
+    return null;
+  }
+}
+
 export async function getHomeProfileSimulatedByUserHouse(args: {
   userId: string;
   houseId: string;
@@ -86,33 +138,7 @@ export async function getHomeProfileSimulatedByUserHouse(args: {
   try {
     let rec = await homeDetailsPrisma.homeProfileSimulated.findUnique({
       where: { userId_houseId: { userId: args.userId, houseId: args.houseId } },
-      select: {
-        homeAge: true,
-        homeStyle: true,
-        squareFeet: true,
-        stories: true,
-        insulationType: true,
-        windowType: true,
-        foundation: true,
-        ledLights: true,
-        smartThermostat: true,
-        summerTemp: true,
-        winterTemp: true,
-        occupantsWork: true,
-        occupantsSchool: true,
-        occupantsHomeAllDay: true,
-        fuelConfiguration: true,
-        hvacType: true,
-        heatingType: true,
-        hasPool: true,
-        poolPumpType: true,
-        poolPumpHp: true,
-        poolSummerRunHoursPerDay: true,
-        poolWinterRunHoursPerDay: true,
-        hasPoolHeater: true,
-        poolHeaterType: true,
-        ...EV_SELECT,
-      },
+      select: HOME_PROFILE_SELECT,
     });
 
     if (rec && !(rec as any).evHasVehicle) {
@@ -136,12 +162,7 @@ export async function getHomeProfileSimulatedByUserHouse(args: {
       }
     }
 
-    if (!rec) return null;
-    const r = rec as any;
-    return {
-      ...r,
-      ev: recToEv(r),
-    } as HomeProfileSimulatedForSimulator;
+    return materializeHomeProfileRecord((rec as Record<string, unknown> | null) ?? null);
   } catch {
     return null;
   }

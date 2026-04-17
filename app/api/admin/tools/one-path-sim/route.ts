@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getHomeProfileReadOnlyByUserHouse } from "@/modules/homeProfile/repo";
 import {
   adaptIntervalRawInput,
   adaptManualAnnualRawInput,
@@ -24,6 +24,7 @@ import {
   type SimulationVariableInputType,
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/runtime";
+import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -146,7 +147,7 @@ export async function POST(request: NextRequest) {
       payload: null,
       updatedAt: null,
     })),
-    getHomeProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
+    getHomeProfileReadOnlyByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
     getApplianceProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
     getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
   ]);
@@ -159,6 +160,28 @@ export async function POST(request: NextRequest) {
     weatherHouseId: previewActualContextHouse.id,
     simulationVariablePolicy: previewSimulationVariablePolicy,
   }).catch(() => ({ score: null, derivedInput: null }));
+  const previewLookupSourceContext = {
+    actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
+    actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,
+    usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",
+    usageTruthSeedResult: usageTruth?.seedResult ?? null,
+    upstreamUsageTruth: usageTruth?.summary ?? null,
+    manualUsagePayload: manualUsage.payload ?? null,
+    manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
+    travelRangesFromDb,
+    homeProfile: homeProfile ?? null,
+    applianceProfile: applianceProfile ?? null,
+    weatherScore: weatherEnvelope.score ?? null,
+    weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
+  } as const;
+  const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({
+    scenario: {
+      mode: previewMode,
+      scenarioSelectionStrategy:
+        typeof body?.scenarioId === "string" && body.scenarioId.trim() ? "scenario_id" : "baseline",
+    },
+    lookupSourceContext: previewLookupSourceContext,
+  });
 
   if (action === "lookup" || !action) {
     return NextResponse.json({
@@ -169,18 +192,8 @@ export async function POST(request: NextRequest) {
       selectedHouse: resolved.selectedHouse,
       scenarios: resolved.scenarios,
       sourceContext: {
-        actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
-        actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,
-        usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",
-        usageTruthSeedResult: usageTruth?.seedResult ?? null,
-        upstreamUsageTruth: usageTruth?.summary ?? null,
-        manualUsagePayload: manualUsage.payload ?? null,
-        manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
-        travelRangesFromDb,
-        homeProfile: homeProfile ?? null,
-        applianceProfile: applianceProfile ?? null,
-        weatherScore: weatherEnvelope.score ?? null,
-        weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
+        ...previewLookupSourceContext,
+        readOnlyAudit,
       },
     });
   }

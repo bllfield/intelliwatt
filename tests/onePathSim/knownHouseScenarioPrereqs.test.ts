@@ -28,6 +28,25 @@ describe("one path known-house scenario prereqs", () => {
     expect(status.compareCapableNow).toBe(false);
     expect(status.blockingReasons).toEqual(["Complete Home Details (required fields)."]);
     expect(status.availablePrepActions).toEqual(["prepare_home_details"]);
+    expect(status.validatorAudit.homeDetails).toEqual(
+      expect.objectContaining({
+        ready: false,
+        validator: "validateHomeProfile(requirePastBaselineFields=true)",
+        failureCode: "occupants_invalid",
+      })
+    );
+    expect(status.blockingDetails).toEqual([
+      expect.objectContaining({
+        category: "homeDetails",
+        validator: "validateHomeProfile(requirePastBaselineFields=true)",
+        failureCode: "occupants_invalid",
+      }),
+    ]);
+    expect(status.readSourceComparison.usageTruth).toEqual(
+      expect.objectContaining({
+        sameRunOwnerAsUserSite: true,
+      })
+    );
   });
 
   it("marks a Brian manual monthly Past preset compare-capable only when home, appliances, usage truth, and manual totals are ready", () => {
@@ -86,5 +105,18 @@ describe("one path known-house scenario prereqs", () => {
     expect(status.usageTruthReady).toBe(true);
     expect(status.compareCapableNow).toBe(true);
     expect(status.blockingReasons).toEqual([]);
+    expect(status.validatorAudit.manualMonthlyPayload).toEqual(
+      expect.objectContaining({
+        ready: true,
+        validator: "hasUsableMonthlyPayload",
+        failureCode: null,
+      })
+    );
+    expect(status.readSourceComparison.manualUsage).toEqual(
+      expect.objectContaining({
+        sameBackingStoreAsUserSite: true,
+        sameRunOwnerAsUserSite: false,
+      })
+    );
   });
 });

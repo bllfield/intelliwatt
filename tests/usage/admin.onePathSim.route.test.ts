@@ -10,6 +10,7 @@ const listScenarios = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const getHomeProfileSimulatedByUserHouse = vi.fn();
+const getHomeProfileReadOnlyByUserHouse = vi.fn();
 const getApplianceProfileSimulatedByUserHouse = vi.fn();
 const normalizeStoredApplianceProfile = vi.fn();
 const resolveSharedWeatherSensitivityEnvelope = vi.fn();
@@ -62,15 +63,20 @@ vi.mock("@/modules/usageSimulator/service", () => ({
 
 vi.mock("@/modules/homeProfile/repo", () => ({
   getHomeProfileSimulatedByUserHouse: (...args: any[]) => getHomeProfileSimulatedByUserHouse(...args),
+  getHomeProfileReadOnlyByUserHouse: (...args: any[]) => getHomeProfileReadOnlyByUserHouse(...args),
 }));
 
 vi.mock("@/modules/applianceProfile/repo", () => ({
   getApplianceProfileSimulatedByUserHouse: (...args: any[]) => getApplianceProfileSimulatedByUserHouse(...args),
 }));
 
-vi.mock("@/modules/applianceProfile/validation", () => ({
-  normalizeStoredApplianceProfile: (...args: any[]) => normalizeStoredApplianceProfile(...args),
-}));
+vi.mock("@/modules/applianceProfile/validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/applianceProfile/validation")>();
+  return {
+    ...actual,
+    normalizeStoredApplianceProfile: (...args: any[]) => normalizeStoredApplianceProfile(...args),
+  };
+});
 
 vi.mock("@/modules/onePathSim/runtime", () => ({
   getOnePathManualUsageInput: (...args: any[]) => getManualUsageInputForUserHouse(...args),
@@ -112,6 +118,7 @@ describe("admin one path sim route", () => {
     getManualUsageInputForUserHouse.mockReset();
     saveManualUsageInputForUserHouse.mockReset();
     getHomeProfileSimulatedByUserHouse.mockReset();
+    getHomeProfileReadOnlyByUserHouse.mockReset();
     getApplianceProfileSimulatedByUserHouse.mockReset();
     normalizeStoredApplianceProfile.mockReset();
     resolveSharedWeatherSensitivityEnvelope.mockReset();
@@ -156,6 +163,7 @@ describe("admin one path sim route", () => {
     });
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: null, updatedAt: null });
     getHomeProfileSimulatedByUserHouse.mockResolvedValue({ squareFeet: 2000 });
+    getHomeProfileReadOnlyByUserHouse.mockResolvedValue({ squareFeet: 2000 });
     getApplianceProfileSimulatedByUserHouse.mockResolvedValue({ appliancesJson: { fuelConfiguration: "all_electric", appliances: [] } });
     normalizeStoredApplianceProfile.mockReturnValue({ fuelConfiguration: "all_electric", appliances: [] });
     resolveSharedWeatherSensitivityEnvelope.mockResolvedValue({ score: { scoringMode: "INTERVAL_BASED" }, derivedInput: null });
@@ -193,8 +201,22 @@ describe("admin one path sim route", () => {
       seedingAttempted: false,
       seedingResult: "not_needed",
     });
+    expect(json.sourceContext.readOnlyAudit.validatorAudit.usageTruth).toEqual(
+      expect.objectContaining({
+        ready: true,
+        validator: "upstreamUsageTruth.currentRun.statusSummary.downstreamSimulationAllowed || usageTruthSource === persisted_usage_output",
+      })
+    );
+    expect(json.sourceContext.readOnlyAudit.readSourceComparison.manualUsage).toEqual(
+      expect.objectContaining({
+        sameBackingStoreAsUserSite: true,
+      })
+    );
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
     expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
+    expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(saveManualUsageInputForUserHouse).not.toHaveBeenCalled();
   });
 
   it("uses the selected mode policy and actual context house for lookup weather preview", async () => {
