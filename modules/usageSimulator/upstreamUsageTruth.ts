@@ -4,6 +4,9 @@ import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
+// This module is the live shared upstream-usage owner for existing shared simulation surfaces.
+// The isolated lockbox owner is implemented separately under modules/onePathSim/upstreamUsageTruth.ts.
+
 export type UpstreamUsageTruthOwner = {
   label: string;
   owner: string;
@@ -98,7 +101,7 @@ export function buildUpstreamUsageTruthSummary(args: {
   return {
     title: "Upstream Usage Truth",
     summary:
-      "This panel makes the hard lock explicit: usage stays upstream, simulation stays downstream, and One Path only consumes persisted usage truth or requests the existing shared usage refresh path before running.",
+      "This panel describes the live shared upstream-usage owner: usage stays upstream, simulation stays downstream, and the shared path reads persisted usage truth first before optionally requesting the existing live usage refresh path.",
     currentRun: {
       statusSummary: {
         usageTruthStatus: status.usageTruthStatus,
@@ -151,7 +154,7 @@ export function buildUpstreamUsageTruthSummary(args: {
       {
         label: "Upstream truth resolver",
         owner: "modules/usageSimulator/upstreamUsageTruth.ts",
-        whyItMatters: "Reads persisted usage truth first and prevents One Path from becoming a second upstream usage producer.",
+        whyItMatters: "Defines the live shared owner that reads persisted usage truth first and optionally seeds it through the existing shared refresh path.",
       },
       {
         label: "Shared usage layer",
@@ -166,7 +169,7 @@ export function buildUpstreamUsageTruthSummary(args: {
       {
         label: "Existing usage route owner",
         owner: "app/api/user/usage/refresh/route.ts",
-        whyItMatters: "The user-facing usage refresh route remains the existing orchestration entrypoint; this pass only surfaces that truth in the pre-cutover harness.",
+        whyItMatters: "The user-facing usage refresh route remains the existing orchestration entrypoint for the live shared owner.",
       },
     ],
   };

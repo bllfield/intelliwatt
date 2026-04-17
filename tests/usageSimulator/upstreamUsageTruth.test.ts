@@ -20,7 +20,7 @@ vi.mock("@/lib/usage/userUsageRefresh", () => ({
   requestUsageRefreshForUserHouse: (...args: any[]) => requestUsageRefreshForUserHouse(...args),
 }));
 
-describe("upstream usage truth for simulation", () => {
+describe("live shared upstream usage truth owner", () => {
   beforeEach(() => {
     findFirst.mockReset();
     resolveIntervalsLayer.mockReset();
@@ -33,7 +33,7 @@ describe("upstream usage truth for simulation", () => {
     });
   });
 
-  it("reads persisted usage truth through the shared usage layer when available", async () => {
+  it("reads persisted usage truth through the live shared usage layer when available", async () => {
     resolveIntervalsLayer.mockResolvedValue({
       dataset: { summary: { totalKwh: 123 } },
       alternatives: { smt: { totalKwh: 123 }, greenButton: null },
@@ -67,7 +67,7 @@ describe("upstream usage truth for simulation", () => {
     });
   });
 
-  it("requests the existing usage refresh flow when persisted usage truth is missing", async () => {
+  it("requests the existing live usage refresh flow when persisted usage truth is missing", async () => {
     resolveIntervalsLayer
       .mockResolvedValueOnce({ dataset: null, alternatives: { smt: null, greenButton: null } })
       .mockResolvedValueOnce({
