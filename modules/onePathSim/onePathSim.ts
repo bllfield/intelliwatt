@@ -273,6 +273,18 @@ function buildMonthlyTotalsRecord(rows: unknown): Record<string, number> {
   }, {});
 }
 
+function buildManualBillPeriodTotalsRecord(rows: unknown): Record<string, number> {
+  if (!Array.isArray(rows)) return {};
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    const id = String((row as any)?.id ?? "");
+    const kwh = Number((row as any)?.targetKwh ?? (row as any)?.kwh ?? Number.NaN);
+    if (id && Number.isFinite(kwh)) {
+      acc[id] = kwh;
+    }
+    return acc;
+  }, {});
+}
+
 function buildIntervalBaselinePassthroughDataset(args: {
   engineInput: CanonicalSimulationEngineInput;
   upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
@@ -335,10 +347,24 @@ function buildManualBaselinePassthroughDataset(args: {
   upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
   manualUsagePayload: ManualUsagePayload | null;
 }) {
+  const statementRanges =
+    Array.isArray((args.manualUsagePayload as any)?.statementRanges)
+      ? ((args.manualUsagePayload as any).statementRanges as unknown[])
+      : Array.isArray(args.engineInput.statementRanges)
+        ? args.engineInput.statementRanges
+        : [];
   const monthlyRows =
     args.manualUsagePayload?.mode === "MONTHLY"
-      ? Object.entries(args.engineInput.monthlyTotalsKwhByMonth)
-          .map(([month, kwh]) => ({ month, kwh: Number(kwh) || 0 }))
+      ? (
+          Array.isArray((args.manualUsagePayload as any)?.monthlyKwh) &&
+          (args.manualUsagePayload as any).monthlyKwh.length > 0
+            ? (args.manualUsagePayload as any).monthlyKwh
+            : Object.entries(args.engineInput.monthlyTotalsKwhByMonth).map(([month, kwh]) => ({ month, kwh }))
+        )
+          .map((row: any) => ({
+            month: String(row?.month ?? "").slice(0, 7),
+            kwh: Number(row?.kwh ?? 0) || 0,
+          }))
           .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
           .sort((a, b) => (a.month < b.month ? -1 : 1))
       : [];
@@ -346,10 +372,14 @@ function buildManualBaselinePassthroughDataset(args: {
     args.manualUsagePayload?.mode === "ANNUAL"
       ? Math.max(0, Number(args.manualUsagePayload.annualKwh ?? args.engineInput.annualTargetKwh ?? 0) || 0)
       : monthlyRows.reduce((sum, row) => sum + row.kwh, 0);
-  const firstStatementRange = Array.isArray(args.engineInput.statementRanges) ? (args.engineInput.statementRanges[0] as any) : null;
-  const lastStatementRange = Array.isArray(args.engineInput.statementRanges)
-    ? (args.engineInput.statementRanges[args.engineInput.statementRanges.length - 1] as any)
+  const firstStatementRange = Array.isArray(statementRanges) ? (statementRanges[0] as any) : null;
+  const lastStatementRange = Array.isArray(statementRanges)
+    ? (statementRanges[statementRanges.length - 1] as any)
     : null;
+  const payloadAnchorEndDate =
+    typeof (args.manualUsagePayload as any)?.anchorEndDate === "string"
+      ? String((args.manualUsagePayload as any).anchorEndDate).slice(0, 10)
+      : null;
   const startDate =
     typeof lastStatementRange?.startDate === "string"
       ? String(lastStatementRange.startDate).slice(0, 10)
@@ -357,13 +387,15 @@ function buildManualBaselinePassthroughDataset(args: {
   const endDate =
     typeof firstStatementRange?.endDate === "string"
       ? String(firstStatementRange.endDate).slice(0, 10)
-      : args.engineInput.anchorEndDate ?? args.engineInput.coverageWindowEnd ?? null;
+      : payloadAnchorEndDate ?? args.engineInput.anchorEndDate ?? args.engineInput.coverageWindowEnd ?? null;
   const presentation = resolveOnePathManualStageOnePresentation({
     surface: "admin_manual_monthly_stage_one",
     payload: args.manualUsagePayload,
   });
   const billPeriods =
     args.manualUsagePayload != null ? buildOnePathManualBillPeriodTargets(args.manualUsagePayload) : [];
+  const manualBillPeriodTotalsKwhById =
+    buildManualBillPeriodTotalsRecord(statementRanges) ?? args.engineInput.manualBillPeriodTotalsKwhById;
   const annualSeriesTimestamp =
     (endDate ?? args.engineInput.coverageWindowEnd ?? `${new Date().getUTCFullYear()}-12-31`).slice(0, 4) +
     "-01-01T00:00:00.000Z";
@@ -406,9 +438,9 @@ function buildManualBaselinePassthroughDataset(args: {
       coverageEnd: endDate ?? args.engineInput.coverageWindowEnd ?? null,
       canonicalMonths: args.engineInput.canonicalMonths,
       timezone: args.engineInput.timezone,
-      statementRanges: args.engineInput.statementRanges,
+      statementRanges,
       manualBillPeriods: billPeriods,
-      manualBillPeriodTotalsKwhById: args.engineInput.manualBillPeriodTotalsKwhById,
+      manualBillPeriodTotalsKwhById,
       manualStageOnePresentation: presentation,
       manualPayloadMode: args.manualUsagePayload?.mode ?? null,
       lockboxExecutionMode: "baseline_passthrough_only",
@@ -1096,12 +1128,18 @@ export function buildSharedSimulationReadModel(
   artifact: CanonicalSimulationArtifact
 ): CanonicalSimulationReadModel {
   const meta = artifact.dataset.meta ?? {};
-  const curvePayload = buildOnePathDailyCurveComparePayload({
-    actualDataset: null,
-    simulatedDataset: artifact.dataset,
-    compareRows: artifact.compareProjection?.rows ?? [],
-    timezone: String((meta as any)?.timezone ?? "America/Chicago"),
-  });
+  const isBaselinePassthroughRead =
+    artifact.scenarioId == null &&
+    artifact.inputType !== "NEW_BUILD" &&
+    Boolean((meta as any)?.baselinePassthrough);
+  const curvePayload = isBaselinePassthroughRead
+    ? null
+    : buildOnePathDailyCurveComparePayload({
+        actualDataset: null,
+        simulatedDataset: artifact.dataset,
+        compareRows: artifact.compareProjection?.rows ?? [],
+        timezone: String((meta as any)?.timezone ?? "America/Chicago"),
+      });
   const runIdentity = {
     artifactId: artifact.artifactId,
     artifactInputHash: artifact.artifactInputHash,

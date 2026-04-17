@@ -14,6 +14,7 @@ describe("one path sim canonical variable snapshot source", () => {
     const policySource = readRepoFile("modules/usageSimulator/simulationVariablePolicy.ts");
     const truthSummarySource = readRepoFile("modules/onePathSim/onePathTruthSummary.ts");
     const upstreamUsageSource = readRepoFile("modules/onePathSim/upstreamUsageTruth.ts");
+    const onePathServiceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
     const usageRouteSource = readRepoFile("app/api/user/usage/route.ts");
     const usagePageSource = readRepoFile("app/dashboard/usage/page.tsx");
 
@@ -33,6 +34,9 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(source).toContain("donorFallbackExclusions");
     expect(source).toContain("intradayReconstruction");
     expect(source).toContain("finalSharedOutputContract");
+    expect(source).toContain("buildManualBaselinePassthroughDataset");
+    expect(source).toContain("baselineSimulationBlocked");
+    expect(source).toContain("lockboxExecutionMode: \"baseline_passthrough_only\"");
     expect(policySource).toContain("valueSource");
     expect(policySource).toContain("resolvedWeatherShapingMode");
     expect(policySource).toContain("resolvedRebalanceMode");
@@ -54,6 +58,8 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(upstreamUsageSource).toContain("baseline_upstream_usage_seed_start");
     expect(upstreamUsageSource).toContain("baseline_upstream_usage_seed_success");
     expect(upstreamUsageSource).toContain("baseline_upstream_usage_seed_failure");
+    expect(onePathServiceSource).toContain("baseline_invariant_violation_synthetic_packaging_attempt");
+    expect(onePathServiceSource).toContain("baseline_passthrough_required");
     expect(usageRouteSource).toContain("resolveIntervalsLayer");
     expect(usagePageSource).toContain("UsageDashboard");
     expect(usagePageSource).not.toContain("one-path-sim");

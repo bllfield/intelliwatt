@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
 const getOnePathManualUsageInput = vi.fn();
 const resolveOnePathManualStageOnePresentation = vi.fn();
+const buildOnePathDailyCurveComparePayload = vi.fn();
 const buildOnePathValidationCompareProjectionSidecar = vi.fn();
 const buildOnePathSharedPastSimDiagnostics = vi.fn();
 const buildOnePathManualArtifactDecorations = vi.fn();
@@ -35,11 +36,7 @@ vi.mock("@/modules/applianceProfile/validation", () => ({
 
 vi.mock("@/modules/onePathSim/runtime", () => ({
   attachOnePathRunIdentityToEffectiveSimulationVariablesUsed: vi.fn((value: unknown) => value),
-  buildOnePathDailyCurveComparePayload: vi.fn(() => ({
-    actualIntervals15: [],
-    simulatedIntervals15: [],
-    simulatedDailyRows: [],
-  })),
+  buildOnePathDailyCurveComparePayload: (...args: any[]) => buildOnePathDailyCurveComparePayload(...args),
   buildOnePathManualBillPeriodTargets: vi.fn((payload: any) => payload?.statementRanges ?? []),
   buildOnePathSharedPastSimDiagnostics: (...args: any[]) => buildOnePathSharedPastSimDiagnostics(...args),
   buildOnePathValidationCompareProjectionSidecar: (...args: any[]) =>
@@ -182,6 +179,7 @@ describe("one path baseline passthrough", () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockReset();
     getOnePathManualUsageInput.mockReset();
     resolveOnePathManualStageOnePresentation.mockReset();
+    buildOnePathDailyCurveComparePayload.mockReset();
     buildOnePathValidationCompareProjectionSidecar.mockReset();
     buildOnePathSharedPastSimDiagnostics.mockReset();
     buildOnePathManualArtifactDecorations.mockReset();
@@ -193,6 +191,11 @@ describe("one path baseline passthrough", () => {
     buildOnePathValidationCompareProjectionSidecar.mockReturnValue({
       rows: [],
       metrics: { mode: "baseline" },
+    });
+    buildOnePathDailyCurveComparePayload.mockReturnValue({
+      actualIntervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.11 }],
+      simulatedIntervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.22 }],
+      simulatedDailyRows: [{ date: "2026-04-01", kwh: 8.4 }],
     });
     buildOnePathSharedPastSimDiagnostics.mockReturnValue({
       lockboxExecutionSummary: {
@@ -224,29 +227,30 @@ describe("one path baseline passthrough", () => {
   });
 
   it("reuses upstream interval usage truth for baseline and skips synthetic recalc", async () => {
+    const upstreamDataset = {
+      summary: {
+        source: "SMT",
+        totalKwh: 222,
+        start: "2026-03-01",
+        end: "2026-04-30",
+        latest: "2026-04-30",
+      },
+      daily: [{ date: "2026-04-01", kwh: 7.4 }],
+      monthly: [
+        { month: "2026-03", kwh: 110 },
+        { month: "2026-04", kwh: 112 },
+      ],
+      series: {
+        intervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.25 }],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "SMT",
+        canonicalMonths: ["2026-03", "2026-04"],
+      },
+    };
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
-      buildUsageTruth({
-        summary: {
-          source: "SMT",
-          totalKwh: 222,
-          start: "2026-03-01",
-          end: "2026-04-30",
-          latest: "2026-04-30",
-        },
-        daily: [{ date: "2026-04-01", kwh: 7.4 }],
-        monthly: [
-          { month: "2026-03", kwh: 110 },
-          { month: "2026-04", kwh: 112 },
-        ],
-        series: {
-          intervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.25 }],
-        },
-        meta: {
-          datasetKind: "ACTUAL",
-          actualSource: "SMT",
-          canonicalMonths: ["2026-03", "2026-04"],
-        },
-      })
+      buildUsageTruth(upstreamDataset)
     );
 
     const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
@@ -261,10 +265,9 @@ describe("one path baseline passthrough", () => {
       seedIfMissing: true,
     });
     expect(artifact.dataset.summary.source).toBe("SMT");
-    expect(artifact.dataset.monthly).toEqual([
-      { month: "2026-03", kwh: 110 },
-      { month: "2026-04", kwh: 112 },
-    ]);
+    expect(artifact.dataset.daily).toEqual(upstreamDataset.daily);
+    expect(artifact.dataset.monthly).toEqual(upstreamDataset.monthly);
+    expect(artifact.dataset.series.intervals15).toEqual(upstreamDataset.series.intervals15);
     expect(artifact.dataset.meta.baselinePassthrough).toBe(true);
     expect(artifact.dataset.series.intervals15).toHaveLength(1);
     expect(logSimPipelineEvent).toHaveBeenCalledWith(
@@ -276,7 +279,7 @@ describe("one path baseline passthrough", () => {
     );
   });
 
-  it("reuses saved manual monthly truth for baseline without calling the synthetic builder", async () => {
+  it("reuses saved manual monthly truth for baseline without drifting to normalized engine input values", async () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
       buildUsageTruth({
         summary: {
@@ -301,8 +304,8 @@ describe("one path baseline passthrough", () => {
           { month: "2026-04", kwh: 270 },
         ],
         statementRanges: [
-          { month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30" },
-          { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+          { id: "apr", month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30", kwh: 270 },
+          { id: "mar", month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31", kwh: 210 },
         ],
       },
     });
@@ -319,13 +322,17 @@ describe("one path baseline passthrough", () => {
         simulatorMode: "MANUAL_TOTALS",
         manualConstraintMode: "MANUAL_MONTHLY",
         monthlyTotalsKwhByMonth: {
-          "2026-03": 210,
-          "2026-04": 270,
+          "2026-03": 999,
+          "2026-04": 888,
         },
         statementRanges: [
-          { month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30" },
-          { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+          { id: "apr", month: "2026-04", startDate: "2026-04-05", endDate: "2026-04-29", kwh: 888 },
+          { id: "mar", month: "2026-03", startDate: "2026-03-05", endDate: "2026-03-29", kwh: 999 },
         ],
+        manualBillPeriodTotalsKwhById: {
+          apr: 888,
+          mar: 999,
+        },
         runtime: {
           ...buildBaseEngineInput().runtime,
           mode: "MANUAL_TOTALS",
@@ -345,9 +352,17 @@ describe("one path baseline passthrough", () => {
     ]);
     expect(artifact.dataset.series.intervals15).toEqual([]);
     expect(artifact.dataset.meta.baselinePassthroughMode).toBe("MANUAL_MONTHLY");
+    expect(artifact.dataset.meta.statementRanges).toEqual([
+      { id: "apr", month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30", kwh: 270 },
+      { id: "mar", month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31", kwh: 210 },
+    ]);
+    expect(artifact.manualBillPeriodTotalsKwhById).toEqual({
+      apr: 270,
+      mar: 210,
+    });
   });
 
-  it("reuses saved manual annual truth for baseline without inventing normalized monthly output", async () => {
+  it("reuses saved manual annual truth for baseline without drifting to normalized engine input coverage", async () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
       buildUsageTruth({
         summary: {
@@ -366,7 +381,7 @@ describe("one path baseline passthrough", () => {
     getOnePathManualUsageInput.mockResolvedValue({
       payload: {
         mode: "ANNUAL",
-        anchorEndDate: "2026-04-30",
+        anchorEndDate: "2026-02-15",
         annualKwh: 12345,
         statementRanges: [],
       },
@@ -383,7 +398,8 @@ describe("one path baseline passthrough", () => {
         inputType: "MANUAL_ANNUAL",
         simulatorMode: "MANUAL_TOTALS",
         manualConstraintMode: "MANUAL_ANNUAL",
-        annualTargetKwh: 12345,
+        annualTargetKwh: 99999,
+        anchorEndDate: "2026-04-30",
         runtime: {
           ...buildBaseEngineInput().runtime,
           mode: "MANUAL_TOTALS",
@@ -393,9 +409,12 @@ describe("one path baseline passthrough", () => {
 
     expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
     expect(artifact.dataset.summary.totalKwh).toBe(12345);
+    expect(artifact.dataset.summary.end).toBe("2026-02-15");
+    expect(artifact.dataset.summary.latest).toBe("2026-02-15");
     expect(artifact.dataset.monthly).toEqual([]);
     expect(artifact.dataset.series.intervals15).toEqual([]);
     expect(artifact.dataset.meta.baselinePassthroughMode).toBe("MANUAL_ANNUAL");
+    expect(artifact.dataset.meta.coverageEnd).toBe("2026-02-15");
   });
 
   it("fails baseline only when upstream usage truth still cannot be obtained", async () => {
@@ -482,5 +501,97 @@ describe("one path baseline passthrough", () => {
     expect(runOnePathSimulatorBuild).toHaveBeenCalledTimes(1);
     expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledTimes(1);
     expect(artifact.dataset.summary.source).toBe("SIMULATED");
+  });
+
+  it("suppresses Past Sim-only curve compare payloads for baseline read models", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth({
+        summary: {
+          source: "SMT",
+          totalKwh: 222,
+          start: "2026-03-01",
+          end: "2026-04-30",
+          latest: "2026-04-30",
+        },
+        daily: [{ date: "2026-04-01", kwh: 7.4 }],
+        monthly: [{ month: "2026-04", kwh: 222 }],
+        series: {
+          intervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.25 }],
+        },
+        meta: { datasetKind: "ACTUAL" },
+      })
+    );
+
+    const { runSharedSimulation, buildSharedSimulationReadModel } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(buildBaseEngineInput());
+    const readModel = buildSharedSimulationReadModel(artifact);
+
+    expect(buildOnePathDailyCurveComparePayload).not.toHaveBeenCalled();
+    expect(readModel.curveCompareActualIntervals15).toEqual([]);
+    expect(readModel.curveCompareSimulatedIntervals15).toEqual([]);
+    expect(readModel.curveCompareSimulatedDailyRows).toEqual([]);
+  });
+
+  it("keeps Past Sim-only curve compare payloads on Past read models", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth({
+        summary: {
+          source: "SMT",
+          totalKwh: 222,
+          start: "2026-03-01",
+          end: "2026-04-30",
+          latest: "2026-04-30",
+        },
+        daily: [],
+        monthly: [],
+        series: { intervals15: [] },
+        meta: { datasetKind: "ACTUAL" },
+      })
+    );
+    runOnePathSimulatorBuild.mockResolvedValue({
+      ok: true,
+      canonicalArtifactInputHash: "artifact-hash-1",
+    });
+    readOnePathSimulatedUsageScenario.mockResolvedValue({
+      ok: true,
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          totalKwh: 240,
+          start: "2026-03-01",
+          end: "2026-04-30",
+          latest: "2026-04-30",
+        },
+        daily: [{ date: "2026-04-01", kwh: 8 }],
+        monthly: [{ month: "2026-04", kwh: 240 }],
+        series: {
+          intervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.25 }],
+        },
+        meta: {
+          artifactInputHash: "artifact-hash-1",
+          engineVersion: "past-v1",
+          manualBillPeriodTotalsKwhById: {},
+        },
+      },
+    });
+
+    const { runSharedSimulation, buildSharedSimulationReadModel } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        scenarioId: "past-scenario-1",
+        runtime: {
+          ...buildBaseEngineInput().runtime,
+          scenarioId: "past-scenario-1",
+        },
+      })
+    );
+    const readModel = buildSharedSimulationReadModel(artifact);
+
+    expect(buildOnePathDailyCurveComparePayload).toHaveBeenCalledTimes(1);
+    expect(readModel.curveCompareActualIntervals15).toEqual([{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.11 }]);
+    expect(readModel.curveCompareSimulatedIntervals15).toEqual([
+      { timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.22 },
+    ]);
+    expect(readModel.curveCompareSimulatedDailyRows).toEqual([{ date: "2026-04-01", kwh: 8.4 }]);
   });
 });
