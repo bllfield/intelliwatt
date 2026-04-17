@@ -123,7 +123,16 @@ export type CanonicalSimulationArtifact = {
     summary: any;
     daily: any[];
     monthly: any[];
-    series: { intervals15: any[] };
+    dailyWeather?: Record<string, unknown> | null;
+    totals?: Record<string, unknown> | null;
+    insights?: Record<string, unknown> | null;
+    series: {
+      intervals15: any[];
+      hourly?: any[];
+      daily?: any[];
+      monthly?: any[];
+      annual?: any[];
+    };
     meta: Record<string, unknown>;
   };
   simulatedDayResults: any[];
@@ -1154,10 +1163,34 @@ async function buildArtifactFromEngineInput(args: {
       summary: (datasetRead.dataset as any)?.summary ?? {},
       daily: Array.isArray((datasetRead.dataset as any)?.daily) ? (datasetRead.dataset as any).daily : [],
       monthly: Array.isArray((datasetRead.dataset as any)?.monthly) ? (datasetRead.dataset as any).monthly : [],
+      dailyWeather:
+        (datasetRead.dataset as any)?.dailyWeather &&
+        typeof (datasetRead.dataset as any).dailyWeather === "object" &&
+        !Array.isArray((datasetRead.dataset as any).dailyWeather)
+          ? (datasetRead.dataset as any).dailyWeather
+          : null,
+      totals:
+        (datasetRead.dataset as any)?.totals &&
+        typeof (datasetRead.dataset as any).totals === "object" &&
+        !Array.isArray((datasetRead.dataset as any).totals)
+          ? (datasetRead.dataset as any).totals
+          : null,
+      insights:
+        (datasetRead.dataset as any)?.insights &&
+        typeof (datasetRead.dataset as any).insights === "object" &&
+        !Array.isArray((datasetRead.dataset as any).insights)
+          ? (datasetRead.dataset as any).insights
+          : null,
       series: {
         intervals15: Array.isArray((datasetRead.dataset as any)?.series?.intervals15)
           ? (datasetRead.dataset as any).series.intervals15
           : [],
+        hourly: Array.isArray((datasetRead.dataset as any)?.series?.hourly) ? (datasetRead.dataset as any).series.hourly : [],
+        daily: Array.isArray((datasetRead.dataset as any)?.series?.daily) ? (datasetRead.dataset as any).series.daily : [],
+        monthly: Array.isArray((datasetRead.dataset as any)?.series?.monthly)
+          ? (datasetRead.dataset as any).series.monthly
+          : [],
+        annual: Array.isArray((datasetRead.dataset as any)?.series?.annual) ? (datasetRead.dataset as any).series.annual : [],
       },
       meta: asRecord((datasetRead.dataset as any)?.meta) ?? {},
     },

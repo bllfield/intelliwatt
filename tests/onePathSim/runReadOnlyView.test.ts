@@ -54,6 +54,70 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "00:00", avgKw: 1.2 },
       { hhmm: "00:15", avgKw: 1.3 },
     ]);
+    expect(view?.summary.baseload).toBe(0.9);
+    expect(view?.summary.weekdayKwh).toBe(9000);
+    expect(view?.summary.weekendKwh).toBe(6008.06);
+    expect(view?.summary.timeOfDayBuckets).toEqual([{ key: "overnight", label: "Overnight", kwh: 2500 }]);
+  });
+
+  it("keeps daily weather and monthly baseload truth when the simulated dataset already carries them", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+        },
+        daily: [{ date: "2026-04-16", kwh: 10, source: "SIMULATED" }],
+        dailyWeather: {
+          "2026-04-16": {
+            tAvgF: 72.3,
+            tMinF: 61.1,
+            tMaxF: 84.4,
+            hdd65: 0,
+            cdd65: 7.3,
+            source: "actual",
+          },
+        },
+        monthly: [
+          { month: "2025-05", kwh: 650 },
+          { month: "2025-06", kwh: 688.52 },
+          { month: "2025-07", kwh: 710 },
+        ],
+        totals: {
+          importKwh: 15008.06,
+          exportKwh: 0,
+          netKwh: 15008.06,
+        },
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 9000, weekend: 6008.06 },
+          timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 2500 }],
+          peakDay: null,
+          peakHour: null,
+          baseload: 0.95,
+          baseloadDaily: 22.75,
+          baseloadMonthly: 688.52,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          weatherSourceSummary: "actual_only",
+        },
+      },
+    });
+
+    expect(view?.dailyWeather?.["2026-04-16"]).toEqual({
+      tAvgF: 72.3,
+      tMinF: 61.1,
+      tMaxF: 84.4,
+      hdd65: 0,
+      cdd65: 7.3,
+      source: "actual",
+    });
+    expect(view?.summary.baseload).toBe(0.95);
+    expect(view?.summary.baseloadDaily).toBe(22.75);
+    expect(view?.summary.baseloadMonthly).toBe(688.52);
+    expect(view?.summary.timeOfDayBuckets.length).toBe(1);
+    expect(view?.fifteenMinuteAverages).toEqual([{ hhmm: "00:00", avgKw: 1.2 }]);
   });
 
   it("binds validation compare rows and metrics from the persisted read model", () => {
