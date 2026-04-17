@@ -16,6 +16,22 @@ export type OnePathWeatherAvailability = {
   failureMessage: string | null;
 };
 
+export type OnePathWeatherGuardScope = "trusted_simulation_output" | "baseline_passthrough_or_lookup";
+
+export type OnePathWeatherGuardDecision = {
+  scope: OnePathWeatherGuardScope;
+  shouldHardStop: boolean;
+  weatherTrustStatus: "trusted_weather" | "untrusted_weather" | "weather_incomplete_for_baseline_readback";
+  weatherCoverageStatus:
+    | "actual_weather_coverage_complete"
+    | "partial_weather_coverage"
+    | "missing_weather_coverage"
+    | "stub_weather_only";
+  missingLatestWeatherDay: boolean;
+  partialWeatherCoverage: boolean;
+  failureMessage: string | null;
+};
+
 function uniqueSortedDateKeys(dateKeys: string[]): string[] {
   return Array.from(
     new Set(
@@ -109,5 +125,40 @@ export function summarizeOnePathWeatherAvailability(args: {
     missingDateCount,
     missingDateKeys,
     failureMessage,
+  };
+}
+
+export function resolveOnePathWeatherGuardDecision(args: {
+  availability: OnePathWeatherAvailability;
+  scope: OnePathWeatherGuardScope;
+}): OnePathWeatherGuardDecision {
+  const missingLatestWeatherDay =
+    args.availability.weatherCoverageEnd != null &&
+    args.availability.missingDateKeys.includes(args.availability.weatherCoverageEnd);
+  const partialWeatherCoverage =
+    args.availability.weatherSourceSummary === "mixed_actual_and_stub" ||
+    args.availability.weatherSourceSummary === "stub_only";
+  const weatherCoverageStatus: OnePathWeatherGuardDecision["weatherCoverageStatus"] =
+    args.availability.weatherSourceSummary === "actual_only"
+      ? "actual_weather_coverage_complete"
+      : args.availability.weatherSourceSummary === "none"
+        ? "missing_weather_coverage"
+        : args.availability.weatherSourceSummary === "stub_only"
+          ? "stub_weather_only"
+          : "partial_weather_coverage";
+  const shouldHardStop = args.scope === "trusted_simulation_output" && !args.availability.available;
+
+  return {
+    scope: args.scope,
+    shouldHardStop,
+    weatherTrustStatus: args.availability.available
+      ? "trusted_weather"
+      : shouldHardStop
+        ? "untrusted_weather"
+        : "weather_incomplete_for_baseline_readback",
+    weatherCoverageStatus,
+    missingLatestWeatherDay,
+    partialWeatherCoverage,
+    failureMessage: shouldHardStop ? args.availability.failureMessage : null,
   };
 }

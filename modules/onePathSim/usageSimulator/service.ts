@@ -63,7 +63,7 @@ import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill, ensureHouseWeatherNormalAvgBackfill } from "@/modules/weather/backfill";
 import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
 import type { SimulatedDayResult } from "@/modules/onePathSim/simulatedUsage/pastDaySimulatorTypes";
-import { summarizeOnePathWeatherAvailability } from "@/modules/onePathSim/weatherAvailability";
+import { resolveOnePathWeatherGuardDecision, summarizeOnePathWeatherAvailability } from "@/modules/onePathSim/weatherAvailability";
 import {
   canonicalIntervalKey,
   dateKeyInTimezone,
@@ -142,6 +142,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
   buildInputs: Record<string, unknown>;
   fallbackHouseId: string;
   fallbackTimezone?: string | null;
+  scope: "trusted_simulation_output" | "baseline_passthrough_or_lookup";
 }) {
   const dataset = args.dataset;
   if (!dataset || !Array.isArray(dataset.daily) || dataset.daily.length === 0) return;
@@ -183,12 +184,35 @@ async function attachSelectedDailyWeatherForDataset(args: {
     weatherLogicMode,
     skippedLatLng,
   });
-  if (!weatherAvailability.available) {
+  const weatherGuard = resolveOnePathWeatherGuardDecision({
+    availability: weatherAvailability,
+    scope: args.scope,
+  });
+  if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") {
+    (dataset as any).meta = {};
+  }
+  (dataset as any).meta.weatherLogicMode = weatherLogicMode;
+  (dataset as any).meta.weatherKindUsed = weatherKind;
+  (dataset as any).meta.weatherSourceSummary = weatherAvailability.weatherSourceSummary;
+  (dataset as any).meta.weatherFallbackReason = weatherAvailability.weatherFallbackReason;
+  (dataset as any).meta.weatherProviderName = weatherAvailability.weatherProviderName;
+  (dataset as any).meta.weatherCoverageStart = weatherAvailability.weatherCoverageStart;
+  (dataset as any).meta.weatherCoverageEnd = weatherAvailability.weatherCoverageEnd;
+  (dataset as any).meta.weatherStubRowCount = weatherAvailability.weatherStubRowCount;
+  (dataset as any).meta.weatherActualRowCount = weatherAvailability.weatherActualRowCount;
+  (dataset as any).meta.weatherMissingDateCount = weatherAvailability.missingDateCount;
+  (dataset as any).meta.weatherMissingDateKeys = weatherAvailability.missingDateKeys;
+  (dataset as any).meta.weatherTrustStatus = weatherGuard.weatherTrustStatus;
+  (dataset as any).meta.weatherCoverageStatus = weatherGuard.weatherCoverageStatus;
+  (dataset as any).meta.missingLatestWeatherDay = weatherGuard.missingLatestWeatherDay;
+  (dataset as any).meta.partialWeatherCoverage = weatherGuard.partialWeatherCoverage;
+  if (weatherGuard.shouldHardStop) {
     throw new Error(
-      weatherAvailability.failureMessage ??
+      weatherGuard.failureMessage ??
         "Shared simulation weather guard failed: required real weather coverage is unavailable."
     );
   }
+  if (!weatherAvailability.available) return;
   (dataset as any).dailyWeather = Object.fromEntries(
     dateKeys.map((dateKey: string) => {
       const w = wxMap.get(dateKey)!;
@@ -205,18 +229,6 @@ async function attachSelectedDailyWeatherForDataset(args: {
       ];
     })
   );
-  if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") {
-    (dataset as any).meta = {};
-  }
-  (dataset as any).meta.weatherLogicMode = weatherLogicMode;
-  (dataset as any).meta.weatherKindUsed = weatherKind;
-  (dataset as any).meta.weatherSourceSummary = weatherAvailability.weatherSourceSummary;
-  (dataset as any).meta.weatherFallbackReason = weatherAvailability.weatherFallbackReason;
-  (dataset as any).meta.weatherProviderName = weatherAvailability.weatherProviderName;
-  (dataset as any).meta.weatherCoverageStart = weatherAvailability.weatherCoverageStart;
-  (dataset as any).meta.weatherCoverageEnd = weatherAvailability.weatherCoverageEnd;
-  (dataset as any).meta.weatherStubRowCount = weatherAvailability.weatherStubRowCount;
-  (dataset as any).meta.weatherActualRowCount = weatherAvailability.weatherActualRowCount;
 }
 import {
   buildSourceDerivedMonthlyTargetResolutionFromPayload,
@@ -6761,6 +6773,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         buildInputs,
         fallbackHouseId: args.houseId,
         fallbackTimezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
+        scope: scenarioKey === "BASELINE" ? "baseline_passthrough_or_lookup" : "trusted_simulation_output",
       });
       const quality = validateSharedSimQuality(restored);
       if (!quality.ok) {
@@ -7417,6 +7430,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       buildInputs: buildInputs as Record<string, unknown>,
       fallbackHouseId: args.houseId,
       fallbackTimezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
+      scope: scenarioKey === "BASELINE" ? "baseline_passthrough_or_lookup" : "trusted_simulation_output",
     });
 
     // Past and Future baseload come from the built curve (buildSimulatedUsageDatasetFromBuildInputs), which already

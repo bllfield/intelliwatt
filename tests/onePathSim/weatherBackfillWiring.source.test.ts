@@ -18,4 +18,17 @@ describe("one path weather backfill wiring", () => {
     expect(source).not.toContain("ensureOnePathWeatherBackfillNoOp");
     expect(source).not.toContain("ensureOnePathWeatherNormalAvgBackfillNoOp");
   });
+
+  it("keeps the hard-stop scoped to trusted simulation outputs, not baseline passthrough reads", () => {
+    const onePathSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
+    const weatherSource = readRepoFile("modules/onePathSim/weatherAvailability.ts");
+    const liveUsageRouteSource = readRepoFile("app/api/user/usage/route.ts");
+
+    expect(weatherSource).toContain("resolveOnePathWeatherGuardDecision");
+    expect(onePathSource).toContain('scope: scenarioKey === "BASELINE" ? "baseline_passthrough_or_lookup" : "trusted_simulation_output"');
+    expect(onePathSource).toContain("weatherTrustStatus");
+    expect(onePathSource).toContain("weatherCoverageStatus");
+    expect(liveUsageRouteSource).not.toContain("resolveOnePathWeatherGuardDecision");
+    expect(liveUsageRouteSource).not.toContain("summarizeOnePathWeatherAvailability");
+  });
 });
