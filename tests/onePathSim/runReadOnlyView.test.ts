@@ -120,6 +120,45 @@ describe("buildOnePathRunReadOnlyView", () => {
     expect(view?.fifteenMinuteAverages).toEqual([{ hhmm: "00:00", avgKw: 1.2 }]);
   });
 
+  it("rebuilds the 15-minute load curve from simulated interval truth when stored curve insights are missing", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+        },
+        daily: [
+          { date: "2026-04-16", kwh: 10, source: "SIMULATED" },
+          { date: "2026-04-17", kwh: 12, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-04", kwh: 22 }],
+        insights: {
+          weekdayVsWeekend: { weekday: 22, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 0.8,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-04-16T00:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-04-16T00:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-04-17T00:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2026-04-17T00:15:00.000Z", kwh: 1.0 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "00:00", avgKw: 2 },
+      { hhmm: "00:15", avgKw: 3 },
+    ]);
+  });
+
   it("binds validation compare rows and metrics from the persisted read model", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {

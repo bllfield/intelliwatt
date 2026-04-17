@@ -339,4 +339,85 @@ describe("one path simulation variable copy payload", () => {
       })
     );
   });
+
+  it("includes the rendered Past display monthly contract alongside raw monthly rows for AI copy", () => {
+    const payload = buildSimulationVariableCopyPayload({
+      mode: "INTERVAL",
+      response: {
+        familyMeta: {},
+        defaults: {},
+        effectiveByMode: { INTERVAL: {} },
+        overrides: {},
+      },
+      sandboxSummary: {
+        runStatus: {
+          runType: "PAST_SIM",
+        },
+      },
+      loadedSourceContext: {
+        userUsagePageBaselineContract: {
+          dataset: {
+            summary: { source: "SMT", intervalsCount: 4 },
+            monthly: [{ month: "2025-04", kwh: 10 }],
+            daily: [{ date: "2025-04-16", kwh: 10, source: "ACTUAL" }],
+            insights: {
+              fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+            },
+            meta: { actualSource: "SMT" },
+          },
+        },
+      } as any,
+      readModel: {
+        dataset: {
+          summary: {
+            source: "SIMULATED",
+            intervalsCount: 35040,
+          },
+          monthly: [
+            { month: "2025-04", kwh: 523.53 },
+            { month: "2025-05", kwh: 100 },
+            { month: "2026-04", kwh: 419.69 },
+          ],
+          daily: [{ date: "2026-04-16", kwh: 10, source: "SIMULATED" }],
+          insights: {
+            stitchedMonth: {
+              mode: "PRIOR_YEAR_TAIL",
+              yearMonth: "2026-04",
+              haveDaysThrough: 15,
+              missingDaysFrom: 16,
+              missingDaysTo: 30,
+              borrowedFromYearMonth: "2025-04",
+              completenessRule: "borrow_prior_year_tail",
+            },
+            fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 2.5 }],
+            weekdayVsWeekend: { weekday: 10, weekend: 0 },
+            timeOfDayBuckets: [],
+            peakDay: null,
+            peakHour: null,
+            baseload: 0.75,
+          },
+          totals: {
+            importKwh: 1043.22,
+            exportKwh: 0,
+            netKwh: 1043.22,
+          },
+          meta: {
+            datasetKind: "SIMULATED",
+          },
+        },
+      } as any,
+    } as any);
+
+    expect((payload.runDisplayContract as any)?.monthlyDisplayRows).toEqual([
+      { month: "2025-05", kwh: 100 },
+      { month: "2026-04", kwh: 943.22 },
+    ]);
+    expect((payload.runDisplayContract as any)?.rawMonthlyRows).toEqual([
+      { month: "2025-04", kwh: 523.53 },
+      { month: "2025-05", kwh: 100 },
+      { month: "2026-04", kwh: 419.69 },
+    ]);
+    expect((payload.runDisplayContract as any)?.monthlyRowsDifferFromRaw).toBe(true);
+    expect((payload.userUsageDashboardViewModel as any)?.monthlyRows).toEqual([{ month: "2025-04", kwh: 10 }]);
+  });
 });

@@ -12,6 +12,32 @@ function asDateKey(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
+function round2(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function buildFifteenMinuteAveragesFromIntervals15(
+  value: unknown
+): Array<{ hhmm: string; avgKw: number }> {
+  const buckets = new Map<string, { sumKw: number; count: number }>();
+  for (const row of asArray<Record<string, unknown>>(value)) {
+    const hhmm = String(row.timestamp ?? "").slice(11, 16);
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) continue;
+    const kwh = Number(row.kwh ?? row.consumption_kwh);
+    if (!Number.isFinite(kwh)) continue;
+    const current = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
+    current.sumKw += kwh * 4;
+    current.count += 1;
+    buckets.set(hhmm, current);
+  }
+  return Array.from(buckets.entries())
+    .map(([hhmm, bucket]) => ({
+      hhmm,
+      avgKw: bucket.count > 0 ? round2(bucket.sumKw / bucket.count) : 0,
+    }))
+    .sort((left, right) => (left.hhmm < right.hhmm ? -1 : left.hhmm > right.hhmm ? 1 : 0));
+}
+
 export type OnePathPastScenarioVariable = {
   kind: string;
   effectiveMonth?: string;
@@ -42,6 +68,7 @@ export type OnePathRunReadOnlyView = {
   dailyRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
   dailyWeather: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
   fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+  fifteenMinuteCurveSourceOwner: string;
   stitchedMonth: {
     mode: "PRIOR_YEAR_TAIL";
     yearMonth: string;
@@ -153,6 +180,15 @@ export function buildOnePathRunReadOnlyView(args: {
   const compareRowsPrimary = asCompareRows(compareProjection.rows);
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
   const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
+  const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(asRecord(dataset.series)?.intervals15);
+  const fifteenMinuteAverages = viewModel.derived.fifteenCurve.length
+    ? viewModel.derived.fifteenCurve
+    : rebuiltFifteenMinuteAverages;
+  const fifteenMinuteCurveSourceOwner = viewModel.derived.fifteenCurve.length
+    ? "buildUserUsageDashboardViewModel(...).derived.fifteenCurve"
+    : rebuiltFifteenMinuteAverages.length
+      ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
+      : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
   const compareMetrics =
     compareProjection.metrics && typeof compareProjection.metrics === "object"
       ? (compareProjection.metrics as Record<string, unknown>)
@@ -183,7 +219,8 @@ export function buildOnePathRunReadOnlyView(args: {
     monthlyRows: viewModel.derived.monthly,
     dailyRows,
     dailyWeather: (viewModel.derived.dailyWeather as OnePathRunReadOnlyView["dailyWeather"]) ?? null,
-    fifteenMinuteAverages: viewModel.derived.fifteenCurve,
+    fifteenMinuteAverages,
+    fifteenMinuteCurveSourceOwner,
     stitchedMonth: viewModel.derived.stitchedMonth,
     weatherScore,
     pastVariables,

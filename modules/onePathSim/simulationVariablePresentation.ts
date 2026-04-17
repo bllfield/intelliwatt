@@ -1,5 +1,6 @@
 import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
+import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type {
   EffectiveSimulationVariablesUsed,
   SimulationVariableInputType,
@@ -53,6 +54,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function asNullableRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function humanizeKey(key: string): string {
@@ -377,6 +382,45 @@ export function buildSimulationVariableCopyPayload(args: {
       artifact.engineVersion === "baseline_passthrough_v1");
   const pastSim = !lookupOnly && !baselinePassthrough;
   const runType = lookupOnly ? "LOOKUP_ONLY" : baselinePassthrough ? "BASELINE_PASSTHROUGH" : "PAST_SIM";
+  const readModelDataset = asNullableRecord(readModel.dataset);
+  const runDisplayView =
+    pastSim && readModelDataset
+      ? buildOnePathRunReadOnlyView({
+          dataset: readModelDataset,
+          engineInput: asNullableRecord(args.engineInput),
+          readModel,
+        })
+      : null;
+  const rawMonthlyRows = Array.isArray(readModelDataset?.monthly)
+    ? (readModelDataset?.monthly as Array<Record<string, unknown>>)
+        .map((row) => ({
+          month: String(row?.month ?? "").slice(0, 7),
+          kwh: Number(row?.kwh ?? Number.NaN),
+        }))
+        .filter((row) => /^\d{4}-\d{2}$/.test(row.month) && Number.isFinite(row.kwh))
+    : [];
+  const runDisplayContract = runDisplayView
+    ? {
+        sourceOwner: "buildOnePathRunReadOnlyView",
+        monthlyDisplayOwner: "buildOnePathRunReadOnlyView(...).monthlyRows",
+        monthlyDisplayRows: runDisplayView.monthlyRows,
+        rawMonthlyRows,
+        monthlyRowsDifferFromRaw: JSON.stringify(runDisplayView.monthlyRows) !== JSON.stringify(rawMonthlyRows),
+        stitchedMonth: runDisplayView.stitchedMonth,
+        fifteenMinuteCurve: {
+          rowsCount: runDisplayView.fifteenMinuteAverages.length,
+          preview: runDisplayView.fifteenMinuteAverages.slice(0, 12),
+          sourceOwner: runDisplayView.fifteenMinuteCurveSourceOwner,
+        },
+        coverage: {
+          start: runDisplayView.summary.coverageStart,
+          end: runDisplayView.summary.coverageEnd,
+          intervalsCount: runDisplayView.summary.intervalsCount,
+          source: runDisplayView.summary.source,
+          weatherBasisLabel: runDisplayView.summary.weatherBasisLabel,
+        },
+      }
+    : null;
   return {
     purpose: "Copyable shared simulation variable payload for AI-assisted tuning and curve-shaping review.",
     selectedMode: inputType,
@@ -390,6 +434,7 @@ export function buildSimulationVariableCopyPayload(args: {
       baselinePassthrough,
       pastSim,
       includesDashboardViewModel: Boolean(copiedDashboardViewModel),
+      includesRunDisplayContract: Boolean(runDisplayContract),
       includesParitySections: Boolean(baselineParityReport || baselineParityAudit),
       includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
       includesReadOnlyAudit: Boolean(readOnlyAudit),
@@ -399,6 +444,7 @@ export function buildSimulationVariableCopyPayload(args: {
     sandboxSummary: args.sandboxSummary ?? null,
     loadedSourceContext: copiedLoadedSourceContext,
     userUsageDashboardViewModel: copiedDashboardViewModel,
+    runDisplayContract,
     baselineParityReport,
     baselineParityAudit,
     displayTotalsAudit,
