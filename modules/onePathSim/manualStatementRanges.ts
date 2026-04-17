@@ -1,12 +1,12 @@
-import { lastFullMonthChicago } from "@/modules/manualUsage/anchor";
-import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { lastFullMonthChicago } from "@/modules/onePathSim/manualAnchor";
+import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
 import type {
   AnnualManualUsagePayload,
   ManualStatementRange,
   ManualUsagePayload,
   MonthlyManualUsagePayload,
   TravelRange,
-} from "@/modules/simulatedUsage/types";
+} from "@/modules/onePathSim/simulatedUsage/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

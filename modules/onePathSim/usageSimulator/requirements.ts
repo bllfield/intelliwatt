@@ -1,6 +1,6 @@
 import { validateApplianceProfile, type ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/validation";
 import { validateHomeProfile, type HomeProfileInput } from "@/modules/homeProfile/validation";
-import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
+import { validateManualUsagePayload } from "@/modules/onePathSim/manualValidation";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 
 export type SimulatorMode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";

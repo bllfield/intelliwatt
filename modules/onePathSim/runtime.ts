@@ -22,10 +22,13 @@ export {
   resetSimulationVariableOverrides as resetOnePathSimulationVariableOverrides,
   saveSimulationVariableOverrides as saveOnePathSimulationVariableOverrides,
 } from "@/modules/onePathSim/simulationVariablePolicy";
-export { resolveCanonicalUsage365CoverageWindow as resolveOnePathCanonicalUsage365CoverageWindow, resolveReportedCoverageWindow as resolveOnePathReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
-export { buildValidationCompareProjectionSidecar as buildOnePathValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
-export { buildDailyCurveComparePayload as buildOnePathDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
-export { buildSharedPastSimDiagnostics as buildOnePathSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
+export {
+  resolveCanonicalUsage365CoverageWindow as resolveOnePathCanonicalUsage365CoverageWindow,
+  resolveReportedCoverageWindow as resolveOnePathReportedCoverageWindow,
+} from "@/modules/onePathSim/usageSimulator/metadataWindow";
+export { buildValidationCompareProjectionSidecar as buildOnePathValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
+export { buildDailyCurveComparePayload as buildOnePathDailyCurveComparePayload } from "@/modules/onePathSim/usageSimulator/dailyCurveCompareSummary";
+export { buildSharedPastSimDiagnostics as buildOnePathSharedPastSimDiagnostics } from "@/modules/onePathSim/usageSimulator/sharedDiagnostics";
 export type {
   UpstreamUsageTruthSeedResult,
   UpstreamUsageTruthSection,

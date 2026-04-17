@@ -29,7 +29,7 @@ import {
 import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weatherSensitivityShared";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
-import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 
 export type CanonicalSimulationInputType =
   | "INTERVAL"

@@ -15,6 +15,8 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 ## Core principles / guardrails
 - **One Path Sim rescue architecture:** `docs/ONE_PATH_SIM_ARCHITECTURE.md` is the canonical written architecture reference for One Path Sim. One Path Sim Admin is currently pre-cutover only. It is the proving harness / truth console, not proof that all older surfaces are already rerouted.
 - **Usage upstream rule:** the existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production. Simulation begins only after usage truth exists, and One Path must consume persisted usage truth as upstream input rather than becoming a new usage producer.
+- **Current One Path quarantine rule:** active One Path behavior is fail-closed when persisted usage truth is missing. It does not call the live usage refresh/orchestration owner directly from inside the lockbox.
+- **Current One Path isolation rule:** live app surfaces remain untouched, and `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
 - **Canonical simulation pipeline rule:** `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
 - **Reader rule:** readers must consume persisted artifact + read-model truth. They must not recompute core sim outputs or privately reshape parity, compare, chart series, or source truth.
 - **Compare / sim integrity (GapFill & shared Past)**: No hidden fallbacks in compare or fresh shared simulation. Missing canonical simulated values stay missing (null / explicit reason codes). **Actual usage must never be copied into simulated-side fields** for scoring or parity. **Invariant violations** (e.g. simulated-day `localDate` vs interval-derived local dates) must surface explicitly; compare fails with `SIMULATED_DAY_LOCAL_DATE_INTERVAL_INVARIANT_VIOLATION` rather than preferring one authority silently.
@@ -211,6 +213,18 @@ This section is authoritative for future manual-usage implementation and handoff
 - fallback hierarchy
 
 Other docs should align to this file and stay shorter unless file-specific detail is required.
+
+## Lockstep Docs Rule
+
+Any future structural change to simulation ownership, module boundaries, orchestration, cutover state, or lockbox isolation must update the relevant docs and plan files in the same pass.
+
+Minimum same-pass workflow:
+- code change
+- docs/plan sync
+- stale-reference audit
+- explicit conflict report if docs and code disagree
+
+No code-only architecture changes are allowed.
 
 ## Simulation Modeling Modes (Authoritative)
 

@@ -39,7 +39,9 @@ ONE PATH SIM RESCUE ARCHITECTURE
 - **Canonical reference:** `docs/ONE_PATH_SIM_ARCHITECTURE.md`
 - **Current state:** One Path Sim Admin is the **pre-cutover** simulation proving harness / truth console. It is not yet proof that older simulation-facing surfaces have been fully rerouted.
 - **Usage stays upstream:** the existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production. Simulation starts only after usage truth exists.
-- **No new usage producer:** One Path Sim may read persisted usage truth, and when usage truth is missing it may request the existing shared usage orchestration / refresh path to seed it first. It must not become a new upstream usage producer.
+- **No new usage producer:** One Path Sim may read persisted usage truth. Current quarantine implementation does **not** trigger the live shared usage orchestration / refresh path directly; it fails closed and reports missing usage truth instead. One Path must not become a new upstream usage producer.
+- **Verified isolation state:** live app surfaces remain quarantined from One Path, and `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
+- **Cutover honesty rule:** that internal seal does **not** mean GapFill, Manual Lab, or user sim pages are already cut over to One Path.
 - **Canonical downstream pipeline:** `raw input -> shared adapter -> CanonicalSimulationEngineInput -> shared simulation core -> shared post-sim formatter -> persisted CanonicalSimulationArtifact -> CanonicalSimulationReadModel`
 - **One shared contracts family:** future readers must read the same persisted artifact family and the same canonical read model. Readers must not recompute core sim outputs or privately reshape parity, compare, chart, or source truth.
 - **Mode rule:** `INTERVAL`, `MANUAL_MONTHLY`, `MANUAL_ANNUAL`, and `NEW_BUILD` may differ before the adapter boundary, but everything after `CanonicalSimulationEngineInput` must stay shared.
@@ -685,6 +687,8 @@ If a block changes any of the above, that same block must also include:
 - the exact project docs that must be reviewed and updated
 - an explicit instruction to align docs in the same pass
 - an explicit instruction that contradictory older doc language must be overridden or updated
+- a stale-reference search/audit for outdated ownership, cutover, or orchestration claims
+- an explicit conflict report when project docs/plans do not match verified code state
 - tests or verification steps that match the new documented contract when applicable
 
 At minimum, scope-changing or architecture-changing blocks must review and update as needed:
@@ -698,6 +702,8 @@ At minimum, scope-changing or architecture-changing blocks must review and updat
 If a block changes implementation contract but does not include doc alignment, that block is incomplete and off-plan.
 
 Future chats must treat doc alignment as part of the implementation work, not as a separate optional cleanup step.
+
+No code-only architecture changes are allowed.
 
 The reason for this rule is to prevent Cursor and future chats from drifting away from the agreed project plan.
 

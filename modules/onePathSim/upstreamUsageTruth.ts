@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
-import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
-import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
+import { resolveReportedCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 
 export type UpstreamUsageTruthOwner = {
   label: string;

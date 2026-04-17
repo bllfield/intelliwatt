@@ -13,7 +13,7 @@ describe("one path sim canonical variable snapshot source", () => {
     const source = readRepoFile("modules/onePathSim/onePathSim.ts");
     const policySource = readRepoFile("modules/usageSimulator/simulationVariablePolicy.ts");
     const truthSummarySource = readRepoFile("modules/onePathSim/onePathTruthSummary.ts");
-    const upstreamUsageSource = readRepoFile("modules/usageSimulator/upstreamUsageTruth.ts");
+    const upstreamUsageSource = readRepoFile("modules/onePathSim/upstreamUsageTruth.ts");
     const usageRouteSource = readRepoFile("app/api/user/usage/route.ts");
     const usagePageSource = readRepoFile("app/dashboard/usage/page.tsx");
 
@@ -45,14 +45,13 @@ describe("one path sim canonical variable snapshot source", () => {
     expect(truthSummarySource).toContain("annualModeTruth");
     expect(truthSummarySource).toContain("newBuildModeTruth");
     expect(upstreamUsageSource).toContain("resolveIntervalsLayer");
-    expect(upstreamUsageSource).toContain("requestUsageRefreshForUserHouse");
     expect(upstreamUsageSource).toContain("buildUpstreamUsageTruthSummary");
     expect(upstreamUsageSource).toContain("downstreamSimulationAllowed");
     expect(upstreamUsageSource).toContain("existing_persisted_truth");
-    expect(upstreamUsageSource).toContain("seeded_via_existing_refresh");
-    expect(upstreamUsageSource).toContain("missing_after_seed_attempt");
     expect(upstreamUsageSource).toContain("persisted_usage_output");
-    expect(upstreamUsageSource).toContain("seeded_via_existing_usage_orchestration");
+    expect(upstreamUsageSource).toContain("missing_after_seed_attempt");
+    expect(upstreamUsageSource).toContain("One Path quarantine mode does not trigger the live usage refresh owner directly.");
+    expect(upstreamUsageSource).not.toContain("requestUsageRefreshForUserHouse");
     expect(usageRouteSource).toContain("resolveIntervalsLayer");
     expect(usagePageSource).toContain("UsageDashboard");
     expect(usagePageSource).not.toContain("one-path-sim");

@@ -1,5 +1,5 @@
 import { buildManualBillPeriodTargets, buildManualBillPeriodTotalsById } from "@/modules/onePathSim/manualStatementRanges";
-import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import {

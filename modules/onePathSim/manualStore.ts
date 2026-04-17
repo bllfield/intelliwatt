@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/db";
-import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
+import { anchorEndDateUtc } from "@/modules/onePathSim/manualAnchor";
 import { normalizeStatementRanges, normalizeTravelRanges } from "@/modules/onePathSim/manualStatementRanges";
-import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
+import { validateManualUsagePayload } from "@/modules/onePathSim/manualValidation";
 import type {
   AnnualManualUsagePayload,
   ManualUsagePayload,
   MonthlyManualUsagePayload,
-} from "@/modules/simulatedUsage/types";
+} from "@/modules/onePathSim/simulatedUsage/types";
 
 function clampInt(n: unknown, lo: number, hi: number): number {
   const x = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : Number(n);

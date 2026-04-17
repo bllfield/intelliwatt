@@ -3,15 +3,15 @@ import {
   buildManualUsageReadModel,
   type ManualUsageReadModel,
 } from "@/modules/onePathSim/manualReadModel";
-import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import {
   buildValidationCompareProjectionFromDatasets,
   buildValidationCompareProjectionSidecar,
-} from "@/modules/usageSimulator/compareProjection";
+} from "@/modules/onePathSim/usageSimulator/compareProjection";
 import {
   buildSharedPastSimDiagnostics,
   type SharedDiagnosticsCallerType,
-} from "@/modules/usageSimulator/sharedDiagnostics";
+} from "@/modules/onePathSim/usageSimulator/sharedDiagnostics";
 
 function compactTravelRanges(value: unknown): Array<{ startDate: string; endDate: string }> {
   if (!Array.isArray(value)) return [];

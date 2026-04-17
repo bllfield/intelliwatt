@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { monthsEndingAt } from "@/modules/onePathSim/manualAnchor";
 import { canonicalWindow12Months } from "@/modules/onePathSim/usageSimulator/canonicalWindow";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
@@ -53,7 +53,7 @@ import {
   INTERVAL_CODEC_V1,
 } from "@/modules/onePathSim/usageSimulator/intervalCodec";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
-import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
 import {
   buildManualUsageStageOneResolvedSeeds,
   resolveManualUsageStageOnePayloadForMode,

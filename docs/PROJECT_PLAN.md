@@ -15,7 +15,18 @@
 - **Exact run snapshot rule:** the canonical artifact/read model must expose `effectiveSimulationVariablesUsed` for the same run identity so admin tuning surfaces can inspect the resolved shared values and their value sources without reconstructing them in the page.
 - **Shared weather selector rule**: user Past owns `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home share `gapfillWeatherLogicSetting` within a run. The selector difference is pre-lockbox only; the resolver/path/display remain shared.
 - **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
-- **One Path Sim rescue architecture:** see `docs/ONE_PATH_SIM_ARCHITECTURE.md` for the current intended architecture. One Path Sim Admin is pre-cutover only. Usage remains upstream and untouched. One Path consumes persisted usage truth as input, uses one shared producer pipeline after adapter normalization, and must not introduce reader-owned recompute or private source-home/manual-monthly/weather branches.
+- **One Path Sim rescue architecture:** see `docs/ONE_PATH_SIM_ARCHITECTURE.md` for the current verified architecture state. One Path Sim Admin is pre-cutover only. Usage remains upstream and untouched. Active One Path quarantine behavior is fail-closed when persisted usage truth is missing. Live app surfaces remain quarantined from One Path, and `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
+- **Cutover honesty rule:** internal seal does not mean live cutover is complete. GapFill, Manual Lab, and user sim pages are still not routed through One Path.
+
+### Architecture lockstep rule
+
+- Any structural change to simulation ownership, module boundaries, orchestration, cutover state, upstream/downstream truth ownership, or lockbox isolation must update the relevant docs and plan files in the same pass.
+- Required same-pass workflow:
+  - code change
+  - docs/plan sync
+  - stale-reference audit
+  - explicit conflict report when docs, plans, and code disagree
+- No code-only architecture changes are allowed.
 
 - No duplicate functional logic is allowed across files.
 - Shared behavior must be implemented once in a canonical module and imported everywhere else.

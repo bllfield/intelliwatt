@@ -11,7 +11,7 @@ import type {
   MonthlyTargetConstructionDiagnostic,
 } from "@/modules/onePathSim/usageSimulator/monthlyTargetConstruction";
 import { buildUniformMonthlyTotalsFromAnnualWindow } from "@/modules/onePathSim/usageSimulator/build";
-import type { ManualBillPeriodTarget } from "@/modules/manualUsage/statementRanges";
+import type { ManualBillPeriodTarget } from "@/modules/onePathSim/manualStatementRanges";
 import type { ResolvedSimFingerprint } from "@/modules/onePathSim/usageSimulator/resolvedSimFingerprintTypes";
 import type {
   EffectiveSimulationVariablesUsed,

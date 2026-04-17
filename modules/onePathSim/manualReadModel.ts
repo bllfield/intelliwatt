@@ -6,7 +6,7 @@ import {
   type ManualBillPeriodTarget,
   type ManualMonthlyStageOneRow,
 } from "@/modules/onePathSim/manualStatementRanges";
-import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 
 export type ManualBillPeriodCompareStatus =
   | "reconciled"

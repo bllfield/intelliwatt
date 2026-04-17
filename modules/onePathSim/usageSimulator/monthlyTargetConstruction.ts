@@ -1,7 +1,7 @@
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
-import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
-import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
-import { buildManualBillPeriodTargets } from "@/modules/manualUsage/statementRanges";
+import { anchorEndDateUtc } from "@/modules/onePathSim/manualAnchor";
+import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
+import { buildManualBillPeriodTargets } from "@/modules/onePathSim/manualStatementRanges";
 import type { ManualUsagePayload, TravelRange } from "@/modules/onePathSim/simulatedUsage/types";
 
 export const MIN_TRUSTED_NON_TRAVEL_DAYS_PER_MONTH = 5;

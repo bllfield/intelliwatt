@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { ManualUsagePayload, SimulatedCurve, TravelRange } from "./types";
-import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
-import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
+import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
+import { anchorEndDateUtc } from "@/modules/onePathSim/manualAnchor";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/onePathSim/usageSimulator/pastStitchedCurve";
 import {
   buildPastDaySimulationContext,

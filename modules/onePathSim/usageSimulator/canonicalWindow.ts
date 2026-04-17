@@ -3,7 +3,7 @@
  * End month is derived from the canonical usage day window anchor (today-2 Chicago by default).
  * See CANONICAL_WINDOW.md. Output day count may be 365 or 366 depending on the window.
  */
-import { monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { monthsEndingAt } from "@/modules/onePathSim/manualAnchor";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 
 export type CanonicalWindow = {

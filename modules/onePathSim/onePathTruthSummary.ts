@@ -4,7 +4,7 @@ import {
   resolveOnePathManualStageOnePresentation,
   resolveOnePathReportedCoverageWindow,
 } from "@/modules/onePathSim/runtime";
-import type { ManualUsagePayload, ManualStatementRange } from "@/modules/simulatedUsage/types";
+import type { ManualUsagePayload, ManualStatementRange } from "@/modules/onePathSim/simulatedUsage/types";
 
 export type OnePathTruthOwner = {
   label: string;

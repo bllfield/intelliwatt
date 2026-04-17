@@ -7,7 +7,7 @@ import {
   buildManualBillPeriodTargets,
   buildManualBillPeriodTotalsById,
   type ManualBillPeriodTarget,
-} from "@/modules/manualUsage/statementRanges";
+} from "@/modules/onePathSim/manualStatementRanges";
 import {
   resolveManualMonthlyTargetDiagnostics,
   type ManualMonthlyInputState,

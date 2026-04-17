@@ -19,6 +19,9 @@ When this document conflicts with older planning or audit language, this documen
 - It is the place to define, inspect, and verify the canonical shared simulation architecture.
 - It is **not yet** the live source of truth for all existing simulation-facing surfaces.
 - Existing GapFill, Manual Lab, user Past/manual pages, and other readers are **not yet fully rerouted** just because One Path exists.
+- Existing live app surfaces remain quarantined from One Path. GapFill, Manual Lab, user sim pages, and the normal usage flow are still on their current live/shared paths.
+- Current verified repo state: `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
+- That internal seal does **not** mean cutover is complete. One Path may still depend on safe pure utilities and read-only data access outside `modules/onePathSim/**`, but it is not allowed to depend on live behavior owners.
 - This phase is about locking ownership and contracts so later cutover can happen without drift.
 
 ## Non-negotiable upstream / downstream boundary
@@ -28,7 +31,7 @@ When this document conflicts with older planning or audit language, this documen
 - The existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production.
 - Simulation starts only **after** usage truth exists.
 - One Path Sim and future simulation consumers must treat persisted usage output as upstream input truth.
-- If usage truth is missing, simulation may request the **existing** usage orchestration / refresh path to seed usage truth first.
+- Current quarantine implementation does **not** request the live usage orchestration / refresh path directly from inside One Path. It fails closed and reports missing usage truth instead.
 - One Path Sim must **not** become a new upstream usage producer.
 - This architecture does **not** redesign, replace, or disconnect the current usage page flow.
 
@@ -110,6 +113,15 @@ Rules:
 - GapFill source home must not own private source-home simulation behavior.
 - GapFill may expose read-only diagnostics or compare views, but it must not introduce a separate source-home producer or formatter.
 
+## Current verified isolation status
+
+- One Path is still **pre-cutover only**.
+- One Path is **externally quarantined** from live consumer surfaces.
+- One Path is also now **internally sealed** against live behavior-owner imports from the old shared sim/manual namespaces listed above.
+- The active upstream truth owner inside One Path is `modules/onePathSim/upstreamUsageTruth.ts`.
+- Current quarantine behavior is **fail-closed** on missing usage truth. One Path does not trigger the live usage refresh/orchestration owner directly.
+- This document must describe the verified code state, not an older intended state.
+
 ## Variable tuning ownership
 
 - The shared simulation variable policy is the tuning/config owner.
@@ -181,3 +193,15 @@ The following must never drift again:
 - no reader-owned recompute of simulation truth
 - no private source-home behavior
 - no caller-specific manual-monthly calculation behavior
+
+## Lockstep workflow rule
+
+Any structural change to simulation ownership, module boundaries, orchestration, cutover state, upstream/downstream truth ownership, or lockbox isolation must update the relevant project docs and plan files in the **same pass**.
+
+Required same-pass work:
+- code change
+- docs/plan sync
+- stale-reference audit
+- explicit conflict report when docs, plans, and code disagree
+
+No code-only architecture changes are allowed.

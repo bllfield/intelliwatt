@@ -1,5 +1,5 @@
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
-import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
+import type { ManualBillPeriodCompare as ManualMonthlyReconciliation } from "@/modules/onePathSim/manualReadModel";
 
 export type SharedDiagnosticsCallerType =
   | "user_past"

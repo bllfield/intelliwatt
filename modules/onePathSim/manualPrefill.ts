@@ -1,4 +1,4 @@
-import { rollingAutoAnchorEndDateChicago } from "@/modules/manualUsage/anchor";
+import { rollingAutoAnchorEndDateChicago } from "@/modules/onePathSim/manualAnchor";
 import { addDaysToIsoDate, buildContiguousStatementRanges, MAX_MANUAL_MONTHLY_BILLS } from "@/modules/onePathSim/manualStatementRanges";
 import type {
   AnnualManualUsagePayload,
