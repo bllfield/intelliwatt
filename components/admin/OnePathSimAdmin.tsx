@@ -1023,7 +1023,11 @@ export function OnePathSimAdmin() {
         </div>
 
         {isPastSimRun && runReadOnlyDataset ? (
-          <OnePathRunReadOnlyView dataset={runReadOnlyDataset} engineInput={asRecord(runResult?.engineInput)} />
+          <OnePathRunReadOnlyView
+            dataset={runReadOnlyDataset}
+            engineInput={asRecord(runResult?.engineInput)}
+            readModel={asRecord(runResult?.readModel)}
+          />
         ) : lookupUserUsageBaselineContract ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">

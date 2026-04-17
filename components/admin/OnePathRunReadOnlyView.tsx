@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useState } from "react";
+import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
+import { PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED } from "@/modules/onePathSim/usageSimulator/pastCompareUiDefaults";
 
 function formatScenarioVariable(value: {
   kind: string;
@@ -35,12 +37,15 @@ function MetricCard(props: { label: string; value: string; note?: string }) {
 export function OnePathRunReadOnlyView(props: {
   dataset?: Record<string, unknown> | null;
   engineInput?: Record<string, unknown> | null;
+  readModel?: Record<string, unknown> | null;
 }) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
+  const [compareExpanded, setCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
   const view = buildOnePathRunReadOnlyView({
     dataset: props.dataset ?? null,
     engineInput: props.engineInput ?? null,
+    readModel: props.readModel ?? null,
   });
 
   if (!view) return null;
@@ -156,6 +161,40 @@ export function OnePathRunReadOnlyView(props: {
         coverageStart={view.summary.coverageStart}
         coverageEnd={view.summary.coverageEnd}
       />
+
+      <div className="rounded-2xl border border-brand-blue/10 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-brand-navy">Validation / Test Day Compare</div>
+            <div className="mt-1 text-xs text-brand-navy/70">
+              {view.compare.rows.length
+                ? `${view.compare.rows.length} scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.`
+                : "This section compares modeled vs actual on validation days for simulator accuracy transparency."}
+            </div>
+            {view.compare.rows.length && view.compare.metrics ? (
+              <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
+                WAPE {Number(view.compare.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
+                {Number(view.compare.metrics?.mae ?? 0).toFixed(2)} · RMSE {Number(view.compare.metrics?.rmse ?? 0).toFixed(2)}
+              </div>
+            ) : null}
+          </div>
+          {view.compare.rows.length ? (
+            <button
+              type="button"
+              className="shrink-0 rounded-lg border border-brand-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-brand-navy shadow-sm hover:bg-brand-navy/5"
+              onClick={() => setCompareExpanded((value) => !value)}
+              aria-expanded={compareExpanded}
+            >
+              {compareExpanded ? "Hide details" : "Show details"}
+            </button>
+          ) : null}
+        </div>
+        {view.compare.rows.length ? (
+          compareExpanded ? <ValidationComparePanel rows={view.compare.rows} metrics={view.compare.metrics} showMetricsSummary={false} /> : null
+        ) : (
+          <div className="mt-2 text-xs text-brand-navy/70">No validation/test-day compare rows are available for this Past scenario yet.</div>
+        )}
+      </div>
     </div>
   );
 }

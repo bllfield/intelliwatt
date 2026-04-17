@@ -55,4 +55,101 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "00:15", avgKw: 1.3 },
     ]);
   });
+
+  it("binds validation compare rows and metrics from the persisted read model", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 1344,
+        },
+        daily: [
+          { date: "2026-04-16", kwh: 99, source: "ACTUAL" },
+          { date: "2026-04-17", kwh: 100, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2026-04", kwh: 199 }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 100, weekend: 99 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 0.9,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+        },
+      },
+      readModel: {
+        compareProjection: {
+          rows: [
+            {
+              localDate: "2026-04-16",
+              dayType: "weekday",
+              actualDayKwh: 8.1,
+              simulatedDayKwh: 7.8,
+              errorKwh: -0.3,
+              percentError: 3.7,
+              weather: {
+                tAvgF: 71.2,
+                tMinF: 60.1,
+                tMaxF: 84.4,
+                hdd65: 0,
+                cdd65: 6.2,
+                source: "actual",
+                weatherMissing: false,
+              },
+            },
+          ],
+          metrics: {
+            wape: 3.7,
+            mae: 0.3,
+            rmse: 0.3,
+          },
+        },
+        tuningSummary: {
+          selectedValidationRows: [
+            {
+              localDate: "2026-04-18",
+              dayType: "weekend",
+              actualDayKwh: 55,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(view?.compare.metrics).toEqual({
+      wape: 3.7,
+      mae: 0.3,
+      rmse: 0.3,
+    });
+    expect(view?.compare.rows).toEqual([
+      {
+        localDate: "2026-04-16",
+        dayType: "weekday",
+        actualDayKwh: 8.1,
+        simulatedDayKwh: 7.8,
+        errorKwh: -0.3,
+        percentError: 3.7,
+        weather: {
+          tAvgF: 71.2,
+          tMinF: 60.1,
+          tMaxF: 84.4,
+          hdd65: 0,
+          cdd65: 6.2,
+          source: "actual",
+          weatherMissing: false,
+        },
+      },
+    ]);
+    expect(view?.compare.rows[0]?.actualDayKwh).toBe(8.1);
+    expect(view?.compare.selectedValidationRows).toEqual([
+      {
+        localDate: "2026-04-18",
+        dayType: "weekend",
+        actualDayKwh: 55,
+      },
+    ]);
+  });
 });

@@ -12,6 +12,7 @@ describe("OnePathRunReadOnlyView source contract", () => {
   it("mirrors the user Past page sections and shared component owners", () => {
     const source = readRepoFile("components/admin/OnePathRunReadOnlyView.tsx");
     const chartsSource = readRepoFile("components/usage/UsageChartsPanel.tsx");
+    const compareSource = readRepoFile("components/usage/ValidationComparePanel.tsx");
 
     expect(source).toContain("UsageChartsPanel");
     expect(source).toContain("WeatherSensitivityCard");
@@ -47,5 +48,18 @@ describe("OnePathRunReadOnlyView source contract", () => {
     expect(chartsSource).toContain("CDD65");
     expect(chartsSource).toContain("15-minute load curve");
     expect(chartsSource).toContain("Average kW by time of day");
+    expect(source).toContain("ValidationComparePanel");
+    expect(source).toContain("Validation / Test Day Compare");
+    expect(source).toContain("scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.");
+    expect(source).toContain("WAPE");
+    expect(source).toContain("MAE");
+    expect(source).toContain("RMSE");
+    expect(source).toContain("Show details");
+    expect(source).toContain("Hide details");
+    expect(compareSource).toContain("Day Type");
+    expect(compareSource).toContain("Actual kWh");
+    expect(compareSource).toContain("Sim kWh");
+    expect(compareSource).toContain("% Error");
+    expect(compareSource).toContain("Weather columns use the same day-level values as the Past daily table when");
   });
 });

@@ -1,5 +1,6 @@
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
+import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -52,17 +53,65 @@ export type OnePathRunReadOnlyView = {
   } | null;
   weatherScore: WeatherSensitivityScore | null;
   pastVariables: OnePathPastScenarioVariable[];
+  compare: {
+    rows: ValidationCompareProjectionSidecar["rows"];
+    metrics: Record<string, unknown> | null;
+    selectedValidationRows: Array<Record<string, unknown>>;
+  };
 };
+
+function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function asCompareRows(value: unknown): ValidationCompareProjectionSidecar["rows"] {
+  return asArray<Record<string, unknown>>(value)
+    .map((row) => {
+      const localDate = String(row.localDate ?? row.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) return null;
+      const dayType = row.dayType === "weekend" ? "weekend" : "weekday";
+      const actualDayKwh = Number(row.actualDayKwh ?? row.actualKwh);
+      const simulatedDayKwh = Number(row.simulatedDayKwh ?? row.simKwh);
+      const errorKwh = Number(row.errorKwh ?? row.error);
+      const percentErrorRaw = row.percentError ?? row.percentErrorPct;
+      const percentError =
+        percentErrorRaw == null || !Number.isFinite(Number(percentErrorRaw)) ? null : Number(percentErrorRaw);
+      const weather = asRecord(row.weather);
+      return {
+        localDate,
+        dayType,
+        actualDayKwh: Number.isFinite(actualDayKwh) ? actualDayKwh : 0,
+        simulatedDayKwh: Number.isFinite(simulatedDayKwh) ? simulatedDayKwh : 0,
+        errorKwh: Number.isFinite(errorKwh) ? errorKwh : 0,
+        percentError,
+        weather:
+          weather && Object.keys(weather).length
+            ? {
+                tAvgF: Number.isFinite(Number(weather.tAvgF)) ? Number(weather.tAvgF) : null,
+                tMinF: Number.isFinite(Number(weather.tMinF)) ? Number(weather.tMinF) : null,
+                tMaxF: Number.isFinite(Number(weather.tMaxF)) ? Number(weather.tMaxF) : null,
+                hdd65: Number.isFinite(Number(weather.hdd65)) ? Number(weather.hdd65) : null,
+                cdd65: Number.isFinite(Number(weather.cdd65)) ? Number(weather.cdd65) : null,
+                source: typeof weather.source === "string" ? weather.source : null,
+                weatherMissing: weather.weatherMissing === true,
+              }
+            : undefined,
+      };
+    })
+    .filter((row): row is ValidationCompareProjectionSidecar["rows"][number] => row != null);
+}
 
 export function buildOnePathRunReadOnlyView(args: {
   dataset?: Record<string, unknown> | null;
   engineInput?: Record<string, unknown> | null;
+  readModel?: Record<string, unknown> | null;
 }): OnePathRunReadOnlyView | null {
   const dataset = asRecord(args.dataset);
   if (!dataset) return null;
 
   const meta = asRecord(dataset.meta);
   const engineInput = asRecord(args.engineInput);
+  const readModel = asRecord(args.readModel) ?? {};
   const weatherScore = (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null;
   const viewModel = buildUserUsageDashboardViewModel({
     dataset,
@@ -98,6 +147,17 @@ export function buildOnePathRunReadOnlyView(args: {
         })
         .filter((row): row is ReturnType<typeof dailyRowFieldsFromSourceRow> => row != null)
     : viewModel.derived.daily;
+  const compareProjection = asRecord(readModel.compareProjection) ?? {};
+  const tuningSummary = asRecord(readModel.tuningSummary) ?? {};
+  const compareRowsPrimary = asCompareRows(compareProjection.rows);
+  const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
+  const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
+  const compareMetrics =
+    compareProjection.metrics && typeof compareProjection.metrics === "object"
+      ? (compareProjection.metrics as Record<string, unknown>)
+      : tuningSummary.validationMetricsSummary && typeof tuningSummary.validationMetricsSummary === "object"
+        ? (tuningSummary.validationMetricsSummary as Record<string, unknown>)
+        : null;
 
   return {
     summary: {
@@ -126,5 +186,10 @@ export function buildOnePathRunReadOnlyView(args: {
     stitchedMonth: viewModel.derived.stitchedMonth,
     weatherScore,
     pastVariables,
+    compare: {
+      rows: compareRows,
+      metrics: compareMetrics,
+      selectedValidationRows,
+    },
   };
 }
