@@ -4,13 +4,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
+import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
-import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
-import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
-import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -113,45 +109,20 @@ export async function GET(_request: NextRequest) {
         }).catch(() => null);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
-      const [homeProfile, applianceProfileRec, manualUsageRec] = await Promise.all([
-        getHomeProfileSimulatedByUserHouse({ userId: user.id, houseId: house.id }),
-        getApplianceProfileSimulatedByUserHouse({ userId: user.id, houseId: house.id }),
-        getManualUsageInputForUserHouse({ userId: user.id, houseId: house.id }).catch(() => ({ payload: null })),
-      ]);
-      const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
-      const weatherSensitivity = await resolveSharedWeatherSensitivityEnvelope({
-        actualDataset: result.dataset,
-        manualUsagePayload: manualUsageRec?.payload ?? null,
-        homeProfile,
-        applianceProfile,
-        weatherHouseId: house.id,
-      }).catch(() => ({ score: null, derivedInput: null }));
-      results.push({
-        houseId: house.id,
-        label: toPublicHouseLabel({
-          label: house.label,
-          addressLine1: house.addressLine1,
-          fallbackId: house.id,
-        }),
-        address: {
-          line1: house.addressLine1,
-          city: house.addressCity,
-          state: house.addressState,
-        },
-        esiid: house.esiid,
-        dataset: result.dataset,
-        alternatives: result.alternatives,
-        datasetError:
-          result.dataset == null
-            ? {
-                code: 'ACTUAL_DATA_UNAVAILABLE',
-                explanation:
-                  'We could not load interval usage for this home right now. This can happen when SMT/Green Button data is still syncing or temporarily unavailable.',
-              }
-            : null,
-        weatherSensitivityScore: weatherSensitivity.score,
-        weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
-      });
+      results.push(
+        await buildUserUsageHouseContract({
+          userId: user.id,
+          house: {
+            id: house.id,
+            label: house.label,
+            addressLine1: house.addressLine1,
+            addressCity: house.addressCity,
+            addressState: house.addressState,
+            esiid: house.esiid,
+          },
+          resolvedUsage: result,
+        })
+      );
     }
 
     return NextResponse.json(

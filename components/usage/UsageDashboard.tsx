@@ -5,6 +5,7 @@ import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
+import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import {
   type ManualAnnualStageOneSummary,
   type ManualMonthlyStageOneRow,
@@ -12,10 +13,7 @@ import {
   shouldUseManualMonthlyStageOnePayload,
   type ManualMonthlyStageOneSurface,
 } from "@/modules/manualUsage/statementRanges";
-import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
-import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import type {
   WeatherEfficiencyDerivedInput,
@@ -636,157 +634,27 @@ export const UsageDashboard: React.FC<Props> = ({
   const shouldShowForcedManualMonthlyStageOneEmptyState =
     forceManualMonthlyStageOne && !shouldRenderManualMonthlyStageOne && !shouldRenderManualAnnualStageOne;
 
-  const coverage = useMemo(() => {
-    const ds = activeHouse?.dataset;
-    const meta = (ds as any)?.meta ?? {};
-    const datasetKind = meta.datasetKind ?? null;
-    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-    const start = canonicalWindow.startDate;
-    const end = canonicalWindow.endDate;
-    const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
-    const actualSource = meta.actualSource as string | undefined;
-    const hasSimulatedFill =
-      datasetKind === "SIMULATED" &&
-      actualSource &&
-      provenance &&
-      Object.values(provenance).some((v) => v === "SIMULATED");
-    const source =
-      hasSimulatedFill && actualSource
-        ? `${actualSource} with simulated fill for Travel/Vacant`
-        : datasetKind === "SIMULATED"
-          ? "SIMULATED"
-          : ds?.summary?.source ?? null;
-    const weatherBasisLabel = getWeatherBasisLabel(meta);
-    const sourceOfDaySimulationCore = (meta.sourceOfDaySimulationCore as string) || null;
-    return {
-      source,
-      start,
-      end,
-      intervalsCount: ds?.summary?.intervalsCount ?? null,
-      hasSimulatedFill,
-      weatherBasisLabel,
-      sourceOfDaySimulationCore,
+  const dashboardViewModel = useMemo(() => buildUserUsageDashboardViewModel(activeHouse), [activeHouse]);
+  const coverage = dashboardViewModel?.coverage ?? null;
+  const derived =
+    dashboardViewModel?.derived ?? {
+      monthly: [],
+      stitchedMonth: null,
+      daily: [],
+      dailyWeather: null,
+      fifteenCurve: [],
+      totalKwh: 0,
+      totals: { importKwh: 0, exportKwh: 0, netKwh: 0 },
+      avgDailyKwh: 0,
+      weekdayKwh: 0,
+      weekendKwh: 0,
+      timeOfDayBuckets: [],
+      peakDay: null,
+      peakHour: null,
+      baseload: null,
+      baseloadDaily: null,
+      baseloadMonthly: null,
     };
-  }, [activeHouse]);
-
-  const derived = useMemo(() => {
-    const dataset = activeHouse?.dataset;
-    const monthly = dataset?.monthly ?? dataset?.insights?.monthlyTotals ?? [];
-    const daily = dataset?.daily ?? [];
-    const fallbackDailyRaw = daily.length
-      ? daily
-      : (dataset?.series?.daily ?? []).map((d) =>
-          dailyRowFieldsFromSourceRow({
-            date: toDateKeyFromTimestamp(d.timestamp),
-            kwh: d.kwh,
-            source: (d as { source?: string }).source,
-            sourceDetail: (d as { sourceDetail?: string }).sourceDetail,
-          })
-        );
-    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-    const coverageStart = canonicalWindow.startDate;
-    const coverageEnd = canonicalWindow.endDate;
-    const dateInRange = (d: string) =>
-      (!coverageStart || d >= coverageStart) && (!coverageEnd || d <= coverageEnd);
-    const seen = new Set<string>();
-    const fallbackDaily = fallbackDailyRaw
-      .filter((row) => {
-        const d = String(row?.date ?? "").slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
-        if (seen.has(d)) return false;
-        seen.add(d);
-        return dateInRange(d);
-      })
-      .map(
-        (row): DailyRow =>
-          dailyRowFieldsFromSourceRow({
-            date: String((row as { date: string }).date),
-            kwh: (row as { kwh: unknown }).kwh,
-            source: (row as { source?: string }).source,
-            sourceDetail: (row as { sourceDetail?: string }).sourceDetail,
-          })
-      )
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    const intervals = dataset?.intervals ?? [];
-    const fifteenCurve = (dataset?.insights?.fifteenMinuteAverages ?? []).slice().sort((a, b) => {
-      const toMinutes = (hhmm: string) => {
-        const [h, m] = hhmm.split(":").map(Number);
-        return h * 60 + m;
-      };
-      return toMinutes(a.hhmm) - toMinutes(b.hhmm);
-    });
-
-    const totalsFromApi = dataset?.totals;
-    const totalsFromSeries =
-      fallbackDaily.length
-        ? deriveTotalsFromRows(fallbackDaily)
-        : intervals.length
-          ? deriveTotalsFromRows(intervals.map((i) => ({ kwh: i.kwh })))
-          : { importKwh: 0, exportKwh: 0, netKwh: 0 };
-    const totalsFromMonthly = monthly.length
-      ? deriveTotalsFromRows(monthly.map((m) => ({ kwh: Number(m?.kwh) || 0 })))
-      : null;
-    const totals =
-      totalsFromApi != null
-        ? totalsFromMonthly != null && Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
-          ? totalsFromMonthly
-          : totalsFromApi
-        : totalsFromMonthly ?? totalsFromSeries;
-
-    const totalKwh = totals.netKwh;
-
-    const avgDailyKwh = fallbackDaily.length ? totalKwh / fallbackDaily.length : 0;
-    const weekdayKwh = dataset?.insights?.weekdayVsWeekend.weekday ?? 0;
-    const weekendKwh = dataset?.insights?.weekdayVsWeekend.weekend ?? 0;
-
-    const peakDay = dataset?.insights?.peakDay ?? null;
-    const peakHour = dataset?.insights?.peakHour ?? null;
-    const baseload = dataset?.insights?.baseload ?? null;
-
-    const timeOfDayBuckets = (dataset?.insights?.timeOfDayBuckets ?? []).map((b) => ({
-      key: b.key,
-      label: b.label,
-      kwh: b.kwh,
-    }));
-
-    const recentDaily = fallbackDaily
-      .slice()
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    const monthlySorted = buildDisplayedMonthlyRows(dataset);
-    const baseloadDaily =
-      dataset?.insights?.baseloadDaily ??
-      (() => {
-        const v = low10AverageKwh(recentDaily.map((d) => Number(d.kwh) || 0));
-        return v != null ? Number(v.toFixed(2)) : null;
-      })();
-    const baseloadMonthly =
-      dataset?.insights?.baseloadMonthly ??
-      (() => {
-        const v = low10AverageKwh(monthlySorted.map((m) => Number(m.kwh) || 0));
-        return v != null ? Number(v.toFixed(2)) : null;
-      })();
-
-    return {
-      monthly: monthlySorted,
-      stitchedMonth: dataset?.insights?.stitchedMonth ?? null,
-      daily: recentDaily,
-      dailyWeather: (dataset as any)?.dailyWeather ?? null,
-      fifteenCurve,
-      totalKwh,
-      totals,
-      avgDailyKwh,
-      weekdayKwh,
-      weekendKwh,
-      timeOfDayBuckets,
-      peakDay,
-      peakHour,
-      baseload,
-      baseloadDaily,
-      baseloadMonthly,
-    };
-  }, [activeHouse]);
 
   if (loading) {
     return (

@@ -303,31 +303,14 @@ export function OnePathSimAdmin() {
       }),
     [lastRunKnownScenario, lookup?.sourceContext, selectedKnownScenario]
   );
-  const lookupBaselinePreview = useMemo(
-    () => asRecord(lookup?.sourceContext?.baselinePreview),
-    [lookup?.sourceContext?.baselinePreview]
+  const lookupUserUsageBaselineContract = useMemo(() => {
+    const contract = lookup?.sourceContext?.userUsageBaselineContract;
+    return contract && typeof contract === "object" ? contract : null;
+  }, [lookup?.sourceContext?.userUsageBaselineContract]);
+  const lookupBaselineParityAudit = useMemo(
+    () => asRecord(lookup?.sourceContext?.baselineParityAudit),
+    [lookup?.sourceContext?.baselineParityAudit]
   );
-  const baselineReadOnlyPreview = useMemo(() => {
-    const runEngineInput = asRecord(runResult?.engineInput);
-    const isBaselineIntervalRun =
-      runEngineInput.inputType === "INTERVAL" &&
-      (runEngineInput.scenarioId == null || String(runEngineInput.scenarioId) === "");
-    if (isBaselineIntervalRun) {
-      return {
-        readModel: runResult?.readModel ?? null,
-        weatherScore:
-          lookupBaselinePreview?.weatherScore ?? (lookup?.sourceContext as Record<string, unknown> | undefined)?.weatherScore ?? null,
-        parityAudit: lookupBaselinePreview?.parityAudit ?? null,
-      };
-    }
-    return lookupBaselinePreview
-      ? {
-          readModel: lookupBaselinePreview.readModel ?? null,
-          weatherScore: lookupBaselinePreview.weatherScore ?? null,
-          parityAudit: lookupBaselinePreview.parityAudit ?? null,
-        }
-      : null;
-  }, [lookup?.sourceContext, lookupBaselinePreview, runResult?.engineInput, runResult?.readModel]);
 
   const activeVariableFamilyView = useMemo(
     () =>
@@ -1043,19 +1026,18 @@ export function OnePathSimAdmin() {
 
         {runResult ? (
           <div className="space-y-4">
-            {baselineReadOnlyPreview ? (
+            {lookupUserUsageBaselineContract ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Household energy insights</div>
                 <p className="mt-2 text-sm text-slate-600">
-                  Baseline parity audit, Monthly usage, Daily usage, and 15-minute load curve below render from the shared read-only baseline preview only.
+                  Baseline parity audit, Monthly usage, Daily usage, and 15-minute load curve below render from the same user usage baseline contract the selected house already uses.
                 </p>
               </div>
             ) : null}
-            {baselineReadOnlyPreview ? (
+            {lookupUserUsageBaselineContract ? (
               <OnePathBaselineReadOnlyView
-                readModel={baselineReadOnlyPreview.readModel}
-                weatherScore={baselineReadOnlyPreview.weatherScore as any}
-                parityAudit={baselineReadOnlyPreview.parityAudit as any}
+                houseContract={lookupUserUsageBaselineContract as any}
+                parityAudit={lookupBaselineParityAudit as any}
               />
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1239,11 +1221,10 @@ export function OnePathSimAdmin() {
             </div>
           </div>
         ) : null}
-        {!runResult && baselineReadOnlyPreview ? (
+        {!runResult && lookupUserUsageBaselineContract ? (
           <OnePathBaselineReadOnlyView
-            readModel={baselineReadOnlyPreview.readModel}
-            weatherScore={baselineReadOnlyPreview.weatherScore as any}
-            parityAudit={baselineReadOnlyPreview.parityAudit as any}
+            houseContract={lookupUserUsageBaselineContract as any}
+            parityAudit={lookupBaselineParityAudit as any}
           />
         ) : null}
       </div>

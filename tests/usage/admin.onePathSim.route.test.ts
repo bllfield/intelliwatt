@@ -17,13 +17,13 @@ const resolveSharedWeatherSensitivityEnvelope = vi.fn();
 const getTravelRangesFromDb = vi.fn();
 const getSimulationVariablePolicy = vi.fn();
 const resolveUpstreamUsageTruthForSimulation = vi.fn();
+const buildUserUsageHouseContract = vi.fn();
 const adaptIntervalRawInput = vi.fn();
 const adaptManualMonthlyRawInput = vi.fn();
 const adaptManualAnnualRawInput = vi.fn();
 const adaptNewBuildRawInput = vi.fn();
 const runSharedSimulation = vi.fn();
 const buildSharedSimulationReadModel = vi.fn();
-const buildReadOnlyIntervalBaselinePreview = vi.fn();
 class UpstreamUsageTruthMissingError extends Error {
   code = "usage_truth_missing";
   usageTruthSource: string;
@@ -88,6 +88,10 @@ vi.mock("@/modules/onePathSim/runtime", () => ({
   resolveOnePathUpstreamUsageTruthForSimulation: (...args: any[]) => resolveUpstreamUsageTruthForSimulation(...args),
 }));
 
+vi.mock("@/lib/usage/userUsageHouseContract", () => ({
+  buildUserUsageHouseContract: (...args: any[]) => buildUserUsageHouseContract(...args),
+}));
+
 vi.mock("@/modules/onePathSim/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
@@ -95,7 +99,6 @@ vi.mock("@/modules/onePathSim/onePathSim", () => ({
   adaptNewBuildRawInput: (...args: any[]) => adaptNewBuildRawInput(...args),
   runSharedSimulation: (...args: any[]) => runSharedSimulation(...args),
   buildSharedSimulationReadModel: (...args: any[]) => buildSharedSimulationReadModel(...args),
-  buildReadOnlyIntervalBaselinePreview: (...args: any[]) => buildReadOnlyIntervalBaselinePreview(...args),
   SharedSimulationRunError,
   UpstreamUsageTruthMissingError,
 }));
@@ -127,13 +130,13 @@ describe("admin one path sim route", () => {
     getTravelRangesFromDb.mockReset();
     getSimulationVariablePolicy.mockReset();
     resolveUpstreamUsageTruthForSimulation.mockReset();
+    buildUserUsageHouseContract.mockReset();
     adaptIntervalRawInput.mockReset();
     adaptManualMonthlyRawInput.mockReset();
     adaptManualAnnualRawInput.mockReset();
     adaptNewBuildRawInput.mockReset();
     runSharedSimulation.mockReset();
     buildSharedSimulationReadModel.mockReset();
-    buildReadOnlyIntervalBaselinePreview.mockReset();
     vi.stubEnv("HOME_DETAILS_DATABASE_URL", "");
     vi.stubEnv("APPLIANCES_DATABASE_URL", "");
     vi.stubEnv("USAGE_DATABASE_URL", "");
@@ -189,36 +192,34 @@ describe("admin one path sim route", () => {
     adaptNewBuildRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "NEW_BUILD" });
     runSharedSimulation.mockResolvedValue({ artifactId: "artifact-1" });
     buildSharedSimulationReadModel.mockReturnValue({ runIdentity: { artifactId: "artifact-1" } });
-    buildReadOnlyIntervalBaselinePreview.mockResolvedValue({
-      engineInput: { inputType: "INTERVAL", sharedProducerPathUsed: true },
-      readModel: {
-        dataset: {
-          summary: {
-            source: "SMT",
-            intervalsCount: 34823,
-            totalKwh: 13542.3,
-            start: "2025-04-15",
-            end: "2026-04-14",
-          },
-          daily: [{ date: "2026-04-14", kwh: 31.2 }],
-          monthly: [{ month: "2026-04", kwh: 1110 }],
-          series: { intervals15: [{ timestamp: "2026-04-14T23:45:00.000Z", kwh: 0.3 }] },
-          meta: { baselinePassthrough: true },
-          insights: {
-            weekdayVsWeekend: { weekday: 9800, weekend: 3742.3 },
-            timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 2800 }],
-            fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
-          },
-          totals: { importKwh: 13542.3, exportKwh: 0, netKwh: 13542.3 },
+    buildUserUsageHouseContract.mockResolvedValue({
+      houseId: "house-1",
+      label: "Home",
+      address: { line1: "123 Main", city: "Dallas", state: "TX" },
+      esiid: "esiid-1",
+      dataset: {
+        summary: {
+          source: "SMT",
+          intervalsCount: 34823,
+          totalKwh: 13542.3,
+          start: "2025-04-15",
+          end: "2026-04-14",
         },
+        daily: [{ date: "2026-04-14", kwh: 13542.3 }],
+        monthly: [{ month: "2026-04", kwh: 13542.3 }],
+        series: { intervals15: [{ timestamp: "2026-04-14T23:45:00.000Z", kwh: 0.3 }] },
+        meta: { baselinePassthrough: true },
+        insights: {
+          weekdayVsWeekend: { weekday: 9800, weekend: 3742.3 },
+          timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 2800 }],
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+        },
+        totals: { importKwh: 13542.3, exportKwh: 0, netKwh: 13542.3 },
       },
-      parityAudit: {
-        parityStatus: "matched_shared_baseline_truth",
-        intervalCountParity: true,
-        totalKwhParity: true,
-        monthlyParity: true,
-        dailyParity: true,
-      },
+      alternatives: { smt: { totalKwh: 123 }, greenButton: null },
+      datasetError: null,
+      weatherSensitivityScore: { scoringMode: "INTERVAL_BASED" },
+      weatherEfficiencyDerivedInput: null,
     });
   });
 
@@ -265,26 +266,25 @@ describe("admin one path sim route", () => {
     });
     expect(json.sourceContext.weatherScore).toEqual({ scoringMode: "INTERVAL_BASED" });
     expect(json.sourceContext.travelRangesFromDb).toEqual([{ startDate: "2026-03-01", endDate: "2026-03-05" }]);
-    expect(json.sourceContext.baselinePreview).toEqual(
+    expect(json.sourceContext.userUsageBaselineContract).toEqual(
       expect.objectContaining({
-        readModel: expect.objectContaining({
-          dataset: expect.objectContaining({
-            summary: expect.objectContaining({
-              intervalsCount: 34823,
-              totalKwh: 13542.3,
-            }),
+        dataset: expect.objectContaining({
+          summary: expect.objectContaining({
+            intervalsCount: 34823,
+            totalKwh: 13542.3,
           }),
-        }),
-        parityAudit: expect.objectContaining({
-          parityStatus: "matched_shared_baseline_truth",
         }),
       })
     );
-    expect(buildReadOnlyIntervalBaselinePreview).toHaveBeenCalledWith(
+    expect(json.sourceContext.baselineParityAudit).toEqual(
       expect.objectContaining({
-        runtimeUserId: "user-1",
-        selectedHouse: expect.objectContaining({ id: "house-1" }),
-        actualContextHouse: expect.objectContaining({ id: "house-1" }),
+        parityStatus: "matched_shared_baseline_truth",
+      })
+    );
+    expect(buildUserUsageHouseContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        house: expect.objectContaining({ id: "house-1" }),
       })
     );
     expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { getHomeProfileReadOnlyByUserHouse } from "@/modules/homeProfile/repo";
 import {
   adaptIntervalRawInput,
   adaptManualAnnualRawInput,
   adaptManualMonthlyRawInput,
   adaptNewBuildRawInput,
-  buildReadOnlyIntervalBaselinePreview,
   buildSharedSimulationReadModel,
   runSharedSimulation,
   SharedSimulationRunError,
@@ -25,6 +25,7 @@ import {
   type SimulationVariableInputType,
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/runtime";
+import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 
 export const runtime = "nodejs";
@@ -195,27 +196,27 @@ export async function POST(request: NextRequest) {
     weatherScore: weatherEnvelope.score ?? null,
     weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
   } as const;
-  const baselinePreview = usageTruth?.dataset
-    ? await buildReadOnlyIntervalBaselinePreview({
-        runtimeUserId: resolved.userId,
-        selectedHouse: {
-          id: resolved.selectedHouse.id,
-          esiid: resolved.selectedHouse.esiid ?? null,
-        },
-        actualContextHouse: {
-          id: previewActualContextHouse.id,
-          esiid: previewActualContextHouse.esiid ?? null,
-        },
-        actualDataset: usageTruth.dataset,
-        usageTruthSource: usageTruth.usageTruthSource,
-        usageTruthSeedResult: usageTruth.seedResult,
-        upstreamUsageTruth: usageTruth.summary,
-        manualUsagePayload: manualUsage.payload ?? null,
-        homeProfile: homeProfile ?? null,
-        applianceProfile: applianceProfile ?? null,
-        weatherEnvelope,
-      }).catch(() => null)
-    : null;
+  const userUsageBaselineContract = await buildUserUsageHouseContract({
+    userId: resolved.userId,
+    house: {
+      id: resolved.selectedHouse.id,
+      label: resolved.selectedHouse.label ?? null,
+      esiid: resolved.selectedHouse.esiid ?? null,
+    },
+    resolvedUsage: usageTruth
+      ? {
+          dataset: usageTruth.dataset ?? null,
+          alternatives: usageTruth.alternatives ?? { smt: null, greenButton: null },
+        }
+      : { dataset: null, alternatives: { smt: null, greenButton: null } },
+    homeProfile: homeProfile ?? null,
+    applianceProfileRecord: applianceProfileRecord ?? null,
+    manualUsageRecord: manualUsage ?? null,
+    weatherSensitivity: weatherEnvelope,
+  }).catch(() => null);
+  const baselineParityAudit = buildOnePathBaselineParityAudit({
+    houseContract: userUsageBaselineContract,
+  });
   const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({
     scenario: {
       mode: previewMode,
@@ -236,7 +237,8 @@ export async function POST(request: NextRequest) {
       scenarios: resolved.scenarios,
       sourceContext: {
         ...previewLookupSourceContext,
-        baselinePreview,
+        userUsageBaselineContract,
+        baselineParityAudit,
         environmentVisibility,
         readOnlyAudit,
       },

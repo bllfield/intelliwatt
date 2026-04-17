@@ -1,5 +1,6 @@
 "use client";
 
+import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import {
   Bar,
   BarChart,
@@ -13,7 +14,6 @@ import {
 } from "recharts";
 import { buildOnePathBaselineReadOnlyView } from "@/modules/onePathSim/baselineReadOnlyView";
 import type { OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
-import type { WeatherSensitivityScore } from "@/modules/onePathSim/weatherSensitivityShared";
 
 function formatMonthLabel(month: string): string {
   const [year, rawMonth] = month.split("-");
@@ -50,7 +50,7 @@ function MetricCard(props: { label: string; value: string; note?: string }) {
   );
 }
 
-function WeatherScoreCard(props: { score: WeatherSensitivityScore | null }) {
+function WeatherScoreCard(props: { score: UserUsageHouseContract["weatherSensitivityScore"] | null }) {
   if (!props.score) return null;
   return (
     <section className="rounded-2xl border border-brand-blue/15 bg-white p-5 shadow-sm">
@@ -71,13 +71,11 @@ function WeatherScoreCard(props: { score: WeatherSensitivityScore | null }) {
 }
 
 export function OnePathBaselineReadOnlyView(props: {
-  readModel?: unknown;
-  weatherScore?: WeatherSensitivityScore | null;
+  houseContract?: UserUsageHouseContract | null;
   parityAudit?: OnePathBaselineParityAudit | null;
 }) {
   const view = buildOnePathBaselineReadOnlyView({
-    readModel: props.readModel,
-    weatherScore: props.weatherScore ?? null,
+    houseContract: props.houseContract ?? null,
     parityAudit: props.parityAudit ?? null,
   });
 
@@ -88,7 +86,7 @@ export function OnePathBaselineReadOnlyView(props: {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="text-sm font-semibold text-brand-navy">Baseline parity audit</div>
         <p className="mt-2 text-sm text-slate-600">
-          This baseline preview renders from the shared baseline read model only. No page-local baseline data owner is used.
+          This baseline preview renders from the same shared user-usage output contract the baseline usage page already uses.
         </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard label="Parity status" value={view.parityAudit?.parityStatus ?? "missing"} />
@@ -101,7 +99,7 @@ export function OnePathBaselineReadOnlyView(props: {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="text-sm font-semibold text-brand-navy">Household energy insights</div>
         <p className="mt-2 text-sm text-slate-600">
-          Baseline charts and cards below use the same shared read-only baseline truth contract that powers the One Path baseline preview.
+          Baseline charts and cards below use the same read-only baseline contract the user usage run/page renders for the selected house.
         </p>
       </div>
 

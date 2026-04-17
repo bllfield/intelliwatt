@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
@@ -68,7 +69,14 @@ export async function GET(request: NextRequest) {
     if (!scenarioId) {
       const house = await prisma.houseAddress.findFirst({
         where: { id: houseId, userId: u.user.id, archivedAt: null },
-        select: { id: true, esiid: true },
+        select: {
+          id: true,
+          label: true,
+          addressLine1: true,
+          addressCity: true,
+          addressState: true,
+          esiid: true,
+        },
       });
       if (!house) {
         return NextResponse.json(
@@ -91,20 +99,11 @@ export async function GET(request: NextRequest) {
         scenarioId: null,
         esiid: house.esiid ?? null,
       });
-      const dataset = resolved?.dataset ?? null;
-      const [homeProfile, applianceProfileRec, manualUsageRec] = await Promise.all([
-        getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
-        getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
-        getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
-      ]);
-      const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
-      const weatherSensitivity = await resolveSharedWeatherSensitivityEnvelope({
-        actualDataset: dataset,
-        manualUsagePayload: manualUsageRec?.payload ?? null,
-        homeProfile,
-        applianceProfile,
-        weatherHouseId: houseId,
-      }).catch(() => ({ score: null, derivedInput: null }));
+      const contract = await buildUserUsageHouseContract({
+        userId: u.user.id,
+        house,
+        resolvedUsage: resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } },
+      });
       const baselineHeaders = new Headers({ "Cache-Control": "private, max-age=30" });
       baselineHeaders.set("X-Correlation-Id", correlationId);
       return NextResponse.json(
@@ -113,10 +112,10 @@ export async function GET(request: NextRequest) {
           houseId: house.id,
           scenarioKey: "BASELINE",
           scenarioId: null,
-          dataset,
+          dataset: contract.dataset,
           correlationId,
-          weatherSensitivityScore: weatherSensitivity.score,
-          weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
+          weatherSensitivityScore: contract.weatherSensitivityScore,
+          weatherEfficiencyDerivedInput: contract.weatherEfficiencyDerivedInput,
         },
         { headers: baselineHeaders }
       );
