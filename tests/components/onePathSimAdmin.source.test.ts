@@ -122,6 +122,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("OnePathBaselineReadOnlyView");
     expect(source).toContain("userUsageBaselineContract");
     expect(source).toContain("baselineParityAudit");
+    expect(source).toContain("baselineParityReport");
     expect(source).toContain("Known scenario / expectations");
     expect(source).toContain("Tuning cycle summary");
     expect(source).toContain("runResult.readModel?.effectiveSimulationVariablesUsed");

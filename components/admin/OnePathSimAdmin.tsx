@@ -311,6 +311,10 @@ export function OnePathSimAdmin() {
     () => asRecord(lookup?.sourceContext?.baselineParityAudit),
     [lookup?.sourceContext?.baselineParityAudit]
   );
+  const lookupBaselineParityReport = useMemo(
+    () => asRecord(lookup?.sourceContext?.baselineParityReport),
+    [lookup?.sourceContext?.baselineParityReport]
+  );
 
   const activeVariableFamilyView = useMemo(
     () =>
@@ -1038,6 +1042,7 @@ export function OnePathSimAdmin() {
               <OnePathBaselineReadOnlyView
                 houseContract={lookupUserUsageBaselineContract as any}
                 parityAudit={lookupBaselineParityAudit as any}
+                parityReport={lookupBaselineParityReport as any}
               />
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1225,6 +1230,7 @@ export function OnePathSimAdmin() {
           <OnePathBaselineReadOnlyView
             houseContract={lookupUserUsageBaselineContract as any}
             parityAudit={lookupBaselineParityAudit as any}
+            parityReport={lookupBaselineParityReport as any}
           />
         ) : null}
       </div>

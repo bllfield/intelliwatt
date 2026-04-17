@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { buildOnePathBaselineReadOnlyView } from "@/modules/onePathSim/baselineReadOnlyView";
 import type { OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
+import type { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 
 function formatMonthLabel(month: string): string {
   const [year, rawMonth] = month.split("-");
@@ -73,6 +74,7 @@ function WeatherScoreCard(props: { score: UserUsageHouseContract["weatherSensiti
 export function OnePathBaselineReadOnlyView(props: {
   houseContract?: UserUsageHouseContract | null;
   parityAudit?: OnePathBaselineParityAudit | null;
+  parityReport?: ReturnType<typeof buildBaselineParityReport> | null;
 }) {
   const view = buildOnePathBaselineReadOnlyView({
     houseContract: props.houseContract ?? null,
@@ -94,6 +96,22 @@ export function OnePathBaselineReadOnlyView(props: {
           <MetricCard label="Total kWh parity" value={String(view.parityAudit?.totalKwhParity ?? "unknown")} />
           <MetricCard label="Monthly / daily parity" value={`${String(view.parityAudit?.monthlyParity ?? "unknown")} / ${String(view.parityAudit?.dailyParity ?? "unknown")}`} />
         </div>
+        {props.parityReport ? (
+          <div className="mt-4 grid gap-3 xl:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Fields matched</div>
+              <p className="mt-2 text-sm text-slate-700">
+                {props.parityReport.matchedKeys.length ? props.parityReport.matchedKeys.join(", ") : "None"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Fields mismatched</div>
+              <p className="mt-2 text-sm text-slate-700">
+                {props.parityReport.mismatchedKeys.length ? props.parityReport.mismatchedKeys.join(", ") : "None"}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

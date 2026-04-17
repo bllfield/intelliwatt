@@ -26,6 +26,7 @@ import {
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/runtime";
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
+import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 
 export const runtime = "nodejs";
@@ -196,6 +197,14 @@ export async function POST(request: NextRequest) {
     weatherScore: weatherEnvelope.score ?? null,
     weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
   } as const;
+  const userUsagePageBaselineContract = await buildUserUsageHouseContract({
+    userId: resolved.userId,
+    house: {
+      id: resolved.selectedHouse.id,
+      label: resolved.selectedHouse.label ?? null,
+      esiid: resolved.selectedHouse.esiid ?? null,
+    },
+  }).catch(() => null);
   const userUsageBaselineContract = await buildUserUsageHouseContract({
     userId: resolved.userId,
     house: {
@@ -217,6 +226,10 @@ export async function POST(request: NextRequest) {
   const baselineParityAudit = buildOnePathBaselineParityAudit({
     houseContract: userUsageBaselineContract,
   });
+  const baselineParityReport = buildBaselineParityReport({
+    userUsagePageContract: userUsagePageBaselineContract,
+    onePathBaselineContract: userUsageBaselineContract,
+  });
   const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({
     scenario: {
       mode: previewMode,
@@ -237,8 +250,10 @@ export async function POST(request: NextRequest) {
       scenarios: resolved.scenarios,
       sourceContext: {
         ...previewLookupSourceContext,
+        userUsagePageBaselineContract,
         userUsageBaselineContract,
         baselineParityAudit,
+        baselineParityReport,
         environmentVisibility,
         readOnlyAudit,
       },

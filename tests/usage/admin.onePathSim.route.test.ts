@@ -281,12 +281,19 @@ describe("admin one path sim route", () => {
         parityStatus: "matched_shared_baseline_truth",
       })
     );
+    expect(json.sourceContext.baselineParityReport).toEqual(
+      expect.objectContaining({
+        overallMatch: true,
+        firstDivergenceField: null,
+      })
+    );
     expect(buildUserUsageHouseContract).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         house: expect.objectContaining({ id: "house-1" }),
       })
     );
+    expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(2);
     expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
     expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
     expect(saveManualUsageInputForUserHouse).not.toHaveBeenCalled();
