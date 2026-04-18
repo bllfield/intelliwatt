@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   replaceGlobalManualMonthlyLabTestHomeFromSource: vi.fn(),
   ensureGlobalManualMonthlyLabTestHomeHouse: vi.fn(),
   dispatchPastSimRecalc: vi.fn(),
+  buildOnePathManualUsagePastSimReadResult: vi.fn(),
   getUserDefaultValidationSelectionMode: vi.fn(),
   getSimulatedUsageForHouseScenario: vi.fn(),
   getTravelRangesFromDb: vi.fn(),
@@ -53,8 +54,11 @@ vi.mock("@/modules/usageSimulator/labTestHome", () => ({
   ensureGlobalManualMonthlyLabTestHomeHouse: (...args: any[]) => mocks.ensureGlobalManualMonthlyLabTestHomeHouse(...args),
   replaceGlobalManualMonthlyLabTestHomeFromSource: (...args: any[]) => mocks.replaceGlobalManualMonthlyLabTestHomeFromSource(...args),
 }));
-vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
+vi.mock("@/modules/onePathSim/usageSimulator/pastSimRecalcDispatch", () => ({
   dispatchPastSimRecalc: (...args: any[]) => mocks.dispatchPastSimRecalc(...args),
+}));
+vi.mock("@/modules/onePathSim/manualPastSimReadResult", () => ({
+  buildOnePathManualUsagePastSimReadResult: (...args: any[]) => mocks.buildOnePathManualUsagePastSimReadResult(...args),
 }));
 vi.mock("@/modules/usageSimulator/service", () => ({
   getUserDefaultValidationSelectionMode: (...args: any[]) => mocks.getUserDefaultValidationSelectionMode(...args),
@@ -198,8 +202,16 @@ describe("admin manual monthly route", () => {
       correlationId: "cid-1",
       result: { ok: true, canonicalArtifactInputHash: "artifact-hash-1" },
     });
-    mocks.getSimulatedUsageForHouseScenario.mockResolvedValue({
+    mocks.buildOnePathManualUsagePastSimReadResult.mockResolvedValue({
       ok: true,
+      houseId: "lab-home-1",
+      scenarioId: "past-lab-s1",
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+        travelRanges: [],
+      },
       dataset: {
         meta: {
           mode: "MANUAL_TOTALS",
@@ -213,6 +225,37 @@ describe("admin manual monthly route", () => {
           kwh: 10,
           source: "SIMULATED",
         })),
+      },
+      displayDataset: {
+        meta: { timezone: "America/Chicago" },
+        daily: Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+          source: "SIMULATED",
+        })),
+      },
+      compareProjection: { rows: [], metrics: {} },
+      curveCompareActualIntervals15: [],
+      curveCompareSimulatedIntervals15: [],
+      curveCompareSimulatedDailyRows: [],
+      manualReadModel: null,
+      manualMonthlyReconciliation: {
+        rows: [{ actualIntervalTotalKwh: 300 }],
+      },
+      manualParitySummary: {
+        stage1_contract: {
+          anchorEndDate: "2025-04-30",
+        },
+        parity_verdicts: {
+          stage2PathParity: true,
+        },
+      },
+      sharedDiagnostics: {
+        identityContext: {},
+        sourceTruthContext: {},
+        lockboxExecutionSummary: { sharedProducerPathUsed: true },
+        projectionReadSummary: {},
+        tuningSummary: {},
       },
     });
     mocks.buildValidationCompareProjectionSidecar.mockReturnValue({ rows: [], metrics: {} });
@@ -242,7 +285,7 @@ describe("admin manual monthly route", () => {
     expect(mocks.getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
     expect(mocks.getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
     expect(mocks.getManualUsageInputForUserHouse).not.toHaveBeenCalled();
-    expect(mocks.getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
+    expect(mocks.buildOnePathManualUsagePastSimReadResult).not.toHaveBeenCalled();
   });
 
   it("load resets and seeds only the isolated lab home", async () => {
@@ -523,7 +566,7 @@ describe("admin manual monthly route", () => {
         preLockboxTravelRanges: [],
       })
     );
-    expect(mocks.getSimulatedUsageForHouseScenario).not.toHaveBeenCalled();
+    expect(mocks.buildOnePathManualUsagePastSimReadResult).not.toHaveBeenCalled();
   });
 
   it("saving AUTO_DATES writes only to the lab payload and never to the customer/source payload", async () => {
@@ -700,11 +743,13 @@ describe("admin manual monthly route", () => {
     expect(recalcBody.detail).toContain("connection limit: 1");
   });
 
-  it("returns a non-2xx status when read_result fails on the shared read path", async () => {
-    mocks.getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+  it("returns a non-2xx status when read_result fails on the One Path read path", async () => {
+    mocks.buildOnePathManualUsagePastSimReadResult.mockResolvedValueOnce({
       ok: false,
-      code: "COMPARE_TRUTH_INCOMPLETE",
+      error: "COMPARE_TRUTH_INCOMPLETE",
       message: "Missing canonical simulated-day totals.",
+      failureCode: "COMPARE_TRUTH_INCOMPLETE",
+      failureMessage: "Missing canonical simulated-day totals.",
     });
 
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
@@ -727,7 +772,7 @@ describe("admin manual monthly route", () => {
       failureCode: "COMPARE_TRUTH_INCOMPLETE",
       failureMessage: "Missing canonical simulated-day totals.",
     });
-    expect(mocks.getSimulatedUsageForHouseScenario).toHaveBeenCalledWith(
+    expect(mocks.buildOnePathManualUsagePastSimReadResult).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "admin-owner-1",
         houseId: "lab-home-1",
@@ -765,29 +810,52 @@ describe("admin manual monthly route", () => {
         totals: { importKwh: 300, exportKwh: 0, netKwh: 300 },
       },
     });
-    mocks.getSimulatedUsageForHouseScenario
-      .mockResolvedValueOnce({
-        ok: true,
-        dataset: {
-          meta: {
-            mode: "MANUAL_TOTALS",
-            manualMonthlyInputState: {
-              inputKindByMonth: { "2025-04": "entered_nonzero" },
-            },
-            filledMonths: [],
+    mocks.buildOnePathManualUsagePastSimReadResult.mockResolvedValueOnce({
+      ok: true,
+      houseId: "lab-home-1",
+      scenarioId: "past-lab-s1",
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+        travelRanges: [],
+      },
+      dataset: {
+        meta: {
+          mode: "MANUAL_TOTALS",
+          manualMonthlyInputState: {
+            inputKindByMonth: { "2025-04": "entered_nonzero" },
           },
-          daily: Array.from({ length: 30 }, (_, idx) => ({
-            date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
-            kwh: 10,
-            source: "SIMULATED",
-          })),
+          filledMonths: [],
         },
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        code: "NO_BUILD",
-        message: "No persisted source artifact.",
-      });
+        daily: Array.from({ length: 30 }, (_, idx) => ({
+          date: `2025-04-${String(idx + 1).padStart(2, "0")}`,
+          kwh: 10,
+          source: "SIMULATED",
+        })),
+      },
+      displayDataset: null,
+      compareProjection: { rows: [], metrics: {} },
+      curveCompareActualIntervals15: [],
+      curveCompareSimulatedIntervals15: [],
+      curveCompareSimulatedDailyRows: [],
+      manualReadModel: {
+        billPeriodCompare: {
+          rows: [{ actualIntervalTotalKwh: 300 }],
+        },
+      },
+      manualMonthlyReconciliation: {
+        rows: [{ actualIntervalTotalKwh: 300 }],
+      },
+      manualParitySummary: null,
+      sharedDiagnostics: {
+        identityContext: {},
+        sourceTruthContext: {},
+        lockboxExecutionSummary: { sharedProducerPathUsed: true },
+        projectionReadSummary: {},
+        tuningSummary: {},
+      },
+    });
 
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
     const res = await POST(
@@ -812,18 +880,11 @@ describe("admin manual monthly route", () => {
   });
 
   it("read_result exposes shared pure-manual travel donor truth from persisted artifact diagnostics", async () => {
-    mocks.buildSharedPastSimDiagnostics.mockReturnValueOnce({
-      identityContext: {},
-      sourceTruthContext: {
-        manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
-        manualTravelVacantDonorDayCount: 19,
-      },
-      lockboxExecutionSummary: { sharedProducerPathUsed: true },
-      projectionReadSummary: {},
-      tuningSummary: {},
-    });
-    mocks.getSimulatedUsageForHouseScenario.mockResolvedValue({
+    mocks.buildOnePathManualUsagePastSimReadResult.mockResolvedValueOnce({
       ok: true,
+      houseId: "lab-home-1",
+      scenarioId: "past-lab-s1",
+      payload: null,
       dataset: {
         meta: {
           mode: "MANUAL_TOTALS",
@@ -834,6 +895,24 @@ describe("admin manual monthly route", () => {
           filledMonths: [],
         },
         daily: [{ date: "2025-04-10", kwh: 10, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+      },
+      displayDataset: null,
+      compareProjection: { rows: [], metrics: {} },
+      curveCompareActualIntervals15: [],
+      curveCompareSimulatedIntervals15: [],
+      curveCompareSimulatedDailyRows: [],
+      manualReadModel: null,
+      manualMonthlyReconciliation: null,
+      manualParitySummary: null,
+      sharedDiagnostics: {
+        identityContext: {},
+        sourceTruthContext: {
+          manualTravelVacantDonorSource: "same_run_simulated_non_travel_days",
+          manualTravelVacantDonorDayCount: 19,
+        },
+        lockboxExecutionSummary: { sharedProducerPathUsed: true },
+        projectionReadSummary: {},
+        tuningSummary: {},
       },
     });
 
@@ -882,8 +961,20 @@ describe("admin manual monthly route", () => {
         updatedAt: "2025-08-18T00:00:00.000Z",
       };
     });
-    mocks.getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+    mocks.buildOnePathManualUsagePastSimReadResult.mockResolvedValueOnce({
       ok: true,
+      houseId: "lab-home-1",
+      scenarioId: "past-lab-s1",
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-08-31",
+        monthlyKwh: [{ month: "2025-08", kwh: 15000.2 }],
+        statementRanges: [{ month: "2025-08", startDate: "2025-08-01", endDate: "2025-08-31" }],
+        travelRanges: [
+          { startDate: "2025-03-14", endDate: "2025-06-01" },
+          { startDate: "2025-08-13", endDate: "2025-08-17" },
+        ],
+      },
       dataset: {
         meta: {
           mode: "MANUAL_TOTALS",
@@ -892,6 +983,21 @@ describe("admin manual monthly route", () => {
           filledMonths: [],
         },
         daily: [{ date: "2025-08-14", kwh: 12, source: "SIMULATED", sourceDetail: "SIMULATED_TRAVEL_VACANT" }],
+      },
+      displayDataset: null,
+      compareProjection: { rows: [], metrics: {} },
+      curveCompareActualIntervals15: [],
+      curveCompareSimulatedIntervals15: [],
+      curveCompareSimulatedDailyRows: [],
+      manualReadModel: null,
+      manualMonthlyReconciliation: null,
+      manualParitySummary: null,
+      sharedDiagnostics: {
+        identityContext: {},
+        sourceTruthContext: {},
+        lockboxExecutionSummary: { sharedProducerPathUsed: true },
+        projectionReadSummary: {},
+        tuningSummary: {},
       },
     });
 
@@ -918,46 +1024,60 @@ describe("admin manual monthly route", () => {
   });
 
   it("read_result exposes shared manual daily-curve compare payloads from actual source truth plus raw artifact intervals", async () => {
-    mocks.buildValidationCompareProjectionFromDatasets.mockReturnValueOnce({
-      rows: [
-        {
-          localDate: "2024-12-31",
-          dayType: "weekday",
-          actualDayKwh: 0.4,
-          simulatedDayKwh: 0.5,
-          errorKwh: 0.1,
-          percentError: 25,
+    mocks.buildOnePathManualUsagePastSimReadResult.mockResolvedValueOnce({
+      ok: true,
+      houseId: "lab-home-1",
+      scenarioId: "past-lab-s1",
+      payload: null,
+      dataset: {
+        meta: {
+          mode: "MANUAL_TOTALS",
+          lockboxInput: { mode: "MANUAL_MONTHLY" },
+          lockboxPerDayTrace: [],
+          validationOnlyDateKeysLocal: ["2024-12-31"],
         },
+        daily: [{ date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
+      },
+      displayDataset: {
+        meta: {
+          mode: "MANUAL_TOTALS",
+          lockboxInput: { mode: "MANUAL_MONTHLY" },
+          lockboxPerDayTrace: [],
+        },
+        daily: [{ date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
+        series: {
+          intervals15: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.5 }],
+        },
+      },
+      compareProjection: {
+        rows: [
+          {
+            localDate: "2024-12-31",
+            dayType: "weekday",
+            actualDayKwh: 0.4,
+            simulatedDayKwh: 0.5,
+            errorKwh: 0.1,
+            percentError: 25,
+          },
+        ],
+        metrics: { wape: 25 },
+      },
+      curveCompareActualIntervals15: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.4 }],
+      curveCompareSimulatedIntervals15: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.5 }],
+      curveCompareSimulatedDailyRows: [
+        { date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" },
       ],
-      metrics: { wape: 25 },
+      manualReadModel: null,
+      manualMonthlyReconciliation: null,
+      manualParitySummary: null,
+      sharedDiagnostics: {
+        identityContext: {},
+        sourceTruthContext: {},
+        lockboxExecutionSummary: { sharedProducerPathUsed: true },
+        projectionReadSummary: {},
+        tuningSummary: {},
+      },
     });
-    mocks.getSimulatedUsageForHouseScenario
-      .mockResolvedValueOnce({
-        ok: true,
-        dataset: {
-          meta: {
-            mode: "MANUAL_TOTALS",
-            lockboxInput: { mode: "MANUAL_MONTHLY" },
-            lockboxPerDayTrace: [],
-            validationOnlyDateKeysLocal: ["2024-12-31"],
-          },
-          daily: [{ date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
-        },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        dataset: {
-          meta: {
-            mode: "MANUAL_TOTALS",
-            lockboxInput: { mode: "MANUAL_MONTHLY" },
-            lockboxPerDayTrace: [],
-          },
-          daily: [{ date: "2024-12-31", kwh: 0.5, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
-          series: {
-            intervals15: [{ timestamp: "2025-01-01T00:00:00.000Z", kwh: 0.5 }],
-          },
-        },
-      });
 
     const { POST } = await import("@/app/api/admin/tools/manual-monthly/route");
     const res = await POST(

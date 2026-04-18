@@ -17,11 +17,13 @@ describe("external simulation ownership sources", () => {
     expect(source).toContain("recalcSimulatorBuild");
   });
 
-  it("keeps Manual Monthly Lab on shared recalc and manual readback owners", () => {
+  it("keeps Manual Monthly Lab on One Path recalc and readback owners", () => {
     const source = readRepoFile("app/api/admin/tools/manual-monthly/route.ts");
 
     expect(source).toContain("dispatchPastSimRecalc");
-    expect(source).toContain("buildManualUsagePastSimReadResult");
+    expect(source).toContain("buildOnePathManualUsagePastSimReadResult");
+    expect(source).toContain("@/modules/onePathSim/usageSimulator/pastSimRecalcDispatch");
+    expect(source).toContain("@/modules/onePathSim/manualPastSimReadResult");
     expect(source).not.toContain("simulatePastUsageDataset(");
   });
 
@@ -36,7 +38,7 @@ describe("external simulation ownership sources", () => {
   it("keeps the user baseline usage route on shared weather scoring only, not past-sim recalc", () => {
     const source = readRepoFile("app/api/user/usage/route.ts");
 
-    expect(source).toContain("resolveSharedWeatherSensitivityEnvelope");
+    expect(source).toContain("buildUserUsageHouseContract");
     expect(source).not.toContain("recalcSimulatorBuild");
     expect(source).not.toContain("getSimulatedUsageForHouseScenario");
   });

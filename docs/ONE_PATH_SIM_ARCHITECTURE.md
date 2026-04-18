@@ -18,8 +18,8 @@ When this document conflicts with older planning or audit language, this documen
 - One Path Sim Admin is currently a **pre-cutover proving harness / truth console**.
 - It is the place to define, inspect, and verify the canonical shared simulation architecture.
 - It is **not yet** the live source of truth for all existing simulation-facing surfaces.
-- Existing GapFill, Manual Lab, user Past/manual pages, and other readers are **not yet fully rerouted** just because One Path exists.
-- Existing live app surfaces remain quarantined from One Path. GapFill, Manual Lab, user sim pages, and the normal usage flow are still on their current live/shared paths.
+- Existing GapFill, user Past/manual pages, and other readers are **not yet fully rerouted** just because One Path exists.
+- Existing live app surfaces remain quarantined from One Path. GapFill, user sim pages, and the normal usage flow are still on their current live/shared paths; Manual Lab now shares the One Path-owned Stage 2 Past calc/read path but remains a separate admin Stage 1 surface.
 - Current verified repo state: `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
 - That internal seal does **not** mean cutover is complete. One Path may still depend on safe pure utilities and read-only data access outside `modules/onePathSim/**`, but it is not allowed to depend on live behavior owners.
 - This phase is about locking ownership and contracts so later cutover can happen without drift.

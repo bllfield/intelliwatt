@@ -10,14 +10,14 @@ import {
 } from "@/modules/manualUsage/prefill";
 import { normalizeTravelRanges as normalizeManualTravelRanges } from "@/modules/manualUsage/statementRanges";
 import { getManualUsageInputForUserHouse, saveManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
+import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
 import {
   ensureGlobalManualMonthlyLabTestHomeHouse,
   replaceGlobalManualMonthlyLabTestHomeFromSource,
 } from "@/modules/usageSimulator/labTestHome";
 import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
-import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
+import { dispatchPastSimRecalc } from "@/modules/onePathSim/usageSimulator/pastSimRecalcDispatch";
 import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import { classifySimulationFailure } from "@/modules/usageSimulator/simulationDataAlerts";
@@ -105,7 +105,7 @@ async function buildReadResult(args: {
   validationPolicyOwner?: string | null;
   weatherLogicMode?: string | null;
 }) {
-  return buildManualUsagePastSimReadResult({
+  return buildOnePathManualUsagePastSimReadResult({
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
@@ -538,7 +538,7 @@ export async function POST(req: NextRequest) {
         const failure = buildAdminManualRecalcFailure({
           error: error instanceof Error ? error.name : "recalc_exception",
           missingItems: [error instanceof Error ? error.message : String(error)],
-          fallbackMessage: "Manual recalc failed before the shared producer returned a persisted artifact.",
+        fallbackMessage: "Manual recalc failed before the One Path producer returned a persisted artifact.",
         });
         return NextResponse.json(
           {
