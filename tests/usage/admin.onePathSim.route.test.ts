@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("server-only", () => ({}));
@@ -121,8 +121,20 @@ function buildRequest(body: Record<string, unknown>, cookie = "brian@intellipath
   });
 }
 
+function buildDailyRows(startDate: string, endDate: string, kwh = 10) {
+  const out: Array<{ date: string; kwh: number }> = [];
+  const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
+  const end = new Date(`${endDate}T00:00:00.000Z`).getTime();
+  for (let cursor = start; cursor <= end; cursor += 24 * 60 * 60 * 1000) {
+    out.push({ date: new Date(cursor).toISOString().slice(0, 10), kwh });
+  }
+  return out;
+}
+
 describe("admin one path sim route", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-16T12:00:00.000Z"));
     requireAdmin.mockReset();
     lookupAdminHousesByEmail.mockReset();
     resolveAdminHouseSelection.mockReset();
@@ -160,7 +172,11 @@ describe("admin one path sim route", () => {
     resolveAdminHouseSelection.mockResolvedValue({ id: "house-1", label: "Primary", esiid: "esiid-1", isPrimary: true });
     listScenarios.mockResolvedValue({ ok: true, scenarios: [{ id: "scenario-1", name: "Past" }] });
     resolveUpstreamUsageTruthForSimulation.mockResolvedValue({
-      dataset: { summary: { totalKwh: 123 }, meta: { actualSource: "SMT" } },
+      dataset: {
+        summary: { totalKwh: 3790, end: "2026-04-14" },
+        meta: { actualSource: "SMT" },
+        daily: buildDailyRows("2025-04-01", "2026-04-14"),
+      },
       alternatives: { smt: { totalKwh: 123 }, greenButton: null },
       actualContextHouse: { id: "house-1", esiid: "esiid-1" },
       usageTruthSource: "persisted_usage_output",
@@ -362,6 +378,10 @@ describe("admin one path sim route", () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("allows the browser admin cookie for lookup and returns source context", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com", includeDebugDiagnostics: true }));
@@ -371,7 +391,9 @@ describe("admin one path sim route", () => {
     expect(requireAdmin).not.toHaveBeenCalled();
     expect(json.ok).toBe(true);
     expect(json.selectedHouse.id).toBe("house-1");
-    expect(json.sourceContext.actualDatasetSummary).toEqual({ totalKwh: 123 });
+    expect(json.sourceContext.actualDatasetSummary).toEqual(
+      expect.objectContaining({ totalKwh: 3790, end: "2026-04-14" })
+    );
     expect(json.sourceContext.upstreamUsageTruth.currentRun.statusSummary).toEqual({
       usageTruthStatus: "existing_persisted_truth",
       downstreamSimulationAllowed: true,
@@ -701,6 +723,42 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
+  it("returns interval-derived monthly and annual admin seeds on manual load when no payload is saved", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "load_manual",
+        email: "customer@example.com",
+        houseId: "house-1",
+        actualContextHouseId: "house-1",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.payload).toBeNull();
+    expect(json.seed?.sourceMode).toBe("ACTUAL_INTERVALS_MONTHLY_PREFILL");
+    expect(json.seed?.monthly).toMatchObject({
+      mode: "MONTHLY",
+      dateSourceMode: "AUTO_DATES",
+      anchorEndDate: "2026-04-14",
+    });
+    expect(Array.isArray(json.seed?.monthly?.monthlyKwh)).toBe(true);
+    expect(json.seed?.monthly?.monthlyKwh?.length).toBeGreaterThan(0);
+    expect(json.seed?.annual).toMatchObject({
+      mode: "ANNUAL",
+      anchorEndDate: "2026-04-14",
+    });
+    expect(json.seed?.annual?.annualKwh).toBeGreaterThan(0);
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      seedIfMissing: false,
+    });
+  });
+
   it("keeps manual debug-off runs on the same lean readback path and returns Stage 1 plus Stage 2 display data", async () => {
     getManualUsageInputForUserHouse.mockResolvedValueOnce({
       payload: {
@@ -786,7 +844,7 @@ describe("admin one path sim route", () => {
     );
   });
 
-  it("fails manual runs early when no saved manual payload exists", async () => {
+  it("derives a manual monthly payload from interval-backed usage when no payload is saved", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
       buildRequest({
@@ -798,15 +856,18 @@ describe("admin one path sim route", () => {
     );
     const json = await res.json();
 
-    expect(res.status).toBe(409);
-    expect(adaptManualMonthlyRawInput).not.toHaveBeenCalled();
-    expect(runSharedSimulation).not.toHaveBeenCalled();
-    expect(json).toEqual({
-      ok: false,
-      error: "requirements_unmet",
-      missingItems: ["Save manual usage totals (monthly or annual)."],
-      message: "requirements_unmet: Save manual usage totals (monthly or annual).",
-    });
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(adaptManualMonthlyRawInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manualUsagePayload: expect.objectContaining({
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-14",
+          dateSourceMode: "AUTO_DATES",
+        }),
+      })
+    );
+    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
   });
 
   it("returns shared recalc requirement failures without masking the missing manual payload", async () => {

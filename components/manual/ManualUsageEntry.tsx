@@ -260,6 +260,11 @@ export function ManualUsageEntry({
           setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
         }
+        if (showMonthlyDateSourceControls) {
+          setMonthlyDateSourceMode("AUTO_DATES");
+          setMonthlyRows(buildAutoDateRows(defaultMonthlyRows(), rollingAutoAnchorEndDate));
+          setAnnualAnchorEndDate(rollingAutoAnchorEndDate);
+        }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Failed to load manual usage");
       } finally {

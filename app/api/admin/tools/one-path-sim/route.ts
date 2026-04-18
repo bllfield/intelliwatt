@@ -29,8 +29,14 @@ import {
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
+import {
+  reanchorGapfillManualStageOnePayload,
+  resolveGapfillSyntheticAnchorEndDate,
+  resolveSharedManualStageOneContract,
+} from "@/modules/onePathSim/manualPrefill";
 import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
+import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 
@@ -85,6 +91,98 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function includeDebugDiagnosticsByDefault(value: unknown): boolean {
   return value === true;
+}
+
+function normalizeActiveTravelRanges(args: {
+  overrideTravelRanges?: unknown;
+  payload?: ManualUsagePayload | null;
+  dbTravelRanges?: unknown;
+}): Array<{ startDate: string; endDate: string }> {
+  if (Array.isArray(args.overrideTravelRanges) && args.overrideTravelRanges.length > 0) {
+    return args.overrideTravelRanges as Array<{ startDate: string; endDate: string }>;
+  }
+  if (Array.isArray(args.payload?.travelRanges) && args.payload.travelRanges.length > 0) {
+    return args.payload.travelRanges;
+  }
+  if (Array.isArray(args.dbTravelRanges) && args.dbTravelRanges.length > 0) {
+    return args.dbTravelRanges as Array<{ startDate: string; endDate: string }>;
+  }
+  return [];
+}
+
+async function buildOnePathAdminManualSeeds(args: {
+  userId: string;
+  houseId: string;
+  actualContextHouseId: string;
+  payload: ManualUsagePayload | null;
+  overrideTravelRanges?: unknown;
+  dbTravelRanges?: unknown;
+}) {
+  const usageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
+    userId: args.userId,
+    houseId: args.houseId,
+    actualContextHouseId: args.actualContextHouseId,
+    seedIfMissing: false,
+  }).catch(() => null);
+  const actualEndDate = String(usageTruth?.dataset?.summary?.end ?? "").slice(0, 10) || null;
+  const syntheticAnchorEndDate = resolveGapfillSyntheticAnchorEndDate(actualEndDate);
+  const activeTravelRanges = normalizeActiveTravelRanges({
+    overrideTravelRanges: args.overrideTravelRanges,
+    payload: args.payload,
+    dbTravelRanges: args.dbTravelRanges,
+  });
+  const monthlyResolved = resolveSharedManualStageOneContract({
+    mode: "MONTHLY",
+    sourcePayload: args.payload,
+    actualEndDate: syntheticAnchorEndDate,
+    travelRanges: activeTravelRanges,
+    dailyRows: usageTruth?.dataset?.daily ?? [],
+  });
+  const annualResolved = resolveSharedManualStageOneContract({
+    mode: "ANNUAL",
+    sourcePayload: args.payload,
+    actualEndDate: syntheticAnchorEndDate,
+    travelRanges: activeTravelRanges,
+    dailyRows: usageTruth?.dataset?.daily ?? [],
+  });
+  const monthlySeed =
+    monthlyResolved.payload?.mode === "MONTHLY"
+      ? monthlyResolved.payloadSource === "actual_derived_seed"
+        ? reanchorGapfillManualStageOnePayload({
+            payload: {
+              ...monthlyResolved.payload,
+              dateSourceMode: "AUTO_DATES",
+              travelRanges: activeTravelRanges.length > 0 ? activeTravelRanges : monthlyResolved.payload.travelRanges,
+            },
+            anchorEndDate: syntheticAnchorEndDate,
+          })
+        : monthlyResolved.payload
+      : null;
+  const annualSeed =
+    annualResolved.payload?.mode === "ANNUAL"
+      ? annualResolved.payloadSource === "actual_derived_seed"
+        ? reanchorGapfillManualStageOnePayload({
+            payload: {
+              ...annualResolved.payload,
+              travelRanges: activeTravelRanges.length > 0 ? activeTravelRanges : annualResolved.payload.travelRanges,
+            },
+            anchorEndDate: syntheticAnchorEndDate,
+          })
+        : annualResolved.payload
+      : null;
+  return {
+    usageTruth,
+    activeTravelRanges,
+    seed: {
+      sourceMode: monthlyResolved.seedSet.sourceMode ?? annualResolved.seedSet.sourceMode ?? null,
+      monthly: monthlySeed,
+      annual: annualSeed,
+    },
+    payloadForMode: {
+      MANUAL_MONTHLY: monthlySeed,
+      MANUAL_ANNUAL: annualSeed,
+    } as const,
+  };
 }
 
 function asScenarioVariable(value: unknown): {
@@ -145,11 +243,26 @@ export async function POST(request: NextRequest) {
       userId: resolved.userId,
       houseId: resolved.selectedHouse.id,
     }).catch(() => ({ payload: null, updatedAt: null }));
+    const actualContextHouseId =
+      typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+        ? body.actualContextHouseId.trim()
+        : resolved.selectedHouse.id;
+    const travelRangesFromDb = await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []);
+    const seeds = await buildOnePathAdminManualSeeds({
+      userId: resolved.userId,
+      houseId: resolved.selectedHouse.id,
+      actualContextHouseId,
+      payload: manual.payload ?? null,
+      dbTravelRanges: travelRangesFromDb,
+    });
     return NextResponse.json({
       ok: true,
       houseId: resolved.selectedHouse.id,
       payload: manual.payload ?? null,
       updatedAt: manual.updatedAt ?? null,
+      sourcePayload: manual.payload ?? null,
+      sourceUpdatedAt: manual.updatedAt ?? null,
+      seed: seeds.seed,
     });
   }
 
@@ -177,17 +290,6 @@ export async function POST(request: NextRequest) {
             updatedAt: null,
           }))
         : { payload: null, updatedAt: null };
-    if ((mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL") && !manualUsage.payload) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "requirements_unmet",
-          missingItems: ["Save manual usage totals (monthly or annual)."],
-          message: "requirements_unmet: Save manual usage totals (monthly or annual).",
-        },
-        { status: 409 }
-      );
-    }
     const rawInputBase = {
       userId: resolved.userId,
       houseId: resolved.selectedHouse.id,
@@ -214,6 +316,36 @@ export async function POST(request: NextRequest) {
       travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : [],
       persistRequested: body?.persistRequested !== false,
     } as const;
+    const adminManualSeeds =
+      mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+        ? await buildOnePathAdminManualSeeds({
+            userId: resolved.userId,
+            houseId: resolved.selectedHouse.id,
+            actualContextHouseId: rawInputBase.actualContextHouseId,
+            payload: manualUsage.payload ?? null,
+            overrideTravelRanges: rawInputBase.travelRanges,
+            dbTravelRanges: await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
+          })
+        : null;
+    const effectiveManualUsagePayload =
+      mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+        ? adminManualSeeds?.payloadForMode[mode] ?? null
+        : null;
+    if ((mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL") && !effectiveManualUsagePayload) {
+      const missingItems =
+        mode === "MANUAL_ANNUAL"
+          ? ["Save filled manual annual usage totals before running MANUAL_ANNUAL."]
+          : ["Save filled manual monthly usage totals before running MANUAL_MONTHLY."];
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "requirements_unmet",
+          missingItems,
+          message: `requirements_unmet: ${missingItems.join("; ")}`,
+        },
+        { status: 409 }
+      );
+    }
     try {
       if (!includeDebugDiagnostics && rawInputBase.scenarioId) {
         const readback = await readOnePathSimulatedUsageScenario({
@@ -253,7 +385,7 @@ export async function POST(request: NextRequest) {
         const manualStageOneView =
           mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
             ? buildOnePathManualStageOneView({
-                payload: manualUsage.payload ?? null,
+                payload: effectiveManualUsagePayload,
                 dataset: readback.dataset,
                 actualDataset:
                   (
@@ -299,13 +431,13 @@ export async function POST(request: NextRequest) {
           : mode === "MANUAL_ANNUAL"
             ? await adaptManualAnnualRawInput({
                 ...rawInputBase,
-                manualUsagePayload: manualUsage.payload ?? null,
+                manualUsagePayload: effectiveManualUsagePayload,
               })
             : mode === "NEW_BUILD"
               ? await adaptNewBuildRawInput(rawInputBase)
               : await adaptManualMonthlyRawInput({
                   ...rawInputBase,
-                  manualUsagePayload: manualUsage.payload ?? null,
+                  manualUsagePayload: effectiveManualUsagePayload,
                 });
       const artifact = await runSharedSimulation(engineInput);
       const readModel = buildSharedSimulationReadModel(artifact);

@@ -772,6 +772,8 @@ export function OnePathSimAdmin() {
             action: "load_manual",
             email: lookup?.email ?? email,
             houseId,
+            actualContextHouseId: effectiveActualContextHouseId,
+            mode,
           }),
         });
         return (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as any;
@@ -790,7 +792,7 @@ export function OnePathSimAdmin() {
         return (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as any;
       },
     }),
-    [email, lookup?.email]
+    [effectiveActualContextHouseId, email, lookup?.email, mode]
   );
 
   return (
