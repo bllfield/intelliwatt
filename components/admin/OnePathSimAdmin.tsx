@@ -263,13 +263,14 @@ export function OnePathSimAdmin() {
   );
   const orderedKnownScenarios = useMemo(() => {
     const brianEmail = PRIMARY_BRIAN_SANDBOX_CONTEXT.email;
+    const registryOrder = new Map(KNOWN_HOUSE_SCENARIOS.map((scenario, index) => [scenario.scenarioKey, index]));
     return [...KNOWN_HOUSE_SCENARIOS].sort((left, right) => {
       if (left.scenarioKey === DEFAULT_BRIAN_KNOWN_SCENARIO_KEY) return -1;
       if (right.scenarioKey === DEFAULT_BRIAN_KNOWN_SCENARIO_KEY) return 1;
       if (left.sourceUserEmail === brianEmail && right.sourceUserEmail !== brianEmail) return -1;
       if (right.sourceUserEmail === brianEmail && left.sourceUserEmail !== brianEmail) return 1;
       if (left.active !== right.active) return left.active ? -1 : 1;
-      return left.label.localeCompare(right.label);
+      return (registryOrder.get(left.scenarioKey) ?? 0) - (registryOrder.get(right.scenarioKey) ?? 0);
     });
   }, []);
   const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
