@@ -49,6 +49,7 @@ Required same-pass workflow:
 - Shared Past Sim must fill missing bill-cycle months, excluded travel/vacant days, and other required simulated periods after normalization. Blank input-chart months are an input-state concept, not the final artifact contract.
 - Manual monthly user Past and admin manual-monthly lab are required to stay identical from normalized input submission through chart rendering.
 - One Path manual admin/read surfaces should now mirror that split with a dedicated Stage 1 contract view plus the same Stage 2 display-ready readback contract, while still keeping One Path-owned display wrappers separate from the current user manual page.
+- One Path Admin unresolved manual loads may also mirror Manual Lab / GapFill Stage 1 convenience behavior by deriving admin seed totals, anchor, and bill ranges from interval-backed actual usage when the test-home manual payload is missing. That admin seeding is Stage 1-only convenience; only the resolved manual totals and metadata may enter Stage 2.
 - Allowed admin-only divergence begins only after the shared Past result is accepted for display:
   - bill-period parity compare
   - extra diagnostics
@@ -101,6 +102,7 @@ Required same-pass workflow:
 - GapFill Actual House summary/monthly/diagnostic panels must use that same shared persisted actual-house read path too; if the shared artifact/readback has actual-house truth, the UI must project it from there rather than route-local placeholders.
 - Actual compare totals must come from that same shared actual-house read path as the Actual House monthly display; do not mix a second annual aggregate or alternate monthly source without explicit labeling.
 - Manual Lab remains the authority for manual-entry Stage 1 semantics, so GapFill manual monthly/manual annual now resolve the same shared manual payload contract before recalc and persist that contract onto the reusable test home before the shared producer runs.
+- One Path Admin now mirrors the same rolling current-Chicago-minus-2-days anchor contract for unresolved manual-monthly admin autofill so admin bill-end dates and statement ranges stay aligned with GapFill convenience behavior.
   - Manual monthly Stage 2 input is totals-only. Source actual usage may seed month/bill-period totals, but raw intervals, source daily rows, and actual-derived intraday shapes stay out of the manual-monthly simulation path.
   - GapFill `MANUAL_MONTHLY` is the pure manual monthly variant for interval-backed houses: saved manual payload drives Stage 2, source actual usage is compare-only, and no source-derived monthly anchors survive as active Stage 2 drivers.
   - Manual monthly source-backed periods that overlap travel/vacant dates lose source-truth ownership and are filled by the shared simulation path instead of reusing actual-derived totals.
