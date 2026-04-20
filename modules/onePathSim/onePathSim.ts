@@ -35,7 +35,11 @@ import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weather
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { hasUsableAnnualPayload, hasUsableMonthlyPayload } from "@/modules/onePathSim/manualPrefill";
-import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
+import type {
+  ManualMonthlyDateSourceMode,
+  ManualStatementRange,
+  ManualUsagePayload,
+} from "@/modules/onePathSim/simulatedUsage/types";
 
 export type CanonicalSimulationInputType =
   | "INTERVAL"
@@ -327,6 +331,31 @@ function buildManualBillPeriodTotalsRecord(rows: unknown): Record<string, number
   }, {});
 }
 
+function normalizeManualStatementRanges(rows: unknown): ManualStatementRange[] {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row) => ({
+      month: String((row as any)?.month ?? "").slice(0, 7),
+      startDate:
+        typeof (row as any)?.startDate === "string" && (row as any).startDate.trim()
+          ? String((row as any).startDate).slice(0, 10)
+          : null,
+      endDate: String((row as any)?.endDate ?? "").slice(0, 10),
+    }))
+    .filter(
+      (row): row is ManualStatementRange =>
+        /^\d{4}-\d{2}$/.test(row.month) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(row.endDate) &&
+        (row.startDate == null || /^\d{4}-\d{2}-\d{2}$/.test(row.startDate))
+    );
+}
+
+function normalizeManualMonthlyDateSourceMode(value: unknown): ManualMonthlyDateSourceMode | undefined {
+  return value === "CUSTOMER_DATES" || value === "AUTO_DATES" || value === "ADMIN_CUSTOM_DATES"
+    ? value
+    : undefined;
+}
+
 function buildManualPayloadFromEngineInput(engineInput: CanonicalSimulationEngineInput): ManualUsagePayload | null {
   if (engineInput.inputType === "MANUAL_MONTHLY") {
     const monthlyKwh = Object.entries(engineInput.monthlyTotalsKwhByMonth)
@@ -347,9 +376,9 @@ function buildManualPayloadFromEngineInput(engineInput: CanonicalSimulationEngin
       mode: "MONTHLY",
       anchorEndDate: engineInput.anchorEndDate,
       monthlyKwh,
-      statementRanges: Array.isArray(engineInput.statementRanges) ? engineInput.statementRanges : [],
+      statementRanges: normalizeManualStatementRanges(engineInput.statementRanges),
       travelRanges: Array.isArray(engineInput.travelRanges) ? engineInput.travelRanges : [],
-      dateSourceMode: engineInput.dateSourceMode ?? undefined,
+      dateSourceMode: normalizeManualMonthlyDateSourceMode(engineInput.dateSourceMode),
     };
   }
   if (engineInput.inputType === "MANUAL_ANNUAL") {

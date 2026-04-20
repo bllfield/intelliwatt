@@ -4018,6 +4018,7 @@ async function recalcSimulatorBuildImpl(args: {
   esiid: string | null;
   /** Optional shared actual-context source house; defaults to houseId. */
   actualContextHouseId?: string;
+  manualUsagePayload?: ManualUsagePayloadAny | null;
   mode: SimulatorMode;
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;
