@@ -130,13 +130,17 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("OnePathRunReadOnlyView");
     expect(source).toContain("OnePathManualStageView");
     expect(source).toContain("Manual Stage 2 simulated result");
+    expect(source).toContain("Manual baseline / phase 1");
+    expect(source).toContain("shouldRenderManualBaselinePhaseOneOnly");
+    expect(source).toContain("shouldRenderLookupBaselineView");
+    expect(source).toContain("displayRunType !== \"PAST_SIM\"");
     expect(source).toContain("manualStageOneView");
     expect(source).not.toContain("/api/user/manual-usage");
     expect(source).not.toContain("user_usage_manual_monthly_stage_one");
     expect(source).toContain("userUsageBaselineContract");
     expect(source).toContain("baselineParityAudit");
     expect(source).toContain("baselineParityReport");
-    expect(source).toContain('sandboxHarnessSummary.runStatus.runType === "PAST_SIM"');
+    expect(source).toContain("displayRunType === \"PAST_SIM\"");
     expect(source).toContain("runResult?.readModel?.dataset");
     expect(source).toContain("Known scenario / expectations");
     expect(source).toContain("Tuning cycle summary");

@@ -362,8 +362,9 @@ export function OnePathSimAdmin() {
     [debugDiagnosticsEnabled, lookup?.sourceContext?.baselineParityReport]
   );
   const runDisplayView = useMemo(() => asRecord(runResult?.runDisplayView), [runResult?.runDisplayView]);
-  const isPastSimRun =
-    sandboxHarnessSummary.runStatus.runType === "PAST_SIM" || runResult?.runType === "PAST_SIM" || runDisplayView != null;
+  const activeDisplayMode = String(runResult?.engineInput?.inputType ?? mode);
+  const isManualDisplayMode = activeDisplayMode === "MANUAL_MONTHLY" || activeDisplayMode === "MANUAL_ANNUAL";
+  const displayRunType = String(runResult?.runType ?? sandboxHarnessSummary.runStatus.runType ?? "BASELINE_OR_UNSET");
   const manualStageOneView = useMemo(
     () =>
       (runResult?.manualStageOneView ??
@@ -380,6 +381,23 @@ export function OnePathSimAdmin() {
     () => asRecord(runResult?.readModel?.dataset),
     [runResult?.readModel?.dataset]
   );
+  const shouldRenderManualBaselinePhaseOneOnly =
+    Boolean(shouldShowManualStageOneView) && isManualDisplayMode && displayRunType !== "PAST_SIM";
+  const shouldRenderPastSimView = displayRunType === "PAST_SIM" && Boolean(runDisplayView || runReadOnlyDataset);
+  const shouldRenderLookupBaselineView =
+    !isManualDisplayMode && !shouldRenderPastSimView && Boolean(lookupUserUsageBaselineContract);
+  const activePathLabel =
+    mode === "INTERVAL"
+      ? "interval calculations"
+      : mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+        ? "manual path"
+        : "new-build path";
+  const runButtonLabel =
+    mode === "INTERVAL"
+      ? "Run One Path interval path"
+      : mode === "NEW_BUILD"
+        ? "Run One Path new-build path"
+        : "Run One Path manual path";
 
   const activeVariableFamilyView = useMemo(
     () =>
@@ -701,7 +719,7 @@ export function OnePathSimAdmin() {
     setRunResult(null);
     setBusy(true);
     setError(null);
-    setStatus(`Running canonical ${mode} through the One Path-owned interval calculations...`);
+    setStatus(`Running canonical ${mode} through the One Path-owned ${activePathLabel}...`);
     const res = await fetch("/api/admin/tools/one-path-sim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -746,6 +764,7 @@ export function OnePathSimAdmin() {
     setLastRunKnownScenarioKey(selectedKnownScenario?.scenarioKey ?? "");
     setStatus("One Path run completed and read back from the canonical artifact/read-model path.");
   }, [
+    activePathLabel,
     debugDiagnosticsEnabled,
     effectiveActualContextHouseId,
     effectiveHouseId,
@@ -802,9 +821,9 @@ export function OnePathSimAdmin() {
           <div className="text-2xl font-semibold text-brand-navy">One Path Sim Admin</div>
           <p className="mt-2 max-w-4xl text-sm text-slate-600">
             Thin admin harness for the pre-cutover canonical simulation truth console. All four modes adapt into
-            One Path-owned interval calculations, persist one artifact family, and render from the One Path read model
-            only. Shared/live inputs stay read-only, and shared display reuse stays presentation-only. Older surfaces
-            are not rerouted to this harness yet.
+            One Path-owned simulation paths, persist one artifact family, and render from the One Path read model only.
+            Shared/live inputs stay read-only, and shared display reuse stays presentation-only. Older surfaces are not
+            rerouted to this harness yet.
           </p>
           <div className="mt-2 text-xs text-slate-500">Older surfaces are not rerouted to this harness yet.</div>
         </div>
@@ -1041,15 +1060,15 @@ export function OnePathSimAdmin() {
               disabled={busy || !lookup || !effectiveHouseId}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
             >
-              Run One Path interval path
+              {runButtonLabel}
             </button>
           </div>
 
           <div className="mt-6 rounded-xl border border-brand-blue/10 bg-slate-50 p-4">
             <div className="text-sm font-semibold text-brand-navy">One Path calculation variable popups</div>
             <p className="mt-1 text-xs text-slate-600">
-              These edit the One Path module variables directly. A change here affects the One Path-owned interval calculations
-              that read this policy.
+              These edit the One Path module variables directly. A change here affects the One Path-owned{" "}
+              {mode === "INTERVAL" ? "interval calculations" : activePathLabel} that read this policy.
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
               <button
@@ -1079,14 +1098,25 @@ export function OnePathSimAdmin() {
 
         {shouldShowManualStageOneView ? <OnePathManualStageView view={shouldShowManualStageOneView} /> : null}
 
-        {isPastSimRun && (runDisplayView || runReadOnlyDataset) ? (
+        {shouldRenderManualBaselinePhaseOneOnly ? (
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-sm font-semibold text-brand-navy">Manual baseline / phase 1</div>
+            <p className="mt-2 text-sm text-slate-600">
+              Manual baseline stays on the Stage 1 billing-period contract only. Monthly bill totals, statement ranges,
+              anchors, and travel ownership remain visible above; daily usage, interval counts, and 15-minute curves do
+              not render for this phase.
+            </p>
+          </div>
+        ) : null}
+
+        {shouldRenderPastSimView ? (
           <div className="space-y-4">
             {shouldShowManualStageOneView ? (
               <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-brand-navy">Manual Stage 2 simulated result</div>
                 <p className="mt-2 text-sm text-slate-600">
-                  One Path-owned Past Sim output rendered through the same lean display-ready contract and read-only view used
-                  by the interval harness where it remains truthful to manual mode.
+                  One Path-owned Past Sim output rendered through the same lean display-ready contract and read-only view
+                  used by the finished One Path display surfaces where it remains truthful to manual mode.
                 </p>
               </div>
             ) : null}
@@ -1097,7 +1127,7 @@ export function OnePathSimAdmin() {
               readModel={runDisplayView ? null : asRecord(runResult?.readModel)}
             />
           </div>
-        ) : lookupUserUsageBaselineContract ? (
+        ) : shouldRenderLookupBaselineView ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
               <div className="text-sm font-semibold text-brand-navy">Household energy insights</div>
