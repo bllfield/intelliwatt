@@ -723,6 +723,40 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
+  it("returns a derived manual Stage 1 preview on manual lookup when the test-home payload is missing", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.sourceContext.debugDiagnosticsIncluded).toBe(false);
+    expect(json.sourceContext.effectiveManualUsagePayload).toMatchObject({
+      mode: "MONTHLY",
+      dateSourceMode: "AUTO_DATES",
+      anchorEndDate: "2026-04-14",
+    });
+    expect(json.sourceContext.manualStageOneView).toMatchObject({
+      mode: "MONTHLY",
+    });
+    expect(json.sourceContext.manualSeed).toMatchObject({
+      sourceMode: "ACTUAL_INTERVALS_MONTHLY_PREFILL",
+    });
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      seedIfMissing: false,
+    });
+  });
+
   it("returns interval-derived monthly and annual admin seeds on manual load when no payload is saved", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(

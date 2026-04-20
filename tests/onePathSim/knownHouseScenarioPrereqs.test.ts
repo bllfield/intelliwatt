@@ -119,4 +119,45 @@ describe("one path known-house scenario prereqs", () => {
       })
     );
   });
+
+  it("treats derived One Path admin manual seeds as preset-ready when saved manual payload is absent", () => {
+    const status = buildKnownHouseScenarioPrereqStatus({
+      scenario: {
+        mode: "MANUAL_MONTHLY",
+        scenarioSelectionStrategy: "baseline",
+      },
+      lookupSourceContext: {
+        usageTruthSource: "persisted_usage_output",
+        upstreamUsageTruth: {
+          currentRun: {
+            statusSummary: {
+              downstreamSimulationAllowed: true,
+            },
+          },
+        },
+        homeProfile: null,
+        applianceProfile: null,
+        manualUsagePayload: null,
+        effectiveManualUsagePayload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-14",
+          dateSourceMode: "AUTO_DATES",
+          monthlyKwh: [
+            { month: "2026-03", kwh: 800 },
+            { month: "2026-04", kwh: 820 },
+          ],
+          statementRanges: [
+            { month: "2026-04", startDate: "2026-03-15", endDate: "2026-04-14" },
+            { month: "2026-03", startDate: "2026-02-15", endDate: "2026-03-14" },
+          ],
+          travelRanges: [],
+        },
+      },
+    });
+
+    expect(status.manualMonthlyPayloadReady).toBe(true);
+    expect(status.baselineRunnableNow).toBe(true);
+    expect(status.blockingReasons).toEqual([]);
+    expect(status.availablePrepActions).toEqual([]);
+  });
 });

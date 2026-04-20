@@ -4113,7 +4113,7 @@ async function recalcSimulatorBuildImpl(args: {
   const homeRec = await getHomeProfileSimulatedByUserHouse({ userId, houseId });
   const applianceRec = await getApplianceProfileSimulatedByUserHouse({ userId, houseId });
 
-  let manualUsagePayload = (manualRec?.payload as any) ?? null;
+  let manualUsagePayload = args.manualUsagePayload ?? (manualRec?.payload as any) ?? null;
   const canonical = canonicalMonthsForRecalc({ mode, manualUsagePayload, now: args.now });
 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
@@ -6067,6 +6067,7 @@ export type RecalcSimulatorBuildArgs = {
   houseId: string;
   esiid: string | null;
   actualContextHouseId?: string;
+  manualUsagePayload?: ManualUsagePayloadAny | null;
   mode: SimulatorMode;
   scenarioId?: string | null;
   weatherPreference?: WeatherPreference;

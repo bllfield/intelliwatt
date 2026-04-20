@@ -406,6 +406,68 @@ describe("one path baseline passthrough", () => {
     });
   });
 
+  it("keeps manual monthly baseline on Stage 1 truth even when no saved payload exists", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth({
+        summary: {
+          source: "SMT",
+          totalKwh: 480,
+          start: "2026-03-01",
+          end: "2026-04-30",
+          latest: "2026-04-30",
+        },
+        daily: [{ date: "2026-04-01", kwh: 10 }],
+        monthly: [{ month: "2026-04", kwh: 300 }],
+        series: { intervals15: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.25 }] },
+        meta: { datasetKind: "ACTUAL" },
+      })
+    );
+    getOnePathManualUsageInput.mockResolvedValue({ payload: null });
+    resolveOnePathManualStageOnePresentation.mockReturnValue({
+      mode: "MONTHLY",
+      surface: "admin_manual_monthly_stage_one",
+      rows: [{ month: "2026-03", kwh: 210 }, { month: "2026-04", kwh: 270 }],
+    });
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "MANUAL_MONTHLY",
+        simulatorMode: "MANUAL_TOTALS",
+        manualConstraintMode: "MANUAL_MONTHLY",
+        monthlyTotalsKwhByMonth: {
+          "2026-03": 210,
+          "2026-04": 270,
+        },
+        statementRanges: [
+          { id: "apr", month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30", kwh: 270 },
+          { id: "mar", month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31", kwh: 210 },
+        ],
+        dateSourceMode: "AUTO_DATES",
+        travelRanges: [{ startDate: "2026-03-10", endDate: "2026-03-12" }],
+        actualIntervalsReference: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 0.25 }],
+        actualDailyReference: [{ date: "2026-04-01", kwh: 10 }],
+        runtime: {
+          ...buildBaseEngineInput().runtime,
+          mode: "MANUAL_TOTALS",
+        },
+      })
+    );
+
+    expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
+    expect(artifact.dataset.summary.source).toBe("MANUAL");
+    expect(artifact.dataset.monthly).toEqual([
+      { month: "2026-03", kwh: 210 },
+      { month: "2026-04", kwh: 270 },
+    ]);
+    expect(artifact.dataset.daily).toEqual([]);
+    expect(artifact.dataset.series.intervals15).toEqual([]);
+    expect(artifact.dataset.meta.statementRanges).toEqual([
+      { id: "apr", month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30", kwh: 270 },
+      { id: "mar", month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31", kwh: 210 },
+    ]);
+  });
+
   it("reuses saved manual annual truth for baseline without drifting to normalized engine input coverage", async () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
       buildUsageTruth({

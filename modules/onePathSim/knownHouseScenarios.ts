@@ -208,7 +208,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
-    expectedTruthSource: "saved_manual_usage_payload",
+    expectedTruthSource: "effective_manual_stage_one_payload",
     expectations: {
       expectedBaselineParity: true,
       expectedPastSimCompareAvailable: false,
@@ -240,7 +240,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
-    expectedTruthSource: "saved_manual_usage_payload",
+    expectedTruthSource: "effective_manual_stage_one_payload",
     expectations: {
       expectedBaselineParity: false,
       expectedPastSimCompareAvailable: false,
@@ -272,7 +272,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
-    expectedTruthSource: "saved_manual_usage_payload",
+    expectedTruthSource: "effective_manual_stage_one_payload",
     expectations: {
       expectedBaselineParity: false,
       expectedPastSimCompareAvailable: true,
@@ -304,7 +304,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
-    expectedTruthSource: "saved_manual_usage_payload",
+    expectedTruthSource: "effective_manual_stage_one_payload",
     expectations: {
       expectedBaselineParity: true,
       expectedPastSimCompareAvailable: false,
@@ -336,7 +336,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
-    expectedTruthSource: "saved_manual_usage_payload",
+    expectedTruthSource: "effective_manual_stage_one_payload",
     expectations: {
       expectedBaselineParity: false,
       expectedPastSimCompareAvailable: false,
@@ -368,7 +368,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
-    expectedTruthSource: "saved_manual_usage_payload",
+    expectedTruthSource: "effective_manual_stage_one_payload",
     expectations: {
       expectedBaselineParity: false,
       expectedPastSimCompareAvailable: true,

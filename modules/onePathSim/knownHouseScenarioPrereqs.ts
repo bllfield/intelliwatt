@@ -180,7 +180,9 @@ export function buildKnownHouseScenarioPrereqStatus(args: {
   const statusSummary = asRecord(asRecord(upstreamUsageTruth.currentRun).statusSummary);
   const homeProfile = lookupSourceContext.homeProfile;
   const applianceProfile = lookupSourceContext.applianceProfile;
-  const manualUsagePayload = lookupSourceContext.manualUsagePayload;
+  const manualUsagePayload =
+    (lookupSourceContext.effectiveManualUsagePayload as typeof lookupSourceContext.manualUsagePayload) ??
+    lookupSourceContext.manualUsagePayload;
   const mode = String(scenario.mode ?? "");
   const scenarioSelectionStrategy = String(scenario.scenarioSelectionStrategy ?? "");
   const homeValidation = validateHomeProfile(homeProfile, { requirePastBaselineFields: true });
@@ -262,6 +264,10 @@ export function buildKnownHouseScenarioPrereqStatus(args: {
 
   const blockingReasons: string[] = [];
   const blockingDetails: OnePathBlockingDetail[] = [];
+  const requiresHomeDetails =
+    mode === "INTERVAL" || mode === "NEW_BUILD" || scenarioSelectionStrategy !== "baseline";
+  const requiresApplianceDetails =
+    mode !== "INTERVAL" && mode !== "NEW_BUILD" && scenarioSelectionStrategy !== "baseline";
   if (!usageTruthReady) blockingReasons.push("Upstream usage truth is not ready.");
   if (!usageTruthReady) {
     blockingDetails.push({
@@ -272,7 +278,7 @@ export function buildKnownHouseScenarioPrereqStatus(args: {
       sourceOwner: validatorAudit.usageTruth.sourceOwner,
     });
   }
-  if (!homeDetailsReady) {
+  if (requiresHomeDetails && !homeDetailsReady) {
     blockingReasons.push("Complete Home Details (required fields).");
     blockingDetails.push({
       category: "homeDetails",
@@ -283,7 +289,7 @@ export function buildKnownHouseScenarioPrereqStatus(args: {
     });
   }
 
-  if (mode !== "INTERVAL" && mode !== "NEW_BUILD" && !applianceProfileReady) {
+  if (requiresApplianceDetails && !applianceProfileReady) {
     blockingReasons.push("Complete Appliances (select fuel configuration, add appliance types as needed).");
     blockingDetails.push({
       category: "applianceDetails",
@@ -341,7 +347,9 @@ export function buildKnownHouseScenarioPrereqStatus(args: {
           : usageTruthReady && homeDetailsReady);
 
   const availablePrepActions: string[] = [];
-  if (!homeDetailsReady || !applianceProfileReady) availablePrepActions.push("prepare_home_details");
+  if ((requiresHomeDetails && !homeDetailsReady) || (requiresApplianceDetails && !applianceProfileReady)) {
+    availablePrepActions.push("prepare_home_details");
+  }
   if (mode === "MANUAL_MONTHLY" && !manualMonthlyPayloadReady) availablePrepActions.push("prepare_manual_monthly");
   if (mode === "MANUAL_ANNUAL" && !manualAnnualPayloadReady) availablePrepActions.push("prepare_manual_annual");
 

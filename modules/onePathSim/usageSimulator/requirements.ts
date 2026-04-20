@@ -38,7 +38,7 @@ export function computeRequirements(inputs: SimulatorInputs, mode: SimulatorMode
 
   // MANUAL_TOTALS
   const manualOk = inputs.manualUsagePayload ? validateManualUsagePayload(inputs.manualUsagePayload).ok : false;
-  if (!manualOk) missingItems.unshift("Save manual usage totals (monthly or annual).");
+  if (!manualOk) missingItems.unshift("Provide a usable manual Stage 1 payload before running MANUAL_TOTALS.");
 
   return { canRecalc: missingItems.length === 0, missingItems };
 }

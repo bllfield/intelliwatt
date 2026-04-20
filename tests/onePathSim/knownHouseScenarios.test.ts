@@ -66,6 +66,15 @@ describe("one path known-house scenario registry", () => {
     expect(scenarioKeys).toContain("keeper-green-button-future-primary");
   });
 
+  it("labels manual preset truth around the effective Stage 1 payload that actually loads", () => {
+    const manualPresets = KNOWN_HOUSE_SCENARIOS.filter(
+      (scenario) => scenario.mode === "MANUAL_MONTHLY" || scenario.mode === "MANUAL_ANNUAL"
+    );
+
+    expect(manualPresets.length).toBeGreaterThan(0);
+    expect(manualPresets.every((scenario) => scenario.expectedTruthSource === "effective_manual_stage_one_payload")).toBe(true);
+  });
+
   it("looks scenarios up by stable key", () => {
     const first = KNOWN_HOUSE_SCENARIOS[0];
     expect(getKnownHouseScenarioByKey(first.scenarioKey)).toEqual(first);

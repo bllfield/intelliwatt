@@ -327,6 +327,50 @@ function buildManualBillPeriodTotalsRecord(rows: unknown): Record<string, number
   }, {});
 }
 
+function buildManualPayloadFromEngineInput(engineInput: CanonicalSimulationEngineInput): ManualUsagePayload | null {
+  if (engineInput.inputType === "MANUAL_MONTHLY") {
+    const monthlyKwh = Object.entries(engineInput.monthlyTotalsKwhByMonth)
+      .map(([month, kwh]) => ({
+        month: String(month).slice(0, 7),
+        kwh: Number(kwh ?? Number.NaN),
+      }))
+      .filter((row) => /^\d{4}-\d{2}$/.test(row.month) && Number.isFinite(row.kwh))
+      .sort((left, right) => (left.month < right.month ? -1 : 1));
+    if (
+      typeof engineInput.anchorEndDate !== "string" ||
+      !engineInput.anchorEndDate ||
+      monthlyKwh.length === 0
+    ) {
+      return null;
+    }
+    return {
+      mode: "MONTHLY",
+      anchorEndDate: engineInput.anchorEndDate,
+      monthlyKwh,
+      statementRanges: Array.isArray(engineInput.statementRanges) ? engineInput.statementRanges : [],
+      travelRanges: Array.isArray(engineInput.travelRanges) ? engineInput.travelRanges : [],
+      dateSourceMode: engineInput.dateSourceMode ?? undefined,
+    };
+  }
+  if (engineInput.inputType === "MANUAL_ANNUAL") {
+    if (
+      typeof engineInput.anchorEndDate !== "string" ||
+      !engineInput.anchorEndDate ||
+      typeof engineInput.annualTargetKwh !== "number" ||
+      !Number.isFinite(engineInput.annualTargetKwh)
+    ) {
+      return null;
+    }
+    return {
+      mode: "ANNUAL",
+      anchorEndDate: engineInput.anchorEndDate,
+      annualKwh: engineInput.annualTargetKwh,
+      travelRanges: Array.isArray(engineInput.travelRanges) ? engineInput.travelRanges : [],
+    };
+  }
+  return null;
+}
+
 function buildIntervalBaselinePassthroughDataset(args: {
   engineInput: CanonicalSimulationEngineInput;
   upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
@@ -552,7 +596,9 @@ async function buildBaselinePassthroughArtifact(args: {
       ? (await getOnePathManualUsageInput({
           userId: args.engineInput.runtime.userId,
           houseId: args.engineInput.houseId,
-        }).catch(() => ({ payload: null }))).payload ?? null
+        }).catch(() => ({ payload: null }))).payload ??
+        buildManualPayloadFromEngineInput(args.engineInput) ??
+        null
       : null;
 
   return buildBaselinePassthroughArtifactFromResolvedTruth({
@@ -885,10 +931,18 @@ function buildCanonicalEngineInput(args: {
     manualBillPeriodTotalsKwhById,
     normalizedMonthTargetsByMonth: monthlyTotalsKwhByMonth,
     monthlyTargetConstructionDiagnostics: null,
-    actualIntervalsReference: Array.isArray(args.loaded.actualDataset?.series?.intervals15)
-      ? args.loaded.actualDataset.series.intervals15
-      : [],
-    actualDailyReference: Array.isArray(args.loaded.actualDataset?.daily) ? args.loaded.actualDataset.daily : [],
+    actualIntervalsReference:
+      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL"
+        ? []
+        : Array.isArray(args.loaded.actualDataset?.series?.intervals15)
+          ? args.loaded.actualDataset.series.intervals15
+          : [],
+    actualDailyReference:
+      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL"
+        ? []
+        : Array.isArray(args.loaded.actualDataset?.daily)
+          ? args.loaded.actualDataset.daily
+          : [],
     actualMonthlyReference,
     actualSource: typeof actualMeta.actualSource === "string" ? String(actualMeta.actualSource) : null,
     actualIntervalFingerprint:
@@ -1241,6 +1295,10 @@ export async function runSharedSimulation(
     persistPastSimBaseline: engineInput.runtime.persistPastSimBaseline,
     validationOnlyDateKeysLocal: engineInput.runtime.validationOnlyDateKeysLocal,
     preLockboxTravelRanges: engineInput.runtime.preLockboxTravelRanges,
+    manualUsagePayload:
+      engineInput.inputType === "MANUAL_MONTHLY" || engineInput.inputType === "MANUAL_ANNUAL"
+        ? buildManualPayloadFromEngineInput(engineInput)
+        : null,
     validationDaySelectionMode: (engineInput.runtime.validationDaySelectionMode as any) ?? undefined,
     validationDayCount: engineInput.runtime.validationDayCount ?? undefined,
     runContext: {

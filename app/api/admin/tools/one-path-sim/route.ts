@@ -508,10 +508,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const previewMode = normalizeMode(body?.mode);
+  const previewMode =
+    typeof body?.mode === "string" && body.mode.trim()
+      ? normalizeMode(body.mode)
+      : "INTERVAL";
 
   if ((action === "lookup" || !action) && !includeDebugDiagnostics) {
     const travelRangesFromDb = await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []);
+    const previewActualContextHouseId =
+      typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+        ? body.actualContextHouseId.trim()
+        : resolved.selectedHouse.id;
     const manualUsage =
       previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
         ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
@@ -519,6 +526,20 @@ export async function POST(request: NextRequest) {
             updatedAt: null,
           }))
         : { payload: null, updatedAt: null };
+    const adminManualSeeds =
+      (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") && !manualUsage.payload
+        ? await buildOnePathAdminManualSeeds({
+            userId: resolved.userId,
+            houseId: resolved.selectedHouse.id,
+            actualContextHouseId: previewActualContextHouseId,
+            payload: manualUsage.payload ?? null,
+            dbTravelRanges: travelRangesFromDb,
+          })
+        : null;
+    const effectiveManualUsagePayload =
+      previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
+        ? adminManualSeeds?.payloadForMode[previewMode] ?? manualUsage.payload ?? null
+        : null;
     return NextResponse.json({
       ok: true,
       email: resolved.email,
@@ -529,9 +550,11 @@ export async function POST(request: NextRequest) {
       sourceContext: {
         debugDiagnosticsIncluded: false,
         travelRangesFromDb,
-        ...(manualUsage.payload
+        ...(effectiveManualUsagePayload
           ? {
-              manualStageOneView: buildOnePathManualStageOnePreview(manualUsage.payload),
+              manualStageOneView: buildOnePathManualStageOnePreview(effectiveManualUsagePayload),
+              effectiveManualUsagePayload,
+              manualSeed: adminManualSeeds?.seed ?? null,
               manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
             }
           : {}),
@@ -584,6 +607,20 @@ export async function POST(request: NextRequest) {
     weatherHouseId: previewActualContextHouse.id,
     simulationVariablePolicy: previewSimulationVariablePolicy,
   }).catch(() => ({ score: null, derivedInput: null }));
+  const adminManualSeeds =
+    (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") && !manualUsage.payload
+      ? await buildOnePathAdminManualSeeds({
+          userId: resolved.userId,
+          houseId: resolved.selectedHouse.id,
+          actualContextHouseId: previewActualContextHouse.id,
+          payload: manualUsage.payload ?? null,
+          dbTravelRanges: travelRangesFromDb,
+        })
+      : null;
+  const effectiveManualUsagePayload =
+    previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
+      ? adminManualSeeds?.payloadForMode[previewMode] ?? manualUsage.payload ?? null
+      : null;
   const previewLookupSourceContext = {
     actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
     actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,
@@ -591,8 +628,10 @@ export async function POST(request: NextRequest) {
     usageTruthSeedResult: usageTruth?.seedResult ?? null,
     upstreamUsageTruth: usageTruth?.summary ?? null,
     manualUsagePayload: manualUsage.payload ?? null,
+    effectiveManualUsagePayload,
     manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
-    manualStageOneView: buildOnePathManualStageOnePreview(manualUsage.payload ?? null),
+    manualStageOneView: buildOnePathManualStageOnePreview(effectiveManualUsagePayload),
+    manualSeed: adminManualSeeds?.seed ?? null,
     travelRangesFromDb,
     homeProfile: homeProfile ?? null,
     applianceProfile: applianceProfile ?? null,
