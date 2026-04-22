@@ -695,8 +695,21 @@ export function OnePathSimAdmin() {
       setError("Choose a known-house scenario preset first.");
       return;
     }
+    const resolvedEmail = email.trim() || lookup?.email?.trim() || selectedKnownScenario.sourceUserEmail;
+    const normalizedResolvedEmail = resolvedEmail.trim().toLowerCase();
+    const normalizedPresetEmail = selectedKnownScenario.sourceUserEmail.trim().toLowerCase();
+    const reusingCurrentLookup = lookup?.email?.trim().toLowerCase() === normalizedResolvedEmail;
+    const shouldUsePresetSourceContext = normalizedResolvedEmail === normalizedPresetEmail;
+    const scenarioForSelection = shouldUsePresetSourceContext
+      ? selectedKnownScenario
+      : {
+          ...selectedKnownScenario,
+          sourceHouseId: null,
+          actualContextHouseId: null,
+          houseSelectionStrategy: "selected_house" as const,
+        };
     setRunResult(null);
-    setEmail(selectedKnownScenario.sourceUserEmail);
+    setEmail(resolvedEmail);
     setMode(selectedKnownScenario.mode);
     setWeatherPreference(selectedKnownScenario.weatherPreference);
     setValidationSelectionMode(selectedKnownScenario.validationSelectionMode ?? "stratified_weather_balanced");
@@ -705,14 +718,25 @@ export function OnePathSimAdmin() {
     setPersistRequested(selectedKnownScenario.persistRequested);
     setRunReason(`known_house:${selectedKnownScenario.scenarioKey}`);
     const json = await requestLookup({
-      email: selectedKnownScenario.sourceUserEmail,
-      houseId: selectedKnownScenario.sourceHouseId ?? undefined,
+      email: resolvedEmail,
+      houseId:
+        shouldUsePresetSourceContext
+          ? selectedKnownScenario.sourceHouseId ?? undefined
+          : reusingCurrentLookup
+            ? selectedHouseId || undefined
+            : undefined,
       mode: selectedKnownScenario.mode,
-      actualContextHouseId: selectedKnownScenario.actualContextHouseId,
+      actualContextHouseId:
+        shouldUsePresetSourceContext
+          ? selectedKnownScenario.actualContextHouseId
+          : reusingCurrentLookup
+            ? actualContextHouseId || selectedHouseId || null
+            : null,
+      freshSelection: !shouldUsePresetSourceContext && !reusingCurrentLookup,
     });
     if (!json) return;
     const resolvedSelection = resolveKnownHouseScenarioSelection({
-      scenario: selectedKnownScenario,
+      scenario: scenarioForSelection,
       lookup: json,
     });
     applyLookupResponse(json, {
@@ -726,7 +750,7 @@ export function OnePathSimAdmin() {
           : [],
     });
     setStatus(`Known-house scenario preset loaded: ${selectedKnownScenario.label}.`);
-  }, [applyLookupResponse, requestLookup, selectedKnownScenario]);
+  }, [actualContextHouseId, applyLookupResponse, email, lookup?.email, requestLookup, selectedHouseId, selectedKnownScenario]);
 
   const runSimulation = useCallback(async () => {
     if (!lookup || !effectiveHouseId) {
@@ -894,7 +918,8 @@ export function OnePathSimAdmin() {
             <label className="text-sm text-slate-700 lg:col-span-2">
               <div className="font-semibold text-brand-navy">Known-house scenario preset</div>
               <div className="mt-1 text-xs text-slate-500">
-                Brian sandbox house is the default tuning context: {PRIMARY_BRIAN_SANDBOX_CONTEXT.houseLabel}
+                Presets apply to the currently entered email and loaded house. Brian stays the default reference context only
+                when the active email is {PRIMARY_BRIAN_SANDBOX_CONTEXT.email}.
               </div>
               <select
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"

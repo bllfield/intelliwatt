@@ -40,7 +40,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("Actual context house");
     expect(source).toContain("Manual validation date keys");
     expect(source).toContain("Known-house scenario preset");
-    expect(source).toContain("Brian sandbox house is the default tuning context");
+    expect(source).toContain("Presets apply to the currently entered email and loaded house.");
     expect(source).toContain('useState(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY)');
     expect(source).toContain("Debug diagnostics");
     expect(source).toContain("useState(true)");
@@ -246,5 +246,18 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain('setSelectedScenarioId("");');
     expect(source).toContain('setTravelRanges([]);');
     expect(source).toContain('onClick={() => void loadLookup(undefined, { freshSelection: true })}');
+  });
+
+  it("applies known scenario presets to the active email unless that email is Brian's", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+
+    expect(source).toContain("const resolvedEmail = email.trim() || lookup?.email?.trim() || selectedKnownScenario.sourceUserEmail");
+    expect(source).toContain("const shouldUsePresetSourceContext = normalizedResolvedEmail === normalizedPresetEmail");
+    expect(source).toContain('setEmail(resolvedEmail);');
+    expect(source).toContain("houseSelectionStrategy: \"selected_house\" as const");
+    expect(source).toContain("freshSelection: !shouldUsePresetSourceContext && !reusingCurrentLookup");
+    expect(source).toContain("email: resolvedEmail,");
+    expect(source).not.toContain("setEmail(selectedKnownScenario.sourceUserEmail);");
+    expect(source).not.toContain("email: selectedKnownScenario.sourceUserEmail,");
   });
 });
