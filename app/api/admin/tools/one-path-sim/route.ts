@@ -30,10 +30,13 @@ import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselinePa
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import {
+  hasUsableAnnualPayload,
+  hasUsableMonthlyPayload,
   reanchorGapfillManualStageOnePayload,
   resolveGapfillSyntheticAnchorEndDate,
   resolveSharedManualStageOneContract,
 } from "@/modules/onePathSim/manualPrefill";
+import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
@@ -91,6 +94,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function includeDebugDiagnosticsByDefault(value: unknown): boolean {
   return value === true;
+}
+
+function needsManualSeedForMode(
+  mode: CanonicalSimulationInputType,
+  payload: ManualUsagePayload | null | undefined
+): boolean {
+  if (mode === "MANUAL_MONTHLY") return !hasUsableMonthlyPayload(payload);
+  if (mode === "MANUAL_ANNUAL") return !hasUsableAnnualPayload(payload);
+  return false;
 }
 
 function normalizeActiveTravelRanges(args: {
@@ -338,8 +350,9 @@ export async function POST(request: NextRequest) {
 
   if (action === "run") {
     const mode = normalizeMode(body?.mode);
+    const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";
     const manualUsage =
-      mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+      isManualMode
         ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
             payload: null,
             updatedAt: null,
@@ -372,7 +385,7 @@ export async function POST(request: NextRequest) {
       persistRequested: body?.persistRequested !== false,
     } as const;
     const adminManualSeeds =
-      mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+      isManualMode
         ? await buildOnePathAdminManualSeeds({
             userId: resolved.userId,
             houseId: resolved.selectedHouse.id,
@@ -383,10 +396,10 @@ export async function POST(request: NextRequest) {
           })
         : null;
     const effectiveManualUsagePayload =
-      mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
+      isManualMode
         ? adminManualSeeds?.payloadForMode[mode] ?? null
         : null;
-    if ((mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL") && !effectiveManualUsagePayload) {
+    if (isManualMode && !effectiveManualUsagePayload) {
       const missingItems =
         mode === "MANUAL_ANNUAL"
           ? ["Save filled manual annual usage totals before running MANUAL_ANNUAL."]
@@ -402,7 +415,7 @@ export async function POST(request: NextRequest) {
       );
     }
     try {
-      if (!includeDebugDiagnostics && rawInputBase.scenarioId) {
+      if (!includeDebugDiagnostics && rawInputBase.scenarioId && !isManualMode) {
         const readback = await readOnePathSimulatedUsageScenario({
           userId: resolved.userId,
           houseId: resolved.selectedHouse.id,
@@ -496,6 +509,52 @@ export async function POST(request: NextRequest) {
                 });
       const artifact = await runSharedSimulation(engineInput);
       const readModel = buildSharedSimulationReadModel(artifact);
+      const actualDatasetForManualRun =
+        isManualMode
+          ? (
+              await resolveOnePathUpstreamUsageTruthForSimulation({
+                userId: resolved.userId,
+                houseId: resolved.selectedHouse.id,
+                actualContextHouseId: rawInputBase.actualContextHouseId,
+                seedIfMissing: false,
+              }).catch(() => null)
+            )?.dataset ?? null
+          : null;
+      const manualPastReadResult =
+        isManualMode && rawInputBase.scenarioId
+          ? await buildOnePathManualUsagePastSimReadResult({
+              userId: resolved.userId,
+              houseId: resolved.selectedHouse.id,
+              scenarioId: rawInputBase.scenarioId,
+              readMode: "artifact_only",
+              callerType: "user_past",
+              exactArtifactInputHash: artifact.artifactInputHash ?? null,
+              requireExactArtifactMatch: Boolean(artifact.artifactInputHash),
+              usageInputMode: mode,
+              weatherLogicMode: artifact.engineInput?.weatherLogicMode ?? null,
+              artifactId: artifact.artifactId ?? null,
+              artifactInputHash: artifact.artifactInputHash ?? null,
+              artifactEngineVersion: artifact.engineVersion ?? null,
+              manualUsagePayload: effectiveManualUsagePayload,
+              actualDataset: actualDatasetForManualRun,
+            })
+          : null;
+      const manualRunDisplayView =
+        manualPastReadResult && manualPastReadResult.ok
+          ? buildOnePathRunReadOnlyView({
+              dataset: asRecord(manualPastReadResult.displayDataset),
+              engineInput: asRecord(engineInput),
+              readModel: { compareProjection: manualPastReadResult.compareProjection },
+            })
+          : null;
+      const runDisplayView =
+        manualRunDisplayView ??
+        buildOnePathRunReadOnlyView({
+          dataset: asRecord(readModel.dataset),
+          engineInput: asRecord(engineInput),
+          readModel: asRecord(readModel),
+        }) ??
+        null;
       if (!includeDebugDiagnostics) {
         return NextResponse.json({
           ok: true,
@@ -503,12 +562,7 @@ export async function POST(request: NextRequest) {
           runType: rawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
           engineInput,
           manualStageOneView: readModel.manualStageOneView ?? null,
-          runDisplayView:
-            buildOnePathRunReadOnlyView({
-              dataset: asRecord(readModel.dataset),
-              engineInput: asRecord(engineInput),
-              readModel: asRecord(readModel),
-            }) ?? null,
+          runDisplayView,
           artifact: null,
           readModel: null,
         });
@@ -516,10 +570,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         ok: true,
         debugDiagnosticsIncluded: true,
+        runType: rawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
         engineInput,
         artifact,
         readModel,
         manualStageOneView: readModel.manualStageOneView ?? null,
+        runDisplayView,
       });
     } catch (error) {
       if (isUpstreamUsageTruthMissingFailure(error)) {
@@ -582,7 +638,8 @@ export async function POST(request: NextRequest) {
           }))
         : { payload: null, updatedAt: null };
     const adminManualSeeds =
-      (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") && !manualUsage.payload
+      (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") &&
+      needsManualSeedForMode(previewMode, manualUsage.payload ?? null)
         ? await buildOnePathAdminManualSeeds({
             userId: resolved.userId,
             houseId: resolved.selectedHouse.id,
@@ -663,7 +720,8 @@ export async function POST(request: NextRequest) {
     simulationVariablePolicy: previewSimulationVariablePolicy,
   }).catch(() => ({ score: null, derivedInput: null }));
   const adminManualSeeds =
-    (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") && !manualUsage.payload
+    (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") &&
+    needsManualSeedForMode(previewMode, manualUsage.payload ?? null)
       ? await buildOnePathAdminManualSeeds({
           userId: resolved.userId,
           houseId: resolved.selectedHouse.id,

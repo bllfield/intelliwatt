@@ -24,6 +24,7 @@ const adaptManualAnnualRawInput = vi.fn();
 const adaptNewBuildRawInput = vi.fn();
 const runSharedSimulation = vi.fn();
 const buildSharedSimulationReadModel = vi.fn();
+const buildOnePathManualUsagePastSimReadResult = vi.fn();
 const readOnePathSimulatedUsageScenario = vi.fn();
 const listOnePathScenarioEvents = vi.fn();
 class UpstreamUsageTruthMissingError extends Error {
@@ -110,6 +111,10 @@ vi.mock("@/modules/onePathSim/serviceBridge", () => ({
   listOnePathScenarioEvents: (...args: any[]) => listOnePathScenarioEvents(...args),
 }));
 
+vi.mock("@/modules/onePathSim/manualPastSimReadResult", () => ({
+  buildOnePathManualUsagePastSimReadResult: (...args: any[]) => buildOnePathManualUsagePastSimReadResult(...args),
+}));
+
 function buildRequest(body: Record<string, unknown>, cookie = "brian@intellipath-solutions.com") {
   return new NextRequest("http://localhost/api/admin/tools/one-path-sim", {
     method: "POST",
@@ -156,6 +161,7 @@ describe("admin one path sim route", () => {
     adaptNewBuildRawInput.mockReset();
     runSharedSimulation.mockReset();
     buildSharedSimulationReadModel.mockReset();
+    buildOnePathManualUsagePastSimReadResult.mockReset();
     readOnePathSimulatedUsageScenario.mockReset();
     listOnePathScenarioEvents.mockReset();
     vi.stubEnv("HOME_DETAILS_DATABASE_URL", "");
@@ -215,9 +221,17 @@ describe("admin one path sim route", () => {
     adaptManualMonthlyRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_MONTHLY" });
     adaptManualAnnualRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_ANNUAL" });
     adaptNewBuildRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "NEW_BUILD" });
-    runSharedSimulation.mockResolvedValue({ artifactId: "artifact-1" });
+    runSharedSimulation.mockResolvedValue({ artifactId: "artifact-1", artifactInputHash: "artifact-hash-1", engineInput: {} });
     buildSharedSimulationReadModel.mockReturnValue({
       runIdentity: { artifactId: "artifact-1" },
+      manualStageOneView: {
+        mode: "MONTHLY",
+        source: "artifact_backed_read_model",
+        stageOnePresentation: { mode: "MONTHLY" },
+        billPeriodCompare: {
+          rows: [{ month: "2026-03", actualIntervalTotalKwh: 300, manualTotalKwh: 300 }],
+        },
+      },
       dataset: {
         summary: {
           source: "SIMULATED",
@@ -279,6 +293,60 @@ describe("admin one path sim route", () => {
           borrowedFromYearMonth: "2025-04",
           completenessRule: "test",
         },
+      },
+    });
+    buildOnePathManualUsagePastSimReadResult.mockResolvedValue({
+      ok: true,
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+          totalKwh: 15008.06,
+          start: "2025-04-16",
+          end: "2026-04-15",
+        },
+        monthly: [{ month: "2026-04", kwh: 15008.06 }],
+        daily: [{ date: "2026-04-15", kwh: 41.12, source: "SIMULATED" }],
+      },
+      displayDataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 35040,
+          totalKwh: 15008.06,
+          start: "2025-04-16",
+          end: "2026-04-15",
+        },
+        meta: {
+          weatherSensitivityScore: { scoringMode: "INTERVAL_BASED" },
+        },
+        monthly: [{ month: "2026-04", kwh: 15008.06 }],
+        daily: [{ date: "2026-04-15", kwh: 41.12, source: "SIMULATED" }],
+        dailyWeather: {
+          "2026-04-15": { tAvgF: 63, tMinF: 54, tMaxF: 71, hdd65: 2, cdd65: 0 },
+        },
+        totals: {
+          importKwh: 15008.06,
+          exportKwh: 0,
+          netKwh: 15008.06,
+        },
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 10000, weekend: 5008.06 },
+          timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 3200 }],
+        },
+      },
+      compareProjection: {
+        rows: [
+          {
+            localDate: "2026-04-15",
+            dayType: "weekday",
+            actualDayKwh: 40,
+            simulatedDayKwh: 41.12,
+            errorKwh: 1.12,
+            percentError: 2.8,
+          },
+        ],
+        metrics: { wape: 2.8, mae: 1.12, rmse: 1.12 },
       },
     });
     readOnePathSimulatedUsageScenario.mockResolvedValue({
@@ -579,7 +647,9 @@ describe("admin one path sim route", () => {
     expect(res.status).toBe(200);
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
     expect(runSharedSimulation).toHaveBeenCalledWith({ sharedProducerPathUsed: true, inputType: "INTERVAL" });
-    expect(buildSharedSimulationReadModel).toHaveBeenCalledWith({ artifactId: "artifact-1" });
+    expect(buildSharedSimulationReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({ artifactId: "artifact-1" })
+    );
     expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
   });
 
@@ -757,6 +827,53 @@ describe("admin one path sim route", () => {
     });
   });
 
+  it("repairs legacy manual lookup payloads that only saved anchorEndMonth before building Stage 1 preview", async () => {
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        billEndDay: 15,
+        monthlyKwh: [
+          { month: "2026-03", kwh: "" },
+          { month: "2026-02", kwh: "" },
+        ],
+        travelRanges: [{ startDate: "2026-03-10", endDate: "2026-03-12" }],
+        anchorEndMonth: "2026-03",
+      },
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.sourceContext.effectiveManualUsagePayload).toMatchObject({
+      mode: "MONTHLY",
+      anchorEndDate: "2026-04-14",
+      dateSourceMode: "AUTO_DATES",
+    });
+    expect(json.sourceContext.manualStageOneView).toMatchObject({
+      mode: "MONTHLY",
+    });
+    expect(json.sourceContext.manualSeed).toMatchObject({
+      sourceMode: "ACTUAL_INTERVALS_MONTHLY_PREFILL",
+    });
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      seedIfMissing: false,
+    });
+  });
+
   it("returns interval-derived monthly and annual admin seeds on manual load when no payload is saved", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
@@ -793,7 +910,7 @@ describe("admin one path sim route", () => {
     });
   });
 
-  it("keeps manual debug-off runs on the same lean readback path and returns Stage 1 plus Stage 2 display data", async () => {
+  it("rebuilds manual debug-off past runs before returning Stage 1 plus the manual display dataset", async () => {
     getManualUsageInputForUserHouse.mockResolvedValueOnce({
       payload: {
         mode: "MONTHLY",
@@ -839,20 +956,39 @@ describe("admin one path sim route", () => {
     expect(json.runDisplayView).toBeTruthy();
     expect(json.artifact ?? null).toBeNull();
     expect(json.readModel ?? null).toBeNull();
-    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledWith({
+    expect(adaptManualMonthlyRawInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scenarioId: "scenario-1",
+        manualUsagePayload: expect.objectContaining({
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-14",
+        }),
+      })
+    );
+    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
+    expect(buildSharedSimulationReadModel).toHaveBeenCalledTimes(1);
+    expect(buildOnePathManualUsagePastSimReadResult).toHaveBeenCalledWith({
       userId: "user-1",
       houseId: "house-1",
       scenarioId: "scenario-1",
-      readMode: "allow_rebuild",
-      projectionMode: "baseline",
-      readContext: {
-        artifactReadMode: "allow_rebuild",
-        projectionMode: "baseline",
-        compareSidecarRequest: true,
-      },
+      readMode: "artifact_only",
+      callerType: "user_past",
+      exactArtifactInputHash: "artifact-hash-1",
+      requireExactArtifactMatch: true,
+      usageInputMode: "MANUAL_MONTHLY",
+      weatherLogicMode: null,
+      artifactId: "artifact-1",
+      artifactInputHash: "artifact-hash-1",
+      artifactEngineVersion: null,
+      manualUsagePayload: expect.objectContaining({
+        mode: "MONTHLY",
+        anchorEndDate: "2026-04-14",
+      }),
+      actualDataset: expect.objectContaining({
+        summary: expect.objectContaining({ totalKwh: 3790 }),
+      }),
     });
-    expect(runSharedSimulation).not.toHaveBeenCalled();
-    expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
+    expect(readOnePathSimulatedUsageScenario).not.toHaveBeenCalled();
   });
 
   it("passes actual context house and manual validation date keys through the shared adapter", async () => {
