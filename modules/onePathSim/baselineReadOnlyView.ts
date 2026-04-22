@@ -2,6 +2,7 @@ import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboard
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import type { OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import type { WeatherSensitivityScore } from "@/modules/onePathSim/weatherSensitivityShared";
+import type { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 
 export type OnePathBaselineReadOnlyView = {
   summary: {
@@ -23,7 +24,7 @@ export type OnePathBaselineReadOnlyView = {
     timeOfDayBuckets: Array<{ key: string; label: string; kwh: number }>;
   };
   monthlyRows: Array<{ month: string; kwh: number }>;
-  dailyRows: Array<{ date: string; kwh: number; source?: string; sourceDetail?: string }>;
+  dailyRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
   dailyWeather: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
   fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
   stitchedMonth: {
