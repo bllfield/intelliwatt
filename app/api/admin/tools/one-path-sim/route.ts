@@ -110,7 +110,7 @@ function normalizeActiveTravelRanges(args: {
   payload?: ManualUsagePayload | null;
   dbTravelRanges?: unknown;
 }): Array<{ startDate: string; endDate: string }> {
-  if (Array.isArray(args.overrideTravelRanges) && args.overrideTravelRanges.length > 0) {
+  if (Array.isArray(args.overrideTravelRanges)) {
     return args.overrideTravelRanges as Array<{ startDate: string; endDate: string }>;
   }
   if (Array.isArray(args.payload?.travelRanges) && args.payload.travelRanges.length > 0) {
@@ -120,6 +120,17 @@ function normalizeActiveTravelRanges(args: {
     return args.dbTravelRanges as Array<{ startDate: string; endDate: string }>;
   }
   return [];
+}
+
+function applyExplicitTravelRangesToManualPayload(
+  payload: ManualUsagePayload | null,
+  overrideTravelRanges?: unknown
+): ManualUsagePayload | null {
+  if (!payload || !Array.isArray(overrideTravelRanges)) return payload;
+  return {
+    ...payload,
+    travelRanges: overrideTravelRanges as Array<{ startDate: string; endDate: string }>,
+  };
 }
 
 function buildMonthlyKwhByMonth(
@@ -381,7 +392,7 @@ export async function POST(request: NextRequest) {
       validationOnlyDateKeysLocal: Array.isArray(body?.validationOnlyDateKeysLocal)
         ? body.validationOnlyDateKeysLocal.map((value: unknown) => String(value ?? "").slice(0, 10))
         : [],
-      travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : [],
+      travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : undefined,
       persistRequested: body?.persistRequested !== false,
     } as const;
     const adminManualSeeds =
@@ -397,7 +408,7 @@ export async function POST(request: NextRequest) {
         : null;
     const effectiveManualUsagePayload =
       isManualMode
-        ? adminManualSeeds?.payloadForMode[mode] ?? null
+        ? applyExplicitTravelRangesToManualPayload(adminManualSeeds?.payloadForMode[mode] ?? null, rawInputBase.travelRanges)
         : null;
     if (isManualMode && !effectiveManualUsagePayload) {
       const missingItems =
@@ -696,14 +707,6 @@ export async function POST(request: NextRequest) {
     getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
-  const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
-    actualDataset: usageTruth?.dataset ?? null,
-    manualUsagePayload: manualUsage.payload ?? null,
-    homeProfile,
-    applianceProfile,
-    weatherHouseId: previewActualContextHouse.id,
-    simulationVariablePolicy: previewSimulationVariablePolicy,
-  }).catch(() => ({ score: null, derivedInput: null }));
   const adminManualSeeds =
     (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") &&
     needsManualSeedForMode(previewMode, manualUsage.payload ?? null)
@@ -717,8 +720,20 @@ export async function POST(request: NextRequest) {
       : null;
   const effectiveManualUsagePayload =
     previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
-      ? adminManualSeeds?.payloadForMode[previewMode] ?? manualUsage.payload ?? null
+      ? applyExplicitTravelRangesToManualPayload(
+          adminManualSeeds?.payloadForMode[previewMode] ?? manualUsage.payload ?? null,
+          body?.travelRanges
+        )
       : null;
+  const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
+    actualDataset:
+      previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL" ? null : usageTruth?.dataset ?? null,
+    manualUsagePayload: effectiveManualUsagePayload,
+    homeProfile,
+    applianceProfile,
+    weatherHouseId: previewActualContextHouse.id,
+    simulationVariablePolicy: previewSimulationVariablePolicy,
+  }).catch(() => ({ score: null, derivedInput: null }));
   const previewLookupSourceContext = {
     actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
     actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,

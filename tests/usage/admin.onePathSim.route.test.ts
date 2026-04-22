@@ -874,6 +874,52 @@ describe("admin one path sim route", () => {
     });
   });
 
+  it("keeps manual lookup weather scoring on the billing-period path", async () => {
+    const savedPayload = {
+      mode: "MONTHLY",
+      anchorEndDate: "2026-04-14",
+      dateSourceMode: "AUTO_DATES",
+      monthlyKwh: [
+        { month: "2026-03", kwh: 510 },
+        { month: "2026-04", kwh: 420 },
+      ],
+      statementRanges: [
+        { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+        { month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-14" },
+      ],
+      travelRanges: [{ startDate: "2026-03-10", endDate: "2026-03-12" }],
+    };
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: savedPayload,
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(resolveSharedWeatherSensitivityEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actualDataset: null,
+        manualUsagePayload: expect.objectContaining({
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-14",
+        }),
+        weatherHouseId: "house-1",
+      })
+    );
+  });
+
   it("returns interval-derived monthly and annual admin seeds on manual load when no payload is saved", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
@@ -911,6 +957,10 @@ describe("admin one path sim route", () => {
   });
 
   it("rebuilds manual debug-off past runs before returning Stage 1 plus the manual display dataset", async () => {
+    const explicitTravelRanges = [
+      { startDate: "2025-03-14", endDate: "2025-06-01" },
+      { startDate: "2025-08-13", endDate: "2025-08-17" },
+    ];
     getManualUsageInputForUserHouse.mockResolvedValueOnce({
       payload: {
         mode: "MONTHLY",
@@ -937,6 +987,7 @@ describe("admin one path sim route", () => {
         houseId: "house-1",
         mode: "MANUAL_MONTHLY",
         scenarioId: "scenario-1",
+        travelRanges: explicitTravelRanges,
       })
     );
     const json = await res.json();
@@ -962,6 +1013,7 @@ describe("admin one path sim route", () => {
         manualUsagePayload: expect.objectContaining({
           mode: "MONTHLY",
           anchorEndDate: "2026-04-14",
+          travelRanges: explicitTravelRanges,
         }),
       })
     );
@@ -983,6 +1035,7 @@ describe("admin one path sim route", () => {
       manualUsagePayload: expect.objectContaining({
         mode: "MONTHLY",
         anchorEndDate: "2026-04-14",
+        travelRanges: explicitTravelRanges,
       }),
       actualDataset: expect.objectContaining({
         summary: expect.objectContaining({ totalKwh: 3790 }),

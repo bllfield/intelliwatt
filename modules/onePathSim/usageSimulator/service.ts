@@ -4251,7 +4251,9 @@ async function recalcSimulatorBuildImpl(args: {
   const simulationVariablePolicy = simulationVariableResolution.effective;
   try {
     const shouldLoadWeatherSensitivityActualDataset =
-      typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
+      mode !== "MANUAL_TOTALS" &&
+      typeof actualContextHouseId === "string" &&
+      actualContextHouseId.trim().length > 0;
     const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
       ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
       : null;

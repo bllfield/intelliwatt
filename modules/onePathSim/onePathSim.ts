@@ -849,6 +849,7 @@ async function loadSharedContext(args: {
   actualContextHouseId?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   seedUsageTruthIfMissing?: boolean;
+  weatherScoringMode?: "interval" | "manual";
 }): Promise<LoadedSharedContext> {
   const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
@@ -876,7 +877,7 @@ async function loadSharedContext(args: {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
-    actualDataset: upstreamUsageTruth.dataset,
+    actualDataset: args.weatherScoringMode === "manual" ? null : upstreamUsageTruth.dataset,
     manualUsagePayload: manualUsageRecord.payload ?? null,
     homeProfile,
     applianceProfile,
@@ -1048,6 +1049,7 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
     seedUsageTruthIfMissing: true,
+    weatherScoringMode: "interval",
   });
   return buildCanonicalEngineInput({
     inputType: "INTERVAL",
@@ -1074,6 +1076,7 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     actualContextHouseId: raw.actualContextHouseId,
     manualUsagePayload: raw.manualUsagePayload,
     seedUsageTruthIfMissing: true,
+    weatherScoringMode: "manual",
   });
   return buildCanonicalEngineInput({
     inputType: "MANUAL_MONTHLY",
@@ -1100,6 +1103,7 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     actualContextHouseId: raw.actualContextHouseId,
     manualUsagePayload: raw.manualUsagePayload,
     seedUsageTruthIfMissing: true,
+    weatherScoringMode: "manual",
   });
   return buildCanonicalEngineInput({
     inputType: "MANUAL_ANNUAL",
@@ -1121,6 +1125,7 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
     seedUsageTruthIfMissing: true,
+    weatherScoringMode: "interval",
   });
   return buildCanonicalEngineInput({
     inputType: "NEW_BUILD",
@@ -1380,6 +1385,8 @@ export async function readSharedSimulationArtifact(args: {
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
     seedUsageTruthIfMissing: (args.scenarioId ?? null) == null && args.inputType !== "NEW_BUILD",
+    weatherScoringMode:
+      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL" ? "manual" : "interval",
   });
   const engineInput = buildCanonicalEngineInput({
     inputType: args.inputType,
