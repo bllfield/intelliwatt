@@ -228,4 +228,23 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(ownershipAuditSource).toContain("pageSurfaceAuditMatrix");
     expect(isolatedOwnershipAuditEntrySource).toContain("sharedWiringFlow");
   });
+
+  it("resets stale preset and run state on a fresh email lookup", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+
+    expect(source).toContain("freshSelection?: boolean");
+    expect(source).toContain('houseId: args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? "")');
+    expect(source).toContain(
+      'actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null)'
+    );
+    expect(source).toContain("if (freshSelection) {");
+    expect(source).toContain('setRunResult(null);');
+    expect(source).toContain('setLastRunKnownScenarioKey("");');
+    expect(source).toContain('setSelectedKnownScenarioKey("");');
+    expect(source).toContain('setSelectedHouseId("");');
+    expect(source).toContain('setActualContextHouseId("");');
+    expect(source).toContain('setSelectedScenarioId("");');
+    expect(source).toContain('setTravelRanges([]);');
+    expect(source).toContain('onClick={() => void loadLookup(undefined, { freshSelection: true })}');
+  });
 });

@@ -624,12 +624,14 @@ export function OnePathSimAdmin() {
       houseId?: string;
       mode?: "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
       actualContextHouseId?: string | null;
+      freshSelection?: boolean;
     }) => {
       const trimmedEmail = (args?.email ?? email).trim();
       if (!trimmedEmail) {
         setError("Enter a user email.");
         return null;
       }
+      const freshSelection = args?.freshSelection === true;
       setBusy(true);
       setError(null);
       setStatus("Loading user, houses, and source context...");
@@ -639,9 +641,9 @@ export function OnePathSimAdmin() {
         body: JSON.stringify({
           action: "lookup",
           email: trimmedEmail,
-          houseId: args?.houseId ?? effectiveHouseId ?? "",
+          houseId: args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
           mode: args?.mode ?? mode,
-          actualContextHouseId: args?.actualContextHouseId ?? effectiveActualContextHouseId ?? null,
+          actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null),
           includeDebugDiagnostics: debugDiagnosticsEnabled,
         }),
       });
@@ -659,15 +661,30 @@ export function OnePathSimAdmin() {
   );
 
   const loadLookup = useCallback(
-    async (houseIdOverride?: string) => {
-      const json = await requestLookup({ houseId: houseIdOverride });
+    async (houseIdOverride?: string, options?: { freshSelection?: boolean }) => {
+      const freshSelection = options?.freshSelection === true;
+      if (freshSelection) {
+        setRunResult(null);
+        setLastRunKnownScenarioKey("");
+        setSelectedKnownScenarioKey("");
+        setSelectedHouseId("");
+        setActualContextHouseId("");
+        setSelectedScenarioId("");
+        setTravelRanges([]);
+      }
+      const json = await requestLookup({ houseId: houseIdOverride, freshSelection });
       if (!json) return;
-      applyLookupResponse(json, {
-        actualContextHouseId:
-          actualContextHouseId && (json.houses ?? []).some((house: { id: string }) => house.id === actualContextHouseId)
-            ? actualContextHouseId
-            : json.selectedHouse?.id ?? "",
-      });
+      applyLookupResponse(
+        json,
+        freshSelection
+          ? undefined
+          : {
+              actualContextHouseId:
+                actualContextHouseId && (json.houses ?? []).some((house: { id: string }) => house.id === actualContextHouseId)
+                  ? actualContextHouseId
+                  : json.selectedHouse?.id ?? "",
+            }
+      );
       setStatus("Lookup loaded.");
     },
     [actualContextHouseId, applyLookupResponse, requestLookup]
@@ -864,7 +881,7 @@ export function OnePathSimAdmin() {
             <div className="flex items-end">
               <button
                 type="button"
-                onClick={() => void loadLookup()}
+                onClick={() => void loadLookup(undefined, { freshSelection: true })}
                 disabled={busy}
                 className="w-full rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy disabled:opacity-60"
               >
