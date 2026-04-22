@@ -450,22 +450,7 @@ export async function POST(request: NextRequest) {
           houseId: resolved.selectedHouse.id,
           scenarioId: rawInputBase.scenarioId,
         }).catch(() => ({ ok: false as const, events: [] as unknown[] }));
-        const manualStageOneView =
-          mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
-            ? buildOnePathManualStageOneView({
-                payload: effectiveManualUsagePayload,
-                dataset: readback.dataset,
-                actualDataset:
-                  (
-                    await resolveOnePathUpstreamUsageTruthForSimulation({
-                      userId: resolved.userId,
-                      houseId: resolved.selectedHouse.id,
-                      actualContextHouseId: rawInputBase.actualContextHouseId,
-                      seedIfMissing: false,
-                    }).catch(() => null)
-                  )?.dataset ?? null,
-              })
-            : null;
+        const manualStageOneView = null;
         const runDisplayViewBase =
           buildOnePathRunReadOnlyView({
             dataset: asRecord(readback.dataset),
