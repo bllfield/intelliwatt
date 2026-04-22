@@ -904,6 +904,70 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes stale auto-date monthly payload totals from actual-derived admin truth when a saved oldest bill is zero", async () => {
+    getManualUsageInputForUserHouse.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-04-14",
+        dateSourceMode: "AUTO_DATES",
+        monthlyKwh: [
+          { month: "2026-04", kwh: 300 },
+          { month: "2026-03", kwh: 300 },
+          { month: "2026-02", kwh: 300 },
+          { month: "2026-01", kwh: 300 },
+          { month: "2025-12", kwh: 300 },
+          { month: "2025-11", kwh: 300 },
+          { month: "2025-10", kwh: 300 },
+          { month: "2025-09", kwh: 300 },
+          { month: "2025-08", kwh: 300 },
+          { month: "2025-07", kwh: 300 },
+          { month: "2025-06", kwh: 300 },
+          { month: "2025-05", kwh: 0 },
+        ],
+        statementRanges: [
+          { month: "2026-04", startDate: "2026-03-15", endDate: "2026-04-14" },
+          { month: "2026-03", startDate: "2026-02-15", endDate: "2026-03-14" },
+          { month: "2026-02", startDate: "2026-01-15", endDate: "2026-02-14" },
+          { month: "2026-01", startDate: "2025-12-15", endDate: "2026-01-14" },
+          { month: "2025-12", startDate: "2025-11-15", endDate: "2025-12-14" },
+          { month: "2025-11", startDate: "2025-10-15", endDate: "2025-11-14" },
+          { month: "2025-10", startDate: "2025-09-15", endDate: "2025-10-14" },
+          { month: "2025-09", startDate: "2025-08-15", endDate: "2025-09-14" },
+          { month: "2025-08", startDate: "2025-07-15", endDate: "2025-08-14" },
+          { month: "2025-07", startDate: "2025-06-15", endDate: "2025-07-14" },
+          { month: "2025-06", startDate: "2025-05-15", endDate: "2025-06-14" },
+          { month: "2025-05", startDate: "2025-04-15", endDate: "2025-05-14" },
+        ],
+        travelRanges: [],
+      },
+      updatedAt: "2026-04-09T00:00:00.000Z",
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "MANUAL_MONTHLY",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(adaptManualMonthlyRawInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manualUsagePayload: expect.objectContaining({
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-14",
+          dateSourceMode: "AUTO_DATES",
+          monthlyKwh: expect.not.arrayContaining([expect.objectContaining({ kwh: 0 })]),
+        }),
+      })
+    );
+  });
+
   it("returns shared recalc requirement failures without masking the missing manual payload", async () => {
     getManualUsageInputForUserHouse.mockResolvedValueOnce({
       payload: { mode: "MONTHLY", anchorEndDate: "2026-03-31", monthlyKwh: [{ month: "2026-03", kwh: 500 }] },

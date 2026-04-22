@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
+import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
@@ -1006,6 +1007,15 @@ export async function getActualUsageDatasetForHouse(
   if (dataset && dataset.daily.length > 0) {
     try {
       const dateKeys = dataset.daily.map((d) => d.date);
+      const firstDateKey = dateKeys[0] ?? null;
+      const lastDateKey = dateKeys[dateKeys.length - 1] ?? null;
+      if (firstDateKey && lastDateKey) {
+        await ensureHouseWeatherBackfill({
+          houseId,
+          startDate: firstDateKey,
+          endDate: lastDateKey,
+        }).catch(() => null);
+      }
       const wxMap = await getHouseWeatherDays({
         houseId,
         dateKeys,

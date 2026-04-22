@@ -110,6 +110,38 @@ function normalizeActiveTravelRanges(args: {
   return [];
 }
 
+function buildMonthlyKwhByMonth(
+  payload: ManualUsagePayload | null | undefined
+): Map<string, number | null> {
+  if (payload?.mode !== "MONTHLY" || !Array.isArray(payload.monthlyKwh)) return new Map();
+  return new Map(
+    payload.monthlyKwh
+      .map((row) => {
+        const month = String(row?.month ?? "").slice(0, 7);
+        const kwh = typeof row?.kwh === "number" && Number.isFinite(row.kwh) ? row.kwh : null;
+        return /^\d{4}-\d{2}$/.test(month) ? ([month, kwh] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, number | null] => entry != null)
+  );
+}
+
+function shouldPreferActualDerivedAdminMonthlyPayload(args: {
+  savedPayload: ManualUsagePayload | null | undefined;
+  actualDerivedPayload: ManualUsagePayload | null | undefined;
+}): boolean {
+  if (args.savedPayload?.mode !== "MONTHLY" || args.actualDerivedPayload?.mode !== "MONTHLY") return false;
+  if (args.savedPayload.dateSourceMode !== "AUTO_DATES") return false;
+  const savedByMonth = buildMonthlyKwhByMonth(args.savedPayload);
+  for (const row of args.actualDerivedPayload.monthlyKwh) {
+    const month = String(row?.month ?? "").slice(0, 7);
+    const actualKwh = typeof row?.kwh === "number" && Number.isFinite(row.kwh) ? row.kwh : null;
+    if (!/^\d{4}-\d{2}$/.test(month) || actualKwh == null || actualKwh <= 0) continue;
+    const savedKwh = savedByMonth.get(month);
+    if (savedKwh == null || savedKwh === 0) return true;
+  }
+  return false;
+}
+
 async function buildOnePathAdminManualSeeds(args: {
   userId: string;
   houseId: string;
@@ -131,16 +163,39 @@ async function buildOnePathAdminManualSeeds(args: {
     payload: args.payload,
     dbTravelRanges: args.dbTravelRanges,
   });
+  const actualDerivedMonthlyResolved = resolveSharedManualStageOneContract({
+    mode: "MONTHLY",
+    sourcePayload: null,
+    actualEndDate: syntheticAnchorEndDate,
+    travelRanges: activeTravelRanges,
+    dailyRows: usageTruth?.dataset?.daily ?? [],
+  });
+  const actualDerivedMonthlyPayload =
+    actualDerivedMonthlyResolved.payload?.mode === "MONTHLY" ? actualDerivedMonthlyResolved.payload : null;
+  const refreshedAutoDateMonthlyPayload =
+    actualDerivedMonthlyPayload != null
+      ? {
+          ...actualDerivedMonthlyPayload,
+          dateSourceMode: "AUTO_DATES" as const,
+          travelRanges: activeTravelRanges.length > 0 ? activeTravelRanges : actualDerivedMonthlyPayload.travelRanges,
+        }
+      : null;
+  const preferredSourcePayload = shouldPreferActualDerivedAdminMonthlyPayload({
+    savedPayload: args.payload,
+    actualDerivedPayload: actualDerivedMonthlyPayload,
+  })
+    ? refreshedAutoDateMonthlyPayload
+    : args.payload;
   const monthlyResolved = resolveSharedManualStageOneContract({
     mode: "MONTHLY",
-    sourcePayload: args.payload,
+    sourcePayload: preferredSourcePayload,
     actualEndDate: syntheticAnchorEndDate,
     travelRanges: activeTravelRanges,
     dailyRows: usageTruth?.dataset?.daily ?? [],
   });
   const annualResolved = resolveSharedManualStageOneContract({
     mode: "ANNUAL",
-    sourcePayload: args.payload,
+    sourcePayload: preferredSourcePayload,
     actualEndDate: syntheticAnchorEndDate,
     travelRanges: activeTravelRanges,
     dailyRows: usageTruth?.dataset?.daily ?? [],
