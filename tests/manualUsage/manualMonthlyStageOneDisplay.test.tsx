@@ -152,7 +152,10 @@ describe("manual monthly stage-one display", () => {
     );
 
     expect(html).toContain("Annual usage total");
+    expect(html).toContain("Annual usage window");
+    expect(html).toContain("one trailing 365-day usage window");
     expect(html).toContain("1/1/25 - 12/31/25");
+    expect(html).toContain("anchor date 2025-12-31");
     expect(html).toContain("5000.0");
     expect(html).not.toContain("Monthly usage");
     expect(html).not.toContain("Daily usage");

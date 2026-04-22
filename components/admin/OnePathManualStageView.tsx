@@ -46,7 +46,11 @@ export function OnePathManualStageView(props: { view?: OnePathManualStageOneView
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Source" value={view.source === "artifact_backed_read_model" ? "Artifact-backed" : "Saved preview"} />
-        <MetricCard label="Anchor / Bill End Date" value={view.anchorEndDate ?? "not set"} />
+        <MetricCard
+          label={view.mode === "MONTHLY" ? "Anchor / Bill End Date" : "Anchor Date"}
+          value={view.anchorEndDate ?? "not set"}
+          note={view.mode === "ANNUAL" ? "Annual Stage 1 uses one trailing 365-day window ending on this anchor." : undefined}
+        />
         <MetricCard label="Date source mode" value={view.dateSourceMode ?? "n/a"} note={view.mode === "MONTHLY" ? "Monthly only." : "Annual mode has no monthly date-source mode."} />
         <MetricCard
           label="Eligible vs Excluded"
