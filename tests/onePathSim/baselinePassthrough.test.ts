@@ -463,9 +463,27 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.daily).toEqual([]);
     expect(artifact.dataset.series.intervals15).toEqual([]);
     expect(artifact.dataset.meta.statementRanges).toEqual([
-      { id: "apr", month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30", kwh: 270 },
-      { id: "mar", month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31", kwh: 210 },
+      { month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30" },
+      { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
     ]);
+    expect(buildOnePathManualArtifactDecorations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manualUsagePayload: {
+          mode: "MONTHLY",
+          anchorEndDate: "2026-04-30",
+          dateSourceMode: "AUTO_DATES",
+          monthlyKwh: [
+            { month: "2026-03", kwh: 210 },
+            { month: "2026-04", kwh: 270 },
+          ],
+          statementRanges: [
+            { month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30" },
+            { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+          ],
+          travelRanges: [{ startDate: "2026-03-10", endDate: "2026-03-12" }],
+        },
+      })
+    );
   });
 
   it("reuses saved manual annual truth for baseline without drifting to normalized engine input coverage", async () => {
@@ -521,6 +539,80 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.series.intervals15).toEqual([]);
     expect(artifact.dataset.meta.baselinePassthroughMode).toBe("MANUAL_ANNUAL");
     expect(artifact.dataset.meta.coverageEnd).toBe("2026-02-15");
+  });
+
+  it("falls back to derived manual annual Stage 1 truth when the saved annual payload is blank", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth({
+        summary: {
+          source: "SMT",
+          totalKwh: 999,
+          start: "2025-05-01",
+          end: "2026-04-30",
+          latest: "2026-04-30",
+        },
+        daily: [],
+        monthly: [],
+        series: { intervals15: [] },
+        meta: { datasetKind: "ACTUAL" },
+      })
+    );
+    getOnePathManualUsageInput.mockResolvedValue({
+      payload: {
+        mode: "ANNUAL",
+        anchorEndDate: "",
+        annualKwh: Number.NaN,
+        statementRanges: [],
+      },
+    });
+    resolveOnePathManualStageOnePresentation.mockImplementation(({ payload }: { payload?: any }) => {
+      if (payload?.mode !== "ANNUAL") return null;
+      if (payload?.anchorEndDate === "2026-04-30" && payload?.annualKwh === 12345) {
+        return {
+          mode: "ANNUAL",
+          surface: "admin_manual_monthly_stage_one",
+          summary: {
+            key: "annual:2026-04-30",
+            startDate: "2025-05-01",
+            endDate: "2026-04-30",
+            anchorEndDate: "2026-04-30",
+            label: "5/1/25 - 4/30/26",
+            shortLabel: "5/1/25-4/30/26",
+            annualKwh: 12345,
+          },
+        };
+      }
+      return null;
+    });
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "MANUAL_ANNUAL",
+        simulatorMode: "MANUAL_TOTALS",
+        manualConstraintMode: "MANUAL_ANNUAL",
+        annualTargetKwh: 12345,
+        anchorEndDate: "2026-04-30",
+        runtime: {
+          ...buildBaseEngineInput().runtime,
+          mode: "MANUAL_TOTALS",
+        },
+      })
+    );
+
+    expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
+    expect(artifact.dataset.summary.totalKwh).toBe(12345);
+    expect(artifact.dataset.summary.end).toBe("2026-04-30");
+    expect(buildOnePathManualArtifactDecorations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manualUsagePayload: {
+          mode: "ANNUAL",
+          anchorEndDate: "2026-04-30",
+          annualKwh: 12345,
+          travelRanges: [],
+        },
+      })
+    );
   });
 
   it("fails baseline only when upstream usage truth still cannot be obtained", async () => {

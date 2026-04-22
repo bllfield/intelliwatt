@@ -400,6 +400,16 @@ function buildManualPayloadFromEngineInput(engineInput: CanonicalSimulationEngin
   return null;
 }
 
+function isUsableManualStageOnePayload(payload: ManualUsagePayload | null | undefined): payload is ManualUsagePayload {
+  if (!payload) return false;
+  return (
+    resolveOnePathManualStageOnePresentation({
+      surface: "admin_manual_monthly_stage_one",
+      payload,
+    }) != null
+  );
+}
+
 function buildIntervalBaselinePassthroughDataset(args: {
   engineInput: CanonicalSimulationEngineInput;
   upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
@@ -622,12 +632,20 @@ async function buildBaselinePassthroughArtifact(args: {
 
   const manualUsagePayload =
     args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
-      ? (await getOnePathManualUsageInput({
-          userId: args.engineInput.runtime.userId,
-          houseId: args.engineInput.houseId,
-        }).catch(() => ({ payload: null }))).payload ??
-        buildManualPayloadFromEngineInput(args.engineInput) ??
-        null
+      ? await (() => {
+          const derivedPayload = buildManualPayloadFromEngineInput(args.engineInput);
+          return getOnePathManualUsageInput({
+            userId: args.engineInput.runtime.userId,
+            houseId: args.engineInput.houseId,
+          })
+            .catch(() => ({ payload: null }))
+            .then((record) => {
+              const savedPayload = record.payload;
+              if (isUsableManualStageOnePayload(savedPayload)) return savedPayload;
+              if (isUsableManualStageOnePayload(derivedPayload)) return derivedPayload;
+              return savedPayload ?? derivedPayload ?? null;
+            });
+        })()
       : null;
 
   return buildBaselinePassthroughArtifactFromResolvedTruth({
@@ -676,6 +694,7 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
           artifactInputHash: null,
           artifactEngineVersion: "baseline_passthrough_v1",
           actualDataset: upstreamUsageTruth.dataset,
+          manualUsagePayload: args.manualUsagePayload,
         })
       : null;
   const sharedDiagnostics =
