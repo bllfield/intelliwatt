@@ -23,6 +23,7 @@ describe("one path green button anchor wiring", () => {
   it("lets one path use the Green Button anchor-backed interval window when uploads are older than canonical coverage", () => {
     const serviceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
     const onePathSource = readRepoFile("modules/onePathSim/onePathSim.ts");
+    const actualDatasetSource = readRepoFile("lib/usage/actualDatasetForHouse.ts");
 
     expect(serviceSource).toContain("intervalActualSource?: \"SMT\" | \"GREEN_BUTTON\" | null;");
     expect(serviceSource).toContain("args.intervalActualSource === \"GREEN_BUTTON\"");
@@ -30,5 +31,8 @@ describe("one path green button anchor wiring", () => {
     expect(serviceSource).toContain("source: \"smt_anchor\"");
     expect(onePathSource).toContain("usesGreenButtonAnchorWindow");
     expect(onePathSource).toContain("actualMeta.actualSource === \"GREEN_BUTTON\"");
+    expect(actualDatasetSource).toContain("getLatestGreenButtonFullDayDateKey");
+    expect(actualDatasetSource).toContain("const greenButtonAnchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId });");
+    expect(actualDatasetSource).toContain("const anchoredMonths = monthsEndingAt(endMonth, 12);");
   });
 });

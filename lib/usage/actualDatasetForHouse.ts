@@ -12,6 +12,8 @@ import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource, type ActualUsageSource } from "@/modules/realUsageAdapter/actual";
+import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
+import { monthsEndingAt } from "@/modules/onePathSim/manualAnchor";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -31,6 +33,27 @@ function chicagoDateKey(d: Date): string {
   } catch {
     return d.toISOString().slice(0, 10);
   }
+}
+
+function parseYearMonth(ym: string): { year: number; month1: number } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month1 = Number(m[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month1) || month1 < 1 || month1 > 12) return null;
+  return { year, month1 };
+}
+
+function utcRangeWithChicagoBuffer(months: string[]): { start: Date; endExclusive: Date } {
+  const first = parseYearMonth(months[0] ?? "");
+  const last = parseYearMonth(months[months.length - 1] ?? "");
+  if (!first || !last) {
+    const now = new Date();
+    return { start: new Date(now.getTime() - 370 * DAY_MS), endExclusive: new Date(now.getTime() + DAY_MS) };
+  }
+  const start = new Date(Date.UTC(first.year, first.month1 - 1, 1, 0, 0, 0, 0) - DAY_MS);
+  const endExclusive = new Date(Date.UTC(last.year, last.month1, 1, 0, 0, 0, 0) + 2 * DAY_MS);
+  return { start, endExclusive };
 }
 
 export type UsageSeriesPoint = { timestamp: string; kwh: number };
@@ -566,8 +589,23 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
     orderBy: { timestamp: "desc" },
     select: { timestamp: true },
   });
-  if (!hasRows?.timestamp) return null;
-  return { cutoff, end };
+  if (hasRows?.timestamp) return { cutoff, end };
+
+  const greenButtonAnchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId });
+  if (typeof greenButtonAnchorEndDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(greenButtonAnchorEndDate)) {
+    return null;
+  }
+  const endMonth = greenButtonAnchorEndDate.slice(0, 7);
+  const anchoredMonths = monthsEndingAt(endMonth, 12);
+  const anchoredRange = utcRangeWithChicagoBuffer(anchoredMonths);
+  const anchoredEnd = new Date(anchoredRange.endExclusive.getTime() - 1);
+  const anchoredRows = await usageClient.greenButtonInterval.findFirst({
+    where: { homeId: houseId, rawId, timestamp: { gte: anchoredRange.start, lte: anchoredEnd } },
+    orderBy: { timestamp: "desc" },
+    select: { timestamp: true },
+  });
+  if (!anchoredRows?.timestamp) return null;
+  return { cutoff: anchoredRange.start, end: anchoredEnd };
 }
 
 async function getSmtWindow(esiid: string) {
