@@ -1284,6 +1284,56 @@ describe("admin one path sim route", () => {
     });
   });
 
+  it("returns a distinct usage DB unavailable error for upstream truth failures when the usage env is missing", async () => {
+    runSharedSimulation.mockRejectedValueOnce(
+      new UpstreamUsageTruthMissingError({
+        usageTruthSource: "missing_usage_truth",
+        seedResult: null,
+        upstreamUsageTruth: {
+          title: "Upstream Usage Truth",
+          summary: "green button usage truth missing",
+          currentRun: {},
+          sharedOwners: [],
+        },
+      })
+    );
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "GREEN_BUTTON",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(503);
+    expect(json).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: "usage_db_unavailable",
+        usageTruthSource: "missing_usage_truth",
+        seedResult: null,
+        upstreamUsageTruth: expect.objectContaining({
+          title: "Upstream Usage Truth",
+        }),
+        environmentVisibility: expect.objectContaining({
+          usage: expect.objectContaining({
+            envVarName: "USAGE_DATABASE_URL",
+            envVarPresent: false,
+          }),
+        }),
+        runtimeEnvParityTrace: expect.objectContaining({
+          envVisibility: expect.objectContaining({
+            usage: false,
+          }),
+        }),
+      })
+    );
+  });
+
   it("routes manual save through the shared manual input store", async () => {
     saveManualUsageInputForUserHouse.mockResolvedValue({
       ok: true,

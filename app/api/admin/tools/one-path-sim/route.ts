@@ -306,6 +306,33 @@ function buildEnvironmentVisibility() {
   };
 }
 
+function usageDbUnavailableResponse(args: {
+  usageTruthSource: unknown;
+  seedResult: unknown;
+  upstreamUsageTruth: unknown;
+  message?: string;
+}) {
+  const environmentVisibility = buildEnvironmentVisibility();
+  const runtimeEnvParityTrace = buildRuntimeEnvParityTrace({
+    environmentVisibility,
+  });
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "usage_db_unavailable",
+      usageTruthSource: args.usageTruthSource,
+      seedResult: args.seedResult,
+      upstreamUsageTruth: args.upstreamUsageTruth,
+      environmentVisibility,
+      runtimeEnvParityTrace,
+      message:
+        args.message ??
+        "The shared usage database is unavailable in this runtime, so persisted usage truth cannot be read.",
+    },
+    { status: 503 }
+  );
+}
+
 async function loadGreenButtonUploadSummary(houseId: string | null | undefined) {
   if (!houseId) return null;
   const prismaAny = prisma as any;
@@ -660,6 +687,14 @@ export async function POST(request: NextRequest) {
       });
     } catch (error) {
       if (isUpstreamUsageTruthMissingFailure(error)) {
+        const environmentVisibility = buildEnvironmentVisibility();
+        if (!environmentVisibility.usage.envVarPresent) {
+          return usageDbUnavailableResponse({
+            usageTruthSource: error.usageTruthSource,
+            seedResult: error.seedResult,
+            upstreamUsageTruth: error.upstreamUsageTruth,
+          });
+        }
         return NextResponse.json(
           {
             ok: false,
