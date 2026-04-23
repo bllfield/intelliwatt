@@ -268,12 +268,12 @@ export function buildManualUsageReadModel(args: {
   if (billPeriodTargets.length === 0) return null;
   const billPeriodTotalsKwhById = buildManualBillPeriodTotalsById(billPeriodTargets);
 
-  // Shared readback already persists day totals; prefer those over rescanning the full interval artifact.
-  const simulatedDailyTotalsByDate = buildDailyTotalsByDate(args.dataset);
-  const simulatedIntervalTotalsByDate =
-    simulatedDailyTotalsByDate.size > 0 ? new Map<string, number>() : buildIntervalTotalsByDate(args.dataset);
+  // For manual parity we prefer raw interval sums when available so bill-period exact matches do not drift from per-day rounding.
+  const simulatedIntervalTotalsByDate = buildIntervalTotalsByDate(args.dataset);
+  const simulatedDailyTotalsByDate =
+    simulatedIntervalTotalsByDate.size > 0 ? new Map<string, number>() : buildDailyTotalsByDate(args.dataset);
   const simulatedStatementTotalsByDate =
-    simulatedDailyTotalsByDate.size > 0 ? simulatedDailyTotalsByDate : simulatedIntervalTotalsByDate;
+    simulatedIntervalTotalsByDate.size > 0 ? simulatedIntervalTotalsByDate : simulatedDailyTotalsByDate;
 
   const actualDatasetTotalsByDate =
     args.actualDataset != null

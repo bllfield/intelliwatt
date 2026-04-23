@@ -620,7 +620,8 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   options?: { buildInputs?: unknown; coverageWindow?: CoverageWindow }
 ): { startDate: string; endDate: string } | null {
   if (scenarioKey === "BASELINE" || !dataset?.summary) return null;
-  const canonicalCoverage = options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
+  const manualCoverage = resolveManualCoverageWindowFromBuildInputs(options?.buildInputs);
+  const canonicalCoverage = manualCoverage ?? options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
   dataset.summary.start = canonicalCoverage.startDate;
   dataset.summary.end = canonicalCoverage.endDate;
   dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
@@ -644,6 +645,39 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   dataset.meta.excludedDateKeysCount = boundedExcludedDateKeys.size;
   dataset.meta.excludedDateKeysFingerprint = Array.from(boundedExcludedDateKeys).sort().join(",");
   return canonicalCoverage;
+}
+
+function resolveManualCoverageWindowFromBuildInputs(
+  buildInputs: unknown
+): { startDate: string; endDate: string } | null {
+  const input = (buildInputs ?? null) as {
+    mode?: unknown;
+    canonicalPeriods?: Array<{ startDate?: unknown; endDate?: unknown }> | null;
+    manualBillPeriods?: Array<{ startDate?: unknown; endDate?: unknown }> | null;
+  } | null;
+  if (String(input?.mode ?? "").trim() !== "MANUAL_TOTALS") return null;
+  const rawPeriods = Array.isArray(input?.canonicalPeriods) && input!.canonicalPeriods.length > 0
+    ? input!.canonicalPeriods
+    : Array.isArray(input?.manualBillPeriods)
+      ? input!.manualBillPeriods
+      : [];
+  const periods = rawPeriods
+    .map((period) => ({
+      startDate: String(period?.startDate ?? "").slice(0, 10),
+      endDate: String(period?.endDate ?? "").slice(0, 10),
+    }))
+    .filter(
+      (period): period is { startDate: string; endDate: string } =>
+        /^\d{4}-\d{2}-\d{2}$/.test(period.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(period.endDate)
+    )
+    .sort((left, right) =>
+      left.startDate === right.startDate ? left.endDate.localeCompare(right.endDate) : left.startDate.localeCompare(right.startDate)
+    );
+  if (periods.length === 0) return null;
+  return {
+    startDate: periods[0]!.startDate,
+    endDate: periods.reduce((latest, period) => (period.endDate > latest ? period.endDate : latest), periods[0]!.endDate),
+  };
 }
 
 function normalizeValidationOnlyDateKeysLocal(
@@ -3729,15 +3763,39 @@ export function resolveSharedPastRecalcWindow(args: {
   mode: "SMT_BASELINE" | "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE";
   canonicalMonths: string[];
   smtAnchorPeriods?: Array<{ startDate: string; endDate: string }> | undefined;
+  manualCanonicalPeriods?: Array<{ startDate: string; endDate: string }> | undefined;
 }): {
   startDate: string;
   endDate: string;
-  source: "smt_anchor" | "canonical_month_range" | "canonical_coverage_fallback";
+  source: "smt_anchor" | "canonical_month_range" | "canonical_coverage_fallback" | "manual_bill_period_window";
 } {
+  if (args.mode === "MANUAL_TOTALS" && Array.isArray(args.manualCanonicalPeriods) && args.manualCanonicalPeriods.length > 0) {
+    const sortedPeriods = args.manualCanonicalPeriods
+      .map((period) => ({
+        startDate: String(period.startDate ?? "").slice(0, 10),
+        endDate: String(period.endDate ?? "").slice(0, 10),
+      }))
+      .filter(
+        (period): period is { startDate: string; endDate: string } =>
+          /^\d{4}-\d{2}-\d{2}$/.test(period.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(period.endDate)
+      )
+      .sort((left, right) =>
+        left.startDate === right.startDate ? left.endDate.localeCompare(right.endDate) : left.startDate.localeCompare(right.startDate)
+      );
+    if (sortedPeriods.length > 0) {
+      return {
+        startDate: sortedPeriods[0]!.startDate,
+        endDate: sortedPeriods.reduce((latest, period) => (period.endDate > latest ? period.endDate : latest), sortedPeriods[0]!.endDate),
+        source: "manual_bill_period_window",
+      };
+    }
+  }
+
   // Shared producer parity lock:
-  // Past simulation window ownership is canonical usage coverage across cold_build/recalc/lab_validation.
+  // Interval and new-build Past simulation window ownership stays canonical usage coverage.
   // SMT anchors remain metadata for actual/source context, not producer coverage ownership.
-  void args;
+  void args.canonicalMonths;
+  void args.smtAnchorPeriods;
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   return {
     startDate: canonicalCoverage.startDate,
@@ -4716,9 +4774,7 @@ async function recalcSimulatorBuildImpl(args: {
       ? (() => {
           const manualBillPeriods = built.manualBillPeriods ?? [];
           if (manualBillPeriods.length > 0) {
-            return manualBillPeriods
-              .filter((period) => period.eligibleForConstraint)
-              .map((period) => ({
+            return manualBillPeriods.map((period) => ({
                 id: period.id,
                 startDate: period.startDate,
                 endDate: period.endDate,
@@ -4794,6 +4850,7 @@ async function recalcSimulatorBuildImpl(args: {
           mode: simMode,
           canonicalMonths: built.canonicalMonths,
           smtAnchorPeriods: simMode === "SMT_BASELINE" ? smtAnchorPeriods : undefined,
+          manualCanonicalPeriods: simMode === "MANUAL_TOTALS" ? manualCanonicalPeriods : undefined,
         })
       : null;
   if (recalcIntervalPreload && sharedPastRecalcWindow) {
@@ -7425,7 +7482,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       };
     }
 
-    // Non-baseline scenario metadata window must match the shared Usage dashboard 365-day canonical window.
+    // Non-baseline metadata stays canonical for interval/new-build, but manual modes own their bill-date window.
     if (scenarioKey !== "BASELINE" && dataset?.summary) {
       const canonicalCoverage =
         applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs }) ??

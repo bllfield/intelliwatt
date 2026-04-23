@@ -6,6 +6,11 @@ function fmtKwh(value: number | null): string {
   return value != null && Number.isFinite(value) ? value.toFixed(2) : "\u2014";
 }
 
+function fmtSignedKwh(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "\u2014";
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)} kWh`;
+}
+
 function formatInputKind(value: string): string {
   switch (value) {
     case "entered_nonzero":
@@ -98,9 +103,40 @@ export function ManualMonthlyReconciliationPanel(props: {
   const rows = Array.isArray(props.reconciliation?.rows) ? props.reconciliation.rows : [];
   if (rows.length === 0) return null;
 
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.entered += Number(row.stageOneTargetTotalKwh ?? 0) || 0;
+      acc.simulated += Number(row.simulatedStatementTotalKwh ?? 0) || 0;
+      return acc;
+    },
+    { entered: 0, simulated: 0 }
+  );
+  const totalDelta = totals.simulated - totals.entered;
+
   return (
     <div className={props.className}>
-      <div className="mt-2 text-xs text-brand-navy/80">
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Bill total entered</div>
+          <div className="mt-2 text-lg font-semibold text-neutral-900">{totals.entered.toFixed(2)} kWh</div>
+        </div>
+        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Past Sim total</div>
+          <div className="mt-2 text-lg font-semibold text-neutral-900">{totals.simulated.toFixed(2)} kWh</div>
+        </div>
+        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Bill total delta</div>
+          <div className="mt-2 text-lg font-semibold text-neutral-900">{fmtSignedKwh(totalDelta)}</div>
+        </div>
+        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Exact-match periods</div>
+          <div className="mt-2 text-lg font-semibold text-neutral-900">
+            {props.reconciliation.reconciledRangeCount}/{props.reconciliation.eligibleRangeCount}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 text-xs text-brand-navy/80">
         Eligible exact-match {props.reconciliation.eligibleRangeCount} · Excluded / other {props.reconciliation.ineligibleRangeCount} ·
         Reconciled {props.reconciliation.reconciledRangeCount} · Delta present {props.reconciliation.deltaPresentRangeCount}
       </div>
@@ -108,36 +144,33 @@ export function ManualMonthlyReconciliationPanel(props: {
         <table className="min-w-full text-xs border border-brand-blue/10">
           <thead className="bg-brand-blue/5">
             <tr>
-              <th className="border border-brand-blue/10 px-2 py-1 text-left">Bill period</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-left">Input kind</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-right">Actual kWh</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-right">Entered kWh</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-right">Stage 1 target kWh</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-right">Past Sim kWh</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-left">Month</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-left">Bill range</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-right">Bill total</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-right">Past Sim</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-right">Delta</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-left">Parity rule</th>
               <th className="border border-brand-blue/10 px-2 py-1 text-left">Status</th>
-              <th className="border border-brand-blue/10 px-2 py-1 text-left">Reason</th>
+              <th className="border border-brand-blue/10 px-2 py-1 text-left">Details</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={`${row.month}:${row.startDate}:${row.endDate}`} className={rowToneClass(row.status)}>
+                <td className="border border-brand-blue/10 px-2 py-1 font-medium">{row.month}</td>
                 <td className="border border-brand-blue/10 px-2 py-1">
-                  <div className="font-medium">{row.month}</div>
-                  <div className="text-[0.7rem] text-brand-navy/60">
-                    {row.startDate} {"->"} {row.endDate}
-                  </div>
+                  {row.startDate} {"->"} {row.endDate}
                 </td>
-                <td className="border border-brand-blue/10 px-2 py-1">{formatInputKind(row.inputKind)}</td>
-                <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.actualIntervalTotalKwh)}</td>
-                <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.enteredStatementTotalKwh)}</td>
                 <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.stageOneTargetTotalKwh)}</td>
                 <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.simulatedStatementTotalKwh)}</td>
-                <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtKwh(row.deltaKwh)}</td>
-                <td className="border border-brand-blue/10 px-2 py-1">{formatParityRule(row.parityRequirement)}</td>
+                <td className="border border-brand-blue/10 px-2 py-1 text-right">{fmtSignedKwh(row.deltaKwh)}</td>
                 <td className="border border-brand-blue/10 px-2 py-1">{formatStatusLabel(row.status)}</td>
-                <td className="border border-brand-blue/10 px-2 py-1">{formatReasonLabel(row.reason, row.status)}</td>
+                <td className="border border-brand-blue/10 px-2 py-1">
+                  <div>{formatReasonLabel(row.reason, row.status)}</div>
+                  <div className="mt-1 text-[0.7rem] text-brand-navy/60">
+                    {formatInputKind(row.inputKind)} · {formatParityRule(row.parityRequirement)}
+                    {row.actualIntervalTotalKwh != null ? ` · Actual ${fmtKwh(row.actualIntervalTotalKwh)} kWh` : ""}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
 
 describe("ManualMonthlyReconciliationPanel", () => {
-  it("keeps the same totals while rendering clearer parity and status labels", () => {
+  it("keeps the same totals while rendering a month-first reconciliation summary", () => {
     const html = renderToStaticMarkup(
       <ManualMonthlyReconciliationPanel
         reconciliation={{
@@ -50,6 +50,10 @@ describe("ManualMonthlyReconciliationPanel", () => {
 
     expect(html).toContain("1100.12");
     expect(html).toContain("900.45");
+    expect(html).toContain("Bill total entered");
+    expect(html).toContain("Past Sim total");
+    expect(html).toContain("Bill total delta");
+    expect(html).toContain("Exact-match periods");
     expect(html).toContain("Eligible exact-match 1");
     expect(html).toContain("Excluded / other 1");
     expect(html).toContain("Exact match required");
@@ -57,6 +61,8 @@ describe("ManualMonthlyReconciliationPanel", () => {
     expect(html).toContain("Reconciled");
     expect(html).toContain("Excluded");
     expect(html).toContain("Missing input");
+    expect(html).toContain("Bill range");
     expect(html).toContain("2026-02-09 -&gt; 2026-03-08");
+    expect(html).toContain("+0.00 kWh");
   });
 });
