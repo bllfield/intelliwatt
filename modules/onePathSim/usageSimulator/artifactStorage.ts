@@ -23,51 +23,51 @@ function compactDateKeyList(value: unknown): string[] {
 
 export function compactLockboxPerDayTraceForArtifactStorage(value: unknown): AnyRecord[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((row) => {
-      const item = asRecord(row);
-      if (!item) return null;
-      return {
-        localDate: asOptionalString(item.localDate),
-        simulatedReasonCode: asOptionalString(item.simulatedReasonCode),
-        fallbackLevel: asOptionalString(item.fallbackLevel),
-        clampApplied: item.clampApplied === true,
-        dayClassification: asOptionalString(item.dayClassification),
-        weatherSeverityMultiplier: asFiniteNumber(item.weatherSeverityMultiplier),
-        weatherModeUsed: asOptionalString(item.weatherModeUsed),
-        finalDayKwh: asFiniteNumber(item.finalDayKwh),
-        displayDayKwh: asFiniteNumber(item.displayDayKwh),
-        intervalSumKwh: asFiniteNumber(item.intervalSumKwh),
-        shapeVariantUsed: asOptionalString(item.shapeVariantUsed),
-        donorSelectionModeUsed: asOptionalString(item.donorSelectionModeUsed),
-        donorCandidatePoolSize: asFiniteNumber(item.donorCandidatePoolSize),
-        selectedDonorLocalDates: compactDateKeyList(item.selectedDonorLocalDates),
-        donorWeatherRegimeUsed: asOptionalString(item.donorWeatherRegimeUsed),
-        donorMonthKeyUsed: asOptionalString(item.donorMonthKeyUsed),
-        thermalDistanceScore: asFiniteNumber(item.thermalDistanceScore),
-        broadFallbackUsed: item.broadFallbackUsed === true,
-        sameRegimeDonorPoolAvailable: item.sameRegimeDonorPoolAvailable === true,
-        donorPoolBlendStrategy: asOptionalString(item.donorPoolBlendStrategy),
-        donorPoolKwhSpread: asFiniteNumber(item.donorPoolKwhSpread),
-        donorPoolKwhVariance: asFiniteNumber(item.donorPoolKwhVariance),
-        donorPoolMedianKwh: asFiniteNumber(item.donorPoolMedianKwh),
-        donorVarianceGuardrailTriggered: item.donorVarianceGuardrailTriggered === true,
-        weatherAdjustmentModeUsed: asOptionalString(item.weatherAdjustmentModeUsed),
-        postDonorAdjustmentCoefficient: asFiniteNumber(item.postDonorAdjustmentCoefficient),
-        shape96Hash: asOptionalString(item.shape96Hash),
-        templateSelectionKind: asOptionalString(item.templateSelectionKind),
-        selectedFingerprintBucketMonth: asOptionalString(item.selectedFingerprintBucketMonth),
-        selectedFingerprintBucketDayType: asOptionalString(item.selectedFingerprintBucketDayType),
-        selectedFingerprintWeatherBucket: asOptionalString(item.selectedFingerprintWeatherBucket),
-        selectedFingerprintIdentity: asOptionalString(item.selectedFingerprintIdentity),
-        selectedReferencePoolCount: asFiniteNumber(item.selectedReferencePoolCount),
-        weatherScalingCoefficientUsed: asFiniteNumber(item.weatherScalingCoefficientUsed),
-        dayTotalBeforeWeatherScale: asFiniteNumber(item.dayTotalBeforeWeatherScale),
-        dayTotalAfterWeatherScale: asFiniteNumber(item.dayTotalAfterWeatherScale),
-        intervalShapeScalingMethod: asOptionalString(item.intervalShapeScalingMethod),
-      };
-    })
-    .filter((row): row is AnyRecord => row != null);
+  const out: AnyRecord[] = [];
+  for (const row of value) {
+    const item = asRecord(row);
+    if (!item) continue;
+    out.push({
+      localDate: asOptionalString(item.localDate),
+      simulatedReasonCode: asOptionalString(item.simulatedReasonCode),
+      fallbackLevel: asOptionalString(item.fallbackLevel),
+      clampApplied: item.clampApplied === true,
+      dayClassification: asOptionalString(item.dayClassification),
+      weatherSeverityMultiplier: asFiniteNumber(item.weatherSeverityMultiplier),
+      weatherModeUsed: asOptionalString(item.weatherModeUsed),
+      finalDayKwh: asFiniteNumber(item.finalDayKwh),
+      displayDayKwh: asFiniteNumber(item.displayDayKwh),
+      intervalSumKwh: asFiniteNumber(item.intervalSumKwh),
+      shapeVariantUsed: asOptionalString(item.shapeVariantUsed),
+      donorSelectionModeUsed: asOptionalString(item.donorSelectionModeUsed),
+      donorCandidatePoolSize: asFiniteNumber(item.donorCandidatePoolSize),
+      selectedDonorLocalDates: compactDateKeyList(item.selectedDonorLocalDates),
+      donorWeatherRegimeUsed: asOptionalString(item.donorWeatherRegimeUsed),
+      donorMonthKeyUsed: asOptionalString(item.donorMonthKeyUsed),
+      thermalDistanceScore: asFiniteNumber(item.thermalDistanceScore),
+      broadFallbackUsed: item.broadFallbackUsed === true,
+      sameRegimeDonorPoolAvailable: item.sameRegimeDonorPoolAvailable === true,
+      donorPoolBlendStrategy: asOptionalString(item.donorPoolBlendStrategy),
+      donorPoolKwhSpread: asFiniteNumber(item.donorPoolKwhSpread),
+      donorPoolKwhVariance: asFiniteNumber(item.donorPoolKwhVariance),
+      donorPoolMedianKwh: asFiniteNumber(item.donorPoolMedianKwh),
+      donorVarianceGuardrailTriggered: item.donorVarianceGuardrailTriggered === true,
+      weatherAdjustmentModeUsed: asOptionalString(item.weatherAdjustmentModeUsed),
+      postDonorAdjustmentCoefficient: asFiniteNumber(item.postDonorAdjustmentCoefficient),
+      shape96Hash: asOptionalString(item.shape96Hash),
+      templateSelectionKind: asOptionalString(item.templateSelectionKind),
+      selectedFingerprintBucketMonth: asOptionalString(item.selectedFingerprintBucketMonth),
+      selectedFingerprintBucketDayType: asOptionalString(item.selectedFingerprintBucketDayType),
+      selectedFingerprintWeatherBucket: asOptionalString(item.selectedFingerprintWeatherBucket),
+      selectedFingerprintIdentity: asOptionalString(item.selectedFingerprintIdentity),
+      selectedReferencePoolCount: asFiniteNumber(item.selectedReferencePoolCount),
+      weatherScalingCoefficientUsed: asFiniteNumber(item.weatherScalingCoefficientUsed),
+      dayTotalBeforeWeatherScale: asFiniteNumber(item.dayTotalBeforeWeatherScale),
+      dayTotalAfterWeatherScale: asFiniteNumber(item.dayTotalAfterWeatherScale),
+      intervalShapeScalingMethod: asOptionalString(item.intervalShapeScalingMethod),
+    });
+  }
+  return out;
 }
 
 export function buildPastArtifactDatasetJsonForStorage(args: {
