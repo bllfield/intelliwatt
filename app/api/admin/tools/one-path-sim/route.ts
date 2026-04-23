@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse } from "@/modules/homeProfile/repo";
