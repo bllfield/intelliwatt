@@ -19,6 +19,7 @@ const getSimulationVariablePolicy = vi.fn();
 const resolveUpstreamUsageTruthForSimulation = vi.fn();
 const buildUserUsageHouseContract = vi.fn();
 const adaptIntervalRawInput = vi.fn();
+const adaptGreenButtonRawInput = vi.fn();
 const adaptManualMonthlyRawInput = vi.fn();
 const adaptManualAnnualRawInput = vi.fn();
 const adaptNewBuildRawInput = vi.fn();
@@ -97,6 +98,7 @@ vi.mock("@/lib/usage/userUsageHouseContract", () => ({
 
 vi.mock("@/modules/onePathSim/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
+  adaptGreenButtonRawInput: (...args: any[]) => adaptGreenButtonRawInput(...args),
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
   adaptManualAnnualRawInput: (...args: any[]) => adaptManualAnnualRawInput(...args),
   adaptNewBuildRawInput: (...args: any[]) => adaptNewBuildRawInput(...args),
@@ -156,6 +158,7 @@ describe("admin one path sim route", () => {
     resolveUpstreamUsageTruthForSimulation.mockReset();
     buildUserUsageHouseContract.mockReset();
     adaptIntervalRawInput.mockReset();
+    adaptGreenButtonRawInput.mockReset();
     adaptManualMonthlyRawInput.mockReset();
     adaptManualAnnualRawInput.mockReset();
     adaptNewBuildRawInput.mockReset();
@@ -211,6 +214,7 @@ describe("admin one path sim route", () => {
     getSimulationVariablePolicy.mockResolvedValue({
       effectiveByMode: {
         INTERVAL: { previewPolicy: "interval" },
+        GREEN_BUTTON: { previewPolicy: "green-button" },
         MANUAL_MONTHLY: { previewPolicy: "manual-monthly" },
         MANUAL_ANNUAL: { previewPolicy: "manual-annual" },
         NEW_BUILD: { previewPolicy: "new-build" },
@@ -218,6 +222,7 @@ describe("admin one path sim route", () => {
       overrides: {},
     });
     adaptIntervalRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "INTERVAL" });
+    adaptGreenButtonRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "GREEN_BUTTON" });
     adaptManualMonthlyRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_MONTHLY" });
     adaptManualAnnualRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_ANNUAL" });
     adaptNewBuildRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "NEW_BUILD" });
@@ -653,6 +658,31 @@ describe("admin one path sim route", () => {
     expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
   });
 
+  it("routes green button runs through the dedicated green button adapter and source preference", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "GREEN_BUTTON",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(adaptGreenButtonRawInput).toHaveBeenCalledTimes(1);
+    expect(adaptGreenButtonRawInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferredActualSource: "GREEN_BUTTON",
+      })
+    );
+    expect(adaptIntervalRawInput).not.toHaveBeenCalled();
+    expect(runSharedSimulation).toHaveBeenCalledWith({ sharedProducerPathUsed: true, inputType: "GREEN_BUTTON" });
+    expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
+  });
+
   it("keeps interval run requests off the lookup-only preview and baseline contract path", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
@@ -689,6 +719,7 @@ describe("admin one path sim route", () => {
     expect(json.ok).toBe(true);
     expect(json.sourceContext).toEqual({
       debugDiagnosticsIncluded: false,
+      greenButtonUpload: null,
       travelRangesFromDb: [{ startDate: "2026-03-01", endDate: "2026-03-05" }],
     });
     expect(resolveUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();

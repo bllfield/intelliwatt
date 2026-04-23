@@ -44,6 +44,9 @@ describe("one path known-house scenario registry", () => {
 
   it("covers the requested baseline/past/future lifecycle families by mode", () => {
     const scenarioKeys = KNOWN_HOUSE_SCENARIOS.map((scenario) => scenario.scenarioKey);
+    const greenButtonModes = KNOWN_HOUSE_SCENARIOS.filter((scenario) => scenario.scenarioType === "GREEN_BUTTON_TRUTH").map(
+      (scenario) => scenario.mode
+    );
 
     expect(scenarioKeys).toContain("keeper-brian-interval-baseline-primary");
     expect(scenarioKeys).toContain("keeper-interval-past-primary");
@@ -64,6 +67,7 @@ describe("one path known-house scenario registry", () => {
     expect(scenarioKeys).toContain("keeper-green-button-baseline-primary");
     expect(scenarioKeys).toContain("keeper-green-button-past-primary");
     expect(scenarioKeys).toContain("keeper-green-button-future-primary");
+    expect(greenButtonModes.every((mode) => mode === "GREEN_BUTTON")).toBe(true);
   });
 
   it("labels manual preset truth around the effective Stage 1 payload that actually loads", () => {

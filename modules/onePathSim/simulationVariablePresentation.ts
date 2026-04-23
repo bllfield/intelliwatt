@@ -166,6 +166,7 @@ function fieldTuningHint(key: string): string {
 }
 
 function modeToInputType(mode: string): SimulationVariableInputType {
+  if (mode === "GREEN_BUTTON") return "GREEN_BUTTON";
   if (mode === "MANUAL_MONTHLY") return "MANUAL_MONTHLY";
   if (mode === "MANUAL_ANNUAL") return "MANUAL_ANNUAL";
   if (mode === "NEW_BUILD") return "NEW_BUILD";
@@ -173,6 +174,7 @@ function modeToInputType(mode: string): SimulationVariableInputType {
 }
 
 function modeToBucketKey(mode: SimulationVariableInputType): "intervalOverrides" | "manualMonthlyOverrides" | "manualAnnualOverrides" | "newBuildOverrides" {
+  if (mode === "GREEN_BUTTON") return "intervalOverrides";
   if (mode === "MANUAL_MONTHLY") return "manualMonthlyOverrides";
   if (mode === "MANUAL_ANNUAL") return "manualAnnualOverrides";
   if (mode === "NEW_BUILD") return "newBuildOverrides";
@@ -180,6 +182,7 @@ function modeToBucketKey(mode: SimulationVariableInputType): "intervalOverrides"
 }
 
 function modeLabel(mode: SimulationVariableInputType): string {
+  if (mode === "GREEN_BUTTON") return "Green Button";
   if (mode === "MANUAL_MONTHLY") return "Manual Monthly";
   if (mode === "MANUAL_ANNUAL") return "Manual Annual";
   if (mode === "NEW_BUILD") return "New Build";

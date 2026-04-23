@@ -45,6 +45,7 @@ import type {
 
 export type CanonicalSimulationInputType =
   | "INTERVAL"
+  | "GREEN_BUTTON"
   | "MANUAL_MONTHLY"
   | "MANUAL_ANNUAL"
   | "NEW_BUILD";
@@ -65,7 +66,7 @@ export type CanonicalSimulationEngineInput = {
   billEndDay: number | null;
   statementRanges: unknown[];
   dateSourceMode: string | null;
-  manualConstraintMode: "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+  manualConstraintMode: "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
   monthlyTotalsKwhByMonth: Record<string, number>;
   annualTargetKwh: number | null;
   manualBillPeriodTotalsKwhById: Record<string, number>;
@@ -300,6 +301,10 @@ function deriveWeatherLogicMode(
   return weatherPreference === "LONG_TERM_AVERAGE"
     ? "LONG_TERM_AVERAGE_WEATHER"
     : "LAST_YEAR_ACTUAL_WEATHER";
+}
+
+function isIntervalLikeInputType(inputType: CanonicalSimulationInputType): boolean {
+  return inputType === "INTERVAL" || inputType === "GREEN_BUTTON";
 }
 
 function toScenarioKey(scenarioId: string | null | undefined): string {
@@ -607,9 +612,16 @@ async function buildBaselinePassthroughArtifact(args: {
     houseId: args.engineInput.houseId,
     actualContextHouseId: args.engineInput.actualContextHouseId,
     seedIfMissing: args.engineInput.inputType === "INTERVAL",
+    preferredActualSource:
+      args.engineInput.inputType === "GREEN_BUTTON"
+        ? "GREEN_BUTTON"
+        : args.engineInput.runtime.runContext?.preferredActualSource === "SMT" ||
+            args.engineInput.runtime.runContext?.preferredActualSource === "GREEN_BUTTON"
+          ? args.engineInput.runtime.runContext.preferredActualSource
+          : null,
   });
 
-  if (!upstreamUsageTruth.dataset && args.engineInput.inputType === "INTERVAL") {
+  if (!upstreamUsageTruth.dataset && isIntervalLikeInputType(args.engineInput.inputType)) {
     logSimPipelineEvent("baseline_dataset_passthrough_failure", {
       userId: args.engineInput.runtime.userId,
       houseId: args.engineInput.houseId,
@@ -670,7 +682,7 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
   const upstreamUsageTruth = args.upstreamUsageTruth;
 
   const dataset =
-    args.engineInput.inputType === "INTERVAL"
+    isIntervalLikeInputType(args.engineInput.inputType)
       ? buildIntervalBaselinePassthroughDataset({
           engineInput: args.engineInput,
           upstreamUsageTruth,
@@ -950,7 +962,7 @@ function buildCanonicalEngineInput(args: {
   const actualSummaryEnd =
     typeof args.loaded.actualDataset?.summary?.end === "string" ? String(args.loaded.actualDataset.summary.end).slice(0, 10) : null;
   const usesGreenButtonAnchorWindow =
-    args.inputType === "INTERVAL" &&
+    isIntervalLikeInputType(args.inputType) &&
     actualMeta.actualSource === "GREEN_BUTTON" &&
     !!actualSummaryStart &&
     !!actualSummaryEnd &&
@@ -975,7 +987,7 @@ function buildCanonicalEngineInput(args: {
     engineInputVersion: "one-path-sim-v1",
     inputType: args.inputType,
     simulatorMode:
-      args.inputType === "INTERVAL"
+      isIntervalLikeInputType(args.inputType)
         ? "SMT_BASELINE"
         : args.inputType === "NEW_BUILD"
           ? "NEW_BUILD_ESTIMATE"
@@ -1053,7 +1065,7 @@ function buildCanonicalEngineInput(args: {
       esiid: args.loaded.house.esiid,
       actualContextHouseId: args.loaded.actualContextHouseId,
       mode:
-        args.inputType === "INTERVAL"
+        isIntervalLikeInputType(args.inputType)
           ? "SMT_BASELINE"
           : args.inputType === "NEW_BUILD"
             ? "NEW_BUILD_ESTIMATE"
@@ -1091,6 +1103,30 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
     travelRanges: raw.travelRanges ?? [],
     persistRequested: raw.persistRequested,
+    loaded,
+    runtimeUserId: raw.userId,
+  });
+}
+
+export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<CanonicalSimulationEngineInput> {
+  const loaded = await loadSharedContext({
+    userId: raw.userId,
+    houseId: raw.houseId,
+    actualContextHouseId: raw.actualContextHouseId,
+    seedUsageTruthIfMissing: false,
+    weatherScoringMode: "interval",
+    preferredActualSource: "GREEN_BUTTON",
+  });
+  return buildCanonicalEngineInput({
+    inputType: "GREEN_BUTTON",
+    scenarioId: raw.scenarioId ?? null,
+    weatherPreference: normalizeWeatherPreference(raw.weatherPreference),
+    validationSelectionMode: raw.validationSelectionMode ?? null,
+    validationDayCount: raw.validationDayCount ?? null,
+    validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
+    travelRanges: raw.travelRanges ?? [],
+    persistRequested: raw.persistRequested,
+    preferredActualSource: "GREEN_BUTTON",
     loaded,
     runtimeUserId: raw.userId,
   });

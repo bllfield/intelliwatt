@@ -289,7 +289,7 @@ export type SimulationVariablePolicy = {
   };
 };
 
-export type SimulationVariableInputType = "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+export type SimulationVariableInputType = "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
 export type SimulationVariablePolicyModeBucketKey =
   | "sharedDefaults"
   | "intervalOverrides"
@@ -762,6 +762,8 @@ function pickKnownOverrideValues<T extends Record<string, unknown>>(
 
 function resolveModeBucketKey(inputType: SimulationVariableInputType): Exclude<SimulationVariablePolicyModeBucketKey, "sharedDefaults"> {
   switch (inputType) {
+    case "GREEN_BUTTON":
+      return "intervalOverrides";
     case "MANUAL_MONTHLY":
       return "manualMonthlyOverrides";
     case "MANUAL_ANNUAL":
@@ -954,9 +956,17 @@ export function resolveSimulationVariablePolicyForInputType(
       compareTuningMetrics,
     } as EffectiveSimulationVariablesUsed["familyByFamilyResolvedValues"],
     resolvedWeatherShapingMode:
-      inputType === "INTERVAL" ? "interval_based_shared_path" : inputType === "NEW_BUILD" ? "shared_weather_path_without_interval_score" : "billing_period_shared_path",
+      inputType === "INTERVAL" || inputType === "GREEN_BUTTON"
+        ? "interval_based_shared_path"
+        : inputType === "NEW_BUILD"
+          ? "shared_weather_path_without_interval_score"
+          : "billing_period_shared_path",
     resolvedRebalanceMode:
-      inputType === "INTERVAL" ? "interval_reference_authoritative" : inputType === "NEW_BUILD" ? "synthetic_target_authoritative" : "manual_target_authoritative",
+      inputType === "INTERVAL" || inputType === "GREEN_BUTTON"
+        ? "interval_reference_authoritative"
+        : inputType === "NEW_BUILD"
+          ? "synthetic_target_authoritative"
+          : "manual_target_authoritative",
     resolvedFallbackMode: "shared_donor_fallback_exclusion_ladder",
     resolvedIntradayReconstructionControls:
       intradayShapeReconstruction.resolvedValues as SimulationVariablePolicy["intradayShapeReconstruction"],
@@ -983,6 +993,7 @@ export function buildEffectivePoliciesByMode(
 ): Record<SimulationVariableInputType, SimulationVariablePolicy> {
   return {
     INTERVAL: resolveSimulationVariablePolicyForInputType("INTERVAL", overrides).effective,
+    GREEN_BUTTON: resolveSimulationVariablePolicyForInputType("GREEN_BUTTON", overrides).effective,
     MANUAL_MONTHLY: resolveSimulationVariablePolicyForInputType("MANUAL_MONTHLY", overrides).effective,
     MANUAL_ANNUAL: resolveSimulationVariablePolicyForInputType("MANUAL_ANNUAL", overrides).effective,
     NEW_BUILD: resolveSimulationVariablePolicyForInputType("NEW_BUILD", overrides).effective,

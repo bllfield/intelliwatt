@@ -289,7 +289,7 @@ export type SimulationVariablePolicy = {
   };
 };
 
-export type SimulationVariableInputType = "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+export type SimulationVariableInputType = "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
 export type SimulationVariablePolicyModeBucketKey =
   | "sharedDefaults"
   | "intervalOverrides"
@@ -983,6 +983,7 @@ export function buildEffectivePoliciesByMode(
 ): Record<SimulationVariableInputType, SimulationVariablePolicy> {
   return {
     INTERVAL: resolveSimulationVariablePolicyForInputType("INTERVAL", overrides).effective,
+    GREEN_BUTTON: resolveSimulationVariablePolicyForInputType("GREEN_BUTTON", overrides).effective,
     MANUAL_MONTHLY: resolveSimulationVariablePolicyForInputType("MANUAL_MONTHLY", overrides).effective,
     MANUAL_ANNUAL: resolveSimulationVariablePolicyForInputType("MANUAL_ANNUAL", overrides).effective,
     NEW_BUILD: resolveSimulationVariablePolicyForInputType("NEW_BUILD", overrides).effective,

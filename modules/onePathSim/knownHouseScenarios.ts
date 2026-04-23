@@ -1,4 +1,4 @@
-export type OnePathKnownScenarioMode = "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+export type OnePathKnownScenarioMode = "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
 
 export type OnePathKnownScenarioType =
   | "INTERVAL_TRUTH"
@@ -444,7 +444,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     scenarioKey: "keeper-green-button-baseline-primary",
     label: "Brian green button baseline primary",
     active: true,
-    mode: "INTERVAL",
+    mode: "GREEN_BUTTON",
     scenarioType: "GREEN_BUTTON_TRUTH",
     sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
@@ -474,7 +474,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     scenarioKey: "keeper-green-button-past-primary",
     label: "Brian green button Past Sim primary",
     active: true,
-    mode: "INTERVAL",
+    mode: "GREEN_BUTTON",
     scenarioType: "GREEN_BUTTON_TRUTH",
     sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
@@ -507,7 +507,7 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     scenarioKey: "keeper-green-button-future-primary",
     label: "Brian green button Future Sim primary",
     active: true,
-    mode: "INTERVAL",
+    mode: "GREEN_BUTTON",
     scenarioType: "GREEN_BUTTON_TRUTH",
     sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,

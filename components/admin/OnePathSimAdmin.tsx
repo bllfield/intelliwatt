@@ -193,7 +193,7 @@ export function OnePathSimAdmin() {
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [selectedKnownScenarioKey, setSelectedKnownScenarioKey] = useState(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY);
   const [lastRunKnownScenarioKey, setLastRunKnownScenarioKey] = useState("");
-  const [mode, setMode] = useState<"INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD">("INTERVAL");
+  const [mode, setMode] = useState<"INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD">("INTERVAL");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
     "LAST_YEAR_WEATHER"
   );
@@ -412,6 +412,8 @@ export function OnePathSimAdmin() {
   const activePathLabel =
     mode === "INTERVAL"
       ? "interval calculations"
+      : mode === "GREEN_BUTTON"
+        ? "green-button path"
       : mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL"
         ? "manual path"
         : "new-build path";
@@ -426,6 +428,8 @@ export function OnePathSimAdmin() {
   const runButtonLabel =
     mode === "INTERVAL"
       ? "Run One Path interval path"
+      : mode === "GREEN_BUTTON"
+        ? "Run One Path Green Button path"
       : mode === "NEW_BUILD"
         ? "Run One Path new-build path"
         : "Run One Path manual path";
@@ -653,7 +657,7 @@ export function OnePathSimAdmin() {
     async (args?: {
       email?: string;
       houseId?: string;
-      mode?: "INTERVAL" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
+      mode?: "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
       actualContextHouseId?: string | null;
       freshSelection?: boolean;
     }) => {
@@ -907,7 +911,7 @@ export function OnePathSimAdmin() {
         scenarioId: selectedScenarioId || null,
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
-        preferredActualSource: selectedKnownScenarioIsGreenButton && mode === "INTERVAL" ? "GREEN_BUTTON" : null,
+        preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
         weatherPreference,
         validationSelectionMode,
         validationDayCount: Number(validationDayCount) || null,
@@ -1158,6 +1162,7 @@ export function OnePathSimAdmin() {
               <div className="font-semibold text-brand-navy">Mode</div>
               <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={mode} onChange={(event) => setMode(event.target.value as any)}>
                 <option value="INTERVAL">INTERVAL</option>
+                <option value="GREEN_BUTTON">GREEN_BUTTON</option>
                 <option value="MANUAL_MONTHLY">MANUAL_MONTHLY</option>
                 <option value="MANUAL_ANNUAL">MANUAL_ANNUAL</option>
                 <option value="NEW_BUILD">NEW_BUILD</option>
@@ -1320,7 +1325,7 @@ export function OnePathSimAdmin() {
             <div className="text-sm font-semibold text-brand-navy">One Path calculation variable popups</div>
             <p className="mt-1 text-xs text-slate-600">
               These edit the One Path module variables directly. A change here affects the One Path-owned{" "}
-              {mode === "INTERVAL" ? "interval calculations" : activePathLabel} that read this policy.
+              {activePathLabel} that read this policy.
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
               <button

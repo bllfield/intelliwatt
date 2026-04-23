@@ -83,6 +83,8 @@ export function buildUpstreamUsageTruthSummary(args: {
   dataset: any | null;
   usageTruthSource: UpstreamUsageTruthSource;
   seedResult: UpstreamUsageTruthSeedResult;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  seedIfMissing?: boolean;
 }): UpstreamUsageTruthSection {
   const datasetRecord = asRecord(args.dataset);
   const datasetSummary = asRecord(datasetRecord.summary);
@@ -96,10 +98,13 @@ export function buildUpstreamUsageTruthSummary(args: {
       })
     : { startDate: null, endDate: null };
 
+  const greenButtonOnlyMode = args.preferredActualSource === "GREEN_BUTTON";
   return {
     title: "Upstream Usage Truth",
     summary:
-      "This panel makes the baseline passthrough rule explicit: usage stays upstream, simulation stays downstream, and One Path baseline reuses persisted usage truth or requests the existing shared usage refresh owner before failing.",
+      greenButtonOnlyMode
+        ? "This panel makes the Green Button rule explicit: usage stays upstream, simulation stays downstream, and One Path only accepts persisted Green Button truth produced by the shared usage pipeline."
+        : "This panel makes the baseline passthrough rule explicit: usage stays upstream, simulation stays downstream, and One Path baseline reuses persisted usage truth or requests the existing shared usage refresh owner before failing.",
     currentRun: {
       statusSummary: {
         usageTruthStatus: status.usageTruthStatus,
@@ -118,6 +123,7 @@ export function buildUpstreamUsageTruthSummary(args: {
               ? "persisted_usage_truth_after_refresh"
               : "usage_truth_unavailable",
         sourceOwner: "shared usage layer / resolveIntervalsLayer ACTUAL_USAGE_INTERVALS",
+        requestedActualSource: args.preferredActualSource ?? null,
         usageArtifactId: datasetMeta.artifactId ?? null,
         usageDatasetId: datasetMeta.datasetId ?? null,
         usageIntervalFingerprint:
@@ -142,8 +148,9 @@ export function buildUpstreamUsageTruthSummary(args: {
       orchestrationTrace: {
         lookedForExistingUsageTruth: status.lookedForExistingUsageTruth,
         existingUsageTruthFound: status.existingUsageTruthFound,
+        seedingAllowed: args.seedIfMissing === true,
         refreshRequested: status.refreshRequested,
-        refreshOwner: "lib/usage/userUsageRefresh.ts -> requestUsageRefreshForUserHouse",
+        refreshOwner: greenButtonOnlyMode ? null : "lib/usage/userUsageRefresh.ts -> requestUsageRefreshForUserHouse",
         refreshCompleted: status.refreshCompleted,
         refreshFailureReason: status.refreshFailureReason,
       },
@@ -159,16 +166,27 @@ export function buildUpstreamUsageTruthSummary(args: {
         owner: "lib/usage/resolveIntervalsLayer.ts :: ACTUAL_USAGE_INTERVALS",
         whyItMatters: "Keeps usage truth ownership on the same shared actual-usage layer used by the existing usage page.",
       },
-      {
-        label: "Shared refresh owner",
-        owner: "lib/usage/userUsageRefresh.ts",
-        whyItMatters: "When baseline truth is missing, seeding requests the existing shared usage refresh/orchestration path instead of inventing a second actual-usage producer.",
-      },
-      {
-        label: "Existing usage route owner",
-        owner: "app/api/user/usage/refresh/route.ts",
-        whyItMatters: "The user-facing usage refresh route remains the shared orchestration entrypoint owned outside One Path.",
-      },
+      ...(greenButtonOnlyMode
+        ? [
+            {
+              label: "Green Button upload owner",
+              owner: "shared usage Green Button pipeline",
+              whyItMatters:
+                "Green Button mode only becomes runnable after the shared usage pipeline has already ingested a persisted Green Button dataset for the actual-context house.",
+            },
+          ]
+        : [
+            {
+              label: "Shared refresh owner",
+              owner: "lib/usage/userUsageRefresh.ts",
+              whyItMatters: "When baseline truth is missing, seeding requests the existing shared usage refresh/orchestration path instead of inventing a second actual-usage producer.",
+            },
+            {
+              label: "Existing usage route owner",
+              owner: "app/api/user/usage/refresh/route.ts",
+              whyItMatters: "The user-facing usage refresh route remains the shared orchestration entrypoint owned outside One Path.",
+            },
+          ]),
     ],
   };
 }
@@ -284,6 +302,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
         dataset: resolved.dataset,
         usageTruthSource: "persisted_usage_output",
         seedResult: null,
+        preferredActualSource: args.preferredActualSource ?? null,
+        seedIfMissing: args.seedIfMissing,
       }),
     };
   }
@@ -310,6 +330,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
         dataset: null,
         usageTruthSource: "missing_usage_truth",
         seedResult: null,
+        preferredActualSource: args.preferredActualSource ?? null,
+        seedIfMissing: args.seedIfMissing,
       }),
     };
   }
@@ -390,6 +412,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
       dataset: resolved?.dataset ?? null,
       usageTruthSource,
       seedResult,
+      preferredActualSource: args.preferredActualSource ?? null,
+      seedIfMissing: args.seedIfMissing,
     }),
   };
 }

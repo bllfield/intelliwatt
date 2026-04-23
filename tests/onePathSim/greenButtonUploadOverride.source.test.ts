@@ -12,6 +12,7 @@ describe("one path green button preset wiring", () => {
   it("routes admin Green Button replacements through the usage upload ticket flow", () => {
     const adminSource = readRepoFile("components/admin/OnePathSimAdmin.tsx");
     const lookupRouteSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+    const onePathSource = readRepoFile("modules/onePathSim/onePathSim.ts");
 
     expect(adminSource).toContain("uploadGreenButtonThroughUsage");
     expect(adminSource).toContain("/api/green-button/upload-ticket");
@@ -20,9 +21,14 @@ describe("one path green button preset wiring", () => {
     expect(adminSource).toContain("The selected file will be uploaded through the usage Green Button pipeline when you load this preset.");
     expect(adminSource).not.toContain("/api/admin/green-button/upload");
     expect(adminSource).not.toContain("Prefer uploaded Green Button for INTERVAL usage");
-    expect(adminSource).toContain("preferredActualSource: selectedKnownScenarioIsGreenButton && mode === \"INTERVAL\" ? \"GREEN_BUTTON\" : null");
+    expect(adminSource).toContain("preferredActualSource: mode === \"GREEN_BUTTON\" ? \"GREEN_BUTTON\" : null");
+    expect(adminSource).toContain("<option value=\"GREEN_BUTTON\">GREEN_BUTTON</option>");
     expect(lookupRouteSource).toContain("greenButtonUpload: actualContextGreenButtonUpload");
+    expect(lookupRouteSource).toContain("mode === \"GREEN_BUTTON\"");
+    expect(lookupRouteSource).toContain("await adaptGreenButtonRawInput(effectiveRawInputBase)");
     expect(lookupRouteSource).toContain("const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);");
+    expect(onePathSource).toContain("export async function adaptGreenButtonRawInput");
+    expect(onePathSource).toContain("inputType: \"GREEN_BUTTON\"");
   });
 
   it("carries the preferred source through shared actual-usage resolvers", () => {

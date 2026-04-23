@@ -4,6 +4,7 @@ import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract"
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse } from "@/modules/homeProfile/repo";
 import {
+  adaptGreenButtonRawInput,
   adaptIntervalRawInput,
   adaptManualAnnualRawInput,
   adaptManualMonthlyRawInput,
@@ -81,6 +82,8 @@ function normalizeMode(value: unknown): CanonicalSimulationInputType {
   switch (String(value ?? "").trim().toUpperCase()) {
     case "INTERVAL":
       return "INTERVAL";
+    case "GREEN_BUTTON":
+      return "GREEN_BUTTON";
     case "MANUAL_ANNUAL":
       return "MANUAL_ANNUAL";
     case "NEW_BUILD":
@@ -466,20 +469,27 @@ export async function POST(request: NextRequest) {
       travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : undefined,
       persistRequested: body?.persistRequested !== false,
     } as const;
+    const effectiveRawInputBase = {
+      ...rawInputBase,
+      preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : rawInputBase.preferredActualSource,
+    } as const;
     const adminManualSeeds =
       isManualMode
         ? await buildOnePathAdminManualSeeds({
             userId: resolved.userId,
             houseId: resolved.selectedHouse.id,
-            actualContextHouseId: rawInputBase.actualContextHouseId,
+            actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
             payload: manualUsage.payload ?? null,
-            overrideTravelRanges: rawInputBase.travelRanges,
+            overrideTravelRanges: effectiveRawInputBase.travelRanges,
             dbTravelRanges: await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
           })
         : null;
     const effectiveManualUsagePayload =
       isManualMode
-        ? applyExplicitTravelRangesToManualPayload(adminManualSeeds?.payloadForMode[mode] ?? null, rawInputBase.travelRanges)
+        ? applyExplicitTravelRangesToManualPayload(
+            adminManualSeeds?.payloadForMode[mode] ?? null,
+            effectiveRawInputBase.travelRanges
+          )
         : null;
     if (isManualMode && !effectiveManualUsagePayload) {
       const missingItems =
@@ -497,11 +507,11 @@ export async function POST(request: NextRequest) {
       );
     }
     try {
-      if (!includeDebugDiagnostics && rawInputBase.scenarioId && !isManualMode) {
+      if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await readOnePathSimulatedUsageScenario({
           userId: resolved.userId,
           houseId: resolved.selectedHouse.id,
-          scenarioId: rawInputBase.scenarioId,
+          scenarioId: effectiveRawInputBase.scenarioId,
           readMode: "allow_rebuild",
           projectionMode: "baseline",
           readContext: {
@@ -530,7 +540,7 @@ export async function POST(request: NextRequest) {
         const scenarioEvents = await listOnePathScenarioEvents({
           userId: resolved.userId,
           houseId: resolved.selectedHouse.id,
-          scenarioId: rawInputBase.scenarioId,
+          scenarioId: effectiveRawInputBase.scenarioId,
         }).catch(() => ({ ok: false as const, events: [] as unknown[] }));
         const manualStageOneView = null;
         const runDisplayViewBase =
@@ -562,16 +572,18 @@ export async function POST(request: NextRequest) {
       }
       const engineInput =
         mode === "INTERVAL"
-          ? await adaptIntervalRawInput(rawInputBase)
+          ? await adaptIntervalRawInput(effectiveRawInputBase)
+          : mode === "GREEN_BUTTON"
+            ? await adaptGreenButtonRawInput(effectiveRawInputBase)
           : mode === "MANUAL_ANNUAL"
             ? await adaptManualAnnualRawInput({
-                ...rawInputBase,
+                ...effectiveRawInputBase,
                 manualUsagePayload: effectiveManualUsagePayload,
               })
             : mode === "NEW_BUILD"
-              ? await adaptNewBuildRawInput(rawInputBase)
+              ? await adaptNewBuildRawInput(effectiveRawInputBase)
               : await adaptManualMonthlyRawInput({
-                  ...rawInputBase,
+                  ...effectiveRawInputBase,
                   manualUsagePayload: effectiveManualUsagePayload,
                 });
       const artifact = await runSharedSimulation(engineInput);
@@ -582,18 +594,18 @@ export async function POST(request: NextRequest) {
               await resolveOnePathUpstreamUsageTruthForSimulation({
                 userId: resolved.userId,
                 houseId: resolved.selectedHouse.id,
-                actualContextHouseId: rawInputBase.actualContextHouseId,
+                actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
                 seedIfMissing: false,
-                preferredActualSource: rawInputBase.preferredActualSource,
+                preferredActualSource: effectiveRawInputBase.preferredActualSource,
               }).catch(() => null)
             )?.dataset ?? null
           : null;
       const manualPastReadResult =
-        isManualMode && rawInputBase.scenarioId
+        isManualMode && effectiveRawInputBase.scenarioId
           ? await buildOnePathManualUsagePastSimReadResult({
               userId: resolved.userId,
               houseId: resolved.selectedHouse.id,
-              scenarioId: rawInputBase.scenarioId,
+              scenarioId: effectiveRawInputBase.scenarioId,
               readMode: "artifact_only",
               callerType: "user_past",
               exactArtifactInputHash: artifact.artifactInputHash ?? null,
@@ -627,7 +639,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
-          runType: rawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
+          runType: effectiveRawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
           engineInput,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
@@ -772,6 +784,7 @@ export async function POST(request: NextRequest) {
       houseId: resolved.selectedHouse.id,
       actualContextHouseId: previewActualContextHouse.id,
       seedIfMissing: false,
+      preferredActualSource: previewMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
     }).catch(() => null),
     getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
       payload: null,
