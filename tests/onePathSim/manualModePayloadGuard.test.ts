@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+
+const getHomeProfileSimulatedByUserHouse = vi.fn();
+const getApplianceProfileSimulatedByUserHouse = vi.fn();
+const getOnePathManualUsageInput = vi.fn();
+const resolveOnePathCanonicalUsage365CoverageWindow = vi.fn();
+const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
+const resolveOnePathWeatherSensitivityEnvelope = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -11,11 +18,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/modules/homeProfile/repo", () => ({
-  getHomeProfileSimulatedByUserHouse: vi.fn(),
+  getHomeProfileSimulatedByUserHouse: (...args: any[]) => getHomeProfileSimulatedByUserHouse(...args),
 }));
 
 vi.mock("@/modules/applianceProfile/repo", () => ({
-  getApplianceProfileSimulatedByUserHouse: vi.fn(),
+  getApplianceProfileSimulatedByUserHouse: (...args: any[]) => getApplianceProfileSimulatedByUserHouse(...args),
 }));
 
 vi.mock("@/modules/applianceProfile/validation", () => ({
@@ -29,11 +36,11 @@ vi.mock("@/modules/onePathSim/runtime", () => ({
   buildOnePathSharedPastSimDiagnostics: vi.fn(() => null),
   buildOnePathValidationCompareProjectionSidecar: vi.fn(() => ({ rows: [], metrics: {} })),
   buildOnePathWeatherEfficiencyDerivedInput: vi.fn(() => null),
-  getOnePathManualUsageInput: vi.fn(),
-  resolveOnePathCanonicalUsage365CoverageWindow: vi.fn(() => ({ startDate: "2025-05-01", endDate: "2026-04-30" })),
+  getOnePathManualUsageInput: (...args: any[]) => getOnePathManualUsageInput(...args),
+  resolveOnePathCanonicalUsage365CoverageWindow: (...args: any[]) => resolveOnePathCanonicalUsage365CoverageWindow(...args),
   resolveOnePathManualStageOnePresentation: vi.fn(() => null),
-  resolveOnePathUpstreamUsageTruthForSimulation: vi.fn(),
-  resolveOnePathWeatherSensitivityEnvelope: vi.fn(() => ({ score: null, derivedInput: null })),
+  resolveOnePathUpstreamUsageTruthForSimulation: (...args: any[]) => resolveOnePathUpstreamUsageTruthForSimulation(...args),
+  resolveOnePathWeatherSensitivityEnvelope: (...args: any[]) => resolveOnePathWeatherSensitivityEnvelope(...args),
 }));
 
 vi.mock("@/modules/onePathSim/manualArtifactDecorations", () => ({
@@ -55,6 +62,21 @@ vi.mock("@/modules/onePathSim/usageSimulator/simObservability", () => ({
 }));
 
 describe("one path manual mode payload guards", () => {
+  beforeEach(() => {
+    getHomeProfileSimulatedByUserHouse.mockReset();
+    getApplianceProfileSimulatedByUserHouse.mockReset();
+    getOnePathManualUsageInput.mockReset();
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReset();
+    resolveOnePathUpstreamUsageTruthForSimulation.mockReset();
+    resolveOnePathWeatherSensitivityEnvelope.mockReset();
+
+    getHomeProfileSimulatedByUserHouse.mockResolvedValue(null);
+    getApplianceProfileSimulatedByUserHouse.mockResolvedValue(null);
+    getOnePathManualUsageInput.mockResolvedValue({ payload: null });
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({ startDate: "2025-05-01", endDate: "2026-04-30" });
+    resolveOnePathWeatherSensitivityEnvelope.mockResolvedValue({ score: null, derivedInput: null });
+  });
+
   it("fails MANUAL_MONTHLY when the saved payload is present but not usable monthly truth", async () => {
     const { adaptManualMonthlyRawInput, SharedSimulationRunError } = await import("@/modules/onePathSim/onePathSim");
 
@@ -112,6 +134,53 @@ describe("one path manual mode payload guards", () => {
       new SharedSimulationRunError({
         code: "requirements_unmet",
         missingItems: ["Save a MANUAL_ANNUAL payload before running MANUAL_ANNUAL."],
+      })
+    );
+  });
+
+  it("allows MANUAL_MONTHLY to adapt from saved manual truth without upstream interval usage", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
+      selectedHouse: { id: "house-1", esiid: "esiid-1" },
+      actualContextHouse: { id: "house-1", esiid: "esiid-1" },
+      dataset: null,
+      alternatives: { smt: null, greenButton: null },
+      usageTruthSource: "missing_usage_truth",
+      seedResult: null,
+      summary: { title: "Upstream Usage Truth", summary: "manual-only house", currentRun: {}, sharedOwners: [] },
+    });
+
+    const { adaptManualMonthlyRawInput } = await import("@/modules/onePathSim/onePathSim");
+    const engineInput = await adaptManualMonthlyRawInput({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      scenarioId: "past-1",
+      weatherPreference: "LAST_YEAR_WEATHER",
+      validationSelectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+      validationOnlyDateKeysLocal: [],
+      travelRanges: [],
+      persistRequested: true,
+      manualUsagePayload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-01-15",
+        monthlyKwh: [{ month: "2026-01", kwh: 500 }],
+        statementRanges: [{ month: "2026-01", startDate: "2025-12-16", endDate: "2026-01-15" }],
+        travelRanges: [],
+      } as any,
+    });
+
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      seedIfMissing: false,
+    });
+    expect(engineInput.inputType).toBe("MANUAL_MONTHLY");
+    expect(engineInput.actualIntervalsReference).toEqual([]);
+    expect(engineInput.upstreamUsageTruth).toEqual(
+      expect.objectContaining({
+        summary: "manual-only house",
       })
     );
   });

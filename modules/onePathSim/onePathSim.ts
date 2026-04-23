@@ -603,10 +603,10 @@ async function buildBaselinePassthroughArtifact(args: {
     userId: args.engineInput.runtime.userId,
     houseId: args.engineInput.houseId,
     actualContextHouseId: args.engineInput.actualContextHouseId,
-    seedIfMissing: true,
+    seedIfMissing: args.engineInput.inputType === "INTERVAL",
   });
 
-  if (!upstreamUsageTruth.dataset) {
+  if (!upstreamUsageTruth.dataset && args.engineInput.inputType === "INTERVAL") {
     logSimPipelineEvent("baseline_dataset_passthrough_failure", {
       userId: args.engineInput.runtime.userId,
       houseId: args.engineInput.houseId,
@@ -849,6 +849,7 @@ async function loadSharedContext(args: {
   actualContextHouseId?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   seedUsageTruthIfMissing?: boolean;
+  allowMissingUsageTruth?: boolean;
   weatherScoringMode?: "interval" | "manual";
 }): Promise<LoadedSharedContext> {
   const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
@@ -857,7 +858,7 @@ async function loadSharedContext(args: {
     actualContextHouseId: args.actualContextHouseId,
     seedIfMissing: args.seedUsageTruthIfMissing === true,
   });
-  if (!upstreamUsageTruth.dataset) {
+  if (!upstreamUsageTruth.dataset && args.allowMissingUsageTruth !== true) {
     throw new UpstreamUsageTruthMissingError({
       usageTruthSource: upstreamUsageTruth.usageTruthSource,
       seedResult: upstreamUsageTruth.seedResult,
@@ -1075,7 +1076,8 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
     manualUsagePayload: raw.manualUsagePayload,
-    seedUsageTruthIfMissing: true,
+    seedUsageTruthIfMissing: false,
+    allowMissingUsageTruth: true,
     weatherScoringMode: "manual",
   });
   return buildCanonicalEngineInput({
@@ -1102,7 +1104,8 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
     manualUsagePayload: raw.manualUsagePayload,
-    seedUsageTruthIfMissing: true,
+    seedUsageTruthIfMissing: false,
+    allowMissingUsageTruth: true,
     weatherScoringMode: "manual",
   });
   return buildCanonicalEngineInput({

@@ -642,6 +642,66 @@ describe("one path baseline passthrough", () => {
     );
   });
 
+  it("keeps manual monthly baseline runnable when only manual usage truth exists", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth(null, {
+        dataset: null,
+        usageTruthSource: "missing_usage_truth",
+        seedResult: null,
+      })
+    );
+    getOnePathManualUsageInput.mockResolvedValue({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2026-04-30",
+        monthlyKwh: [
+          { month: "2026-03", kwh: 210 },
+          { month: "2026-04", kwh: 270 },
+        ],
+        statementRanges: [
+          { month: "2026-04", startDate: "2026-04-01", endDate: "2026-04-30" },
+          { month: "2026-03", startDate: "2026-03-01", endDate: "2026-03-31" },
+        ],
+        travelRanges: [],
+      },
+    });
+    resolveOnePathManualStageOnePresentation.mockReturnValue({
+      mode: "MONTHLY",
+      surface: "admin_manual_monthly_stage_one",
+      rows: [{ month: "2026-03", kwh: 210 }, { month: "2026-04", kwh: 270 }],
+    });
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "MANUAL_MONTHLY",
+        simulatorMode: "MANUAL_TOTALS",
+        manualConstraintMode: "MANUAL_MONTHLY",
+        monthlyTotalsKwhByMonth: {
+          "2026-03": 210,
+          "2026-04": 270,
+        },
+        runtime: {
+          ...buildBaseEngineInput().runtime,
+          mode: "MANUAL_TOTALS",
+        },
+      })
+    );
+
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "actual-house-1",
+      seedIfMissing: false,
+    });
+    expect(artifact.dataset.summary.source).toBe("MANUAL");
+    expect(artifact.dataset.meta.usageTruthSource).toBe("missing_usage_truth");
+    expect(artifact.dataset.monthly).toEqual([
+      { month: "2026-03", kwh: 210 },
+      { month: "2026-04", kwh: 270 },
+    ]);
+  });
+
   it("keeps Past runs on the existing shared simulation path", async () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
       buildUsageTruth({
