@@ -260,14 +260,12 @@ export function buildManualBillPeriodTargets(payload: ManualUsagePayload): Manua
       if (!isYearMonth(month)) continue;
       numericValuesByMonth.set(month, typeof rawKwh === "number" && Number.isFinite(rawKwh) ? rawKwh : null);
     }
-    const travelRanges = normalizeTravelRanges(payload.travelRanges);
     return deriveStatementRangesFromMonthlyPayload(payload)
       .map((range) => {
         const labels = formatStatementRangeLabel(range);
         const enteredKwh = numericValuesByMonth.get(range.month) ?? null;
         const inputKind: ManualBillPeriodInputKind =
           enteredKwh == null ? "missing" : enteredKwh === 0 ? "entered_zero" : "entered_nonzero";
-        const travelOverlap = isIsoDate(range.startDate) ? overlapsTravelRange({ startDate: range.startDate, endDate: range.endDate }, travelRanges) : false;
         return {
           id: range.month,
           periodType: "monthly_statement" as const,
@@ -278,8 +276,9 @@ export function buildManualBillPeriodTargets(payload: ManualUsagePayload): Manua
           shortLabel: labels.shortLabel,
           enteredKwh,
           inputKind,
-          eligibleForConstraint: enteredKwh != null && !travelOverlap,
-          exclusionReason: travelOverlap ? ("travel_overlap" as const) : enteredKwh == null ? ("missing_input" as const) : null,
+          // Monthly statement totals remain exact-match targets even when travel overlaps the range.
+          eligibleForConstraint: enteredKwh != null,
+          exclusionReason: enteredKwh == null ? ("missing_input" as const) : null,
         };
       })
       .filter((period) => isIsoDate(period.startDate))

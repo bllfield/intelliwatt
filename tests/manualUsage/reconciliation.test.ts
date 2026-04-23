@@ -28,7 +28,7 @@ describe("manual monthly reconciliation", () => {
     });
   });
 
-  it("marks travel-overlapped entered ranges ineligible", () => {
+  it("keeps travel-overlapped entered ranges eligible", () => {
     const out = buildManualMonthlyReconciliation({
       payload: {
         mode: "MONTHLY",
@@ -55,8 +55,8 @@ describe("manual monthly reconciliation", () => {
 
     const april = out?.rows.find((row) => row.month === "2025-04");
     expect(april).toMatchObject({
-      eligible: false,
-      status: "travel_overlap",
+      eligible: true,
+      status: "reconciled",
     });
   });
 
@@ -176,8 +176,8 @@ describe("manual monthly reconciliation", () => {
       month: "2025-04",
       enteredStatementTotalKwh: 100,
       stageOneTargetTotalKwh: 100,
-      simulatedStatementTotalKwh: 100,
-      deltaKwh: 0,
+      simulatedStatementTotalKwh: 99.99,
+      deltaKwh: -0.01,
       status: "reconciled",
     });
   });

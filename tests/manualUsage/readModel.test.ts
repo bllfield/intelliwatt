@@ -294,8 +294,8 @@ describe("manual usage read model", () => {
         actualIntervalTotalKwh: 341,
         stageOneTargetTotalKwh: 310,
         simulatedStatementTotalKwh: 310,
-        eligible: false,
-        status: "travel_overlap",
+        eligible: true,
+        status: "reconciled",
       }),
     ]);
     expect(readModel?.monthlyCompareRows).toEqual([
@@ -365,7 +365,7 @@ describe("manual usage read model", () => {
         expect.objectContaining({
           month: "2025-04",
           kwh: 300,
-          parityRequirement: "excluded_travel_overlap",
+          parityRequirement: "exact_match_required",
         }),
       ],
     });
@@ -408,9 +408,9 @@ describe("manual usage read model", () => {
       }),
       expect.objectContaining({
         month: "2025-04",
-        eligible: false,
-        status: "travel_overlap",
-        parityRequirement: "excluded_travel_overlap",
+        eligible: true,
+        status: "delta_present",
+        parityRequirement: "exact_match_required",
       }),
     ]);
   });
