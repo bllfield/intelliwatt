@@ -24,6 +24,7 @@ import {
   type SimulatorBuildInputsV1,
 } from "@/modules/onePathSim/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/onePathSim/usageSimulator/hash";
+import { buildPastArtifactDatasetJsonForStorage } from "@/modules/onePathSim/usageSimulator/artifactStorage";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/onePathSim/usageSimulator/windowIdentity";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/onePathSim/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from "@/modules/usageScenario/overlay";
@@ -5838,21 +5839,22 @@ async function recalcSimulatorBuildImpl(args: {
       (dataset.meta as any).lockboxPerRunTrace = perRunTrace;
       (dataset.meta as any).lockboxPerDayTrace = perDayTrace;
       (dataset.meta as any).fullChainHash = fullChainHash;
-      const datasetJsonForStorage = {
-        ...dataset,
-        canonicalArtifactSimulatedDayTotalsByDate,
-        meta: {
-          ...((dataset as any)?.meta ?? {}),
-          effectiveSimulationVariablesUsed: (dataset.meta as any).effectiveSimulationVariablesUsed,
-          canonicalArtifactSimulatedDayTotalsByDate,
-          lockboxInput: finalizedLockboxInput,
-          lockboxRunContext: runContext,
-          lockboxPerRunTrace: perRunTrace,
-          lockboxPerDayTrace: perDayTrace,
-          fullChainHash,
+      const datasetJsonForStorage = buildPastArtifactDatasetJsonForStorage({
+        dataset: {
+          ...dataset,
+          meta: {
+            ...((dataset as any)?.meta ?? {}),
+            effectiveSimulationVariablesUsed: (dataset.meta as any).effectiveSimulationVariablesUsed,
+            canonicalArtifactSimulatedDayTotalsByDate,
+            lockboxInput: finalizedLockboxInput,
+            lockboxRunContext: runContext,
+            lockboxPerRunTrace: perRunTrace,
+            lockboxPerDayTrace: perDayTrace,
+            fullChainHash,
+          },
         },
-        series: { ...((dataset as any)?.series ?? {}), intervals15: [] },
-      };
+        canonicalArtifactSimulatedDayTotalsByDate,
+      });
       const scenarioIdForCache = scenarioId ?? "BASELINE";
       logSimPipelineEvent("recalc_artifact_cache_save_start", {
         correlationId: args.correlationId,
@@ -7444,15 +7446,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);
             const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
-            const datasetJsonForStorage = {
-              ...dataset,
+            const datasetJsonForStorage = buildPastArtifactDatasetJsonForStorage({
+              dataset,
               canonicalArtifactSimulatedDayTotalsByDate,
-              meta: {
-                ...((dataset as any)?.meta ?? {}),
-                canonicalArtifactSimulatedDayTotalsByDate,
-              },
-              series: { ...(dataset.series ?? {}), intervals15: [] },
-            };
+            });
             logSimPipelineEvent("allow_rebuild_artifact_cache_save_start", {
               correlationId: args.correlationId,
               houseId: args.houseId,
