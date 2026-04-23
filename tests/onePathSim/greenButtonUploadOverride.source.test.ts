@@ -8,17 +8,21 @@ function readRepoFile(relativePath: string): string {
   return readFileSync(resolve(ROOT, relativePath), "utf8");
 }
 
-describe("one path green button upload override wiring", () => {
-  it("threads an admin Green Button preference from the upload UI into the One Path run request", () => {
+describe("one path green button preset wiring", () => {
+  it("routes admin Green Button replacements through the usage upload ticket flow", () => {
     const adminSource = readRepoFile("components/admin/OnePathSimAdmin.tsx");
-    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+    const lookupRouteSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
 
-    expect(adminSource).toContain("uploadGreenButtonToContextHouse");
-    expect(adminSource).toContain("/api/admin/green-button/upload");
-    expect(adminSource).toContain("Prefer uploaded Green Button for INTERVAL usage");
-    expect(adminSource).toContain("preferredActualSource: shouldPreferUploadedGreenButton ? \"GREEN_BUTTON\" : null");
-    expect(routeSource).toContain("body?.preferredActualSource === \"SMT\" || body?.preferredActualSource === \"GREEN_BUTTON\"");
-    expect(routeSource).toContain("preferredActualSource: rawInputBase.preferredActualSource");
+    expect(adminSource).toContain("uploadGreenButtonThroughUsage");
+    expect(adminSource).toContain("/api/green-button/upload-ticket");
+    expect(adminSource).toContain("selectedKnownScenario.scenarioType === \"GREEN_BUTTON_TRUTH\"");
+    expect(adminSource).toContain("greenButtonSelectedFile");
+    expect(adminSource).toContain("The selected file will be uploaded through the usage Green Button pipeline when you load this preset.");
+    expect(adminSource).not.toContain("/api/admin/green-button/upload");
+    expect(adminSource).not.toContain("Prefer uploaded Green Button for INTERVAL usage");
+    expect(adminSource).toContain("preferredActualSource: selectedKnownScenarioIsGreenButton && mode === \"INTERVAL\" ? \"GREEN_BUTTON\" : null");
+    expect(lookupRouteSource).toContain("greenButtonUpload: actualContextGreenButtonUpload");
+    expect(lookupRouteSource).toContain("const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);");
   });
 
   it("carries the preferred source through shared actual-usage resolvers", () => {

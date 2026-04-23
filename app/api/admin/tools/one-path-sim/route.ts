@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse } from "@/modules/homeProfile/repo";
 import {
   adaptIntervalRawInput,
@@ -297,6 +298,71 @@ function buildEnvironmentVisibility() {
       envVarPresent: Boolean(process.env.USAGE_DATABASE_URL),
       owner: "lib/db/usageClient.ts -> .prisma/usage-client",
     },
+  };
+}
+
+async function loadGreenButtonUploadSummary(houseId: string | null | undefined) {
+  if (!houseId) return null;
+  const prismaAny = prisma as any;
+  const latestUpload = await prismaAny.greenButtonUpload
+    .findFirst({
+      where: { houseId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        parseStatus: true,
+        parseMessage: true,
+        dateRangeStart: true,
+        dateRangeEnd: true,
+        intervalMinutes: true,
+        fileName: true,
+        fileSizeBytes: true,
+      },
+    })
+    .catch(() => null);
+
+  const coverage = await (usagePrisma as any)?.greenButtonInterval
+    ?.aggregate({
+      where: { homeId: houseId },
+      _count: { _all: true },
+      _min: { timestamp: true },
+      _max: { timestamp: true },
+    })
+    .catch(() => null);
+
+  const derivedCoverage =
+    coverage && (coverage._count?._all ?? 0) > 0
+      ? {
+          start: coverage._min?.timestamp ?? null,
+          end: coverage._max?.timestamp ?? null,
+          count: coverage._count?._all ?? 0,
+        }
+      : null;
+
+  if (latestUpload) {
+    return {
+      ...latestUpload,
+      dateRangeStart: latestUpload.dateRangeStart ?? derivedCoverage?.start ?? null,
+      dateRangeEnd: latestUpload.dateRangeEnd ?? derivedCoverage?.end ?? null,
+      intervalCount: derivedCoverage?.count ?? null,
+    };
+  }
+
+  if (!derivedCoverage) return null;
+  return {
+    id: "derived-coverage",
+    createdAt: derivedCoverage.start ?? null,
+    updatedAt: derivedCoverage.end ?? null,
+    parseStatus: "complete",
+    parseMessage: null,
+    dateRangeStart: derivedCoverage.start,
+    dateRangeEnd: derivedCoverage.end,
+    intervalMinutes: 15,
+    fileName: "derived",
+    fileSizeBytes: null,
+    intervalCount: derivedCoverage.count,
   };
 }
 
@@ -631,6 +697,7 @@ export async function POST(request: NextRequest) {
       typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
         ? body.actualContextHouseId.trim()
         : resolved.selectedHouse.id;
+    const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);
     const manualUsage =
       previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
         ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
@@ -663,6 +730,7 @@ export async function POST(request: NextRequest) {
       sourceContext: {
         debugDiagnosticsIncluded: false,
         travelRangesFromDb,
+        greenButtonUpload,
         ...(effectiveManualUsagePayload
           ? {
               manualStageOneView: buildOnePathManualStageOnePreview(effectiveManualUsagePayload),
@@ -683,6 +751,7 @@ export async function POST(request: NextRequest) {
           ? body.actualContextHouseId.trim()
           : resolved.selectedHouse.id)
     ) ?? resolved.selectedHouse;
+  const actualContextGreenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouse.id);
   let previewSimulationVariablePolicy: SimulationVariablePolicy | null = null;
   try {
     const sharedSimulationVariablePolicy = await getOnePathSimulationVariablePolicy();
@@ -745,6 +814,7 @@ export async function POST(request: NextRequest) {
     usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",
     usageTruthSeedResult: usageTruth?.seedResult ?? null,
     upstreamUsageTruth: usageTruth?.summary ?? null,
+    greenButtonUpload: actualContextGreenButtonUpload,
     manualUsagePayload: manualUsage.payload ?? null,
     effectiveManualUsagePayload,
     manualUsageUpdatedAt: manualUsage.updatedAt ?? null,
