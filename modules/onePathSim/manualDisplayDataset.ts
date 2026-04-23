@@ -1,4 +1,4 @@
-import { buildDailyFromIntervals, buildDisplayMonthlyFromIntervalsUtc } from "@/modules/onePathSim/usageSimulator/dataset";
+import { buildDailyFromIntervals } from "@/modules/onePathSim/usageSimulator/dataset";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 
 function asDateKey(value: unknown): string | null {
@@ -26,6 +26,62 @@ function remapDatePrefix(timestamp: string, dateMap: Map<string, string>): strin
   const targetDate = dateMap.get(sourceDate);
   if (!targetDate) return timestamp;
   return `${targetDate}${timestamp.slice(10)}`;
+}
+
+function round2(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function lastNYearMonthsFrom(year: number, month1: number, n: number): string[] {
+  const out: string[] = [];
+  const count = Math.max(1, Math.floor(n));
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const idx = month1 - i;
+    const normalizedYear = idx >= 1 ? year : year - Math.ceil((1 - idx) / 12);
+    const normalizedMonth = ((idx - 1) % 12 + 12) % 12 + 1;
+    out.push(`${String(normalizedYear)}-${String(normalizedMonth).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+function buildManualDisplayMonthly(args: {
+  intervals15: Array<{ timestamp?: unknown; consumption_kwh?: unknown; kwh?: unknown }>;
+  displayStart: string;
+  displayEnd: string;
+}) {
+  const monthTotals = new Map<string, number>();
+  for (const row of args.intervals15) {
+    const timestamp = String(row?.timestamp ?? "");
+    const dateKey = timestamp.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    if (dateKey < args.displayStart || dateKey > args.displayEnd) continue;
+    const yearMonth = dateKey.slice(0, 7);
+    const kwh = Number(row?.consumption_kwh ?? row?.kwh ?? 0) || 0;
+    monthTotals.set(yearMonth, (monthTotals.get(yearMonth) ?? 0) + kwh);
+  }
+
+  const displayEndDate = new Date(`${args.displayEnd}T00:00:00.000Z`);
+  const endYear = displayEndDate.getUTCFullYear();
+  const endMonth = displayEndDate.getUTCMonth() + 1;
+  const yearMonths = lastNYearMonthsFrom(endYear, endMonth, 12);
+  const monthlyTotals = new Map<string, number>();
+  for (const yearMonth of yearMonths) {
+    monthlyTotals.set(yearMonth, monthTotals.get(yearMonth) ?? 0);
+  }
+
+  const leadingYearMonth = args.displayStart.slice(0, 7);
+  if (/^\d{4}-\d{2}$/.test(leadingYearMonth) && !yearMonths.includes(leadingYearMonth)) {
+    const trailingYearMonth = yearMonths[yearMonths.length - 1]!;
+    monthlyTotals.set(
+      trailingYearMonth,
+      (monthlyTotals.get(trailingYearMonth) ?? 0) + (monthTotals.get(leadingYearMonth) ?? 0)
+    );
+  }
+
+  return yearMonths.map((month) => ({
+    month,
+    kwh: round2(monthlyTotals.get(month) ?? 0),
+  }));
 }
 
 function buildDisplayNote(args: {
@@ -95,13 +151,16 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
         timestamp: remapDatePrefix(String(row?.timestamp ?? ""), dateMap),
       }))
     : dataset?.series?.daily;
-  const monthlyBuild = buildDisplayMonthlyFromIntervalsUtc(
-    remappedIntervals15.map((row: any) => ({
-      timestamp: String(row?.timestamp ?? ""),
-      consumption_kwh: Number(row?.consumption_kwh ?? row?.kwh ?? 0) || 0,
-    })),
-    displayEnd
-  );
+  const remappedIntervalRows = remappedIntervals15.map((row: any) => ({
+    timestamp: String(row?.timestamp ?? ""),
+    consumption_kwh: Number(row?.consumption_kwh ?? row?.kwh ?? 0) || 0,
+  }));
+  const manualDisplayMonthly = buildManualDisplayMonthly({
+    intervals15: remappedIntervalRows,
+    displayStart,
+    displayEnd,
+  });
+  const remappedTotalKwh = round2(remappedIntervalRows.reduce((sum, row) => sum + (Number(row?.consumption_kwh) || 0), 0));
   const remappedDailyWeather =
     dataset?.dailyWeather && typeof dataset.dailyWeather === "object"
       ? Object.fromEntries(
@@ -125,6 +184,8 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
       ...(dataset?.summary ?? {}),
       start: displayStart,
       end: displayEnd,
+      totalKwh:
+        typeof dataset?.summary?.totalKwh === "number" ? dataset.summary.totalKwh : remappedTotalKwh,
     },
     meta: {
       ...(dataset?.meta ?? {}),
@@ -144,7 +205,7 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
           ? `${String(dataset.meta.weatherNote).trim()} ${displayNote}`
           : displayNote,
     },
-    monthly: monthlyBuild.monthly,
+    monthly: manualDisplayMonthly,
     daily: remappedDaily,
     dailyWeather: remappedDailyWeather,
     totals: {
@@ -152,16 +213,18 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
       importKwh:
         typeof dataset?.totals?.importKwh === "number"
           ? dataset.totals.importKwh
-          : monthlyBuild.monthly.reduce((sum, row) => sum + (Number(row?.kwh) || 0), 0),
+          : remappedTotalKwh,
       exportKwh: typeof dataset?.totals?.exportKwh === "number" ? dataset.totals.exportKwh : 0,
       netKwh:
         typeof dataset?.totals?.netKwh === "number"
           ? dataset.totals.netKwh
-          : monthlyBuild.monthly.reduce((sum, row) => sum + (Number(row?.kwh) || 0), 0),
+          : remappedTotalKwh,
     },
     insights: {
       ...(dataset?.insights ?? {}),
-      stitchedMonth: monthlyBuild.stitchedMonth,
+      // Manual display-window remap already carries the dropped leading days into the
+      // trailing displayed month, so the generic latest-month stitch metadata is misleading.
+      stitchedMonth: null,
     },
     series: {
       ...(dataset?.series ?? {}),

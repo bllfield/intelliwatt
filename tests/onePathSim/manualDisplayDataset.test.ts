@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import { remapManualDisplayDatasetToCanonicalWindow } from "@/modules/onePathSim/manualDisplayDataset";
 
+function addDays(dateKey: string, days: number): string {
+  const dt = new Date(`${dateKey}T00:00:00.000Z`);
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function enumerateDateKeysInclusive(startDate: string, endDate: string): string[] {
+  const out: string[] = [];
+  for (let current = startDate; current <= endDate; current = addDays(current, 1)) out.push(current);
+  return out;
+}
+
 describe("manual display dataset remap", () => {
   it("re-dates the manual sim window onto the customer display window without changing totals", () => {
     const dataset = {
@@ -62,7 +74,39 @@ describe("manual display dataset remap", () => {
       exportKwh: 0,
       netKwh: 18,
     });
+    expect(out.insights.stitchedMonth).toBeNull();
     expect(String(out.meta.manualDisplayWindowNote ?? "")).toContain("post-anchor");
     expect(String(out.meta.weatherNote ?? "")).toContain("standard customer view");
+  });
+
+  it("carries only the dropped leading display days into the trailing month total", () => {
+    const dates = enumerateDateKeysInclusive("2025-03-17", "2026-03-15");
+    const dataset = {
+      summary: {
+        start: "2025-03-17",
+        end: "2026-03-15",
+        totalKwh: dates.length,
+      },
+      totals: {
+        importKwh: dates.length,
+        exportKwh: 0,
+        netKwh: dates.length,
+      },
+      daily: dates.map((date) => ({ date, kwh: 1, source: "SIMULATED" })),
+      series: {
+        intervals15: dates.map((date) => ({ timestamp: `${date}T00:00:00.000Z`, kwh: 1 })),
+      },
+    };
+
+    const out = remapManualDisplayDatasetToCanonicalWindow({
+      dataset,
+      usageInputMode: "MANUAL_MONTHLY",
+      displayWindowEndDate: "2026-04-21",
+    });
+
+    const monthlySum = out.monthly.reduce((sum: number, row: { kwh: number }) => sum + row.kwh, 0);
+    expect(monthlySum).toBe(dates.length);
+    expect(out.monthly[out.monthly.length - 1]).toEqual({ month: "2026-04", kwh: 29 });
+    expect(out.insights.stitchedMonth).toBeNull();
   });
 });

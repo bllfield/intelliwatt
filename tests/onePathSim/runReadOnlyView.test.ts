@@ -214,6 +214,59 @@ describe("buildOnePathRunReadOnlyView", () => {
     });
   });
 
+  it("suppresses shared stitched-month fallback for manual display-window remaps", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 34944,
+        },
+        monthly: [
+          { month: "2025-05", kwh: 100 },
+          { month: "2026-04", kwh: 200 },
+        ],
+        daily: [{ date: "2026-04-21", kwh: 10, source: "SIMULATED" }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 10, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 0.8,
+          stitchedMonth: null,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          manualDisplayWindowStitch: {
+            simulationWindowStart: "2025-03-17",
+            simulationWindowEnd: "2026-03-15",
+            displayWindowStart: "2025-04-23",
+            displayWindowEnd: "2026-04-21",
+          },
+        },
+      },
+      readModel: {
+        sharedDiagnostics: {
+          simulatedChartStitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-04",
+            haveDaysThrough: 21,
+            missingDaysFrom: 22,
+            missingDaysTo: 30,
+            borrowedFromYearMonth: "2025-04",
+            completenessRule: "borrow_prior_year_tail",
+          },
+        },
+      },
+    });
+
+    expect(view?.monthlyRows).toEqual([
+      { month: "2025-05", kwh: 100 },
+      { month: "2026-04", kwh: 200 },
+    ]);
+    expect(view?.stitchedMonth).toBeNull();
+  });
+
   it("binds validation compare rows and metrics from the persisted read model", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {

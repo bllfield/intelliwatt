@@ -183,9 +183,17 @@ export function buildOnePathRunReadOnlyView(args: {
   const readModel = asRecord(args.readModel) ?? {};
   const sharedDiagnostics = asRecord(readModel.sharedDiagnostics) ?? {};
   const datasetInsights = asRecord(dataset.insights) ?? {};
+  const manualDisplayWindowStitch =
+    meta.manualDisplayWindowStitch &&
+    typeof meta.manualDisplayWindowStitch === "object" &&
+    !Array.isArray(meta.manualDisplayWindowStitch)
+      ? (meta.manualDisplayWindowStitch as Record<string, unknown>)
+      : null;
+  const hasManualDisplayWindowStitch =
+    manualDisplayWindowStitch != null && Object.keys(manualDisplayWindowStitch).length > 0;
   const stitchedMonth =
     asStitchedMonthRecord(datasetInsights.stitchedMonth) ??
-    asStitchedMonthRecord(sharedDiagnostics.simulatedChartStitchedMonth);
+    (hasManualDisplayWindowStitch ? null : asStitchedMonthRecord(sharedDiagnostics.simulatedChartStitchedMonth));
   const datasetForDisplay =
     stitchedMonth && !asStitchedMonthRecord(datasetInsights.stitchedMonth)
       ? {
