@@ -686,41 +686,63 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     const filename = file.originalname?.slice(0, 255) || file.fieldname || "green-button-upload.xml";
     const mimeType = file.mimetype?.slice(0, 128) || "application/xml";
 
-    // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
+    const content = (() => {
+      const bytes = new Uint8Array(buffer.byteLength);
+      bytes.set(buffer);
+      return bytes;
+    })();
+    let previousRawHomeId: string | null = null;
     try {
-      const content = (() => {
-        const bytes = new Uint8Array(buffer.byteLength);
-        bytes.set(buffer);
-        return bytes;
-      })();
-      const upserted = await usagePrisma.rawGreenButton.upsert({
+      const existing = await usagePrisma.rawGreenButton.findUnique({
         where: { sha256 },
-        update: {},
-        create: {
-          homeId: house.id,
-          userId: house.userId,
-          utilityName,
-          accountNumber,
-          filename,
-          mimeType,
-          sizeBytes: buffer.length,
-          content,
-          sha256,
-          capturedAt: new Date(),
-        },
-        select: { id: true },
+        select: { id: true, homeId: true },
       });
-      rawRecordId = upserted.id;
-      logEvent("raw.upsert", { sha256, rawRecordId, reused: false, sizeBytes: buffer.length });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-        const existing = await usagePrisma.rawGreenButton.findUnique({ where: { sha256 }, select: { id: true } });
-        rawRecordId = existing?.id ?? null;
-        logEvent("raw.upsert.duplicate", { sha256, rawRecordId });
+      if (existing?.id) {
+        rawRecordId = existing.id;
+        previousRawHomeId = existing.homeId ? String(existing.homeId) : null;
+        await usagePrisma.rawGreenButton.update({
+          where: { id: existing.id },
+          data: {
+            homeId: house.id,
+            userId: house.userId,
+            utilityName,
+            accountNumber,
+            filename,
+            mimeType,
+            sizeBytes: buffer.length,
+            content,
+            capturedAt: new Date(),
+          },
+        });
+        logEvent("raw.upsert", {
+          sha256,
+          rawRecordId,
+          reused: true,
+          reboundFromHouseId: previousRawHomeId && previousRawHomeId !== house.id ? previousRawHomeId : null,
+          sizeBytes: buffer.length,
+        });
       } else {
-        logEvent("raw.upsert.error", { sha256, error: String(err) });
-        throw err;
+        const created = await usagePrisma.rawGreenButton.create({
+          data: {
+            homeId: house.id,
+            userId: house.userId,
+            utilityName,
+            accountNumber,
+            filename,
+            mimeType,
+            sizeBytes: buffer.length,
+            content,
+            sha256,
+            capturedAt: new Date(),
+          },
+          select: { id: true },
+        });
+        rawRecordId = created.id;
+        logEvent("raw.upsert", { sha256, rawRecordId, reused: false, sizeBytes: buffer.length });
       }
+    } catch (err) {
+      logEvent("raw.upsert.error", { sha256, error: String(err) });
+      throw err;
     }
 
     if (!rawRecordId) {
@@ -859,6 +881,18 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } }),
       (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } }),
     ];
+    if (previousRawHomeId && previousRawHomeId !== house.id) {
+      cleanupTasks.push(
+        usagePrisma.greenButtonInterval.deleteMany({
+          where: { homeId: previousRawHomeId, rawId: rawRecordId },
+        })
+      );
+      cleanupTasks.push(
+        (prisma as any).greenButtonUpload.deleteMany({
+          where: { houseId: previousRawHomeId, storageKey },
+        })
+      );
+    }
     if (house.esiid) {
       cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }));
     }

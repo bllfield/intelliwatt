@@ -76,7 +76,28 @@ export async function POST(request: Request) {
     const mimeType = file.type && file.type.length > 0 ? file.type : "application/xml";
 
     let rawRecord: { id: string } | null = null;
-    try {
+    let previousRawHomeId: string | null = null;
+    const existing = await usagePrisma.rawGreenButton.findUnique({
+      where: { sha256 },
+      select: { id: true, homeId: true },
+    });
+    if (existing?.id) {
+      previousRawHomeId = existing.homeId ? String(existing.homeId) : null;
+      rawRecord = await usagePrisma.rawGreenButton.update({
+        where: { id: existing.id },
+        data: {
+          homeId: house.id,
+          userId: user.id,
+          utilityName,
+          accountNumber,
+          filename: file.name,
+          mimeType,
+          sizeBytes: buffer.length,
+          content: buffer,
+        },
+        select: { id: true },
+      });
+    } else {
       rawRecord = await usagePrisma.rawGreenButton.create({
         data: {
           homeId: house.id,
@@ -91,19 +112,6 @@ export async function POST(request: Request) {
         },
         select: { id: true },
       });
-    } catch (error: any) {
-      if (error?.code === "P2002") {
-        const existing = await usagePrisma.rawGreenButton.findUnique({
-          where: { sha256 },
-          select: { id: true },
-        });
-        if (!existing) {
-          throw error;
-        }
-        rawRecord = existing;
-      } else {
-        throw error;
-      }
     }
 
     const uploadRecord = await (prisma as any).greenButtonUpload.create({
@@ -210,6 +218,18 @@ export async function POST(request: Request) {
           where: { houseId: house.id, NOT: { id: uploadRecord.id } },
         }),
       ];
+      if (previousRawHomeId && previousRawHomeId !== house.id) {
+        cleanupTasks.push(
+          (usagePrisma as any).greenButtonInterval.deleteMany({
+            where: { homeId: previousRawHomeId, rawId: rawRecord.id },
+          }),
+        );
+        cleanupTasks.push(
+          (prisma as any).greenButtonUpload.deleteMany({
+            where: { houseId: previousRawHomeId, storageKey: `usage:raw_green_button:${rawRecord.id}` },
+          }),
+        );
+      }
       await Promise.all(cleanupTasks);
 
       const intervalData = trimmed.map((interval) => ({
