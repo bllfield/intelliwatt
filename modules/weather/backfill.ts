@@ -57,11 +57,20 @@ export async function ensureHouseWeatherBackfill(args: {
   startDate: string;
   endDate: string;
   timezone?: string;
+  allowOutsideCanonicalCoverage?: boolean;
 }): Promise<{ fetched: number; stubbed: number; skippedLatLng?: boolean }> {
   const { houseId, startDate, endDate, timezone } = args;
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-  const boundedStartDate = String(startDate).slice(0, 10) < canonicalCoverage.startDate ? canonicalCoverage.startDate : String(startDate).slice(0, 10);
-  const boundedEndDate = String(endDate).slice(0, 10) > canonicalCoverage.endDate ? canonicalCoverage.endDate : String(endDate).slice(0, 10);
+  const requestedStartDate = String(startDate).slice(0, 10);
+  const requestedEndDate = String(endDate).slice(0, 10);
+  const boundedStartDate =
+    args.allowOutsideCanonicalCoverage === true || requestedStartDate >= canonicalCoverage.startDate
+      ? requestedStartDate
+      : canonicalCoverage.startDate;
+  const boundedEndDate =
+    args.allowOutsideCanonicalCoverage === true || requestedEndDate <= canonicalCoverage.endDate
+      ? requestedEndDate
+      : canonicalCoverage.endDate;
   const dateKeys = enumerateDateKeysUtc(boundedStartDate, boundedEndDate);
   if (dateKeys.length === 0) return { fetched: 0, stubbed: 0 };
 

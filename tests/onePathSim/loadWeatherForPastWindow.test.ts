@@ -99,6 +99,7 @@ describe("one path lockbox loadWeatherForPastWindow", () => {
       houseId: "h1",
       startDate: "2026-04-14",
       endDate: "2026-04-15",
+      allowOutsideCanonicalCoverage: true,
     });
     expect(thrown?.message ?? "").toContain("ACTUAL_LAST_YEAR coverage is still missing after real API backfill");
     expect(thrown?.message ?? "").toContain("requestedWeatherWindow=2026-04-14..2026-04-15");

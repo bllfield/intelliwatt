@@ -1121,7 +1121,12 @@ export async function loadWeatherForPastWindow(args: {
   if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
     await ensureHouseWeatherNormalAvgBackfill({ houseId, dateKeys: canonicalDateKeys });
   } else {
-    await ensureHouseWeatherBackfill({ houseId, startDate, endDate });
+    await ensureHouseWeatherBackfill({
+      houseId,
+      startDate,
+      endDate,
+      allowOutsideCanonicalCoverage: true,
+    });
   }
   const [actualWx2, normalWx2] = await Promise.all([
     getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),

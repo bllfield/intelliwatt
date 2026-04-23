@@ -13,6 +13,7 @@ import {
 } from "@/modules/usageSimulator/sharedDiagnostics";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
+import { remapManualDisplayDatasetToCanonicalWindow } from "@/modules/onePathSim/manualDisplayDataset";
 
 export type ManualUsagePastSimReadResult =
   | {
@@ -146,7 +147,7 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
     };
   }
 
-  const displayDataset = shouldUseRawDisplayDataset(effectiveUsageInputMode)
+  const displayDatasetRaw = shouldUseRawDisplayDataset(effectiveUsageInputMode)
     ? await loadManualUsageRawDisplayDataset({
         userId: args.userId,
         houseId: args.houseId,
@@ -158,6 +159,10 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
         fallbackDataset: out.dataset,
       })
     : out.dataset;
+  const displayDataset = remapManualDisplayDatasetToCanonicalWindow({
+    dataset: displayDatasetRaw,
+    usageInputMode: effectiveUsageInputMode,
+  });
 
   emit("manual_readback_dataset_ready", {
     intervalCount: Array.isArray((out.dataset as any)?.series?.intervals15) ? (out.dataset as any).series.intervals15.length : 0,

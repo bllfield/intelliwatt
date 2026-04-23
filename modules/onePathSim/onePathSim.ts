@@ -17,6 +17,7 @@ import {
   type UpstreamUsageTruthSource,
 } from "@/modules/onePathSim/runtime";
 import { buildOnePathManualArtifactDecorations } from "@/modules/onePathSim/manualArtifactDecorations";
+import { remapManualDisplayDatasetToCanonicalWindow } from "@/modules/onePathSim/manualDisplayDataset";
 import { buildOnePathTruthSummary, type OnePathTruthSummary } from "@/modules/onePathSim/onePathTruthSummary";
 import { buildOnePathBaselineParityAudit, type OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import {
@@ -1201,7 +1202,10 @@ async function buildArtifactFromEngineInput(args: {
           houseId: args.engineInput.houseId,
           scenarioId: args.engineInput.scenarioId,
           dataset: datasetRead.dataset,
-          displayDataset: datasetRead.dataset,
+          displayDataset: remapManualDisplayDatasetToCanonicalWindow({
+            dataset: datasetRead.dataset,
+            usageInputMode: args.engineInput.inputType,
+          }),
           callerType: args.callerType,
           usageInputMode: args.engineInput.inputType,
           weatherLogicMode: args.engineInput.weatherLogicMode,

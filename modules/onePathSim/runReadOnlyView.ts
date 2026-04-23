@@ -89,6 +89,7 @@ export type OnePathRunReadOnlyView = {
     source: string | null;
     coverageStart: string | null;
     coverageEnd: string | null;
+    displayWindowNote: string | null;
     intervalsCount: number | null;
     weatherBasisLabel: string | null;
     sourceOfDaySimulationCore: string | null;
@@ -256,6 +257,10 @@ export function buildOnePathRunReadOnlyView(args: {
       source: viewModel.coverage.source,
       coverageStart: viewModel.coverage.start,
       coverageEnd: viewModel.coverage.end,
+      displayWindowNote:
+        typeof meta.manualDisplayWindowNote === "string" && meta.manualDisplayWindowNote.trim().length > 0
+          ? meta.manualDisplayWindowNote
+          : null,
       intervalsCount: viewModel.coverage.intervalsCount,
       weatherBasisLabel: viewModel.coverage.weatherBasisLabel,
       sourceOfDaySimulationCore: viewModel.coverage.sourceOfDaySimulationCore,

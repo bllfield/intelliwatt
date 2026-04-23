@@ -80,6 +80,9 @@ export function OnePathRunReadOnlyView(props: {
             </p>
           ) : null}
           {view.summary.weatherBasisLabel ? <p className="mt-0.5 text-xs text-neutral-500">{view.summary.weatherBasisLabel}</p> : null}
+          {view.summary.displayWindowNote ? (
+            <p className="mt-0.5 text-xs text-neutral-500">{view.summary.displayWindowNote}</p>
+          ) : null}
           {view.summary.sourceOfDaySimulationCore ? (
             <p className="mt-0.5 text-xs text-neutral-500">
               Simulation core: <span className="font-medium text-neutral-600">{view.summary.sourceOfDaySimulationCore}</span>
