@@ -46,21 +46,31 @@ function lastNYearMonthsFrom(year: number, month1: number, n: number): string[] 
 
 function buildManualDisplayMonthly(args: {
   intervals15: Array<{ timestamp?: unknown; consumption_kwh?: unknown; kwh?: unknown }>;
-  displayStart: string;
-  displayEnd: string;
 }) {
   const monthTotals = new Map<string, number>();
   for (const row of args.intervals15) {
     const timestamp = String(row?.timestamp ?? "");
     const dateKey = timestamp.slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
-    if (dateKey < args.displayStart || dateKey > args.displayEnd) continue;
     const yearMonth = dateKey.slice(0, 7);
     const kwh = Number(row?.consumption_kwh ?? row?.kwh ?? 0) || 0;
     monthTotals.set(yearMonth, (monthTotals.get(yearMonth) ?? 0) + kwh);
   }
 
-  const displayEndDate = new Date(`${args.displayEnd}T00:00:00.000Z`);
+  const latestDateKey = args.intervals15.reduce<string>((latest, row) => {
+    const timestamp = String(row?.timestamp ?? "");
+    const dateKey = timestamp.slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey > latest ? dateKey : latest;
+  }, "");
+  const earliestDateKey = args.intervals15.reduce<string>((earliest, row) => {
+    const timestamp = String(row?.timestamp ?? "");
+    const dateKey = timestamp.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return earliest;
+    return !earliest || dateKey < earliest ? dateKey : earliest;
+  }, "");
+  if (!latestDateKey) return [];
+
+  const displayEndDate = new Date(`${latestDateKey}T00:00:00.000Z`);
   const endYear = displayEndDate.getUTCFullYear();
   const endMonth = displayEndDate.getUTCMonth() + 1;
   const yearMonths = lastNYearMonthsFrom(endYear, endMonth, 12);
@@ -68,8 +78,7 @@ function buildManualDisplayMonthly(args: {
   for (const yearMonth of yearMonths) {
     monthlyTotals.set(yearMonth, monthTotals.get(yearMonth) ?? 0);
   }
-
-  const leadingYearMonth = args.displayStart.slice(0, 7);
+  const leadingYearMonth = earliestDateKey.slice(0, 7);
   if (/^\d{4}-\d{2}$/.test(leadingYearMonth) && !yearMonths.includes(leadingYearMonth)) {
     const trailingYearMonth = yearMonths[yearMonths.length - 1]!;
     monthlyTotals.set(
@@ -135,7 +144,11 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
     ...row,
     timestamp: remapDatePrefix(String(row?.timestamp ?? ""), dateMap),
   }));
-  const remappedDaily =
+  const displayIntervals15 = remappedIntervals15.filter((row: any) => {
+    const dateKey = String(row?.timestamp ?? "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey >= displayStart && dateKey <= displayEnd;
+  });
+  const remappedDailySource =
     Array.isArray(dataset?.daily) && dataset.daily.length > 0
       ? dataset.daily.map((row: any) => {
           const sourceDate = asDateKey(row?.date);
@@ -144,33 +157,40 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
             date: sourceDate ? dateMap.get(sourceDate) ?? sourceDate : row?.date,
           };
         })
-      : buildDailyFromIntervals(remappedIntervals15);
+      : buildDailyFromIntervals(displayIntervals15);
+  const remappedDaily = remappedDailySource.filter((row: any) => {
+    const dateKey = asDateKey(row?.date);
+    return dateKey != null && dateKey >= displayStart && dateKey <= displayEnd;
+  });
   const remappedSeriesDaily = Array.isArray(dataset?.series?.daily)
     ? dataset.series.daily.map((row: any) => ({
         ...row,
         timestamp: remapDatePrefix(String(row?.timestamp ?? ""), dateMap),
-      }))
+      })).filter((row: any) => {
+        const dateKey = String(row?.timestamp ?? "").slice(0, 10);
+        return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey >= displayStart && dateKey <= displayEnd;
+      })
     : dataset?.series?.daily;
-  const remappedIntervalRows = remappedIntervals15.map((row: any) => ({
+  const remappedIntervalRows = displayIntervals15.map((row: any) => ({
     timestamp: String(row?.timestamp ?? ""),
     consumption_kwh: Number(row?.consumption_kwh ?? row?.kwh ?? 0) || 0,
   }));
   const manualDisplayMonthly = buildManualDisplayMonthly({
     intervals15: remappedIntervalRows,
-    displayStart,
-    displayEnd,
   });
   const remappedTotalKwh = round2(
     remappedIntervalRows.reduce((sum: number, row: { consumption_kwh: number }) => sum + (Number(row.consumption_kwh) || 0), 0)
   );
   const remappedDailyWeather =
     dataset?.dailyWeather && typeof dataset.dailyWeather === "object"
-      ? Object.fromEntries(
-          Object.entries(dataset.dailyWeather as Record<string, unknown>).map(([dateKey, weather]) => [
-            dateMap.get(dateKey) ?? dateKey,
-            weather,
-          ])
-        )
+      ? (() => {
+          const remappedWeatherEntries: Array<[string, unknown]> = Object.entries(
+            dataset.dailyWeather as Record<string, unknown>
+          ).map(([dateKey, weather]) => [dateMap.get(dateKey) ?? dateKey, weather]);
+          return Object.fromEntries(
+            remappedWeatherEntries.filter(([dateKey]) => dateKey >= displayStart && dateKey <= displayEnd)
+          );
+        })()
       : dataset?.dailyWeather;
   const displayNote = buildDisplayNote({
     simulationWindowStart: summaryStart,
@@ -186,8 +206,7 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
       ...(dataset?.summary ?? {}),
       start: displayStart,
       end: displayEnd,
-      totalKwh:
-        typeof dataset?.summary?.totalKwh === "number" ? dataset.summary.totalKwh : remappedTotalKwh,
+      totalKwh: remappedTotalKwh,
     },
     meta: {
       ...(dataset?.meta ?? {}),
@@ -212,15 +231,9 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
     dailyWeather: remappedDailyWeather,
     totals: {
       ...(dataset?.totals ?? {}),
-      importKwh:
-        typeof dataset?.totals?.importKwh === "number"
-          ? dataset.totals.importKwh
-          : remappedTotalKwh,
-      exportKwh: typeof dataset?.totals?.exportKwh === "number" ? dataset.totals.exportKwh : 0,
-      netKwh:
-        typeof dataset?.totals?.netKwh === "number"
-          ? dataset.totals.netKwh
-          : remappedTotalKwh,
+      importKwh: remappedTotalKwh,
+      exportKwh: 0,
+      netKwh: remappedTotalKwh,
     },
     insights: {
       ...(dataset?.insights ?? {}),
@@ -230,7 +243,7 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
     },
     series: {
       ...(dataset?.series ?? {}),
-      intervals15: remappedIntervals15,
+      intervals15: displayIntervals15,
       daily: remappedSeriesDaily,
     },
   };

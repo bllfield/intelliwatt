@@ -79,6 +79,50 @@ describe("manual display dataset remap", () => {
     expect(String(out.meta.weatherNote ?? "")).toContain("standard customer view");
   });
 
+  it("drops intervals outside the mapped display window from display totals", () => {
+    const dataset = {
+      summary: {
+        start: "2025-03-17",
+        end: "2025-03-19",
+        totalKwh: 19,
+      },
+      totals: {
+        importKwh: 19,
+        exportKwh: 0,
+        netKwh: 19,
+      },
+      daily: [
+        { date: "2025-03-16", kwh: 1, source: "SIMULATED" },
+        { date: "2025-03-17", kwh: 5, source: "SIMULATED" },
+        { date: "2025-03-18", kwh: 6, source: "SIMULATED" },
+        { date: "2025-03-19", kwh: 7, source: "SIMULATED" },
+      ],
+      series: {
+        intervals15: [
+          { timestamp: "2025-03-16T00:00:00.000Z", kwh: 1 },
+          { timestamp: "2025-03-17T00:00:00.000Z", kwh: 5 },
+          { timestamp: "2025-03-18T00:00:00.000Z", kwh: 6 },
+          { timestamp: "2025-03-19T00:00:00.000Z", kwh: 7 },
+        ],
+      },
+    };
+
+    const out = remapManualDisplayDatasetToCanonicalWindow({
+      dataset,
+      usageInputMode: "MANUAL_MONTHLY",
+      displayWindowEndDate: "2026-04-20",
+    });
+
+    expect(out.summary.totalKwh).toBe(18);
+    expect(out.totals).toEqual({
+      importKwh: 18,
+      exportKwh: 0,
+      netKwh: 18,
+    });
+    expect(out.daily.map((row: any) => row.date)).toEqual(["2026-04-18", "2026-04-19", "2026-04-20"]);
+    expect(out.series.intervals15).toHaveLength(3);
+  });
+
   it("carries only the dropped leading display days into the trailing month total", () => {
     const dates = enumerateDateKeysInclusive("2025-03-17", "2026-03-15");
     const dataset = {

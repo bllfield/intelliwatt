@@ -53,6 +53,71 @@ function toDateKeyFromTimestamp(timestamp: string): string {
   return timestamp.slice(0, 10);
 }
 
+function asDateKey(value: unknown): string | null {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function chicagoHour(timestamp: string, timezone: string): number | null {
+  try {
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) return null;
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(ts);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "");
+    return Number.isFinite(hour) && hour >= 0 && hour <= 23 ? hour : null;
+  } catch {
+    return null;
+  }
+}
+
+function deriveWeekdayWeekendFromDaily(rows: DailyRow[]) {
+  let weekday = 0;
+  let weekend = 0;
+  for (const row of rows) {
+    const ts = new Date(`${row.date}T00:00:00.000Z`);
+    const day = ts.getUTCDay();
+    if (day === 0 || day === 6) weekend += Number(row.kwh) || 0;
+    else weekday += Number(row.kwh) || 0;
+  }
+  return {
+    weekday: Number(weekday.toFixed(2)),
+    weekend: Number(weekend.toFixed(2)),
+  };
+}
+
+function deriveTimeOfDayBucketsFromIntervals(
+  rows: Array<{ timestamp?: unknown; kwh?: unknown; consumption_kwh?: unknown }>,
+  options?: { start?: string | null; end?: string | null; timezone?: string }
+) {
+  const timezone = options?.timezone?.trim() ? options.timezone.trim() : "America/Chicago";
+  const sums = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
+  for (const row of rows) {
+    const timestamp = String(row?.timestamp ?? "");
+    const dateKey = asDateKey(timestamp);
+    if (!dateKey) continue;
+    if (options?.start && dateKey < options.start) continue;
+    if (options?.end && dateKey > options.end) continue;
+    const hour = chicagoHour(timestamp, timezone);
+    if (hour == null) continue;
+    const kwh = Number(row?.kwh ?? row?.consumption_kwh ?? 0) || 0;
+    if (hour < 6) sums.overnight += kwh;
+    else if (hour < 12) sums.morning += kwh;
+    else if (hour < 18) sums.afternoon += kwh;
+    else sums.evening += kwh;
+  }
+  return [
+    { key: "overnight", label: "Overnight (12am–6am)", kwh: Number(sums.overnight.toFixed(2)) },
+    { key: "morning", label: "Morning (6am–12pm)", kwh: Number(sums.morning.toFixed(2)) },
+    { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: Number(sums.afternoon.toFixed(2)) },
+    { key: "evening", label: "Evening (6pm–12am)", kwh: Number(sums.evening.toFixed(2)) },
+  ];
+}
+
 function low10AverageKwh(values: number[]): number | null {
   const finite = values.filter((value) => Number.isFinite(value));
   if (!finite.length) return null;
@@ -73,11 +138,18 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   const dataset = house.dataset as any;
   const meta = ((dataset as any)?.meta ?? {}) as Record<string, unknown>;
   const datasetKind = meta.datasetKind ?? null;
+  const hasManualDisplayWindowStitch =
+    meta.manualDisplayWindowStitch != null &&
+    typeof meta.manualDisplayWindowStitch === "object" &&
+    !Array.isArray(meta.manualDisplayWindowStitch);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-  const coverageStart = canonicalWindow.startDate;
-  const coverageEnd = canonicalWindow.endDate;
+  const coverageStart =
+    asDateKey(meta.coverageStart) ?? canonicalWindow.startDate;
+  const coverageEnd =
+    asDateKey(meta.coverageEnd) ?? canonicalWindow.endDate;
   const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
   const actualSource = meta.actualSource as string | undefined;
+  const timezone = typeof meta.timezone === "string" ? meta.timezone : "America/Chicago";
   const hasSimulatedFill =
     datasetKind === "SIMULATED" &&
     actualSource &&
@@ -160,6 +232,21 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     .slice()
     .sort((left: DailyRow, right: DailyRow) => (left.date < right.date ? -1 : 1));
   const monthlySorted = buildDisplayedMonthlyRows(dataset);
+  const weekdayWeekend = hasManualDisplayWindowStitch ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
+  const timeOfDayBuckets = hasManualDisplayWindowStitch
+    ? deriveTimeOfDayBucketsFromIntervals(dataset?.series?.intervals15 ?? [], {
+        start: coverageStart,
+        end: coverageEnd,
+        timezone,
+      })
+    : null;
+  const peakDay = hasManualDisplayWindowStitch
+    ? recentDaily.length > 0
+      ? recentDaily.reduce(
+          (current: DailyRow, row: DailyRow) => ((Number(row.kwh) || 0) > (Number(current.kwh) || 0) ? row : current)
+        )
+      : null
+    : null;
 
   return {
     coverage,
@@ -172,14 +259,16 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
       totalKwh,
       totals,
       avgDailyKwh: fallbackDaily.length ? totalKwh / fallbackDaily.length : 0,
-      weekdayKwh: dataset?.insights?.weekdayVsWeekend?.weekday ?? 0,
-      weekendKwh: dataset?.insights?.weekdayVsWeekend?.weekend ?? 0,
-      timeOfDayBuckets: (dataset?.insights?.timeOfDayBuckets ?? []).map((bucket: any) => ({
+      weekdayKwh: weekdayWeekend?.weekday ?? dataset?.insights?.weekdayVsWeekend?.weekday ?? 0,
+      weekendKwh: weekdayWeekend?.weekend ?? dataset?.insights?.weekdayVsWeekend?.weekend ?? 0,
+      timeOfDayBuckets: timeOfDayBuckets && timeOfDayBuckets.length
+        ? timeOfDayBuckets
+        : (dataset?.insights?.timeOfDayBuckets ?? []).map((bucket: any) => ({
         key: bucket.key,
         label: bucket.label,
         kwh: bucket.kwh,
       })),
-      peakDay: dataset?.insights?.peakDay ?? null,
+      peakDay: peakDay ?? dataset?.insights?.peakDay ?? null,
       peakHour: dataset?.insights?.peakHour ?? null,
       baseload: dataset?.insights?.baseload ?? null,
       baseloadDaily:
