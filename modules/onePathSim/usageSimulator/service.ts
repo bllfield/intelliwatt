@@ -399,10 +399,16 @@ async function getValidationActualDailyByDateForDataset(args: {
   }
 
   // Compare-only: fetch actual kWh for validation keys only (no full-year interval load).
+  const preferredActualSource =
+    args.dataset?.meta?.lockboxRunContext?.preferredActualSource === "SMT" ||
+    args.dataset?.meta?.lockboxRunContext?.preferredActualSource === "GREEN_BUTTON"
+      ? args.dataset.meta.lockboxRunContext.preferredActualSource
+      : null;
   const map = await getActualDailyKwhForLocalDateKeys({
     houseId: actualContextHouseId,
     esiid: actualContextEsiid,
     dateKeysLocal: validationKeys,
+    preferredSource: preferredActualSource,
   });
   return map.size > 0 ? map : null;
 }
@@ -3791,11 +3797,31 @@ export function resolveSharedPastRecalcWindow(args: {
     }
   }
 
+  if (args.mode === "SMT_BASELINE" && Array.isArray(args.smtAnchorPeriods) && args.smtAnchorPeriods.length > 0) {
+    const sortedPeriods = args.smtAnchorPeriods
+      .map((period) => ({
+        startDate: String(period.startDate ?? "").slice(0, 10),
+        endDate: String(period.endDate ?? "").slice(0, 10),
+      }))
+      .filter(
+        (period): period is { startDate: string; endDate: string } =>
+          /^\d{4}-\d{2}-\d{2}$/.test(period.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(period.endDate)
+      )
+      .sort((left, right) =>
+        left.startDate === right.startDate ? left.endDate.localeCompare(right.endDate) : left.startDate.localeCompare(right.startDate)
+      );
+    if (sortedPeriods.length > 0) {
+      return {
+        startDate: sortedPeriods[0]!.startDate,
+        endDate: sortedPeriods.reduce((latest, period) => (period.endDate > latest ? period.endDate : latest), sortedPeriods[0]!.endDate),
+        source: "smt_anchor",
+      };
+    }
+  }
+
   // Shared producer parity lock:
-  // Interval and new-build Past simulation window ownership stays canonical usage coverage.
-  // SMT anchors remain metadata for actual/source context, not producer coverage ownership.
+  // New-build Past simulation window ownership stays canonical usage coverage.
   void args.canonicalMonths;
-  void args.smtAnchorPeriods;
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   return {
     startDate: canonicalCoverage.startDate,
@@ -3975,7 +4001,13 @@ function normalizePreLockboxTravelRanges(
   return Array.from(uniq.values());
 }
 
-function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayload: ManualUsagePayloadAny | null; now?: Date }) {
+function canonicalMonthsForRecalc(args: {
+  mode: SimulatorMode;
+  manualUsagePayload: ManualUsagePayloadAny | null;
+  intervalAnchorEndDate?: string | null;
+  intervalActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  now?: Date;
+}) {
   const now = args.now ?? new Date();
 
   // V1 determinism: derive canonicalMonths from manual anchor when in manual mode, else platform default (last full month Chicago).
@@ -4003,6 +4035,16 @@ function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayloa
         return { endMonth, months: monthsEndingAt(endMonth, 12) };
       }
     }
+  }
+
+  if (
+    args.mode === "SMT_BASELINE" &&
+    args.intervalActualSource === "GREEN_BUTTON" &&
+    typeof args.intervalAnchorEndDate === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.intervalAnchorEndDate)
+  ) {
+    const endMonth = args.intervalAnchorEndDate.slice(0, 7);
+    return { endMonth, months: monthsEndingAt(endMonth, 12) };
   }
 
   return canonicalWindow12Months(now);
@@ -4137,8 +4179,10 @@ async function recalcSimulatorBuildImpl(args: {
     buildPathKind: args.runContext?.buildPathKind ?? "recalc",
     persistRequested: args.runContext?.persistRequested ?? (args.persistPastSimBaseline === true),
     adminLabTreatmentMode: args.runContext?.adminLabTreatmentMode ?? args.adminLabTreatmentMode ?? undefined,
+    preferredActualSource: args.runContext?.preferredActualSource ?? undefined,
     asyncMetadata: args.runContext?.asyncMetadata ?? undefined,
   });
+  const preferredActualSource = runContext.preferredActualSource ?? undefined;
   const initialLockboxInput = buildInitialPastSimLockboxInput({
     houseId,
     actualContextHouseId,
@@ -4173,18 +4217,10 @@ async function recalcSimulatorBuildImpl(args: {
   const applianceRec = await getApplianceProfileSimulatedByUserHouse({ userId, houseId });
 
   let manualUsagePayload = args.manualUsagePayload ?? (manualRec?.payload as any) ?? null;
-  const canonical = canonicalMonthsForRecalc({ mode, manualUsagePayload, now: args.now });
 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const actualOk = mode === "SMT_BASELINE"
-    ? await hasActualIntervals({
-        houseId: actualContextHouseId,
-        esiid: esiid ?? null,
-        canonicalMonths: canonical.months,
-      })
-    : false;
   let actualSourceAnchor = {
     source: null as "SMT" | "GREEN_BUTTON" | null,
     anchorEndDate: null as string | null,
@@ -4196,6 +4232,7 @@ async function recalcSimulatorBuildImpl(args: {
       houseId: actualContextHouseId,
       esiid: esiid ?? null,
       timezone: "America/Chicago",
+      preferredSource: preferredActualSource ?? null,
     });
     actualSourceAnchor = {
       source: resolvedActualSourceAnchor.source,
@@ -4205,6 +4242,20 @@ async function recalcSimulatorBuildImpl(args: {
     };
   }
   let actualSource = actualSourceAnchor.source;
+  const canonical = canonicalMonthsForRecalc({
+    mode,
+    manualUsagePayload,
+    intervalAnchorEndDate: actualSourceAnchor.anchorEndDate,
+    intervalActualSource: actualSourceAnchor.source,
+    now: args.now,
+  });
+  const actualOk = mode === "SMT_BASELINE"
+    ? await hasActualIntervals({
+        houseId: actualContextHouseId,
+        esiid: esiid ?? null,
+        canonicalMonths: canonical.months,
+      })
+    : false;
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
   if (mode === "SMT_BASELINE" && !actualOk) {
@@ -4313,7 +4364,12 @@ async function recalcSimulatorBuildImpl(args: {
       typeof actualContextHouseId === "string" &&
       actualContextHouseId.trim().length > 0;
     const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
-      ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
+      ? (
+          await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+            skipFullYearIntervalFetch: true,
+            preferredSource: preferredActualSource ?? null,
+          })
+        )?.dataset ?? null
       : null;
     const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
       actualDataset: weatherSensitivityActualDataset,
@@ -4407,6 +4463,7 @@ async function recalcSimulatorBuildImpl(args: {
           : null;
       const sourceUsageDataset = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
         skipFullYearIntervalFetch: true,
+        preferredSource: preferredActualSource ?? null,
       }).catch(() => ({ dataset: null }));
       if (!actualSource) {
         const sourceFromDataset = String(sourceUsageDataset?.dataset?.summary?.source ?? "").trim().toUpperCase();
@@ -4796,7 +4853,9 @@ async function recalcSimulatorBuildImpl(args: {
   let validationSetupFailed = false;
   if (simMode === "SMT_BASELINE") {
     try {
-      const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null);
+      const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+        preferredSource: preferredActualSource ?? null,
+      });
       const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
       const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
       if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
@@ -4906,6 +4965,7 @@ async function recalcSimulatorBuildImpl(args: {
             esiid: esiid ?? null,
             startDate: selectionStart,
             endDate: selectionEnd,
+            preferredSource: preferredActualSource ?? null,
           });
         },
       });
@@ -5672,6 +5732,7 @@ async function recalcSimulatorBuildImpl(args: {
         esiid: canonicalActualIdentity.esiid,
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
+        preferredSource: preferredActualSource ?? null,
       });
       const usageShapeProfileIdentity = isLeanManualTotalsMode(simMode)
         ? {
@@ -7818,17 +7879,23 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
   ]);
 
   const manualUsagePayload = (manualRec?.payload as any) ?? null;
-  const canonical = canonicalMonthsForRecalc({ mode: args.mode, manualUsagePayload, now: args.now });
 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const hasActual = await hasActualIntervals({ houseId: args.houseId, esiid: house.esiid ?? null, canonicalMonths: canonical.months });
   const actualSourceAnchor = await resolveActualUsageSourceAnchor({
     houseId: args.houseId,
     esiid: house.esiid ?? null,
     timezone: "America/Chicago",
   });
+  const canonical = canonicalMonthsForRecalc({
+    mode: args.mode,
+    manualUsagePayload,
+    intervalAnchorEndDate: actualSourceAnchor.anchorEndDate,
+    intervalActualSource: actualSourceAnchor.source,
+    now: args.now,
+  });
+  const hasActual = await hasActualIntervals({ houseId: args.houseId, esiid: house.esiid ?? null, canonicalMonths: canonical.months });
   const actualSource = actualSourceAnchor.source;
   const req = computeRequirements(
     { manualUsagePayload: manualUsagePayload as any, homeProfile: homeProfile as any, applianceProfile: applianceProfile as any, hasActualIntervals: hasActual },

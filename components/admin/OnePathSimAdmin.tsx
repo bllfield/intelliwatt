@@ -209,6 +209,15 @@ export function OnePathSimAdmin() {
   const [variableBusy, setVariableBusy] = useState(false);
   const [variableError, setVariableError] = useState<string | null>(null);
   const [validationInfoOpen, setValidationInfoOpen] = useState(false);
+  const [greenButtonSelectedFile, setGreenButtonSelectedFile] = useState<File | null>(null);
+  const [greenButtonUploadInputKey, setGreenButtonUploadInputKey] = useState(0);
+  const [greenButtonUtilityName, setGreenButtonUtilityName] = useState("");
+  const [greenButtonAccountNumber, setGreenButtonAccountNumber] = useState("");
+  const [greenButtonUploadBusy, setGreenButtonUploadBusy] = useState(false);
+  const [greenButtonUploadStatus, setGreenButtonUploadStatus] = useState<string | null>(null);
+  const [greenButtonUploadError, setGreenButtonUploadError] = useState<string | null>(null);
+  const [uploadedGreenButtonHouseId, setUploadedGreenButtonHouseId] = useState<string | null>(null);
+  const [preferUploadedGreenButton, setPreferUploadedGreenButton] = useState(false);
 
   const loadVariablePolicy = useCallback(async () => {
     const res = await fetch("/api/admin/tools/one-path-sim/variables");
@@ -249,6 +258,19 @@ export function OnePathSimAdmin() {
   );
   const effectiveHouseId = selectedHouseId || lookup?.selectedHouse?.id || "";
   const effectiveActualContextHouseId = actualContextHouseId || effectiveHouseId;
+  const shouldPreferUploadedGreenButton =
+    mode === "INTERVAL" &&
+    preferUploadedGreenButton &&
+    !!uploadedGreenButtonHouseId &&
+    uploadedGreenButtonHouseId === effectiveActualContextHouseId;
+  useEffect(() => {
+    setPreferUploadedGreenButton(false);
+    setUploadedGreenButtonHouseId(null);
+    setGreenButtonSelectedFile(null);
+    setGreenButtonUploadInputKey((current) => current + 1);
+    setGreenButtonUploadStatus(null);
+    setGreenButtonUploadError(null);
+  }, [lookup?.userId, effectiveActualContextHouseId]);
   const validationOnlyDateKeysLocal = useMemo(
     () => parseManualValidationDateKeys(validationOnlyDateKeysText),
     [validationOnlyDateKeysText]
@@ -771,6 +793,7 @@ export function OnePathSimAdmin() {
         scenarioId: selectedScenarioId || null,
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
+        preferredActualSource: shouldPreferUploadedGreenButton ? "GREEN_BUTTON" : null,
         weatherPreference,
         validationSelectionMode,
         validationDayCount: Number(validationDayCount) || null,
@@ -815,11 +838,71 @@ export function OnePathSimAdmin() {
     runReason,
     selectedKnownScenario,
     selectedScenarioId,
+    shouldPreferUploadedGreenButton,
     travelRanges,
     validationDayCount,
     validationSelectionMode,
     validationOnlyDateKeysLocal,
     weatherPreference,
+  ]);
+
+  const uploadGreenButtonToContextHouse = useCallback(async () => {
+    if (!lookup?.userId || !effectiveActualContextHouseId) {
+      setGreenButtonUploadError("Load a user and actual context house first.");
+      return;
+    }
+    if (!greenButtonSelectedFile) {
+      setGreenButtonUploadError("Select a Green Button XML or CSV file first.");
+      return;
+    }
+    const lower = greenButtonSelectedFile.name.toLowerCase();
+    if (!lower.endsWith(".xml") && !lower.endsWith(".csv")) {
+      setGreenButtonUploadError("Select a Green Button XML or CSV file.");
+      return;
+    }
+    setGreenButtonUploadBusy(true);
+    setGreenButtonUploadError(null);
+    setGreenButtonUploadStatus("Uploading Green Button file to the current actual context house...");
+    try {
+      const formData = new FormData();
+      formData.append("file", greenButtonSelectedFile);
+      formData.append("houseId", effectiveActualContextHouseId);
+      formData.append("userId", lookup.userId);
+      if (greenButtonUtilityName.trim()) formData.append("utilityName", greenButtonUtilityName.trim());
+      if (greenButtonAccountNumber.trim()) formData.append("accountNumber", greenButtonAccountNumber.trim());
+      const res = await fetch("/api/admin/green-button/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setGreenButtonUploadStatus(null);
+        setGreenButtonUploadError(json?.error ?? `Green Button upload failed (${res.status})`);
+        return;
+      }
+      setUploadedGreenButtonHouseId(effectiveActualContextHouseId);
+      setPreferUploadedGreenButton(true);
+      setMode("INTERVAL");
+      setGreenButtonSelectedFile(null);
+      setGreenButtonUploadInputKey((current) => current + 1);
+      setGreenButtonUploadStatus(
+        "Green Button upload applied to the current actual context house. Interval runs will now prefer this uploaded file."
+      );
+      await loadLookup();
+    } catch (uploadError) {
+      console.error("[OnePathSimAdmin] Green Button upload failed", uploadError);
+      setGreenButtonUploadStatus(null);
+      setGreenButtonUploadError("Green Button upload failed.");
+    } finally {
+      setGreenButtonUploadBusy(false);
+    }
+  }, [
+    effectiveActualContextHouseId,
+    greenButtonAccountNumber,
+    greenButtonSelectedFile,
+    greenButtonUtilityName,
+    loadLookup,
+    lookup?.userId,
   ]);
 
   const manualTransport = useMemo(
@@ -1003,6 +1086,79 @@ export function OnePathSimAdmin() {
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+            <div className="text-sm font-semibold text-brand-navy">Green Button test upload for current context</div>
+            <p className="mt-1 text-xs text-slate-600">
+              Upload a Green Button XML/CSV file onto the current actual context house so One Path can keep that
+              house's home details but use the uploaded file as interval usage for INTERVAL runs.
+            </p>
+            <div className="mt-4 grid gap-4 lg:grid-cols-4">
+              <label className="text-sm text-slate-700 lg:col-span-2">
+                <div className="font-semibold text-brand-navy">Green Button file</div>
+                <input
+                  key={greenButtonUploadInputKey}
+                  type="file"
+                  accept=".xml,.csv,text/xml,text/csv,application/xml"
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                  onChange={(event) => setGreenButtonSelectedFile(event.target.files?.[0] ?? null)}
+                />
+                <div className="mt-1 text-xs text-slate-500">
+                  Target house: {effectiveActualContextHouseId || "Select an actual context house first"}
+                </div>
+              </label>
+              <label className="text-sm text-slate-700">
+                <div className="font-semibold text-brand-navy">Utility name</div>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  value={greenButtonUtilityName}
+                  onChange={(event) => setGreenButtonUtilityName(event.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                <div className="font-semibold text-brand-navy">Account number</div>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  value={greenButtonAccountNumber}
+                  onChange={(event) => setGreenButtonAccountNumber(event.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void uploadGreenButtonToContextHouse()}
+                disabled={greenButtonUploadBusy || !lookup?.userId || !effectiveActualContextHouseId || !greenButtonSelectedFile}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {greenButtonUploadBusy ? "Uploading..." : "Upload to current context house"}
+              </button>
+              <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={preferUploadedGreenButton}
+                  onChange={(event) => setPreferUploadedGreenButton(event.target.checked)}
+                  disabled={!uploadedGreenButtonHouseId || uploadedGreenButtonHouseId !== effectiveActualContextHouseId}
+                />
+                Prefer uploaded Green Button for INTERVAL usage
+              </label>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {shouldPreferUploadedGreenButton
+                ? "Current INTERVAL runs will prefer Green Button usage for this context house."
+                : uploadedGreenButtonHouseId && uploadedGreenButtonHouseId !== effectiveActualContextHouseId
+                  ? "The last uploaded Green Button file belongs to a different context house."
+                  : "INTERVAL runs still follow the normal SMT vs Green Button chooser until the uploaded-file preference is enabled."}
+            </div>
+            {greenButtonUploadStatus ? (
+              <div className="mt-3 rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-800">{greenButtonUploadStatus}</div>
+            ) : null}
+            {greenButtonUploadError ? (
+              <div className="mt-3 rounded-lg bg-rose-100 px-3 py-2 text-sm text-rose-700">{greenButtonUploadError}</div>
+            ) : null}
           </div>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">

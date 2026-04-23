@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { monthsEndingAt } from "@/lib/time/chicago";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   attachOnePathRunIdentityToEffectiveSimulationVariablesUsed,
@@ -179,6 +180,7 @@ export type IntervalRawInput = {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   scenarioId?: string | null;
   weatherPreference?: CanonicalSimulationEngineInput["weatherPreference"];
   validationSelectionMode?: string | null;
@@ -852,12 +854,14 @@ async function loadSharedContext(args: {
   seedUsageTruthIfMissing?: boolean;
   allowMissingUsageTruth?: boolean;
   weatherScoringMode?: "interval" | "manual";
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
 }): Promise<LoadedSharedContext> {
   const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
     seedIfMissing: args.seedUsageTruthIfMissing === true,
+    preferredActualSource: args.preferredActualSource ?? null,
   });
   if (!upstreamUsageTruth.dataset && args.allowMissingUsageTruth !== true) {
     throw new UpstreamUsageTruthMissingError({
@@ -911,6 +915,7 @@ function buildCanonicalEngineInput(args: {
   validationOnlyDateKeysLocal?: string[];
   travelRanges?: Array<{ startDate: string; endDate: string }>;
   persistRequested?: boolean;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   loaded: LoadedSharedContext;
   runtimeUserId: string;
 }): CanonicalSimulationEngineInput {
@@ -940,7 +945,21 @@ function buildCanonicalEngineInput(args: {
   );
   const weatherPreference = args.weatherPreference;
   const weatherLogicMode = deriveWeatherLogicMode(weatherPreference);
+  const actualSummaryStart =
+    typeof args.loaded.actualDataset?.summary?.start === "string" ? String(args.loaded.actualDataset.summary.start).slice(0, 10) : null;
+  const actualSummaryEnd =
+    typeof args.loaded.actualDataset?.summary?.end === "string" ? String(args.loaded.actualDataset.summary.end).slice(0, 10) : null;
+  const usesGreenButtonAnchorWindow =
+    args.inputType === "INTERVAL" &&
+    actualMeta.actualSource === "GREEN_BUTTON" &&
+    !!actualSummaryStart &&
+    !!actualSummaryEnd &&
+    /^\d{4}-\d{2}-\d{2}$/.test(actualSummaryStart) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(actualSummaryEnd);
   const anchorEndDate =
+    usesGreenButtonAnchorWindow && actualSummaryEnd
+      ? actualSummaryEnd
+      :
     typeof (manualUsagePayload as any)?.anchorEndDate === "string"
       ? String((manualUsagePayload as any).anchorEndDate).slice(0, 10)
       : null;
@@ -965,11 +984,19 @@ function buildCanonicalEngineInput(args: {
     actualContextHouseId: args.loaded.actualContextHouseId,
     scenarioId: args.scenarioId,
     timezone: String(actualMeta.timezone ?? "America/Chicago"),
-    coverageWindowStart: coverageWindow.startDate,
-    coverageWindowEnd: coverageWindow.endDate,
-    canonicalMonths: Array.isArray(actualMeta.canonicalMonths) ? (actualMeta.canonicalMonths as string[]) : [],
+    coverageWindowStart: usesGreenButtonAnchorWindow && actualSummaryStart ? actualSummaryStart : coverageWindow.startDate,
+    coverageWindowEnd: usesGreenButtonAnchorWindow && actualSummaryEnd ? actualSummaryEnd : coverageWindow.endDate,
+    canonicalMonths: Array.isArray(actualMeta.canonicalMonths)
+      ? (actualMeta.canonicalMonths as string[])
+      : usesGreenButtonAnchorWindow && actualSummaryEnd
+        ? monthsEndingAt(actualSummaryEnd.slice(0, 7), 12)
+        : [],
     canonicalEndMonth:
-      typeof actualMeta.canonicalEndMonth === "string" ? String(actualMeta.canonicalEndMonth) : coverageWindow.endDate.slice(0, 7),
+      typeof actualMeta.canonicalEndMonth === "string"
+        ? String(actualMeta.canonicalEndMonth)
+        : usesGreenButtonAnchorWindow && actualSummaryEnd
+          ? actualSummaryEnd.slice(0, 7)
+          : coverageWindow.endDate.slice(0, 7),
     anchorEndDate,
     billEndDay,
     statementRanges,
@@ -1040,6 +1067,7 @@ function buildCanonicalEngineInput(args: {
       validationDayCount: args.validationDayCount ?? null,
       runContext: {
         callerLabel: "one_path_sim_admin",
+        ...(args.preferredActualSource ? { preferredActualSource: args.preferredActualSource } : {}),
       },
     },
   };
@@ -1052,6 +1080,7 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     actualContextHouseId: raw.actualContextHouseId,
     seedUsageTruthIfMissing: true,
     weatherScoringMode: "interval",
+    preferredActualSource: raw.preferredActualSource ?? null,
   });
   return buildCanonicalEngineInput({
     inputType: "INTERVAL",
@@ -1080,6 +1109,7 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     seedUsageTruthIfMissing: false,
     allowMissingUsageTruth: true,
     weatherScoringMode: "manual",
+    preferredActualSource: raw.preferredActualSource ?? null,
   });
   return buildCanonicalEngineInput({
     inputType: "MANUAL_MONTHLY",
@@ -1108,6 +1138,7 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     seedUsageTruthIfMissing: false,
     allowMissingUsageTruth: true,
     weatherScoringMode: "manual",
+    preferredActualSource: raw.preferredActualSource ?? null,
   });
   return buildCanonicalEngineInput({
     inputType: "MANUAL_ANNUAL",
@@ -1130,6 +1161,7 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
     actualContextHouseId: raw.actualContextHouseId,
     seedUsageTruthIfMissing: true,
     weatherScoringMode: "interval",
+    preferredActualSource: raw.preferredActualSource ?? null,
   });
   return buildCanonicalEngineInput({
     inputType: "NEW_BUILD",
@@ -1192,6 +1224,7 @@ async function buildArtifactFromEngineInput(args: {
         houseId: args.engineInput.houseId,
         actualContextHouseId: args.engineInput.actualContextHouseId,
         seedIfMissing: false,
+        preferredActualSource: args.engineInput.runtime.runContext?.preferredActualSource ?? null,
       }).catch(() => null)
     )?.dataset ?? null;
   const compareProjection = buildOnePathValidationCompareProjectionSidecar(datasetRead.dataset);

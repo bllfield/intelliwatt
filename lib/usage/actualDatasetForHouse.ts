@@ -11,7 +11,7 @@ import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEs
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
-import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
+import { chooseActualSource, type ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -583,7 +583,13 @@ async function getSmtWindow(esiid: string) {
   return { cutoff, end };
 }
 
-function chooseDataset(smt: UsageDatasetResult | null, greenButton: UsageDatasetResult | null): UsageDatasetResult | null {
+function chooseDataset(
+  smt: UsageDatasetResult | null,
+  greenButton: UsageDatasetResult | null,
+  preferredSource?: ActualUsageSource | null
+): UsageDatasetResult | null {
+  if (preferredSource === "SMT" && smt) return smt;
+  if (preferredSource === "GREEN_BUTTON" && greenButton) return greenButton;
   const latestMs = (d: UsageDatasetResult | null): number => {
     if (!d?.summary?.latest) return 0;
     const t = new Date(d.summary.latest).getTime();
@@ -736,6 +742,7 @@ export async function getActualDailyKwhForLocalDateKeys(args: {
   houseId: string;
   esiid: string | null;
   dateKeysLocal: string[];
+  preferredSource?: ActualUsageSource | null;
 }): Promise<Map<string, number>> {
   const keys = Array.from(
     new Set(
@@ -746,7 +753,11 @@ export async function getActualDailyKwhForLocalDateKeys(args: {
   ).sort();
   if (keys.length === 0) return new Map();
 
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid ?? null });
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid ?? null,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return new Map();
 
   if (source === "SMT") {
@@ -820,7 +831,13 @@ export async function getActualDailyKwhForLocalDateKeys(args: {
 export async function getActualUsageDatasetForHouse(
   houseId: string,
   esiid: string | null,
-  args?: { cutoff?: Date; excludedDateKeys?: Set<string>; /** When true, skip full-year getActualIntervalsForRange (e.g. lab only needs window). Production never passes this. */ skipFullYearIntervalFetch?: boolean }
+  args?: {
+    cutoff?: Date;
+    excludedDateKeys?: Set<string>;
+    preferredSource?: ActualUsageSource | null;
+    /** When true, skip full-year getActualIntervalsForRange (e.g. lab only needs window). Production never passes this. */
+    skipFullYearIntervalFetch?: boolean;
+  }
 ): Promise<{
   dataset: ActualHouseDataset | null;
   alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null };
@@ -839,7 +856,7 @@ export async function getActualUsageDatasetForHouse(
   } catch {
     greenDataset = null;
   }
-  const selected = chooseDataset(smtDataset, greenDataset);
+  const selected = chooseDataset(smtDataset, greenDataset, args?.preferredSource ?? null);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const canonicalCutoff = new Date(canonicalWindow.startDate + "T00:00:00.000Z");
   const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
@@ -916,6 +933,7 @@ export async function getActualUsageDatasetForHouse(
           esiid,
           startDate: rangeStart,
           endDate: rangeEnd,
+          preferredSource: args?.preferredSource ?? null,
         });
         baseloadFiltered = computeNormalLifeBaseloadKw(
           intervalRows.map((r) => ({ tsIso: String(r.timestamp ?? ""), kwh: Number(r.kwh) || 0 })),
@@ -1057,13 +1075,18 @@ export async function getActualIntervalsForRangeWithSource(args: {
   esiid: string | null;
   startDate: string;
   endDate: string;
+  preferredSource?: ActualUsageSource | null;
 }): Promise<{ source: "SMT" | "GREEN_BUTTON" | null; intervals: ActualIntervalPoint[] }> {
   const start = new Date(args.startDate + "T00:00:00.000Z");
   const end = new Date(args.endDate + "T23:59:59.999Z");
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
     return { source: null, intervals: [] };
   }
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return { source: null, intervals: [] };
   if (source === "SMT") {
     if (!args.esiid) return { source: "SMT", intervals: [] };
@@ -1118,6 +1141,7 @@ export async function getActualIntervalsForRange(args: {
   esiid: string | null;
   startDate: string;
   endDate: string;
+  preferredSource?: ActualUsageSource | null;
 }): Promise<ActualIntervalPoint[]> {
   const out = await getActualIntervalsForRangeWithSource(args);
   return out.intervals;
@@ -1133,13 +1157,18 @@ export async function getIntervalDataFingerprint(args: {
   esiid: string | null;
   startDate: string;
   endDate: string;
+  preferredSource?: ActualUsageSource | null;
 }): Promise<string> {
   const start = new Date(args.startDate + "T00:00:00.000Z");
   const end = new Date(args.endDate + "T23:59:59.999Z");
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
     return "";
   }
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return "";
   try {
     if (source === "SMT") {

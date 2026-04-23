@@ -258,7 +258,7 @@ export function buildOnePathRunReadOnlyView(args: {
       coverageStart: viewModel.coverage.start,
       coverageEnd: viewModel.coverage.end,
       displayWindowNote:
-        typeof meta.manualDisplayWindowNote === "string" && meta.manualDisplayWindowNote.trim().length > 0
+        typeof meta?.manualDisplayWindowNote === "string" && meta.manualDisplayWindowNote.trim().length > 0
           ? meta.manualDisplayWindowNote
           : null,
       intervalsCount: viewModel.coverage.intervalsCount,

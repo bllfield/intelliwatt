@@ -2,6 +2,7 @@ import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse
 import type { ActualHouseDataset, UsageSummary } from "@/lib/usage/actualDatasetForHouse";
 import { getIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
+import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 
 type SimulatedUsageSummary = Omit<ActualHouseDataset["summary"], "source"> & {
   source: "SIMULATED";
@@ -83,12 +84,15 @@ export async function resolveIntervalsLayer(args: {
   layerKind: IntervalSeriesKind;
   scenarioId?: string | null;
   esiid?: string | null;
+  preferredActualSource?: ActualUsageSource | null;
 }): Promise<ResolveIntervalsLayerResult | null> {
   if (
     args.layerKind === IntervalSeriesKind.ACTUAL_USAGE_INTERVALS ||
     args.layerKind === IntervalSeriesKind.BASELINE_INTERVALS
   ) {
-    return getActualUsageDatasetForHouse(args.houseId, args.esiid ?? null);
+    return getActualUsageDatasetForHouse(args.houseId, args.esiid ?? null, {
+      preferredSource: args.preferredActualSource ?? null,
+    });
   }
 
   if (args.layerKind === IntervalSeriesKind.PAST_SIM_BASELINE) {

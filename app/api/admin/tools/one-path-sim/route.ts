@@ -376,6 +376,10 @@ export async function POST(request: NextRequest) {
         typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
           ? body.actualContextHouseId.trim()
           : resolved.selectedHouse.id,
+      preferredActualSource:
+        body?.preferredActualSource === "SMT" || body?.preferredActualSource === "GREEN_BUTTON"
+          ? body.preferredActualSource
+          : null,
       scenarioId: typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null,
       weatherPreference:
         body?.weatherPreference === "NONE" || body?.weatherPreference === "LONG_TERM_AVERAGE"
@@ -513,6 +517,7 @@ export async function POST(request: NextRequest) {
                 houseId: resolved.selectedHouse.id,
                 actualContextHouseId: rawInputBase.actualContextHouseId,
                 seedIfMissing: false,
+                preferredActualSource: rawInputBase.preferredActualSource,
               }).catch(() => null)
             )?.dataset ?? null
           : null;

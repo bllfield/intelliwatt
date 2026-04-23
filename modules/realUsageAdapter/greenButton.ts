@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -80,6 +81,34 @@ export async function getLatestGreenButtonIntervalTimestamp(args: { houseId: str
       select: { timestamp: true },
     });
     return latest?.timestamp ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string }): Promise<string | null> {
+  if (!USAGE_DB_ENABLED) return null;
+  const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
+  if (!rawId) return null;
+  try {
+    const usageClient = usagePrisma as any;
+    const rows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        date_trunc('day', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
+        COUNT(*)::int AS intervalscount
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${args.houseId}
+        AND "rawId" = ${rawId}
+      GROUP BY bucket
+      ORDER BY bucket DESC
+      LIMIT 35
+    `)) as Array<{ bucket: Date; intervalscount: number }>;
+    for (const row of rows) {
+      const dateKey = chicagoDateKeyFromBucket(row.bucket);
+      const expectedIntervals = expectedIntervalsForDateISO(dateKey);
+      if ((Number(row.intervalscount) || 0) >= expectedIntervals) return dateKey;
+    }
+    return null;
   } catch {
     return null;
   }

@@ -7,9 +7,9 @@ import {
 } from "@/modules/realUsageAdapter/smt";
 import {
   fetchGreenButtonCanonicalDailyTotals,
+  getLatestGreenButtonFullDayDateKey,
   fetchGreenButtonCanonicalMonthlyTotals,
   fetchGreenButtonIntradayShape96,
-  getLatestGreenButtonIntervalTimestamp,
   hasGreenButtonIntervals,
 } from "@/modules/realUsageAdapter/greenButton";
 import { dateTimePartsInTimezone } from "@/lib/time/chicago";
@@ -40,30 +40,41 @@ export async function resolveActualUsageSourceAnchor(args: {
   houseId: string;
   esiid: string | null;
   timezone?: string | null;
+  preferredSource?: ActualUsageSource | null;
 }): Promise<ActualUsageSourceAnchor> {
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
-  const [smtLatest, gbLatest] = await Promise.all([
+  const [smtLatest, gbAnchorDateKey] = await Promise.all([
     getLatestSmtIntervalTimestamp(args.esiid),
-    getLatestGreenButtonIntervalTimestamp({ houseId: args.houseId }),
+    getLatestGreenButtonFullDayDateKey({ houseId: args.houseId }),
   ]);
   const smtMs = smtLatest ? smtLatest.getTime() : 0;
-  const gbMs = gbLatest ? gbLatest.getTime() : 0;
+  const gbMs =
+    typeof gbAnchorDateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(gbAnchorDateKey)
+      ? new Date(`${gbAnchorDateKey}T12:00:00.000Z`).getTime()
+      : 0;
   let source: ActualUsageSource | null = null;
-  if (smtMs === 0 && gbMs === 0) source = null;
+  if (args.preferredSource === "SMT" && smtMs > 0) source = "SMT";
+  else if (args.preferredSource === "GREEN_BUTTON" && gbMs > 0) source = "GREEN_BUTTON";
+  else if (smtMs === 0 && gbMs === 0) source = null;
   else if (smtMs === gbMs) source = smtMs ? "SMT" : "GREEN_BUTTON";
   else source = smtMs > gbMs ? "SMT" : "GREEN_BUTTON";
 
   const smtAnchorEndDate = toAnchorDateKey(smtLatest, timezone);
-  const greenButtonAnchorEndDate = toAnchorDateKey(gbLatest, timezone);
+  const greenButtonAnchorEndDate = gbAnchorDateKey;
   const anchorEndDate = source === "SMT" ? smtAnchorEndDate : source === "GREEN_BUTTON" ? greenButtonAnchorEndDate : null;
   return { source, anchorEndDate, smtAnchorEndDate, greenButtonAnchorEndDate };
 }
 
-export async function chooseActualSource(args: { houseId: string; esiid: string | null }): Promise<ActualUsageSource | null> {
+export async function chooseActualSource(args: {
+  houseId: string;
+  esiid: string | null;
+  preferredSource?: ActualUsageSource | null;
+}): Promise<ActualUsageSource | null> {
   const resolved = await resolveActualUsageSourceAnchor({
     houseId: args.houseId,
     esiid: args.esiid,
     timezone: "America/Chicago",
+    preferredSource: args.preferredSource ?? null,
   });
   return resolved.source;
 }

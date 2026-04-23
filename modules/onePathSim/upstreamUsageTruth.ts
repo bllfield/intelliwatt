@@ -215,6 +215,7 @@ async function readPersistedUsageTruth(args: {
   userId: string;
   houseId: string;
   esiid: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
 }) {
   return (
     (await resolveIntervalsLayer({
@@ -223,6 +224,7 @@ async function readPersistedUsageTruth(args: {
       layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
       scenarioId: null,
       esiid: args.esiid,
+      preferredActualSource: args.preferredActualSource ?? null,
     }).catch(() => null)) ?? { dataset: null, alternatives: { smt: null, greenButton: null } }
   );
 }
@@ -232,6 +234,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   houseId: string;
   actualContextHouseId?: string | null;
   seedIfMissing: boolean;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
 }): Promise<UpstreamUsageTruthResult> {
   const selectedHouse = await loadHouseForUser({
     userId: args.userId,
@@ -255,6 +258,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     userId: args.userId,
     houseId: actualContextHouse.id,
     esiid: actualContextHouse.esiid,
+    preferredActualSource: args.preferredActualSource ?? null,
   });
   if (resolved?.dataset) {
     if (args.seedIfMissing) {
@@ -353,6 +357,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     userId: args.userId,
     houseId: actualContextHouse.id,
     esiid: actualContextHouse.esiid,
+    preferredActualSource: args.preferredActualSource ?? null,
   });
 
   const usageTruthSource: UpstreamUsageTruthSource = resolved?.dataset
