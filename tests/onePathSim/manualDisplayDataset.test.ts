@@ -13,6 +13,11 @@ describe("manual display dataset remap", () => {
       meta: {
         weatherNote: "Weather integrated in shared past path (actual_only).",
       },
+      totals: {
+        importKwh: 18,
+        exportKwh: 0,
+        netKwh: 18,
+      },
       monthly: [{ month: "2025-03", kwh: 18 }],
       daily: [
         { date: "2025-03-17", kwh: 5, source: "SIMULATED" },
@@ -26,10 +31,10 @@ describe("manual display dataset remap", () => {
       },
       series: {
         intervals15: [
-          { timestamp: "2025-03-17T00:00:00.000Z", consumption_kwh: 1.25 },
-          { timestamp: "2025-03-17T00:15:00.000Z", consumption_kwh: 3.75 },
-          { timestamp: "2025-03-18T00:00:00.000Z", consumption_kwh: 6 },
-          { timestamp: "2025-03-19T00:00:00.000Z", consumption_kwh: 7 },
+          { timestamp: "2025-03-17T00:00:00.000Z", kwh: 1.25 },
+          { timestamp: "2025-03-17T00:15:00.000Z", kwh: 3.75 },
+          { timestamp: "2025-03-18T00:00:00.000Z", kwh: 6 },
+          { timestamp: "2025-03-19T00:00:00.000Z", kwh: 7 },
         ],
       },
     };
@@ -52,6 +57,11 @@ describe("manual display dataset remap", () => {
     ]);
     expect(out.monthly).toHaveLength(12);
     expect(out.monthly[out.monthly.length - 1]).toEqual({ month: "2026-04", kwh: 18 });
+    expect(out.totals).toEqual({
+      importKwh: 18,
+      exportKwh: 0,
+      netKwh: 18,
+    });
     expect(String(out.meta.manualDisplayWindowNote ?? "")).toContain("post-anchor");
     expect(String(out.meta.weatherNote ?? "")).toContain("standard customer view");
   });

@@ -1251,6 +1251,10 @@ async function buildArtifactFromEngineInput(args: {
             typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
               ? String((datasetRead.dataset as any).meta.engineVersion)
               : null,
+          manualUsagePayload:
+            args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
+              ? buildManualPayloadFromEngineInput(args.engineInput)
+              : null,
           actualDataset,
         })
       : null;

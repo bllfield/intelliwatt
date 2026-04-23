@@ -95,7 +95,13 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
         timestamp: remapDatePrefix(String(row?.timestamp ?? ""), dateMap),
       }))
     : dataset?.series?.daily;
-  const monthlyBuild = buildDisplayMonthlyFromIntervalsUtc(remappedIntervals15, displayEnd);
+  const monthlyBuild = buildDisplayMonthlyFromIntervalsUtc(
+    remappedIntervals15.map((row: any) => ({
+      timestamp: String(row?.timestamp ?? ""),
+      consumption_kwh: Number(row?.consumption_kwh ?? row?.kwh ?? 0) || 0,
+    })),
+    displayEnd
+  );
   const remappedDailyWeather =
     dataset?.dailyWeather && typeof dataset.dailyWeather === "object"
       ? Object.fromEntries(
@@ -141,6 +147,18 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
     monthly: monthlyBuild.monthly,
     daily: remappedDaily,
     dailyWeather: remappedDailyWeather,
+    totals: {
+      ...(dataset?.totals ?? {}),
+      importKwh:
+        typeof dataset?.totals?.importKwh === "number"
+          ? dataset.totals.importKwh
+          : monthlyBuild.monthly.reduce((sum, row) => sum + (Number(row?.kwh) || 0), 0),
+      exportKwh: typeof dataset?.totals?.exportKwh === "number" ? dataset.totals.exportKwh : 0,
+      netKwh:
+        typeof dataset?.totals?.netKwh === "number"
+          ? dataset.totals.netKwh
+          : monthlyBuild.monthly.reduce((sum, row) => sum + (Number(row?.kwh) || 0), 0),
+    },
     insights: {
       ...(dataset?.insights ?? {}),
       stitchedMonth: monthlyBuild.stitchedMonth,
