@@ -33,6 +33,8 @@ describe("one path green button anchor wiring", () => {
     expect(onePathSource).toContain("actualMeta.actualSource === \"GREEN_BUTTON\"");
     expect(actualDatasetSource).toContain("getLatestGreenButtonFullDayDateKey");
     expect(actualDatasetSource).toContain("const greenButtonAnchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId });");
-    expect(actualDatasetSource).toContain("const anchoredMonths = monthsEndingAt(endMonth, 12);");
+    expect(actualDatasetSource).toContain("const cutoff = new Date(anchorEnd.getTime() - 364 * DAY_MS);");
+    expect(actualDatasetSource).toContain("const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);");
+    expect(actualDatasetSource).toContain("const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;");
   });
 });

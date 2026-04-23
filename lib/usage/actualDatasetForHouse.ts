@@ -13,7 +13,6 @@ import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource, type ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
-import { monthsEndingAt } from "@/modules/onePathSim/manualAnchor";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,25 +34,13 @@ function chicagoDateKey(d: Date): string {
   }
 }
 
-function parseYearMonth(ym: string): { year: number; month1: number } | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month1 = Number(m[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month1) || month1 < 1 || month1 > 12) return null;
-  return { year, month1 };
-}
-
-function utcRangeWithChicagoBuffer(months: string[]): { start: Date; endExclusive: Date } {
-  const first = parseYearMonth(months[0] ?? "");
-  const last = parseYearMonth(months[months.length - 1] ?? "");
-  if (!first || !last) {
-    const now = new Date();
-    return { start: new Date(now.getTime() - 370 * DAY_MS), endExclusive: new Date(now.getTime() + DAY_MS) };
-  }
-  const start = new Date(Date.UTC(first.year, first.month1 - 1, 1, 0, 0, 0, 0) - DAY_MS);
-  const endExclusive = new Date(Date.UTC(last.year, last.month1, 1, 0, 0, 0, 0) + 2 * DAY_MS);
-  return { start, endExclusive };
+function normalizeDateKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parsed = new Date(trimmed);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return chicagoDateKey(parsed);
 }
 
 export type UsageSeriesPoint = { timestamp: string; kwh: number };
@@ -581,31 +568,20 @@ export async function getBaseloadFromActualExcludingDates(args: {
 }
 
 async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: string) {
-  const { startDate, endDate } = resolveCanonicalUsage365CoverageWindow();
-  const cutoff = new Date(startDate + "T00:00:00.000Z");
-  const end = new Date(endDate + "T23:59:59.999Z");
-  const hasRows = await usageClient.greenButtonInterval.findFirst({
-    where: { homeId: houseId, rawId, timestamp: { gte: cutoff, lte: end } },
-    orderBy: { timestamp: "desc" },
-    select: { timestamp: true },
-  });
-  if (hasRows?.timestamp) return { cutoff, end };
-
   const greenButtonAnchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId });
   if (typeof greenButtonAnchorEndDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(greenButtonAnchorEndDate)) {
     return null;
   }
-  const endMonth = greenButtonAnchorEndDate.slice(0, 7);
-  const anchoredMonths = monthsEndingAt(endMonth, 12);
-  const anchoredRange = utcRangeWithChicagoBuffer(anchoredMonths);
-  const anchoredEnd = new Date(anchoredRange.endExclusive.getTime() - 1);
+  const anchorEnd = new Date(`${greenButtonAnchorEndDate}T23:59:59.999Z`);
+  if (!Number.isFinite(anchorEnd.getTime())) return null;
+  const cutoff = new Date(anchorEnd.getTime() - 364 * DAY_MS);
   const anchoredRows = await usageClient.greenButtonInterval.findFirst({
-    where: { homeId: houseId, rawId, timestamp: { gte: anchoredRange.start, lte: anchoredEnd } },
+    where: { homeId: houseId, rawId, timestamp: { gte: cutoff, lte: anchorEnd } },
     orderBy: { timestamp: "desc" },
     select: { timestamp: true },
   });
   if (!anchoredRows?.timestamp) return null;
-  return { cutoff: anchoredRange.start, end: anchoredEnd };
+  return { cutoff, end: anchorEnd };
 }
 
 async function getSmtWindow(esiid: string) {
@@ -898,6 +874,8 @@ export async function getActualUsageDatasetForHouse(
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const canonicalCutoff = new Date(canonicalWindow.startDate + "T00:00:00.000Z");
   const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
+  const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);
+  const selectedWindowEndDate = normalizeDateKey(selected?.summary?.end ?? null);
 
   let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
   let stitchedMonthMeta: unknown = null;
@@ -951,8 +929,10 @@ export async function getActualUsageDatasetForHouse(
       const cutoff =
         args?.cutoff && Number.isFinite(args.cutoff.getTime())
           ? new Date(args.cutoff.getTime())
-          : canonicalCutoff;
-      const end = canonicalEnd;
+          : selectedWindowStartDate
+            ? new Date(`${selectedWindowStartDate}T00:00:00.000Z`)
+            : canonicalCutoff;
+      const end = selectedWindowEndDate ? new Date(`${selectedWindowEndDate}T23:59:59.999Z`) : canonicalEnd;
       let rawId: string | null = null;
       if (selected.summary.source === "GREEN_BUTTON") {
         const usageClient = usagePrisma as any;
@@ -960,8 +940,8 @@ export async function getActualUsageDatasetForHouse(
         rawId = latestRaw?.id ?? null;
       }
       const computed = await computeInsightsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff, end });
-      const rangeStart = canonicalWindow.startDate;
-      const rangeEnd = canonicalWindow.endDate;
+      const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
+      const rangeEnd = selectedWindowEndDate ?? canonicalWindow.endDate;
       let baseload: number | null = computed.baseload;
       let baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = "SQL_P10_V1";
       let baseloadFiltered: { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null };
