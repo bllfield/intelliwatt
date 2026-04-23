@@ -184,7 +184,7 @@ export function buildOnePathRunReadOnlyView(args: {
   const sharedDiagnostics = asRecord(readModel.sharedDiagnostics) ?? {};
   const datasetInsights = asRecord(dataset.insights) ?? {};
   const manualDisplayWindowStitch =
-    meta.manualDisplayWindowStitch &&
+    meta?.manualDisplayWindowStitch &&
     typeof meta.manualDisplayWindowStitch === "object" &&
     !Array.isArray(meta.manualDisplayWindowStitch)
       ? (meta.manualDisplayWindowStitch as Record<string, unknown>)

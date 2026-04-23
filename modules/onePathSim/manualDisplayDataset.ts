@@ -160,7 +160,9 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
     displayStart,
     displayEnd,
   });
-  const remappedTotalKwh = round2(remappedIntervalRows.reduce((sum, row) => sum + (Number(row?.consumption_kwh) || 0), 0));
+  const remappedTotalKwh = round2(
+    remappedIntervalRows.reduce((sum: number, row: { consumption_kwh: number }) => sum + (Number(row.consumption_kwh) || 0), 0)
+  );
   const remappedDailyWeather =
     dataset?.dailyWeather && typeof dataset.dailyWeather === "object"
       ? Object.fromEntries(
