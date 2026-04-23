@@ -12,7 +12,10 @@ import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
 import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource, type ActualUsageSource } from "@/modules/realUsageAdapter/actual";
-import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
+import {
+  getLatestGreenButtonFullDayDateKey,
+  getLatestUsableRawGreenButtonIdForHouse,
+} from "@/modules/realUsageAdapter/greenButton";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -539,12 +542,7 @@ export async function getBaseloadFromActualExcludingDates(args: {
     const usageClient = usagePrisma as any;
     const houseId = String(args.houseId ?? "").trim();
     if (!houseId) return null;
-    const latestRaw = await usageClient.rawGreenButton.findFirst({
-      where: { homeId: houseId },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    const rawId = latestRaw?.id ?? null;
+    const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
     if (!rawId) return null;
     const dateFilter =
       excludeDateKeys.length === 0
@@ -686,12 +684,12 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
   if (!USAGE_DB_ENABLED) return null;
   try {
     const usageClient = usagePrisma as any;
-    const latestRaw = await usageClient.rawGreenButton.findFirst({ where: { homeId: houseId }, orderBy: { createdAt: "desc" }, select: { id: true } });
-    if (!latestRaw) return null;
-    const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
+    const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+    if (!rawId) return null;
+    const window = await getGreenButtonWindow(usageClient, houseId, rawId);
     if (!window) return null;
     const aggregates = await usageClient.greenButtonInterval.aggregate({
-      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff, lte: window.end } },
+      where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
       _count: { _all: true },
       _sum: { consumptionKwh: true },
       _min: { timestamp: true },
@@ -703,32 +701,32 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     const start = aggregates._min?.timestamp ?? null;
     const end = aggregates._max?.timestamp ?? null;
     const recentIntervals = (await usageClient.greenButtonInterval.findMany({
-      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff, lte: window.end } },
+      where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
       orderBy: { timestamp: "desc" },
       take: 192,
     })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
     const intervals15 = recentIntervals.map((row) => ({ timestamp: row.timestamp.toISOString(), kwh: decimalToNumber(row.consumptionKwh) })).reverse();
     const hourlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('hour', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end} AND "timestamp" >= NOW() - INTERVAL '14 days'
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end} AND "timestamp" >= NOW() - INTERVAL '14 days'
       GROUP BY bucket ORDER BY bucket ASC
     `);
     const hourlyRows = hourlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket DESC LIMIT 400
     `);
     const dailyRows = dailyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const monthlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('month', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket DESC LIMIT 120
     `);
     const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const annualRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('year', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${latestRaw.id} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
+      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket ASC
     `);
     const annualRows = annualRowsRaw as Array<{ bucket: Date; kwh: number }>;
@@ -809,12 +807,8 @@ export async function getActualDailyKwhForLocalDateKeys(args: {
   if (!USAGE_DB_ENABLED) return new Map();
   try {
     const usageClient = usagePrisma as any;
-    const latestRaw = await usageClient.rawGreenButton.findFirst({
-      where: { homeId: args.houseId },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    if (!latestRaw?.id) return new Map();
+    const rawId = await getLatestUsableRawGreenButtonIdForHouse(args.houseId);
+    if (!rawId) return new Map();
     const dateInList = Prisma.join(
       keys.map((d) => Prisma.sql`${d}`),
       ", "
@@ -823,7 +817,7 @@ export async function getActualDailyKwhForLocalDateKeys(args: {
       SELECT to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
              SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
+      WHERE "homeId" = ${args.houseId} AND "rawId" = ${rawId}
         AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') IN (${dateInList})
       GROUP BY 1
       ORDER BY 1 ASC
@@ -935,9 +929,7 @@ export async function getActualUsageDatasetForHouse(
       const end = selectedWindowEndDate ? new Date(`${selectedWindowEndDate}T23:59:59.999Z`) : canonicalEnd;
       let rawId: string | null = null;
       if (selected.summary.source === "GREEN_BUTTON") {
-        const usageClient = usagePrisma as any;
-        const latestRaw = await usageClient.rawGreenButton.findFirst({ where: { homeId: houseId }, orderBy: { createdAt: "desc" }, select: { id: true } });
-        rawId = latestRaw?.id ?? null;
+        rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
       }
       const computed = await computeInsightsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff, end });
       const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
@@ -1129,16 +1121,12 @@ export async function getActualIntervalsForRangeWithSource(args: {
   if (!USAGE_DB_ENABLED) return { source: "GREEN_BUTTON", intervals: [] };
   try {
     const usageClient = usagePrisma as any;
-    const latestRaw = await usageClient.rawGreenButton.findFirst({
-      where: { homeId: args.houseId },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    if (!latestRaw?.id) return { source: "GREEN_BUTTON", intervals: [] };
+    const rawId = await getLatestUsableRawGreenButtonIdForHouse(args.houseId);
+    if (!rawId) return { source: "GREEN_BUTTON", intervals: [] };
     const rows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT "timestamp" AS ts, "consumptionKwh"::float AS kwh
       FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
+      WHERE "homeId" = ${args.houseId} AND "rawId" = ${rawId}
         AND "timestamp" >= ${start} AND "timestamp" <= ${end}
       ORDER BY "timestamp" ASC
     `)) as Array<{ ts: Date; kwh: number }>;
@@ -1217,12 +1205,8 @@ export async function getIntervalDataFingerprint(args: {
     }
     if (!USAGE_DB_ENABLED) return "";
     const usageClient = usagePrisma as any;
-    const latestRaw = await usageClient.rawGreenButton.findFirst({
-      where: { homeId: args.houseId },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    if (!latestRaw?.id) return "";
+    const rawId = await getLatestUsableRawGreenButtonIdForHouse(args.houseId);
+    if (!rawId) return "";
     const rows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT
         COUNT(*)::text AS count,
@@ -1234,7 +1218,7 @@ export async function getIntervalDataFingerprint(args: {
           COALESCE(MAX(hashtextextended(to_char("timestamp", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || ':' || to_char("consumptionKwh"::float, 'FM9999999990.000000'), 0)::bigint)::text, '0')
         ) AS value_hash
       FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
+      WHERE "homeId" = ${args.houseId} AND "rawId" = ${rawId}
         AND "timestamp" >= ${start} AND "timestamp" <= ${end}
     `)) as Array<{ count: string; max_ts: Date | null; value_hash: string | null }>;
     const r = rows?.[0];
