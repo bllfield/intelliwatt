@@ -376,6 +376,11 @@ export function OnePathSimAdmin() {
     const contract = lookup?.sourceContext?.userUsageBaselineContract;
     return contract && typeof contract === "object" ? contract : null;
   }, [debugDiagnosticsEnabled, lookup?.sourceContext?.userUsageBaselineContract]);
+  const lookupUserUsageBaselineView = useMemo(() => {
+    if (!debugDiagnosticsEnabled) return null;
+    const view = lookup?.sourceContext?.userUsageBaselineView;
+    return view && typeof view === "object" ? view : null;
+  }, [debugDiagnosticsEnabled, lookup?.sourceContext?.userUsageBaselineView]);
   const lookupBaselineParityAudit = useMemo(
     () => (debugDiagnosticsEnabled ? asRecord(lookup?.sourceContext?.baselineParityAudit) : null),
     [debugDiagnosticsEnabled, lookup?.sourceContext?.baselineParityAudit]
@@ -408,7 +413,7 @@ export function OnePathSimAdmin() {
     Boolean(shouldShowManualStageOneView) && isManualDisplayMode && displayRunType !== "PAST_SIM";
   const shouldRenderPastSimView = displayRunType === "PAST_SIM" && Boolean(runDisplayView || runReadOnlyDataset);
   const shouldRenderLookupBaselineView =
-    !isManualDisplayMode && !shouldRenderPastSimView && Boolean(lookupUserUsageBaselineContract);
+    !isManualDisplayMode && !shouldRenderPastSimView && Boolean(lookupUserUsageBaselineContract || lookupUserUsageBaselineView);
   const activePathLabel =
     mode === "INTERVAL"
       ? "interval calculations"
@@ -1395,6 +1400,7 @@ export function OnePathSimAdmin() {
             </div>
             <OnePathBaselineReadOnlyView
               houseContract={lookupUserUsageBaselineContract as any}
+              view={lookupUserUsageBaselineView as any}
               parityAudit={lookupBaselineParityAudit as any}
               parityReport={lookupBaselineParityReport as any}
             />

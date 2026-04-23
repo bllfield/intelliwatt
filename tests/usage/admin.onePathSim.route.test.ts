@@ -544,6 +544,43 @@ describe("admin one path sim route", () => {
     expect(saveManualUsageInputForUserHouse).not.toHaveBeenCalled();
   });
 
+  it("returns a compact baseline view for green button lookup debug mode", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        actualContextHouseId: "house-1",
+        mode: "GREEN_BUTTON",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      seedIfMissing: false,
+      preferredActualSource: "GREEN_BUTTON",
+    });
+    expect(json.sourceContext.userUsageBaselineContract).toBeNull();
+    expect(json.sourceContext.userUsagePageBaselineContract).toBeNull();
+    expect(json.sourceContext.userUsageBaselineView).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          source: "SMT",
+          intervalsCount: 34823,
+        }),
+        monthlyRows: expect.any(Array),
+        dailyRows: expect.any(Array),
+      })
+    );
+  });
+
   it("uses the selected mode policy and actual context house for lookup weather preview", async () => {
     lookupAdminHousesByEmail.mockResolvedValue({
       ok: true,

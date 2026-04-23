@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { buildOnePathBaselineReadOnlyView } from "@/modules/onePathSim/baselineReadOnlyView";
+import type { OnePathBaselineReadOnlyView as OnePathBaselineReadOnlyViewData } from "@/modules/onePathSim/baselineReadOnlyView";
 import type { OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import type { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
@@ -21,15 +22,18 @@ function MetricCard(props: { label: string; value: string; note?: string }) {
 
 export function OnePathBaselineReadOnlyView(props: {
   houseContract?: UserUsageHouseContract | null;
+  view?: OnePathBaselineReadOnlyViewData | null;
   parityAudit?: OnePathBaselineParityAudit | null;
   parityReport?: ReturnType<typeof buildBaselineParityReport> | null;
 }) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
-  const view = buildOnePathBaselineReadOnlyView({
-    houseContract: props.houseContract ?? null,
-    parityAudit: props.parityAudit ?? null,
-  });
+  const view =
+    props.view ??
+    buildOnePathBaselineReadOnlyView({
+      houseContract: props.houseContract ?? null,
+      parityAudit: props.parityAudit ?? null,
+    });
 
   if (!view) return null;
 

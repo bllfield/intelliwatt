@@ -31,6 +31,7 @@ import {
 } from "@/modules/onePathSim/runtime";
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
+import { buildOnePathBaselineReadOnlyView } from "@/modules/onePathSim/baselineReadOnlyView";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import {
   hasUsableAnnualPayload,
@@ -873,6 +874,11 @@ export async function POST(request: NextRequest) {
     userUsagePageContract: userUsagePageBaselineContract,
     onePathBaselineContract: userUsageBaselineContract,
   });
+  const userUsageBaselineView = buildOnePathBaselineReadOnlyView({
+    houseContract: userUsageBaselineContract,
+    parityAudit: baselineParityAudit,
+  });
+  const compactLookupBaselineResponse = previewMode === "GREEN_BUTTON";
   const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({
     scenario: {
       mode: previewMode,
@@ -897,8 +903,9 @@ export async function POST(request: NextRequest) {
       scenarios: resolved.scenarios,
       sourceContext: {
         ...previewLookupSourceContext,
-        userUsagePageBaselineContract,
-        userUsageBaselineContract,
+        userUsagePageBaselineContract: compactLookupBaselineResponse ? null : userUsagePageBaselineContract,
+        userUsageBaselineContract: compactLookupBaselineResponse ? null : userUsageBaselineContract,
+        userUsageBaselineView: compactLookupBaselineResponse ? userUsageBaselineView : null,
         baselineParityAudit,
         baselineParityReport,
         environmentVisibility,
