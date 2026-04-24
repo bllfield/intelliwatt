@@ -135,11 +135,9 @@ function formatTruthValue(value: unknown): string {
 
 function hasUsableGreenButtonCoverage(upload: Record<string, unknown> | null | undefined): boolean {
   if (!upload) return false;
-  const start = String(upload.dateRangeStart ?? "").trim();
-  const end = String(upload.dateRangeEnd ?? "").trim();
-  if (start && end) return true;
-  const parseStatus = String(upload.parseStatus ?? "").trim().toLowerCase();
-  return parseStatus === "complete" || parseStatus === "complete_with_warnings" || parseStatus === "success";
+  if (upload.hasPersistedUsageIntervals === true) return true;
+  const intervalCount = Number(upload.intervalCount ?? 0);
+  return Number.isFinite(intervalCount) && intervalCount > 0;
 }
 
 function TruthSummaryPanel(props: {
@@ -430,6 +428,10 @@ export function OnePathSimAdmin() {
     () => hasUsableGreenButtonCoverage(actualContextGreenButtonUpload),
     [actualContextGreenButtonUpload]
   );
+  const actualContextHasGreenButtonUploadRecord = useMemo(() => {
+    if (!actualContextGreenButtonUpload) return false;
+    return Boolean(actualContextGreenButtonUpload.id || actualContextGreenButtonUpload.fileName || actualContextGreenButtonUpload.parseStatus);
+  }, [actualContextGreenButtonUpload]);
   const runButtonLabel =
     mode === "INTERVAL"
       ? "Run One Path interval path"
@@ -1100,6 +1102,12 @@ export function OnePathSimAdmin() {
                           {String(actualContextGreenButtonUpload.dateRangeEnd).slice(0, 10)}.
                         </span>
                       ) : null}
+                    </div>
+                  ) : actualContextHasGreenButtonUploadRecord ? (
+                    <div>
+                      A Green Button upload record exists for this actual context house, but persisted usage-backed intervals are
+                      not currently available. This preset will not run until the shared usage pipeline has produced Green Button
+                      truth for this house, or you upload a replacement file here.
                     </div>
                   ) : (
                     <div>No Green Button usage is currently available for this actual context house. Add a file before loading this preset.</div>

@@ -19,6 +19,8 @@ describe("one path green button preset wiring", () => {
     expect(adminSource).toContain("selectedKnownScenario.scenarioType === \"GREEN_BUTTON_TRUTH\"");
     expect(adminSource).toContain("greenButtonSelectedFile");
     expect(adminSource).toContain("The selected file will be uploaded through the usage Green Button pipeline when you load this preset.");
+            expect(adminSource).toContain("upload.hasPersistedUsageIntervals === true");
+            expect(adminSource).toContain("A Green Button upload record exists for this actual context house, but persisted usage-backed intervals are");
     expect(adminSource).not.toContain("/api/admin/green-button/upload");
     expect(adminSource).not.toContain("Prefer uploaded Green Button for INTERVAL usage");
     expect(adminSource).toContain("preferredActualSource: mode === \"GREEN_BUTTON\" ? \"GREEN_BUTTON\" : null");
@@ -27,6 +29,8 @@ describe("one path green button preset wiring", () => {
     expect(lookupRouteSource).toContain("mode === \"GREEN_BUTTON\"");
     expect(lookupRouteSource).toContain("await adaptGreenButtonRawInput(effectiveRawInputBase)");
     expect(lookupRouteSource).toContain("const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);");
+            expect(lookupRouteSource).toContain("hasPersistedUsageIntervals: Boolean(derivedCoverage)");
+            expect(lookupRouteSource).toContain("intervalCount: derivedCoverage?.count ?? 0");
     expect(onePathSource).toContain("export async function adaptGreenButtonRawInput");
     expect(onePathSource).toContain("inputType: \"GREEN_BUTTON\"");
   });

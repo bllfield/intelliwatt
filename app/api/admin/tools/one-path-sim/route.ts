@@ -376,9 +376,10 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
   if (latestUpload) {
     return {
       ...latestUpload,
-      dateRangeStart: latestUpload.dateRangeStart ?? derivedCoverage?.start ?? null,
-      dateRangeEnd: latestUpload.dateRangeEnd ?? derivedCoverage?.end ?? null,
-      intervalCount: derivedCoverage?.count ?? null,
+      dateRangeStart: derivedCoverage?.start ?? latestUpload.dateRangeStart ?? null,
+      dateRangeEnd: derivedCoverage?.end ?? latestUpload.dateRangeEnd ?? null,
+      intervalCount: derivedCoverage?.count ?? 0,
+      hasPersistedUsageIntervals: Boolean(derivedCoverage),
     };
   }
 
@@ -395,6 +396,7 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
     fileName: "derived",
     fileSizeBytes: null,
     intervalCount: derivedCoverage.count,
+    hasPersistedUsageIntervals: true,
   };
 }
 
