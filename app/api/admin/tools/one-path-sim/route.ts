@@ -878,14 +878,17 @@ export async function POST(request: NextRequest) {
     weatherScore: weatherEnvelope.score ?? null,
     weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
   } as const;
-  const userUsagePageBaselineContract = await buildUserUsageHouseContract({
-    userId: resolved.userId,
-    house: {
-      id: resolved.selectedHouse.id,
-      label: resolved.selectedHouse.label ?? null,
-      esiid: resolved.selectedHouse.esiid ?? null,
-    },
-  }).catch(() => null);
+  const compactLookupBaselineResponse = previewMode === "GREEN_BUTTON";
+  const userUsagePageBaselineContract = compactLookupBaselineResponse
+    ? null
+    : await buildUserUsageHouseContract({
+        userId: resolved.userId,
+        house: {
+          id: resolved.selectedHouse.id,
+          label: resolved.selectedHouse.label ?? null,
+          esiid: resolved.selectedHouse.esiid ?? null,
+        },
+      }).catch(() => null);
   const userUsageBaselineContract = await buildUserUsageHouseContract({
     userId: resolved.userId,
     house: {
@@ -907,15 +910,16 @@ export async function POST(request: NextRequest) {
   const baselineParityAudit = buildOnePathBaselineParityAudit({
     houseContract: userUsageBaselineContract,
   });
-  const baselineParityReport = buildBaselineParityReport({
-    userUsagePageContract: userUsagePageBaselineContract,
-    onePathBaselineContract: userUsageBaselineContract,
-  });
+  const baselineParityReport = compactLookupBaselineResponse
+    ? null
+    : buildBaselineParityReport({
+        userUsagePageContract: userUsagePageBaselineContract,
+        onePathBaselineContract: userUsageBaselineContract,
+      });
   const userUsageBaselineView = buildOnePathBaselineReadOnlyView({
     houseContract: userUsageBaselineContract,
     parityAudit: baselineParityAudit,
   });
-  const compactLookupBaselineResponse = previewMode === "GREEN_BUTTON";
   const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({
     scenario: {
       mode: previewMode,

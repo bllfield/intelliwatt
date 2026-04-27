@@ -569,6 +569,7 @@ describe("admin one path sim route", () => {
     });
     expect(json.sourceContext.userUsageBaselineContract).toBeNull();
     expect(json.sourceContext.userUsagePageBaselineContract).toBeNull();
+    expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
     expect(json.sourceContext.userUsageBaselineView).toEqual(
       expect.objectContaining({
         summary: expect.objectContaining({
