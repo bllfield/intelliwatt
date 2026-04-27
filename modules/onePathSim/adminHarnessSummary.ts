@@ -40,22 +40,53 @@ export function buildOnePathSandboxHarnessSummary(args: {
   const engineInput = asRecord(runResult.engineInput);
   const artifact = asRecord(runResult.artifact);
   const readModel = asRecord(runResult.readModel);
+  const runDisplayView = asRecord(runResult.runDisplayView);
   const dataset = asRecord(readModel.dataset);
   const datasetMeta = asRecord(dataset.meta);
   const datasetSummary = asRecord(dataset.summary);
   const compareProjection = asRecord(readModel.compareProjection);
   const compareRows = asArray(compareProjection.rows);
   const actualMonthlyReference = asRecord(engineInput.actualMonthlyReference);
-  const datasetMonthlyRows = asArray<Record<string, unknown>>(dataset.monthly);
+  const datasetMonthlyRows =
+    asArray<Record<string, unknown>>(dataset.monthly).length > 0
+      ? asArray<Record<string, unknown>>(dataset.monthly)
+      : asArray<Record<string, unknown>>(runDisplayView.monthlyRows);
   const runIdentity = asRecord(readModel.runIdentity);
   const effectiveSimulationVariablesUsed = asRecord(readModel.effectiveSimulationVariablesUsed);
   const upstreamUsageTruth = asRecord(lookupSourceContext.upstreamUsageTruth);
   const upstreamStatusSummary = asRecord(asRecord(upstreamUsageTruth.currentRun).statusSummary);
   const artifactDatasetMeta = asRecord(asRecord(artifact.dataset).meta);
   const baselinePassthrough =
-    Boolean(datasetMeta.baselinePassthrough) || Boolean(artifactDatasetMeta.baselinePassthrough);
+    runResult.runType === "BASELINE_PASSTHROUGH" ||
+    Boolean(datasetMeta.baselinePassthrough) ||
+    Boolean(artifactDatasetMeta.baselinePassthrough);
   const scenarioId = engineInput.scenarioId ?? null;
-  const runType = scenarioId ? "PAST_SIM" : baselinePassthrough ? "BASELINE_PASSTHROUGH" : "BASELINE_OR_UNSET";
+  const runType =
+    typeof runResult.runType === "string" && runResult.runType
+      ? String(runResult.runType)
+      : scenarioId
+        ? "PAST_SIM"
+        : baselinePassthrough
+          ? "BASELINE_PASSTHROUGH"
+          : "BASELINE_OR_UNSET";
+  const displaySummary =
+    Object.keys(datasetSummary).length > 0
+      ? datasetSummary
+      : {
+          source: runDisplayView.summary && typeof runDisplayView.summary === "object" ? asRecord(runDisplayView.summary).source ?? null : null,
+          intervalsCount:
+            runDisplayView.summary && typeof runDisplayView.summary === "object"
+              ? asRecord(runDisplayView.summary).intervalsCount ?? null
+              : null,
+          start:
+            runDisplayView.summary && typeof runDisplayView.summary === "object"
+              ? asRecord(runDisplayView.summary).coverageStart ?? null
+              : null,
+          end:
+            runDisplayView.summary && typeof runDisplayView.summary === "object"
+              ? asRecord(runDisplayView.summary).coverageEnd ?? null
+              : null,
+        };
 
   return {
     runStatus: {
@@ -82,7 +113,7 @@ export function buildOnePathSandboxHarnessSummary(args: {
       lookupActualDatasetSummary: lookupSourceContext.actualDatasetSummary ?? null,
       actualMonthlyReference,
       actualMonthlyReferenceTotalKwh: sumNumericRecord(actualMonthlyReference),
-      datasetSummary: datasetSummary,
+      datasetSummary: displaySummary,
       datasetMonthlyRows,
       datasetMonthlyTotalKwh: sumMonthlyRows(datasetMonthlyRows),
       compareProjectionMetrics: compareProjection.metrics ?? null,
