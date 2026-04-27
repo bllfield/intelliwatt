@@ -24,10 +24,12 @@ describe("green button full-day anchor", () => {
   });
 
   it("uses the latest complete Chicago day instead of an incomplete latest upload day", async () => {
-    usageQueryRaw.mockResolvedValue([
-      { bucket: new Date("2026-04-21T05:00:00.000Z"), intervalscount: 40 },
-      { bucket: new Date("2026-04-20T05:00:00.000Z"), intervalscount: 96 },
-    ]);
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-04-21T05:00:00.000Z") }])
+      .mockResolvedValueOnce([
+        { bucket: new Date("2026-04-21T05:00:00.000Z"), intervalscount: 40 },
+        { bucket: new Date("2026-04-20T05:00:00.000Z"), intervalscount: 96 },
+      ]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
     const out = await mod.getLatestGreenButtonFullDayDateKey({ houseId: "house-1" });
@@ -36,7 +38,9 @@ describe("green button full-day anchor", () => {
   });
 
   it("accepts DST-short days when the interval count matches the expected local-day coverage", async () => {
-    usageQueryRaw.mockResolvedValue([{ bucket: new Date("2026-03-08T06:00:00.000Z"), intervalscount: 92 }]);
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-03-08T06:00:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2026-03-08T06:00:00.000Z"), intervalscount: 92 }]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
     const out = await mod.getLatestGreenButtonFullDayDateKey({ houseId: "house-1" });

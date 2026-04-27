@@ -58,6 +58,16 @@ async function latestRawGreenButtonIdForHouse(houseId: string): Promise<string |
   if (!USAGE_DB_ENABLED) return null;
   try {
     const usageClient = usagePrisma as any;
+    const latestUsableRawFromIntervals = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT i."rawId" AS "id", MAX(i."timestamp") AS "latestTimestamp"
+      FROM "GreenButtonInterval" i
+      WHERE i."homeId" = ${houseId}
+      GROUP BY i."rawId"
+      ORDER BY MAX(i."timestamp") DESC
+      LIMIT 1
+    `)) as Array<{ id: string }>;
+    if (latestUsableRawFromIntervals?.[0]?.id) return String(latestUsableRawFromIntervals[0].id);
+
     const latestUsableRaw = (await usageClient.$queryRaw(Prisma.sql`
       SELECT r."id"
       FROM "RawGreenButton" r
@@ -72,6 +82,7 @@ async function latestRawGreenButtonIdForHouse(houseId: string): Promise<string |
       LIMIT 1
     `)) as Array<{ id: string }>;
     if (latestUsableRaw?.[0]?.id) return String(latestUsableRaw[0].id);
+
     const latestRaw = await usageClient.rawGreenButton.findFirst({
       where: { homeId: houseId },
       orderBy: { createdAt: "desc" },

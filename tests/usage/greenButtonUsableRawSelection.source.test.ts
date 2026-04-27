@@ -9,14 +9,15 @@ function readRepoFile(relativePath: string): string {
 }
 
 describe("green button usable raw selection", () => {
-  it("prefers the newest raw that already has ingested intervals", () => {
+  it("prefers the newest raw id owned by persisted interval rows", () => {
     const greenButtonSource = readRepoFile("modules/realUsageAdapter/greenButton.ts");
     const actualDatasetSource = readRepoFile("lib/usage/actualDatasetForHouse.ts");
 
-    expect(greenButtonSource).toContain('FROM "RawGreenButton" r');
     expect(greenButtonSource).toContain('FROM "GreenButtonInterval" i');
-    expect(greenButtonSource).toContain('AND i."rawId" = r."id"');
-    expect(greenButtonSource).toContain('ORDER BY r."createdAt" DESC');
+    expect(greenButtonSource).toContain('SELECT i."rawId" AS "id"');
+    expect(greenButtonSource).toContain('WHERE i."homeId" = ${houseId}');
+    expect(greenButtonSource).toContain('ORDER BY MAX(i."timestamp") DESC');
+    expect(greenButtonSource).toContain('FROM "RawGreenButton" r');
     expect(greenButtonSource).toContain("export async function getLatestUsableRawGreenButtonIdForHouse");
 
     expect(actualDatasetSource).toContain("getLatestUsableRawGreenButtonIdForHouse");
