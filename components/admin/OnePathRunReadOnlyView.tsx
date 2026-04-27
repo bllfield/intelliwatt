@@ -39,10 +39,12 @@ export function OnePathRunReadOnlyView(props: {
   dataset?: Record<string, unknown> | null;
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
+  runType?: string | null;
 }) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
   const [compareExpanded, setCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
+  const isBaselinePassthrough = props.runType === "BASELINE_PASSTHROUGH";
   const derivedView = useMemo(
     () =>
       buildOnePathRunReadOnlyView({
@@ -60,10 +62,14 @@ export function OnePathRunReadOnlyView(props: {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Past simulated usage</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+            {isBaselinePassthrough ? "Baseline usage" : "Past simulated usage"}
+          </p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
-            {view.summary.hasSimulatedFill
+            {isBaselinePassthrough
+              ? "Based on persisted actual usage truth selected by the shared usage layer for baseline passthrough."
+              : view.summary.hasSimulatedFill
               ? "Based on actual usage data with simulated fill for Travel/Vacant dates."
               : "Based on a simulated 15-minute curve generated from your manual entry or SMT baseline."}
           </p>

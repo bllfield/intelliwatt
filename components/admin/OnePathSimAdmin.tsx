@@ -409,7 +409,9 @@ export function OnePathSimAdmin() {
   );
   const shouldRenderManualBaselinePhaseOneOnly =
     Boolean(shouldShowManualStageOneView) && isManualDisplayMode && displayRunType !== "PAST_SIM";
-  const shouldRenderPastSimView = displayRunType === "PAST_SIM" && Boolean(runDisplayView || runReadOnlyDataset);
+  const shouldRenderPastSimView =
+    (displayRunType === "PAST_SIM" || displayRunType === "BASELINE_PASSTHROUGH") &&
+    Boolean(runDisplayView || runReadOnlyDataset);
   const shouldRenderLookupBaselineView =
     !isManualDisplayMode && !shouldRenderPastSimView && Boolean(lookupUserUsageBaselineContract || lookupUserUsageBaselineView);
   const activePathLabel =
@@ -1400,6 +1402,7 @@ export function OnePathSimAdmin() {
               dataset={runDisplayView ? null : runReadOnlyDataset}
               engineInput={asRecord(runResult?.engineInput)}
               readModel={runDisplayView ? null : asRecord(runResult?.readModel)}
+              runType={displayRunType}
             />
           </div>
         ) : shouldRenderLookupBaselineView ? (

@@ -19,6 +19,8 @@ describe("OnePathRunReadOnlyView source contract", () => {
     expect(source).toContain("UsageChartsPanel");
     expect(source).toContain("WeatherSensitivityCard");
     expect(source).toContain("Past simulated usage");
+    expect(source).toContain("Baseline usage");
+    expect(source).toContain("persisted actual usage truth selected by the shared usage layer for baseline passthrough");
     expect(source).toContain("Household energy insights");
     expect(source).toContain("Data coverage:");
     expect(source).toContain("Simulation core:");
