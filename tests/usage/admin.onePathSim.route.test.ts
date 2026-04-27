@@ -696,8 +696,34 @@ describe("admin one path sim route", () => {
     expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
   });
 
-  it("routes green button runs through the dedicated green button adapter and source preference", async () => {
+  it("returns a compact baseline passthrough response for green button runs", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    runSharedSimulation.mockResolvedValueOnce({
+      artifactId: null,
+      artifactInputHash: null,
+      engineInput: { inputType: "GREEN_BUTTON" },
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON",
+          intervalsCount: 34823,
+          totalKwh: 13542.3,
+          start: "2025-04-15",
+          end: "2026-04-14",
+        },
+        daily: [{ date: "2026-04-14", kwh: 13542.3 }],
+        monthly: [{ month: "2026-04", kwh: 13542.3 }],
+        series: { intervals15: [{ timestamp: "2026-04-14T23:45:00.000Z", kwh: 0.3 }] },
+        meta: { baselinePassthrough: true },
+        insights: {
+          weekdayVsWeekend: { weekday: 9800, weekend: 3742.3 },
+          timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 2800 }],
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+        },
+        totals: { importKwh: 13542.3, exportKwh: 0, netKwh: 13542.3 },
+      },
+      compareProjection: null,
+      manualStageOneView: null,
+    });
     const res = await POST(
       buildRequest({
         action: "run",
@@ -718,7 +744,12 @@ describe("admin one path sim route", () => {
     );
     expect(adaptIntervalRawInput).not.toHaveBeenCalled();
     expect(runSharedSimulation).toHaveBeenCalledWith({ sharedProducerPathUsed: true, inputType: "GREEN_BUTTON" });
-    expect(json.readModel.runIdentity.artifactId).toBe("artifact-1");
+    expect(json.debugDiagnosticsIncluded).toBe(false);
+    expect(json.runType).toBe("BASELINE_PASSTHROUGH");
+    expect(json.runDisplayView).toBeTruthy();
+    expect(json.artifact ?? null).toBeNull();
+    expect(json.readModel ?? null).toBeNull();
+    expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
   });
 
   it("keeps interval run requests off the lookup-only preview and baseline contract path", async () => {

@@ -617,6 +617,36 @@ export async function POST(request: NextRequest) {
                   manualUsagePayload: effectiveManualUsagePayload,
                 });
       const artifact = await runSharedSimulation(engineInput);
+      const artifactDataset = asRecord(artifact.dataset);
+      const artifactDatasetMeta = asRecord(artifactDataset?.meta);
+      const isGreenButtonBaselinePassthroughRun =
+        mode === "GREEN_BUTTON" &&
+        !effectiveRawInputBase.scenarioId &&
+        Boolean(artifactDatasetMeta?.baselinePassthrough);
+      if (isGreenButtonBaselinePassthroughRun) {
+        const compactRunDisplayView =
+          buildOnePathRunReadOnlyView({
+            dataset: artifactDataset,
+            engineInput: asRecord(engineInput),
+            readModel:
+              artifact.compareProjection || artifact.manualStageOneView
+                ? {
+                    compareProjection: artifact.compareProjection,
+                    manualStageOneView: artifact.manualStageOneView,
+                  }
+                : null,
+          }) ?? null;
+        return NextResponse.json({
+          ok: true,
+          debugDiagnosticsIncluded: false,
+          runType: "BASELINE_PASSTHROUGH",
+          engineInput,
+          manualStageOneView: artifact.manualStageOneView ?? null,
+          runDisplayView: compactRunDisplayView,
+          artifact: null,
+          readModel: null,
+        });
+      }
       const readModel = buildSharedSimulationReadModel(artifact);
       const actualDatasetForManualRun =
         isManualMode
@@ -669,7 +699,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
-          runType: effectiveRawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
+          runType:
+            effectiveRawInputBase.scenarioId
+              ? "PAST_SIM"
+              : Boolean(artifactDatasetMeta?.baselinePassthrough)
+                ? "BASELINE_PASSTHROUGH"
+                : "BASELINE_OR_UNSET",
           engineInput,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
@@ -680,7 +715,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         ok: true,
         debugDiagnosticsIncluded: true,
-        runType: rawInputBase.scenarioId ? "PAST_SIM" : "BASELINE_OR_UNSET",
+        runType:
+          rawInputBase.scenarioId
+            ? "PAST_SIM"
+            : Boolean(artifactDatasetMeta?.baselinePassthrough)
+              ? "BASELINE_PASSTHROUGH"
+              : "BASELINE_OR_UNSET",
         engineInput,
         artifact,
         readModel,
