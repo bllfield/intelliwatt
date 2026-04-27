@@ -667,6 +667,7 @@ export function OnePathSimAdmin() {
       mode?: "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
       actualContextHouseId?: string | null;
       freshSelection?: boolean;
+      includeDebugDiagnostics?: boolean;
     }) => {
       const trimmedEmail = (args?.email ?? email).trim();
       if (!trimmedEmail) {
@@ -686,7 +687,7 @@ export function OnePathSimAdmin() {
           houseId: args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
           mode: args?.mode ?? mode,
           actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null),
-          includeDebugDiagnostics: debugDiagnosticsEnabled,
+          includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -842,7 +843,10 @@ export function OnePathSimAdmin() {
     setRunReason(`known_house:${selectedKnownScenario.scenarioKey}`);
     setGreenButtonUploadError(null);
 
-    let json = await requestLookup(lookupArgs);
+    let json = await requestLookup({
+      ...lookupArgs,
+      includeDebugDiagnostics: false,
+    });
     if (!json) return;
 
     let resolvedSelection = resolveKnownHouseScenarioSelection({
@@ -861,6 +865,7 @@ export function OnePathSimAdmin() {
           houseId: resolvedSelection.selectedHouseId || lookupArgs.houseId,
           actualContextHouseId: targetActualContextHouseId,
           freshSelection: false,
+          includeDebugDiagnostics: false,
         });
         if (!json) return;
         resolvedSelection = resolveKnownHouseScenarioSelection({
