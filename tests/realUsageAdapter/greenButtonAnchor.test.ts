@@ -47,4 +47,18 @@ describe("green button full-day anchor", () => {
 
     expect(out).toBe("2026-03-08");
   });
+
+  it("falls back to the latest local interval day when no full day exists", async () => {
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
+      .mockResolvedValueOnce([
+        { bucket: new Date("2025-12-02T05:00:00.000Z"), intervalscount: 51 },
+        { bucket: new Date("2025-12-01T05:00:00.000Z"), intervalscount: 53 },
+      ]);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.getLatestGreenButtonFullDayDateKey({ houseId: "house-1" });
+
+    expect(out).toBe("2025-12-01");
+  });
 });

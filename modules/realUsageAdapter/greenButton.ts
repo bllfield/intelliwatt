@@ -137,6 +137,7 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
       const expectedIntervals = expectedIntervalsForDateISO(dateKey);
       if ((Number(row.intervalscount) || 0) >= expectedIntervals) return dateKey;
     }
+    if (rows[0]?.bucket) return chicagoDateKeyFromBucket(rows[0].bucket);
     return null;
   } catch {
     return null;
