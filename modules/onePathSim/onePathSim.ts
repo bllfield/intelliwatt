@@ -1077,6 +1077,7 @@ async function loadSharedContext(args: {
   allowMissingUsageTruth?: boolean;
   weatherScoringMode?: "interval" | "manual";
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  skipOptionalEnrichment?: boolean;
 }): Promise<LoadedSharedContext> {
   const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
@@ -1092,28 +1093,32 @@ async function loadSharedContext(args: {
       upstreamUsageTruth: upstreamUsageTruth.summary,
     });
   }
-  const [
-    manualUsageRecord,
-    homeProfile,
-    applianceProfileRecord,
-  ] = await Promise.all([
+  const manualUsageRecord =
     args.manualUsagePayload !== undefined
-      ? Promise.resolve({ payload: args.manualUsagePayload ?? null })
-      : getOnePathManualUsageInput({ userId: args.userId, houseId: args.houseId }).catch(() => ({ payload: null })),
-    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null),
-    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null),
-  ]);
-  const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
-  const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
-    actualDataset: args.weatherScoringMode === "manual" ? null : upstreamUsageTruth.dataset,
-    manualUsagePayload: manualUsageRecord.payload ?? null,
-    homeProfile,
-    applianceProfile,
-    weatherHouseId: upstreamUsageTruth.actualContextHouse.id,
-  }).catch(() => ({
-    score: null,
-    derivedInput: null,
-  }));
+      ? { payload: args.manualUsagePayload ?? null }
+      : await getOnePathManualUsageInput({ userId: args.userId, houseId: args.houseId }).catch(() => ({ payload: null }));
+  const enrichmentSkipped = args.skipOptionalEnrichment === true;
+  const [homeProfile, applianceProfileRecord] = enrichmentSkipped
+    ? [null, null]
+    : await Promise.all([
+        getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null),
+        getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null),
+      ]);
+  const applianceProfile = enrichmentSkipped
+    ? null
+    : normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
+  const weatherEnvelope = enrichmentSkipped
+    ? { score: null, derivedInput: null }
+    : await resolveOnePathWeatherSensitivityEnvelope({
+        actualDataset: args.weatherScoringMode === "manual" ? null : upstreamUsageTruth.dataset,
+        manualUsagePayload: manualUsageRecord.payload ?? null,
+        homeProfile,
+        applianceProfile,
+        weatherHouseId: upstreamUsageTruth.actualContextHouse.id,
+      }).catch(() => ({
+        score: null,
+        derivedInput: null,
+      }));
   return {
     house: upstreamUsageTruth.selectedHouse,
     actualContextHouseId: upstreamUsageTruth.actualContextHouse.id,
@@ -1328,13 +1333,16 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
 }
 
 export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<CanonicalSimulationEngineInput> {
+  const isBaselineGreenButtonRun = (raw.scenarioId ?? null) == null;
   const loaded = await loadSharedContext({
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    manualUsagePayload: isBaselineGreenButtonRun ? null : undefined,
     seedUsageTruthIfMissing: false,
     weatherScoringMode: "interval",
     preferredActualSource: "GREEN_BUTTON",
+    skipOptionalEnrichment: isBaselineGreenButtonRun,
   });
   return buildCanonicalEngineInput({
     inputType: "GREEN_BUTTON",

@@ -170,12 +170,14 @@ describe("one path manual mode payload guards", () => {
       } as any,
     });
 
-    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
-      userId: "user-1",
-      houseId: "house-1",
-      actualContextHouseId: "house-1",
-      seedIfMissing: false,
-    });
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        actualContextHouseId: "house-1",
+        seedIfMissing: false,
+      })
+    );
     expect(engineInput.inputType).toBe("MANUAL_MONTHLY");
     expect(engineInput.actualIntervalsReference).toEqual([]);
     expect(engineInput.upstreamUsageTruth).toEqual(
@@ -183,5 +185,51 @@ describe("one path manual mode payload guards", () => {
         summary: "manual-only house",
       })
     );
+  });
+
+  it("skips optional enrichment for GREEN_BUTTON baseline adaptation", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
+      selectedHouse: { id: "house-1", esiid: "esiid-1" },
+      actualContextHouse: { id: "house-1", esiid: "esiid-1" },
+      dataset: {
+        summary: { source: "GREEN_BUTTON", start: "2025-04-26", end: "2026-04-25", totalKwh: 1234 },
+        daily: [{ date: "2025-04-26", kwh: 10 }],
+        monthly: [{ month: "2025-04", kwh: 10 }],
+        meta: { actualSource: "GREEN_BUTTON", timezone: "America/Chicago" },
+        series: { intervals15: [{ timestamp: "2025-04-26T12:00:00.000Z", kwh: 1 }] },
+      },
+      alternatives: { smt: null, greenButton: { totalKwh: 1234 } },
+      usageTruthSource: "persisted_usage_output",
+      seedResult: null,
+      summary: { title: "Upstream Usage Truth", summary: "green button baseline", currentRun: {}, sharedOwners: [] },
+    });
+
+    const { adaptGreenButtonRawInput } = await import("@/modules/onePathSim/onePathSim");
+    const engineInput = await adaptGreenButtonRawInput({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      scenarioId: null,
+      weatherPreference: "LAST_YEAR_WEATHER",
+      validationSelectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+      validationOnlyDateKeysLocal: [],
+      travelRanges: [],
+      persistRequested: true,
+    });
+
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      seedIfMissing: false,
+      preferredActualSource: "GREEN_BUTTON",
+    });
+    expect(getOnePathManualUsageInput).not.toHaveBeenCalled();
+    expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
+    expect(resolveOnePathWeatherSensitivityEnvelope).not.toHaveBeenCalled();
+    expect(engineInput.inputType).toBe("GREEN_BUTTON");
+    expect(engineInput.weatherEfficiencyDerivedInput).toBeNull();
   });
 });
