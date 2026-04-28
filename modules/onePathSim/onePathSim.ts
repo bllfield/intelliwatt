@@ -333,6 +333,129 @@ function buildMonthlyTotalsRecord(rows: unknown): Record<string, number> {
   }, {});
 }
 
+function asDateKey(value: unknown): string | null {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function dateKeyInTimezone(timestamp: string, timezone: string): string | null {
+  try {
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(ts);
+    const year = parts.find((part) => part.type === "year")?.value ?? "";
+    const month = parts.find((part) => part.type === "month")?.value ?? "";
+    const day = parts.find((part) => part.type === "day")?.value ?? "";
+    const dateKey = `${year}-${month}-${day}`;
+    return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : null;
+  } catch {
+    return null;
+  }
+}
+
+function hourInTimezone(timestamp: string, timezone: string): number | null {
+  try {
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "2-digit",
+      hour12: false,
+    }).formatToParts(ts);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "");
+    return Number.isFinite(hour) && hour >= 0 && hour <= 23 ? hour : null;
+  } catch {
+    return null;
+  }
+}
+
+function sumSignedKwhRows(rows: Array<{ kwh: number }>) {
+  let importKwh = 0;
+  let exportKwh = 0;
+  for (const row of rows) {
+    const kwh = Number(row.kwh) || 0;
+    if (kwh >= 0) importKwh += kwh;
+    else exportKwh += Math.abs(kwh);
+  }
+  return {
+    importKwh: Number(importKwh.toFixed(2)),
+    exportKwh: Number(exportKwh.toFixed(2)),
+    netKwh: Number((importKwh - exportKwh).toFixed(2)),
+  };
+}
+
+function buildDailyRowsFromBoundedIntervals(
+  rows: Array<{ timestamp: string; kwh: number }>,
+  timezone: string
+): Array<{ date: string; kwh: number }> {
+  const byDate = new Map<string, number>();
+  for (const row of rows) {
+    const dateKey = dateKeyInTimezone(String(row.timestamp ?? ""), timezone);
+    if (!dateKey) continue;
+    byDate.set(dateKey, (byDate.get(dateKey) ?? 0) + (Number(row.kwh) || 0));
+  }
+  return Array.from(byDate.entries())
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([date, kwh]) => ({ date, kwh: Number(kwh.toFixed(2)) }));
+}
+
+function buildMonthlyRowsFromDailyRows(
+  rows: Array<{ date: string; kwh: number }>
+): Array<{ month: string; kwh: number }> {
+  const byMonth = new Map<string, number>();
+  for (const row of rows) {
+    const month = String(row.date ?? "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    byMonth.set(month, (byMonth.get(month) ?? 0) + (Number(row.kwh) || 0));
+  }
+  return Array.from(byMonth.entries())
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([month, kwh]) => ({ month, kwh: Number(kwh.toFixed(2)) }));
+}
+
+function buildWeekdayWeekendFromDailyRows(rows: Array<{ date: string; kwh: number }>) {
+  let weekday = 0;
+  let weekend = 0;
+  for (const row of rows) {
+    const dateKey = asDateKey(row.date);
+    if (!dateKey) continue;
+    const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+    if (day === 0 || day === 6) weekend += Number(row.kwh) || 0;
+    else weekday += Number(row.kwh) || 0;
+  }
+  return {
+    weekday: Number(weekday.toFixed(2)),
+    weekend: Number(weekend.toFixed(2)),
+  };
+}
+
+function buildTimeOfDayBucketsFromIntervals(
+  rows: Array<{ timestamp: string; kwh: number }>,
+  timezone: string
+): Array<{ key: string; label: string; kwh: number }> {
+  const sums = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
+  for (const row of rows) {
+    const hour = hourInTimezone(String(row.timestamp ?? ""), timezone);
+    if (hour == null) continue;
+    const kwh = Number(row.kwh) || 0;
+    if (hour < 6) sums.overnight += kwh;
+    else if (hour < 12) sums.morning += kwh;
+    else if (hour < 18) sums.afternoon += kwh;
+    else sums.evening += kwh;
+  }
+  return [
+    { key: "overnight", label: "Overnight (12am–6am)", kwh: Number(sums.overnight.toFixed(2)) },
+    { key: "morning", label: "Morning (6am–12pm)", kwh: Number(sums.morning.toFixed(2)) },
+    { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: Number(sums.afternoon.toFixed(2)) },
+    { key: "evening", label: "Evening (6pm–12am)", kwh: Number(sums.evening.toFixed(2)) },
+  ];
+}
+
 function buildManualBillPeriodTotalsRecord(rows: unknown): Record<string, number> {
   if (!Array.isArray(rows)) return {};
   return rows.reduce<Record<string, number>>((acc, row) => {
@@ -432,11 +555,55 @@ function buildIntervalBaselinePassthroughDataset(args: {
   const summary = asRecord((sourceDataset as any).summary) ?? {};
   const meta = asRecord((sourceDataset as any).meta) ?? {};
   const displayCoverageWindow = resolveOnePathCanonicalUsage365CoverageWindow();
-  const monthlyRows = Array.isArray((sourceDataset as any).monthly) ? (sourceDataset as any).monthly : [];
-  const totalKwh =
-    typeof summary.totalKwh === "number"
-      ? summary.totalKwh
-      : monthlyRows.reduce((sum: number, row: any) => sum + (Number(row?.kwh) || 0), 0);
+  const timezone =
+    (typeof meta.timezone === "string" && meta.timezone.trim()) || args.engineInput.timezone || "America/Chicago";
+  const dateInDisplayWindow = (date: string | null) =>
+    date != null && date >= displayCoverageWindow.startDate && date <= displayCoverageWindow.endDate;
+  const boundedIntervals15 = Array.isArray((sourceDataset as any)?.series?.intervals15)
+    ? ((sourceDataset as any).series.intervals15 as Array<{ timestamp?: unknown; kwh?: unknown }>)
+        .map((row) => ({
+          timestamp: String(row?.timestamp ?? ""),
+          kwh: Number(row?.kwh ?? 0) || 0,
+        }))
+        .filter((row) => row.timestamp.length > 0)
+        .filter((row) => dateInDisplayWindow(dateKeyInTimezone(row.timestamp, timezone)))
+    : [];
+  const boundedDaily =
+    Array.isArray((sourceDataset as any).daily) && (sourceDataset as any).daily.length > 0
+      ? ((sourceDataset as any).daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }>)
+          .map((row) => ({
+            ...(typeof row?.source === "string" ? { source: row.source } : {}),
+            ...(typeof row?.sourceDetail === "string" ? { sourceDetail: row.sourceDetail } : {}),
+            date: String(row?.date ?? "").slice(0, 10),
+            kwh: Number(row?.kwh ?? 0) || 0,
+          }))
+          .filter((row) => dateInDisplayWindow(asDateKey(row.date)))
+      : buildDailyRowsFromBoundedIntervals(boundedIntervals15, timezone);
+  const monthlyRows =
+    boundedDaily.length > 0
+      ? buildMonthlyRowsFromDailyRows(boundedDaily)
+      : Array.isArray((sourceDataset as any).monthly)
+        ? ((sourceDataset as any).monthly as Array<{ month?: unknown; kwh?: unknown }>)
+            .map((row) => ({
+              month: String(row?.month ?? "").slice(0, 7),
+              kwh: Number(row?.kwh ?? 0) || 0,
+            }))
+            .filter((row) => {
+              if (!/^\d{4}-\d{2}$/.test(row.month)) return false;
+              const monthEnd = `${row.month}-31`;
+              return monthEnd >= displayCoverageWindow.startDate && row.month <= displayCoverageWindow.endDate.slice(0, 7);
+            })
+        : [];
+  const totals = sumSignedKwhRows(
+    boundedDaily.length > 0 ? boundedDaily.map((row) => ({ kwh: row.kwh })) : monthlyRows.map((row) => ({ kwh: row.kwh }))
+  );
+  const totalKwh = totals.netKwh;
+  const boundedWeekdayWeekend = buildWeekdayWeekendFromDailyRows(boundedDaily);
+  const boundedTimeOfDayBuckets = buildTimeOfDayBucketsFromIntervals(boundedIntervals15, timezone);
+  const peakDay =
+    boundedDaily.length > 0
+      ? boundedDaily.reduce((current, row) => (row.kwh > current.kwh ? row : current))
+      : null;
 
   return {
     ...sourceDataset,
@@ -448,13 +615,32 @@ function buildIntervalBaselinePassthroughDataset(args: {
       end: displayCoverageWindow.endDate,
       latest: summary.latest ?? displayCoverageWindow.endDate,
     },
-    daily: Array.isArray((sourceDataset as any).daily) ? (sourceDataset as any).daily : [],
+    totals,
+    daily: boundedDaily,
     monthly: monthlyRows,
     series: {
       ...((sourceDataset as any).series ?? {}),
-      intervals15: Array.isArray((sourceDataset as any)?.series?.intervals15)
-        ? (sourceDataset as any).series.intervals15
-        : [],
+      intervals15: boundedIntervals15,
+      daily: boundedDaily.map((row) => ({
+        timestamp: `${row.date}T00:00:00.000Z`,
+        kwh: row.kwh,
+      })),
+      monthly: monthlyRows.map((row) => ({
+        timestamp: `${row.month}-01T00:00:00.000Z`,
+        kwh: row.kwh,
+      })),
+      annual: [
+        {
+          timestamp: `${displayCoverageWindow.endDate.slice(0, 4)}-01-01T00:00:00.000Z`,
+          kwh: totalKwh,
+        },
+      ],
+    },
+    insights: {
+      ...(asRecord((sourceDataset as any).insights) ?? {}),
+      weekdayVsWeekend: boundedWeekdayWeekend,
+      timeOfDayBuckets: boundedTimeOfDayBuckets,
+      peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
     },
     meta: {
       ...meta,
@@ -478,6 +664,7 @@ function buildIntervalBaselinePassthroughDataset(args: {
       upstreamDatasetLatest: summary.latest ?? null,
       baselineCoverageDisplayOwner: "resolveCanonicalUsage365CoverageWindow",
       baselineCoverageRawOwner: "resolveIntervalsLayer ACTUAL_USAGE_INTERVALS dataset.summary",
+      timezone,
       canonicalMonths:
         Array.isArray(meta.canonicalMonths) && meta.canonicalMonths.length > 0
           ? meta.canonicalMonths
@@ -772,10 +959,25 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
       summary: (dataset as any)?.summary ?? {},
       daily: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [],
       monthly: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly : [],
+      dailyWeather:
+        (dataset as any)?.dailyWeather && typeof (dataset as any).dailyWeather === "object"
+          ? ((dataset as any).dailyWeather as Record<string, unknown>)
+          : null,
+      totals:
+        (dataset as any)?.totals && typeof (dataset as any).totals === "object"
+          ? ((dataset as any).totals as Record<string, unknown>)
+          : null,
+      insights:
+        (dataset as any)?.insights && typeof (dataset as any).insights === "object"
+          ? ((dataset as any).insights as Record<string, unknown>)
+          : null,
       series: {
         intervals15: Array.isArray((dataset as any)?.series?.intervals15)
           ? (dataset as any).series.intervals15
           : [],
+        daily: Array.isArray((dataset as any)?.series?.daily) ? (dataset as any).series.daily : [],
+        monthly: Array.isArray((dataset as any)?.series?.monthly) ? (dataset as any).series.monthly : [],
+        annual: Array.isArray((dataset as any)?.series?.annual) ? (dataset as any).series.annual : [],
       },
       meta: (asRecord((dataset as any)?.meta) ?? {}) as Record<string, unknown>,
     },

@@ -262,15 +262,17 @@ describe("one path baseline passthrough", () => {
 
     expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
     expect(readOnePathSimulatedUsageScenario).not.toHaveBeenCalled();
-    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
-      userId: "user-1",
-      houseId: "house-1",
-      actualContextHouseId: "actual-house-1",
-      seedIfMissing: true,
-    });
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        actualContextHouseId: "actual-house-1",
+        seedIfMissing: true,
+      })
+    );
     expect(artifact.dataset.summary.source).toBe("SMT");
     expect(artifact.dataset.daily).toEqual(upstreamDataset.daily);
-    expect(artifact.dataset.monthly).toEqual(upstreamDataset.monthly);
+    expect(artifact.dataset.monthly).toEqual([{ month: "2026-04", kwh: 7.4 }]);
     expect(artifact.dataset.series.intervals15).toEqual(upstreamDataset.series.intervals15);
     expect(artifact.dataset.meta.baselinePassthrough).toBe(true);
     expect(artifact.dataset.series.intervals15).toHaveLength(1);
@@ -321,6 +323,91 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.meta.upstreamDatasetSummaryStart).toBe("2025-04-14");
     expect(artifact.dataset.meta.upstreamDatasetSummaryEnd).toBe("2026-04-14");
     expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
+  });
+
+  it("bounds Green Button baseline passthrough rows and insights to the canonical display window", async () => {
+    const upstreamDataset = {
+      summary: {
+        source: "GREEN_BUTTON",
+        totalKwh: 9999,
+        start: "2024-12-01",
+        end: "2025-12-31",
+        latest: "2025-12-31T23:45:00.000Z",
+        intervalsCount: 4,
+      },
+      daily: [
+        { date: "2025-04-25", kwh: 10 },
+        { date: "2025-04-26", kwh: 20 },
+        { date: "2025-04-27", kwh: 30 },
+        { date: "2025-12-31", kwh: 40 },
+      ],
+      monthly: [
+        { month: "2024-12", kwh: 500 },
+        { month: "2025-04", kwh: 1000 },
+        { month: "2025-12", kwh: 2000 },
+      ],
+      series: {
+        intervals15: [
+          { timestamp: "2025-04-25T05:00:00.000Z", kwh: 1 },
+          { timestamp: "2025-04-26T12:00:00.000Z", kwh: 2 },
+          { timestamp: "2025-04-27T01:00:00.000Z", kwh: 3 },
+          { timestamp: "2025-12-31T20:00:00.000Z", kwh: 4 },
+        ],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+      },
+    };
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
+      startDate: "2025-04-26",
+      endDate: "2026-04-25",
+    });
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "GREEN_BUTTON",
+        manualConstraintMode: "GREEN_BUTTON",
+      })
+    );
+
+    expect(artifact.dataset.summary.start).toBe("2025-04-26");
+    expect(artifact.dataset.summary.end).toBe("2026-04-25");
+    expect(artifact.dataset.summary.totalKwh).toBe(90);
+    expect(artifact.dataset.daily).toEqual([
+      { date: "2025-04-26", kwh: 20 },
+      { date: "2025-04-27", kwh: 30 },
+      { date: "2025-12-31", kwh: 40 },
+    ]);
+    expect(artifact.dataset.monthly).toEqual([
+      { month: "2025-04", kwh: 50 },
+      { month: "2025-12", kwh: 40 },
+    ]);
+    expect(artifact.dataset.totals).toEqual({
+      importKwh: 90,
+      exportKwh: 0,
+      netKwh: 90,
+    });
+    expect(artifact.dataset.series.intervals15).toEqual([
+      { timestamp: "2025-04-26T12:00:00.000Z", kwh: 2 },
+      { timestamp: "2025-04-27T01:00:00.000Z", kwh: 3 },
+      { timestamp: "2025-12-31T20:00:00.000Z", kwh: 4 },
+    ]);
+    expect(artifact.dataset.insights.weekdayVsWeekend).toEqual({
+      weekday: 40,
+      weekend: 50,
+    });
+    expect(artifact.dataset.insights.timeOfDayBuckets).toEqual([
+      { key: "overnight", label: "Overnight (12am–6am)", kwh: 0 },
+      { key: "morning", label: "Morning (6am–12pm)", kwh: 2 },
+      { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 4 },
+      { key: "evening", label: "Evening (6pm–12am)", kwh: 3 },
+    ]);
+    expect(artifact.dataset.meta.coverageStart).toBe("2025-04-26");
+    expect(artifact.dataset.meta.coverageEnd).toBe("2026-04-25");
   });
 
   it("reuses saved manual monthly truth for baseline without drifting to normalized engine input values", async () => {
@@ -688,12 +775,14 @@ describe("one path baseline passthrough", () => {
       })
     );
 
-    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
-      userId: "user-1",
-      houseId: "house-1",
-      actualContextHouseId: "actual-house-1",
-      seedIfMissing: false,
-    });
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        actualContextHouseId: "actual-house-1",
+        seedIfMissing: false,
+      })
+    );
     expect(artifact.dataset.summary.source).toBe("MANUAL");
     expect(artifact.dataset.meta.usageTruthSource).toBe("missing_usage_truth");
     expect(artifact.dataset.monthly).toEqual([
