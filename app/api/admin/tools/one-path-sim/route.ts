@@ -13,6 +13,7 @@ import {
   runSharedSimulation,
   SharedSimulationRunError,
   UpstreamUsageTruthMissingError,
+  type CanonicalSimulationEngineInput,
   type CanonicalSimulationInputType,
 } from "@/modules/onePathSim/onePathSim";
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
@@ -49,6 +50,7 @@ import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParit
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 function isUpstreamUsageTruthMissingFailure(
   error: unknown
@@ -96,6 +98,95 @@ function normalizeMode(value: unknown): CanonicalSimulationInputType {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function buildSlimAdminEngineInput(engineInput: CanonicalSimulationEngineInput | null | undefined) {
+  if (!engineInput) return null;
+  const weatherDaysReference = asRecord(engineInput.weatherDaysReference);
+  const prefetchedUsageTruth = asRecord(engineInput.prefetchedBaselineUpstreamUsageTruth);
+  return {
+    ...engineInput,
+    actualIntervalsReference: {
+      omittedForAdminResponse: true,
+      rowsCount: Array.isArray(engineInput.actualIntervalsReference) ? engineInput.actualIntervalsReference.length : 0,
+    },
+    actualDailyReference: {
+      omittedForAdminResponse: true,
+      rowsCount: Array.isArray(engineInput.actualDailyReference) ? engineInput.actualDailyReference.length : 0,
+    },
+    weatherDaysReference:
+      weatherDaysReference != null
+        ? {
+            omittedForAdminResponse: true,
+            rowsCount: Object.keys(weatherDaysReference).length,
+          }
+        : null,
+    prefetchedBaselineUpstreamUsageTruth:
+      prefetchedUsageTruth != null
+        ? {
+            usageTruthSource: prefetchedUsageTruth.usageTruthSource ?? null,
+            seedResult: prefetchedUsageTruth.seedResult ?? null,
+            summary: prefetchedUsageTruth.summary ?? null,
+          }
+        : null,
+  };
+}
+
+function buildCompactRunReadModelDataset(args: {
+  artifactDataset: Record<string, unknown> | null;
+  artifactDatasetMeta: Record<string, unknown> | null;
+  runDisplayView: Record<string, unknown> | null;
+}) {
+  const summary = asRecord(args.artifactDataset?.summary);
+  const viewSummary = asRecord(args.runDisplayView?.summary);
+  return {
+    summary: {
+      ...(summary ?? {}),
+      source: viewSummary?.source ?? summary?.source ?? null,
+      totalKwh: asRecord(viewSummary?.totals)?.netKwh ?? summary?.totalKwh ?? null,
+      start: viewSummary?.coverageStart ?? summary?.start ?? null,
+      end: viewSummary?.coverageEnd ?? summary?.end ?? null,
+      latest: summary?.latest ?? viewSummary?.coverageEnd ?? null,
+    },
+    daily: Array.isArray(args.runDisplayView?.dailyRows)
+      ? args.runDisplayView?.dailyRows
+      : Array.isArray(args.artifactDataset?.daily)
+        ? args.artifactDataset.daily
+        : [],
+    monthly: Array.isArray(args.runDisplayView?.monthlyRows)
+      ? args.runDisplayView?.monthlyRows
+      : Array.isArray(args.artifactDataset?.monthly)
+        ? args.artifactDataset.monthly
+        : [],
+    dailyWeather: args.runDisplayView?.dailyWeather ?? null,
+    totals: asRecord(viewSummary?.totals) ?? null,
+    insights: {
+      fifteenMinuteAverages: Array.isArray(args.runDisplayView?.fifteenMinuteAverages)
+        ? args.runDisplayView?.fifteenMinuteAverages
+        : [],
+      stitchedMonth: args.runDisplayView?.stitchedMonth ?? null,
+      weekdayVsWeekend:
+        typeof viewSummary?.weekdayKwh === "number" || typeof viewSummary?.weekendKwh === "number"
+          ? {
+              weekday: Number(viewSummary?.weekdayKwh ?? 0),
+              weekend: Number(viewSummary?.weekendKwh ?? 0),
+            }
+          : null,
+      timeOfDayBuckets: Array.isArray(viewSummary?.timeOfDayBuckets) ? viewSummary.timeOfDayBuckets : [],
+      peakDay: viewSummary?.peakDay ?? null,
+      peakHour: viewSummary?.peakHour ?? null,
+      baseload: typeof viewSummary?.baseload === "number" ? viewSummary.baseload : null,
+      baseloadDaily: typeof viewSummary?.baseloadDaily === "number" ? viewSummary.baseloadDaily : null,
+      baseloadMonthly: typeof viewSummary?.baseloadMonthly === "number" ? viewSummary.baseloadMonthly : null,
+    },
+    series: {
+      intervals15: [],
+    },
+    meta: {
+      ...(args.artifactDatasetMeta ?? {}),
+      baselinePassthrough: true,
+    },
+  };
 }
 
 function includeDebugDiagnosticsByDefault(value: unknown): boolean {
@@ -619,6 +710,7 @@ export async function POST(request: NextRequest) {
       const artifact = await runSharedSimulation(engineInput);
       const artifactDataset = asRecord(artifact.dataset);
       const artifactDatasetMeta = asRecord(artifactDataset?.meta);
+      const slimEngineInput = buildSlimAdminEngineInput(engineInput);
       const isGreenButtonBaselinePassthroughRun =
         mode === "GREEN_BUTTON" &&
         !effectiveRawInputBase.scenarioId &&
@@ -636,15 +728,25 @@ export async function POST(request: NextRequest) {
                   }
                 : null,
           }) ?? null;
+        const compactReadModel =
+          compactRunDisplayView || artifactDataset
+            ? {
+                dataset: buildCompactRunReadModelDataset({
+                  artifactDataset,
+                  artifactDatasetMeta,
+                  runDisplayView: compactRunDisplayView,
+                }),
+              }
+            : null;
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
-          engineInput,
+          engineInput: slimEngineInput,
           manualStageOneView: artifact.manualStageOneView ?? null,
           runDisplayView: compactRunDisplayView,
           artifact: null,
-          readModel: null,
+          readModel: compactReadModel,
         });
       }
       const readModel = buildSharedSimulationReadModel(artifact);
@@ -705,7 +807,7 @@ export async function POST(request: NextRequest) {
               : Boolean(artifactDatasetMeta?.baselinePassthrough)
                 ? "BASELINE_PASSTHROUGH"
                 : "BASELINE_OR_UNSET",
-          engineInput,
+          engineInput: slimEngineInput,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
           artifact: null,
@@ -716,12 +818,12 @@ export async function POST(request: NextRequest) {
         ok: true,
         debugDiagnosticsIncluded: true,
         runType:
-          rawInputBase.scenarioId
+          effectiveRawInputBase.scenarioId
             ? "PAST_SIM"
             : Boolean(artifactDatasetMeta?.baselinePassthrough)
               ? "BASELINE_PASSTHROUGH"
               : "BASELINE_OR_UNSET",
-        engineInput,
+        engineInput: slimEngineInput,
         artifact,
         readModel,
         manualStageOneView: readModel.manualStageOneView ?? null,

@@ -50,6 +50,12 @@ export type CanonicalSimulationInputType =
   | "MANUAL_ANNUAL"
   | "NEW_BUILD";
 
+type ResolvedUpstreamUsageTruth = Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
+type PrefetchedBaselineUpstreamUsageTruth = Pick<
+  ResolvedUpstreamUsageTruth,
+  "dataset" | "usageTruthSource" | "seedResult" | "summary"
+>;
+
 export type CanonicalSimulationEngineInput = {
   engineInputVersion: "one-path-sim-v1";
   inputType: CanonicalSimulationInputType;
@@ -97,6 +103,7 @@ export type CanonicalSimulationEngineInput = {
   manualTravelVacantDonorPoolMode: string | null;
   weatherEfficiencyDerivedInput: WeatherEfficiencyDerivedInput | null;
   upstreamUsageTruth: UpstreamUsageTruthSection | null;
+  prefetchedBaselineUpstreamUsageTruth?: PrefetchedBaselineUpstreamUsageTruth | null;
   runtime: {
     userId: string;
     houseId: string;
@@ -213,8 +220,6 @@ type LoadedSharedContext = {
   applianceProfile: Record<string, unknown> | null;
   weatherEnvelope: Awaited<ReturnType<typeof resolveOnePathWeatherSensitivityEnvelope>>;
 };
-
-type ResolvedUpstreamUsageTruth = Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
 
 export type ReadOnlyIntervalBaselinePreview = {
   engineInput: CanonicalSimulationEngineInput;
@@ -607,19 +612,21 @@ async function buildBaselinePassthroughArtifact(args: {
     memoryRssMb: getMemoryRssMb(),
   });
 
-  const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
-    userId: args.engineInput.runtime.userId,
-    houseId: args.engineInput.houseId,
-    actualContextHouseId: args.engineInput.actualContextHouseId,
-    seedIfMissing: args.engineInput.inputType === "INTERVAL",
-    preferredActualSource:
-      args.engineInput.inputType === "GREEN_BUTTON"
-        ? "GREEN_BUTTON"
-        : args.engineInput.runtime.runContext?.preferredActualSource === "SMT" ||
-            args.engineInput.runtime.runContext?.preferredActualSource === "GREEN_BUTTON"
-          ? args.engineInput.runtime.runContext.preferredActualSource
-          : null,
-  });
+  const upstreamUsageTruth =
+    args.engineInput.prefetchedBaselineUpstreamUsageTruth ??
+    (await resolveOnePathUpstreamUsageTruthForSimulation({
+      userId: args.engineInput.runtime.userId,
+      houseId: args.engineInput.houseId,
+      actualContextHouseId: args.engineInput.actualContextHouseId,
+      seedIfMissing: args.engineInput.inputType === "INTERVAL",
+      preferredActualSource:
+        args.engineInput.inputType === "GREEN_BUTTON"
+          ? "GREEN_BUTTON"
+          : args.engineInput.runtime.runContext?.preferredActualSource === "SMT" ||
+              args.engineInput.runtime.runContext?.preferredActualSource === "GREEN_BUTTON"
+            ? args.engineInput.runtime.runContext.preferredActualSource
+            : null,
+    }));
 
   if (!upstreamUsageTruth.dataset && isIntervalLikeInputType(args.engineInput.inputType)) {
     logSimPipelineEvent("baseline_dataset_passthrough_failure", {
@@ -1059,6 +1066,15 @@ function buildCanonicalEngineInput(args: {
     manualTravelVacantDonorPoolMode: null,
     weatherEfficiencyDerivedInput: derivedInput,
     upstreamUsageTruth: args.loaded.upstreamUsageTruth,
+    prefetchedBaselineUpstreamUsageTruth:
+      args.scenarioId == null && isIntervalLikeInputType(args.inputType)
+        ? {
+            dataset: args.loaded.actualDataset,
+            usageTruthSource: args.loaded.usageTruthSource,
+            seedResult: args.loaded.usageTruthSeedResult,
+            summary: args.loaded.upstreamUsageTruth,
+          }
+        : null,
     runtime: {
       userId: args.runtimeUserId,
       houseId: args.loaded.house.id,

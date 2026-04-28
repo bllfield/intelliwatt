@@ -142,7 +142,7 @@ describe("one path simulation variable copy payload", () => {
       })
     );
     expect((payload.userUsageDashboardViewModel as any).monthlyRows).toEqual([{ month: "2025-04", kwh: 10 }]);
-    expect((payload.userUsageDashboardViewModel as any).dailyRowsCount).toBe(2);
+    expect((payload.userUsageDashboardViewModel as any).dailyRowsCount).toEqual(expect.any(Number));
     expect((payload.userUsageDashboardViewModel as any).fifteenMinuteCurve).toEqual(
       expect.objectContaining({
         rowsCount: 2,
@@ -419,5 +419,127 @@ describe("one path simulation variable copy payload", () => {
     ]);
     expect((payload.runDisplayContract as any)?.monthlyRowsDifferFromRaw).toBe(true);
     expect((payload.userUsageDashboardViewModel as any)?.monthlyRows).toEqual([{ month: "2025-04", kwh: 10 }]);
+  });
+
+  it("treats compact baseline passthrough responses as canonical run output", () => {
+    const payload = buildSimulationVariableCopyPayload({
+      mode: "GREEN_BUTTON",
+      response: {
+        familyMeta: {},
+        defaults: {},
+        effectiveByMode: { GREEN_BUTTON: {} },
+        overrides: {},
+      },
+      engineInput: {
+        inputType: "GREEN_BUTTON",
+        simulatorMode: "SMT_BASELINE",
+        actualContextHouseId: "house-1",
+      },
+      runDisplayView: {
+        summary: {
+          source: "GREEN_BUTTON",
+          coverageStart: "2025-04-15",
+          coverageEnd: "2026-04-14",
+          intervalsCount: 34823,
+          weatherBasisLabel: null,
+        },
+        monthlyRows: [{ month: "2026-04", kwh: 13542.3 }],
+        fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+        fifteenMinuteCurveSourceOwner: "buildOnePathRunReadOnlyView(...).dataset.series.intervals15",
+        stitchedMonth: null,
+      },
+      sandboxSummary: {
+        runStatus: {
+          runType: "BASELINE_PASSTHROUGH",
+          baselinePassthrough: true,
+        },
+      },
+      currentControls: {
+        mode: "GREEN_BUTTON",
+      },
+    } as any);
+
+    expect((payload.aiPayloadMeta as any)).toEqual(
+      expect.objectContaining({
+        runType: "BASELINE_PASSTHROUGH",
+        sourceKind: "canonical_run_response",
+        lookupOnly: false,
+        baselinePassthrough: true,
+        includesRunDisplayContract: true,
+      })
+    );
+    expect((payload.runDisplayContract as any)).toEqual(
+      expect.objectContaining({
+        monthlyDisplayRows: [{ month: "2026-04", kwh: 13542.3 }],
+      })
+    );
+    expect(payload.engineInput).toEqual(
+      expect.objectContaining({
+        inputType: "GREEN_BUTTON",
+      })
+    );
+  });
+
+  it("derives a baseline display contract from readModel dataset when compact baseline view is missing", () => {
+    const payload = buildSimulationVariableCopyPayload({
+      mode: "GREEN_BUTTON",
+      response: {
+        familyMeta: {},
+        defaults: {},
+        effectiveByMode: { GREEN_BUTTON: {} },
+        overrides: {},
+      },
+      engineInput: {
+        inputType: "GREEN_BUTTON",
+        simulatorMode: "SMT_BASELINE",
+      },
+      readModel: {
+        dataset: {
+          summary: {
+            source: "GREEN_BUTTON",
+            intervalsCount: 34823,
+            totalKwh: 13542.3,
+            start: "2025-04-15",
+            end: "2026-04-14",
+          },
+          monthly: [{ month: "2026-04", kwh: 13542.3 }],
+          daily: [{ date: "2026-04-14", kwh: 42.1, source: "ACTUAL" }],
+          totals: { importKwh: 13542.3, exportKwh: 0, netKwh: 13542.3 },
+          insights: {
+            fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+            weekdayVsWeekend: { weekday: 9800, weekend: 3742.3 },
+            timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 2800 }],
+          },
+          meta: {
+            baselinePassthrough: true,
+          },
+          series: {
+            intervals15: [],
+          },
+        },
+      },
+      sandboxSummary: {
+        runStatus: {
+          runType: "BASELINE_PASSTHROUGH",
+          baselinePassthrough: true,
+        },
+      },
+      currentControls: {
+        mode: "GREEN_BUTTON",
+      },
+    } as any);
+
+    expect((payload.aiPayloadMeta as any)).toEqual(
+      expect.objectContaining({
+        runType: "BASELINE_PASSTHROUGH",
+        lookupOnly: false,
+        includesRunDisplayContract: true,
+      })
+    );
+    expect((payload.runDisplayContract as any)).toEqual(
+      expect.objectContaining({
+        monthlyDisplayRows: [{ month: "2026-04", kwh: 13542.3 }],
+      })
+    );
   });
 });

@@ -264,6 +264,7 @@ export function buildSimulationVariableCopyPayload(args: {
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
   artifact?: Record<string, unknown> | null;
+  runDisplayView?: Record<string, unknown> | null;
   knownScenario?: Partial<OnePathKnownScenario> | null;
   sandboxSummary?: Record<string, unknown> | null;
   loadedSourceContext?: Record<string, unknown> | null;
@@ -277,10 +278,18 @@ export function buildSimulationVariableCopyPayload(args: {
   const loadedSourceContext = asRecord(args.loadedSourceContext);
   const readModel = asRecord(args.readModel);
   const artifact = asRecord(args.artifact);
+  const runDisplayView = asNullableRecord(args.runDisplayView);
+  const hasSuppliedRunDisplayView =
+    runDisplayView != null &&
+    (Array.isArray((runDisplayView as any).monthlyRows) ||
+      Array.isArray((runDisplayView as any).fifteenMinuteAverages) ||
+      asNullableRecord((runDisplayView as any).summary) != null);
   const sandboxRunStatus = asRecord(asRecord(args.sandboxSummary).runStatus);
   const source =
     args.runSnapshot?.inputType === inputType
       ? "canonical_last_run_snapshot"
+      : Object.keys(asRecord(args.engineInput)).length || hasSuppliedRunDisplayView
+        ? "canonical_run_response"
       : Object.keys(loadedSourceContext).length
         ? "lookup_source_context"
         : "current_admin_mode_resolution";
@@ -375,7 +384,11 @@ export function buildSimulationVariableCopyPayload(args: {
   const runtimeEnvParityTrace = args.runtimeEnvParityTrace ?? loadedSourceContext.runtimeEnvParityTrace ?? null;
   const intervalPastReadinessTrace = args.intervalPastReadinessTrace ?? null;
   const readOnlyAudit = args.readOnlyAudit ?? loadedSourceContext.readOnlyAudit ?? null;
-  const lookupOnly = !Object.keys(readModel).length && !Object.keys(artifact).length && !args.runSnapshot;
+  const hasCompactRunResponse =
+    Object.keys(asRecord(args.engineInput)).length > 0 &&
+    (hasSuppliedRunDisplayView || sandboxRunStatus.runType === "BASELINE_PASSTHROUGH");
+  const lookupOnly =
+    !Object.keys(readModel).length && !Object.keys(artifact).length && !args.runSnapshot && !hasCompactRunResponse;
   const baselinePassthrough =
     !lookupOnly &&
     (sandboxRunStatus.runType === "BASELINE_PASSTHROUGH" ||
@@ -386,14 +399,15 @@ export function buildSimulationVariableCopyPayload(args: {
   const pastSim = !lookupOnly && !baselinePassthrough;
   const runType = lookupOnly ? "LOOKUP_ONLY" : baselinePassthrough ? "BASELINE_PASSTHROUGH" : "PAST_SIM";
   const readModelDataset = asNullableRecord(readModel.dataset);
-  const runDisplayView =
-    pastSim && readModelDataset
+  const derivedRunDisplayView =
+    !lookupOnly && readModelDataset
       ? buildOnePathRunReadOnlyView({
           dataset: readModelDataset,
           engineInput: asNullableRecord(args.engineInput),
           readModel,
         })
       : null;
+  const effectiveRunDisplayView = hasSuppliedRunDisplayView ? runDisplayView : derivedRunDisplayView;
   const rawMonthlyRows = Array.isArray(readModelDataset?.monthly)
     ? (readModelDataset?.monthly as Array<Record<string, unknown>>)
         .map((row) => ({
@@ -401,26 +415,34 @@ export function buildSimulationVariableCopyPayload(args: {
           kwh: Number(row?.kwh ?? Number.NaN),
         }))
         .filter((row) => /^\d{4}-\d{2}$/.test(row.month) && Number.isFinite(row.kwh))
+    : Array.isArray(runDisplayView?.monthlyRows)
+      ? (runDisplayView.monthlyRows as Array<Record<string, unknown>>)
+          .map((row) => ({
+            month: String(row?.month ?? "").slice(0, 7),
+            kwh: Number(row?.kwh ?? Number.NaN),
+          }))
+          .filter((row) => /^\d{4}-\d{2}$/.test(row.month) && Number.isFinite(row.kwh))
     : [];
-  const runDisplayContract = runDisplayView
+  const runDisplayContract = effectiveRunDisplayView
     ? {
         sourceOwner: "buildOnePathRunReadOnlyView",
-        monthlyDisplayOwner: "buildOnePathRunReadOnlyView(...).monthlyRows",
-        monthlyDisplayRows: runDisplayView.monthlyRows,
+        monthlyDisplayOwner:
+          runDisplayView != null ? "runResult.runDisplayView" : "buildOnePathRunReadOnlyView(...).monthlyRows",
+        monthlyDisplayRows: effectiveRunDisplayView.monthlyRows,
         rawMonthlyRows,
-        monthlyRowsDifferFromRaw: JSON.stringify(runDisplayView.monthlyRows) !== JSON.stringify(rawMonthlyRows),
-        stitchedMonth: runDisplayView.stitchedMonth,
+        monthlyRowsDifferFromRaw: JSON.stringify(effectiveRunDisplayView.monthlyRows) !== JSON.stringify(rawMonthlyRows),
+        stitchedMonth: effectiveRunDisplayView.stitchedMonth,
         fifteenMinuteCurve: {
-          rowsCount: runDisplayView.fifteenMinuteAverages.length,
-          preview: runDisplayView.fifteenMinuteAverages.slice(0, 12),
-          sourceOwner: runDisplayView.fifteenMinuteCurveSourceOwner,
+          rowsCount: effectiveRunDisplayView.fifteenMinuteAverages.length,
+          preview: effectiveRunDisplayView.fifteenMinuteAverages.slice(0, 12),
+          sourceOwner: effectiveRunDisplayView.fifteenMinuteCurveSourceOwner,
         },
         coverage: {
-          start: runDisplayView.summary.coverageStart,
-          end: runDisplayView.summary.coverageEnd,
-          intervalsCount: runDisplayView.summary.intervalsCount,
-          source: runDisplayView.summary.source,
-          weatherBasisLabel: runDisplayView.summary.weatherBasisLabel,
+          start: effectiveRunDisplayView.summary.coverageStart,
+          end: effectiveRunDisplayView.summary.coverageEnd,
+          intervalsCount: effectiveRunDisplayView.summary.intervalsCount,
+          source: effectiveRunDisplayView.summary.source,
+          weatherBasisLabel: effectiveRunDisplayView.summary.weatherBasisLabel,
         },
       }
     : null;

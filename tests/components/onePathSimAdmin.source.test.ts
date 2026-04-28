@@ -216,7 +216,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(manualStageViewSource).toContain("annual-total semantics");
     expect(manualStageViewSource).not.toContain("/api/user/manual-usage");
     expect(manualStageViewSource).not.toContain("user_usage_manual_monthly_stage_one");
-    expect(source).toContain("readModel={runDisplayView ? null : asRecord(runResult?.readModel)}");
+    expect(source).toContain("dataset={runReadOnlyDataset}");
+    expect(source).toContain("readModel={asRecord(runResult?.readModel)}");
     expect(presentationSource).toContain("knownScenario");
     expect(presentationSource).toContain("sandboxSummary");
     expect(presentationSource).toContain("tuningCycleSummary");

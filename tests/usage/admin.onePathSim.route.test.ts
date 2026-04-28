@@ -746,9 +746,24 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).toHaveBeenCalledWith({ sharedProducerPathUsed: true, inputType: "GREEN_BUTTON" });
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.runType).toBe("BASELINE_PASSTHROUGH");
+    expect(json.engineInput).toEqual(
+      expect.objectContaining({
+        inputType: "GREEN_BUTTON",
+        actualIntervalsReference: {
+          omittedForAdminResponse: true,
+          rowsCount: 0,
+        },
+      })
+    );
     expect(json.runDisplayView).toBeTruthy();
     expect(json.artifact ?? null).toBeNull();
-    expect(json.readModel ?? null).toBeNull();
+    expect(json.readModel).toEqual(
+      expect.objectContaining({
+        dataset: expect.objectContaining({
+          monthly: [{ month: "2026-04", kwh: 13542.3 }],
+        }),
+      })
+    );
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
   });
 

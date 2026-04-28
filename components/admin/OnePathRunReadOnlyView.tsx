@@ -34,6 +34,19 @@ function MetricCard(props: { label: string; value: string; note?: string }) {
   );
 }
 
+function isRenderableRunReadOnlyView(value: unknown): value is OnePathRunReadOnlyModel {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.summary != null &&
+    typeof candidate.summary === "object" &&
+    !Array.isArray(candidate.summary) &&
+    Array.isArray(candidate.monthlyRows) &&
+    Array.isArray(candidate.dailyRows) &&
+    Array.isArray(candidate.fifteenMinuteAverages)
+  );
+}
+
 export function OnePathRunReadOnlyView(props: {
   view?: OnePathRunReadOnlyModel | null;
   dataset?: Record<string, unknown> | null;
@@ -54,7 +67,8 @@ export function OnePathRunReadOnlyView(props: {
       }),
     [props.dataset, props.engineInput, props.readModel]
   );
-  const view = props.view ?? derivedView;
+  const suppliedView = isRenderableRunReadOnlyView(props.view) ? props.view : null;
+  const view = suppliedView ?? derivedView;
 
   if (!view) return null;
 

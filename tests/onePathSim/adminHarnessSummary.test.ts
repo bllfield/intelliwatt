@@ -179,6 +179,45 @@ describe("one path sandbox harness summary", () => {
     expect(summary.compareVisibility.simulatedCurveIntervalsCount).toBe(0);
   });
 
+  it("surfaces compact baseline passthrough runs without a read model", () => {
+    const summary = buildOnePathSandboxHarnessSummary({
+      knownScenario: {
+        scenarioKey: "keeper-green-button-baseline-primary",
+        label: "Brian green button baseline primary",
+        scenarioType: "GREEN_BUTTON_TRUTH",
+      },
+      runResult: {
+        runType: "BASELINE_PASSTHROUGH",
+        engineInput: {
+          inputType: "GREEN_BUTTON",
+          simulatorMode: "SMT_BASELINE",
+          scenarioId: null,
+          actualContextHouseId: "house-1",
+        },
+        runDisplayView: {
+          summary: {
+            source: "GREEN_BUTTON",
+            coverageStart: "2025-04-15",
+            coverageEnd: "2026-04-14",
+            intervalsCount: 34823,
+          },
+          monthlyRows: [{ month: "2026-04", kwh: 13542.3 }],
+        },
+      },
+    });
+
+    expect(summary.runStatus.selectedMode).toBe("GREEN_BUTTON");
+    expect(summary.runStatus.runType).toBe("BASELINE_PASSTHROUGH");
+    expect(summary.runStatus.baselinePassthrough).toBe(true);
+    expect(summary.monthlyTruthCompare.datasetSummary).toEqual({
+      source: "GREEN_BUTTON",
+      intervalsCount: 34823,
+      start: "2025-04-15",
+      end: "2026-04-14",
+    });
+    expect(summary.monthlyTruthCompare.datasetMonthlyRows).toEqual([{ month: "2026-04", kwh: 13542.3 }]);
+  });
+
   it("surfaces Past Sim compare metrics, weather sensitivity, and daily shape visibility", () => {
     const summary = buildOnePathSandboxHarnessSummary({
       knownScenario: {

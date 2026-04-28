@@ -488,6 +488,7 @@ export function OnePathSimAdmin() {
       engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
       readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
       artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+      runDisplayView: (runResult?.runDisplayView as Record<string, unknown> | undefined) ?? null,
       loadedSourceContext: asRecord(lookup?.sourceContext),
       baselineParityReport: lookupBaselineParityReport,
       baselineParityAudit: lookupBaselineParityAudit,
@@ -540,6 +541,7 @@ export function OnePathSimAdmin() {
       engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
       readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
       artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+      runDisplayView: (runResult?.runDisplayView as Record<string, unknown> | undefined) ?? null,
       loadedSourceContext: asRecord(lookup?.sourceContext),
       baselineParityReport: lookupBaselineParityReport,
       baselineParityAudit: lookupBaselineParityAudit,
@@ -1399,9 +1401,9 @@ export function OnePathSimAdmin() {
             ) : null}
             <OnePathRunReadOnlyView
               view={(runDisplayView as any) ?? null}
-              dataset={runDisplayView ? null : runReadOnlyDataset}
+              dataset={runReadOnlyDataset}
               engineInput={asRecord(runResult?.engineInput)}
-              readModel={runDisplayView ? null : asRecord(runResult?.readModel)}
+              readModel={asRecord(runResult?.readModel)}
               runType={displayRunType}
             />
           </div>
