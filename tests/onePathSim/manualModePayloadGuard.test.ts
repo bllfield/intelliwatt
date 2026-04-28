@@ -230,6 +230,9 @@ describe("one path manual mode payload guards", () => {
     expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
     expect(resolveOnePathWeatherSensitivityEnvelope).not.toHaveBeenCalled();
     expect(engineInput.inputType).toBe("GREEN_BUTTON");
+    expect(engineInput.actualIntervalsReference).toEqual([]);
+    expect(engineInput.actualDailyReference).toEqual([]);
+    expect(engineInput.weatherDaysReference).toBeNull();
     expect(engineInput.weatherEfficiencyDerivedInput).toBeNull();
   });
 });

@@ -1164,6 +1164,7 @@ function buildCanonicalEngineInput(args: {
       .map((row: any) => [String(row?.month ?? "").slice(0, 7), Number(row?.kwh ?? Number.NaN)])
       .filter((entry: [string, number]) => /^\d{4}-\d{2}$/.test(entry[0]) && Number.isFinite(entry[1]))
   ) as Record<string, number>;
+  const isBaselineIntervalLikeRun = args.scenarioId == null && isIntervalLikeInputType(args.inputType);
   const travelRanges = normalizeTravelRanges(
     args.travelRanges ??
       (manualUsagePayload && Array.isArray((manualUsagePayload as any).travelRanges)
@@ -1237,13 +1238,13 @@ function buildCanonicalEngineInput(args: {
     normalizedMonthTargetsByMonth: monthlyTotalsKwhByMonth,
     monthlyTargetConstructionDiagnostics: null,
     actualIntervalsReference:
-      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL"
+      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL" || isBaselineIntervalLikeRun
         ? []
         : Array.isArray(args.loaded.actualDataset?.series?.intervals15)
           ? args.loaded.actualDataset.series.intervals15
           : [],
     actualDailyReference:
-      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL"
+      args.inputType === "MANUAL_MONTHLY" || args.inputType === "MANUAL_ANNUAL" || isBaselineIntervalLikeRun
         ? []
         : Array.isArray(args.loaded.actualDataset?.daily)
           ? args.loaded.actualDataset.daily
@@ -1268,7 +1269,7 @@ function buildCanonicalEngineInput(args: {
     evProfile: asRecord((args.loaded.homeProfile as any)?.ev) ?? null,
     weatherPreference,
     weatherLogicMode,
-    weatherDaysReference: asRecord(args.loaded.actualDataset?.dailyWeather) ?? null,
+    weatherDaysReference: isBaselineIntervalLikeRun ? null : asRecord(args.loaded.actualDataset?.dailyWeather) ?? null,
     sharedProducerPathUsed: true,
     sourceDerivedMode: args.loaded.usageTruthSource,
     manualTravelVacantDonorPoolMode: null,
