@@ -55,6 +55,7 @@ type PrefetchedBaselineUpstreamUsageTruth = Pick<
   ResolvedUpstreamUsageTruth,
   "dataset" | "usageTruthSource" | "seedResult" | "summary"
 >;
+type BaselinePassthroughUpstreamUsageTruth = PrefetchedBaselineUpstreamUsageTruth;
 
 export type CanonicalSimulationEngineInput = {
   engineInputVersion: "one-path-sim-v1";
@@ -425,7 +426,7 @@ function isUsableManualStageOnePayload(payload: ManualUsagePayload | null | unde
 
 function buildIntervalBaselinePassthroughDataset(args: {
   engineInput: CanonicalSimulationEngineInput;
-  upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
+  upstreamUsageTruth: BaselinePassthroughUpstreamUsageTruth;
 }) {
   const sourceDataset = args.upstreamUsageTruth.dataset ?? {};
   const summary = asRecord((sourceDataset as any).summary) ?? {};
@@ -488,7 +489,7 @@ function buildIntervalBaselinePassthroughDataset(args: {
 
 function buildManualBaselinePassthroughDataset(args: {
   engineInput: CanonicalSimulationEngineInput;
-  upstreamUsageTruth: Awaited<ReturnType<typeof resolveOnePathUpstreamUsageTruthForSimulation>>;
+  upstreamUsageTruth: BaselinePassthroughUpstreamUsageTruth;
   manualUsagePayload: ManualUsagePayload | null;
 }) {
   type ManualMonthlyRow = { month: string; kwh: number };
@@ -682,7 +683,7 @@ async function buildBaselinePassthroughArtifact(args: {
 async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
   engineInput: CanonicalSimulationEngineInput;
   callerType: SharedDiagnosticsCallerType;
-  upstreamUsageTruth: ResolvedUpstreamUsageTruth;
+  upstreamUsageTruth: BaselinePassthroughUpstreamUsageTruth;
   manualUsagePayload: ManualUsagePayload | null;
   startedAt: number;
 }): Promise<CanonicalSimulationArtifact> {

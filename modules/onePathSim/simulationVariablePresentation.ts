@@ -1,6 +1,6 @@
 import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
-import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
+import { buildOnePathRunReadOnlyView, type OnePathRunReadOnlyView as OnePathRunReadOnlyModel } from "@/modules/onePathSim/runReadOnlyView";
 import type {
   EffectiveSimulationVariablesUsed,
   SimulationVariableInputType,
@@ -58,6 +58,19 @@ function asArray<T = unknown>(value: unknown): T[] {
 
 function asNullableRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function isRunReadOnlyViewModel(value: unknown): value is OnePathRunReadOnlyModel {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.summary != null &&
+    typeof candidate.summary === "object" &&
+    !Array.isArray(candidate.summary) &&
+    Array.isArray(candidate.monthlyRows) &&
+    Array.isArray(candidate.dailyRows) &&
+    Array.isArray(candidate.fifteenMinuteAverages)
+  );
 }
 
 function humanizeKey(key: string): string {
@@ -278,12 +291,8 @@ export function buildSimulationVariableCopyPayload(args: {
   const loadedSourceContext = asRecord(args.loadedSourceContext);
   const readModel = asRecord(args.readModel);
   const artifact = asRecord(args.artifact);
-  const runDisplayView = asNullableRecord(args.runDisplayView);
-  const hasSuppliedRunDisplayView =
-    runDisplayView != null &&
-    (Array.isArray((runDisplayView as any).monthlyRows) ||
-      Array.isArray((runDisplayView as any).fifteenMinuteAverages) ||
-      asNullableRecord((runDisplayView as any).summary) != null);
+  const runDisplayView = isRunReadOnlyViewModel(args.runDisplayView) ? args.runDisplayView : null;
+  const hasSuppliedRunDisplayView = runDisplayView != null;
   const sandboxRunStatus = asRecord(asRecord(args.sandboxSummary).runStatus);
   const source =
     args.runSnapshot?.inputType === inputType

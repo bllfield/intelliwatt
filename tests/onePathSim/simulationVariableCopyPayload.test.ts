@@ -444,6 +444,7 @@ describe("one path simulation variable copy payload", () => {
           weatherBasisLabel: null,
         },
         monthlyRows: [{ month: "2026-04", kwh: 13542.3 }],
+        dailyRows: [{ date: "2026-04-14", kwh: 42.1, source: "ACTUAL" }],
         fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
         fifteenMinuteCurveSourceOwner: "buildOnePathRunReadOnlyView(...).dataset.series.intervals15",
         stitchedMonth: null,
