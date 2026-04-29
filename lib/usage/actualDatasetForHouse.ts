@@ -382,6 +382,8 @@ async function computeInsightsFromDb(args: {
   rawId?: string | null;
   cutoff: Date;
   end: Date;
+  precomputedDailyTotals?: Array<{ date: string; kwh: number }>;
+  precomputedMonthlyTotals?: Array<{ month: string; kwh: number }>;
 }): Promise<{
   dailyTotals: Array<{ date: string; kwh: number }>;
   monthlyTotals: Array<{ month: string; kwh: number }>;
@@ -509,19 +511,31 @@ async function computeInsightsFromDb(args: {
     const houseId = String(args.houseId ?? "").trim();
     const rawId = String(args.rawId ?? "").trim();
     if (!houseId || !rawId) return empty;
-    const dailyRows = (await usageClient.$queryRaw(Prisma.sql`
+    const dailyTotals = Array.isArray(args.precomputedDailyTotals)
+      ? args.precomputedDailyTotals.map((row) => ({
+          date: String(row.date).slice(0, 10),
+          kwh: round2(Number(row.kwh) || 0),
+        }))
+      : (
+          (await usageClient.$queryRaw(Prisma.sql`
       SELECT to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
-    `)) as Array<{ date: string; kwh: number }>;
-    const dailyTotals = dailyRows.map((r) => ({ date: String(r.date), kwh: round2(r.kwh) }));
+    `)) as Array<{ date: string; kwh: number }>
+        ).map((r) => ({ date: String(r.date), kwh: round2(r.kwh) }));
     const peakDay = dailyTotals.length > 0 ? dailyTotals.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
-    const monthlyRows = (await usageClient.$queryRaw(Prisma.sql`
+    const monthlyTotals = Array.isArray(args.precomputedMonthlyTotals)
+      ? args.precomputedMonthlyTotals.map((row) => ({
+          month: String(row.month).slice(0, 7),
+          kwh: round2(Number(row.kwh) || 0),
+        }))
+      : (
+          (await usageClient.$queryRaw(Prisma.sql`
       SELECT to_char(date_trunc('month', "timestamp")::date, 'YYYY-MM') AS month, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
-    `)) as Array<{ month: string; kwh: number }>;
-    const monthlyTotals = monthlyRows.map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
+    `)) as Array<{ month: string; kwh: number }>
+        ).map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
     const fifteenRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT to_char("timestamp", 'HH24:MI') AS hhmm, AVG(("consumptionKwh" * 4))::float AS avgkw
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
@@ -777,11 +791,14 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   };
 }
 
-async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetResult | null> {
+async function fetchGreenButtonDataset(
+  houseId: string,
+  options?: { lightweight?: boolean; rawId?: string | null }
+): Promise<UsageDatasetResult | null> {
   if (!USAGE_DB_ENABLED) return null;
   try {
     const usageClient = usagePrisma as any;
-    const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+    const rawId = typeof options?.rawId === "string" && options.rawId.trim() ? options.rawId.trim() : await getLatestUsableRawGreenButtonIdForHouse(houseId);
     if (!rawId) return null;
     const window = await getGreenButtonWindow(usageClient, houseId, rawId);
     if (!window) return null;
@@ -797,18 +814,25 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     const totalKwh = decimalToNumber(aggregates._sum?.consumptionKwh ?? 0);
     const start = aggregates._min?.timestamp ?? null;
     const end = aggregates._max?.timestamp ?? null;
-    const recentIntervals = (await usageClient.greenButtonInterval.findMany({
-      where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
-      orderBy: { timestamp: "desc" },
-      take: 192,
-    })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
-    const intervals15 = recentIntervals.map((row) => ({ timestamp: row.timestamp.toISOString(), kwh: decimalToNumber(row.consumptionKwh) })).reverse();
-    const hourlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+    const lightweight = options?.lightweight === true;
+    const intervals15 = lightweight
+      ? []
+      : (
+          (await usageClient.greenButtonInterval.findMany({
+            where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
+            orderBy: { timestamp: "desc" },
+            take: 192,
+          })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>
+        )
+          .map((row) => ({ timestamp: row.timestamp.toISOString(), kwh: decimalToNumber(row.consumptionKwh) }))
+          .reverse();
+    const hourlyRows = lightweight
+      ? []
+      : ((await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('hour', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end} AND "timestamp" >= NOW() - INTERVAL '14 days'
       GROUP BY bucket ORDER BY bucket ASC
-    `);
-    const hourlyRows = hourlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
+    `)) as Array<{ bucket: Date; kwh: number }>);
     const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
@@ -821,12 +845,13 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
       GROUP BY bucket ORDER BY bucket DESC LIMIT 120
     `);
     const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
-    const annualRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+    const annualRows = lightweight
+      ? []
+      : ((await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('year', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket ASC
-    `);
-    const annualRows = annualRowsRaw as Array<{ bucket: Date; kwh: number }>;
+    `)) as Array<{ bucket: Date; kwh: number }>);
     return {
       summary: {
         source: "GREEN_BUTTON",
@@ -956,25 +981,39 @@ export async function getActualUsageDatasetForHouse(
   /** True when skipFullYearIntervalFetch was true and we did not call getActualIntervalsForRange. */
   skippedFullYearIntervalFetch?: boolean;
 }> {
+  const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
+  const preferredSource = args?.preferredSource ?? null;
+  const fetchOnlyPreferredSource =
+    skippedFullYearIntervalFetch && (preferredSource === "SMT" || preferredSource === "GREEN_BUTTON");
   let smtDataset: UsageDatasetResult | null = null;
   let greenDataset: UsageDatasetResult | null = null;
-  try {
-    smtDataset = await fetchSmtDataset(esiid);
-  } catch {
-    smtDataset = null;
+  let greenButtonRawId: string | null = null;
+  if (!fetchOnlyPreferredSource || preferredSource === "SMT") {
+    try {
+      smtDataset = await fetchSmtDataset(esiid);
+    } catch {
+      smtDataset = null;
+    }
   }
-  try {
-    greenDataset = await fetchGreenButtonDataset(houseId);
-  } catch {
-    greenDataset = null;
+  if (!fetchOnlyPreferredSource || preferredSource === "GREEN_BUTTON") {
+    try {
+      if (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON" && USAGE_DB_ENABLED) {
+        greenButtonRawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+      }
+      greenDataset = await fetchGreenButtonDataset(houseId, {
+        lightweight: skippedFullYearIntervalFetch && preferredSource === "GREEN_BUTTON",
+        rawId: greenButtonRawId,
+      });
+    } catch {
+      greenDataset = null;
+    }
   }
-  const selected = chooseDataset(smtDataset, greenDataset, args?.preferredSource ?? null);
+  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const canonicalCutoff = new Date(canonicalWindow.startDate + "T00:00:00.000Z");
   const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
   const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);
   const selectedWindowEndDate = normalizeDateKey(selected?.summary?.end ?? null);
-  const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
 
   const emptyInsights: ActualHouseInsights = {
     fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
@@ -1014,7 +1053,11 @@ export async function getActualUsageDatasetForHouse(
       YYYY_MM_DD.test(lightweightRangeEnd)
     ) {
       try {
-        const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+        const rawId =
+          greenButtonRawId ??
+          (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON"
+            ? null
+            : await getLatestUsableRawGreenButtonIdForHouse(houseId));
         const computed =
           rawId != null
             ? await computeInsightsFromDb({
@@ -1023,6 +1066,8 @@ export async function getActualUsageDatasetForHouse(
                 rawId,
                 cutoff: new Date(`${lightweightRangeStart}T00:00:00.000Z`),
                 end: new Date(`${lightweightRangeEnd}T23:59:59.999Z`),
+                precomputedDailyTotals: dailyTotals.length > 0 ? dailyTotals : undefined,
+                precomputedMonthlyTotals: monthlyTotals.length > 0 ? monthlyTotals : undefined,
               })
             : null;
         if (computed) {
