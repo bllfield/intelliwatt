@@ -973,7 +973,7 @@ export async function getActualUsageDatasetForHouse(
         ? dailyTotals.reduce((current, row) => (row.kwh > current.kwh ? row : current))
         : null;
     let weekdayVsWeekend = deriveWeekdayWeekendFromDailyTotals(dailyTotals);
-    let insights = {
+    let insights: Record<string, unknown> = {
       ...emptyInsights,
       peakDay,
       baseloadMonthly: low10Average(monthlyTotals.map((row) => Number(row.kwh) || 0)),

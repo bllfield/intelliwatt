@@ -473,10 +473,9 @@ describe("one path baseline passthrough", () => {
         intervalsCount: 31488,
       },
       daily: [
-        { date: "2025-04-28", kwh: 70 },
-        { date: "2025-04-29", kwh: 80 },
+        { date: "2025-12-01", kwh: 9545.8 },
       ],
-      monthly: [{ month: "2025-04", kwh: 150 }],
+      monthly: [{ month: "2025-12", kwh: 9545.8 }],
       insights: {
         timeOfDayBuckets: [
           { key: "overnight", label: "Overnight (12am–6am)", kwh: 1200 },
@@ -497,10 +496,6 @@ describe("one path baseline passthrough", () => {
         timezone: "America/Chicago",
       },
     };
-    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
-      startDate: "2025-04-28",
-      endDate: "2026-04-27",
-    });
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
 
     const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
@@ -508,10 +503,62 @@ describe("one path baseline passthrough", () => {
       buildBaseEngineInput({
         inputType: "GREEN_BUTTON",
         manualConstraintMode: "GREEN_BUTTON",
+        coverageWindowStart: "2025-04-28",
+        coverageWindowEnd: "2025-12-01",
       })
     );
 
     expect(artifact.dataset.insights.timeOfDayBuckets).toEqual(upstreamDataset.insights.timeOfDayBuckets);
+  });
+
+  it("drops preview-only Green Button time-of-day buckets when they do not match full-window totals", async () => {
+    const upstreamDataset = {
+      summary: {
+        source: "GREEN_BUTTON",
+        totalKwh: 19433.91,
+        start: "2024-12-02",
+        end: "2025-12-01",
+        latest: "2025-12-01T23:00:00.000Z",
+        intervalsCount: 31560,
+      },
+      daily: [
+        { date: "2024-12-02", kwh: 35.73 },
+        { date: "2025-12-01", kwh: 54.89 },
+      ],
+      monthly: [{ month: "2025-12", kwh: 54.89 }],
+      insights: {
+        timeOfDayBuckets: [
+          { key: "overnight", label: "Overnight (12am–6am)", kwh: 17.11 },
+          { key: "morning", label: "Morning (6am–12pm)", kwh: 45.18 },
+          { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 41.63 },
+          { key: "evening", label: "Evening (6pm–12am)", kwh: 17.41 },
+        ],
+      },
+      series: {
+        intervals15: [
+          { timestamp: "2025-12-01T00:00:00.000Z", kwh: 0.5 },
+          { timestamp: "2025-12-01T00:15:00.000Z", kwh: 0.75 },
+        ],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+      },
+    };
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "GREEN_BUTTON",
+        manualConstraintMode: "GREEN_BUTTON",
+        coverageWindowStart: "2024-12-02",
+        coverageWindowEnd: "2025-12-01",
+      })
+    );
+
+    expect(artifact.dataset.insights.timeOfDayBuckets).toEqual([]);
   });
 
   it("reuses saved manual monthly truth for baseline without drifting to normalized engine input values", async () => {
