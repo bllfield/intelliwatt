@@ -1401,6 +1401,42 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
   });
 }
 
+export async function buildIntervalLikeBaselinePassthroughDataset(
+  engineInput: CanonicalSimulationEngineInput
+): Promise<Record<string, unknown>> {
+  if (!isBaselinePassthroughInput(engineInput) || !isIntervalLikeInputType(engineInput.inputType)) {
+    throw new Error("Interval-like baseline passthrough dataset requires a baseline interval-like engine input.");
+  }
+  const upstreamUsageTruth =
+    engineInput.prefetchedBaselineUpstreamUsageTruth ??
+    (await resolveOnePathUpstreamUsageTruthForSimulation({
+      userId: engineInput.runtime.userId,
+      houseId: engineInput.houseId,
+      actualContextHouseId: engineInput.actualContextHouseId,
+      seedIfMissing: engineInput.inputType === "INTERVAL",
+      preferredActualSource:
+        engineInput.inputType === "GREEN_BUTTON"
+          ? "GREEN_BUTTON"
+          : engineInput.runtime.runContext?.preferredActualSource === "SMT" ||
+              engineInput.runtime.runContext?.preferredActualSource === "GREEN_BUTTON"
+            ? engineInput.runtime.runContext.preferredActualSource
+            : null,
+    }));
+
+  if (!upstreamUsageTruth.dataset) {
+    throw new UpstreamUsageTruthMissingError({
+      usageTruthSource: upstreamUsageTruth.usageTruthSource,
+      seedResult: upstreamUsageTruth.seedResult,
+      upstreamUsageTruth: upstreamUsageTruth.summary,
+    });
+  }
+
+  return buildIntervalBaselinePassthroughDataset({
+    engineInput,
+    upstreamUsageTruth,
+  }) as Record<string, unknown>;
+}
+
 export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Promise<CanonicalSimulationEngineInput> {
   requireUsableManualPayload({
     inputType: "MANUAL_MONTHLY",

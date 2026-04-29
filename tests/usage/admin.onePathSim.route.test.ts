@@ -23,6 +23,7 @@ const adaptGreenButtonRawInput = vi.fn();
 const adaptManualMonthlyRawInput = vi.fn();
 const adaptManualAnnualRawInput = vi.fn();
 const adaptNewBuildRawInput = vi.fn();
+const buildIntervalLikeBaselinePassthroughDataset = vi.fn();
 const runSharedSimulation = vi.fn();
 const buildSharedSimulationReadModel = vi.fn();
 const buildOnePathManualUsagePastSimReadResult = vi.fn();
@@ -102,6 +103,7 @@ vi.mock("@/modules/onePathSim/onePathSim", () => ({
   adaptManualMonthlyRawInput: (...args: any[]) => adaptManualMonthlyRawInput(...args),
   adaptManualAnnualRawInput: (...args: any[]) => adaptManualAnnualRawInput(...args),
   adaptNewBuildRawInput: (...args: any[]) => adaptNewBuildRawInput(...args),
+  buildIntervalLikeBaselinePassthroughDataset: (...args: any[]) => buildIntervalLikeBaselinePassthroughDataset(...args),
   runSharedSimulation: (...args: any[]) => runSharedSimulation(...args),
   buildSharedSimulationReadModel: (...args: any[]) => buildSharedSimulationReadModel(...args),
   SharedSimulationRunError,
@@ -162,6 +164,7 @@ describe("admin one path sim route", () => {
     adaptManualMonthlyRawInput.mockReset();
     adaptManualAnnualRawInput.mockReset();
     adaptNewBuildRawInput.mockReset();
+    buildIntervalLikeBaselinePassthroughDataset.mockReset();
     runSharedSimulation.mockReset();
     buildSharedSimulationReadModel.mockReset();
     buildOnePathManualUsagePastSimReadResult.mockReset();
@@ -226,6 +229,33 @@ describe("admin one path sim route", () => {
     adaptManualMonthlyRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_MONTHLY" });
     adaptManualAnnualRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "MANUAL_ANNUAL" });
     adaptNewBuildRawInput.mockResolvedValue({ sharedProducerPathUsed: true, inputType: "NEW_BUILD" });
+    buildIntervalLikeBaselinePassthroughDataset.mockResolvedValue({
+      summary: {
+        source: "GREEN_BUTTON",
+        intervalsCount: 31536,
+        totalKwh: 13542.3,
+        start: "2025-04-16",
+        end: "2026-04-15",
+      },
+      meta: {
+        baselinePassthrough: true,
+        weatherSensitivityScore: { scoringMode: "INTERVAL_BASED" },
+      },
+      monthly: [{ month: "2026-04", kwh: 13542.3 }],
+      daily: [{ date: "2026-04-15", kwh: 41.12, source: "GREEN_BUTTON" }],
+      totals: { importKwh: 13542.3, exportKwh: 0, netKwh: 13542.3 },
+      insights: {
+        fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+        weekdayVsWeekend: { weekday: 10000, weekend: 3542.3 },
+        timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 3200 }],
+      },
+      series: {
+        intervals15: [],
+        daily: [{ timestamp: "2026-04-15T00:00:00.000Z", kwh: 41.12 }],
+        monthly: [{ timestamp: "2026-04-01T00:00:00.000Z", kwh: 13542.3 }],
+        annual: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 13542.3 }],
+      },
+    });
     runSharedSimulation.mockResolvedValue({ artifactId: "artifact-1", artifactInputHash: "artifact-hash-1", engineInput: {} });
     buildSharedSimulationReadModel.mockReturnValue({
       runIdentity: { artifactId: "artifact-1" },
@@ -743,7 +773,11 @@ describe("admin one path sim route", () => {
       })
     );
     expect(adaptIntervalRawInput).not.toHaveBeenCalled();
-    expect(runSharedSimulation).toHaveBeenCalledWith({ sharedProducerPathUsed: true, inputType: "GREEN_BUTTON" });
+    expect(buildIntervalLikeBaselinePassthroughDataset).toHaveBeenCalledWith({
+      sharedProducerPathUsed: true,
+      inputType: "GREEN_BUTTON",
+    });
+    expect(runSharedSimulation).not.toHaveBeenCalled();
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.runType).toBe("BASELINE_PASSTHROUGH");
     expect(json.engineInput).toEqual(
@@ -1332,7 +1366,7 @@ describe("admin one path sim route", () => {
   });
 
   it("returns a distinct usage DB unavailable error for upstream truth failures when the usage env is missing", async () => {
-    runSharedSimulation.mockRejectedValueOnce(
+    buildIntervalLikeBaselinePassthroughDataset.mockRejectedValueOnce(
       new UpstreamUsageTruthMissingError({
         usageTruthSource: "missing_usage_truth",
         seedResult: null,

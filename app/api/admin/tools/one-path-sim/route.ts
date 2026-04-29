@@ -9,6 +9,7 @@ import {
   adaptManualAnnualRawInput,
   adaptManualMonthlyRawInput,
   adaptNewBuildRawInput,
+  buildIntervalLikeBaselinePassthroughDataset,
   buildSharedSimulationReadModel,
   runSharedSimulation,
   SharedSimulationRunError,
@@ -707,10 +708,40 @@ export async function POST(request: NextRequest) {
                   ...effectiveRawInputBase,
                   manualUsagePayload: effectiveManualUsagePayload,
                 });
+      const slimEngineInput = buildSlimAdminEngineInput(engineInput);
+      if (mode === "GREEN_BUTTON" && !effectiveRawInputBase.scenarioId) {
+        const baselineDataset = asRecord(await buildIntervalLikeBaselinePassthroughDataset(engineInput));
+        const baselineDatasetMeta = asRecord(baselineDataset?.meta);
+        const compactRunDisplayView =
+          buildOnePathRunReadOnlyView({
+            dataset: baselineDataset,
+            engineInput: asRecord(engineInput),
+            readModel: null,
+          }) ?? null;
+        const compactReadModel =
+          compactRunDisplayView || baselineDataset
+            ? {
+                dataset: buildCompactRunReadModelDataset({
+                  artifactDataset: baselineDataset,
+                  artifactDatasetMeta: baselineDatasetMeta,
+                  runDisplayView: compactRunDisplayView,
+                }),
+              }
+            : null;
+        return NextResponse.json({
+          ok: true,
+          debugDiagnosticsIncluded: false,
+          runType: "BASELINE_PASSTHROUGH",
+          engineInput: slimEngineInput,
+          manualStageOneView: null,
+          runDisplayView: compactRunDisplayView,
+          artifact: null,
+          readModel: compactReadModel,
+        });
+      }
       const artifact = await runSharedSimulation(engineInput);
       const artifactDataset = asRecord(artifact.dataset);
       const artifactDatasetMeta = asRecord(artifactDataset?.meta);
-      const slimEngineInput = buildSlimAdminEngineInput(engineInput);
       const isGreenButtonBaselinePassthroughRun =
         mode === "GREEN_BUTTON" &&
         !effectiveRawInputBase.scenarioId &&
