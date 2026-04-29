@@ -18,7 +18,7 @@ import {
 } from "@/modules/realUsageAdapter/greenButton";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
-import { prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -231,6 +231,47 @@ function fillDailyGaps(
     out.push({ timestamp: new Date(ms).toISOString(), kwh: map.get(ms) ?? 0 });
   }
   return out;
+}
+
+function chicagoYearMonth(d: Date): string {
+  return dateTimePartsInTimezone(d, SMT_TZ)?.yearMonth ?? d.toISOString().slice(0, 7);
+}
+
+function deriveDailyTotalsFromSeries(points: UsageSeriesPoint[]): Array<{ date: string; kwh: number }> {
+  const byDate = new Map<string, number>();
+  for (const point of points) {
+    const date = normalizeDateKey(point.timestamp);
+    if (!date) continue;
+    byDate.set(date, round2(Number(point.kwh) || 0));
+  }
+  return Array.from(byDate.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, kwh]) => ({ date, kwh }));
+}
+
+function deriveMonthlyTotalsFromSeries(points: UsageSeriesPoint[]): Array<{ month: string; kwh: number }> {
+  const byMonth = new Map<string, number>();
+  for (const point of points) {
+    const parsed = new Date(point.timestamp);
+    if (!Number.isFinite(parsed.getTime())) continue;
+    const month = chicagoYearMonth(parsed);
+    byMonth.set(month, round2(Number(point.kwh) || 0));
+  }
+  return Array.from(byMonth.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([month, kwh]) => ({ month, kwh }));
+}
+
+function deriveWeekdayWeekendFromDailyTotals(dailyTotals: Array<{ date: string; kwh: number }>): { weekday: number; weekend: number } {
+  let weekday = 0;
+  let weekend = 0;
+  for (const row of dailyTotals) {
+    const parsed = new Date(`${row.date}T12:00:00.000Z`);
+    const day = parsed.getUTCDay();
+    if (day === 0 || day === 6) weekend += Number(row.kwh) || 0;
+    else weekday += Number(row.kwh) || 0;
+  }
+  return { weekday: round2(weekday), weekend: round2(weekend) };
 }
 
 async function computeImportExportTotalsFromDb(args: {
@@ -882,6 +923,60 @@ export async function getActualUsageDatasetForHouse(
   const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
   const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);
   const selectedWindowEndDate = normalizeDateKey(selected?.summary?.end ?? null);
+  const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
+
+  const emptyInsights = {
+    fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
+    timeOfDayBuckets: [] as Array<{ key: string; label: string; kwh: number }>,
+    peakDay: null as { date: string; kwh: number } | null,
+    peakHour: null as { hour: number; kw: number } | null,
+    baseload: null as number | null,
+    baseloadDaily: null as number | null,
+    baseloadMonthly: null as number | null,
+    weekdayVsWeekend: { weekday: 0, weekend: 0 },
+  };
+
+  if (selected && skippedFullYearIntervalFetch) {
+    const dailyTotals = deriveDailyTotalsFromSeries(Array.isArray(selected.series?.daily) ? selected.series.daily : []);
+    const monthlyTotals = deriveMonthlyTotalsFromSeries(Array.isArray(selected.series?.monthly) ? selected.series.monthly : []);
+    const totalFromMonthly = round2(monthlyTotals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
+    const totalKwh = monthlyTotals.length > 0 ? totalFromMonthly : round2(Number(selected.summary.totalKwh) || 0);
+    const peakDay =
+      dailyTotals.length > 0
+        ? dailyTotals.reduce((current, row) => (row.kwh > current.kwh ? row : current))
+        : null;
+    const weekdayVsWeekend = deriveWeekdayWeekendFromDailyTotals(dailyTotals);
+    const insights = {
+      ...emptyInsights,
+      peakDay,
+      baseloadMonthly: low10Average(monthlyTotals.map((row) => Number(row.kwh) || 0)),
+      weekdayVsWeekend,
+    };
+    const dataset: ActualHouseDataset = {
+      summary: {
+        ...selected.summary,
+        totalKwh,
+      },
+      series: {
+        ...selected.series,
+        annual: selected.series?.annual?.length
+          ? [{ ...selected.series.annual[0], kwh: totalKwh }]
+          : selected.series.annual,
+      },
+      daily: dailyTotals,
+      monthly: monthlyTotals,
+      insights,
+      totals: { importKwh: totalKwh, exportKwh: 0, netKwh: totalKwh },
+    };
+    return {
+      dataset,
+      alternatives: {
+        smt: smtDataset?.summary ?? null,
+        greenButton: greenDataset?.summary ?? null,
+      },
+      skippedFullYearIntervalFetch: true,
+    };
+  }
 
   let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
   let stitchedMonthMeta: unknown = null;
@@ -912,18 +1007,6 @@ export async function getActualUsageDatasetForHouse(
     stitchedMonthMeta = null;
   }
 
-  const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
-
-  const emptyInsights = {
-    fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
-    timeOfDayBuckets: [] as Array<{ key: string; label: string; kwh: number }>,
-    peakDay: null as { date: string; kwh: number } | null,
-    peakHour: null as { hour: number; kw: number } | null,
-    baseload: null as number | null,
-    baseloadDaily: null as number | null,
-    baseloadMonthly: null as number | null,
-    weekdayVsWeekend: { weekday: 0, weekend: 0 },
-  };
   let insights: Record<string, unknown> = { ...emptyInsights };
   let dailyTotals: Array<{ date: string; kwh: number }> = [];
   let monthlyTotals: Array<{ month: string; kwh: number }> = [];
