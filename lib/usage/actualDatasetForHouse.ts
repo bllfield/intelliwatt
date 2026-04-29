@@ -1047,10 +1047,13 @@ export async function getActualUsageDatasetForHouse(
     };
     const lightweightRangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
     const lightweightRangeEnd = selectedWindowEndDate ?? canonicalWindow.endDate;
-    if (
+    const shouldQueryGreenButtonDbInsights =
       selected.summary.source === "GREEN_BUTTON" &&
       YYYY_MM_DD.test(lightweightRangeStart) &&
-      YYYY_MM_DD.test(lightweightRangeEnd)
+      YYYY_MM_DD.test(lightweightRangeEnd) &&
+      !(preferredSource === "GREEN_BUTTON" && skippedFullYearIntervalFetch);
+    if (
+      shouldQueryGreenButtonDbInsights
     ) {
       try {
         const rawId =
