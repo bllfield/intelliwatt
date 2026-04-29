@@ -272,6 +272,20 @@ function deriveMonthlyTotalsFromSeries(points: UsageSeriesPoint[]): Array<{ mont
     .map(([month, kwh]) => ({ month, kwh }));
 }
 
+function deriveMonthlyTotalsFromDailyTotals(
+  dailyTotals: Array<{ date: string; kwh: number }>
+): Array<{ month: string; kwh: number }> {
+  const byMonth = new Map<string, number>();
+  for (const row of dailyTotals) {
+    const month = String(row.date ?? "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    byMonth.set(month, round2((byMonth.get(month) ?? 0) + (Number(row.kwh) || 0)));
+  }
+  return Array.from(byMonth.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([month, kwh]) => ({ month, kwh }));
+}
+
 function deriveWeekdayWeekendFromDailyTotals(dailyTotals: Array<{ date: string; kwh: number }>): { weekday: number; weekend: number } {
   let weekday = 0;
   let weekend = 0;
@@ -947,21 +961,68 @@ export async function getActualUsageDatasetForHouse(
   };
 
   if (selected && skippedFullYearIntervalFetch) {
-    const dailyTotals = deriveDailyTotalsFromSeries(Array.isArray(selected.series?.daily) ? selected.series.daily : []);
-    const monthlyTotals = deriveMonthlyTotalsFromSeries(Array.isArray(selected.series?.monthly) ? selected.series.monthly : []);
-    const totalFromMonthly = round2(monthlyTotals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
-    const totalKwh = monthlyTotals.length > 0 ? totalFromMonthly : round2(Number(selected.summary.totalKwh) || 0);
-    const peakDay =
+    let dailyTotals = deriveDailyTotalsFromSeries(Array.isArray(selected.series?.daily) ? selected.series.daily : []);
+    let monthlyTotals =
+      dailyTotals.length > 0
+        ? deriveMonthlyTotalsFromDailyTotals(dailyTotals)
+        : deriveMonthlyTotalsFromSeries(Array.isArray(selected.series?.monthly) ? selected.series.monthly : []);
+    let totalFromMonthly = round2(monthlyTotals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
+    let totalKwh = monthlyTotals.length > 0 ? totalFromMonthly : round2(Number(selected.summary.totalKwh) || 0);
+    let peakDay =
       dailyTotals.length > 0
         ? dailyTotals.reduce((current, row) => (row.kwh > current.kwh ? row : current))
         : null;
-    const weekdayVsWeekend = deriveWeekdayWeekendFromDailyTotals(dailyTotals);
-    const insights = {
+    let weekdayVsWeekend = deriveWeekdayWeekendFromDailyTotals(dailyTotals);
+    let insights = {
       ...emptyInsights,
       peakDay,
       baseloadMonthly: low10Average(monthlyTotals.map((row) => Number(row.kwh) || 0)),
       weekdayVsWeekend,
     };
+    const lightweightRangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
+    const lightweightRangeEnd = selectedWindowEndDate ?? canonicalWindow.endDate;
+    if (
+      selected.summary.source === "GREEN_BUTTON" &&
+      YYYY_MM_DD.test(lightweightRangeStart) &&
+      YYYY_MM_DD.test(lightweightRangeEnd)
+    ) {
+      try {
+        const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+        const computed =
+          rawId != null
+            ? await computeInsightsFromDb({
+                source: "GREEN_BUTTON",
+                houseId,
+                rawId,
+                cutoff: new Date(`${lightweightRangeStart}T00:00:00.000Z`),
+                end: new Date(`${lightweightRangeEnd}T23:59:59.999Z`),
+              })
+            : null;
+        if (computed) {
+          dailyTotals = computed.dailyTotals;
+          monthlyTotals = computed.monthlyTotals;
+          totalFromMonthly = round2(monthlyTotals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
+          totalKwh = monthlyTotals.length > 0 ? totalFromMonthly : round2(Number(selected.summary.totalKwh) || 0);
+          peakDay = computed.peakDay;
+          weekdayVsWeekend = computed.weekdayVsWeekend;
+          insights = {
+            fifteenMinuteAverages: computed.fifteenMinuteAverages,
+            timeOfDayBuckets: computed.timeOfDayBuckets,
+            peakDay: computed.peakDay,
+            peakHour: computed.peakHour,
+            baseload: computed.baseload ?? null,
+            baseloadMethod: computed.baseloadMethod ?? "SQL_P10_V1",
+            baseloadFallbackUsed: computed.baseloadFallbackUsed ?? false,
+            baseloadDebugNote: computed.baseloadDebugNote ?? null,
+            baseloadDaily: computed.baseloadDaily,
+            baseloadMonthly: computed.baseloadMonthly,
+            weekdayVsWeekend: computed.weekdayVsWeekend,
+          };
+        }
+      } catch {
+        // Fall back to series-derived monthly/daily rows when the lightweight aggregate read fails.
+      }
+    }
     const dataset: ActualHouseDataset = {
       summary: {
         ...selected.summary,

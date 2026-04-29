@@ -267,6 +267,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
+function round2(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 function normalizeTravelRanges(value: unknown): Array<{ startDate: string; endDate: string }> {
   if (!Array.isArray(value)) return [];
   return value
@@ -624,11 +628,19 @@ function buildIntervalBaselinePassthroughDataset(args: {
         }))
         .filter((row) => row.key.length > 0 && row.label.length > 0)
     : [];
-  const boundedTimeOfDayBuckets =
+  const sourceTimeOfDayBucketTotal = round2(
+    sourceTimeOfDayBuckets.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)
+  );
+  const sourceTimeOfDayBucketsTrusted =
     sourceTimeOfDayBuckets.length > 0 &&
+    Math.abs(sourceTimeOfDayBucketTotal - totalKwh) <= Math.max(1, totalKwh * 0.005);
+  const boundedTimeOfDayBuckets =
+    sourceTimeOfDayBucketsTrusted &&
     boundedIntervals15.length < (Number(summary.intervalsCount ?? boundedIntervals15.length) || 0)
       ? sourceTimeOfDayBuckets
-      : buildTimeOfDayBucketsFromIntervals(boundedIntervals15, timezone);
+      : boundedIntervals15.length < (Number(summary.intervalsCount ?? boundedIntervals15.length) || 0)
+        ? []
+        : buildTimeOfDayBucketsFromIntervals(boundedIntervals15, timezone);
   const peakDay =
     boundedDaily.length > 0
       ? boundedDaily.reduce((current, row) => (row.kwh > current.kwh ? row : current))
