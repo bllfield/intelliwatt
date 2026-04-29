@@ -1,5 +1,5 @@
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
-import type { ActualHouseDataset, UsageSummary } from "@/lib/usage/actualDatasetForHouse";
+import type { ActualHouseDataset, ActualHouseInsights, UsageSummary } from "@/lib/usage/actualDatasetForHouse";
 import { getIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
@@ -50,6 +50,19 @@ function buildPersistedDatasetFromIntervals(args: {
   const monthly = Array.from(monthlyMap.entries())
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([month, kwh]) => ({ month, kwh: round2(kwh) }));
+  const insights: ActualHouseInsights = {
+    fifteenMinuteAverages: [],
+    timeOfDayBuckets: [],
+    peakDay: null,
+    peakHour: null,
+    baseload: null,
+    baseloadDaily: null,
+    baseloadMonthly: null,
+    weekdayVsWeekend: { weekday: 0, weekend: 0 },
+    artifactKind: args.kind,
+    artifactReadMode: "persisted_only",
+    artifactRecomputed: false,
+  };
 
   return {
     summary: {
@@ -69,11 +82,7 @@ function buildPersistedDatasetFromIntervals(args: {
     },
     daily,
     monthly,
-    insights: {
-      artifactKind: args.kind,
-      artifactReadMode: "persisted_only",
-      artifactRecomputed: false,
-    },
+    insights,
     totals: { importKwh: totalKwh, exportKwh: 0, netKwh: totalKwh },
   };
 }

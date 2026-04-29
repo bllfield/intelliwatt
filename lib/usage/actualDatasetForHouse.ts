@@ -72,13 +72,40 @@ export type UsageDatasetResult = {
 
 export type ImportExportTotals = { importKwh: number; exportKwh: number; netKwh: number };
 
+type ActualHouseBaseloadMethod = "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1";
+
+export type ActualHouseStitchedMonth = {
+  mode: "PRIOR_YEAR_TAIL";
+  yearMonth: string;
+  haveDaysThrough: number;
+  missingDaysFrom: number;
+  missingDaysTo: number;
+  borrowedFromYearMonth: string;
+  completenessRule: string;
+};
+
+export type ActualHouseInsights = Record<string, unknown> & {
+  fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+  timeOfDayBuckets: Array<{ key: string; label: string; kwh: number }>;
+  stitchedMonth?: ActualHouseStitchedMonth | null;
+  peakDay: { date: string; kwh: number } | null;
+  peakHour: { hour: number; kw: number } | null;
+  baseload: number | null;
+  baseloadMethod?: ActualHouseBaseloadMethod;
+  baseloadFallbackUsed?: boolean;
+  baseloadDebugNote?: string | null;
+  baseloadDaily: number | null;
+  baseloadMonthly: number | null;
+  weekdayVsWeekend: { weekday: number; weekend: number };
+};
+
 /** Same shape as one house's dataset in GET /api/user/usage */
 export type ActualHouseDataset = {
   summary: UsageSummary;
   series: UsageDatasetResult["series"];
   daily: Array<{ date: string; kwh: number }>;
   monthly: Array<{ month: string; kwh: number }>;
-  insights: Record<string, unknown> | null;
+  insights: ActualHouseInsights | null;
   totals: ImportExportTotals;
   meta?: Record<string, unknown> | null;
   /** When set, daily usage table shows Avg °F, Min °F, Max °F, HDD65, CDD65. */
@@ -363,7 +390,7 @@ async function computeInsightsFromDb(args: {
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
-  baseloadMethod?: "SQL_P10_V1";
+  baseloadMethod?: ActualHouseBaseloadMethod;
   baseloadFallbackUsed?: boolean;
   baseloadDebugNote?: string | null;
   baseloadDaily: number | null;
@@ -949,7 +976,7 @@ export async function getActualUsageDatasetForHouse(
   const selectedWindowEndDate = normalizeDateKey(selected?.summary?.end ?? null);
   const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
 
-  const emptyInsights = {
+  const emptyInsights: ActualHouseInsights = {
     fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
     timeOfDayBuckets: [] as Array<{ key: string; label: string; kwh: number }>,
     peakDay: null as { date: string; kwh: number } | null,
@@ -973,7 +1000,7 @@ export async function getActualUsageDatasetForHouse(
         ? dailyTotals.reduce((current, row) => (row.kwh > current.kwh ? row : current))
         : null;
     let weekdayVsWeekend = deriveWeekdayWeekendFromDailyTotals(dailyTotals);
-    let insights: Record<string, unknown> = {
+    let insights: ActualHouseInsights = {
       ...emptyInsights,
       peakDay,
       baseloadMonthly: low10Average(monthlyTotals.map((row) => Number(row.kwh) || 0)),
@@ -1059,7 +1086,7 @@ export async function getActualUsageDatasetForHouse(
   }
 
   let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
-  let stitchedMonthMeta: unknown = null;
+  let stitchedMonthMeta: ActualHouseStitchedMonth | null = null;
   try {
     if (selected?.summary?.source === "SMT" && esiid) {
       if (Number.isFinite(canonicalEnd.getTime())) {
@@ -1087,7 +1114,7 @@ export async function getActualUsageDatasetForHouse(
     stitchedMonthMeta = null;
   }
 
-  let insights: Record<string, unknown> = { ...emptyInsights };
+  let insights: ActualHouseInsights = { ...emptyInsights };
   let dailyTotals: Array<{ date: string; kwh: number }> = [];
   let monthlyTotals: Array<{ month: string; kwh: number }> = [];
   let totals: ImportExportTotals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
@@ -1110,7 +1137,7 @@ export async function getActualUsageDatasetForHouse(
       const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
       const rangeEnd = selectedWindowEndDate ?? canonicalWindow.endDate;
       let baseload: number | null = computed.baseload;
-      let baseloadMethod: "FILTERED_NORMAL_LIFE_V1" | "FALLBACK_V1" | "SQL_P10_V1" = "SQL_P10_V1";
+      let baseloadMethod: ActualHouseBaseloadMethod = "SQL_P10_V1";
       let baseloadFiltered: { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null };
       if (!args?.skipFullYearIntervalFetch) {
         const intervalRows = await getActualIntervalsForRange({
