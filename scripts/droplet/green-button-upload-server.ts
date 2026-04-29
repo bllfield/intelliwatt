@@ -10,7 +10,6 @@ const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 500 * 1024
 const SECRET = process.env.GREEN_BUTTON_UPLOAD_SECRET || "";
 const ALLOW_ORIGIN = process.env.GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN || "https://intelliwatt.com";
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
@@ -843,32 +842,18 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       return;
     }
 
-    const sorted = [...normalized].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    const latestTimestamp = sorted[sorted.length - 1]?.timestamp ?? null;
-    if (!latestTimestamp) {
+    const { trimGreenButtonIntervalsToLatestLocalDays } = await import("@/lib/usage/greenButtonCoverage");
+    const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(
+      normalized,
+      MANUAL_USAGE_LIFETIME_DAYS
+    );
+    if (trimmed.length === 0 || !startDateKey || !endDateKey) {
       if (uploadRecordId) {
         await (prisma as any).greenButtonUpload.update({
           where: { id: uploadRecordId },
           data: {
             parseStatus: "error",
-            parseMessage: "Unable to determine timestamp window for intervals.",
-          },
-        });
-      }
-      res.status(422).json({ ok: false, error: "no_recent_readings" });
-      return;
-    }
-
-    const cutoff = new Date(latestTimestamp.getTime() - MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
-    const trimmed = sorted.filter((interval) => interval.timestamp >= cutoff);
-
-    if (trimmed.length === 0) {
-      if (uploadRecordId) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecordId },
-          data: {
-            parseStatus: "empty",
-            parseMessage: "No intervals found within the last 365 days.",
+            parseMessage: "Unable to determine a Chicago-local 365-day coverage window for intervals.",
           },
         });
       }
@@ -928,6 +913,8 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
         normalizedIntervals: trimmed.length,
         totalKwh: Number(totalKwh.toFixed(6)),
         appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
+        coverageStartDateKey: startDateKey,
+        coverageEndDateKey: endDateKey,
         warnings: parsed.warnings,
       };
       await (prisma as any).greenButtonUpload.update({

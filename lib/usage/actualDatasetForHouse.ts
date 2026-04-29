@@ -17,6 +17,8 @@ import {
   getLatestUsableRawGreenButtonIdForHouse,
 } from "@/modules/realUsageAdapter/greenButton";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
+import { prevCalendarDayDateKey } from "@/lib/time/chicago";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -570,16 +572,19 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
   if (typeof greenButtonAnchorEndDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(greenButtonAnchorEndDate)) {
     return null;
   }
-  const anchorEnd = new Date(`${greenButtonAnchorEndDate}T23:59:59.999Z`);
-  if (!Number.isFinite(anchorEnd.getTime())) return null;
-  const cutoff = new Date(anchorEnd.getTime() - 364 * DAY_MS);
+  const greenButtonStartDate = prevCalendarDayDateKey(greenButtonAnchorEndDate, 364);
+  const range = buildUtcRangeForChicagoLocalDateRange({
+    startDateKey: greenButtonStartDate,
+    endDateKey: greenButtonAnchorEndDate,
+  });
+  if (!range) return null;
   const anchoredRows = await usageClient.greenButtonInterval.findFirst({
-    where: { homeId: houseId, rawId, timestamp: { gte: cutoff, lte: anchorEnd } },
+    where: { homeId: houseId, rawId, timestamp: { gte: range.startInclusive, lte: range.endInclusive } },
     orderBy: { timestamp: "desc" },
     select: { timestamp: true },
   });
   if (!anchoredRows?.timestamp) return null;
-  return { cutoff, end: anchorEnd };
+  return { cutoff: range.startInclusive, end: range.endInclusive };
 }
 
 async function getSmtWindow(esiid: string) {
@@ -719,19 +724,26 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     `);
     const dailyRows = dailyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const monthlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-      SELECT date_trunc('month', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
+      SELECT date_trunc('month', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket DESC LIMIT 120
     `);
     const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
     const annualRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-      SELECT date_trunc('year', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
+      SELECT date_trunc('year', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket ASC
     `);
     const annualRows = annualRowsRaw as Array<{ bucket: Date; kwh: number }>;
     return {
-      summary: { source: "GREEN_BUTTON", intervalsCount: count, totalKwh, start: start ? start.toISOString() : null, end: end ? end.toISOString() : null, latest: end ? end.toISOString() : null },
+      summary: {
+        source: "GREEN_BUTTON",
+        intervalsCount: count,
+        totalKwh,
+        start: start ? chicagoDateKey(start) : null,
+        end: end ? chicagoDateKey(end) : null,
+        latest: end ? end.toISOString() : null,
+      },
       series: {
         intervals15,
         hourly: toSeriesPoint(hourlyRows),

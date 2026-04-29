@@ -599,7 +599,20 @@ function buildIntervalBaselinePassthroughDataset(args: {
   );
   const totalKwh = totals.netKwh;
   const boundedWeekdayWeekend = buildWeekdayWeekendFromDailyRows(boundedDaily);
-  const boundedTimeOfDayBuckets = buildTimeOfDayBucketsFromIntervals(boundedIntervals15, timezone);
+  const sourceTimeOfDayBuckets = Array.isArray((sourceDataset as any)?.insights?.timeOfDayBuckets)
+    ? ((sourceDataset as any).insights.timeOfDayBuckets as Array<{ key?: unknown; label?: unknown; kwh?: unknown }>)
+        .map((row) => ({
+          key: String(row?.key ?? ""),
+          label: String(row?.label ?? ""),
+          kwh: Number(row?.kwh ?? 0) || 0,
+        }))
+        .filter((row) => row.key.length > 0 && row.label.length > 0)
+    : [];
+  const boundedTimeOfDayBuckets =
+    sourceTimeOfDayBuckets.length > 0 &&
+    boundedIntervals15.length < (Number(summary.intervalsCount ?? boundedIntervals15.length) || 0)
+      ? sourceTimeOfDayBuckets
+      : buildTimeOfDayBucketsFromIntervals(boundedIntervals15, timezone);
   const peakDay =
     boundedDaily.length > 0
       ? boundedDaily.reduce((current, row) => (row.kwh > current.kwh ? row : current))

@@ -9,12 +9,12 @@ import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { normalizeEmail } from "@/lib/utils/email";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
+import { trimGreenButtonIntervalsToLatestLocalDays } from "@/lib/usage/greenButtonCoverage";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
 
 // No explicit upload cap; rely on platform limits. Large files are allowed to ensure full 12-month coverage.
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -176,31 +176,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 422 });
       }
 
-      const sorted = [...normalized].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
-      );
-      const latestTimestamp = sorted[sorted.length - 1]?.timestamp ?? null;
-      if (!latestTimestamp) {
+      const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(normalized, MANUAL_USAGE_LIFETIME_DAYS);
+      if (trimmed.length === 0 || !startDateKey || !endDateKey) {
         await (prisma as any).greenButtonUpload.update({
           where: { id: uploadRecord.id },
           data: {
             parseStatus: "error",
-            parseMessage: "Unable to determine timestamp window for intervals.",
-          },
-        });
-
-        return NextResponse.json({ ok: false, error: "no_recent_readings" }, { status: 422 });
-      }
-
-      const cutoff = new Date(latestTimestamp.getTime() - MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
-      const trimmed = sorted.filter((interval) => interval.timestamp >= cutoff);
-
-      if (trimmed.length === 0) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecord.id },
-          data: {
-            parseStatus: "empty",
-            parseMessage: "No intervals found within the last 365 days.",
+            parseMessage: "Unable to determine a Chicago-local 365-day coverage window for intervals.",
           },
         });
 
@@ -297,6 +279,8 @@ export async function POST(request: Request) {
         normalizedIntervals: trimmed.length,
         totalKwh: Number(totalKwh.toFixed(6)),
         appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
+        coverageStartDateKey: startDateKey,
+        coverageEndDateKey: endDateKey,
         warnings: parsed.warnings,
       };
 

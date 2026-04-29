@@ -410,6 +410,58 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.meta.coverageEnd).toBe("2026-04-25");
   });
 
+  it("keeps persisted time-of-day buckets for Green Button baseline when interval series is only a recent preview", async () => {
+    const upstreamDataset = {
+      summary: {
+        source: "GREEN_BUTTON",
+        totalKwh: 9545.8,
+        start: "2025-04-28",
+        end: "2025-12-01",
+        latest: "2025-12-02T00:00:00.000Z",
+        intervalsCount: 31488,
+      },
+      daily: [
+        { date: "2025-04-28", kwh: 70 },
+        { date: "2025-04-29", kwh: 80 },
+      ],
+      monthly: [{ month: "2025-04", kwh: 150 }],
+      insights: {
+        timeOfDayBuckets: [
+          { key: "overnight", label: "Overnight (12am–6am)", kwh: 1200 },
+          { key: "morning", label: "Morning (6am–12pm)", kwh: 2400 },
+          { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 3600 },
+          { key: "evening", label: "Evening (6pm–12am)", kwh: 2345.8 },
+        ],
+      },
+      series: {
+        intervals15: [
+          { timestamp: "2025-12-01T00:00:00.000Z", kwh: 0.5 },
+          { timestamp: "2025-12-01T00:15:00.000Z", kwh: 0.75 },
+        ],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+      },
+    };
+    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
+      startDate: "2025-04-28",
+      endDate: "2026-04-27",
+    });
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "GREEN_BUTTON",
+        manualConstraintMode: "GREEN_BUTTON",
+      })
+    );
+
+    expect(artifact.dataset.insights.timeOfDayBuckets).toEqual(upstreamDataset.insights.timeOfDayBuckets);
+  });
+
   it("reuses saved manual monthly truth for baseline without drifting to normalized engine input values", async () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
       buildUsageTruth({
