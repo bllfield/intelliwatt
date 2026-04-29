@@ -199,6 +199,7 @@ async function readPersistedUsageTruth(args: {
       layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
       scenarioId: null,
       esiid: args.esiid,
+      lightweightActualUsage: true,
     }).catch(() => null)) ?? { dataset: null, alternatives: { smt: null, greenButton: null } }
   );
 }

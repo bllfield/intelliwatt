@@ -55,6 +55,7 @@ describe("live shared upstream usage truth owner", () => {
       layerKind: "ACTUAL_USAGE_INTERVALS",
       scenarioId: null,
       esiid: "esiid-2",
+      lightweightActualUsage: true,
     });
     expect(requestUsageRefreshForUserHouse).not.toHaveBeenCalled();
     expect(out.usageTruthSource).toBe("persisted_usage_output");

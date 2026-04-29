@@ -85,6 +85,7 @@ export async function resolveIntervalsLayer(args: {
   scenarioId?: string | null;
   esiid?: string | null;
   preferredActualSource?: ActualUsageSource | null;
+  lightweightActualUsage?: boolean;
 }): Promise<ResolveIntervalsLayerResult | null> {
   if (
     args.layerKind === IntervalSeriesKind.ACTUAL_USAGE_INTERVALS ||
@@ -92,6 +93,7 @@ export async function resolveIntervalsLayer(args: {
   ) {
     return getActualUsageDatasetForHouse(args.houseId, args.esiid ?? null, {
       preferredSource: args.preferredActualSource ?? null,
+      skipFullYearIntervalFetch: args.lightweightActualUsage === true,
     });
   }
 

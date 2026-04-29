@@ -243,6 +243,7 @@ async function readPersistedUsageTruth(args: {
       scenarioId: null,
       esiid: args.esiid,
       preferredActualSource: args.preferredActualSource ?? null,
+      lightweightActualUsage: true,
     }).catch(() => null)) ?? { dataset: null, alternatives: { smt: null, greenButton: null } }
   );
 }
