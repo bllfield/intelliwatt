@@ -25,8 +25,8 @@ export function buildUtcRangeForChicagoLocalDateRange(args: {
   };
 }
 
-export function resolveLatestCompleteOrAvailableGreenButtonDateKey(
-  intervals: GreenButtonTimestampedInterval[]
+export function resolveLatestCompleteOrAvailableGreenButtonDateKey<T extends GreenButtonTimestampedInterval>(
+  intervals: T[]
 ): string | null {
   const countsByDateKey = new Map<string, number>();
   for (const interval of intervals) {
@@ -45,11 +45,11 @@ export function resolveLatestCompleteOrAvailableGreenButtonDateKey(
   return sortedDateKeys[sortedDateKeys.length - 1] ?? null;
 }
 
-export function trimGreenButtonIntervalsToLatestLocalDays(
-  intervals: GreenButtonTimestampedInterval[],
+export function trimGreenButtonIntervalsToLatestLocalDays<T extends GreenButtonTimestampedInterval>(
+  intervals: T[],
   totalDays = 365
 ): {
-  trimmed: GreenButtonTimestampedInterval[];
+  trimmed: T[];
   startDateKey: string | null;
   endDateKey: string | null;
 } {
