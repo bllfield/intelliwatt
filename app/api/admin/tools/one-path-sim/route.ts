@@ -47,11 +47,100 @@ import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } fro
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
+import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+const GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS = 25_000;
+
+class AdminRouteStageTimeoutError extends Error {
+  code = "one_path_admin_timeout" as const;
+  stage: string;
+  correlationId: string;
+  timeoutMs: number;
+  elapsedMs: number;
+
+  constructor(args: { stage: string; correlationId: string; timeoutMs: number; elapsedMs: number }) {
+    super(`Admin one-path route timed out during ${args.stage} after ${args.elapsedMs}ms.`);
+    this.name = "AdminRouteStageTimeoutError";
+    this.stage = args.stage;
+    this.correlationId = args.correlationId;
+    this.timeoutMs = args.timeoutMs;
+    this.elapsedMs = args.elapsedMs;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+function isAdminRouteStageTimeoutFailure(error: unknown): error is AdminRouteStageTimeoutError {
+  return error instanceof AdminRouteStageTimeoutError;
+}
+
+async function withAdminRouteStageTimeout<T>(args: {
+  stage: string;
+  correlationId: string;
+  timeoutMs: number;
+  mode: CanonicalSimulationInputType;
+  houseId: string;
+  stageTimingsMs: Record<string, number>;
+  promise: Promise<T>;
+}): Promise<T> {
+  const startedAt = Date.now();
+  logSimPipelineEvent("one_path_admin_stage_start", {
+    stage: args.stage,
+    correlationId: args.correlationId,
+    timeoutMs: args.timeoutMs,
+    mode: args.mode,
+    houseId: args.houseId,
+    memoryRssMb: getMemoryRssMb(),
+  });
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const result = await Promise.race<T>([
+      args.promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new AdminRouteStageTimeoutError({
+              stage: args.stage,
+              correlationId: args.correlationId,
+              timeoutMs: args.timeoutMs,
+              elapsedMs: Date.now() - startedAt,
+            })
+          );
+        }, args.timeoutMs);
+      }),
+    ]);
+    const durationMs = Date.now() - startedAt;
+    args.stageTimingsMs[args.stage] = durationMs;
+    logSimPipelineEvent("one_path_admin_stage_success", {
+      stage: args.stage,
+      correlationId: args.correlationId,
+      durationMs,
+      mode: args.mode,
+      houseId: args.houseId,
+      memoryRssMb: getMemoryRssMb(),
+    });
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    args.stageTimingsMs[args.stage] = durationMs;
+    logSimPipelineEvent("one_path_admin_stage_failure", {
+      stage: args.stage,
+      correlationId: args.correlationId,
+      durationMs,
+      timeoutMs: isAdminRouteStageTimeoutFailure(error) ? error.timeoutMs : undefined,
+      failureMessage: error instanceof Error ? error.message : "unknown_error",
+      mode: args.mode,
+      houseId: args.houseId,
+      memoryRssMb: getMemoryRssMb(),
+    });
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function isUpstreamUsageTruthMissingFailure(
   error: unknown
@@ -553,6 +642,8 @@ export async function POST(request: NextRequest) {
 
   if (action === "run") {
     const mode = normalizeMode(body?.mode);
+    const correlationId = createSimCorrelationId();
+    const stageTimingsMs: Record<string, number> = {};
     const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";
     const manualUsage =
       isManualMode
@@ -696,7 +787,15 @@ export async function POST(request: NextRequest) {
         mode === "INTERVAL"
           ? await adaptIntervalRawInput(effectiveRawInputBase)
           : mode === "GREEN_BUTTON"
-            ? await adaptGreenButtonRawInput(effectiveRawInputBase)
+            ? await withAdminRouteStageTimeout({
+                stage: "adapt_green_button_raw_input",
+                correlationId,
+                timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
+                mode,
+                houseId: resolved.selectedHouse.id,
+                stageTimingsMs,
+                promise: adaptGreenButtonRawInput(effectiveRawInputBase),
+              })
           : mode === "MANUAL_ANNUAL"
             ? await adaptManualAnnualRawInput({
                 ...effectiveRawInputBase,
@@ -710,14 +809,36 @@ export async function POST(request: NextRequest) {
                 });
       const slimEngineInput = buildSlimAdminEngineInput(engineInput);
       if (mode === "GREEN_BUTTON" && !effectiveRawInputBase.scenarioId) {
-        const baselineDataset = asRecord(await buildIntervalLikeBaselinePassthroughDataset(engineInput));
+        const baselineDataset = asRecord(
+          await withAdminRouteStageTimeout({
+            stage: "build_green_button_baseline_dataset",
+            correlationId,
+            timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
+            mode,
+            houseId: resolved.selectedHouse.id,
+            stageTimingsMs,
+            promise: buildIntervalLikeBaselinePassthroughDataset(engineInput),
+          })
+        );
         const baselineDatasetMeta = asRecord(baselineDataset?.meta);
         const compactRunDisplayView =
-          buildOnePathRunReadOnlyView({
-            dataset: baselineDataset,
-            engineInput: asRecord(engineInput),
-            readModel: null,
-          }) ?? null;
+          (
+            await withAdminRouteStageTimeout({
+              stage: "build_green_button_baseline_view",
+              correlationId,
+              timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
+              mode,
+              houseId: resolved.selectedHouse.id,
+              stageTimingsMs,
+              promise: Promise.resolve(
+                buildOnePathRunReadOnlyView({
+                  dataset: baselineDataset,
+                  engineInput: asRecord(engineInput),
+                  readModel: null,
+                }) ?? null
+              ),
+            })
+          ) ?? null;
         const compactReadModel =
           compactRunDisplayView || baselineDataset
             ? {
@@ -732,6 +853,7 @@ export async function POST(request: NextRequest) {
           ok: true,
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
+          correlationId,
           engineInput: slimEngineInput,
           manualStageOneView: null,
           runDisplayView: compactRunDisplayView,
@@ -880,6 +1002,21 @@ export async function POST(request: NextRequest) {
             message: error.message,
           },
           { status: 409 }
+        );
+      }
+      if (isAdminRouteStageTimeoutFailure(error)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: error.code,
+            message: error.message,
+            stage: error.stage,
+            correlationId: error.correlationId,
+            timeoutMs: error.timeoutMs,
+            elapsedMs: error.elapsedMs,
+            stageTimingsMs,
+          },
+          { status: 504 }
         );
       }
       if (isSharedSimulationRunFailure(error)) {

@@ -801,6 +801,36 @@ describe("admin one path sim route", () => {
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
   });
 
+  it("returns a structured timeout error for green button baseline stage overruns", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    adaptGreenButtonRawInput.mockImplementationOnce(() => new Promise(() => {}));
+
+    const pending = POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "GREEN_BUTTON",
+        includeDebugDiagnostics: true,
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(25_000);
+    const res = await pending;
+    const json = await res.json();
+
+    expect(res.status).toBe(504);
+    expect(json).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: "one_path_admin_timeout",
+        stage: "adapt_green_button_raw_input",
+        correlationId: expect.any(String),
+        timeoutMs: 25_000,
+      })
+    );
+  });
+
   it("keeps interval run requests off the lookup-only preview and baseline contract path", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
