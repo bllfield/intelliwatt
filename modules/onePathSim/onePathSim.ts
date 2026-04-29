@@ -554,7 +554,23 @@ function buildIntervalBaselinePassthroughDataset(args: {
   const sourceDataset = args.upstreamUsageTruth.dataset ?? {};
   const summary = asRecord((sourceDataset as any).summary) ?? {};
   const meta = asRecord((sourceDataset as any).meta) ?? {};
-  const displayCoverageWindow = resolveOnePathCanonicalUsage365CoverageWindow();
+  const displayCoverageWindow =
+    typeof args.engineInput.coverageWindowStart === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowStart) &&
+    typeof args.engineInput.coverageWindowEnd === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowEnd)
+      ? {
+          startDate: args.engineInput.coverageWindowStart,
+          endDate: args.engineInput.coverageWindowEnd,
+        }
+      : resolveOnePathCanonicalUsage365CoverageWindow();
+  const displayCoverageOwner =
+    typeof args.engineInput.coverageWindowStart === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowStart) &&
+    typeof args.engineInput.coverageWindowEnd === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowEnd)
+      ? "engineInput.coverageWindowStart/coverageWindowEnd"
+      : "resolveCanonicalUsage365CoverageWindow";
   const timezone =
     (typeof meta.timezone === "string" && meta.timezone.trim()) || args.engineInput.timezone || "America/Chicago";
   const dateInDisplayWindow = (date: string | null) =>
@@ -675,7 +691,7 @@ function buildIntervalBaselinePassthroughDataset(args: {
       upstreamDatasetSummaryStart: summary.start ?? null,
       upstreamDatasetSummaryEnd: summary.end ?? null,
       upstreamDatasetLatest: summary.latest ?? null,
-      baselineCoverageDisplayOwner: "resolveCanonicalUsage365CoverageWindow",
+      baselineCoverageDisplayOwner: displayCoverageOwner,
       baselineCoverageRawOwner: "resolveIntervalsLayer ACTUAL_USAGE_INTERVALS dataset.summary",
       timezone,
       canonicalMonths:

@@ -285,7 +285,7 @@ describe("one path baseline passthrough", () => {
     );
   });
 
-  it("uses the same canonical coverage-label owner as the user dashboard while preserving upstream interval counts", async () => {
+  it("uses the normalized engine-input coverage window while preserving upstream interval counts", async () => {
     const upstreamDataset = {
       summary: {
         source: "SMT",
@@ -305,14 +305,15 @@ describe("one path baseline passthrough", () => {
         actualSource: "SMT",
       },
     };
-    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
-      startDate: "2025-04-15",
-      endDate: "2026-04-14",
-    });
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
 
     const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
-    const artifact = await runSharedSimulation(buildBaseEngineInput());
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        coverageWindowStart: "2025-04-15",
+        coverageWindowEnd: "2026-04-14",
+      })
+    );
 
     expect(artifact.dataset.summary.intervalsCount).toBe(34823);
     expect(artifact.dataset.series.intervals15).toHaveLength(1);
@@ -322,10 +323,11 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.meta.coverageEnd).toBe("2026-04-14");
     expect(artifact.dataset.meta.upstreamDatasetSummaryStart).toBe("2025-04-14");
     expect(artifact.dataset.meta.upstreamDatasetSummaryEnd).toBe("2026-04-14");
+    expect(artifact.dataset.meta.baselineCoverageDisplayOwner).toBe("engineInput.coverageWindowStart/coverageWindowEnd");
     expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
   });
 
-  it("bounds Green Button baseline passthrough rows and insights to the canonical display window", async () => {
+  it("bounds Green Button baseline passthrough rows and insights to the engine-input coverage window", async () => {
     const upstreamDataset = {
       summary: {
         source: "GREEN_BUTTON",
@@ -360,10 +362,6 @@ describe("one path baseline passthrough", () => {
         timezone: "America/Chicago",
       },
     };
-    resolveOnePathCanonicalUsage365CoverageWindow.mockReturnValue({
-      startDate: "2025-04-26",
-      endDate: "2026-04-25",
-    });
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
 
     const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
@@ -371,43 +369,97 @@ describe("one path baseline passthrough", () => {
       buildBaseEngineInput({
         inputType: "GREEN_BUTTON",
         manualConstraintMode: "GREEN_BUTTON",
+        coverageWindowStart: "2024-12-01",
+        coverageWindowEnd: "2025-12-31",
       })
     );
 
-    expect(artifact.dataset.summary.start).toBe("2025-04-26");
-    expect(artifact.dataset.summary.end).toBe("2026-04-25");
-    expect(artifact.dataset.summary.totalKwh).toBe(90);
+    expect(artifact.dataset.summary.start).toBe("2024-12-01");
+    expect(artifact.dataset.summary.end).toBe("2025-12-31");
+    expect(artifact.dataset.summary.totalKwh).toBe(100);
     expect(artifact.dataset.daily).toEqual([
+      { date: "2025-04-25", kwh: 10 },
       { date: "2025-04-26", kwh: 20 },
       { date: "2025-04-27", kwh: 30 },
       { date: "2025-12-31", kwh: 40 },
     ]);
     expect(artifact.dataset.monthly).toEqual([
-      { month: "2025-04", kwh: 50 },
+      { month: "2025-04", kwh: 60 },
       { month: "2025-12", kwh: 40 },
     ]);
     expect(artifact.dataset.totals).toEqual({
-      importKwh: 90,
+      importKwh: 100,
       exportKwh: 0,
-      netKwh: 90,
+      netKwh: 100,
     });
     expect(artifact.dataset.series.intervals15).toEqual([
+      { timestamp: "2025-04-25T05:00:00.000Z", kwh: 1 },
       { timestamp: "2025-04-26T12:00:00.000Z", kwh: 2 },
       { timestamp: "2025-04-27T01:00:00.000Z", kwh: 3 },
       { timestamp: "2025-12-31T20:00:00.000Z", kwh: 4 },
     ]);
     expect(artifact.dataset.insights.weekdayVsWeekend).toEqual({
-      weekday: 40,
+      weekday: 50,
       weekend: 50,
     });
     expect(artifact.dataset.insights.timeOfDayBuckets).toEqual([
-      { key: "overnight", label: "Overnight (12am–6am)", kwh: 0 },
+      { key: "overnight", label: "Overnight (12am–6am)", kwh: 1 },
       { key: "morning", label: "Morning (6am–12pm)", kwh: 2 },
       { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 4 },
       { key: "evening", label: "Evening (6pm–12am)", kwh: 3 },
     ]);
-    expect(artifact.dataset.meta.coverageStart).toBe("2025-04-26");
-    expect(artifact.dataset.meta.coverageEnd).toBe("2026-04-25");
+    expect(artifact.dataset.meta.coverageStart).toBe("2024-12-01");
+    expect(artifact.dataset.meta.coverageEnd).toBe("2025-12-31");
+    expect(artifact.dataset.meta.baselineCoverageDisplayOwner).toBe("engineInput.coverageWindowStart/coverageWindowEnd");
+  });
+
+  it("keeps Green Button baseline on the uploaded file's full persisted 365-day window when available", async () => {
+    const upstreamDataset = {
+      summary: {
+        source: "GREEN_BUTTON",
+        totalKwh: 3650,
+        start: "2024-12-02",
+        end: "2025-12-01",
+        latest: "2025-12-01T23:45:00.000Z",
+        intervalsCount: 35040,
+      },
+      daily: [
+        { date: "2024-12-02", kwh: 10 },
+        { date: "2025-06-01", kwh: 20 },
+        { date: "2025-12-01", kwh: 30 },
+      ],
+      monthly: [
+      { month: "2025-04", kwh: 50 },
+        { month: "2025-06", kwh: 20 },
+        { month: "2025-12", kwh: 30 },
+      ],
+      series: {
+        intervals15: [],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+      },
+    };
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "GREEN_BUTTON",
+        manualConstraintMode: "GREEN_BUTTON",
+        coverageWindowStart: "2024-12-02",
+        coverageWindowEnd: "2025-12-01",
+      })
+    );
+
+    expect(artifact.dataset.summary.start).toBe("2024-12-02");
+    expect(artifact.dataset.summary.end).toBe("2025-12-01");
+    expect(artifact.dataset.daily[0]).toEqual({ date: "2024-12-02", kwh: 10 });
+    expect(artifact.dataset.daily[artifact.dataset.daily.length - 1]).toEqual({ date: "2025-12-01", kwh: 30 });
+    expect(artifact.dataset.meta.upstreamDatasetSummaryStart).toBe("2024-12-02");
+    expect(artifact.dataset.meta.upstreamDatasetSummaryEnd).toBe("2025-12-01");
   });
 
   it("keeps persisted time-of-day buckets for Green Button baseline when interval series is only a recent preview", async () => {

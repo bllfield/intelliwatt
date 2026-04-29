@@ -80,6 +80,7 @@ export type ActualHouseDataset = {
   monthly: Array<{ month: string; kwh: number }>;
   insights: Record<string, unknown> | null;
   totals: ImportExportTotals;
+  meta?: Record<string, unknown> | null;
   /** When set, daily usage table shows Avg °F, Min °F, Max °F, HDD65, CDD65. */
   dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }> | null;
 };
@@ -240,7 +241,10 @@ function chicagoYearMonth(d: Date): string {
 function deriveDailyTotalsFromSeries(points: UsageSeriesPoint[]): Array<{ date: string; kwh: number }> {
   const byDate = new Map<string, number>();
   for (const point of points) {
-    const date = normalizeDateKey(point.timestamp);
+    const date =
+      typeof point.timestamp === "string" && /^\d{4}-\d{2}-\d{2}/.test(point.timestamp)
+        ? point.timestamp.slice(0, 10)
+        : normalizeDateKey(point.timestamp);
     if (!date) continue;
     byDate.set(date, round2(Number(point.kwh) || 0));
   }
@@ -252,9 +256,15 @@ function deriveDailyTotalsFromSeries(points: UsageSeriesPoint[]): Array<{ date: 
 function deriveMonthlyTotalsFromSeries(points: UsageSeriesPoint[]): Array<{ month: string; kwh: number }> {
   const byMonth = new Map<string, number>();
   for (const point of points) {
-    const parsed = new Date(point.timestamp);
-    if (!Number.isFinite(parsed.getTime())) continue;
-    const month = chicagoYearMonth(parsed);
+    const month =
+      typeof point.timestamp === "string" && /^\d{4}-\d{2}/.test(point.timestamp)
+        ? point.timestamp.slice(0, 7)
+        : (() => {
+            const parsed = new Date(point.timestamp);
+            if (!Number.isFinite(parsed.getTime())) return null;
+            return chicagoYearMonth(parsed);
+          })();
+    if (!month) continue;
     byMonth.set(month, round2(Number(point.kwh) || 0));
   }
   return Array.from(byMonth.entries())
@@ -967,6 +977,15 @@ export async function getActualUsageDatasetForHouse(
       monthly: monthlyTotals,
       insights,
       totals: { importKwh: totalKwh, exportKwh: 0, netKwh: totalKwh },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: selected.summary.source,
+        timezone: SMT_TZ,
+        coverageStart: selected.summary.start,
+        coverageEnd: selected.summary.end,
+        canonicalMonths: monthlyTotals.map((row) => row.month),
+        canonicalEndMonth: monthlyTotals.length > 0 ? monthlyTotals[monthlyTotals.length - 1]?.month ?? null : null,
+      },
     };
     return {
       dataset,
@@ -1124,6 +1143,16 @@ export async function getActualUsageDatasetForHouse(
         monthly: monthlyForDataset,
         insights,
         totals: totalsForDataset,
+        meta: {
+          datasetKind: "ACTUAL",
+          actualSource: selected.summary.source,
+          timezone: SMT_TZ,
+          coverageStart: selected.summary.start,
+          coverageEnd: selected.summary.end,
+          canonicalMonths: monthlyForDataset.map((row) => row.month),
+          canonicalEndMonth:
+            monthlyForDataset.length > 0 ? monthlyForDataset[monthlyForDataset.length - 1]?.month ?? null : null,
+        },
       }
     : null;
 
