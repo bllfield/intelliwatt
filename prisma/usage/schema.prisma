@@ -358,6 +358,24 @@ model GapfillLabTestHomeLink {
   @@index([status, updatedAt])
 }
 
+/// Dedicated reusable lab test-home mapping for One Path admin isolation.
+model OnePathLabTestHomeLink {
+  id              String   @id @default(cuid())
+  ownerUserId     String   @unique
+  testHomeHouseId String
+  sourceUserId    String?
+  sourceHouseId   String?
+  status          String   @default("ready") // ready | replacing | profile_syncing | failed
+  statusMessage   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastReplacedAt  DateTime?
+
+  @@index([testHomeHouseId])
+  @@index([sourceUserId, sourceHouseId])
+  @@index([status, updatedAt])
+}
+
 /// System-wide canonical validation-day selection defaults.
 model UsageSimulatorSettings {
   /// Singleton key. Use "default" for the active record.

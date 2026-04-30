@@ -20,7 +20,13 @@ import {
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
-import { gateOnePathSimAdmin, resolveOnePathSimUserSelection } from "./_helpers";
+import { gateOnePathSimAdmin, resolveOnePathSimOwnerUserId, resolveOnePathSimUserSelection } from "./_helpers";
+import {
+  ensureGlobalOnePathLabTestHomeHouse,
+  getOnePathLabTestHomeLink,
+  ONE_PATH_LAB_TEST_HOME_LABEL,
+  replaceGlobalOnePathLabTestHomeFromSource,
+} from "@/modules/usageSimulator/labTestHome";
 import {
   getOnePathManualUsageInput,
   getOnePathSimulationVariablePolicy,
@@ -49,6 +55,7 @@ import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/typ
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
+import { listScenarios } from "@/modules/usageSimulator/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -590,6 +597,44 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
   };
 }
 
+async function resolveOnePathTestHomeState(args: {
+  ownerUserId: string;
+  selectedSourceHouseId: string;
+}) {
+  const ensured = await ensureGlobalOnePathLabTestHomeHouse(args.ownerUserId);
+  const link = await getOnePathLabTestHomeLink(args.ownerUserId);
+  const testHomeHouseId = String(link?.testHomeHouseId ?? ensured.id);
+  const testHomeHouse = await (prisma as any).houseAddress
+    .findFirst({
+      where: { id: testHomeHouseId, userId: args.ownerUserId, archivedAt: null },
+      select: { id: true, label: true, esiid: true },
+    })
+    .catch(() => null);
+  const linkedSourceHouseId = link?.sourceHouseId ? String(link.sourceHouseId) : null;
+  const status = String(link?.status ?? (testHomeHouse ? "ready" : "replacing"));
+  const isPinned = Boolean(
+    testHomeHouse?.id && status === "ready" && linkedSourceHouseId && linkedSourceHouseId === args.selectedSourceHouseId
+  );
+  return {
+    ownerUserId: args.ownerUserId,
+    testHomeHouseId,
+    testHomeHouse: testHomeHouse
+      ? {
+          id: String(testHomeHouse.id),
+          label: String(testHomeHouse.label ?? ""),
+          esiid: testHomeHouse.esiid ? String(testHomeHouse.esiid) : null,
+        }
+      : null,
+    linkedSourceHouseId,
+    linkedSourceUserId: link?.sourceUserId ? String(link.sourceUserId) : null,
+    status,
+    statusMessage: link?.statusMessage ? String(link.statusMessage) : null,
+    lastReplacedAt: link?.lastReplacedAt ? new Date(link.lastReplacedAt).toISOString() : null,
+    isPinned,
+    needsReplace: !isPinned,
+  };
+}
+
 export async function POST(request: NextRequest) {
   const denied = gateOnePathSimAdmin(request);
   if (denied) return denied;
@@ -599,33 +644,115 @@ export async function POST(request: NextRequest) {
   const includeDebugDiagnostics = includeDebugDiagnosticsByDefault(body?.includeDebugDiagnostics);
   const resolved = await resolveOnePathSimUserSelection({
     email: typeof body?.email === "string" ? body.email : null,
-    houseId: typeof body?.houseId === "string" ? body.houseId : null,
+    houseId:
+      typeof body?.sourceHouseId === "string"
+        ? body.sourceHouseId
+        : typeof body?.houseId === "string"
+          ? body.houseId
+          : null,
   });
   if (!resolved.ok) {
     const status = resolved.error === "email_required" ? 400 : 404;
     return NextResponse.json({ ok: false, error: resolved.error }, { status });
   }
 
+  const ownerUserId = await resolveOnePathSimOwnerUserId(request);
+  if (!ownerUserId) {
+    return NextResponse.json({ ok: false, error: "lab_owner_not_found" }, { status: 400 });
+  }
+  const onePathTestHomeState = await resolveOnePathTestHomeState({
+    ownerUserId,
+    selectedSourceHouseId: resolved.selectedHouse.id,
+  });
+  const effectiveUserId = onePathTestHomeState.isPinned ? ownerUserId : resolved.userId;
+  const effectiveHouseId = onePathTestHomeState.isPinned ? onePathTestHomeState.testHomeHouseId : resolved.selectedHouse.id;
+  const defaultActualContextHouseId = onePathTestHomeState.isPinned ? effectiveHouseId : resolved.selectedHouse.id;
+  const effectiveScenarios =
+    onePathTestHomeState.isPinned && effectiveHouseId
+      ? (
+          await listScenarios({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
+            ok: false as const,
+            scenarios: [] as unknown[],
+          }))
+        ).scenarios ?? []
+      : resolved.scenarios;
+  const onePathTestHomeSummary = {
+    houseId: onePathTestHomeState.testHomeHouseId,
+    label: onePathTestHomeState.testHomeHouse?.label ?? ONE_PATH_LAB_TEST_HOME_LABEL,
+    esiid: onePathTestHomeState.testHomeHouse?.esiid ?? null,
+    status: onePathTestHomeState.status,
+    statusMessage: onePathTestHomeState.statusMessage,
+    sourceHouseId: onePathTestHomeState.linkedSourceHouseId,
+    sourceUserId: onePathTestHomeState.linkedSourceUserId,
+    lastReplacedAt: onePathTestHomeState.lastReplacedAt,
+    isPinned: onePathTestHomeState.isPinned,
+    needsReplace: onePathTestHomeState.needsReplace,
+  } as const;
+
+  if (action === "replace_test_home_from_source") {
+    const replacement = await replaceGlobalOnePathLabTestHomeFromSource({
+      ownerUserId,
+      sourceUserId: resolved.userId,
+      sourceHouseId: resolved.selectedHouse.id,
+    });
+    if (!replacement.ok) {
+      return NextResponse.json(replacement, { status: replacement.error === "source_house_not_found" ? 404 : 500 });
+    }
+    const replacedState = await resolveOnePathTestHomeState({
+      ownerUserId,
+      selectedSourceHouseId: resolved.selectedHouse.id,
+    });
+    return NextResponse.json({
+      ok: true,
+      sourceHouseId: resolved.selectedHouse.id,
+      testHomeHouseId: replacedState.testHomeHouseId,
+      onePathTestHome: {
+        houseId: replacedState.testHomeHouseId,
+        label: replacedState.testHomeHouse?.label ?? ONE_PATH_LAB_TEST_HOME_LABEL,
+        esiid: replacedState.testHomeHouse?.esiid ?? null,
+        status: replacedState.status,
+        statusMessage: replacedState.statusMessage,
+        sourceHouseId: replacedState.linkedSourceHouseId,
+        sourceUserId: replacedState.linkedSourceUserId,
+        lastReplacedAt: replacedState.lastReplacedAt,
+        isPinned: replacedState.isPinned,
+        needsReplace: replacedState.needsReplace,
+      },
+    });
+  }
+
+  if ((action === "load_manual" || action === "save_manual" || action === "run") && onePathTestHomeState.needsReplace) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "test_home_not_ready",
+        message: "Replace the One Path test home from the selected source before running or saving.",
+        onePathTestHome: onePathTestHomeSummary,
+      },
+      { status: 409 }
+    );
+  }
+
   if (action === "load_manual") {
     const manual = await getOnePathManualUsageInput({
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
+      userId: effectiveUserId,
+      houseId: effectiveHouseId,
     }).catch(() => ({ payload: null, updatedAt: null }));
     const actualContextHouseId =
       typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
         ? body.actualContextHouseId.trim()
-        : resolved.selectedHouse.id;
-    const travelRangesFromDb = await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []);
+        : defaultActualContextHouseId;
+    const travelRangesFromDb = await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []);
     const seeds = await buildOnePathAdminManualSeeds({
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
-      actualContextHouseId,
+      userId: effectiveUserId,
+      houseId: effectiveHouseId,
+      actualContextHouseId: defaultActualContextHouseId || actualContextHouseId,
       payload: manual.payload ?? null,
       dbTravelRanges: travelRangesFromDb,
     });
     return NextResponse.json({
       ok: true,
-      houseId: resolved.selectedHouse.id,
+      houseId: effectiveHouseId,
       payload: manual.payload ?? null,
       updatedAt: manual.updatedAt ?? null,
       sourcePayload: manual.payload ?? null,
@@ -636,14 +763,14 @@ export async function POST(request: NextRequest) {
 
   if (action === "save_manual") {
     const saved = await saveOnePathManualUsageInput({
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
+      userId: effectiveUserId,
+      houseId: effectiveHouseId,
       payload: body?.payload,
     });
     if (!saved.ok) return NextResponse.json(saved, { status: 400 });
     return NextResponse.json({
       ok: true,
-      houseId: resolved.selectedHouse.id,
+      houseId: effectiveHouseId,
       payload: saved.payload,
       updatedAt: saved.updatedAt,
     });
@@ -656,18 +783,15 @@ export async function POST(request: NextRequest) {
     const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";
     const manualUsage =
       isManualMode
-        ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
+        ? await getOnePathManualUsageInput({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
             payload: null,
             updatedAt: null,
           }))
         : { payload: null, updatedAt: null };
     const rawInputBase = {
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
-      actualContextHouseId:
-        typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
-          ? body.actualContextHouseId.trim()
-          : resolved.selectedHouse.id,
+      userId: effectiveUserId,
+      houseId: effectiveHouseId,
+      actualContextHouseId: defaultActualContextHouseId,
       preferredActualSource:
         body?.preferredActualSource === "SMT" || body?.preferredActualSource === "GREEN_BUTTON"
           ? body.preferredActualSource
@@ -698,12 +822,12 @@ export async function POST(request: NextRequest) {
     const adminManualSeeds =
       isManualMode
         ? await buildOnePathAdminManualSeeds({
-            userId: resolved.userId,
-            houseId: resolved.selectedHouse.id,
+            userId: effectiveUserId,
+            houseId: effectiveHouseId,
             actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
             payload: manualUsage.payload ?? null,
             overrideTravelRanges: effectiveRawInputBase.travelRanges,
-            dbTravelRanges: await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
+            dbTravelRanges: await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
           })
         : null;
     const effectiveManualUsagePayload =
@@ -731,8 +855,8 @@ export async function POST(request: NextRequest) {
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await readOnePathSimulatedUsageScenario({
-          userId: resolved.userId,
-          houseId: resolved.selectedHouse.id,
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
           scenarioId: effectiveRawInputBase.scenarioId,
           readMode: "allow_rebuild",
           projectionMode: "baseline",
@@ -760,8 +884,8 @@ export async function POST(request: NextRequest) {
         }
         const compareProjection = buildValidationCompareProjectionSidecar(readback.dataset);
         const scenarioEvents = await listOnePathScenarioEvents({
-          userId: resolved.userId,
-          houseId: resolved.selectedHouse.id,
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
           scenarioId: effectiveRawInputBase.scenarioId,
         }).catch(() => ({ ok: false as const, events: [] as unknown[] }));
         const manualStageOneView = null;
@@ -801,7 +925,7 @@ export async function POST(request: NextRequest) {
                 correlationId,
                 timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
                 mode,
-                houseId: resolved.selectedHouse.id,
+                houseId: effectiveHouseId,
                 stageTimingsMs,
                 promise: adaptGreenButtonRawInput(effectiveRawInputBase),
               })
@@ -824,7 +948,7 @@ export async function POST(request: NextRequest) {
             correlationId,
             timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
             mode,
-            houseId: resolved.selectedHouse.id,
+            houseId: effectiveHouseId,
             stageTimingsMs,
             promise: buildIntervalLikeBaselinePassthroughDataset(engineInput),
           })
@@ -837,7 +961,7 @@ export async function POST(request: NextRequest) {
               correlationId,
               timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
               mode,
-              houseId: resolved.selectedHouse.id,
+              houseId: effectiveHouseId,
               stageTimingsMs,
               promise: Promise.resolve(
                 buildOnePathRunReadOnlyView({
@@ -916,8 +1040,8 @@ export async function POST(request: NextRequest) {
         isManualMode
           ? (
               await resolveOnePathUpstreamUsageTruthForSimulation({
-                userId: resolved.userId,
-                houseId: resolved.selectedHouse.id,
+                userId: effectiveUserId,
+                houseId: effectiveHouseId,
                 actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
                 seedIfMissing: false,
                 preferredActualSource: effectiveRawInputBase.preferredActualSource,
@@ -927,8 +1051,8 @@ export async function POST(request: NextRequest) {
       const manualPastReadResult =
         isManualMode && effectiveRawInputBase.scenarioId
           ? await buildOnePathManualUsagePastSimReadResult({
-              userId: resolved.userId,
-              houseId: resolved.selectedHouse.id,
+              userId: effectiveUserId,
+              houseId: effectiveHouseId,
               scenarioId: effectiveRawInputBase.scenarioId,
               readMode: "artifact_only",
               callerType: "user_past",
@@ -1062,15 +1186,15 @@ export async function POST(request: NextRequest) {
       : "INTERVAL";
 
   if ((action === "lookup" || !action) && !includeDebugDiagnostics) {
-    const travelRangesFromDb = await getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []);
+    const travelRangesFromDb = await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []);
     const previewActualContextHouseId =
       typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
-        ? body.actualContextHouseId.trim()
-        : resolved.selectedHouse.id;
+        ? defaultActualContextHouseId
+        : defaultActualContextHouseId;
     const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);
     const manualUsage =
       previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
-        ? await getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
+        ? await getOnePathManualUsageInput({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
             payload: null,
             updatedAt: null,
           }))
@@ -1079,8 +1203,8 @@ export async function POST(request: NextRequest) {
       (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") &&
       needsManualSeedForMode(previewMode, manualUsage.payload ?? null)
         ? await buildOnePathAdminManualSeeds({
-            userId: resolved.userId,
-            houseId: resolved.selectedHouse.id,
+            userId: effectiveUserId,
+            houseId: effectiveHouseId,
             actualContextHouseId: previewActualContextHouseId,
             payload: manualUsage.payload ?? null,
             dbTravelRanges: travelRangesFromDb,
@@ -1096,9 +1220,10 @@ export async function POST(request: NextRequest) {
       userId: resolved.userId,
       houses: resolved.houses,
       selectedHouse: resolved.selectedHouse,
-      scenarios: resolved.scenarios,
+      scenarios: effectiveScenarios,
       sourceContext: {
         debugDiagnosticsIncluded: false,
+        onePathTestHome: onePathTestHomeSummary,
         travelRangesFromDb,
         greenButtonUpload,
         ...(effectiveManualUsagePayload
@@ -1114,13 +1239,15 @@ export async function POST(request: NextRequest) {
   }
 
   const previewActualContextHouse =
-    resolved.houses.find(
-      (house) =>
-        house.id ===
-        (typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
-          ? body.actualContextHouseId.trim()
-          : resolved.selectedHouse.id)
-    ) ?? resolved.selectedHouse;
+    onePathTestHomeState.isPinned && onePathTestHomeState.testHomeHouse
+      ? onePathTestHomeState.testHomeHouse
+      : resolved.houses.find(
+            (house) =>
+              house.id ===
+              (typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+                ? body.actualContextHouseId.trim()
+                : resolved.selectedHouse.id)
+          ) ?? resolved.selectedHouse;
   const actualContextGreenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouse.id);
   let previewSimulationVariablePolicy: SimulationVariablePolicy | null = null;
   try {
@@ -1137,27 +1264,27 @@ export async function POST(request: NextRequest) {
 
   const [usageTruth, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
     resolveOnePathUpstreamUsageTruthForSimulation({
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
+      userId: effectiveUserId,
+      houseId: effectiveHouseId,
       actualContextHouseId: previewActualContextHouse.id,
       seedIfMissing: false,
       preferredActualSource: previewMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
     }).catch(() => null),
-    getOnePathManualUsageInput({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => ({
+    getOnePathManualUsageInput({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
       payload: null,
       updatedAt: null,
     })),
-    getHomeProfileReadOnlyByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
-    getApplianceProfileSimulatedByUserHouse({ userId: resolved.userId, houseId: resolved.selectedHouse.id }).catch(() => null),
-    getOnePathTravelRangesFromDb(resolved.userId, resolved.selectedHouse.id).catch(() => []),
+    getHomeProfileReadOnlyByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null),
+    getApplianceProfileSimulatedByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null),
+    getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const adminManualSeeds =
     (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") &&
     needsManualSeedForMode(previewMode, manualUsage.payload ?? null)
       ? await buildOnePathAdminManualSeeds({
-          userId: resolved.userId,
-          houseId: resolved.selectedHouse.id,
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
           actualContextHouseId: previewActualContextHouse.id,
           payload: manualUsage.payload ?? null,
           dbTravelRanges: travelRangesFromDb,
@@ -1185,6 +1312,7 @@ export async function POST(request: NextRequest) {
     usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",
     usageTruthSeedResult: usageTruth?.seedResult ?? null,
     upstreamUsageTruth: usageTruth?.summary ?? null,
+    onePathTestHome: onePathTestHomeSummary,
     greenButtonUpload: actualContextGreenButtonUpload,
     manualUsagePayload: manualUsage.payload ?? null,
     effectiveManualUsagePayload,
@@ -1209,11 +1337,11 @@ export async function POST(request: NextRequest) {
         },
       }).catch(() => null);
   const userUsageBaselineContract = await buildUserUsageHouseContract({
-    userId: resolved.userId,
+    userId: effectiveUserId,
     house: {
-      id: resolved.selectedHouse.id,
-      label: resolved.selectedHouse.label ?? null,
-      esiid: resolved.selectedHouse.esiid ?? null,
+      id: effectiveHouseId,
+      label: onePathTestHomeState.testHomeHouse?.label ?? resolved.selectedHouse.label ?? null,
+      esiid: onePathTestHomeState.testHomeHouse?.esiid ?? resolved.selectedHouse.esiid ?? null,
     },
     resolvedUsage: usageTruth
       ? {
@@ -1260,7 +1388,7 @@ export async function POST(request: NextRequest) {
       userId: resolved.userId,
       houses: resolved.houses,
       selectedHouse: resolved.selectedHouse,
-      scenarios: resolved.scenarios,
+      scenarios: effectiveScenarios,
       sourceContext: {
         ...previewLookupSourceContext,
         userUsagePageBaselineContract: compactLookupBaselineResponse ? null : userUsagePageBaselineContract,

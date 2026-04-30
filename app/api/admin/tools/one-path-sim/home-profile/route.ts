@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
 import { validateHomeProfile } from "@/modules/homeProfile/validation";
-import { gateOnePathSimAdmin } from "../_helpers";
+import { resolveOnePathWriteTarget } from "../_helpers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,24 +15,24 @@ async function resolveHouseOwner(houseId: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const denied = gateOnePathSimAdmin(request);
-  if (denied) return denied;
   const url = new URL(request.url);
   const houseId = String(url.searchParams.get("houseId") ?? "").trim();
   if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
-  const house = await resolveHouseOwner(houseId);
+  const target = await resolveOnePathWriteTarget({ request, requestedHouseId: houseId });
+  if (!target.ok) return target.response;
+  const house = await resolveHouseOwner(target.testHomeHouseId);
   if (!house?.userId) return NextResponse.json({ ok: false, error: "house_not_found" }, { status: 404 });
 
   const rec = await (homeDetailsPrisma as any).homeProfileSimulated
     .findUnique({
-      where: { userId_houseId: { userId: house.userId, houseId } },
+      where: { userId_houseId: { userId: house.userId, houseId: target.testHomeHouseId } },
     })
     .catch(() => null);
-  if (!rec) return NextResponse.json({ ok: true, houseId, profile: null, updatedAt: null });
+  if (!rec) return NextResponse.json({ ok: true, houseId: target.testHomeHouseId, profile: null, updatedAt: null });
 
   return NextResponse.json({
     ok: true,
-    houseId,
+    houseId: target.testHomeHouseId,
     profile: {
       homeAge: rec.homeAge,
       homeStyle: rec.homeStyle,
@@ -79,21 +79,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const denied = gateOnePathSimAdmin(request);
-  if (denied) return denied;
   const body = await request.json().catch(() => ({}));
   const houseId = typeof body?.houseId === "string" ? body.houseId.trim() : "";
   if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
-  const house = await resolveHouseOwner(houseId);
+  const target = await resolveOnePathWriteTarget({ request, requestedHouseId: houseId });
+  if (!target.ok) return target.response;
+  const house = await resolveHouseOwner(target.testHomeHouseId);
   if (!house?.userId) return NextResponse.json({ ok: false, error: "house_not_found" }, { status: 404 });
   const validated = validateHomeProfile(body?.profile ?? body, { requirePastBaselineFields: true });
   if (!validated.ok) return NextResponse.json({ ok: false, error: validated.error }, { status: 400 });
 
   const rec = await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
-    where: { userId_houseId: { userId: house.userId, houseId } },
+    where: { userId_houseId: { userId: house.userId, houseId: target.testHomeHouseId } },
     create: {
       userId: house.userId,
-      houseId,
+      houseId: target.testHomeHouseId,
       ...validated.value,
       provenanceJson: body?.provenance ?? null,
       prefillJson: body?.prefill ?? null,
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
   });
   return NextResponse.json({
     ok: true,
-    houseId,
+    houseId: target.testHomeHouseId,
     updatedAt: rec?.updatedAt ? new Date(rec.updatedAt).toISOString() : new Date().toISOString(),
   });
 }

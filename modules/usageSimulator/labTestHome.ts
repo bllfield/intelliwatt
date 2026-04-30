@@ -2,11 +2,13 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
 import { appliancesPrisma } from "@/lib/db/appliancesClient";
+import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 
 export const GAPFILL_LAB_TEST_HOME_LABEL = "GAPFILL_CANONICAL_LAB_TEST_HOME";
 export const MANUAL_MONTHLY_LAB_TEST_HOME_LABEL = "MANUAL_MONTHLY_LAB_TEST_HOME";
+export const ONE_PATH_LAB_TEST_HOME_LABEL = "ONE_PATH_LAB_TEST_HOME";
 
 type LabTestHomeLink = {
   ownerUserId: string;
@@ -32,9 +34,12 @@ function resolveModel(db: any, modelName: string): any | null {
   return fromRoot ?? null;
 }
 
-function getLabLinkModel(): any | null {
+function getNamedLabLinkModel(kind: "gapfill" | "onePath"): any | null {
   try {
-    const model = (usagePrisma as any).gapfillLabTestHomeLink;
+    const model =
+      kind === "onePath"
+        ? (usagePrisma as any).onePathLabTestHomeLink
+        : (usagePrisma as any).gapfillLabTestHomeLink;
     if (!model) return null;
     if (
       typeof model.findUnique !== "function" ||
@@ -52,7 +57,30 @@ function getLabLinkModel(): any | null {
 export async function getLabTestHomeLink(
   ownerUserId: string
 ): Promise<LabTestHomeLink | null> {
-  const model = getLabLinkModel();
+  const model = getNamedLabLinkModel("gapfill");
+  if (!model) return null;
+  const row = await model
+    .findUnique({
+      where: { ownerUserId },
+      select: {
+        ownerUserId: true,
+        testHomeHouseId: true,
+        sourceUserId: true,
+        sourceHouseId: true,
+        status: true,
+        statusMessage: true,
+        lastReplacedAt: true,
+      },
+    })
+    .catch(() => null);
+  if (!row) return null;
+  return row as LabTestHomeLink;
+}
+
+export async function getOnePathLabTestHomeLink(
+  ownerUserId: string
+): Promise<LabTestHomeLink | null> {
+  const model = getNamedLabLinkModel("onePath");
   if (!model) return null;
   const row = await model
     .findUnique({
@@ -89,6 +117,17 @@ export async function ensureGlobalManualMonthlyLabTestHomeHouse(
   return ensureNamedLabTestHomeHouse(ownerUserId, {
     label: MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
     addressLine1: "Manual Monthly Lab Test Home",
+    addressCity: "Lab",
+    addressState: "TX",
+  });
+}
+
+export async function ensureGlobalOnePathLabTestHomeHouse(
+  ownerUserId: string
+): Promise<{ id: string; esiid: string | null; label: string }> {
+  return ensureNamedLabTestHomeHouse(ownerUserId, {
+    label: ONE_PATH_LAB_TEST_HOME_LABEL,
+    addressLine1: "One Path Lab Test Home",
     addressCity: "Lab",
     addressState: "TX",
   });
@@ -192,6 +231,7 @@ async function copySourceHouseIdentityToLabHome(args: {
     utilityPhone: string | null;
   };
   label: string;
+  esiid?: string | null;
 }) {
   const houseAddressModel = resolveModel(args.tx, "houseAddress");
   if (!houseAddressModel?.update) throw new Error("houseAddress_model_unavailable");
@@ -214,7 +254,7 @@ async function copySourceHouseIdentityToLabHome(args: {
       utilityName: args.sourceHouse.utilityName,
       utilityPhone: args.sourceHouse.utilityPhone,
       label: args.label,
-      esiid: null,
+      esiid: args.esiid ?? null,
     },
   });
 }
@@ -228,7 +268,7 @@ export async function upsertLabTestHomeLink(args: {
   statusMessage?: string | null;
   lastReplacedAt?: Date | null;
 }): Promise<void> {
-  const model = getLabLinkModel();
+  const model = getNamedLabLinkModel("gapfill");
   if (!model) return;
   try {
     await model.upsert({
@@ -254,6 +294,218 @@ export async function upsertLabTestHomeLink(args: {
   } catch {
     // Table may be unavailable during rollout; replacement logic can proceed without link persistence.
   }
+}
+
+export async function upsertOnePathLabTestHomeLink(args: {
+  ownerUserId: string;
+  testHomeHouseId: string;
+  sourceUserId?: string | null;
+  sourceHouseId?: string | null;
+  status: "ready" | "replacing" | "profile_syncing" | "failed";
+  statusMessage?: string | null;
+  lastReplacedAt?: Date | null;
+}): Promise<void> {
+  const model = getNamedLabLinkModel("onePath");
+  if (!model) return;
+  try {
+    await model.upsert({
+      where: { ownerUserId: args.ownerUserId },
+      create: {
+        ownerUserId: args.ownerUserId,
+        testHomeHouseId: args.testHomeHouseId,
+        sourceUserId: args.sourceUserId ?? null,
+        sourceHouseId: args.sourceHouseId ?? null,
+        status: args.status,
+        statusMessage: args.statusMessage ?? null,
+        lastReplacedAt: args.lastReplacedAt ?? null,
+      },
+      update: {
+        testHomeHouseId: args.testHomeHouseId,
+        sourceUserId: args.sourceUserId ?? null,
+        sourceHouseId: args.sourceHouseId ?? null,
+        status: args.status,
+        statusMessage: args.statusMessage ?? null,
+        lastReplacedAt: args.lastReplacedAt ?? undefined,
+      },
+    });
+  } catch {
+    // Table may be unavailable during rollout; replacement logic can proceed without link persistence.
+  }
+}
+
+async function clearOnePathActualUsageState(args: { houseId: string }) {
+  await Promise.all([
+    (usagePrisma as any).greenButtonInterval?.deleteMany?.({
+      where: { homeId: args.houseId },
+    }) ?? Promise.resolve(),
+    (usagePrisma as any).rawGreenButton?.deleteMany?.({
+      where: { homeId: args.houseId },
+    }) ?? Promise.resolve(),
+    (usagePrisma as any).homeMonthlyUsageBucket?.deleteMany?.({
+      where: { homeId: args.houseId },
+    }) ?? Promise.resolve(),
+    (usagePrisma as any).homeDailyUsageBucket?.deleteMany?.({
+      where: { homeId: args.houseId },
+    }) ?? Promise.resolve(),
+    (prisma as any).greenButtonUpload?.deleteMany?.({
+      where: { houseId: args.houseId },
+    }) ?? Promise.resolve(),
+    (prisma as any).manualUsageUpload?.deleteMany?.({
+      where: { houseId: args.houseId, source: "green_button" },
+    }) ?? Promise.resolve(),
+  ]);
+}
+
+async function cloneOnePathGreenButtonUsageFromSource(args: {
+  sourceHouseId: string;
+  targetHouseId: string;
+  targetUserId: string;
+  targetEsiid: string | null;
+}) {
+  await clearOnePathActualUsageState({ houseId: args.targetHouseId });
+
+  const latestUpload = await (prisma as any).greenButtonUpload
+    ?.findFirst?.({
+      where: { houseId: args.sourceHouseId },
+      orderBy: [{ dateRangeEnd: "desc" }, { updatedAt: "desc" }],
+      select: {
+        utilityName: true,
+        accountNumber: true,
+        fileName: true,
+        fileType: true,
+        fileSizeBytes: true,
+        dateRangeStart: true,
+        dateRangeEnd: true,
+        intervalMinutes: true,
+        parseStatus: true,
+        parseMessage: true,
+        storageKey: true,
+      },
+    })
+    .catch(() => null);
+
+  const rawIdFromUpload =
+    typeof latestUpload?.storageKey === "string" && latestUpload.storageKey.startsWith("usage:raw_green_button:")
+      ? latestUpload.storageKey.slice("usage:raw_green_button:".length)
+      : null;
+
+  const latestRaw =
+    (rawIdFromUpload
+      ? await (usagePrisma as any).rawGreenButton
+          ?.findUnique?.({
+            where: { id: rawIdFromUpload },
+            select: {
+              id: true,
+              utilityName: true,
+              accountNumber: true,
+              filename: true,
+              mimeType: true,
+              sizeBytes: true,
+              content: true,
+              capturedAt: true,
+            },
+          })
+          .catch(() => null)
+      : null) ??
+    (await (usagePrisma as any).rawGreenButton
+      ?.findFirst?.({
+        where: { homeId: args.sourceHouseId },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          utilityName: true,
+          accountNumber: true,
+          filename: true,
+          mimeType: true,
+          sizeBytes: true,
+          content: true,
+          capturedAt: true,
+        },
+      })
+      .catch(() => null));
+
+  if (!latestRaw?.id) return { copied: false as const, rawId: null as string | null };
+
+  const sourceIntervals = await (usagePrisma as any).greenButtonInterval
+    ?.findMany?.({
+      where: { homeId: args.sourceHouseId, rawId: latestRaw.id },
+      orderBy: { timestamp: "asc" },
+      select: {
+        timestamp: true,
+        consumptionKwh: true,
+        intervalMinutes: true,
+      },
+    })
+    .catch(() => []);
+
+  if (!Array.isArray(sourceIntervals) || sourceIntervals.length === 0) {
+    return { copied: false as const, rawId: null as string | null };
+  }
+
+  const clonedRaw = await (usagePrisma as any).rawGreenButton.create({
+    data: {
+      homeId: args.targetHouseId,
+      userId: args.targetUserId,
+      utilityName: latestRaw.utilityName ?? latestUpload?.utilityName ?? null,
+      accountNumber: latestRaw.accountNumber ?? latestUpload?.accountNumber ?? null,
+      filename: latestRaw.filename,
+      mimeType: latestRaw.mimeType,
+      sizeBytes: latestRaw.sizeBytes,
+      content: latestRaw.content,
+      capturedAt: latestRaw.capturedAt ?? null,
+      sha256: null,
+    },
+    select: { id: true },
+  });
+
+  const BATCH_SIZE = 4000;
+  for (let index = 0; index < sourceIntervals.length; index += BATCH_SIZE) {
+    const batch = sourceIntervals.slice(index, index + BATCH_SIZE).map((row: any) => ({
+      rawId: clonedRaw.id,
+      homeId: args.targetHouseId,
+      userId: args.targetUserId,
+      timestamp: row.timestamp,
+      consumptionKwh: row.consumptionKwh,
+      intervalMinutes: row.intervalMinutes,
+    }));
+    if (batch.length > 0) {
+      await (usagePrisma as any).greenButtonInterval.createMany({ data: batch });
+    }
+  }
+
+  if (latestUpload) {
+    await (prisma as any).greenButtonUpload.create({
+      data: {
+        houseId: args.targetHouseId,
+        utilityName: latestUpload.utilityName ?? null,
+        accountNumber: latestUpload.accountNumber ?? null,
+        fileName: latestUpload.fileName,
+        fileType: latestUpload.fileType,
+        fileSizeBytes: latestUpload.fileSizeBytes ?? latestRaw.sizeBytes,
+        storageKey: `usage:raw_green_button:${clonedRaw.id}`,
+        dateRangeStart: latestUpload.dateRangeStart ?? null,
+        dateRangeEnd: latestUpload.dateRangeEnd ?? null,
+        intervalMinutes: latestUpload.intervalMinutes ?? 15,
+        parseStatus: latestUpload.parseStatus ?? "complete",
+        parseMessage: latestUpload.parseMessage ?? null,
+      },
+    });
+  }
+
+  const earliest = sourceIntervals[0]?.timestamp ?? null;
+  const latest = sourceIntervals[sourceIntervals.length - 1]?.timestamp ?? null;
+  if (earliest && latest) {
+    await ensureCoreMonthlyBuckets({
+      homeId: args.targetHouseId,
+      esiid: args.targetEsiid,
+      rangeStart: earliest,
+      rangeEnd: latest,
+      source: "GREENBUTTON",
+      intervalSource: "GREENBUTTON",
+    }).catch(() => null);
+  }
+
+  return { copied: true as const, rawId: clonedRaw.id };
 }
 
 async function copyScenariosAndEvents(args: {
@@ -669,6 +921,190 @@ export async function replaceGlobalManualMonthlyLabTestHomeFromSource(args: {
       ok: false,
       error: "replace_manual_monthly_lab_test_home_failed",
       message: error instanceof Error ? error.message : "replace_manual_monthly_lab_test_home_failed",
+    };
+  }
+}
+
+export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+}): Promise<{
+  ok: boolean;
+  testHomeHouseId?: string;
+  sourceHouseId?: string;
+  error?: string;
+  message?: string;
+}> {
+  const sourceHouse = await (prisma as any).houseAddress
+    .findFirst({
+      where: {
+        id: args.sourceHouseId,
+        userId: args.sourceUserId,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        userId: true,
+        addressLine1: true,
+        addressLine2: true,
+        addressCity: true,
+        addressState: true,
+        addressZip5: true,
+        addressZip4: true,
+        addressCountry: true,
+        placeId: true,
+        lat: true,
+        lng: true,
+        addressValidated: true,
+        validationSource: true,
+        esiid: true,
+        tdspSlug: true,
+        utilityName: true,
+        utilityPhone: true,
+      },
+    })
+    .catch(() => null);
+  if (!sourceHouse?.id) {
+    return { ok: false, error: "source_house_not_found" };
+  }
+
+  let testHome: { id: string; esiid: string | null; label: string } | null = null;
+  try {
+    testHome = await ensureGlobalOnePathLabTestHomeHouse(args.ownerUserId);
+    await upsertOnePathLabTestHomeLink({
+      ownerUserId: args.ownerUserId,
+      testHomeHouseId: testHome.id,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      status: "replacing",
+      statusMessage: "Replacing One Path test home from selected source house.",
+    });
+
+    await (prisma as any).$transaction(async (tx: any) => {
+      await resetLabHomeMutableState({ tx, ownerUserId: args.ownerUserId, houseId: testHome!.id });
+      await copySourceHouseIdentityToLabHome({
+        tx,
+        labHouseId: testHome!.id,
+        sourceHouse,
+        label: ONE_PATH_LAB_TEST_HOME_LABEL,
+        esiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
+      });
+      await copyScenariosAndEvents({
+        tx,
+        sourceUserId: args.sourceUserId,
+        sourceHouseId: args.sourceHouseId,
+        targetUserId: args.ownerUserId,
+        targetHouseId: testHome!.id,
+      });
+      await copyManualUsageInput({
+        tx,
+        sourceUserId: args.sourceUserId,
+        sourceHouseId: args.sourceHouseId,
+        targetUserId: args.ownerUserId,
+        targetHouseId: testHome!.id,
+      });
+    });
+
+    await Promise.all([
+      (usagePrisma as any).pastSimulatedDatasetCache?.deleteMany?.({
+        where: { houseId: testHome.id },
+      }) ?? Promise.resolve(),
+      (usagePrisma as any).gapfillCompareRunSnapshot?.deleteMany?.({
+        where: { houseId: testHome.id },
+      }) ?? Promise.resolve(),
+    ]);
+
+    await upsertOnePathLabTestHomeLink({
+      ownerUserId: args.ownerUserId,
+      testHomeHouseId: testHome.id,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      status: "profile_syncing",
+      statusMessage: "Main DB replacement complete; syncing One Path profiles and actual-usage isolation.",
+    });
+
+    const [sourceHomeProfile, sourceApplianceProfile] = await Promise.all([
+      getHomeProfileSimulatedByUserHouse({
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+      }),
+      getApplianceProfileSimulatedByUserHouse({
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+      }),
+    ]);
+
+    if (sourceHomeProfile) {
+      await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
+        where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
+        create: {
+          userId: args.ownerUserId,
+          houseId: testHome.id,
+          ...sourceHomeProfile,
+        },
+        update: {
+          ...sourceHomeProfile,
+        },
+      });
+    }
+    if (sourceApplianceProfile?.appliancesJson) {
+      await (appliancesPrisma as any).applianceProfileSimulated.upsert({
+        where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
+        create: {
+          userId: args.ownerUserId,
+          houseId: testHome.id,
+          appliancesJson: sourceApplianceProfile.appliancesJson,
+        },
+        update: {
+          appliancesJson: sourceApplianceProfile.appliancesJson,
+        },
+      });
+    }
+
+    await cloneOnePathGreenButtonUsageFromSource({
+      sourceHouseId: args.sourceHouseId,
+      targetHouseId: testHome.id,
+      targetUserId: args.ownerUserId,
+      targetEsiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
+    });
+
+    await (prisma as any).houseDailyWeather
+      .deleteMany({
+        where: { houseId: testHome.id },
+      })
+      .catch(() => null);
+
+    await upsertOnePathLabTestHomeLink({
+      ownerUserId: args.ownerUserId,
+      testHomeHouseId: testHome.id,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      status: "ready",
+      statusMessage: "One Path test home replaced successfully from selected source.",
+      lastReplacedAt: new Date(),
+    });
+
+    return {
+      ok: true,
+      testHomeHouseId: testHome.id,
+      sourceHouseId: args.sourceHouseId,
+    };
+  } catch (error) {
+    if (testHome?.id) {
+      await upsertOnePathLabTestHomeLink({
+        ownerUserId: args.ownerUserId,
+        testHomeHouseId: testHome.id,
+        sourceUserId: args.sourceUserId,
+        sourceHouseId: args.sourceHouseId,
+        status: "failed",
+        statusMessage: error instanceof Error ? error.message : "replace_one_path_lab_test_home_failed",
+      });
+    }
+    return {
+      ok: false,
+      error: "replace_one_path_lab_test_home_failed",
+      message: error instanceof Error ? error.message : "replace_one_path_lab_test_home_failed",
     };
   }
 }
