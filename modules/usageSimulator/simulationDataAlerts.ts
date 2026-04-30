@@ -176,7 +176,7 @@ export function classifySimulationFailure(args: {
 }
 
 export async function recordSimulationDataAlert(args: {
-  source: "GAPFILL_LAB" | "USER_SIMULATION" | "USAGE_DASHBOARD";
+  source: "GAPFILL_LAB" | "USER_SIMULATION" | "USAGE_DASHBOARD" | "PLANS_DASHBOARD";
   userId?: string | null;
   userEmail?: string | null;
   houseId?: string | null;

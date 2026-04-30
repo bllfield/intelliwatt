@@ -19,6 +19,7 @@ import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } fro
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { deriveUniversalAvailability } from "@/lib/plan-engine/universalStatus";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import { recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
@@ -160,6 +161,42 @@ function numOrNull(n: any): number | null {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
+function parseConnectionLimitFromUrl(urlRaw: unknown): number | null {
+  const text = String(urlRaw ?? "").trim();
+  if (!text) return null;
+  try {
+    const u = new URL(text);
+    const parsed = Number(u.searchParams.get("connection_limit") ?? "");
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getEffectiveConnectionLimit(): number | null {
+  return parseConnectionLimitFromUrl(process.env.USAGE_DATABASE_URL) ?? parseConnectionLimitFromUrl(process.env.DATABASE_URL);
+}
+
+function isConnectionPoolExhaustionError(err: unknown): boolean {
+  const code = String((err as any)?.code ?? "");
+  const message = String((err as any)?.message ?? err ?? "");
+  return code === "P2024" || /connection pool|timed out fetching a new connection|too many connections/i.test(message);
+}
+
+class PlansHardBlockError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly context: Record<string, unknown>;
+
+  constructor(args: { code: string; message: string; status?: number; context?: Record<string, unknown> }) {
+    super(args.message);
+    this.name = "PlansHardBlockError";
+    this.code = args.code;
+    this.status = args.status ?? 503;
+    this.context = args.context ?? {};
+  }
+}
+
 function decimalToNumber(v: any): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (v && typeof v === "object" && typeof v.toString === "function") {
@@ -198,6 +235,10 @@ function lastNYearMonthsChicago(n: number): string[] {
 }
 
 export async function GET(req: NextRequest) {
+  let alertUserId: string | null = null;
+  let alertUserEmail: string | null = null;
+  let alertHouseId: string | null = null;
+  let alertHouseLabel: string | null = null;
   try {
     const cookieStore = cookies();
     const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
@@ -215,6 +256,8 @@ export async function GET(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
     }
+    alertUserId = user.id;
+    alertUserEmail = user.email;
 
     let house: any = await (prisma as any).houseAddress.findFirst({
       where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
@@ -271,6 +314,8 @@ export async function GET(req: NextRequest) {
         { status: 200 },
       );
     }
+    alertHouseId = String(house.id ?? "");
+    alertHouseLabel = String(house.addressLine1 ?? house.id ?? "").trim() || null;
 
     const url = new URL(req.url);
     const datasetMode = parseBoolParam(url.searchParams.get("dataset"), false);
@@ -1769,6 +1814,21 @@ export async function GET(req: NextRequest) {
         // If required usage buckets are missing, this is not "unsupported"—it means the pipeline hasn't populated
         // the required bucket keys for the home yet.
         if (missingBucketKeys.length > 0) {
+          const connectionLimit = getEffectiveConnectionLimit();
+          if (connectionLimit != null && connectionLimit <= 1) {
+            throw new PlansHardBlockError({
+              code: "PLANS_BUCKETS_BLOCKED_BY_DB_POOL",
+              message:
+                "Plans are temporarily unavailable because the database connection pool is exhausted and required usage buckets could not be ensured.",
+              context: {
+                connectionLimit,
+                missingBucketKeys,
+                offerId,
+                ratePlanId: effectiveRatePlanId,
+                route: "/api/dashboard/plans",
+              },
+            });
+          }
           return { status: "NOT_IMPLEMENTED", reason: "MISSING_BUCKETS" };
         }
         // Cache key: (home + ratePlan + engineVersion + tdsp + rateStructure + usageBucketsDigest)
@@ -2140,6 +2200,48 @@ export async function GET(req: NextRequest) {
       },
     );
   } catch (e: any) {
+    const isHardBlock = e instanceof PlansHardBlockError;
+    const isPoolExhaustion = isConnectionPoolExhaustionError(e);
+    if (isHardBlock || isPoolExhaustion) {
+      const reasonCode = isHardBlock ? e.code : "PRISMA_POOL_EXHAUSTION";
+      const reasonMessage = isHardBlock
+        ? String(e.message)
+        : "Plans failed because the database connection pool was exhausted.";
+      await recordSimulationDataAlert({
+        source: "PLANS_DASHBOARD",
+        userId: alertUserId,
+        userEmail: alertUserEmail,
+        houseId: alertHouseId,
+        houseLabel: alertHouseLabel,
+        reasonCode,
+        reasonMessage,
+        missingData: [],
+        context: {
+          route: "/api/dashboard/plans",
+          errorCode: String(e?.code ?? ""),
+          errorMessage: String(e?.message ?? e ?? ""),
+          ...(isHardBlock && e?.context && typeof e.context === "object" ? e.context : {}),
+        },
+      }).catch(() => ({ ok: false as const }));
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Plans are temporarily unavailable because the system could not access the database connection pool required for IntelliWatt calculations. Support has been alerted.",
+          message:
+            "Plans are temporarily unavailable because the system could not access the database connection pool required for IntelliWatt calculations. Support has been alerted.",
+          code: reasonCode,
+          hardBlock: true,
+        },
+        {
+          status: isHardBlock ? e.status ?? 503 : 503,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        },
+      );
+    }
     return NextResponse.json(
       { ok: false, error: e?.message ?? String(e) },
       { status: 500 },
