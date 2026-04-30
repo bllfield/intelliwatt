@@ -1220,7 +1220,7 @@ function buildCanonicalEngineInput(args: {
   const actualMonthlyRows = buildDisplayedMonthlyRows(args.loaded.actualDataset as any);
   const actualMonthlyReference = Object.fromEntries(
     actualMonthlyRows
-      .map((row: any) => [String(row?.month ?? "").slice(0, 7), Number(row?.kwh ?? Number.NaN)])
+      .map((row: any): [string, number] => [String(row?.month ?? "").slice(0, 7), Number(row?.kwh ?? Number.NaN)])
       .filter((entry: [string, number]) => /^\d{4}-\d{2}$/.test(entry[0]) && Number.isFinite(entry[1]))
   ) as Record<string, number>;
   const isBaselineIntervalLikeRun = args.scenarioId == null && isIntervalLikeInputType(args.inputType);
