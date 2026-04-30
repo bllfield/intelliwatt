@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getCurrentPlanPrisma } from "@/lib/prismaCurrentPlan";
+import { resolveDashboardHomeId } from "@/lib/dashboard/resolveDashboardHomeId";
 import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
@@ -111,23 +112,7 @@ export async function GET(req: NextRequest) {
     });
     if (!user) return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
 
-    // House context: prefer ACTIVE usage entry's houseId, then newest usage entry, then newest house.
-    const usageEntries = await prisma.entry.findMany({
-      where: { userId: user.id, type: "smart_meter_connect" },
-      orderBy: [{ createdAt: "desc" }],
-      select: { id: true, status: true, houseId: true },
-    });
-    const isLive = (s: any) => s === "ACTIVE" || s === "EXPIRING_SOON";
-    const usageEntry = usageEntries.find((e) => isLive(e.status)) ?? usageEntries[0] ?? null;
-    let houseId = (usageEntry?.houseId as string | null) ?? null;
-    if (!houseId) {
-      const bestHouse = await prisma.houseAddress.findFirst({
-        where: { userId: user.id, archivedAt: null },
-        orderBy: [{ updatedAt: "desc" }],
-        select: { id: true },
-      });
-      houseId = bestHouse?.id ?? null;
-    }
+    const houseId = await resolveDashboardHomeId(user.id);
     if (!houseId) return NextResponse.json({ ok: false, error: "no_house_context" }, { status: 400 });
 
     const house = await (prisma as any).houseAddress.findUnique({
