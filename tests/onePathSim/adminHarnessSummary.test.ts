@@ -218,6 +218,41 @@ describe("one path sandbox harness summary", () => {
     expect(summary.monthlyTruthCompare.datasetMonthlyRows).toEqual([{ month: "2026-04", kwh: 13542.3 }]);
   });
 
+  it("prefers baseline passthrough dataset producer-path parity over engine input intent", () => {
+    const summary = buildOnePathSandboxHarnessSummary({
+      runResult: {
+        runType: "BASELINE_PASSTHROUGH",
+        engineInput: {
+          inputType: "GREEN_BUTTON",
+          sharedProducerPathUsed: true,
+        },
+        artifact: {
+          dataset: {
+            meta: {
+              baselinePassthrough: true,
+              sharedProducerPathUsed: false,
+            },
+          },
+        },
+        readModel: {
+          dataset: {
+            summary: { totalKwh: 100, source: "GREEN_BUTTON" },
+            monthly: [{ month: "2026-04", kwh: 100 }],
+            meta: {
+              baselinePassthrough: true,
+              sharedProducerPathUsed: false,
+            },
+          },
+          curveCompareActualIntervals15: [],
+          curveCompareSimulatedIntervals15: [],
+          curveCompareSimulatedDailyRows: [],
+        },
+      },
+    });
+
+    expect(summary.runStatus.sharedProducerPathUsed).toBe(false);
+  });
+
   it("surfaces Past Sim compare metrics, weather sensitivity, and daily shape visibility", () => {
     const summary = buildOnePathSandboxHarnessSummary({
       knownScenario: {

@@ -98,7 +98,11 @@ export function buildOnePathSandboxHarnessSummary(args: {
       baselineSimulationBlocked:
         datasetMeta.baselineSimulationBlocked ?? artifactDatasetMeta.baselineSimulationBlocked ?? null,
       sharedProducerPathUsed:
-        runIdentity.sharedProducerPathUsed ?? engineInput.sharedProducerPathUsed ?? null,
+        runIdentity.sharedProducerPathUsed ??
+        datasetMeta.sharedProducerPathUsed ??
+        artifactDatasetMeta.sharedProducerPathUsed ??
+        engineInput.sharedProducerPathUsed ??
+        null,
       knownScenarioKey: knownScenario.scenarioKey ?? null,
       knownScenarioLabel: knownScenario.label ?? null,
       knownScenarioType: knownScenario.scenarioType ?? null,

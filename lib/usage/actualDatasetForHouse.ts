@@ -68,6 +68,9 @@ export type UsageDatasetResult = {
     monthly: UsageSeriesPoint[];
     annual: UsageSeriesPoint[];
   };
+  insights?: {
+    timeOfDayBuckets?: Array<{ key: string; label: string; kwh: number }>;
+  } | null;
 };
 
 export type ImportExportTotals = { importKwh: number; exportKwh: number; netKwh: number };
@@ -765,16 +768,9 @@ function chooseDataset(
 ): UsageDatasetResult | null {
   if (preferredSource === "SMT" && smt) return smt;
   if (preferredSource === "GREEN_BUTTON" && greenButton) return greenButton;
-  const latestMs = (d: UsageDatasetResult | null): number => {
-    if (!d?.summary?.latest) return 0;
-    const t = new Date(d.summary.latest).getTime();
-    return Number.isFinite(t) ? t : 0;
-  };
-  const smtLatest = latestMs(smt);
-  const gbLatest = latestMs(greenButton);
-  if (smtLatest === 0 && gbLatest === 0) return null;
-  if (smtLatest === gbLatest) return smt ?? greenButton;
-  return smtLatest > gbLatest ? smt! : greenButton!;
+  if (smt) return smt;
+  if (greenButton) return greenButton;
+  return null;
 }
 
 async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult | null> {
@@ -897,6 +893,27 @@ async function fetchGreenButtonDataset(
       GROUP BY bucket ORDER BY bucket DESC LIMIT 120
     `);
     const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
+    const timeOfDayBuckets = lightweight
+      ? ((await usageClient.$queryRaw(Prisma.sql`
+      SELECT key, label, sort, SUM("consumptionKwh")::float AS kwh FROM (
+        SELECT CASE WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 6 THEN 'overnight'
+                    WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12 THEN 'morning'
+                    WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18 THEN 'afternoon' ELSE 'evening' END AS key,
+               CASE WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 6 THEN 'Overnight (12am–6am)'
+                    WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12 THEN 'Morning (6am–12pm)'
+                    WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18 THEN 'Afternoon (12pm–6pm)' ELSE 'Evening (6pm–12am)' END AS label,
+               CASE WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 6 THEN 1
+                    WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12 THEN 2
+                    WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18 THEN 3 ELSE 4 END AS sort,
+               "consumptionKwh"
+        FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
+      ) t GROUP BY key, label, sort ORDER BY sort ASC
+    `)) as Array<{ key: string; label: string; sort: number; kwh: number }>).map((row) => ({
+          key: String(row.key),
+          label: String(row.label),
+          kwh: round2(row.kwh),
+        }))
+      : [];
     const annualRows = lightweight
       ? []
       : ((await usageClient.$queryRaw(Prisma.sql`
@@ -920,6 +937,7 @@ async function fetchGreenButtonDataset(
         monthly: toSeriesPoint(monthlyRows),
         annual: toSeriesPoint(annualRows),
       },
+      insights: timeOfDayBuckets.length > 0 ? { timeOfDayBuckets } : null,
     };
   } catch {
     return null;
@@ -1091,8 +1109,18 @@ export async function getActualUsageDatasetForHouse(
         ? dailyTotals.reduce((current, row) => (row.kwh > current.kwh ? row : current))
         : null;
     let weekdayVsWeekend = deriveWeekdayWeekendFromDailyTotals(dailyTotals);
+    const selectedTimeOfDayBuckets = Array.isArray(selected.insights?.timeOfDayBuckets)
+      ? selected.insights.timeOfDayBuckets
+          .map((row) => ({
+            key: String(row?.key ?? ""),
+            label: String(row?.label ?? ""),
+            kwh: round2(Number(row?.kwh) || 0),
+          }))
+          .filter((row) => row.key.length > 0 && row.label.length > 0)
+      : [];
     let insights: ActualHouseInsights = {
       ...emptyInsights,
+      timeOfDayBuckets: selectedTimeOfDayBuckets,
       peakDay,
       baseloadMonthly: low10Average(monthlyTotals.map((row) => Number(row.kwh) || 0)),
       weekdayVsWeekend,
