@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { gateOnePathSimAdmin } from "../../_helpers";
+import { resolveOnePathWriteTarget } from "../../_helpers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const denied = gateOnePathSimAdmin(request);
-  if (denied) return denied;
   const url = new URL(request.url);
   const houseId = String(url.searchParams.get("houseId") ?? "").trim();
   if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
+  const target = await resolveOnePathWriteTarget({ request, requestedHouseId: houseId });
+  if (!target.ok) return target.response;
   return NextResponse.json({
     ok: true,
-    houseId,
+    houseId: target.testHomeHouseId,
     prefill: {
       homeStyle: { value: null, source: "UNKNOWN" },
       insulationType: { value: null, source: "UNKNOWN" },

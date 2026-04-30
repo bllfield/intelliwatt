@@ -262,7 +262,11 @@ export function OnePathSimAdmin() {
     [mode, variableDraftParsed]
   );
   const effectiveHouseId = selectedHouseId || lookup?.selectedHouse?.id || "";
-  const effectiveActualContextHouseId = actualContextHouseId || effectiveHouseId;
+  const onePathTestHome = useMemo(() => asRecord(lookup?.sourceContext?.onePathTestHome), [lookup?.sourceContext?.onePathTestHome]);
+  const effectiveMutableHouseId =
+    typeof onePathTestHome?.houseId === "string" && onePathTestHome.houseId.trim() ? onePathTestHome.houseId.trim() : "";
+  const onePathTestHomePinned = onePathTestHome?.isPinned === true && Boolean(effectiveMutableHouseId);
+  const effectiveActualContextHouseId = onePathTestHomePinned ? effectiveMutableHouseId : actualContextHouseId || effectiveHouseId;
   useEffect(() => {
     setGreenButtonSelectedFile(null);
     setGreenButtonUploadInputKey((current) => current + 1);
@@ -707,6 +711,59 @@ export function OnePathSimAdmin() {
     [debugDiagnosticsEnabled, effectiveActualContextHouseId, effectiveHouseId, email, mode]
   );
 
+  const replaceOnePathTestHome = useCallback(
+    async (args: { email: string; sourceHouseId: string }) => {
+      const res = await fetch("/api/admin/tools/one-path-sim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "replace_test_home_from_source",
+          email: args.email,
+          houseId: args.sourceHouseId,
+          sourceHouseId: args.sourceHouseId,
+        }),
+      });
+      return (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as any;
+    },
+    []
+  );
+
+  const ensureOnePathTestHomeReady = useCallback(
+    async (json: LookupResponse, sourceHouseId: string, lookupEmail: string) => {
+      const testHome = asRecord(json.sourceContext?.onePathTestHome);
+      const alreadyPinned =
+        testHome?.isPinned === true &&
+        typeof testHome?.sourceHouseId === "string" &&
+        testHome.sourceHouseId === sourceHouseId;
+      if (alreadyPinned) return json;
+
+      setBusy(true);
+      setError(null);
+      setStatus("Replacing the dedicated One Path test home from the selected source house...");
+      const replaceJson = await replaceOnePathTestHome({ email: lookupEmail, sourceHouseId });
+      if (!replaceJson?.ok) {
+        setBusy(false);
+        setStatus(null);
+        setError(replaceJson?.message ?? replaceJson?.error ?? "One Path test-home replacement failed.");
+        return null;
+      }
+
+      const refreshed = await requestLookup({
+        email: lookupEmail,
+        houseId: sourceHouseId,
+        actualContextHouseId: null,
+        freshSelection: false,
+      });
+      setBusy(false);
+      if (!refreshed) {
+        setStatus(null);
+        return null;
+      }
+      return refreshed;
+    },
+    [replaceOnePathTestHome, requestLookup]
+  );
+
   const loadLookup = useCallback(
     async (houseIdOverride?: string, options?: { freshSelection?: boolean }) => {
       const freshSelection = options?.freshSelection === true;
@@ -719,8 +776,15 @@ export function OnePathSimAdmin() {
         setSelectedScenarioId("");
         setTravelRanges([]);
       }
-      const json = await requestLookup({ houseId: houseIdOverride, freshSelection });
+      let json = await requestLookup({ houseId: houseIdOverride, freshSelection });
       if (!json) return;
+      const sourceHouseId = houseIdOverride || json.selectedHouse?.id || "";
+      const lookupEmail = (json.email || email).trim();
+      if (sourceHouseId && lookupEmail) {
+        const ensured = await ensureOnePathTestHomeReady(json, sourceHouseId, lookupEmail);
+        if (!ensured) return;
+        json = ensured;
+      }
       applyLookupResponse(
         json,
         freshSelection
@@ -734,7 +798,7 @@ export function OnePathSimAdmin() {
       );
       setStatus("Lookup loaded.");
     },
-    [actualContextHouseId, applyLookupResponse, requestLookup]
+    [actualContextHouseId, applyLookupResponse, email, ensureOnePathTestHomeReady, requestLookup]
   );
 
   const uploadGreenButtonThroughUsage = useCallback(
@@ -753,10 +817,10 @@ export function OnePathSimAdmin() {
       setGreenButtonUploadError(null);
       setGreenButtonUploadStatus("Uploading replacement Green Button file through the usage pipeline...");
       try {
-        const ticketRes = await fetch("/api/green-button/upload-ticket", {
+        const ticketRes = await fetch("/api/admin/tools/one-path-sim/green-button/upload-ticket", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ homeId: houseId }),
+          body: JSON.stringify({ houseId }),
         });
         const ticketJson = await ticketRes.json().catch(() => null);
         if (!ticketRes.ok || !ticketJson?.ok || !ticketJson?.uploadUrl || !ticketJson?.payload || !ticketJson?.signature) {
@@ -852,6 +916,13 @@ export function OnePathSimAdmin() {
       includeDebugDiagnostics: false,
     });
     if (!json) return;
+    const ensuredLookup = await ensureOnePathTestHomeReady(
+      json,
+      lookupArgs.houseId || json.selectedHouse?.id || "",
+      resolvedEmail
+    );
+    if (!ensuredLookup) return;
+    json = ensuredLookup;
 
     let resolvedSelection = resolveKnownHouseScenarioSelection({
       scenario: scenarioForSelection,
@@ -859,7 +930,12 @@ export function OnePathSimAdmin() {
     });
 
     if (selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH") {
-      const targetActualContextHouseId = resolvedSelection.actualContextHouseId || resolvedSelection.selectedHouseId;
+      const targetActualContextHouseId =
+        (typeof asRecord(json.sourceContext?.onePathTestHome)?.houseId === "string"
+          ? String(asRecord(json.sourceContext?.onePathTestHome)?.houseId ?? "")
+          : "") ||
+        resolvedSelection.actualContextHouseId ||
+        resolvedSelection.selectedHouseId;
       const hasExistingGreenButtonUsage = hasUsableGreenButtonCoverage(asRecord(json.sourceContext?.greenButtonUpload));
       if (greenButtonSelectedFile) {
         const uploaded = await uploadGreenButtonThroughUsage(targetActualContextHouseId);
@@ -872,6 +948,13 @@ export function OnePathSimAdmin() {
           includeDebugDiagnostics: false,
         });
         if (!json) return;
+        const reEnsuredLookup = await ensureOnePathTestHomeReady(
+          json,
+          resolvedSelection.selectedHouseId || lookupArgs.houseId || json.selectedHouse?.id || "",
+          resolvedEmail
+        );
+        if (!reEnsuredLookup) return;
+        json = reEnsuredLookup;
         resolvedSelection = resolveKnownHouseScenarioSelection({
           scenario: scenarioForSelection,
           lookup: json,
@@ -906,10 +989,11 @@ export function OnePathSimAdmin() {
     selectedHouseId,
     selectedKnownScenario,
     uploadGreenButtonThroughUsage,
+    ensureOnePathTestHomeReady,
   ]);
 
   const runSimulation = useCallback(async () => {
-    if (!lookup || !effectiveHouseId) {
+    if (!lookup || !effectiveHouseId || !effectiveMutableHouseId) {
       setError("Load a user and select a house first.");
       return;
     }
@@ -933,7 +1017,8 @@ export function OnePathSimAdmin() {
       body: JSON.stringify({
         action: "run",
         email: lookup.email,
-        houseId: effectiveHouseId,
+        sourceHouseId: effectiveHouseId,
+        houseId: effectiveMutableHouseId,
         scenarioId: selectedScenarioId || null,
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
@@ -985,6 +1070,7 @@ export function OnePathSimAdmin() {
     debugDiagnosticsEnabled,
     effectiveActualContextHouseId,
     effectiveHouseId,
+    effectiveMutableHouseId,
     lookup,
     mode,
     persistRequested,
@@ -1010,6 +1096,7 @@ export function OnePathSimAdmin() {
             action: "load_manual",
             email: lookup?.email ?? email,
             houseId,
+            sourceHouseId: effectiveHouseId || null,
             actualContextHouseId: effectiveActualContextHouseId,
             mode,
           }),
@@ -1024,13 +1111,14 @@ export function OnePathSimAdmin() {
             action: "save_manual",
             email: lookup?.email ?? email,
             houseId: args.houseId,
+            sourceHouseId: effectiveHouseId || null,
             payload: args.payload,
           }),
         });
         return (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as any;
       },
     }),
-    [effectiveActualContextHouseId, email, lookup?.email, mode]
+    [effectiveActualContextHouseId, effectiveHouseId, email, lookup?.email, mode]
   );
 
   return (
@@ -1091,6 +1179,22 @@ export function OnePathSimAdmin() {
               </button>
             </div>
           </div>
+
+          {onePathTestHome ? (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">Pinned One Path test home</div>
+              <div className="mt-1">
+                Source house: <span className="font-mono">{String(onePathTestHome.sourceHouseId ?? "unlinked")}</span>
+              </div>
+              <div className="mt-1">
+                Test home: <span className="font-mono">{effectiveMutableHouseId || "not ready"}</span>
+              </div>
+              <div className="mt-1">
+                Status: {String(onePathTestHome.status ?? "unknown")}
+                {onePathTestHome.statusMessage ? ` - ${String(onePathTestHome.statusMessage)}` : ""}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-6 grid gap-4 lg:grid-cols-4">
             <label className="text-sm text-slate-700 lg:col-span-2">
@@ -1247,18 +1351,24 @@ export function OnePathSimAdmin() {
             </label>
             <label className="text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Actual context house</div>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                value={effectiveActualContextHouseId}
-                onChange={(event) => setActualContextHouseId(event.target.value)}
-              >
-                <option value="">Use selected house</option>
-                {(lookup?.houses ?? []).map((house) => (
-                  <option key={house.id} value={house.id}>
-                    {house.label}
-                  </option>
-                ))}
-              </select>
+              {onePathTestHomePinned ? (
+                <div className="mt-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  Pinned to One Path test home: {effectiveActualContextHouseId}
+                </div>
+              ) : (
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  value={effectiveActualContextHouseId}
+                  onChange={(event) => setActualContextHouseId(event.target.value)}
+                >
+                  <option value="">Use selected house</option>
+                  {(lookup?.houses ?? []).map((house) => (
+                    <option key={house.id} value={house.id}>
+                      {house.label}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
           </div>
 
@@ -1325,7 +1435,7 @@ export function OnePathSimAdmin() {
             <button
               type="button"
               onClick={() => setHomeOpen(true)}
-              disabled={!effectiveHouseId}
+              disabled={!effectiveMutableHouseId}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
             >
               Home Details popup
@@ -1333,7 +1443,7 @@ export function OnePathSimAdmin() {
             <button
               type="button"
               onClick={() => setApplianceOpen(true)}
-              disabled={!effectiveHouseId}
+              disabled={!effectiveMutableHouseId}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
             >
               Appliance Details popup
@@ -1348,7 +1458,7 @@ export function OnePathSimAdmin() {
             <button
               type="button"
               onClick={() => setManualOpen(true)}
-              disabled={!effectiveHouseId}
+              disabled={!effectiveMutableHouseId}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
             >
               Manual Usage Entry popup
@@ -1356,7 +1466,7 @@ export function OnePathSimAdmin() {
             <button
               type="button"
               onClick={() => void runSimulation()}
-              disabled={busy || !lookup || !effectiveHouseId}
+              disabled={busy || !lookup || !effectiveHouseId || !effectiveMutableHouseId}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
             >
               {runButtonLabel}
@@ -1696,9 +1806,9 @@ export function OnePathSimAdmin() {
       </div>
 
       <Modal open={homeOpen} title="Home Details popup/editor" onClose={() => setHomeOpen(false)}>
-        {effectiveHouseId ? (
+        {effectiveMutableHouseId ? (
           <HomeDetailsClient
-            houseId={effectiveHouseId}
+            houseId={effectiveMutableHouseId}
             loadUrl="/api/admin/tools/one-path-sim/home-profile"
             saveUrl="/api/admin/tools/one-path-sim/home-profile"
             prefillUrl="/api/admin/tools/one-path-sim/home-profile/prefill"
@@ -1711,9 +1821,9 @@ export function OnePathSimAdmin() {
       </Modal>
 
       <Modal open={applianceOpen} title="Appliance Details popup/editor" onClose={() => setApplianceOpen(false)}>
-        {effectiveHouseId ? (
+        {effectiveMutableHouseId ? (
           <AppliancesClient
-            houseId={effectiveHouseId}
+            houseId={effectiveMutableHouseId}
             loadUrl="/api/admin/tools/one-path-sim/appliances"
             saveUrl="/api/admin/tools/one-path-sim/appliances"
             awardEntries={false}
@@ -1725,9 +1835,9 @@ export function OnePathSimAdmin() {
       </Modal>
 
       <Modal open={manualOpen} title="Manual Usage Entry popup/editor" onClose={() => setManualOpen(false)}>
-        {effectiveHouseId ? (
+        {effectiveMutableHouseId ? (
           <ManualUsageEntry
-            houseId={effectiveHouseId}
+            houseId={effectiveMutableHouseId}
             transport={manualTransport}
             showMonthlyDateSourceControls
             onSaved={async () => {

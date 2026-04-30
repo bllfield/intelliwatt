@@ -7,6 +7,10 @@ const requireAdmin = vi.fn();
 const lookupAdminHousesByEmail = vi.fn();
 const resolveAdminHouseSelection = vi.fn();
 const listScenarios = vi.fn();
+const prismaUserFindFirst = vi.fn();
+const prismaHouseAddressFindFirst = vi.fn();
+const prismaGreenButtonUploadFindFirst = vi.fn();
+const usageGreenButtonIntervalAggregate = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const getHomeProfileSimulatedByUserHouse = vi.fn();
@@ -29,6 +33,9 @@ const buildSharedSimulationReadModel = vi.fn();
 const buildOnePathManualUsagePastSimReadResult = vi.fn();
 const readOnePathSimulatedUsageScenario = vi.fn();
 const listOnePathScenarioEvents = vi.fn();
+const ensureGlobalOnePathLabTestHomeHouse = vi.fn();
+const getOnePathLabTestHomeLink = vi.fn();
+const replaceGlobalOnePathLabTestHomeFromSource = vi.fn();
 class UpstreamUsageTruthMissingError extends Error {
   code = "usage_truth_missing";
   usageTruthSource: string;
@@ -58,6 +65,28 @@ vi.mock("@/lib/auth/admin", () => ({
   requireAdmin: (...args: any[]) => requireAdmin(...args),
 }));
 
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    user: {
+      findFirst: (...args: any[]) => prismaUserFindFirst(...args),
+    },
+    houseAddress: {
+      findFirst: (...args: any[]) => prismaHouseAddressFindFirst(...args),
+    },
+    greenButtonUpload: {
+      findFirst: (...args: any[]) => prismaGreenButtonUploadFindFirst(...args),
+    },
+  },
+}));
+
+vi.mock("@/lib/db/usageClient", () => ({
+  usagePrisma: {
+    greenButtonInterval: {
+      aggregate: (...args: any[]) => usageGreenButtonIntervalAggregate(...args),
+    },
+  },
+}));
+
 vi.mock("@/lib/admin/adminHouseLookup", () => ({
   lookupAdminHousesByEmail: (...args: any[]) => lookupAdminHousesByEmail(...args),
   resolveAdminHouseSelection: (...args: any[]) => resolveAdminHouseSelection(...args),
@@ -65,6 +94,13 @@ vi.mock("@/lib/admin/adminHouseLookup", () => ({
 
 vi.mock("@/modules/usageSimulator/service", () => ({
   listScenarios: (...args: any[]) => listScenarios(...args),
+}));
+
+vi.mock("@/modules/usageSimulator/labTestHome", () => ({
+  ONE_PATH_LAB_TEST_HOME_LABEL: "ONE_PATH_LAB_TEST_HOME",
+  ensureGlobalOnePathLabTestHomeHouse: (...args: any[]) => ensureGlobalOnePathLabTestHomeHouse(...args),
+  getOnePathLabTestHomeLink: (...args: any[]) => getOnePathLabTestHomeLink(...args),
+  replaceGlobalOnePathLabTestHomeFromSource: (...args: any[]) => replaceGlobalOnePathLabTestHomeFromSource(...args),
 }));
 
 vi.mock("@/modules/homeProfile/repo", () => ({
@@ -148,6 +184,10 @@ describe("admin one path sim route", () => {
     lookupAdminHousesByEmail.mockReset();
     resolveAdminHouseSelection.mockReset();
     listScenarios.mockReset();
+    prismaUserFindFirst.mockReset();
+    prismaHouseAddressFindFirst.mockReset();
+    prismaGreenButtonUploadFindFirst.mockReset();
+    usageGreenButtonIntervalAggregate.mockReset();
     getManualUsageInputForUserHouse.mockReset();
     saveManualUsageInputForUserHouse.mockReset();
     getHomeProfileSimulatedByUserHouse.mockReset();
@@ -170,11 +210,24 @@ describe("admin one path sim route", () => {
     buildOnePathManualUsagePastSimReadResult.mockReset();
     readOnePathSimulatedUsageScenario.mockReset();
     listOnePathScenarioEvents.mockReset();
+    ensureGlobalOnePathLabTestHomeHouse.mockReset();
+    getOnePathLabTestHomeLink.mockReset();
+    replaceGlobalOnePathLabTestHomeFromSource.mockReset();
     vi.stubEnv("HOME_DETAILS_DATABASE_URL", "");
     vi.stubEnv("APPLIANCES_DATABASE_URL", "");
     vi.stubEnv("USAGE_DATABASE_URL", "");
 
     requireAdmin.mockReturnValue({ ok: false, status: 401, body: { error: "Unauthorized" } });
+    prismaUserFindFirst.mockResolvedValue({ id: "user-1" });
+    prismaHouseAddressFindFirst.mockImplementation(async ({ where }: any) => {
+      if (!where?.id) return null;
+      if (String(where.id) === "test-home-1") {
+        return { id: "test-home-1", label: "One Path Test Home", esiid: "esiid-test-1" };
+      }
+      return { id: String(where.id), label: "Primary", esiid: "esiid-1" };
+    });
+    prismaGreenButtonUploadFindFirst.mockResolvedValue(null);
+    usageGreenButtonIntervalAggregate.mockResolvedValue(null);
     lookupAdminHousesByEmail.mockResolvedValue({
       ok: true,
       email: "customer@example.com",
@@ -183,6 +236,21 @@ describe("admin one path sim route", () => {
     });
     resolveAdminHouseSelection.mockResolvedValue({ id: "house-1", label: "Primary", esiid: "esiid-1", isPrimary: true });
     listScenarios.mockResolvedValue({ ok: true, scenarios: [{ id: "scenario-1", name: "Past" }] });
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValue({ id: "house-1", esiid: "esiid-1", label: "ONE_PATH_LAB_TEST_HOME" });
+    getOnePathLabTestHomeLink.mockResolvedValue({
+      ownerUserId: "user-1",
+      testHomeHouseId: "house-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-15T00:00:00.000Z"),
+    });
+    replaceGlobalOnePathLabTestHomeFromSource.mockResolvedValue({
+      ok: true,
+      testHomeHouseId: "test-home-1",
+      sourceHouseId: "house-1",
+    });
     resolveUpstreamUsageTruthForSimulation.mockResolvedValue({
       dataset: {
         summary: { totalKwh: 3790, end: "2026-04-14" },
@@ -636,12 +704,13 @@ describe("admin one path sim route", () => {
     expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
       userId: "user-1",
       houseId: "house-1",
-      actualContextHouseId: "house-2",
+      actualContextHouseId: "house-1",
       seedIfMissing: false,
+      preferredActualSource: null,
     });
     expect(resolveSharedWeatherSensitivityEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
-        weatherHouseId: "house-2",
+        weatherHouseId: "house-1",
         simulationVariablePolicy: { previewPolicy: "manual-monthly" },
       })
     );
@@ -866,11 +935,18 @@ describe("admin one path sim route", () => {
 
     expect(res.status).toBe(200);
     expect(json.ok).toBe(true);
-    expect(json.sourceContext).toEqual({
-      debugDiagnosticsIncluded: false,
-      greenButtonUpload: null,
-      travelRangesFromDb: [{ startDate: "2026-03-01", endDate: "2026-03-05" }],
-    });
+    expect(json.sourceContext).toEqual(
+      expect.objectContaining({
+        debugDiagnosticsIncluded: false,
+        greenButtonUpload: null,
+        travelRangesFromDb: [{ startDate: "2026-03-01", endDate: "2026-03-05" }],
+        onePathTestHome: expect.objectContaining({
+          houseId: "house-1",
+          isPinned: true,
+          needsReplace: false,
+        }),
+      })
+    );
     expect(resolveUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();
     expect(resolveSharedWeatherSensitivityEnvelope).not.toHaveBeenCalled();
     expect(getHomeProfileReadOnlyByUserHouse).not.toHaveBeenCalled();
@@ -1240,7 +1316,7 @@ describe("admin one path sim route", () => {
 
     expect(adaptIntervalRawInput).toHaveBeenCalledWith(
       expect.objectContaining({
-        actualContextHouseId: "house-2",
+        actualContextHouseId: "house-1",
         validationSelectionMode: "manual",
         validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
       })
@@ -1470,5 +1546,188 @@ describe("admin one path sim route", () => {
       payload: { mode: "ANNUAL", anchorEndDate: "2026-03-31", annualKwh: 9000, travelRanges: [] },
     });
     expect(json.payload.mode).toBe("ANNUAL");
+  });
+
+  it("replaces the One Path test home from the selected source house", async () => {
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: "esiid-test-1",
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink
+      .mockResolvedValueOnce({
+        ownerUserId: "admin-1",
+        testHomeHouseId: "test-home-1",
+        sourceUserId: "user-1",
+        sourceHouseId: "house-other",
+        status: "ready",
+        statusMessage: "stale",
+        lastReplacedAt: new Date("2026-04-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        ownerUserId: "admin-1",
+        testHomeHouseId: "test-home-1",
+        sourceUserId: "user-1",
+        sourceHouseId: "house-1",
+        status: "ready",
+        statusMessage: "ready",
+        lastReplacedAt: new Date("2026-04-16T00:00:00.000Z"),
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "replace_test_home_from_source",
+        email: "customer@example.com",
+        houseId: "house-1",
+        sourceHouseId: "house-1",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(replaceGlobalOnePathLabTestHomeFromSource).toHaveBeenCalledWith({
+      ownerUserId: "user-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+    });
+    expect(json.onePathTestHome).toEqual(
+      expect.objectContaining({
+        houseId: "test-home-1",
+        sourceHouseId: "house-1",
+        isPinned: true,
+        needsReplace: false,
+      })
+    );
+  });
+
+  it("pins runs and manual saves to the linked One Path test home", async () => {
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: "esiid-test-1",
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "admin-1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-16T00:00:00.000Z"),
+    });
+    saveManualUsageInputForUserHouse.mockResolvedValueOnce({
+      ok: true,
+      updatedAt: "2026-04-16T12:00:00.000Z",
+      payload: { mode: "MONTHLY", travelRanges: [] },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const saveRes = await POST(
+      buildRequest({
+        action: "save_manual",
+        email: "customer@example.com",
+        houseId: "test-home-1",
+        sourceHouseId: "house-1",
+        payload: { mode: "MONTHLY", travelRanges: [] },
+      })
+    );
+    const saveJson = await saveRes.json();
+
+    expect(saveRes.status).toBe(200);
+    expect(saveManualUsageInputForUserHouse).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "test-home-1",
+      payload: { mode: "MONTHLY", travelRanges: [] },
+    });
+    expect(saveJson.houseId).toBe("test-home-1");
+
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: "esiid-test-1",
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "admin-1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-16T00:00:00.000Z"),
+    });
+
+    const runRes = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "test-home-1",
+        sourceHouseId: "house-1",
+        mode: "INTERVAL",
+      })
+    );
+    expect(runRes.status).toBe(200);
+    expect(adaptIntervalRawInput).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "test-home-1",
+        actualContextHouseId: "test-home-1",
+      })
+    );
+  });
+
+  it("keeps the live user baseline bound to the source house while One Path uses the test home", async () => {
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: "esiid-test-1",
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "user-1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-16T00:00:00.000Z"),
+    });
+    prismaHouseAddressFindFirst.mockImplementationOnce(async () => ({
+      id: "test-home-1",
+      label: "One Path Test Home",
+      esiid: "esiid-test-1",
+    }));
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(buildUserUsageHouseContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        house: expect.objectContaining({ id: "house-1", esiid: "esiid-1" }),
+      })
+    );
+    expect(buildUserUsageHouseContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        house: expect.objectContaining({ id: "test-home-1", esiid: "esiid-test-1" }),
+      })
+    );
+    expect(json.sourceContext.onePathTestHome).toEqual(
+      expect.objectContaining({
+        houseId: "test-home-1",
+        sourceHouseId: "house-1",
+        isPinned: true,
+      })
+    );
   });
 });
