@@ -8,7 +8,7 @@ export default function CurrentRatePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showCompareRequiredNotice =
-    searchParams.get("from") === "compare" && searchParams.get("reason") === "current_plan_required";
+    searchParams?.get("from") === "compare" && searchParams?.get("reason") === "current_plan_required";
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
