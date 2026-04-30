@@ -276,7 +276,17 @@ export default function PlansClient() {
   // Sort/filter must be display-only: it must never *start* any background warmups.
   // Warmups may only start from the default landing view, and may continue only if a warmup session
   // was already started from that default view.
-  const allowWarmupInBackground = allowWarmupKicksFromThisView || warmupSessionActive;
+  const allowWarmupInBackground = ENABLE_PLANS_AUTO_WARMUPS && (allowWarmupKicksFromThisView || warmupSessionActive);
+
+  useEffect(() => {
+    if (ENABLE_PLANS_AUTO_WARMUPS) return;
+    setWarmupSessionActive(false);
+    try {
+      window.sessionStorage.removeItem(`plans_warmup_active_v1:${warmupKey}`);
+    } catch {
+      // ignore
+    }
+  }, [ENABLE_PLANS_AUTO_WARMUPS, warmupKey]);
 
   useEffect(() => {
     try {

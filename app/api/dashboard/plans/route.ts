@@ -1823,8 +1823,8 @@ export async function GET(req: NextRequest) {
               context: {
                 connectionLimit,
                 missingBucketKeys,
-                offerId,
-                ratePlanId: effectiveRatePlanId,
+                offerId: String((base as any)?.offerId ?? ""),
+                ratePlanId: templateOk ? ratePlanId : null,
                 route: "/api/dashboard/plans",
               },
             });

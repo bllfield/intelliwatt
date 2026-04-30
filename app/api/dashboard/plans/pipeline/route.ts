@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
+import { recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,12 @@ function toInt(v: string | null, fallback: number): number {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function isConnectionPoolExhaustionError(err: unknown): boolean {
+  const code = String((err as any)?.code ?? "");
+  const message = String((err as any)?.message ?? err ?? "");
+  return code === "P2024" || /connection pool|timed out fetching a new connection|too many connections/i.test(message);
 }
 
 export async function POST(req: NextRequest) {
@@ -89,12 +96,76 @@ export async function POST(req: NextRequest) {
       fallbackCooldownMs,
     });
 
+    if (result.ok === false && isConnectionPoolExhaustionError(result.error)) {
+      await recordSimulationDataAlert({
+        source: "PLANS_DASHBOARD",
+        userId: user.id,
+        userEmail,
+        houseId: String(house.id ?? ""),
+        houseLabel: String(house.addressLine1 ?? house.id ?? "").trim() || null,
+        reasonCode: "PRISMA_POOL_EXHAUSTION",
+        reasonMessage: "Plans pipeline failed because the database connection pool was exhausted.",
+        missingData: [],
+        context: {
+          route: "/api/dashboard/plans/pipeline",
+          reason,
+          errorMessage: result.error,
+        },
+      }).catch(() => ({ ok: false as const }));
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Plans calculations are temporarily unavailable because the database connection pool is exhausted. Support has been alerted.",
+          code: "PRISMA_POOL_EXHAUSTION",
+          hardBlock: true,
+        },
+        { status: 503 },
+      );
+    }
+
     return NextResponse.json(result, { status: 200 });
   } catch (e: any) {
     const msg = toErrorMessage(e);
     console.error("[dashboard_plans_pipeline] fatal error", { message: msg });
-    // Fail-soft: this endpoint is triggered by customer dashboard flows; do not return 500.
-    return NextResponse.json({ ok: false, error: msg }, { status: 200 });
+    if (isConnectionPoolExhaustionError(e)) {
+      try {
+        const cookieStore = cookies();
+        const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
+        const userEmail = sessionEmail ? normalizeEmail(sessionEmail) : null;
+        const user = userEmail
+          ? await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } })
+          : null;
+        await recordSimulationDataAlert({
+          source: "PLANS_DASHBOARD",
+          userId: user?.id ?? null,
+          userEmail,
+          reasonCode: "PRISMA_POOL_EXHAUSTION",
+          reasonMessage: "Plans pipeline failed because the database connection pool was exhausted.",
+          missingData: [],
+          context: {
+            route: "/api/dashboard/plans/pipeline",
+            reason,
+            errorMessage: msg,
+          },
+        }).catch(() => ({ ok: false as const }));
+      } catch {
+        // ignore alert failures
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Plans calculations are temporarily unavailable because the database connection pool is exhausted. Support has been alerted.",
+          code: "PRISMA_POOL_EXHAUSTION",
+          hardBlock: true,
+        },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
 
