@@ -1044,6 +1044,8 @@ export async function getActualUsageDatasetForHouse(
     preferredSource?: ActualUsageSource | null;
     /** When true, skip full-year getActualIntervalsForRange (e.g. lab only needs window). Production never passes this. */
     skipFullYearIntervalFetch?: boolean;
+    /** When true, keep lightweight reads on the cheap aggregate path and skip extra DB insight recompute. */
+    skipLightweightInsightRecompute?: boolean;
   }
 ): Promise<{
   dataset: ActualHouseDataset | null;
@@ -1052,6 +1054,7 @@ export async function getActualUsageDatasetForHouse(
   skippedFullYearIntervalFetch?: boolean;
 }> {
   const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
+  const skipLightweightInsightRecompute = Boolean(args?.skipLightweightInsightRecompute);
   const preferredSource = args?.preferredSource ?? null;
   const fetchOnlyPreferredSource =
     skippedFullYearIntervalFetch && (preferredSource === "SMT" || preferredSource === "GREEN_BUTTON");
@@ -1130,7 +1133,8 @@ export async function getActualUsageDatasetForHouse(
     const shouldQueryGreenButtonDbInsights =
       selected.summary.source === "GREEN_BUTTON" &&
       YYYY_MM_DD.test(lightweightRangeStart) &&
-      YYYY_MM_DD.test(lightweightRangeEnd);
+      YYYY_MM_DD.test(lightweightRangeEnd) &&
+      !skipLightweightInsightRecompute;
     if (
       shouldQueryGreenButtonDbInsights
     ) {

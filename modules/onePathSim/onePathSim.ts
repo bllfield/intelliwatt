@@ -1137,6 +1137,7 @@ async function loadSharedContext(args: {
   weatherScoringMode?: "interval" | "manual";
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   skipOptionalEnrichment?: boolean;
+  skipLightweightInsightRecompute?: boolean;
 }): Promise<LoadedSharedContext> {
   const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
@@ -1144,6 +1145,7 @@ async function loadSharedContext(args: {
     actualContextHouseId: args.actualContextHouseId,
     seedIfMissing: args.seedUsageTruthIfMissing === true,
     preferredActualSource: args.preferredActualSource ?? null,
+    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
   if (!upstreamUsageTruth.dataset && args.allowMissingUsageTruth !== true) {
     throw new UpstreamUsageTruthMissingError({
@@ -1403,6 +1405,7 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
     weatherScoringMode: "interval",
     preferredActualSource: "GREEN_BUTTON",
     skipOptionalEnrichment: isBaselineGreenButtonRun,
+    skipLightweightInsightRecompute: isBaselineGreenButtonRun,
   });
   return buildCanonicalEngineInput({
     inputType: "GREEN_BUTTON",

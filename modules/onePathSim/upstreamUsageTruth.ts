@@ -234,6 +234,7 @@ async function readPersistedUsageTruth(args: {
   houseId: string;
   esiid: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  skipLightweightInsightRecompute?: boolean;
 }) {
   return (
     (await resolveIntervalsLayer({
@@ -244,6 +245,7 @@ async function readPersistedUsageTruth(args: {
       esiid: args.esiid,
       preferredActualSource: args.preferredActualSource ?? null,
       lightweightActualUsage: true,
+      skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
     }).catch(() => null)) ?? { dataset: null, alternatives: { smt: null, greenButton: null } }
   );
 }
@@ -254,6 +256,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   actualContextHouseId?: string | null;
   seedIfMissing: boolean;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  skipLightweightInsightRecompute?: boolean;
 }): Promise<UpstreamUsageTruthResult> {
   const selectedHouse = await loadHouseForUser({
     userId: args.userId,
@@ -278,6 +281,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     houseId: actualContextHouse.id,
     esiid: actualContextHouse.esiid,
     preferredActualSource: args.preferredActualSource ?? null,
+    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
   if (resolved?.dataset) {
     if (args.seedIfMissing) {
@@ -381,6 +385,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     houseId: actualContextHouse.id,
     esiid: actualContextHouse.esiid,
     preferredActualSource: args.preferredActualSource ?? null,
+    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
 
   const usageTruthSource: UpstreamUsageTruthSource = resolved?.dataset

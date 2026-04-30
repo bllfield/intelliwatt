@@ -224,6 +224,7 @@ describe("one path manual mode payload guards", () => {
       actualContextHouseId: "house-1",
       seedIfMissing: false,
       preferredActualSource: "GREEN_BUTTON",
+      skipLightweightInsightRecompute: true,
     });
     expect(getOnePathManualUsageInput).not.toHaveBeenCalled();
     expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
