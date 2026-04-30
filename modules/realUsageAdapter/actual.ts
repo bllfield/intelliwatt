@@ -56,8 +56,8 @@ export async function resolveActualUsageSourceAnchor(args: {
   if (args.preferredSource === "SMT" && smtMs > 0) source = "SMT";
   else if (args.preferredSource === "GREEN_BUTTON" && gbMs > 0) source = "GREEN_BUTTON";
   else if (smtMs === 0 && gbMs === 0) source = null;
-  else if (smtMs === gbMs) source = smtMs ? "SMT" : "GREEN_BUTTON";
-  else source = smtMs > gbMs ? "SMT" : "GREEN_BUTTON";
+  else if (smtMs > 0) source = "SMT";
+  else source = "GREEN_BUTTON";
 
   const smtAnchorEndDate = toAnchorDateKey(smtLatest, timezone);
   const greenButtonAnchorEndDate = gbAnchorDateKey;

@@ -10,6 +10,7 @@ import {
   type ManualAnnualStageOneSummary,
   type ManualMonthlyStageOneRow,
   resolveManualStageOnePresentation,
+  shouldAllowManualStageOnePresentation,
   shouldUseManualMonthlyStageOnePayload,
   type ManualMonthlyStageOneSurface,
 } from "@/modules/manualUsage/statementRanges";
@@ -593,6 +594,12 @@ export const UsageDashboard: React.FC<Props> = ({
     activeHouse?.weatherSensitivityScore ?? fetchedManualWeatherSensitivityScore ?? null;
 
   const manualMonthlyStageOne = useMemo(() => {
+    const allowManualStageOnePresentation = shouldAllowManualStageOnePresentation({
+      surface: presentationSurface,
+      hasResolvedIntervalDataset: Boolean(activeHouse?.dataset),
+      forceManualMonthlyStageOne,
+    });
+    if (!allowManualStageOnePresentation) return null;
     if (manualMonthlyStageOneRowsOverride?.length) {
       return {
         mode: "MONTHLY" as const,
@@ -616,7 +623,9 @@ export const UsageDashboard: React.FC<Props> = ({
     });
   }, [
     activeHouse?.houseId,
+    activeHouse?.dataset,
     fetchedManualUsagePayload,
+    forceManualMonthlyStageOne,
     manualMonthlyStageOneRowsOverride,
     manualUsageHouseId,
     manualUsagePayload,

@@ -55,4 +55,17 @@ describe("actual usage source preference", () => {
 
     expect(out).toBe("SMT");
   });
+
+  it("defaults to SMT when both SMT and Green Button exist", async () => {
+    smtFindFirst.mockResolvedValue({ ts: new Date("2026-04-20T12:00:00.000Z") });
+    getLatestGreenButtonFullDayDateKey.mockResolvedValue("2026-04-22");
+
+    const mod = await import("@/modules/realUsageAdapter/actual");
+    const out = await mod.chooseActualSource({
+      houseId: "house-1",
+      esiid: "esiid-1",
+    });
+
+    expect(out).toBe("SMT");
+  });
 });

@@ -6,6 +6,7 @@ import {
   resolveManualStageOnePresentation,
   resolveManualMonthlyLabStageOnePayloads,
   resolveManualMonthlyStageOneRenderMode,
+  shouldAllowManualStageOnePresentation,
   shouldUseManualMonthlyStageOnePayload,
 } from "@/modules/manualUsage/statementRanges";
 
@@ -31,6 +32,29 @@ describe("manual monthly stage one dashboard state", () => {
         selectedUsageHouseId: "house-2",
       })
     ).toBe(false);
+  });
+
+  it("suppresses user stage-one fallback when interval usage is already resolved", () => {
+    expect(
+      shouldAllowManualStageOnePresentation({
+        surface: "user_usage_manual_monthly_stage_one",
+        hasResolvedIntervalDataset: true,
+      })
+    ).toBe(false);
+
+    expect(
+      shouldAllowManualStageOnePresentation({
+        surface: "user_usage_manual_monthly_stage_one",
+        hasResolvedIntervalDataset: false,
+      })
+    ).toBe(true);
+
+    expect(
+      shouldAllowManualStageOnePresentation({
+        surface: "admin_manual_monthly_stage_one",
+        hasResolvedIntervalDataset: true,
+      })
+    ).toBe(true);
   });
 
   it("renders a forced empty state instead of a zero-data chart when no statement rows exist", () => {

@@ -434,6 +434,16 @@ export function shouldUseManualMonthlyStageOnePayload(args: {
   return !args.manualUsageHouseId || !args.selectedUsageHouseId || args.selectedUsageHouseId === args.manualUsageHouseId;
 }
 
+export function shouldAllowManualStageOnePresentation(args: {
+  surface?: ManualMonthlyStageOneSurface | null;
+  hasResolvedIntervalDataset?: boolean;
+  forceManualMonthlyStageOne?: boolean;
+}): boolean {
+  if (args.forceManualMonthlyStageOne) return true;
+  if (args.surface !== "user_usage_manual_monthly_stage_one") return true;
+  return !args.hasResolvedIntervalDataset;
+}
+
 export function resolveManualMonthlyStageOneRenderMode(args: {
   forceManualMonthlyStageOne?: boolean;
   rows?: ManualMonthlyStageOneRow[] | null;
