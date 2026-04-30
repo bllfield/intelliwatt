@@ -913,6 +913,16 @@ export function OnePathSimAdmin() {
       setError("Load a user and select a house first.");
       return;
     }
+    const blockedPastRunSummary =
+      intervalPastReadinessTrace?.applicableToCurrentPreset !== false &&
+      intervalPastReadinessTrace?.status === "blocked_for_interval_past"
+        ? String(intervalPastReadinessTrace?.exactBlocker?.failureSummary ?? "").trim()
+        : "";
+    if (blockedPastRunSummary) {
+      setStatus(null);
+      setError(`Past Sim blocked: ${blockedPastRunSummary}`);
+      return;
+    }
     setRunResult(null);
     setBusy(true);
     setError(null);
@@ -954,8 +964,17 @@ export function OnePathSimAdmin() {
             : current
         );
       }
+      const missingItems = Array.isArray(json?.missingItems)
+        ? json.missingItems.map((item: unknown) => String(item ?? "").trim()).filter(Boolean)
+        : [];
+      const surfacedMessage =
+        typeof json?.message === "string" && json.message.trim()
+          ? json.message.trim()
+          : missingItems.length > 0
+            ? missingItems.join("; ")
+            : json?.error ?? `Run failed (${res.status})`;
       setStatus(null);
-      setError(json?.error ?? `Run failed (${res.status})`);
+      setError(surfacedMessage);
       return;
     }
     setRunResult(json);
@@ -973,6 +992,7 @@ export function OnePathSimAdmin() {
     selectedKnownScenario,
     selectedScenarioId,
     selectedKnownScenarioIsGreenButton,
+    intervalPastReadinessTrace,
     travelRanges,
     validationDayCount,
     validationSelectionMode,
