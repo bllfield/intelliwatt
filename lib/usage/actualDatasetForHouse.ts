@@ -586,13 +586,13 @@ async function computeInsightsFromDb(args: {
         }))
       : (
           (await usageClient.$queryRaw(Prisma.sql`
-      SELECT to_char(date_trunc('month', "timestamp")::date, 'YYYY-MM') AS month, SUM("consumptionKwh")::float AS kwh
+      SELECT to_char(date_trunc('month', ("timestamp" AT TIME ZONE 'America/Chicago'))::date, 'YYYY-MM') AS month, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
     `)) as Array<{ month: string; kwh: number }>
         ).map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
     const fifteenRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT to_char("timestamp", 'HH24:MI') AS hhmm, AVG(("consumptionKwh" * 4))::float AS avgkw
+      SELECT to_char(("timestamp" AT TIME ZONE 'America/Chicago'), 'HH24:MI') AS hhmm, AVG(("consumptionKwh" * 4))::float AS avgkw
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY 1 ASC
     `)) as Array<{ hhmm: string; avgkw: number }>;
@@ -614,7 +614,7 @@ async function computeInsightsFromDb(args: {
     `)) as Array<{ key: string; label: string; sort: number; kwh: number }>;
     const timeOfDayBuckets = todRows.map((r) => ({ key: String(r.key), label: String(r.label), kwh: round2(r.kwh) }));
     const peakHourRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT EXTRACT(HOUR FROM "timestamp")::int AS hour, AVG(("consumptionKwh" * 4))::float AS avgkw
+      SELECT EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago'))::int AS hour, AVG(("consumptionKwh" * 4))::float AS avgkw
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
       GROUP BY 1 ORDER BY avgkw DESC LIMIT 1
     `)) as Array<{ hour: number; avgkw: number }>;
@@ -629,8 +629,8 @@ async function computeInsightsFromDb(args: {
     const baseloadDaily = low10Average(dailyTotals.map((d) => Number(d.kwh) || 0));
     const baseloadMonthly = low10Average(monthlyTotals.map((m) => Number(m.kwh) || 0));
     const dowRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN 0 ELSE "consumptionKwh" END)::float, 0) AS weekdaykwh,
-             COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN "consumptionKwh" ELSE 0 END)::float, 0) AS weekendkwh
+      SELECT COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM ("timestamp" AT TIME ZONE 'America/Chicago')) IN (0,6) THEN 0 ELSE "consumptionKwh" END)::float, 0) AS weekdaykwh,
+             COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM ("timestamp" AT TIME ZONE 'America/Chicago')) IN (0,6) THEN "consumptionKwh" ELSE 0 END)::float, 0) AS weekendkwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
     `)) as Array<{ weekdaykwh: number; weekendkwh: number }>;
     const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
@@ -1130,8 +1130,7 @@ export async function getActualUsageDatasetForHouse(
     const shouldQueryGreenButtonDbInsights =
       selected.summary.source === "GREEN_BUTTON" &&
       YYYY_MM_DD.test(lightweightRangeStart) &&
-      YYYY_MM_DD.test(lightweightRangeEnd) &&
-      !(preferredSource === "GREEN_BUTTON" && skippedFullYearIntervalFetch);
+      YYYY_MM_DD.test(lightweightRangeEnd);
     if (
       shouldQueryGreenButtonDbInsights
     ) {
@@ -1141,14 +1140,19 @@ export async function getActualUsageDatasetForHouse(
           (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON"
             ? null
             : await getLatestUsableRawGreenButtonIdForHouse(houseId));
+        const lightweightRange =
+          buildUtcRangeForChicagoLocalDateRange({
+            startDateKey: lightweightRangeStart,
+            endDateKey: lightweightRangeEnd,
+          }) ?? null;
         const computed =
           rawId != null
             ? await computeInsightsFromDb({
                 source: "GREEN_BUTTON",
                 houseId,
                 rawId,
-                cutoff: new Date(`${lightweightRangeStart}T00:00:00.000Z`),
-                end: new Date(`${lightweightRangeEnd}T23:59:59.999Z`),
+                cutoff: lightweightRange?.startInclusive ?? new Date(`${lightweightRangeStart}T00:00:00.000Z`),
+                end: lightweightRange?.endInclusive ?? new Date(`${lightweightRangeEnd}T23:59:59.999Z`),
                 precomputedDailyTotals: dailyTotals.length > 0 ? dailyTotals : undefined,
                 precomputedMonthlyTotals: monthlyTotals.length > 0 ? monthlyTotals : undefined,
               })

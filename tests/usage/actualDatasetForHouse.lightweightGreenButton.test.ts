@@ -66,10 +66,23 @@ describe("actualDatasetForHouse lightweight green button", () => {
         { key: "morning", label: "Morning (6am–12pm)", sort: 2, kwh: 25 },
         { key: "afternoon", label: "Afternoon (12pm–6pm)", sort: 3, kwh: 25 },
         { key: "evening", label: "Evening (6pm–12am)", sort: 4, kwh: 25 },
-      ]);
+      ])
+      .mockResolvedValueOnce([
+        { hhmm: "00:00", avgkw: 4 },
+        { hhmm: "00:15", avgkw: 4.4 },
+      ])
+      .mockResolvedValueOnce([
+        { key: "overnight", label: "Overnight (12am–6am)", sort: 1, kwh: 25 },
+        { key: "morning", label: "Morning (6am–12pm)", sort: 2, kwh: 25 },
+        { key: "afternoon", label: "Afternoon (12pm–6pm)", sort: 3, kwh: 25 },
+        { key: "evening", label: "Evening (6pm–12am)", sort: 4, kwh: 25 },
+      ])
+      .mockResolvedValueOnce([{ hour: 18, avgkw: 6.2 }])
+      .mockResolvedValueOnce([{ baseload: 0.65 }])
+      .mockResolvedValueOnce([{ weekdaykwh: 70, weekendkwh: 30 }]);
   });
 
-  it("preserves lightweight green button time-of-day buckets without full insight recompute", async () => {
+  it("recomputes lightweight green button insight readouts with the anchored local window", async () => {
     const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
 
     const result = await getActualUsageDatasetForHouse("house-1", null, {
@@ -85,5 +98,10 @@ describe("actualDatasetForHouse lightweight green button", () => {
       { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 25 },
       { key: "evening", label: "Evening (6pm–12am)", kwh: 25 },
     ]);
+    expect(result.dataset?.insights?.fifteenMinuteAverages).toEqual([
+      { hhmm: "00:00", avgKw: 4 },
+      { hhmm: "00:15", avgKw: 4.4 },
+    ]);
+    expect(result.dataset?.insights?.peakHour).toEqual({ hour: 18, kw: 6.2 });
   });
 });

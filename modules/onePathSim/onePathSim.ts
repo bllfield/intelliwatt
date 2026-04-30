@@ -37,6 +37,7 @@ import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weather
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { hasUsableAnnualPayload, hasUsableMonthlyPayload } from "@/modules/onePathSim/manualPrefill";
+import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type {
   ManualMonthlyDateSourceMode,
   ManualStatementRange,
@@ -650,7 +651,7 @@ function buildIntervalBaselinePassthroughDataset(args: {
   );
   const sourceTimeOfDayBucketsTrusted =
     sourceTimeOfDayBuckets.length > 0 &&
-    Math.abs(sourceTimeOfDayBucketTotal - totalKwh) <= Math.max(1, totalKwh * 0.005);
+    Math.abs(sourceTimeOfDayBucketTotal - totalKwh) <= 0.05;
   const boundedTimeOfDayBuckets =
     sourceTimeOfDayBucketsTrusted &&
     boundedIntervals15.length < (Number(summary.intervalsCount ?? boundedIntervals15.length) || 0)
@@ -1216,7 +1217,7 @@ function buildCanonicalEngineInput(args: {
   ) as Record<string, number>;
   const derivedInput =
     args.loaded.weatherEnvelope.derivedInput ?? buildOnePathWeatherEfficiencyDerivedInput(args.loaded.weatherEnvelope.score ?? null);
-  const actualMonthlyRows = Array.isArray(args.loaded.actualDataset?.monthly) ? args.loaded.actualDataset.monthly : [];
+  const actualMonthlyRows = buildDisplayedMonthlyRows(args.loaded.actualDataset as any);
   const actualMonthlyReference = Object.fromEntries(
     actualMonthlyRows
       .map((row: any) => [String(row?.month ?? "").slice(0, 7), Number(row?.kwh ?? Number.NaN)])

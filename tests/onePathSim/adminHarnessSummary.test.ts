@@ -207,6 +207,7 @@ describe("one path sandbox harness summary", () => {
     });
 
     expect(summary.runStatus.selectedMode).toBe("GREEN_BUTTON");
+    expect(summary.runStatus.simulatorMode).toBe("GREEN_BUTTON");
     expect(summary.runStatus.runType).toBe("BASELINE_PASSTHROUGH");
     expect(summary.runStatus.baselinePassthrough).toBe(true);
     expect(summary.monthlyTruthCompare.datasetSummary).toEqual({

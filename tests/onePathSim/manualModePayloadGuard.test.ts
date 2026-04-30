@@ -232,7 +232,65 @@ describe("one path manual mode payload guards", () => {
     expect(engineInput.inputType).toBe("GREEN_BUTTON");
     expect(engineInput.actualIntervalsReference).toEqual([]);
     expect(engineInput.actualDailyReference).toEqual([]);
+    expect(engineInput.actualMonthlyReference).toEqual({
+      "2025-04": 10,
+    });
     expect(engineInput.weatherDaysReference).toBeNull();
     expect(engineInput.weatherEfficiencyDerivedInput).toBeNull();
+  });
+
+  it("uses stitched displayed monthly totals for GREEN_BUTTON actualMonthlyReference", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
+      selectedHouse: { id: "house-1", esiid: "esiid-1" },
+      actualContextHouse: { id: "house-1", esiid: "esiid-1" },
+      dataset: {
+        summary: { source: "GREEN_BUTTON", start: "2025-04-15", end: "2026-04-14", totalKwh: 2008.86 },
+        daily: [{ date: "2026-04-14", kwh: 8.4 }],
+        monthly: [
+          { month: "2025-04", kwh: 717.2 },
+          { month: "2025-05", kwh: 1286.66 },
+          { month: "2026-04", kwh: 4.99 },
+        ],
+        insights: {
+          stitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-04",
+            haveDaysThrough: 14,
+            missingDaysFrom: 15,
+            missingDaysTo: 30,
+            borrowedFromYearMonth: "2025-04",
+            completenessRule: "ACTUAL_USAGE_WINDOW",
+          },
+        },
+        meta: {
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+        },
+        series: { intervals15: [{ timestamp: "2026-04-14T12:00:00.000Z", kwh: 1 }] },
+      },
+      alternatives: { smt: null, greenButton: { totalKwh: 2008.86 } },
+      usageTruthSource: "persisted_usage_output",
+      seedResult: null,
+      summary: { title: "Upstream Usage Truth", summary: "green button stitched monthly", currentRun: {}, sharedOwners: [] },
+    });
+
+    const { adaptGreenButtonRawInput } = await import("@/modules/onePathSim/onePathSim");
+    const engineInput = await adaptGreenButtonRawInput({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      scenarioId: null,
+      weatherPreference: "LAST_YEAR_WEATHER",
+      validationSelectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+      validationOnlyDateKeysLocal: [],
+      travelRanges: [],
+      persistRequested: true,
+    });
+
+    expect(engineInput.actualMonthlyReference).toEqual({
+      "2025-05": 1286.66,
+      "2026-04": 722.19,
+    });
   });
 });

@@ -24,6 +24,11 @@ function sumMonthlyRows(rows: unknown): number | null {
   return Math.round(values.reduce((sum, value) => sum + value, 0) * 1000) / 1000;
 }
 
+function displaySimulatorMode(engineInput: Record<string, unknown>): string | null {
+  if (engineInput.inputType === "GREEN_BUTTON") return "GREEN_BUTTON";
+  return typeof engineInput.simulatorMode === "string" ? String(engineInput.simulatorMode) : null;
+}
+
 export function buildOnePathSandboxHarnessSummary(args: {
   lookupSourceContext?: Record<string, unknown> | null;
   runResult?: Record<string, unknown> | null;
@@ -91,7 +96,7 @@ export function buildOnePathSandboxHarnessSummary(args: {
   return {
     runStatus: {
       selectedMode: engineInput.inputType ?? null,
-      simulatorMode: engineInput.simulatorMode ?? null,
+      simulatorMode: displaySimulatorMode(engineInput),
       scenarioId,
       runType,
       baselinePassthrough,
