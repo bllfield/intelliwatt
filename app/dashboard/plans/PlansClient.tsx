@@ -137,7 +137,7 @@ export default function PlansClient() {
   // Those warmups happen via the dashboard bootstrapper and admin tooling.
   // NOTE: We intentionally keep the warmups bounded + throttled; this flips cards from
   // CALCULATING → AVAILABLE as soon as the background pipeline materializes estimates.
-  const ENABLE_PLANS_AUTO_WARMUPS = true;
+  const ENABLE_PLANS_AUTO_WARMUPS = false;
 
   const [q, setQ] = useState("");
   const [rateType, setRateType] = useState<"all" | "fixed" | "variable" | "renewable" | "unknown">("all");
@@ -151,7 +151,7 @@ export default function PlansClient() {
   const userTouchedSortRef = useRef(false);
   const [page, setPage] = useState(1);
   // Default to ALL plans (API uses dataset=1 with pageSize up to 2000).
-  const [pageSize, setPageSize] = useState<10 | 20 | 50 | 2000>(2000);
+  const [pageSize, setPageSize] = useState<10 | 20 | 50 | 2000>(20);
   const userTouchedPageSizeRef = useRef(false);
   // Once the user touches ANY control in the Search/Sort/Filter section, this page must remain
   // display-only: never kick any background warmups (template prefetch or pipeline).
