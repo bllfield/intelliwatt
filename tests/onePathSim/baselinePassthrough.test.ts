@@ -408,6 +408,8 @@ describe("one path baseline passthrough", () => {
       { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 4 },
       { key: "evening", label: "Evening (6pm–12am)", kwh: 3 },
     ]);
+    expect(artifact.dataset.meta.baselinePassthroughMode).toBe("GREEN_BUTTON");
+    expect(artifact.dataset.meta.sharedProducerPathUsed).toBe(true);
     expect(artifact.dataset.meta.coverageStart).toBe("2024-12-01");
     expect(artifact.dataset.meta.coverageEnd).toBe("2025-12-31");
     expect(artifact.dataset.meta.baselineCoverageDisplayOwner).toBe("engineInput.coverageWindowStart/coverageWindowEnd");

@@ -783,6 +783,7 @@ describe("admin one path sim route", () => {
     expect(json.engineInput).toEqual(
       expect.objectContaining({
         inputType: "GREEN_BUTTON",
+        simulatorMode: "GREEN_BUTTON",
         actualIntervalsReference: {
           omittedForAdminResponse: true,
           rowsCount: 0,

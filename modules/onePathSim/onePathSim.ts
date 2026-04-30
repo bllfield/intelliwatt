@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { monthsEndingAt } from "@/lib/time/chicago";
+import { hydrateGreenButtonInsightsForCoverageWindow } from "@/lib/usage/actualDatasetForHouse";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   attachOnePathRunIdentityToEffectiveSimulationVariablesUsed,
@@ -707,10 +708,10 @@ function buildIntervalBaselinePassthroughDataset(args: {
       scenarioKey: "BASELINE",
       scenarioId: null,
       baselinePassthrough: true,
-      baselinePassthroughMode: "INTERVAL",
+      baselinePassthroughMode: args.engineInput.inputType,
       baselineSource: "upstream_usage_truth",
       baselineSimulationBlocked: true,
-      sharedProducerPathUsed: false,
+      sharedProducerPathUsed: args.engineInput.sharedProducerPathUsed,
       inputType: args.engineInput.inputType,
       simulatorMode: args.engineInput.simulatorMode,
       actualContextHouseId: args.engineInput.actualContextHouseId,
@@ -729,6 +730,64 @@ function buildIntervalBaselinePassthroughDataset(args: {
           ? meta.canonicalMonths
           : args.engineInput.canonicalMonths,
       lockboxExecutionMode: "baseline_passthrough_only",
+    },
+  };
+}
+
+function hasUsableGreenButtonBaselineInsights(dataset: Record<string, any>): boolean {
+  const insights = asRecord(dataset.insights) ?? {};
+  return (
+    Array.isArray(insights.fifteenMinuteAverages) &&
+    insights.fifteenMinuteAverages.length > 0 &&
+    Array.isArray(insights.timeOfDayBuckets) &&
+    insights.timeOfDayBuckets.length > 0 &&
+    insights.peakHour != null &&
+    typeof insights.baseload === "number" &&
+    Number.isFinite(insights.baseload)
+  );
+}
+
+async function enrichGreenButtonBaselinePassthroughDataset(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  dataset: Record<string, any>;
+}): Promise<Record<string, any>> {
+  if (args.engineInput.inputType !== "GREEN_BUTTON") return args.dataset;
+  if (hasUsableGreenButtonBaselineInsights(args.dataset)) return args.dataset;
+
+  const hydratedInsights = await hydrateGreenButtonInsightsForCoverageWindow({
+    houseId: args.engineInput.actualContextHouseId,
+    coverageStart: String(args.dataset?.meta?.coverageStart ?? args.engineInput.coverageWindowStart ?? ""),
+    coverageEnd: String(args.dataset?.meta?.coverageEnd ?? args.engineInput.coverageWindowEnd ?? ""),
+    dailyTotals: Array.isArray(args.dataset.daily)
+      ? args.dataset.daily.map((row: any) => ({
+          date: String(row?.date ?? "").slice(0, 10),
+          kwh: Number(row?.kwh ?? 0) || 0,
+        }))
+      : [],
+    monthlyTotals: Array.isArray(args.dataset.monthly)
+      ? args.dataset.monthly.map((row: any) => ({
+          month: String(row?.month ?? "").slice(0, 7),
+          kwh: Number(row?.kwh ?? 0) || 0,
+        }))
+      : [],
+  });
+  if (!hydratedInsights) return args.dataset;
+
+  return {
+    ...args.dataset,
+    insights: {
+      ...(asRecord(args.dataset.insights) ?? {}),
+      weekdayVsWeekend: hydratedInsights.weekdayVsWeekend,
+      timeOfDayBuckets: hydratedInsights.timeOfDayBuckets,
+      peakDay: hydratedInsights.peakDay,
+      peakHour: hydratedInsights.peakHour,
+      baseload: hydratedInsights.baseload,
+      baseloadMethod: hydratedInsights.baseloadMethod ?? null,
+      baseloadFallbackUsed: hydratedInsights.baseloadFallbackUsed ?? null,
+      baseloadDebugNote: hydratedInsights.baseloadDebugNote ?? null,
+      baseloadDaily: hydratedInsights.baseloadDaily,
+      baseloadMonthly: hydratedInsights.baseloadMonthly,
+      fifteenMinuteAverages: hydratedInsights.fifteenMinuteAverages,
     },
   };
 }
@@ -946,16 +1005,23 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
           upstreamUsageTruth,
           manualUsagePayload: args.manualUsagePayload,
         });
+  const finalizedDataset =
+    args.engineInput.inputType === "GREEN_BUTTON"
+      ? await enrichGreenButtonBaselinePassthroughDataset({
+          engineInput: args.engineInput,
+          dataset: dataset as Record<string, any>,
+        })
+      : dataset;
 
-  const compareProjection = buildOnePathValidationCompareProjectionSidecar(dataset);
+  const compareProjection = buildOnePathValidationCompareProjectionSidecar(finalizedDataset);
   const manualReadResult =
     args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
       ? await buildOnePathManualArtifactDecorations({
           userId: args.engineInput.runtime.userId,
           houseId: args.engineInput.houseId,
           scenarioId: null,
-          dataset,
-          displayDataset: dataset,
+          dataset: finalizedDataset,
+          displayDataset: finalizedDataset,
           callerType: args.callerType,
           usageInputMode: args.engineInput.inputType,
           weatherLogicMode: args.engineInput.weatherLogicMode,
@@ -970,7 +1036,7 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
     manualReadResult?.sharedDiagnostics ??
     buildOnePathSharedPastSimDiagnostics({
       callerType: args.callerType,
-      dataset,
+      dataset: finalizedDataset,
       scenarioId: null,
       usageInputMode: args.engineInput.inputType,
       weatherLogicMode: args.engineInput.weatherLogicMode,
@@ -993,9 +1059,11 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
     scenarioId: null,
     usageTruthSource: upstreamUsageTruth.usageTruthSource,
     seedingAttempted: upstreamUsageTruth.seedResult != null,
-    intervalCount: Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15.length : 0,
-    dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
-    monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
+    intervalCount: Array.isArray((finalizedDataset as any)?.series?.intervals15)
+      ? (finalizedDataset as any).series.intervals15.length
+      : 0,
+    dayCount: Array.isArray((finalizedDataset as any)?.daily) ? (finalizedDataset as any).daily.length : 0,
+    monthCount: Array.isArray((finalizedDataset as any)?.monthly) ? (finalizedDataset as any).monthly.length : 0,
     durationMs: Date.now() - args.startedAt,
     source: "buildBaselinePassthroughArtifact",
     memoryRssMb: getMemoryRssMb(),
@@ -1015,41 +1083,43 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
     simulatorMode: args.engineInput.simulatorMode,
     engineInput: args.engineInput,
     dataset: {
-      summary: (dataset as any)?.summary ?? {},
-      daily: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily : [],
-      monthly: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly : [],
+      summary: (finalizedDataset as any)?.summary ?? {},
+      daily: Array.isArray((finalizedDataset as any)?.daily) ? (finalizedDataset as any).daily : [],
+      monthly: Array.isArray((finalizedDataset as any)?.monthly) ? (finalizedDataset as any).monthly : [],
       dailyWeather:
-        (dataset as any)?.dailyWeather && typeof (dataset as any).dailyWeather === "object"
-          ? ((dataset as any).dailyWeather as Record<string, unknown>)
+        (finalizedDataset as any)?.dailyWeather && typeof (finalizedDataset as any).dailyWeather === "object"
+          ? ((finalizedDataset as any).dailyWeather as Record<string, unknown>)
           : null,
       totals:
-        (dataset as any)?.totals && typeof (dataset as any).totals === "object"
-          ? ((dataset as any).totals as Record<string, unknown>)
+        (finalizedDataset as any)?.totals && typeof (finalizedDataset as any).totals === "object"
+          ? ((finalizedDataset as any).totals as Record<string, unknown>)
           : null,
       insights:
-        (dataset as any)?.insights && typeof (dataset as any).insights === "object"
-          ? ((dataset as any).insights as Record<string, unknown>)
+        (finalizedDataset as any)?.insights && typeof (finalizedDataset as any).insights === "object"
+          ? ((finalizedDataset as any).insights as Record<string, unknown>)
           : null,
       series: {
-        intervals15: Array.isArray((dataset as any)?.series?.intervals15)
-          ? (dataset as any).series.intervals15
+        intervals15: Array.isArray((finalizedDataset as any)?.series?.intervals15)
+          ? (finalizedDataset as any).series.intervals15
           : [],
-        daily: Array.isArray((dataset as any)?.series?.daily) ? (dataset as any).series.daily : [],
-        monthly: Array.isArray((dataset as any)?.series?.monthly) ? (dataset as any).series.monthly : [],
-        annual: Array.isArray((dataset as any)?.series?.annual) ? (dataset as any).series.annual : [],
+        daily: Array.isArray((finalizedDataset as any)?.series?.daily) ? (finalizedDataset as any).series.daily : [],
+        monthly: Array.isArray((finalizedDataset as any)?.series?.monthly)
+          ? (finalizedDataset as any).series.monthly
+          : [],
+        annual: Array.isArray((finalizedDataset as any)?.series?.annual) ? (finalizedDataset as any).series.annual : [],
       },
-      meta: (asRecord((dataset as any)?.meta) ?? {}) as Record<string, unknown>,
+      meta: (asRecord((finalizedDataset as any)?.meta) ?? {}) as Record<string, unknown>,
     },
     simulatedDayResults: [],
     stitchedCurve: [],
     monthlyTargetConstructionDiagnostics: null,
-    manualMonthlyInputState: (dataset as any)?.meta?.manualMonthlyInputState ?? null,
-    manualBillPeriods: Array.isArray((dataset as any)?.meta?.manualBillPeriods)
-      ? (dataset as any).meta.manualBillPeriods
+    manualMonthlyInputState: (finalizedDataset as any)?.meta?.manualMonthlyInputState ?? null,
+    manualBillPeriods: Array.isArray((finalizedDataset as any)?.meta?.manualBillPeriods)
+      ? (finalizedDataset as any).meta.manualBillPeriods
       : [],
     manualBillPeriodTotalsKwhById:
-      ((dataset as any)?.meta?.manualBillPeriodTotalsKwhById as Record<string, number> | undefined) ?? {},
-    sourceDerivedMonthlyTotalsKwhByMonth: buildMonthlyTotalsRecord((dataset as any)?.monthly),
+      ((finalizedDataset as any)?.meta?.manualBillPeriodTotalsKwhById as Record<string, number> | undefined) ?? {},
+    sourceDerivedMonthlyTotalsKwhByMonth: buildMonthlyTotalsRecord((finalizedDataset as any)?.monthly),
     compareProjection,
     manualMonthlyReconciliation: manualReadResult?.manualMonthlyReconciliation ?? null,
     manualParitySummary: manualReadResult?.manualParitySummary ?? null,
@@ -1452,10 +1522,16 @@ export async function buildIntervalLikeBaselinePassthroughDataset(
     });
   }
 
-  return buildIntervalBaselinePassthroughDataset({
+  const dataset = buildIntervalBaselinePassthroughDataset({
     engineInput,
     upstreamUsageTruth,
-  }) as Record<string, unknown>;
+  }) as Record<string, any>;
+  return engineInput.inputType === "GREEN_BUTTON"
+    ? ((await enrichGreenButtonBaselinePassthroughDataset({
+        engineInput,
+        dataset,
+      })) as Record<string, unknown>)
+    : (dataset as Record<string, unknown>);
 }
 
 export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Promise<CanonicalSimulationEngineInput> {

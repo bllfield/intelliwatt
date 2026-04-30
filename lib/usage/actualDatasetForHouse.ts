@@ -655,6 +655,39 @@ async function computeInsightsFromDb(args: {
   }
 }
 
+export async function hydrateGreenButtonInsightsForCoverageWindow(args: {
+  houseId: string;
+  coverageStart: string | null | undefined;
+  coverageEnd: string | null | undefined;
+  dailyTotals?: Array<{ date: string; kwh: number }>;
+  monthlyTotals?: Array<{ month: string; kwh: number }>;
+}) {
+  const houseId = String(args.houseId ?? "").trim();
+  const coverageStart = String(args.coverageStart ?? "").slice(0, 10);
+  const coverageEnd = String(args.coverageEnd ?? "").slice(0, 10);
+  if (!houseId || !YYYY_MM_DD.test(coverageStart) || !YYYY_MM_DD.test(coverageEnd)) return null;
+  if (!USAGE_DB_ENABLED) return null;
+
+  const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+  if (!rawId) return null;
+
+  const range = buildUtcRangeForChicagoLocalDateRange({
+    startDateKey: coverageStart,
+    endDateKey: coverageEnd,
+  });
+  if (!range) return null;
+
+  return computeInsightsFromDb({
+    source: "GREEN_BUTTON",
+    houseId,
+    rawId,
+    cutoff: range.startInclusive,
+    end: range.endInclusive,
+    precomputedDailyTotals: args.dailyTotals,
+    precomputedMonthlyTotals: args.monthlyTotals,
+  });
+}
+
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 function validDateKeys(keys: string[]): string[] {
   return keys.filter((k) => typeof k === "string" && YYYY_MM_DD.test(String(k).trim()));

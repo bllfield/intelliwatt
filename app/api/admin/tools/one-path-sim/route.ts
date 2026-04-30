@@ -194,8 +194,10 @@ function buildSlimAdminEngineInput(engineInput: CanonicalSimulationEngineInput |
   if (!engineInput) return null;
   const weatherDaysReference = asRecord(engineInput.weatherDaysReference);
   const prefetchedUsageTruth = asRecord(engineInput.prefetchedBaselineUpstreamUsageTruth);
+  const displaySimulatorMode = engineInput.inputType === "GREEN_BUTTON" ? "GREEN_BUTTON" : engineInput.simulatorMode;
   return {
     ...engineInput,
+    simulatorMode: displaySimulatorMode,
     actualIntervalsReference: {
       omittedForAdminResponse: true,
       rowsCount: Array.isArray(engineInput.actualIntervalsReference) ? engineInput.actualIntervalsReference.length : 0,
@@ -219,6 +221,13 @@ function buildSlimAdminEngineInput(engineInput: CanonicalSimulationEngineInput |
             summary: prefetchedUsageTruth.summary ?? null,
           }
         : null,
+    runtime:
+      engineInput.runtime && typeof engineInput.runtime === "object"
+        ? {
+            ...engineInput.runtime,
+            mode: displaySimulatorMode,
+          }
+        : engineInput.runtime,
   };
 }
 
