@@ -168,4 +168,70 @@ describe("user usage dashboard view model", () => {
       sourceDetail: "SIMULATED_MANUAL_CONSTRAINED",
     });
   });
+
+  it("merges the donor Green Button month into the current display month", () => {
+    const viewModel = buildUserUsageDashboardViewModel({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON",
+          intervalsCount: 35040,
+          totalKwh: 2943.14,
+          start: "2025-04-15",
+          end: "2026-04-14",
+          latest: "2026-04-14T23:45:00.000Z",
+        },
+        totals: {
+          importKwh: 2943.14,
+          exportKwh: 0,
+          netKwh: 2943.14,
+        },
+        monthly: [
+          { month: "2025-04", kwh: 717.2 },
+          { month: "2025-05", kwh: 1286.66 },
+          { month: "2026-04", kwh: 939.28 },
+        ],
+        daily: [],
+        series: {
+          intervals15: [],
+          hourly: [],
+          daily: [],
+          monthly: [],
+          annual: [],
+        },
+        insights: {
+          stitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-04",
+            haveDaysThrough: 14,
+            missingDaysFrom: 15,
+            missingDaysTo: 30,
+            borrowedFromYearMonth: "2025-04",
+            completenessRule: "ACTUAL_USAGE_WINDOW",
+          },
+          weekdayVsWeekend: { weekday: 0, weekend: 0 },
+          timeOfDayBuckets: [],
+          fifteenMinuteAverages: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: null,
+          baseloadDaily: null,
+          baseloadMonthly: null,
+        },
+        meta: {
+          datasetKind: "ACTUAL",
+          actualSource: "GREEN_BUTTON",
+          coverageStart: "2025-04-15",
+          coverageEnd: "2026-04-14",
+          canonicalMonths: ["2025-05", "2026-04"],
+          canonicalEndMonth: "2026-04",
+        },
+      },
+      datasetError: null,
+    });
+
+    expect(viewModel?.derived.monthly).toEqual([
+      { month: "2025-05", kwh: 1286.66 },
+      { month: "2026-04", kwh: 1656.48 },
+    ]);
+  });
 });

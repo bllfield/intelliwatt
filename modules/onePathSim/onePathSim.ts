@@ -599,8 +599,25 @@ function buildIntervalBaselinePassthroughDataset(args: {
           }))
           .filter((row) => dateInDisplayWindow(asDateKey(row.date)))
       : buildDailyRowsFromBoundedIntervals(boundedIntervals15, timezone);
+  const sourceStitchedMonth = asRecord((sourceDataset as any)?.insights)?.stitchedMonth;
+  const hasSourceStitchedMonth =
+    sourceStitchedMonth != null &&
+    typeof sourceStitchedMonth === "object" &&
+    /^\d{4}-\d{2}$/.test(String((sourceStitchedMonth as Record<string, unknown>).yearMonth ?? "").slice(0, 7)) &&
+    /^\d{4}-\d{2}$/.test(String((sourceStitchedMonth as Record<string, unknown>).borrowedFromYearMonth ?? "").slice(0, 7));
   const monthlyRows =
-    boundedDaily.length > 0
+    hasSourceStitchedMonth && Array.isArray((sourceDataset as any).monthly)
+      ? ((sourceDataset as any).monthly as Array<{ month?: unknown; kwh?: unknown }>)
+          .map((row) => ({
+            month: String(row?.month ?? "").slice(0, 7),
+            kwh: Number(row?.kwh ?? 0) || 0,
+          }))
+          .filter((row) => {
+            if (!/^\d{4}-\d{2}$/.test(row.month)) return false;
+            const monthEnd = `${row.month}-31`;
+            return monthEnd >= displayCoverageWindow.startDate && row.month <= displayCoverageWindow.endDate.slice(0, 7);
+          })
+      : boundedDaily.length > 0
       ? buildMonthlyRowsFromDailyRows(boundedDaily)
       : Array.isArray((sourceDataset as any).monthly)
         ? ((sourceDataset as any).monthly as Array<{ month?: unknown; kwh?: unknown }>)

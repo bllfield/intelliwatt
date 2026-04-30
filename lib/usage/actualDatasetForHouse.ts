@@ -313,6 +313,58 @@ function deriveMonthlyTotalsFromDailyTotals(
     .map(([month, kwh]) => ({ month, kwh }));
 }
 
+function daysInMonthFromYearMonth(yearMonth: string): number | null {
+  const match = String(yearMonth ?? "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function buildDisplayStitchedMonthMeta(args: {
+  monthlyTotals: Array<{ month: string; kwh: number }>;
+  coverageEndDateKey: string | null;
+}): ActualHouseStitchedMonth | null {
+  const coverageEndDateKey = String(args.coverageEndDateKey ?? "").slice(0, 10);
+  if (!YYYY_MM_DD.test(coverageEndDateKey)) return null;
+  const yearMonth = coverageEndDateKey.slice(0, 7);
+  const haveDaysThrough = Number(coverageEndDateKey.slice(8, 10));
+  const missingDaysTo = daysInMonthFromYearMonth(yearMonth);
+  if (!Number.isFinite(haveDaysThrough) || !Number.isFinite(missingDaysTo) || haveDaysThrough >= (missingDaysTo ?? 0)) {
+    return null;
+  }
+  const year = Number(yearMonth.slice(0, 4));
+  const month = yearMonth.slice(5, 7);
+  const borrowedFromYearMonth = `${String(year - 1)}-${month}`;
+  const months = new Set((args.monthlyTotals ?? []).map((row) => String(row.month ?? "").slice(0, 7)));
+  if (!months.has(yearMonth) || !months.has(borrowedFromYearMonth)) return null;
+  return {
+    mode: "PRIOR_YEAR_TAIL",
+    yearMonth,
+    haveDaysThrough,
+    missingDaysFrom: haveDaysThrough + 1,
+    missingDaysTo: missingDaysTo ?? haveDaysThrough,
+    borrowedFromYearMonth,
+    completenessRule: "ACTUAL_USAGE_WINDOW",
+  };
+}
+
+function buildDisplayCanonicalMonths(args: {
+  monthlyTotals: Array<{ month: string; kwh: number }>;
+  stitchedMonth: ActualHouseStitchedMonth | null;
+}): string[] {
+  const months = Array.from(
+    new Set(
+      (args.monthlyTotals ?? [])
+        .map((row) => String(row.month ?? "").slice(0, 7))
+        .filter((month) => /^\d{4}-\d{2}$/.test(month))
+    )
+  ).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (!args.stitchedMonth) return months;
+  return months.filter((month) => month !== args.stitchedMonth?.borrowedFromYearMonth);
+}
+
 function deriveWeekdayWeekendFromDailyTotals(dailyTotals: Array<{ date: string; kwh: number }>): { weekday: number; weekend: number } {
   let weekday = 0;
   let weekend = 0;
@@ -1098,6 +1150,20 @@ export async function getActualUsageDatasetForHouse(
         // Fall back to series-derived monthly/daily rows when the lightweight aggregate read fails.
       }
     }
+    const stitchedMonth = buildDisplayStitchedMonthMeta({
+      monthlyTotals,
+      coverageEndDateKey: selectedWindowEndDate,
+    });
+    if (stitchedMonth) {
+      insights = {
+        ...insights,
+        stitchedMonth,
+      };
+    }
+    const canonicalMonths = buildDisplayCanonicalMonths({
+      monthlyTotals,
+      stitchedMonth,
+    });
     const dataset: ActualHouseDataset = {
       summary: {
         ...selected.summary,
@@ -1119,8 +1185,8 @@ export async function getActualUsageDatasetForHouse(
         timezone: SMT_TZ,
         coverageStart: selected.summary.start,
         coverageEnd: selected.summary.end,
-        canonicalMonths: monthlyTotals.map((row) => row.month),
-        canonicalEndMonth: monthlyTotals.length > 0 ? monthlyTotals[monthlyTotals.length - 1]?.month ?? null : null,
+        canonicalMonths,
+        canonicalEndMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
       },
     };
     return {
@@ -1136,13 +1202,20 @@ export async function getActualUsageDatasetForHouse(
   let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
   let stitchedMonthMeta: ActualHouseStitchedMonth | null = null;
   try {
-    if (selected?.summary?.source === "SMT" && esiid) {
+    const bucketBuildGreenButtonRawId =
+      selected?.summary?.source === "GREEN_BUTTON"
+        ? (greenButtonRawId ?? (await getLatestUsableRawGreenButtonIdForHouse(houseId).catch(() => null)))
+        : null;
+    if (
+      (selected?.summary?.source === "SMT" && esiid) ||
+      (selected?.summary?.source === "GREEN_BUTTON" && bucketBuildGreenButtonRawId)
+    ) {
       if (Number.isFinite(canonicalEnd.getTime())) {
         const bucketBuild = await buildUsageBucketsForEstimate({
           homeId: houseId,
-          usageSource: "SMT",
-          esiid,
-          rawId: null,
+          usageSource: selected.summary.source,
+          esiid: selected.summary.source === "SMT" ? esiid : null,
+          rawId: selected.summary.source === "GREEN_BUTTON" ? bucketBuildGreenButtonRawId : null,
           windowEnd: canonicalEnd,
           cutoff: canonicalCutoff,
           requiredBucketKeys: ["kwh.m.all.total"],
@@ -1215,10 +1288,16 @@ export async function getActualUsageDatasetForHouse(
       dailyTotals = computed.dailyTotals;
       monthlyTotals = computed.monthlyTotals;
       totals = await computeImportExportTotalsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff, end });
+      const effectiveStitchedMonthMeta =
+        stitchedMonthMeta ??
+        buildDisplayStitchedMonthMeta({
+          monthlyTotals,
+          coverageEndDateKey: selectedWindowEndDate,
+        });
       insights = {
         fifteenMinuteAverages: computed.fifteenMinuteAverages,
         timeOfDayBuckets: computed.timeOfDayBuckets,
-        ...(stitchedMonthMeta ? { stitchedMonth: stitchedMonthMeta } : {}),
+        ...(effectiveStitchedMonthMeta ? { stitchedMonth: effectiveStitchedMonthMeta } : {}),
         peakDay: computed.peakDay,
         peakHour: computed.peakHour,
         baseload,
@@ -1249,11 +1328,24 @@ export async function getActualUsageDatasetForHouse(
     stitched.length > 0 &&
     (stitchedNonZeroMonths >= 2 || (dbSum <= 1e-3) || (stitchedSum >= dbSum * 0.5));
   const monthlyForDataset = useStitched ? stitched : fromDb;
+  const stitchedMonthForDataset =
+    stitchedMonthMeta ??
+    buildDisplayStitchedMonthMeta({
+      monthlyTotals: monthlyForDataset,
+      coverageEndDateKey: selectedWindowEndDate,
+    });
+  const canonicalMonthsForDataset = buildDisplayCanonicalMonths({
+    monthlyTotals: monthlyForDataset,
+    stitchedMonth: stitchedMonthForDataset,
+  });
   const baseloadMonthlyFromDataset = low10Average(
     (monthlyForDataset ?? []).map((m) => Number(m?.kwh) || 0)
   );
   if (insights && typeof insights === "object") {
     (insights as any).baseloadMonthly = baseloadMonthlyFromDataset;
+    if (stitchedMonthForDataset) {
+      (insights as any).stitchedMonth = stitchedMonthForDataset;
+    }
   }
   const totalFromMonthly = round2(
     (monthlyForDataset ?? []).reduce((s, m) => s + (Number(m?.kwh) || 0), 0)
@@ -1285,9 +1377,9 @@ export async function getActualUsageDatasetForHouse(
           timezone: SMT_TZ,
           coverageStart: selected.summary.start,
           coverageEnd: selected.summary.end,
-          canonicalMonths: monthlyForDataset.map((row) => row.month),
+          canonicalMonths: canonicalMonthsForDataset,
           canonicalEndMonth:
-            monthlyForDataset.length > 0 ? monthlyForDataset[monthlyForDataset.length - 1]?.month ?? null : null,
+            canonicalMonthsForDataset.length > 0 ? canonicalMonthsForDataset[canonicalMonthsForDataset.length - 1] ?? null : null,
         },
       }
     : null;

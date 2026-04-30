@@ -1001,6 +1001,73 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.summary.source).toBe("SIMULATED");
   });
 
+  it("preserves stitched source monthly rows for baseline passthrough datasets", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth({
+        summary: {
+          source: "GREEN_BUTTON",
+          totalKwh: 2008.86,
+          start: "2025-04-15",
+          end: "2026-04-14",
+          latest: "2026-04-14T23:45:00.000Z",
+        },
+        daily: [{ date: "2026-04-14", kwh: 8.4, source: "ACTUAL", sourceDetail: "GREEN_BUTTON" }],
+        monthly: [
+          { month: "2025-04", kwh: 717.2 },
+          { month: "2025-05", kwh: 1286.66 },
+          { month: "2026-04", kwh: 4.99 },
+        ],
+        insights: {
+          stitchedMonth: {
+            mode: "PRIOR_YEAR_TAIL",
+            yearMonth: "2026-04",
+            haveDaysThrough: 14,
+            missingDaysFrom: 15,
+            missingDaysTo: 30,
+            borrowedFromYearMonth: "2025-04",
+            completenessRule: "ACTUAL_USAGE_WINDOW",
+          },
+        },
+        series: {
+          intervals15: [{ timestamp: "2026-04-14T00:00:00.000Z", kwh: 0.25 }],
+        },
+        meta: {
+          datasetKind: "ACTUAL",
+          actualSource: "GREEN_BUTTON",
+          canonicalMonths: ["2025-05", "2026-04"],
+          canonicalEndMonth: "2026-04",
+        },
+      })
+    );
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        actualSource: "GREEN_BUTTON",
+        simulatorMode: "GREEN_BUTTON",
+        coverageWindowStart: "2025-04-15",
+        coverageWindowEnd: "2026-04-14",
+        canonicalMonths: ["2025-05", "2026-04"],
+        canonicalEndMonth: "2026-04",
+        anchorEndDate: "2026-04-14",
+        runtime: {
+          ...buildBaseEngineInput().runtime,
+          mode: "GREEN_BUTTON",
+        },
+      })
+    );
+
+    expect(artifact.dataset.monthly).toEqual([
+      { month: "2025-04", kwh: 717.2 },
+      { month: "2025-05", kwh: 1286.66 },
+      { month: "2026-04", kwh: 4.99 },
+    ]);
+    expect(artifact.dataset.insights?.stitchedMonth).toMatchObject({
+      yearMonth: "2026-04",
+      borrowedFromYearMonth: "2025-04",
+    });
+  });
+
   it("suppresses Past Sim-only curve compare payloads for baseline read models", async () => {
     resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
       buildUsageTruth({
