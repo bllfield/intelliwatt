@@ -183,6 +183,21 @@ function isConnectionPoolExhaustionError(err: unknown): boolean {
   return code === "P2024" || /connection pool|timed out fetching a new connection|too many connections/i.test(message);
 }
 
+function shouldHardBlockQueuedPlansForConstrainedPool(offers: any[]): boolean {
+  return offers.some((offer) => {
+    const statusLabel = String(offer?.intelliwatt?.statusLabel ?? "").trim().toUpperCase();
+    if (statusLabel !== "QUEUED") return false;
+    const estimate = (offer as any)?.intelliwatt?.trueCostEstimate;
+    const tceStatus = String(estimate?.status ?? "").trim().toUpperCase();
+    const tceReason = String(estimate?.reason ?? "").trim().toUpperCase();
+    if (tceStatus === "OK" || tceStatus === "APPROXIMATE" || tceStatus === "MISSING_USAGE") return false;
+    if (tceStatus === "NOT_COMPUTABLE") return false;
+    if (tceStatus === "MISSING_TEMPLATE") return true;
+    if (tceStatus === "NOT_IMPLEMENTED" && (tceReason === "CACHE_MISS" || tceReason === "MISSING_BUCKETS")) return true;
+    return tceStatus === "" || tceStatus === "QUEUED";
+  });
+}
+
 class PlansHardBlockError extends Error {
   readonly code: string;
   readonly status: number;
@@ -1984,6 +1999,20 @@ export async function GET(req: NextRequest) {
     };
 
     const shaped = await Promise.all(pageSlice.map(shapeOffer));
+    const connectionLimit = getEffectiveConnectionLimit();
+    if (hasUsage && connectionLimit != null && connectionLimit <= 1 && shouldHardBlockQueuedPlansForConstrainedPool(shaped)) {
+      throw new PlansHardBlockError({
+        code: "PLANS_BLOCKED_BY_DB_POOL",
+        message:
+          "Plans are temporarily unavailable because IntelliWatt calculations cannot run while the database connection pool is exhausted.",
+        context: {
+          connectionLimit,
+          route: "/api/dashboard/plans",
+          pendingOffersOnPage: shaped.filter((offer) => String(offer?.intelliwatt?.statusLabel ?? "").trim().toUpperCase() === "QUEUED")
+            .length,
+        },
+      });
+    }
 
     // Compute bestOffers (proxy ranking) server-side so the UI can render without an extra round-trip.
     // Must never throw; on any failure, fall back to [].

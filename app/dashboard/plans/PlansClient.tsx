@@ -23,6 +23,7 @@ type ApiResponse = {
   ok: boolean;
   error?: string;
   message?: string;
+  hardBlock?: boolean;
   hasUsage?: boolean;
   usageSummary?: UsageSummary;
   avgMonthlyKwh?: number;
@@ -184,6 +185,22 @@ export default function PlansClient() {
   // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
   const warmupKey = useMemo(() => "default", []);
   const [warmupSessionActive, setWarmupSessionActive] = useState(false);
+
+  const applyHardFailure = useCallback((j: ApiResponse | null, fallback: string) => {
+    setError(j?.error ?? j?.message ?? fallback);
+    setResp(j ?? { ok: false, error: fallback });
+    setLoading(false);
+    setAutoPreparing(false);
+    setPrefetchNote(null);
+    prefetchInFlightRef.current = false;
+    pipelineKickRef.current = false;
+    try {
+      window.sessionStorage.removeItem(`plans_warmup_active_v1:${warmupKey}`);
+    } catch {
+      // ignore
+    }
+    setWarmupSessionActive(false);
+  }, [warmupKey]);
 
   // Once we start a warmup session for this renter-mode dataset, keep it running even if the user
   // touches filters/sort/search. Those interactions must not *start* warmups, but they also must not
@@ -676,6 +693,10 @@ export default function PlansClient() {
             });
             const j = await r.json().catch(() => null);
             setLastPipelineKickResult(j);
+            if (!r.ok || !j?.ok) {
+              applyHardFailure(j, `Plans pipeline failed (${r.status})`);
+              return;
+            }
             const started = Boolean(j?.ok === true && j?.started === true);
             // Only throttle on a successful "started" run. If the call was blocked (cooldown/already_running)
             // or failed, allow a prompt retry in the next effect tick.
@@ -723,9 +744,12 @@ export default function PlansClient() {
           // Add a tiny cache-bust param that is NOT part of serverDatasetKey.
           const cacheBust = String(Date.now());
           fetch(`/api/dashboard/plans?${qs}&_poll=${encodeURIComponent(cacheBust)}`, { cache: "no-store" })
-            .then((r) => r.json().catch(() => null))
-            .then((j) => {
-              if (!j || j.ok !== true) return;
+            .then(async (r) => ({ r, j: (await r.json().catch(() => null)) as ApiResponse | null }))
+            .then(({ r, j }) => {
+              if (!r.ok || !j?.ok) {
+                applyHardFailure(j, `Unable to load plans (${r.status})`);
+                return;
+              }
               setResp(j);
               try {
                 const ck = cacheKeyRef.current || cacheKey;
@@ -752,7 +776,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, datasetMode, warmupSessionActive]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, datasetMode, warmupSessionActive, applyHardFailure]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
