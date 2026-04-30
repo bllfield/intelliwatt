@@ -42,7 +42,7 @@ export default function CompareLandingClient() {
         const sj = await s.json().catch(() => null);
         if (!s.ok || !sj || sj.ok !== true) throw new Error("status_check_failed");
         if (!sj.hasCurrentPlan) {
-          router.replace("/dashboard/current-rate");
+          router.replace("/dashboard/current-rate?from=compare&reason=current_plan_required");
           return;
         }
 

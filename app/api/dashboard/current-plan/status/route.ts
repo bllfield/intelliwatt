@@ -43,26 +43,56 @@ export async function GET(_req: NextRequest) {
     }
     if (!houseId) return NextResponse.json({ ok: true, hasCurrentPlan: false, houseId: null, source: null });
 
-    const house = await prisma.houseAddress.findFirst({
-      where: { id: houseId, userId: user.id, archivedAt: null },
+    const houses = await prisma.houseAddress.findMany({
+      where: { userId: user.id, archivedAt: null },
+      orderBy: [{ updatedAt: "desc" }],
       select: { id: true, esiid: true },
     });
+    const house = houses.find((row) => String(row.id) === String(houseId)) ?? houses[0] ?? null;
     if (!house) return NextResponse.json({ ok: true, hasCurrentPlan: false, houseId, source: null });
+    const knownHouseIds = Array.from(new Set(houses.map((row) => String(row.id)).filter(Boolean)));
+    const knownEsiids = Array.from(
+      new Set(
+        houses
+          .map((row) => (typeof row.esiid === "string" && row.esiid.trim().length > 0 ? row.esiid.trim() : null))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
     const houseEsiid = typeof house.esiid === "string" && house.esiid.trim().length > 0 ? house.esiid.trim() : null;
 
     const currentPlanPrisma = getCurrentPlanPrisma();
     const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
+    const manualHouseWhere =
+      knownEsiids.length > 0
+        ? {
+            OR: [
+              ...(knownHouseIds.length > 0 ? [{ houseId: { in: knownHouseIds } }] : []),
+              { houseId: null, esiId: { in: knownEsiids } },
+            ],
+          }
+        : knownHouseIds.length > 0
+          ? { houseId: { in: knownHouseIds } }
+          : { houseId };
+    const parsedHouseWhere =
+      knownEsiids.length > 0
+        ? {
+            OR: [
+              ...(knownHouseIds.length > 0 ? [{ houseId: { in: knownHouseIds } }] : []),
+              { houseId: null, OR: [{ esiId: { in: knownEsiids } }, { esiid: { in: knownEsiids } }] },
+            ],
+          }
+        : knownHouseIds.length > 0
+          ? { houseId: { in: knownHouseIds } }
+          : { houseId };
 
     const latestManual = await manualDelegate.findFirst({
-      where: houseEsiid
-        ? {
-            userId: user.id,
-            OR: [{ houseId }, { houseId: null, esiId: houseEsiid }],
-          }
-        : { userId: user.id, houseId },
+      where: {
+        userId: user.id,
+        ...manualHouseWhere,
+      },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, lastConfirmedAt: true, notes: true },
+      select: { id: true, houseId: true, lastConfirmedAt: true, notes: true, esiId: true },
     });
 
     const isAutoImportedFromBill = (m: any): boolean => {
@@ -76,25 +106,24 @@ export async function GET(_req: NextRequest) {
     // Parsed (EFL or bill) is acceptable as "has current plan" for compare gating.
     // (Compare route itself will still apply its own precedence rules.)
     const latestParsed = await parsedDelegate.findFirst({
-      where: houseEsiid
-        ? {
-            userId: user.id,
-            uploadId: { not: null },
-            OR: [
-              { houseId },
-              { houseId: null, OR: [{ esiId: houseEsiid }, { esiid: houseEsiid }] },
-            ],
-          }
-        : { userId: user.id, houseId, uploadId: { not: null } },
+      where: {
+        userId: user.id,
+        uploadId: { not: null },
+        ...parsedHouseWhere,
+      },
       orderBy: { createdAt: "desc" },
-      select: { id: true },
+      select: { id: true, houseId: true, esiId: true, esiid: true },
     });
     const hasParsed = Boolean(latestParsed);
 
     const hasCurrentPlan = hasManual || hasParsed;
     const source = hasManual ? "MANUAL" : hasParsed ? "PARSED" : null;
+    const matchedHouseId =
+      (latestManual?.houseId ? String(latestManual.houseId) : null) ??
+      (latestParsed?.houseId ? String(latestParsed.houseId) : null) ??
+      houseId;
 
-    return NextResponse.json({ ok: true, hasCurrentPlan, houseId, source });
+    return NextResponse.json({ ok: true, hasCurrentPlan, houseId: matchedHouseId, source });
   } catch (error) {
     console.error("Error checking current plan status:", error);
     return NextResponse.json({ ok: false, error: "internal_error" }, { status: 500 });
