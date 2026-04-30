@@ -672,6 +672,8 @@ export function OnePathSimAdmin() {
     async (args?: {
       email?: string;
       houseId?: string;
+      sourceHouseId?: string | null;
+      onePathTestHomeHouseId?: string | null;
       mode?: "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
       actualContextHouseId?: string | null;
       freshSelection?: boolean;
@@ -693,6 +695,10 @@ export function OnePathSimAdmin() {
           action: "lookup",
           email: trimmedEmail,
           houseId: args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
+          sourceHouseId: args?.sourceHouseId ?? args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
+          onePathTestHomeHouseId:
+            args?.onePathTestHomeHouseId ??
+            (typeof onePathTestHome?.houseId === "string" && onePathTestHome.houseId.trim() ? onePathTestHome.houseId.trim() : null),
           mode: args?.mode ?? mode,
           actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null),
           includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled,
@@ -708,7 +714,7 @@ export function OnePathSimAdmin() {
       setBusy(false);
       return json as LookupResponse;
     },
-    [debugDiagnosticsEnabled, effectiveActualContextHouseId, effectiveHouseId, email, mode]
+    [debugDiagnosticsEnabled, effectiveActualContextHouseId, effectiveHouseId, email, mode, onePathTestHome?.houseId]
   );
 
   const replaceOnePathTestHome = useCallback(
@@ -751,6 +757,8 @@ export function OnePathSimAdmin() {
       const refreshed = await requestLookup({
         email: lookupEmail,
         houseId: sourceHouseId,
+        sourceHouseId,
+        onePathTestHomeHouseId: typeof replaceJson?.testHomeHouseId === "string" ? replaceJson.testHomeHouseId : null,
         actualContextHouseId: null,
         freshSelection: false,
       });

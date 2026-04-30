@@ -27,6 +27,8 @@ type NamedLabHomeConfig = {
   addressState: string;
 };
 
+const namedLabLinkTableAvailability: Partial<Record<"gapfill" | "onePath", boolean>> = {};
+
 function resolveModel(db: any, modelName: string): any | null {
   const fromDb = db?.[modelName];
   if (fromDb) return fromDb;
@@ -54,10 +56,40 @@ function getNamedLabLinkModel(kind: "gapfill" | "onePath"): any | null {
   }
 }
 
+async function getNamedLabLinkModelIfAvailable(kind: "gapfill" | "onePath"): Promise<any | null> {
+  const cached = namedLabLinkTableAvailability[kind];
+  if (cached === false) return null;
+
+  const model = getNamedLabLinkModel(kind);
+  if (!model) {
+    namedLabLinkTableAvailability[kind] = false;
+    return null;
+  }
+
+  if (cached === true) return model;
+
+  const tableName = kind === "onePath" ? "OnePathLabTestHomeLink" : "GapfillLabTestHomeLink";
+  try {
+    const rows = await (usagePrisma as any).$queryRaw`
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name = ${tableName}
+      LIMIT 1
+    `;
+    const available = Array.isArray(rows) && rows.length > 0;
+    namedLabLinkTableAvailability[kind] = available;
+    return available ? model : null;
+  } catch {
+    namedLabLinkTableAvailability[kind] = false;
+    return null;
+  }
+}
+
 export async function getLabTestHomeLink(
   ownerUserId: string
 ): Promise<LabTestHomeLink | null> {
-  const model = getNamedLabLinkModel("gapfill");
+  const model = await getNamedLabLinkModelIfAvailable("gapfill");
   if (!model) return null;
   const row = await model
     .findUnique({
@@ -80,7 +112,7 @@ export async function getLabTestHomeLink(
 export async function getOnePathLabTestHomeLink(
   ownerUserId: string
 ): Promise<LabTestHomeLink | null> {
-  const model = getNamedLabLinkModel("onePath");
+  const model = await getNamedLabLinkModelIfAvailable("onePath");
   if (!model) return null;
   const row = await model
     .findUnique({
@@ -231,7 +263,6 @@ async function copySourceHouseIdentityToLabHome(args: {
     utilityPhone: string | null;
   };
   label: string;
-  esiid?: string | null;
 }) {
   const houseAddressModel = resolveModel(args.tx, "houseAddress");
   if (!houseAddressModel?.update) throw new Error("houseAddress_model_unavailable");
@@ -254,7 +285,7 @@ async function copySourceHouseIdentityToLabHome(args: {
       utilityName: args.sourceHouse.utilityName,
       utilityPhone: args.sourceHouse.utilityPhone,
       label: args.label,
-      esiid: args.esiid ?? null,
+      esiid: null,
     },
   });
 }
@@ -268,7 +299,7 @@ export async function upsertLabTestHomeLink(args: {
   statusMessage?: string | null;
   lastReplacedAt?: Date | null;
 }): Promise<void> {
-  const model = getNamedLabLinkModel("gapfill");
+  const model = await getNamedLabLinkModelIfAvailable("gapfill");
   if (!model) return;
   try {
     await model.upsert({
@@ -305,7 +336,7 @@ export async function upsertOnePathLabTestHomeLink(args: {
   statusMessage?: string | null;
   lastReplacedAt?: Date | null;
 }): Promise<void> {
-  const model = getNamedLabLinkModel("onePath");
+  const model = await getNamedLabLinkModelIfAvailable("onePath");
   if (!model) return;
   try {
     await model.upsert({
@@ -988,7 +1019,6 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
         labHouseId: testHome!.id,
         sourceHouse,
         label: ONE_PATH_LAB_TEST_HOME_LABEL,
-        esiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
       });
       await copyScenariosAndEvents({
         tx,

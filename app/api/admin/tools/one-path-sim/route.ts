@@ -372,6 +372,7 @@ async function buildOnePathAdminManualSeeds(args: {
   userId: string;
   houseId: string;
   actualContextHouseId: string;
+  smtSourceEsiid?: string | null;
   payload: ManualUsagePayload | null;
   overrideTravelRanges?: unknown;
   dbTravelRanges?: unknown;
@@ -380,6 +381,7 @@ async function buildOnePathAdminManualSeeds(args: {
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
+    smtSourceEsiid: args.smtSourceEsiid ?? null,
     seedIfMissing: false,
   }).catch(() => null);
   const actualEndDate = String(usageTruth?.dataset?.summary?.end ?? "").slice(0, 10) || null;
@@ -600,18 +602,32 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
 async function resolveOnePathTestHomeState(args: {
   ownerUserId: string;
   selectedSourceHouseId: string;
+  fallbackSourceHouseId?: string | null;
+  preferredTestHomeHouseId?: string | null;
 }) {
   const ensured = await ensureGlobalOnePathLabTestHomeHouse(args.ownerUserId);
   const link = await getOnePathLabTestHomeLink(args.ownerUserId);
-  const testHomeHouseId = String(link?.testHomeHouseId ?? ensured.id);
+  const preferredTestHomeHouseId =
+    typeof args.preferredTestHomeHouseId === "string" && args.preferredTestHomeHouseId.trim()
+      ? args.preferredTestHomeHouseId.trim()
+      : null;
+  const testHomeHouseId = String(
+    (preferredTestHomeHouseId && preferredTestHomeHouseId === ensured.id ? preferredTestHomeHouseId : null) ??
+      link?.testHomeHouseId ??
+      ensured.id
+  );
   const testHomeHouse = await (prisma as any).houseAddress
     .findFirst({
       where: { id: testHomeHouseId, userId: args.ownerUserId, archivedAt: null },
       select: { id: true, label: true, esiid: true },
     })
     .catch(() => null);
-  const linkedSourceHouseId = link?.sourceHouseId ? String(link.sourceHouseId) : null;
-  const status = String(link?.status ?? (testHomeHouse ? "ready" : "replacing"));
+  const linkedSourceHouseId =
+    (link?.sourceHouseId ? String(link.sourceHouseId) : null) ??
+    (typeof args.fallbackSourceHouseId === "string" && args.fallbackSourceHouseId.trim()
+      ? args.fallbackSourceHouseId.trim()
+      : null);
+  const status = String(link?.status ?? (testHomeHouse && linkedSourceHouseId ? "ready" : testHomeHouse ? "unlinked" : "replacing"));
   const isPinned = Boolean(
     testHomeHouse?.id && status === "ready" && linkedSourceHouseId && linkedSourceHouseId === args.selectedSourceHouseId
   );
@@ -628,7 +644,8 @@ async function resolveOnePathTestHomeState(args: {
     linkedSourceHouseId,
     linkedSourceUserId: link?.sourceUserId ? String(link.sourceUserId) : null,
     status,
-    statusMessage: link?.statusMessage ? String(link.statusMessage) : null,
+    statusMessage:
+      link?.statusMessage ? String(link.statusMessage) : linkedSourceHouseId ? "Using request-scoped One Path test-home binding." : null,
     lastReplacedAt: link?.lastReplacedAt ? new Date(link.lastReplacedAt).toISOString() : null,
     isPinned,
     needsReplace: !isPinned,
@@ -663,7 +680,20 @@ export async function POST(request: NextRequest) {
   const onePathTestHomeState = await resolveOnePathTestHomeState({
     ownerUserId,
     selectedSourceHouseId: resolved.selectedHouse.id,
+    fallbackSourceHouseId:
+      typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim() ? body.sourceHouseId.trim() : null,
+    preferredTestHomeHouseId:
+      typeof body?.onePathTestHomeHouseId === "string" && body.onePathTestHomeHouseId.trim()
+        ? body.onePathTestHomeHouseId.trim()
+        : typeof body?.houseId === "string" &&
+            typeof body?.sourceHouseId === "string" &&
+            body.houseId.trim() &&
+            body.sourceHouseId.trim() &&
+            body.houseId.trim() !== body.sourceHouseId.trim()
+          ? body.houseId.trim()
+          : null,
   });
+  const smtSourceEsiid = resolved.selectedHouse.esiid ? String(resolved.selectedHouse.esiid) : null;
   const effectiveUserId = onePathTestHomeState.isPinned ? ownerUserId : resolved.userId;
   const effectiveHouseId = onePathTestHomeState.isPinned ? onePathTestHomeState.testHomeHouseId : resolved.selectedHouse.id;
   const defaultActualContextHouseId = onePathTestHomeState.isPinned ? effectiveHouseId : resolved.selectedHouse.id;
@@ -701,6 +731,8 @@ export async function POST(request: NextRequest) {
     const replacedState = await resolveOnePathTestHomeState({
       ownerUserId,
       selectedSourceHouseId: resolved.selectedHouse.id,
+      fallbackSourceHouseId: resolved.selectedHouse.id,
+      preferredTestHomeHouseId: replacement.testHomeHouseId ?? null,
     });
     return NextResponse.json({
       ok: true,
@@ -747,6 +779,7 @@ export async function POST(request: NextRequest) {
       userId: effectiveUserId,
       houseId: effectiveHouseId,
       actualContextHouseId: defaultActualContextHouseId || actualContextHouseId,
+      smtSourceEsiid,
       payload: manual.payload ?? null,
       dbTravelRanges: travelRangesFromDb,
     });
@@ -792,6 +825,7 @@ export async function POST(request: NextRequest) {
       userId: effectiveUserId,
       houseId: effectiveHouseId,
       actualContextHouseId: defaultActualContextHouseId,
+      smtSourceEsiid,
       preferredActualSource:
         body?.preferredActualSource === "SMT" || body?.preferredActualSource === "GREEN_BUTTON"
           ? body.preferredActualSource
@@ -825,6 +859,7 @@ export async function POST(request: NextRequest) {
             userId: effectiveUserId,
             houseId: effectiveHouseId,
             actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+            smtSourceEsiid,
             payload: manualUsage.payload ?? null,
             overrideTravelRanges: effectiveRawInputBase.travelRanges,
             dbTravelRanges: await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
@@ -1206,6 +1241,7 @@ export async function POST(request: NextRequest) {
             userId: effectiveUserId,
             houseId: effectiveHouseId,
             actualContextHouseId: previewActualContextHouseId,
+            smtSourceEsiid,
             payload: manualUsage.payload ?? null,
             dbTravelRanges: travelRangesFromDb,
           })
@@ -1267,6 +1303,7 @@ export async function POST(request: NextRequest) {
       userId: effectiveUserId,
       houseId: effectiveHouseId,
       actualContextHouseId: previewActualContextHouse.id,
+      smtSourceEsiid,
       seedIfMissing: false,
       preferredActualSource: previewMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
     }).catch(() => null),
@@ -1286,6 +1323,7 @@ export async function POST(request: NextRequest) {
           userId: effectiveUserId,
           houseId: effectiveHouseId,
           actualContextHouseId: previewActualContextHouse.id,
+          smtSourceEsiid,
           payload: manualUsage.payload ?? null,
           dbTravelRanges: travelRangesFromDb,
         })

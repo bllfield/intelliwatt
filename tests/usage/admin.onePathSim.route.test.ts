@@ -662,6 +662,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
       preferredActualSource: "GREEN_BUTTON",
     });
@@ -705,6 +706,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
       preferredActualSource: null,
     });
@@ -1079,6 +1081,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
     });
   });
@@ -1126,6 +1129,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
     });
   });
@@ -1208,6 +1212,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
     });
   });

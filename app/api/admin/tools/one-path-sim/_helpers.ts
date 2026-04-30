@@ -92,20 +92,12 @@ export async function resolveOnePathWriteTarget(args: {
   }
   const ensuredHome = await ensureGlobalOnePathLabTestHomeHouse(ownerUserId);
   const link = await getOnePathLabTestHomeLink(ownerUserId);
-  if (!link?.testHomeHouseId) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { ok: false, error: "test_home_not_ready", message: "Replace the One Path test home from the selected source first." },
-        { status: 409 }
-      ),
-    };
-  }
+  const testHomeHouseId = String(link?.testHomeHouseId ?? ensuredHome.id);
   const requestedHouseId = typeof args.requestedHouseId === "string" ? args.requestedHouseId.trim() : "";
   if (
     requestedHouseId &&
-    requestedHouseId !== link.testHomeHouseId &&
-    requestedHouseId !== link.sourceHouseId
+    requestedHouseId !== testHomeHouseId &&
+    (!link?.sourceHouseId || requestedHouseId !== link.sourceHouseId)
   ) {
     return {
       ok: false,
@@ -114,8 +106,8 @@ export async function resolveOnePathWriteTarget(args: {
           ok: false,
           error: "invalid_one_path_target_house",
           message: "One Path admin writes are pinned to the linked test home only.",
-          testHomeHouseId: link.testHomeHouseId,
-          sourceHouseId: link.sourceHouseId ?? null,
+          testHomeHouseId,
+          sourceHouseId: link?.sourceHouseId ?? null,
         },
         { status: 409 }
       ),
@@ -124,8 +116,8 @@ export async function resolveOnePathWriteTarget(args: {
   return {
     ok: true,
     ownerUserId,
-    testHomeHouseId: String(link.testHomeHouseId || ensuredHome.id),
-    sourceHouseId: link.sourceHouseId ? String(link.sourceHouseId) : null,
-    sourceUserId: link.sourceUserId ? String(link.sourceUserId) : null,
+    testHomeHouseId,
+    sourceHouseId: link?.sourceHouseId ? String(link.sourceHouseId) : null,
+    sourceUserId: link?.sourceUserId ? String(link.sourceUserId) : null,
   };
 }

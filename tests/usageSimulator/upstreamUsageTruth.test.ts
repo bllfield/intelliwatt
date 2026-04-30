@@ -110,4 +110,38 @@ describe("live shared upstream usage truth owner", () => {
       seedingResult: "success",
     });
   });
+
+  it("uses the provided SMT source esiid when the actual-context test home has no esiid", async () => {
+    findFirst.mockImplementation(async ({ where }: any) => {
+      if (where.id === "test-home-1") return { id: "test-home-1", esiid: null };
+      if (where.id === "house-1") return { id: "house-1", esiid: "esiid-1" };
+      return null;
+    });
+    resolveIntervalsLayer.mockResolvedValue({
+      dataset: { summary: { totalKwh: 789 }, meta: { sourceEsiid: "esiid-1" } },
+      alternatives: { smt: { totalKwh: 789 }, greenButton: null },
+    });
+    const { resolveUpstreamUsageTruthForSimulation } = await import(
+      "@/modules/usageSimulator/upstreamUsageTruth"
+    );
+
+    const out = await resolveUpstreamUsageTruthForSimulation({
+      userId: "user-1",
+      houseId: "test-home-1",
+      actualContextHouseId: "test-home-1",
+      smtSourceEsiid: "esiid-1",
+      seedIfMissing: false,
+    });
+
+    expect(resolveIntervalsLayer).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "test-home-1",
+      layerKind: "ACTUAL_USAGE_INTERVALS",
+      scenarioId: null,
+      esiid: "esiid-1",
+      lightweightActualUsage: true,
+    });
+    expect(out.actualContextHouse.esiid).toBe("esiid-1");
+    expect(out.dataset).toEqual({ summary: { totalKwh: 789 }, meta: { sourceEsiid: "esiid-1" } });
+  });
 });

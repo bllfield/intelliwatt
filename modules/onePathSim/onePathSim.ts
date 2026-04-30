@@ -191,6 +191,7 @@ export type IntervalRawInput = {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  smtSourceEsiid?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   scenarioId?: string | null;
   weatherPreference?: CanonicalSimulationEngineInput["weatherPreference"];
@@ -924,6 +925,7 @@ async function buildBaselinePassthroughArtifact(args: {
       userId: args.engineInput.runtime.userId,
       houseId: args.engineInput.houseId,
       actualContextHouseId: args.engineInput.actualContextHouseId,
+      smtSourceEsiid: args.engineInput.runtime.esiid,
       seedIfMissing: args.engineInput.inputType === "INTERVAL",
       preferredActualSource:
         args.engineInput.inputType === "GREEN_BUTTON"
@@ -1201,6 +1203,7 @@ async function loadSharedContext(args: {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  smtSourceEsiid?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   seedUsageTruthIfMissing?: boolean;
   allowMissingUsageTruth?: boolean;
@@ -1213,6 +1216,7 @@ async function loadSharedContext(args: {
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
+    smtSourceEsiid: args.smtSourceEsiid ?? null,
     seedIfMissing: args.seedUsageTruthIfMissing === true,
     preferredActualSource: args.preferredActualSource ?? null,
     skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
@@ -1418,7 +1422,7 @@ function buildCanonicalEngineInput(args: {
     runtime: {
       userId: args.runtimeUserId,
       houseId: args.loaded.house.id,
-      esiid: args.loaded.house.esiid,
+      esiid: args.loaded.actualDataset?.meta?.sourceEsiid ?? args.loaded.house.esiid,
       actualContextHouseId: args.loaded.actualContextHouseId,
       mode:
         isIntervalLikeInputType(args.inputType)
@@ -1446,6 +1450,7 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    smtSourceEsiid: raw.smtSourceEsiid ?? null,
     seedUsageTruthIfMissing: true,
     weatherScoringMode: "interval",
     preferredActualSource: raw.preferredActualSource ?? null,
@@ -1470,6 +1475,7 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    smtSourceEsiid: raw.smtSourceEsiid ?? null,
     manualUsagePayload: isBaselineGreenButtonRun ? null : undefined,
     seedUsageTruthIfMissing: false,
     weatherScoringMode: "interval",
@@ -1504,6 +1510,7 @@ export async function buildIntervalLikeBaselinePassthroughDataset(
       userId: engineInput.runtime.userId,
       houseId: engineInput.houseId,
       actualContextHouseId: engineInput.actualContextHouseId,
+      smtSourceEsiid: engineInput.runtime.esiid,
       seedIfMissing: engineInput.inputType === "INTERVAL",
       preferredActualSource:
         engineInput.inputType === "GREEN_BUTTON"
@@ -1543,6 +1550,7 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    smtSourceEsiid: raw.smtSourceEsiid ?? null,
     manualUsagePayload: raw.manualUsagePayload,
     seedUsageTruthIfMissing: false,
     allowMissingUsageTruth: true,
@@ -1572,6 +1580,7 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    smtSourceEsiid: raw.smtSourceEsiid ?? null,
     manualUsagePayload: raw.manualUsagePayload,
     seedUsageTruthIfMissing: false,
     allowMissingUsageTruth: true,
@@ -1597,6 +1606,7 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    smtSourceEsiid: raw.smtSourceEsiid ?? null,
     seedUsageTruthIfMissing: true,
     weatherScoringMode: "interval",
     preferredActualSource: raw.preferredActualSource ?? null,
@@ -1661,6 +1671,7 @@ async function buildArtifactFromEngineInput(args: {
         userId: args.engineInput.runtime.userId,
         houseId: args.engineInput.houseId,
         actualContextHouseId: args.engineInput.actualContextHouseId,
+        smtSourceEsiid: args.engineInput.runtime.esiid,
         seedIfMissing: false,
         preferredActualSource: args.engineInput.runtime.runContext?.preferredActualSource ?? null,
       }).catch(() => null)

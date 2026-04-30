@@ -254,6 +254,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  smtSourceEsiid?: string | null;
   seedIfMissing: boolean;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   skipLightweightInsightRecompute?: boolean;
@@ -266,6 +267,17 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     userId: args.userId,
     houseId: String(args.actualContextHouseId ?? args.houseId),
   });
+  const effectiveSmtEsiid =
+    actualContextHouse.esiid ??
+    (typeof args.smtSourceEsiid === "string" && args.smtSourceEsiid.trim() ? args.smtSourceEsiid.trim() : null);
+  const selectedHouseWithEffectiveEsiid = {
+    ...selectedHouse,
+    esiid: selectedHouse.esiid ?? effectiveSmtEsiid,
+  };
+  const actualContextHouseWithEffectiveEsiid = {
+    ...actualContextHouse,
+    esiid: effectiveSmtEsiid,
+  };
 
   if (args.seedIfMissing) {
     logBaselineUsageTruthEvent("baseline_upstream_usage_truth_lookup_start", {
@@ -279,7 +291,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   let resolved = await readPersistedUsageTruth({
     userId: args.userId,
     houseId: actualContextHouse.id,
-    esiid: actualContextHouse.esiid,
+    esiid: actualContextHouseWithEffectiveEsiid.esiid,
     preferredActualSource: args.preferredActualSource ?? null,
     skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
@@ -295,8 +307,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
       });
     }
     return {
-      selectedHouse,
-      actualContextHouse,
+      selectedHouse: selectedHouseWithEffectiveEsiid,
+      actualContextHouse: actualContextHouseWithEffectiveEsiid,
       dataset: resolved.dataset,
       alternatives: resolved.alternatives ?? { smt: null, greenButton: null },
       usageTruthSource: "persisted_usage_output",
@@ -323,8 +335,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
       usageTruthSource: "missing_usage_truth",
     });
     return {
-      selectedHouse,
-      actualContextHouse,
+      selectedHouse: selectedHouseWithEffectiveEsiid,
+      actualContextHouse: actualContextHouseWithEffectiveEsiid,
       dataset: null,
       alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
       usageTruthSource: "missing_usage_truth",
@@ -383,7 +395,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   resolved = await readPersistedUsageTruth({
     userId: args.userId,
     houseId: actualContextHouse.id,
-    esiid: actualContextHouse.esiid,
+    esiid: actualContextHouseWithEffectiveEsiid.esiid,
     preferredActualSource: args.preferredActualSource ?? null,
     skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
@@ -406,8 +418,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   );
 
   return {
-    selectedHouse,
-    actualContextHouse,
+    selectedHouse: selectedHouseWithEffectiveEsiid,
+    actualContextHouse: actualContextHouseWithEffectiveEsiid,
     dataset: resolved?.dataset ?? null,
     alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
     usageTruthSource,

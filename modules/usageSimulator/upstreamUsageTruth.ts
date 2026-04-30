@@ -208,6 +208,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  smtSourceEsiid?: string | null;
   seedIfMissing: boolean;
 }): Promise<UpstreamUsageTruthResult> {
   const selectedHouse = await loadHouseForUser({
@@ -218,16 +219,27 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     userId: args.userId,
     houseId: String(args.actualContextHouseId ?? args.houseId),
   });
+  const effectiveSmtEsiid =
+    actualContextHouse.esiid ??
+    (typeof args.smtSourceEsiid === "string" && args.smtSourceEsiid.trim() ? args.smtSourceEsiid.trim() : null);
+  const selectedHouseWithEffectiveEsiid = {
+    ...selectedHouse,
+    esiid: selectedHouse.esiid ?? effectiveSmtEsiid,
+  };
+  const actualContextHouseWithEffectiveEsiid = {
+    ...actualContextHouse,
+    esiid: effectiveSmtEsiid,
+  };
 
   let resolved = await readPersistedUsageTruth({
     userId: args.userId,
     houseId: actualContextHouse.id,
-    esiid: actualContextHouse.esiid,
+    esiid: actualContextHouseWithEffectiveEsiid.esiid,
   });
   if (resolved?.dataset) {
     return {
-      selectedHouse,
-      actualContextHouse,
+      selectedHouse: selectedHouseWithEffectiveEsiid,
+      actualContextHouse: actualContextHouseWithEffectiveEsiid,
       dataset: resolved.dataset,
       alternatives: resolved.alternatives ?? { smt: null, greenButton: null },
       usageTruthSource: "persisted_usage_output",
@@ -244,8 +256,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
 
   if (!args.seedIfMissing) {
     return {
-      selectedHouse,
-      actualContextHouse,
+      selectedHouse: selectedHouseWithEffectiveEsiid,
+      actualContextHouse: actualContextHouseWithEffectiveEsiid,
       dataset: null,
       alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
       usageTruthSource: "missing_usage_truth",
@@ -280,12 +292,12 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   resolved = await readPersistedUsageTruth({
     userId: args.userId,
     houseId: actualContextHouse.id,
-    esiid: actualContextHouse.esiid,
+    esiid: actualContextHouseWithEffectiveEsiid.esiid,
   });
 
   return {
-    selectedHouse,
-    actualContextHouse,
+    selectedHouse: selectedHouseWithEffectiveEsiid,
+    actualContextHouse: actualContextHouseWithEffectiveEsiid,
     dataset: resolved?.dataset ?? null,
     alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
     usageTruthSource: resolved?.dataset ? "seeded_via_existing_usage_orchestration" : "missing_usage_truth",
