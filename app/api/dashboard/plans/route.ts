@@ -161,55 +161,10 @@ function numOrNull(n: any): number | null {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
-function parseConnectionLimitFromUrl(urlRaw: unknown): number | null {
-  const text = String(urlRaw ?? "").trim();
-  if (!text) return null;
-  try {
-    const u = new URL(text);
-    const parsed = Number(u.searchParams.get("connection_limit") ?? "");
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function getEffectiveConnectionLimit(): number | null {
-  return parseConnectionLimitFromUrl(process.env.USAGE_DATABASE_URL) ?? parseConnectionLimitFromUrl(process.env.DATABASE_URL);
-}
-
 function isConnectionPoolExhaustionError(err: unknown): boolean {
   const code = String((err as any)?.code ?? "");
   const message = String((err as any)?.message ?? err ?? "");
   return code === "P2024" || /connection pool|timed out fetching a new connection|too many connections/i.test(message);
-}
-
-function shouldHardBlockQueuedPlansForConstrainedPool(offers: any[]): boolean {
-  return offers.some((offer) => {
-    const statusLabel = String(offer?.intelliwatt?.statusLabel ?? "").trim().toUpperCase();
-    if (statusLabel !== "QUEUED") return false;
-    const estimate = (offer as any)?.intelliwatt?.trueCostEstimate;
-    const tceStatus = String(estimate?.status ?? "").trim().toUpperCase();
-    const tceReason = String(estimate?.reason ?? "").trim().toUpperCase();
-    if (tceStatus === "OK" || tceStatus === "APPROXIMATE" || tceStatus === "MISSING_USAGE") return false;
-    if (tceStatus === "NOT_COMPUTABLE") return false;
-    if (tceStatus === "MISSING_TEMPLATE") return true;
-    if (tceStatus === "NOT_IMPLEMENTED" && (tceReason === "CACHE_MISS" || tceReason === "MISSING_BUCKETS")) return true;
-    return tceStatus === "" || tceStatus === "QUEUED";
-  });
-}
-
-class PlansHardBlockError extends Error {
-  readonly code: string;
-  readonly status: number;
-  readonly context: Record<string, unknown>;
-
-  constructor(args: { code: string; message: string; status?: number; context?: Record<string, unknown> }) {
-    super(args.message);
-    this.name = "PlansHardBlockError";
-    this.code = args.code;
-    this.status = args.status ?? 503;
-    this.context = args.context ?? {};
-  }
 }
 
 function decimalToNumber(v: any): number | null {
@@ -1829,21 +1784,6 @@ export async function GET(req: NextRequest) {
         // If required usage buckets are missing, this is not "unsupported"—it means the pipeline hasn't populated
         // the required bucket keys for the home yet.
         if (missingBucketKeys.length > 0) {
-          const connectionLimit = getEffectiveConnectionLimit();
-          if (connectionLimit != null && connectionLimit <= 1) {
-            throw new PlansHardBlockError({
-              code: "PLANS_BUCKETS_BLOCKED_BY_DB_POOL",
-              message:
-                "Plans are temporarily unavailable because the database connection pool is exhausted and required usage buckets could not be ensured.",
-              context: {
-                connectionLimit,
-                missingBucketKeys,
-                offerId: String((base as any)?.offerId ?? ""),
-                ratePlanId: templateOk ? ratePlanId : null,
-                route: "/api/dashboard/plans",
-              },
-            });
-          }
           return { status: "NOT_IMPLEMENTED", reason: "MISSING_BUCKETS" };
         }
         // Cache key: (home + ratePlan + engineVersion + tdsp + rateStructure + usageBucketsDigest)
@@ -1999,21 +1939,6 @@ export async function GET(req: NextRequest) {
     };
 
     const shaped = await Promise.all(pageSlice.map(shapeOffer));
-    const connectionLimit = getEffectiveConnectionLimit();
-    if (hasUsage && connectionLimit != null && connectionLimit <= 1 && shouldHardBlockQueuedPlansForConstrainedPool(shaped)) {
-      throw new PlansHardBlockError({
-        code: "PLANS_BLOCKED_BY_DB_POOL",
-        message:
-          "Plans are temporarily unavailable because IntelliWatt calculations cannot run while the database connection pool is exhausted.",
-        context: {
-          connectionLimit,
-          route: "/api/dashboard/plans",
-          pendingOffersOnPage: shaped.filter((offer) => String(offer?.intelliwatt?.statusLabel ?? "").trim().toUpperCase() === "QUEUED")
-            .length,
-        },
-      });
-    }
-
     // Compute bestOffers (proxy ranking) server-side so the UI can render without an extra round-trip.
     // Must never throw; on any failure, fall back to [].
     let bestOffers: any[] = [];
@@ -2229,13 +2154,10 @@ export async function GET(req: NextRequest) {
       },
     );
   } catch (e: any) {
-    const isHardBlock = e instanceof PlansHardBlockError;
     const isPoolExhaustion = isConnectionPoolExhaustionError(e);
-    if (isHardBlock || isPoolExhaustion) {
-      const reasonCode = isHardBlock ? e.code : "PRISMA_POOL_EXHAUSTION";
-      const reasonMessage = isHardBlock
-        ? String(e.message)
-        : "Plans failed because the database connection pool was exhausted.";
+    if (isPoolExhaustion) {
+      const reasonCode = "PRISMA_POOL_EXHAUSTION";
+      const reasonMessage = "Plans failed because the database connection pool was exhausted.";
       await recordSimulationDataAlert({
         source: "PLANS_DASHBOARD",
         userId: alertUserId,
@@ -2249,7 +2171,6 @@ export async function GET(req: NextRequest) {
           route: "/api/dashboard/plans",
           errorCode: String(e?.code ?? ""),
           errorMessage: String(e?.message ?? e ?? ""),
-          ...(isHardBlock && e?.context && typeof e.context === "object" ? e.context : {}),
         },
       }).catch(() => ({ ok: false as const }));
 
@@ -2264,7 +2185,7 @@ export async function GET(req: NextRequest) {
           hardBlock: true,
         },
         {
-          status: isHardBlock ? e.status ?? 503 : 503,
+          status: 503,
           headers: {
             "Cache-Control": "no-store, max-age=0",
           },
