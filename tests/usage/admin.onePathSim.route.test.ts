@@ -36,6 +36,7 @@ const listOnePathScenarioEvents = vi.fn();
 const ensureGlobalOnePathLabTestHomeHouse = vi.fn();
 const getOnePathLabTestHomeLink = vi.fn();
 const replaceGlobalOnePathLabTestHomeFromSource = vi.fn();
+const syncOnePathMissingProfilesFromSource = vi.fn();
 class UpstreamUsageTruthMissingError extends Error {
   code = "usage_truth_missing";
   usageTruthSource: string;
@@ -101,6 +102,7 @@ vi.mock("@/modules/usageSimulator/labTestHome", () => ({
   ensureGlobalOnePathLabTestHomeHouse: (...args: any[]) => ensureGlobalOnePathLabTestHomeHouse(...args),
   getOnePathLabTestHomeLink: (...args: any[]) => getOnePathLabTestHomeLink(...args),
   replaceGlobalOnePathLabTestHomeFromSource: (...args: any[]) => replaceGlobalOnePathLabTestHomeFromSource(...args),
+  syncOnePathMissingProfilesFromSource: (...args: any[]) => syncOnePathMissingProfilesFromSource(...args),
 }));
 
 vi.mock("@/modules/homeProfile/repo", () => ({
@@ -213,6 +215,7 @@ describe("admin one path sim route", () => {
     ensureGlobalOnePathLabTestHomeHouse.mockReset();
     getOnePathLabTestHomeLink.mockReset();
     replaceGlobalOnePathLabTestHomeFromSource.mockReset();
+    syncOnePathMissingProfilesFromSource.mockReset();
     vi.stubEnv("HOME_DETAILS_DATABASE_URL", "");
     vi.stubEnv("APPLIANCES_DATABASE_URL", "");
     vi.stubEnv("USAGE_DATABASE_URL", "");
@@ -251,6 +254,7 @@ describe("admin one path sim route", () => {
       testHomeHouseId: "test-home-1",
       sourceHouseId: "house-1",
     });
+    syncOnePathMissingProfilesFromSource.mockResolvedValue(null);
     resolveUpstreamUsageTruthForSimulation.mockResolvedValue({
       dataset: {
         summary: { totalKwh: 3790, end: "2026-04-14" },
@@ -640,6 +644,59 @@ describe("admin one path sim route", () => {
     expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
     expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
     expect(saveManualUsageInputForUserHouse).not.toHaveBeenCalled();
+  });
+
+  it("hydrates missing pinned test-home profiles from the selected source on lookup", async () => {
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: "esiid-test-1",
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "user-1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-15T00:00:00.000Z"),
+    });
+    getHomeProfileReadOnlyByUserHouse.mockResolvedValueOnce(null);
+    getApplianceProfileSimulatedByUserHouse.mockResolvedValueOnce(null);
+    syncOnePathMissingProfilesFromSource.mockResolvedValueOnce({
+      homeProfile: {
+        squareFeet: 2000,
+        occupantsWork: 1,
+        occupantsSchool: 0,
+        occupantsHomeAllDay: 0,
+        fuelConfiguration: "all_electric",
+        hvacType: "central",
+        heatingType: "heat_pump",
+      },
+      applianceProfile: {
+        appliancesJson: { fuelConfiguration: "all_electric", appliances: [] },
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com", includeDebugDiagnostics: true }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(syncOnePathMissingProfilesFromSource).toHaveBeenCalledWith({
+      ownerUserId: "user-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      testHomeHouseId: "test-home-1",
+    });
+    expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "test-home-1" });
+    expect(json.sourceContext.homeProfile).toEqual(
+      expect.objectContaining({
+        squareFeet: 2000,
+        occupantsWork: 1,
+        fuelConfiguration: "all_electric",
+      })
+    );
   });
 
   it("returns a compact baseline view for green button lookup debug mode", async () => {

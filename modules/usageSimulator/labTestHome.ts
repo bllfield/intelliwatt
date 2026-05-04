@@ -649,6 +649,73 @@ async function copyManualUsageInput(args: {
   });
 }
 
+export async function syncOnePathMissingProfilesFromSource(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+  testHomeHouseId: string;
+}): Promise<{
+  homeProfile: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>;
+  applianceProfile: Awaited<ReturnType<typeof getApplianceProfileSimulatedByUserHouse>>;
+}> {
+  const [targetHomeProfile, targetApplianceProfile, sourceHomeProfile, sourceApplianceProfile] = await Promise.all([
+    getHomeProfileSimulatedByUserHouse({
+      userId: args.ownerUserId,
+      houseId: args.testHomeHouseId,
+    }),
+    getApplianceProfileSimulatedByUserHouse({
+      userId: args.ownerUserId,
+      houseId: args.testHomeHouseId,
+    }),
+    getHomeProfileSimulatedByUserHouse({
+      userId: args.sourceUserId,
+      houseId: args.sourceHouseId,
+    }),
+    getApplianceProfileSimulatedByUserHouse({
+      userId: args.sourceUserId,
+      houseId: args.sourceHouseId,
+    }),
+  ]);
+
+  let syncedHomeProfile = targetHomeProfile;
+  let syncedApplianceProfile = targetApplianceProfile;
+
+  if (!syncedHomeProfile && sourceHomeProfile) {
+    await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
+      where: { userId_houseId: { userId: args.ownerUserId, houseId: args.testHomeHouseId } },
+      create: {
+        userId: args.ownerUserId,
+        houseId: args.testHomeHouseId,
+        ...sourceHomeProfile,
+      },
+      update: {
+        ...sourceHomeProfile,
+      },
+    });
+    syncedHomeProfile = sourceHomeProfile;
+  }
+
+  if (!syncedApplianceProfile?.appliancesJson && sourceApplianceProfile?.appliancesJson) {
+    await (appliancesPrisma as any).applianceProfileSimulated.upsert({
+      where: { userId_houseId: { userId: args.ownerUserId, houseId: args.testHomeHouseId } },
+      create: {
+        userId: args.ownerUserId,
+        houseId: args.testHomeHouseId,
+        appliancesJson: sourceApplianceProfile.appliancesJson,
+      },
+      update: {
+        appliancesJson: sourceApplianceProfile.appliancesJson,
+      },
+    });
+    syncedApplianceProfile = sourceApplianceProfile;
+  }
+
+  return {
+    homeProfile: syncedHomeProfile ?? null,
+    applianceProfile: syncedApplianceProfile ?? null,
+  };
+}
+
 export async function replaceGlobalLabTestHomeFromSource(args: {
   ownerUserId: string;
   sourceUserId: string;
@@ -1054,43 +1121,12 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       statusMessage: "Main DB replacement complete; syncing One Path profiles and actual-usage isolation.",
     });
 
-    const [sourceHomeProfile, sourceApplianceProfile] = await Promise.all([
-      getHomeProfileSimulatedByUserHouse({
-        userId: args.sourceUserId,
-        houseId: args.sourceHouseId,
-      }),
-      getApplianceProfileSimulatedByUserHouse({
-        userId: args.sourceUserId,
-        houseId: args.sourceHouseId,
-      }),
-    ]);
-
-    if (sourceHomeProfile) {
-      await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
-        where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
-        create: {
-          userId: args.ownerUserId,
-          houseId: testHome.id,
-          ...sourceHomeProfile,
-        },
-        update: {
-          ...sourceHomeProfile,
-        },
-      });
-    }
-    if (sourceApplianceProfile?.appliancesJson) {
-      await (appliancesPrisma as any).applianceProfileSimulated.upsert({
-        where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
-        create: {
-          userId: args.ownerUserId,
-          houseId: testHome.id,
-          appliancesJson: sourceApplianceProfile.appliancesJson,
-        },
-        update: {
-          appliancesJson: sourceApplianceProfile.appliancesJson,
-        },
-      });
-    }
+    await syncOnePathMissingProfilesFromSource({
+      ownerUserId: args.ownerUserId,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      testHomeHouseId: testHome.id,
+    });
 
     await cloneOnePathGreenButtonUsageFromSource({
       sourceHouseId: args.sourceHouseId,

@@ -26,6 +26,7 @@ import {
   getOnePathLabTestHomeLink,
   ONE_PATH_LAB_TEST_HOME_LABEL,
   replaceGlobalOnePathLabTestHomeFromSource,
+  syncOnePathMissingProfilesFromSource,
 } from "@/modules/usageSimulator/labTestHome";
 import {
   getOnePathManualUsageInput,
@@ -753,6 +754,16 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const syncedPinnedProfiles =
+    onePathTestHomeState.isPinned && effectiveHouseId
+      ? await syncOnePathMissingProfilesFromSource({
+          ownerUserId,
+          sourceUserId: resolved.userId,
+          sourceHouseId: resolved.selectedHouse.id,
+          testHomeHouseId: effectiveHouseId,
+        }).catch(() => null)
+      : null;
+
   if ((action === "load_manual" || action === "save_manual" || action === "run") && onePathTestHomeState.needsReplace) {
     return NextResponse.json(
       {
@@ -1298,7 +1309,7 @@ export async function POST(request: NextRequest) {
     previewSimulationVariablePolicy = null;
   }
 
-  const [usageTruth, manualUsage, homeProfile, applianceProfileRecord, travelRangesFromDb] = await Promise.all([
+  const [usageTruth, manualUsage, fetchedHomeProfile, fetchedApplianceProfileRecord, travelRangesFromDb] = await Promise.all([
     resolveOnePathUpstreamUsageTruthForSimulation({
       userId: effectiveUserId,
       houseId: effectiveHouseId,
@@ -1315,6 +1326,8 @@ export async function POST(request: NextRequest) {
     getApplianceProfileSimulatedByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null),
     getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
   ]);
+  const homeProfile = fetchedHomeProfile ?? syncedPinnedProfiles?.homeProfile ?? null;
+  const applianceProfileRecord = fetchedApplianceProfileRecord ?? syncedPinnedProfiles?.applianceProfile ?? null;
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const adminManualSeeds =
     (previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL") &&
