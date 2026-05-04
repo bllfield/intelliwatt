@@ -996,7 +996,9 @@ export async function POST(request: NextRequest) {
             mode,
             houseId: effectiveHouseId,
             stageTimingsMs,
-            promise: buildIntervalLikeBaselinePassthroughDataset(engineInput),
+            promise: buildIntervalLikeBaselinePassthroughDataset(engineInput, {
+              skipGreenButtonInsightHydration: true,
+            }),
           })
         );
         const baselineDatasetMeta = asRecord(baselineDataset?.meta);

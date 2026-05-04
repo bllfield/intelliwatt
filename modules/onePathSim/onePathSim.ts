@@ -1499,7 +1499,10 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
 }
 
 export async function buildIntervalLikeBaselinePassthroughDataset(
-  engineInput: CanonicalSimulationEngineInput
+  engineInput: CanonicalSimulationEngineInput,
+  options?: {
+    skipGreenButtonInsightHydration?: boolean;
+  }
 ): Promise<Record<string, unknown>> {
   if (!isBaselinePassthroughInput(engineInput) || !isIntervalLikeInputType(engineInput.inputType)) {
     throw new Error("Interval-like baseline passthrough dataset requires a baseline interval-like engine input.");
@@ -1534,10 +1537,12 @@ export async function buildIntervalLikeBaselinePassthroughDataset(
     upstreamUsageTruth,
   }) as Record<string, any>;
   return engineInput.inputType === "GREEN_BUTTON"
-    ? ((await enrichGreenButtonBaselinePassthroughDataset({
-        engineInput,
-        dataset,
-      })) as Record<string, unknown>)
+    ? options?.skipGreenButtonInsightHydration === true
+      ? (dataset as Record<string, unknown>)
+      : ((await enrichGreenButtonBaselinePassthroughDataset({
+          engineInput,
+          dataset,
+        })) as Record<string, unknown>)
     : (dataset as Record<string, unknown>);
 }
 
