@@ -4,6 +4,7 @@ import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
 import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { validateHomeProfile } from "@/modules/homeProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 
 export const GAPFILL_LAB_TEST_HOME_LABEL = "GAPFILL_CANONICAL_LAB_TEST_HOME";
@@ -84,6 +85,15 @@ async function getNamedLabLinkModelIfAvailable(kind: "gapfill" | "onePath"): Pro
     namedLabLinkTableAvailability[kind] = false;
     return null;
   }
+}
+
+function normalizeHomeProfileForPersistence(
+  profile: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>
+): Record<string, unknown> | null {
+  if (!profile) return null;
+  const validated = validateHomeProfile(profile, { requirePastBaselineFields: true });
+  if (!validated.ok) return null;
+  return validated.value as Record<string, unknown>;
 }
 
 export async function getLabTestHomeLink(
@@ -681,9 +691,10 @@ export async function syncOnePathMissingProfilesFromSource(args: {
   let syncedHomeProfile = targetHomeProfile;
   let syncedApplianceProfile = targetApplianceProfile;
   const shouldOverwriteExisting = args.overwriteExisting === true;
+  const sourceHomeProfileForPersistence = normalizeHomeProfileForPersistence(sourceHomeProfile);
 
   if (
-    sourceHomeProfile &&
+    sourceHomeProfileForPersistence &&
     (!syncedHomeProfile || (shouldOverwriteExisting && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
   ) {
     await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
@@ -691,10 +702,10 @@ export async function syncOnePathMissingProfilesFromSource(args: {
       create: {
         userId: args.ownerUserId,
         houseId: args.testHomeHouseId,
-        ...sourceHomeProfile,
+        ...sourceHomeProfileForPersistence,
       },
       update: {
-        ...sourceHomeProfile,
+        ...sourceHomeProfileForPersistence,
       },
     });
     syncedHomeProfile = sourceHomeProfile;
@@ -838,16 +849,17 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       }),
     ]);
 
-    if (sourceHomeProfile) {
+    const sourceHomeProfileForPersistence = normalizeHomeProfileForPersistence(sourceHomeProfile);
+    if (sourceHomeProfileForPersistence) {
       await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
         where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
         create: {
           userId: args.ownerUserId,
           houseId: testHome!.id,
-          ...sourceHomeProfile,
+          ...sourceHomeProfileForPersistence,
         },
         update: {
-          ...sourceHomeProfile,
+          ...sourceHomeProfileForPersistence,
         },
       });
     }
@@ -986,16 +998,17 @@ export async function replaceGlobalManualMonthlyLabTestHomeFromSource(args: {
       }),
     ]);
 
-    if (sourceHomeProfile) {
+    const sourceHomeProfileForPersistence = normalizeHomeProfileForPersistence(sourceHomeProfile);
+    if (sourceHomeProfileForPersistence) {
       await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
         where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
         create: {
           userId: args.ownerUserId,
           houseId: testHome!.id,
-          ...sourceHomeProfile,
+          ...sourceHomeProfileForPersistence,
         },
         update: {
-          ...sourceHomeProfile,
+          ...sourceHomeProfileForPersistence,
         },
       });
     }
