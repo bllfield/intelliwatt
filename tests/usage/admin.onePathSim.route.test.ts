@@ -688,6 +688,7 @@ describe("admin one path sim route", () => {
       sourceUserId: "user-1",
       sourceHouseId: "house-1",
       testHomeHouseId: "test-home-1",
+      overwriteExisting: true,
     });
     expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "test-home-1" });
     expect(json.sourceContext.homeProfile).toEqual(

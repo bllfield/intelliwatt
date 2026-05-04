@@ -654,6 +654,7 @@ export async function syncOnePathMissingProfilesFromSource(args: {
   sourceUserId: string;
   sourceHouseId: string;
   testHomeHouseId: string;
+  overwriteExisting?: boolean;
 }): Promise<{
   homeProfile: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>;
   applianceProfile: Awaited<ReturnType<typeof getApplianceProfileSimulatedByUserHouse>>;
@@ -679,8 +680,12 @@ export async function syncOnePathMissingProfilesFromSource(args: {
 
   let syncedHomeProfile = targetHomeProfile;
   let syncedApplianceProfile = targetApplianceProfile;
+  const shouldOverwriteExisting = args.overwriteExisting === true;
 
-  if (!syncedHomeProfile && sourceHomeProfile) {
+  if (
+    sourceHomeProfile &&
+    (!syncedHomeProfile || (shouldOverwriteExisting && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
+  ) {
     await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
       where: { userId_houseId: { userId: args.ownerUserId, houseId: args.testHomeHouseId } },
       create: {
@@ -695,7 +700,12 @@ export async function syncOnePathMissingProfilesFromSource(args: {
     syncedHomeProfile = sourceHomeProfile;
   }
 
-  if (!syncedApplianceProfile?.appliancesJson && sourceApplianceProfile?.appliancesJson) {
+  if (
+    sourceApplianceProfile?.appliancesJson &&
+    (!syncedApplianceProfile?.appliancesJson ||
+      (shouldOverwriteExisting &&
+        JSON.stringify(syncedApplianceProfile.appliancesJson) !== JSON.stringify(sourceApplianceProfile.appliancesJson)))
+  ) {
     await (appliancesPrisma as any).applianceProfileSimulated.upsert({
       where: { userId_houseId: { userId: args.ownerUserId, houseId: args.testHomeHouseId } },
       create: {

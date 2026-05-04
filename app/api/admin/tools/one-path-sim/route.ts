@@ -761,6 +761,7 @@ export async function POST(request: NextRequest) {
           sourceUserId: resolved.userId,
           sourceHouseId: resolved.selectedHouse.id,
           testHomeHouseId: effectiveHouseId,
+          overwriteExisting: action === "lookup",
         }).catch(() => null)
       : null;
 
