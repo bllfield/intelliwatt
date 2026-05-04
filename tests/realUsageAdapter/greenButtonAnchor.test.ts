@@ -61,4 +61,29 @@ describe("green button full-day anchor", () => {
 
     expect(out).toBe("2025-12-01");
   });
+
+  it("rebases older Green Button intervals into the active coverage window", async () => {
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2025-12-01T06:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([
+        { ts: new Date("2025-01-15T12:00:00.000Z"), kwh: 1.25 },
+        { ts: new Date("2025-09-01T12:00:00.000Z"), kwh: 2.5 },
+      ]);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-05-03",
+      coverageEndDate: "2026-05-02",
+    });
+
+    expect(out.intervals.map((row) => row.timestamp.slice(0, 10))).toEqual(["2025-09-01", "2026-01-15"]);
+    expect(out.shiftedIntervalCount).toBe(1);
+    expect(out.shiftedDateCount).toBe(1);
+    expect(String(out.displayWindowNote ?? "")).toContain("shifted into the current coverage window");
+    expect(out.sourceCoverageStart).toBe("2024-12-02");
+    expect(out.sourceCoverageEnd).toBe("2025-12-01");
+  });
 });

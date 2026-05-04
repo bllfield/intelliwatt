@@ -7,6 +7,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { hasActualIntervals, resolveActualUsageSourceAnchor } from "@/modules/realUsageAdapter/actual";
+import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import {
   getActualDailyKwhForLocalDateKeys,
@@ -4728,7 +4729,7 @@ async function recalcSimulatorBuildImpl(args: {
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
   const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
   const recalcIntervalPreload =
-    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
+    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME && actualSource !== "GREEN_BUTTON"
       ? createRecalcIntervalPreloadContext({
           houseId: actualContextHouseId,
           esiid: esiid ?? null,
@@ -4785,6 +4786,14 @@ async function recalcSimulatorBuildImpl(args: {
         stratifyByMonth: true,
         stratifyByWeekend: true,
         loadIntervalsForWindow: async () => {
+          if (actualSource === "GREEN_BUTTON") {
+            const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+              houseId: actualContextHouseId,
+              coverageStartDate: selectionStart,
+              coverageEndDate: selectionEnd,
+            });
+            return rebased.intervals;
+          }
           if (recalcIntervalPreload) {
             const preloaded = await recalcIntervalPreload.getIntervals({
               startDate: selectionStart,

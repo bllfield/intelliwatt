@@ -268,6 +268,8 @@ export function buildOnePathRunReadOnlyView(args: {
       displayWindowNote:
         typeof meta?.manualDisplayWindowNote === "string" && meta.manualDisplayWindowNote.trim().length > 0
           ? meta.manualDisplayWindowNote
+          : typeof meta?.displayWindowNote === "string" && meta.displayWindowNote.trim().length > 0
+            ? meta.displayWindowNote
           : null,
       intervalsCount: viewModel.coverage.intervalsCount,
       weatherBasisLabel: viewModel.coverage.weatherBasisLabel,

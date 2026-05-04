@@ -37,6 +37,71 @@ function chicagoDateKeyFromBucket(bucket: Date): string {
   return dateTimePartsInTimezone(bucket, "America/Chicago")?.dateKey ?? bucket.toISOString().slice(0, 10);
 }
 
+function chicagoDateKeyFromIsoTimestamp(timestamp: string): string | null {
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return dateTimePartsInTimezone(parsed, "America/Chicago")?.dateKey ?? parsed.toISOString().slice(0, 10);
+}
+
+function normalizeDateKey(value: unknown): string | null {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function shiftDateKeyByDays(dateKey: string, days: number): string {
+  const parsed = new Date(`${dateKey}T12:00:00.000Z`);
+  return new Date(parsed.getTime() + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+function shiftIsoTimestampByWholeYears(timestamp: string, years: number): string | null {
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const targetYear = parsed.getUTCFullYear() + years;
+  const monthIndex = parsed.getUTCMonth();
+  const clampedDay = Math.min(parsed.getUTCDate(), new Date(Date.UTC(targetYear, monthIndex + 1, 0)).getUTCDate());
+  return new Date(
+    Date.UTC(
+      targetYear,
+      monthIndex,
+      clampedDay,
+      parsed.getUTCHours(),
+      parsed.getUTCMinutes(),
+      parsed.getUTCSeconds(),
+      parsed.getUTCMilliseconds()
+    )
+  ).toISOString();
+}
+
+function coverageWindowFromCanonicalMonths(months: string[]): { startDate: string; endDate: string } | null {
+  const first = parseYearMonth(months[0] ?? "");
+  const last = parseYearMonth(months[months.length - 1] ?? "");
+  if (!first || !last) return null;
+  const lastDay = new Date(Date.UTC(last.year, last.month1, 0)).getUTCDate();
+  return {
+    startDate: `${String(first.year)}-${String(first.month1).padStart(2, "0")}-01`,
+    endDate: `${String(last.year)}-${String(last.month1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+function resolveSourceCoverageWindowFromAnchorEnd(anchorEndDate: string): { startDate: string; endDate: string } | null {
+  const normalizedEnd = normalizeDateKey(anchorEndDate);
+  if (!normalizedEnd) return null;
+  return {
+    startDate: shiftDateKeyByDays(normalizedEnd, -364),
+    endDate: normalizedEnd,
+  };
+}
+
+export type GreenButtonCoverageWindowIntervals = {
+  intervals: Array<{ timestamp: string; kwh: number }>;
+  intervalsCount: number;
+  sourceCoverageStart: string | null;
+  sourceCoverageEnd: string | null;
+  shiftedIntervalCount: number;
+  shiftedDateCount: number;
+  displayWindowNote: string | null;
+};
+
 function excludeDateKeysFragment(excludeDateKeys: string[] | undefined): Prisma.Sql {
   if (!excludeDateKeys?.length) return Prisma.sql``;
   return Prisma.sql` AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::timestamp, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), ", ")})`;
@@ -144,28 +209,143 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
   }
 }
 
-export async function hasGreenButtonIntervals(args: { houseId: string; canonicalMonths: string[] }): Promise<boolean> {
-  if (!USAGE_DB_ENABLED) return false;
+export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
+  houseId: string;
+  coverageStartDate: string;
+  coverageEndDate: string;
+  excludeDateKeys?: string[];
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
+}): Promise<GreenButtonCoverageWindowIntervals> {
+  const coverageStartDate = normalizeDateKey(args.coverageStartDate);
+  const coverageEndDate = normalizeDateKey(args.coverageEndDate);
+  if (!USAGE_DB_ENABLED || !coverageStartDate || !coverageEndDate || coverageStartDate > coverageEndDate) {
+    return {
+      intervals: [],
+      intervalsCount: 0,
+      sourceCoverageStart: null,
+      sourceCoverageEnd: null,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      displayWindowNote: null,
+    };
+  }
   const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
-  if (!rawId) return false;
-  if (!args.canonicalMonths.length) return false;
-  const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
+  if (!rawId) {
+    return {
+      intervals: [],
+      intervalsCount: 0,
+      sourceCoverageStart: null,
+      sourceCoverageEnd: null,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      displayWindowNote: null,
+    };
+  }
+  const anchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId: args.houseId });
+  const sourceCoverageWindow = anchorEndDate ? resolveSourceCoverageWindowFromAnchorEnd(anchorEndDate) : null;
+  if (!sourceCoverageWindow) {
+    return {
+      intervals: [],
+      intervalsCount: 0,
+      sourceCoverageStart: null,
+      sourceCoverageEnd: null,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      displayWindowNote: null,
+    };
+  }
+
+  const start = new Date(`${sourceCoverageWindow.startDate}T00:00:00.000Z`);
+  const endExclusive = new Date(new Date(`${sourceCoverageWindow.endDate}T00:00:00.000Z`).getTime() + 2 * DAY_MS);
+  const mergedExclude = [
+    ...(args.excludeDateKeys ?? []),
+    ...travelRangesToExcludeDateKeys(args.travelRanges),
+  ]
+    .map((dateKey) => normalizeDateKey(dateKey))
+    .filter((dateKey): dateKey is string => dateKey != null);
+  const excludeTargetDateKeys = new Set<string>(mergedExclude);
 
   try {
     const usageClient = usagePrisma as any;
     const rows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT COUNT(*)::int AS c
+      SELECT "timestamp" AS ts, "consumptionKwh"::float AS kwh
       FROM "GreenButtonInterval"
       WHERE "homeId" = ${args.houseId}
         AND "rawId" = ${rawId}
         AND "timestamp" >= ${start}
         AND "timestamp" < ${endExclusive}
-      LIMIT 1
-    `)) as Array<{ c: number }>;
-    return (Number(rows?.[0]?.c ?? 0) || 0) > 0;
+      ORDER BY "timestamp" ASC
+    `)) as Array<{ ts: Date; kwh: number }>;
+
+    const byTimestamp = new Map<string, number>();
+    const shiftedDateKeys = new Set<string>();
+    let shiftedIntervalCount = 0;
+
+    for (const row of rows) {
+      const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
+      let rebasedTimestamp = rawTimestamp;
+      let targetDateKey = chicagoDateKeyFromIsoTimestamp(rebasedTimestamp);
+      if (!targetDateKey) continue;
+      let shifted = false;
+      while (targetDateKey < coverageStartDate) {
+        const advanced = shiftIsoTimestampByWholeYears(rebasedTimestamp, 1);
+        if (!advanced || advanced === rebasedTimestamp) break;
+        rebasedTimestamp = advanced;
+        targetDateKey = chicagoDateKeyFromIsoTimestamp(rebasedTimestamp);
+        shifted = true;
+        if (!targetDateKey) break;
+      }
+      if (!targetDateKey || targetDateKey < coverageStartDate || targetDateKey > coverageEndDate) continue;
+      if (excludeTargetDateKeys.has(targetDateKey)) continue;
+      if (shifted) {
+        shiftedIntervalCount += 1;
+        shiftedDateKeys.add(targetDateKey);
+      }
+      byTimestamp.set(rebasedTimestamp, (byTimestamp.get(rebasedTimestamp) ?? 0) + (Number(row.kwh) || 0));
+    }
+
+    const intervals = Array.from(byTimestamp.entries())
+      .map(([timestamp, kwh]) => ({
+        timestamp,
+        kwh: Number(kwh) || 0,
+      }))
+      .sort((left, right) => (left.timestamp < right.timestamp ? -1 : left.timestamp > right.timestamp ? 1 : 0));
+    const displayWindowNote =
+      shiftedIntervalCount > 0
+        ? "Historical Green Button intervals were shifted into the current coverage window so available actual data stays in the Past Sim pool up to the current date. Travel/Vacant dates remain excluded."
+        : null;
+
+    return {
+      intervals,
+      intervalsCount: intervals.length,
+      sourceCoverageStart: sourceCoverageWindow.startDate,
+      sourceCoverageEnd: sourceCoverageWindow.endDate,
+      shiftedIntervalCount,
+      shiftedDateCount: shiftedDateKeys.size,
+      displayWindowNote,
+    };
   } catch {
-    return false;
+    return {
+      intervals: [],
+      intervalsCount: 0,
+      sourceCoverageStart: sourceCoverageWindow.startDate,
+      sourceCoverageEnd: sourceCoverageWindow.endDate,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      displayWindowNote: null,
+    };
   }
+}
+
+export async function hasGreenButtonIntervals(args: { houseId: string; canonicalMonths: string[] }): Promise<boolean> {
+  const coverageWindow = coverageWindowFromCanonicalMonths(args.canonicalMonths);
+  if (!coverageWindow) return false;
+  const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+    houseId: args.houseId,
+    coverageStartDate: coverageWindow.startDate,
+    coverageEndDate: coverageWindow.endDate,
+  });
+  return rebased.intervalsCount > 0;
 }
 
 export async function fetchGreenButtonCanonicalMonthlyTotals(args: {
@@ -174,45 +354,25 @@ export async function fetchGreenButtonCanonicalMonthlyTotals(args: {
   excludeDateKeys?: string[];
   travelRanges?: Array<{ startDate: string; endDate: string }>;
 }) {
-  if (!USAGE_DB_ENABLED) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
-  const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
-  if (!rawId) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
-  if (!args.canonicalMonths.length) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
-
-  const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
-  const monthSet = new Set(args.canonicalMonths);
-  const travelKeys = args.travelRanges?.length ? travelRangesToExcludeDateKeys(args.travelRanges) : [];
-  const mergedExclude = [...(args.excludeDateKeys ?? []), ...travelKeys];
-  const exclude = mergedExclude.length ? mergedExclude : args.excludeDateKeys;
-  const excludeFrag = excludeDateKeysFragment(exclude);
-
+  const coverageWindow = coverageWindowFromCanonicalMonths(args.canonicalMonths);
+  if (!coverageWindow) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
   try {
-    const usageClient = usagePrisma as any;
-    const rows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT
-        date_trunc('month', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
-        COALESCE(SUM("consumptionKwh"), 0)::float AS kwh,
-        COUNT(*)::int AS intervalscount
-      FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId}
-        AND "rawId" = ${rawId}
-        AND "timestamp" >= ${start}
-        AND "timestamp" < ${endExclusive}
-        ${excludeFrag}
-      GROUP BY bucket
-      ORDER BY bucket ASC
-    `)) as Array<{ bucket: Date; kwh: number; intervalscount: number }>;
-
+    const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: args.houseId,
+      coverageStartDate: coverageWindow.startDate,
+      coverageEndDate: coverageWindow.endDate,
+      excludeDateKeys: args.excludeDateKeys,
+      travelRanges: args.travelRanges,
+    });
+    const monthSet = new Set(args.canonicalMonths);
     const monthlyKwhByMonth: Record<string, number> = {};
-    let intervalsCount = 0;
-    for (const r of rows) {
-      const ym = chicagoYearMonthFromBucket(r.bucket);
-      if (!monthSet.has(ym)) continue;
-      monthlyKwhByMonth[ym] = Number(r.kwh) || 0;
-      intervalsCount += Number(r.intervalscount) || 0;
+    for (const row of rebased.intervals) {
+      const parts = dateTimePartsInTimezone(new Date(row.timestamp), "America/Chicago");
+      const yearMonth = parts?.yearMonth ?? row.timestamp.slice(0, 7);
+      if (!monthSet.has(yearMonth)) continue;
+      monthlyKwhByMonth[yearMonth] = (monthlyKwhByMonth[yearMonth] ?? 0) + (Number(row.kwh) || 0);
     }
-
-    return { intervalsCount, monthlyKwhByMonth };
+    return { intervalsCount: rebased.intervalsCount, monthlyKwhByMonth };
   } catch {
     return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
   }
@@ -222,37 +382,21 @@ export async function fetchGreenButtonCanonicalDailyTotals(args: {
   houseId: string;
   canonicalMonths: string[];
 }) {
-  if (!USAGE_DB_ENABLED) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
-  const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
-  if (!rawId) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
-  if (!args.canonicalMonths.length) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
-
-  const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
+  const coverageWindow = coverageWindowFromCanonicalMonths(args.canonicalMonths);
+  if (!coverageWindow) return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
   try {
-    const usageClient = usagePrisma as any;
-    const rows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT
-        date_trunc('day', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
-        COALESCE(SUM("consumptionKwh"), 0)::float AS kwh,
-        COUNT(*)::int AS intervalscount
-      FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId}
-        AND "rawId" = ${rawId}
-        AND "timestamp" >= ${start}
-        AND "timestamp" < ${endExclusive}
-      GROUP BY bucket
-      ORDER BY bucket ASC
-    `)) as Array<{ bucket: Date; kwh: number; intervalscount: number }>;
-
+    const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: args.houseId,
+      coverageStartDate: coverageWindow.startDate,
+      coverageEndDate: coverageWindow.endDate,
+    });
     const dailyKwhByDateKey: Record<string, number> = {};
-    let intervalsCount = 0;
-    for (const row of rows) {
-      const dateKey = chicagoDateKeyFromBucket(row.bucket);
-      dailyKwhByDateKey[dateKey] = Number(row.kwh) || 0;
-      intervalsCount += Number(row.intervalscount) || 0;
+    for (const row of rebased.intervals) {
+      const dateKey = chicagoDateKeyFromIsoTimestamp(row.timestamp);
+      if (!dateKey) continue;
+      dailyKwhByDateKey[dateKey] = (dailyKwhByDateKey[dateKey] ?? 0) + (Number(row.kwh) || 0);
     }
-
-    return { intervalsCount, dailyKwhByDateKey };
+    return { intervalsCount: rebased.intervalsCount, dailyKwhByDateKey };
   } catch {
     return { intervalsCount: 0, dailyKwhByDateKey: {} as Record<string, number> };
   }
@@ -264,44 +408,29 @@ export async function fetchGreenButtonIntradayShape96(args: {
   excludeDateKeys?: string[];
   travelRanges?: Array<{ startDate: string; endDate: string }>;
 }): Promise<number[] | null> {
-  if (!USAGE_DB_ENABLED) return null;
-  const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
-  if (!rawId) return null;
-  if (!args.canonicalMonths.length) return null;
-
-  const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
-  const travelKeys = args.travelRanges?.length ? travelRangesToExcludeDateKeys(args.travelRanges) : [];
-  const mergedExclude = [...(args.excludeDateKeys ?? []), ...travelKeys];
-  const exclude = mergedExclude.length ? mergedExclude : args.excludeDateKeys;
-  const excludeFrag = excludeDateKeysFragment(exclude);
-
+  const coverageWindow = coverageWindowFromCanonicalMonths(args.canonicalMonths);
+  if (!coverageWindow) return null;
   try {
-    const usageClient = usagePrisma as any;
-    const rows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT
-        (EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago'))::int * 4 + FLOOR(EXTRACT(MINUTE FROM ("timestamp" AT TIME ZONE 'America/Chicago'))::int / 15))::int AS bucket,
-        COALESCE(SUM("consumptionKwh"), 0)::float AS kwh
-      FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId}
-        AND "rawId" = ${rawId}
-        AND "timestamp" >= ${start}
-        AND "timestamp" < ${endExclusive}
-        ${excludeFrag}
-      GROUP BY bucket
-      ORDER BY bucket ASC
-    `)) as Array<{ bucket: number; kwh: number }>;
-
+    const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: args.houseId,
+      coverageStartDate: coverageWindow.startDate,
+      coverageEndDate: coverageWindow.endDate,
+      excludeDateKeys: args.excludeDateKeys,
+      travelRanges: args.travelRanges,
+    });
     const vec = Array.from({ length: 96 }, () => 0);
     let total = 0;
-    for (const r of rows) {
-      const b = Number(r.bucket);
-      if (!Number.isFinite(b) || b < 0 || b >= 96) continue;
-      const kwh = Number(r.kwh) || 0;
-      vec[b] += kwh;
+    for (const row of rebased.intervals) {
+      const parts = dateTimePartsInTimezone(new Date(row.timestamp), "America/Chicago");
+      if (!parts) continue;
+      const bucket = parts.hour * 4 + Math.floor(parts.minute / 15);
+      if (!Number.isFinite(bucket) || bucket < 0 || bucket >= 96) continue;
+      const kwh = Number(row.kwh) || 0;
+      vec[bucket] += kwh;
       total += kwh;
     }
     if (total <= 0) return null;
-    return vec.map((x) => x / total);
+    return vec.map((value) => value / total);
   } catch {
     return null;
   }

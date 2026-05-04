@@ -23,6 +23,7 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsa
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
 import { buildMonthKeyedDailyAverages } from "@/modules/usageShapeProfile/derive";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
@@ -1614,6 +1615,12 @@ export async function simulatePastUsageDataset(
       resolvedSimFingerprint?.blendMode === "whole_home_only" ||
       resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
     const useWholeHomeOnlyLowDataFastPath = isLowDataSharedPastMode && usesWholeHomeOnlyPrior;
+    const intervalActualSource =
+      (buildInputs as { snapshots?: { actualSource?: unknown } }).snapshots?.actualSource === "GREEN_BUTTON"
+        ? "GREEN_BUTTON"
+        : (buildInputs as { snapshots?: { actualSource?: unknown } }).snapshots?.actualSource === "SMT"
+          ? "SMT"
+          : null;
     const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     const lowDataSyntheticContextBase: {
@@ -1633,11 +1640,27 @@ export async function simulatePastUsageDataset(
               (buildInputs as SimulatorBuildInputsV1).manualTravelVacantDonorPoolMode ?? null,
           }
         : null;
-    const fetchedActualIntervals = preloadedIntervals
+    const greenButtonCoverageIntervals =
+      preloadedIntervals != null || isLowDataSharedPastMode || intervalActualSource !== "GREEN_BUTTON"
+        ? null
+        : await fetchGreenButtonIntervalsForCoverageWindow({
+            houseId: actualHouseId,
+            coverageStartDate: startDate,
+            coverageEndDate: endDate,
+          });
+    const fetchedActualIntervals = greenButtonCoverageIntervals
+      ? greenButtonCoverageIntervals.intervals
+      : preloadedIntervals
       ? null
       : isLowDataSharedPastMode
         ? null
-        : (await getActualIntervalsForRange({ houseId: actualHouseId, esiid, startDate, endDate })).map((p) => ({
+        : (await getActualIntervalsForRange({
+            houseId: actualHouseId,
+            esiid,
+            startDate,
+            endDate,
+            preferredSource: intervalActualSource,
+          })).map((p) => ({
           timestamp: p.timestamp,
           kwh: p.kwh,
         }));
@@ -2479,6 +2502,11 @@ export async function simulatePastUsageDataset(
           intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
           coverageStart: dataset?.summary?.start ?? startDate,
           coverageEnd: dataset?.summary?.end ?? endDate,
+          displayWindowNote: greenButtonCoverageIntervals?.displayWindowNote ?? undefined,
+          greenButtonSourceCoverageStart: greenButtonCoverageIntervals?.sourceCoverageStart ?? undefined,
+          greenButtonSourceCoverageEnd: greenButtonCoverageIntervals?.sourceCoverageEnd ?? undefined,
+          greenButtonShiftedIntervalCount: greenButtonCoverageIntervals?.shiftedIntervalCount ?? undefined,
+          greenButtonShiftedDateCount: greenButtonCoverageIntervals?.shiftedDateCount ?? undefined,
           actualDayCount:
             typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
               ? pastDayCounts.totalDays - pastDayCounts.simulatedDays

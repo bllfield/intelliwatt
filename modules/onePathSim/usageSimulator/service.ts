@@ -7,6 +7,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/onePathSim/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/onePathSim/usageSimulator/requirements";
 import { hasActualIntervals, resolveActualUsageSourceAnchor } from "@/modules/realUsageAdapter/actual";
+import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import {
   getActualDailyKwhForLocalDateKeys,
@@ -3771,6 +3772,7 @@ export function resolveSharedPastRecalcWindow(args: {
   canonicalMonths: string[];
   smtAnchorPeriods?: Array<{ startDate: string; endDate: string }> | undefined;
   manualCanonicalPeriods?: Array<{ startDate: string; endDate: string }> | undefined;
+  intervalActualSource?: "SMT" | "GREEN_BUTTON" | null;
 }): {
   startDate: string;
   endDate: string;
@@ -3798,7 +3800,12 @@ export function resolveSharedPastRecalcWindow(args: {
     }
   }
 
-  if (args.mode === "SMT_BASELINE" && Array.isArray(args.smtAnchorPeriods) && args.smtAnchorPeriods.length > 0) {
+  if (
+    args.mode === "SMT_BASELINE" &&
+    args.intervalActualSource !== "GREEN_BUTTON" &&
+    Array.isArray(args.smtAnchorPeriods) &&
+    args.smtAnchorPeriods.length > 0
+  ) {
     const sortedPeriods = args.smtAnchorPeriods
       .map((period) => ({
         startDate: String(period.startDate ?? "").slice(0, 10),
@@ -4007,6 +4014,7 @@ function canonicalMonthsForRecalc(args: {
   manualUsagePayload: ManualUsagePayloadAny | null;
   intervalAnchorEndDate?: string | null;
   intervalActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  allowGreenButtonAnchorWindow?: boolean;
   now?: Date;
 }) {
   const now = args.now ?? new Date();
@@ -4040,6 +4048,7 @@ function canonicalMonthsForRecalc(args: {
 
   if (
     args.mode === "SMT_BASELINE" &&
+    args.allowGreenButtonAnchorWindow !== false &&
     args.intervalActualSource === "GREEN_BUTTON" &&
     typeof args.intervalAnchorEndDate === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(args.intervalAnchorEndDate)
@@ -4248,6 +4257,7 @@ async function recalcSimulatorBuildImpl(args: {
     manualUsagePayload,
     intervalAnchorEndDate: actualSourceAnchor.anchorEndDate,
     intervalActualSource: actualSourceAnchor.source,
+    allowGreenButtonAnchorWindow: !scenarioId,
     now: args.now,
   });
   const actualOk = mode === "SMT_BASELINE"
@@ -4391,7 +4401,8 @@ async function recalcSimulatorBuildImpl(args: {
     console.warn("[usageSimulator] weather sensitivity pre-sim derivation failed", error);
   }
 
-  // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).
+  // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned
+  // unless Green Button Past needs the shared current coverage window for date rebasing into the present year.
   let canonicalForBuild = canonical;
   let baselineInputsForRecalc: any = null;
   if (scenarioId) {
@@ -4404,6 +4415,10 @@ async function recalcSimulatorBuildImpl(args: {
     const baselineInputs = baselineBuild?.buildInputs as any;
     baselineInputsForRecalc = baselineInputs;
     if (
+      !(
+        scenario?.name === WORKSPACE_PAST_NAME &&
+        (baselineInputs?.snapshots?.actualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON")
+      ) &&
       Array.isArray(baselineInputs?.canonicalMonths) &&
       baselineInputs.canonicalMonths.length > 0 &&
       typeof baselineInputs.canonicalEndMonth === "string"
@@ -4896,7 +4911,7 @@ async function recalcSimulatorBuildImpl(args: {
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
   const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
   const recalcIntervalPreload =
-    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME
+    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME && actualSource !== "GREEN_BUTTON"
       ? createRecalcIntervalPreloadContext({
           houseId: actualContextHouseId,
           esiid: esiid ?? null,
@@ -4911,6 +4926,7 @@ async function recalcSimulatorBuildImpl(args: {
           canonicalMonths: built.canonicalMonths,
           smtAnchorPeriods: simMode === "SMT_BASELINE" ? smtAnchorPeriods : undefined,
           manualCanonicalPeriods: simMode === "MANUAL_TOTALS" ? manualCanonicalPeriods : undefined,
+          intervalActualSource: actualSource,
         })
       : null;
   if (recalcIntervalPreload && sharedPastRecalcWindow) {
@@ -4954,6 +4970,14 @@ async function recalcSimulatorBuildImpl(args: {
         stratifyByMonth: true,
         stratifyByWeekend: true,
         loadIntervalsForWindow: async () => {
+          if (actualSource === "GREEN_BUTTON") {
+            const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+              houseId: actualContextHouseId,
+              coverageStartDate: selectionStart,
+              coverageEndDate: selectionEnd,
+            });
+            return rebased.intervals;
+          }
           if (recalcIntervalPreload) {
             const preloaded = await recalcIntervalPreload.getIntervals({
               startDate: selectionStart,
