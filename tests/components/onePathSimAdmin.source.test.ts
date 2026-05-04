@@ -262,7 +262,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("email: resolvedEmail,");
     expect(source).toContain("includeDebugDiagnostics?: boolean");
     expect(source).toContain("includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled");
-    expect(source).toContain("includeDebugDiagnostics: false");
+    expect(source).toContain("includeDebugDiagnostics: debugDiagnosticsEnabled");
     expect(source).not.toContain("setEmail(selectedKnownScenario.sourceUserEmail);");
     expect(source).not.toContain("email: selectedKnownScenario.sourceUserEmail,");
   });

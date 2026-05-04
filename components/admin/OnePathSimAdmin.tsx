@@ -921,7 +921,7 @@ export function OnePathSimAdmin() {
 
     let json = await requestLookup({
       ...lookupArgs,
-      includeDebugDiagnostics: false,
+      includeDebugDiagnostics: debugDiagnosticsEnabled,
     });
     if (!json) return;
     const ensuredLookup = await ensureOnePathTestHomeReady(
@@ -953,7 +953,7 @@ export function OnePathSimAdmin() {
           houseId: resolvedSelection.selectedHouseId || lookupArgs.houseId,
           actualContextHouseId: targetActualContextHouseId,
           freshSelection: false,
-          includeDebugDiagnostics: false,
+          includeDebugDiagnostics: debugDiagnosticsEnabled,
         });
         if (!json) return;
         const reEnsuredLookup = await ensureOnePathTestHomeReady(
