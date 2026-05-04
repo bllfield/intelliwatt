@@ -96,6 +96,11 @@ function normalizeHomeProfileForPersistence(
   return validated.value as Record<string, unknown>;
 }
 
+function isPastCapableHomeProfile(profile: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>): boolean {
+  if (!profile) return false;
+  return validateHomeProfile(profile, { requirePastBaselineFields: true }).ok;
+}
+
 export async function getLabTestHomeLink(
   ownerUserId: string
 ): Promise<LabTestHomeLink | null> {
@@ -692,10 +697,15 @@ export async function syncOnePathMissingProfilesFromSource(args: {
   let syncedApplianceProfile = targetApplianceProfile;
   const shouldOverwriteExisting = args.overwriteExisting === true;
   const sourceHomeProfileForPersistence = normalizeHomeProfileForPersistence(sourceHomeProfile);
+  const targetHomeProfileReady = isPastCapableHomeProfile(targetHomeProfile);
+  const shouldRepairTargetHomeProfile = !targetHomeProfileReady;
 
   if (
     sourceHomeProfileForPersistence &&
-    (!syncedHomeProfile || (shouldOverwriteExisting && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
+    (!syncedHomeProfile ||
+      (shouldOverwriteExisting &&
+        shouldRepairTargetHomeProfile &&
+        JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
   ) {
     await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
       where: { userId_houseId: { userId: args.ownerUserId, houseId: args.testHomeHouseId } },
