@@ -699,6 +699,49 @@ describe("admin one path sim route", () => {
     );
   });
 
+  it("falls back to the simulated home-profile reader when the read-only lookup is empty", async () => {
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: "esiid-test-1",
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "user-1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-15T00:00:00.000Z"),
+    });
+    getHomeProfileReadOnlyByUserHouse.mockResolvedValueOnce(null);
+    getHomeProfileSimulatedByUserHouse.mockResolvedValueOnce({
+      squareFeet: 2200,
+      occupantsWork: 2,
+      occupantsSchool: 0,
+      occupantsHomeAllDay: 0,
+      fuelConfiguration: "all_electric",
+      hvacType: "central",
+      heatingType: "heat_pump",
+    });
+    syncOnePathMissingProfilesFromSource.mockResolvedValueOnce(null);
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com", includeDebugDiagnostics: true }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "test-home-1" });
+    expect(getHomeProfileSimulatedByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "test-home-1" });
+    expect(json.sourceContext.homeProfile).toEqual(
+      expect.objectContaining({
+        squareFeet: 2200,
+        occupantsWork: 2,
+        fuelConfiguration: "all_electric",
+      })
+    );
+  });
+
   it("returns a compact baseline view for green button lookup debug mode", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { getHomeProfileReadOnlyByUserHouse } from "@/modules/homeProfile/repo";
+import { getHomeProfileReadOnlyByUserHouse, getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   adaptGreenButtonRawInput,
   adaptIntervalRawInput,
@@ -1328,7 +1328,11 @@ export async function POST(request: NextRequest) {
     getApplianceProfileSimulatedByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null),
     getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
   ]);
-  const homeProfile = fetchedHomeProfile ?? syncedPinnedProfiles?.homeProfile ?? null;
+  const fallbackSimulatedHomeProfile =
+    fetchedHomeProfile == null && syncedPinnedProfiles?.homeProfile == null
+      ? await getHomeProfileSimulatedByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null)
+      : null;
+  const homeProfile = fetchedHomeProfile ?? syncedPinnedProfiles?.homeProfile ?? fallbackSimulatedHomeProfile ?? null;
   const applianceProfileRecord = fetchedApplianceProfileRecord ?? syncedPinnedProfiles?.applianceProfile ?? null;
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
   const adminManualSeeds =
