@@ -266,4 +266,10 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).not.toContain("setEmail(selectedKnownScenario.sourceUserEmail);");
     expect(source).not.toContain("email: selectedKnownScenario.sourceUserEmail,");
   });
+
+  it("preserves the resolved scenario selection across lookup refreshes", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+
+    expect(source).toContain('setSelectedScenarioId((current) => overrides?.selectedScenarioId ?? current);');
+  });
 });

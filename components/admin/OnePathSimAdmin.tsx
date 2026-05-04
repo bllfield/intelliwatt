@@ -659,7 +659,7 @@ export function OnePathSimAdmin() {
       setLookup(json);
       setSelectedHouseId(overrides?.selectedHouseId ?? json.selectedHouse?.id ?? "");
       setActualContextHouseId(overrides?.actualContextHouseId ?? json.selectedHouse?.id ?? "");
-      setSelectedScenarioId(overrides?.selectedScenarioId ?? "");
+      setSelectedScenarioId((current) => overrides?.selectedScenarioId ?? current);
       const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
         ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
         : [];
