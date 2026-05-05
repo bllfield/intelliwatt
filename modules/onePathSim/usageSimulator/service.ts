@@ -388,8 +388,16 @@ async function getValidationActualDailyByDateForDataset(args: {
   if (validationKeys.length === 0) return null;
 
   const actualContextHouseId = String(args.dataset?.meta?.actualContextHouseId ?? args.fallbackHouseId);
+  const persistedSourceEsiid = String(
+    args.dataset?.meta?.actualSourceEsiid ??
+    args.dataset?.meta?.lockboxInput?.sourceContext?.sourceEsiid ??
+      args.dataset?.meta?.lockboxPerRunTrace?.lockboxInput?.sourceContext?.sourceEsiid ??
+      ""
+  ).trim();
   let actualContextEsiid: string | null =
-    actualContextHouseId === args.fallbackHouseId ? args.fallbackEsiid ?? null : null;
+    actualContextHouseId === args.fallbackHouseId
+      ? args.fallbackEsiid ?? (persistedSourceEsiid || null)
+      : null;
   if (!actualContextEsiid && actualContextHouseId !== args.fallbackHouseId) {
     const actualHouse = await (prisma as any).houseAddress
       .findUnique({
@@ -397,7 +405,7 @@ async function getValidationActualDailyByDateForDataset(args: {
         select: { esiid: true },
       })
       .catch(() => null);
-    actualContextEsiid = actualHouse?.esiid ?? null;
+    actualContextEsiid = actualHouse?.esiid ?? (persistedSourceEsiid || null);
   }
 
   // Compare-only: fetch actual kWh for validation keys only (no full-year interval load).
@@ -1406,6 +1414,12 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
     (((buildInputs as any)?.snapshots?.actualSource === "SMT" || (buildInputs as any)?.snapshots?.actualSource === "GREEN_BUTTON")
       ? (String((buildInputs as any).snapshots.actualSource) as "SMT" | "GREEN_BUTTON")
       : null);
+  const buildSourceEsiid =
+    buildInputs &&
+    typeof buildInputs === "object" &&
+    typeof (buildInputs as any)?.lockboxInput?.sourceContext?.sourceEsiid === "string"
+      ? String((buildInputs as any).lockboxInput.sourceContext.sourceEsiid).trim()
+      : "";
   const existing =
     Array.isArray((prevMeta as any).validationOnlyDateKeysLocal) &&
     (prevMeta as any).validationOnlyDateKeysLocal.length > 0
@@ -1418,6 +1432,9 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
   }
   if (!((prevMeta as any).actualSource === "SMT" || (prevMeta as any).actualSource === "GREEN_BUTTON") && buildActualSource) {
     (prevMeta as any).actualSource = buildActualSource;
+  }
+  if (typeof (prevMeta as any).actualSourceEsiid !== "string" && buildSourceEsiid) {
+    (prevMeta as any).actualSourceEsiid = buildSourceEsiid;
   }
   dataset.meta = prevMeta;
 
