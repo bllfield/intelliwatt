@@ -10,6 +10,23 @@ export type IntervalPoint = { timestamp: string; kwh: number };
 /** Local calendar date key YYYY-MM-DD (timezone-dependent when derived from timestamp). */
 export type LocalDateKey = string;
 
+const weekdayFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const hourFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const dateKeyFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const slotFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getCachedFormatter(
+  cache: Map<string, Intl.DateTimeFormat>,
+  key: string,
+  factory: () => Intl.DateTimeFormat
+): Intl.DateTimeFormat {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const created = factory();
+  cache.set(key, created);
+  return created;
+}
+
 /** Canonical timestamp key for joining actual and simulated intervals (UTC ISO string). Re-exported from sim contract. */
 export { canonicalIntervalKey };
 
@@ -423,7 +440,9 @@ export function getLocalDayOfWeekFromDateKey(dateKey: string, tz: string): numbe
   try {
     const d = new Date(dateKey + "T12:00:00.000Z");
     if (!Number.isFinite(d.getTime())) return 0;
-    const short = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
+    const short = getCachedFormatter(weekdayFormatterCache, tz, () =>
+      new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" })
+    ).format(d);
     const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     return map[short] ?? 0;
   } catch {
@@ -645,7 +664,9 @@ export function getPoolHourRange(runHoursPerDay: number): { startHour: number; e
 export function localHourInTimezone(tsIso: string, tz: string): number {
   try {
     const d = new Date(tsIso);
-    const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "numeric", hour12: false });
+    const fmt = getCachedFormatter(hourFormatterCache, tz, () =>
+      new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "numeric", hour12: false })
+    );
     return parseInt(fmt.format(d), 10) || 0;
   } catch {
     return new Date(tsIso).getUTCHours();
@@ -657,7 +678,9 @@ export function dateKeyInTimezone(tsIso: string, tz: string): string {
   try {
     const d = new Date(tsIso);
     if (!Number.isFinite(d.getTime())) return tsIso.slice(0, 10);
-    const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+    const fmt = getCachedFormatter(dateKeyFormatterCache, tz, () =>
+      new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" })
+    );
     const parts = fmt.formatToParts(d);
     const y = parts.find((p) => p.type === "year")?.value ?? "";
     const m = parts.find((p) => p.type === "month")?.value ?? "";
@@ -672,12 +695,14 @@ export function dateKeyInTimezone(tsIso: string, tz: string): string {
 export function localSlot96InTimezone(tsIso: string, tz: string): number {
   try {
     const d = new Date(tsIso);
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz,
-      hour: "numeric",
-      minute: "numeric",
-      hour12: false,
-    }).formatToParts(d);
+    const parts = getCachedFormatter(slotFormatterCache, tz, () =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        hour: "numeric",
+        minute: "numeric",
+        hour12: false,
+      })
+    ).formatToParts(d);
     const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
     const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
     return Math.min(95, Math.max(0, hour * 4 + Math.floor(minute / 15)));
@@ -736,7 +761,9 @@ export function buildDailyCurveCompareBySlot(args: {
 export function localDayOfWeekInTimezone(tsIso: string, tz: string): number {
   try {
     const d = new Date(tsIso);
-    const short = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
+    const short = getCachedFormatter(weekdayFormatterCache, tz, () =>
+      new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" })
+    ).format(d);
     const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     return map[short] ?? 0;
   } catch {

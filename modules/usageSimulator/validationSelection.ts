@@ -24,6 +24,16 @@ export type ValidationDaySelectionDiagnostics = {
   shortfallReason: string | null;
 };
 
+const weekdayFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getWeekdayFormatter(timezone: string): Intl.DateTimeFormat {
+  const existing = weekdayFormatterCache.get(timezone);
+  if (existing) return existing;
+  const created = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, weekday: "short" });
+  weekdayFormatterCache.set(timezone, created);
+  return created;
+}
+
 export function normalizeValidationSelectionMode(value: unknown): ValidationDaySelectionMode | null {
   const raw = String(value ?? "").trim().toLowerCase();
   if ((VALIDATION_DAY_SELECTION_MODES as readonly string[]).includes(raw)) {
@@ -46,7 +56,7 @@ function getLocalDayOfWeekFromDateKey(dateKey: string, timezone: string): number
   try {
     const d = new Date(dateKey + "T12:00:00.000Z");
     if (!Number.isFinite(d.getTime())) return 0;
-    const short = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, weekday: "short" }).format(d);
+    const short = getWeekdayFormatter(timezone).format(d);
     const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     return map[short] ?? 0;
   } catch {
