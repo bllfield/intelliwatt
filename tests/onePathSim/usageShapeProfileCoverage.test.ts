@@ -65,6 +65,9 @@ describe("one path usage shape profile coverage", () => {
         startDate: "2025-04-16",
         endDate: "2026-04-15",
       },
+      esiid: "104",
+      preferredActualSource: "SMT",
+      preloadedActualIntervals: [{ timestamp: "2026-04-15T06:00:00.000Z", kwh: 1.5 }],
     } as any);
 
     expect(ensureUsageShapeProfileForUserHouse).toHaveBeenCalledWith({
@@ -75,6 +78,9 @@ describe("one path usage shape profile coverage", () => {
         startDate: "2025-04-16",
         endDate: "2026-04-15",
       },
+      esiid: "104",
+      preferredActualSource: "SMT",
+      preloadedIntervals: [{ timestamp: "2026-04-15T06:00:00.000Z", kwh: 1.5 }],
     });
     expect(out.usageShapeProfileSnap).toEqual({
       weekdayAvgByMonthKey: { "2026-04": 24 },
@@ -135,6 +141,9 @@ describe("one path usage shape profile coverage", () => {
         startDate: "2025-04-16",
         endDate: "2026-04-15",
       },
+      esiid: "104",
+      preferredActualSource: "SMT",
+      preloadedActualIntervals: [{ timestamp: "2026-04-15T06:00:00.000Z", kwh: 1.5 }],
     } as any);
 
     expect(ensureUsageShapeProfileForUserHouse).toHaveBeenCalledTimes(1);

@@ -1284,6 +1284,9 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
   houseId: string;
   timezone: string | undefined;
   canonicalMonths?: string[] | null;
+  esiid?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  preloadedActualIntervals?: Array<{ timestamp: string; kwh: number }> | null;
 }): Promise<{
   usageShapeProfileSnap: UsageShapeProfileSnapForSimulation | null;
   usageShapeProfileDiag: SharedSimUsageShapeProfileDiag;
@@ -1312,6 +1315,9 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
       userId: args.userId,
       houseId: args.houseId,
       timezone: timezoneResolved,
+      esiid: args.esiid ?? null,
+      preferredActualSource: args.preferredActualSource ?? null,
+      preloadedIntervals: args.preloadedActualIntervals ?? null,
     });
     if (ensured.ok) {
       profileAutoBuilt = true;

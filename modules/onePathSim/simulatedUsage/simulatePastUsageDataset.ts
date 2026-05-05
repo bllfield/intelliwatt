@@ -1406,6 +1406,9 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
   timezone: string | undefined;
   canonicalMonths?: string[] | null;
   simCoverageWindow?: { startDate: string; endDate: string } | null;
+  esiid?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  preloadedActualIntervals?: Array<{ timestamp: string; kwh: number }> | null;
 }): Promise<{
   usageShapeProfileSnap: UsageShapeProfileSnapForSimulation | null;
   usageShapeProfileDiag: SharedSimUsageShapeProfileDiag;
@@ -1435,6 +1438,9 @@ export async function ensureUsageShapeProfileForSharedSimulation(args: {
       houseId: args.houseId,
       timezone: timezoneResolved,
       coverageWindow: canonicalCoverage,
+      esiid: args.esiid ?? null,
+      preferredActualSource: args.preferredActualSource ?? null,
+      preloadedIntervals: args.preloadedActualIntervals ?? null,
     });
     if (ensured.ok) {
       profileAutoBuilt = true;
@@ -1877,6 +1883,9 @@ export async function simulatePastUsageDataset(
           timezone,
           canonicalMonths,
           simCoverageWindow: { startDate, endDate },
+          esiid,
+          preferredActualSource: intervalActualSource,
+          preloadedActualIntervals: sourceActualIntervals,
         }),
       ]);
       homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : homeProfileForPast;

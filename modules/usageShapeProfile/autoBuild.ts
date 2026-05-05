@@ -13,6 +13,9 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   houseId: string;
   timezone?: string | null;
   coverageWindow?: { startDate: string; endDate: string } | null;
+  esiid?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  preloadedIntervals?: Array<{ timestamp: string; kwh: number }> | null;
 }): Promise<
   | {
       ok: true;
@@ -40,12 +43,31 @@ export async function ensureUsageShapeProfileForUserHouse(args: {
   if (!house) return { ok: false, reason: "house_not_found" };
 
   const canonicalWindow = args.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
-  const actual = await getActualIntervalsForUsageShapeProfile({
-    houseId: house.id,
-    esiid: house.esiid ?? null,
-    startDate: canonicalWindow.startDate,
-    endDate: canonicalWindow.endDate,
-  });
+  const resolvedEsiid =
+    typeof args.esiid === "string" && args.esiid.trim().length > 0
+      ? args.esiid.trim()
+      : house.esiid ?? null;
+  const preloadedIntervals = Array.isArray(args.preloadedIntervals)
+    ? args.preloadedIntervals
+        .map((row) => ({
+          timestamp: String(row?.timestamp ?? ""),
+          kwh: Number(row?.kwh) || 0,
+        }))
+        .filter((row) => row.timestamp)
+    : [];
+  const actual =
+    preloadedIntervals.length > 0
+      ? {
+          source: (args.preferredActualSource ?? (resolvedEsiid ? "SMT" : "NONE")) as "SMT" | "GREEN_BUTTON" | "NONE",
+          intervals: preloadedIntervals,
+        }
+      : await getActualIntervalsForUsageShapeProfile({
+          houseId: house.id,
+          esiid: resolvedEsiid,
+          startDate: canonicalWindow.startDate,
+          endDate: canonicalWindow.endDate,
+          preferredSource: args.preferredActualSource ?? null,
+        });
   const intervals = actual.intervals;
   if (!Array.isArray(intervals) || intervals.length === 0) {
     return { ok: false, reason: "no_actual_intervals" };

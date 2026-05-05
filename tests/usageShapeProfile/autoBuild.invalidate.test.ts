@@ -115,6 +115,7 @@ describe("ensureUsageShapeProfileForUserHouse invalidates stale past cache", () 
       esiid: "104",
       startDate: "2025-04-16",
       endDate: "2026-04-15",
+      preferredSource: null,
     });
     expect(deriveUsageShapeProfile).toHaveBeenCalledWith(
       [{ tsUtc: "2026-04-15T06:00:00.000Z", kwh: 1.5 }],
@@ -126,5 +127,42 @@ describe("ensureUsageShapeProfileForUserHouse invalidates stale past cache", () 
       expect(out.diagnostics?.canonicalWindowStartDate).toBe("2025-04-16");
       expect(out.diagnostics?.canonicalWindowEndDate).toBe("2026-04-15");
     }
+  });
+
+  it("reuses preloaded intervals instead of re-fetching actual source context", async () => {
+    houseFindFirst.mockResolvedValue({ id: "h1", esiid: null });
+    deriveUsageShapeProfile.mockReturnValue({
+      windowStartUtc: "2025-04-16T00:00:00.000Z",
+      windowEndUtc: "2026-04-15T23:59:59.999Z",
+      shapeByMonth96: { "2026-04": new Array(96).fill(1) },
+    });
+    upsertUsageShapeProfile.mockResolvedValue({
+      id: "p3",
+      derivedAt: "2026-04-16T00:00:00.000Z",
+      simIdentityHash: "ghi789",
+    });
+    invalidatePastCachesForHouse.mockResolvedValue(1);
+
+    const out = await ensureUsageShapeProfileForUserHouse({
+      userId: "u1",
+      houseId: "h1",
+      timezone: "America/Chicago",
+      coverageWindow: {
+        startDate: "2025-04-16",
+        endDate: "2026-04-15",
+      },
+      preferredActualSource: "SMT",
+      esiid: "104",
+      preloadedIntervals: [{ timestamp: "2026-04-15T06:00:00.000Z", kwh: 1.5 }],
+    });
+
+    expect(out.ok).toBe(true);
+    expect(getActualIntervalsForUsageShapeProfile).not.toHaveBeenCalled();
+    expect(deriveUsageShapeProfile).toHaveBeenCalledWith(
+      [{ tsUtc: "2026-04-15T06:00:00.000Z", kwh: 1.5 }],
+      "America/Chicago",
+      "2025-04-16T00:00:00.000Z",
+      "2026-04-15T23:59:59.999Z",
+    );
   });
 });

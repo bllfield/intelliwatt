@@ -17,6 +17,7 @@ export async function getActualIntervalsForUsageShapeProfile(args: {
   esiid: string | null;
   startDate: string;
   endDate: string;
+  preferredSource?: "SMT" | "GREEN_BUTTON" | null;
 }): Promise<UsageShapeActualIntervalsResult> {
   const start = new Date(`${args.startDate}T00:00:00.000Z`);
   const end = new Date(`${args.endDate}T23:59:59.999Z`);
@@ -38,6 +39,7 @@ export async function getActualIntervalsForUsageShapeProfile(args: {
     esiid: args.esiid ?? null,
     startDate: args.startDate,
     endDate: args.endDate,
+    preferredSource: args.preferredSource ?? null,
   }).catch(() => ({ source: null, intervals: [] as Array<{ timestamp: string; kwh: number }> }));
   const source: "SMT" | "GREEN_BUTTON" | "NONE" = resolved.source ?? "NONE";
   return {
