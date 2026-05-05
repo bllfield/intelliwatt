@@ -63,4 +63,33 @@ describe("getCandidateDateCoverageForSelection", () => {
 
     expect(loadIntervalsForWindow).toHaveBeenCalledTimes(2);
   });
+
+  it("filters out partially covered days when full actual-day truth is required", async () => {
+    const loadIntervalsForWindow = vi.fn(async () => [
+      ...Array.from({ length: 96 }, (_, idx) => ({
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, idx * 15)).toISOString(),
+        kwh: 0.25,
+      })),
+      ...Array.from({ length: 95 }, (_, idx) => ({
+        timestamp: new Date(Date.UTC(2026, 0, 2, 0, idx * 15)).toISOString(),
+        kwh: 0.25,
+      })),
+    ]);
+
+    const result = await getCandidateDateCoverageForSelection({
+      houseId: "h3",
+      scenarioIdentity: "past_shared:scenario-1",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-02",
+      timezone: "UTC",
+      minDayCoveragePct: 1,
+      stratifyByMonth: true,
+      stratifyByWeekend: true,
+      loadIntervalsForWindow,
+    });
+
+    expect(result.candidateDateKeys).toEqual(["2026-01-01"]);
+    expect(result.coverageByDay["2026-01-01"]).toMatchObject({ count: 96, expected: 96, pct: 1 });
+    expect(result.coverageByDay["2026-01-02"]).toMatchObject({ count: 95, expected: 96, pct: 95 / 96 });
+  });
 });

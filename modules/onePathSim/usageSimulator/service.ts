@@ -4977,7 +4977,9 @@ async function recalcSimulatorBuildImpl(args: {
         windowStart: selectionStart,
         windowEnd: selectionEnd,
         timezone: timezoneForStoredBuild,
-        minDayCoveragePct: 0.95,
+        // Compare projection later requires full interval-backed daily truth, so do not
+        // allow partially covered days into the validation selection pool.
+        minDayCoveragePct: 1,
         stratifyByMonth: true,
         stratifyByWeekend: true,
         loadIntervalsForWindow: async () => {
