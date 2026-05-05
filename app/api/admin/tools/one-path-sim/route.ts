@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse, getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
@@ -55,6 +56,7 @@ import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyVie
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 import { listScenarios } from "@/modules/usageSimulator/service";
 
@@ -600,6 +602,113 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
   };
 }
 
+const smtCoverageDateFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Chicago",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function smtCoverageDateKey(date: Date | null | undefined): string | null {
+  if (!date) return null;
+  try {
+    return smtCoverageDateFmt.format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+async function maybeRefreshOnePathSmtTailCoverage(args: {
+  mode: CanonicalSimulationInputType;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  sourceUserId: string;
+  sourceHouseId: string;
+  sourceEsiid: string | null;
+  effectiveHouseId: string;
+  actualContextHouseId: string;
+  correlationId: string;
+}) {
+  if (args.mode !== "INTERVAL") return null;
+  if (args.preferredActualSource === "GREEN_BUTTON") return null;
+  const esiid = String(args.sourceEsiid ?? "").trim();
+  if (!esiid) return null;
+
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const targetEndDate = canonicalCoverage.endDate;
+  const coverage = await prisma.smtInterval
+    .aggregate({
+      where: { esiid },
+      _count: { _all: true },
+      _min: { ts: true },
+      _max: { ts: true },
+    })
+    .catch(() => null);
+  const coverageEndDate = smtCoverageDateKey(coverage?._max?.ts ?? null);
+  const coverageStartDate = smtCoverageDateKey(coverage?._min?.ts ?? null);
+  const intervalCount = Number(coverage?._count?._all ?? 0) || 0;
+  const shouldRefresh = !coverageEndDate || coverageEndDate < targetEndDate;
+
+  logSimPipelineEvent("one_path_smt_tail_backfill_check", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: esiid,
+    intervalCount,
+    coverageStartDate,
+    coverageEndDate,
+    targetEndDate,
+    refreshNeeded: shouldRefresh,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+
+  if (!shouldRefresh) {
+    return {
+      attempted: false,
+      reason: "coverage_tail_current",
+      coverageStartDate,
+      coverageEndDate,
+      targetEndDate,
+    };
+  }
+
+  const refreshResult = await requestUsageRefreshForUserHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+  }).catch((error) => ({
+    ok: false as const,
+    error: "refresh_failed" as const,
+    message: error instanceof Error ? error.message : String(error),
+  }));
+  logSimPipelineEvent("one_path_smt_tail_backfill_requested", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: esiid,
+    intervalCount,
+    coverageStartDate,
+    coverageEndDate,
+    targetEndDate,
+    refreshOk: refreshResult.ok,
+    refreshMessage: (refreshResult as any)?.message ?? (refreshResult as any)?.error ?? null,
+    pullAttempted: Array.isArray((refreshResult as any)?.homes)
+      ? Boolean((refreshResult as any).homes.some((home: any) => home?.pull?.attempted))
+      : undefined,
+    backfillCount: Array.isArray((refreshResult as any)?.backfill) ? (refreshResult as any).backfill.length : undefined,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  return {
+    attempted: true,
+    coverageStartDate,
+    coverageEndDate,
+    targetEndDate,
+    result: refreshResult,
+  };
+}
+
 async function resolveOnePathTestHomeState(args: {
   ownerUserId: string;
   selectedSourceHouseId: string;
@@ -899,6 +1008,16 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+    await maybeRefreshOnePathSmtTailCoverage({
+      mode,
+      preferredActualSource: effectiveRawInputBase.preferredActualSource,
+      sourceUserId: resolved.userId,
+      sourceHouseId: resolved.selectedHouse.id,
+      sourceEsiid: smtSourceEsiid,
+      effectiveHouseId,
+      actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+      correlationId,
+    });
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await readOnePathSimulatedUsageScenario({
