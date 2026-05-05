@@ -1,3 +1,4 @@
+import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
@@ -132,6 +133,57 @@ function asArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+function buildDisplayDailyRows(value: unknown): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
+  return asArray<Record<string, unknown>>(value)
+    .map((row) => {
+      const item = asRecord(row);
+      const date = asDateKey(item?.date);
+      if (!date) return null;
+      return dailyRowFieldsFromSourceRow({
+        date,
+        kwh: item?.kwh,
+        source: typeof item?.source === "string" ? item.source : undefined,
+        sourceDetail: typeof item?.sourceDetail === "string" ? item.sourceDetail : undefined,
+      });
+    })
+    .filter((row): row is ReturnType<typeof dailyRowFieldsFromSourceRow> => row != null);
+}
+
+function buildLocalDailyRowsFromIntervals15(args: {
+  intervals15: unknown;
+  timezone: string;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  existingRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
+}): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
+  const coverageStart = asDateKey(args.coverageStart);
+  const coverageEnd = asDateKey(args.coverageEnd);
+  if (!args.timezone.trim()) return [];
+  const sumsByDate = new Map<string, number>();
+  for (const row of asArray<Record<string, unknown>>(args.intervals15)) {
+    const timestamp = String(row?.timestamp ?? "");
+    if (!timestamp) continue;
+    const date = asDateKey(dateKeyInTimezone(timestamp, args.timezone));
+    if (!date) continue;
+    if (coverageStart && date < coverageStart) continue;
+    if (coverageEnd && date > coverageEnd) continue;
+    sumsByDate.set(date, (sumsByDate.get(date) ?? 0) + (Number(row?.kwh ?? row?.consumption_kwh) || 0));
+  }
+  if (sumsByDate.size === 0) return [];
+  const existingByDate = new Map(args.existingRows.map((row) => [row.date, row] as const));
+  return Array.from(sumsByDate.entries())
+    .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+    .map(([date, kwh]) => {
+      const existing = existingByDate.get(date);
+      return dailyRowFieldsFromSourceRow({
+        date,
+        kwh: round2(kwh),
+        source: existing?.source,
+        sourceDetail: existing?.sourceDetail,
+      });
+    });
+}
+
 function asCompareRows(value: unknown): ValidationCompareProjectionSidecar["rows"] {
   const rows = asArray<Record<string, unknown>>(value)
     .map((row): ValidationCompareProjectionSidecar["rows"][number] | null => {
@@ -224,21 +276,29 @@ export function buildOnePathRunReadOnlyView(args: {
         }))
         .filter((value) => value.payloadJson.startDate && value.payloadJson.endDate)
     : [];
-  const dailyRows = Array.isArray(dataset.daily)
-    ? dataset.daily
-        .map((row) => {
-          const item = asRecord(row);
-          const date = asDateKey(item?.date);
-          if (!date) return null;
-          return dailyRowFieldsFromSourceRow({
-            date,
-            kwh: item?.kwh,
-            source: typeof item?.source === "string" ? item.source : undefined,
-            sourceDetail: typeof item?.sourceDetail === "string" ? item.sourceDetail : undefined,
-          });
-        })
-        .filter((row): row is ReturnType<typeof dailyRowFieldsFromSourceRow> => row != null)
-    : viewModel.derived.daily;
+  const datasetDailyRows = buildDisplayDailyRows(dataset.daily);
+  const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
+    intervals15: asRecord(dataset.series)?.intervals15,
+    timezone: typeof meta?.timezone === "string" ? meta.timezone : "America/Chicago",
+    coverageStart: viewModel.coverage.start,
+    coverageEnd: viewModel.coverage.end,
+    existingRows: datasetDailyRows,
+  });
+  const datasetDailyEnd = datasetDailyRows.length > 0 ? datasetDailyRows[datasetDailyRows.length - 1]?.date ?? null : null;
+  const localDailyEnd =
+    intervalBackedLocalDailyRows.length > 0
+      ? intervalBackedLocalDailyRows[intervalBackedLocalDailyRows.length - 1]?.date ?? null
+      : null;
+  const shouldPreferIntervalBackedLocalDailyRows =
+    intervalBackedLocalDailyRows.length > 0 &&
+    (datasetDailyRows.length === 0 ||
+      intervalBackedLocalDailyRows.length > datasetDailyRows.length ||
+      (viewModel.coverage.end != null && localDailyEnd === viewModel.coverage.end && datasetDailyEnd !== viewModel.coverage.end));
+  const dailyRows = shouldPreferIntervalBackedLocalDailyRows
+    ? intervalBackedLocalDailyRows
+    : datasetDailyRows.length > 0
+      ? datasetDailyRows
+      : viewModel.derived.daily;
   const compareProjection = asRecord(readModel.compareProjection) ?? {};
   const tuningSummary = asRecord(readModel.tuningSummary) ?? {};
   const compareRowsPrimary = asCompareRows(compareProjection.rows);

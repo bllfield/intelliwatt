@@ -159,6 +159,49 @@ describe("buildOnePathRunReadOnlyView", () => {
     ]);
   });
 
+  it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {
+    const intervals15: Array<{ timestamp: string; kwh: number }> = [];
+    const start = new Date("2026-05-01T00:00:00.000Z").getTime();
+    const end = new Date("2026-05-03T23:45:00.000Z").getTime();
+    for (let ts = start; ts <= end; ts += 15 * 60 * 1000) {
+      intervals15.push({ timestamp: new Date(ts).toISOString(), kwh: 0.25 });
+    }
+
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: intervals15.length,
+        },
+        daily: [
+          { date: "2026-05-01", kwh: 24, source: "SIMULATED" },
+          { date: "2026-05-02", kwh: 24, source: "SIMULATED" },
+        ],
+        monthly: [{ month: "2026-05", kwh: 72 }],
+        insights: {
+          fifteenMinuteAverages: [],
+          weekdayVsWeekend: { weekday: 48, weekend: 24 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          timezone: "America/Chicago",
+          coverageStart: "2026-05-01",
+          coverageEnd: "2026-05-03",
+        },
+      },
+    });
+
+    expect(view?.summary.coverageEnd).toBe("2026-05-03");
+    expect(view?.dailyRows.map((row) => row.date)).toEqual(["2026-05-01", "2026-05-02", "2026-05-03"]);
+  });
+
   it("reuses shared stitched-month display metadata so One Path monthly rows match the user chart contract", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
