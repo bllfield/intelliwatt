@@ -545,7 +545,7 @@ const candidateDayCoverageCache = new Map<
     createdAtMs: number;
     candidateDateKeys: string[];
     coverageByDay: Record<string, { count: number; expected: number; pct: number }>;
-    intervalsForWindow: IntervalPoint[];
+    intervalsForWindow?: IntervalPoint[];
   }
 >();
 
@@ -580,6 +580,7 @@ export async function getCandidateDateCoverageForSelection(args: {
   minDayCoveragePct: number;
   stratifyByMonth: boolean;
   stratifyByWeekend: boolean;
+  returnIntervalsForWindow?: boolean;
   loadIntervalsForWindow: () => Promise<IntervalPoint[]>;
 }): Promise<{
   candidateDateKeys: string[];
@@ -598,13 +599,14 @@ export async function getCandidateDateCoverageForSelection(args: {
     stratifyByWeekend: args.stratifyByWeekend,
   });
   const now = Date.now();
+  const shouldReturnIntervals = args.returnIntervalsForWindow === true;
   const cached = candidateDayCoverageCache.get(key);
   if (cached && now - cached.createdAtMs <= CANDIDATE_DAY_COVERAGE_CACHE_TTL_MS) {
     return {
       candidateDateKeys: [...cached.candidateDateKeys],
       cacheHit: true,
       coverageByDay: { ...cached.coverageByDay },
-      intervalsForWindow: [...cached.intervalsForWindow],
+      intervalsForWindow: shouldReturnIntervals ? (cached.intervalsForWindow ?? []) : [],
     };
   }
 
@@ -618,13 +620,13 @@ export async function getCandidateDateCoverageForSelection(args: {
     createdAtMs: now,
     candidateDateKeys: [...candidateDateKeys],
     coverageByDay,
-    intervalsForWindow: [...(intervals ?? [])],
+    ...(shouldReturnIntervals ? { intervalsForWindow: intervals ?? [] } : {}),
   });
   return {
     candidateDateKeys,
     cacheHit: false,
     coverageByDay,
-    intervalsForWindow: [...(intervals ?? [])],
+    intervalsForWindow: shouldReturnIntervals ? (intervals ?? []) : [],
   };
 }
 

@@ -3828,35 +3828,11 @@ export function resolveSharedPastRecalcWindow(args: {
     }
   }
 
-  if (
-    args.mode === "SMT_BASELINE" &&
-    args.intervalActualSource !== "GREEN_BUTTON" &&
-    Array.isArray(args.smtAnchorPeriods) &&
-    args.smtAnchorPeriods.length > 0
-  ) {
-    const sortedPeriods = args.smtAnchorPeriods
-      .map((period) => ({
-        startDate: String(period.startDate ?? "").slice(0, 10),
-        endDate: String(period.endDate ?? "").slice(0, 10),
-      }))
-      .filter(
-        (period): period is { startDate: string; endDate: string } =>
-          /^\d{4}-\d{2}-\d{2}$/.test(period.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(period.endDate)
-      )
-      .sort((left, right) =>
-        left.startDate === right.startDate ? left.endDate.localeCompare(right.endDate) : left.startDate.localeCompare(right.startDate)
-      );
-    if (sortedPeriods.length > 0) {
-      return {
-        startDate: sortedPeriods[0]!.startDate,
-        endDate: sortedPeriods.reduce((latest, period) => (period.endDate > latest ? period.endDate : latest), sortedPeriods[0]!.endDate),
-        source: "smt_anchor",
-      };
-    }
-  }
-
-  // Shared producer parity lock:
-  // New-build Past simulation window ownership stays canonical usage coverage.
+  // Shared producer window lock:
+  // Non-manual Past coverage always comes from the canonical shared coverage helper,
+  // never from SMT anchor periods.
+  void args.intervalActualSource;
+  void args.smtAnchorPeriods;
   void args.canonicalMonths;
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   return {

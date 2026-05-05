@@ -19,6 +19,7 @@ describe("getCandidateDateCoverageForSelection", () => {
       minDayCoveragePct: 0.01,
       stratifyByMonth: true,
       stratifyByWeekend: true,
+      returnIntervalsForWindow: true,
       loadIntervalsForWindow,
     };
 
@@ -30,6 +31,29 @@ describe("getCandidateDateCoverageForSelection", () => {
     expect(loadIntervalsForWindow).toHaveBeenCalledTimes(1);
     expect(second.candidateDateKeys).toEqual(first.candidateDateKeys);
     expect(second.intervalsForWindow).toEqual(first.intervalsForWindow);
+  });
+
+  it("does not retain interval payloads unless explicitly requested", async () => {
+    const loadIntervalsForWindow = vi.fn(async () => [
+      { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+      { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+    ]);
+
+    const result = await getCandidateDateCoverageForSelection({
+      houseId: "h1-no-intervals",
+      scenarioIdentity: "gapfill_lab:2025-03..2026-02",
+      windowStart: "2025-03-12",
+      windowEnd: "2026-03-12",
+      timezone: "America/Chicago",
+      minDayCoveragePct: 0.01,
+      stratifyByMonth: true,
+      stratifyByWeekend: true,
+      loadIntervalsForWindow,
+    });
+
+    expect(loadIntervalsForWindow).toHaveBeenCalledTimes(1);
+    expect(result.intervalsForWindow).toEqual([]);
+    expect(result.candidateDateKeys).toEqual(["2025-12-31"]);
   });
 
   it("uses a different cache key when stratification inputs differ", async () => {

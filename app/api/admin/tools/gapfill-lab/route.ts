@@ -3596,6 +3596,7 @@ export async function POST(req: NextRequest) {
       minDayCoveragePct,
       stratifyByMonth,
       stratifyByWeekend,
+      returnIntervalsForWindow: true,
       loadIntervalsForWindow: async () => {
         const candidateIntervals = await getActualIntervalsForRange({
           houseId: house.id,
