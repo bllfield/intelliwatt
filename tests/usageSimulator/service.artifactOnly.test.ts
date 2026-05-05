@@ -1349,6 +1349,70 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     }
   });
 
+  it("pins validation actual-day lookup to SMT when cached artifact rehydrates actualSource from build inputs", async () => {
+    const actualUsageModule = await import("@/lib/usage/actualDatasetForHouse");
+    const getActualDailyKwhForLocalDateKeys = vi.mocked(actualUsageModule.getActualDailyKwhForLocalDateKeys);
+    getActualDailyKwhForLocalDateKeys.mockClear();
+    getActualDailyKwhForLocalDateKeys.mockResolvedValue(new Map([["2026-01-01", 0.5]]));
+
+    scenarioFindFirst.mockResolvedValue({ id: "past-s1", name: "Past (Corrected)" });
+    usageSimulatorBuildFindUnique.mockResolvedValue({
+      buildInputs: {
+        mode: "SMT_BASELINE",
+        canonicalMonths: ["2026-01"],
+        timezone: "America/Chicago",
+        travelRanges: [],
+        validationOnlyDateKeysLocal: ["2026-01-01"],
+        snapshots: {
+          actualSource: "SMT",
+        },
+      },
+    });
+    computePastInputHash.mockReturnValue("hash-rehydrate-actual-source");
+    getCachedPastDataset.mockResolvedValue({
+      inputHash: "hash-rehydrate-actual-source",
+      updatedAt: new Date("2026-03-12T00:00:00.000Z"),
+      datasetJson: {
+        summary: {
+          source: "SIMULATED",
+          intervalsCount: 2,
+          totalKwh: 0.75,
+          start: "2026-01-01",
+          end: "2026-01-01",
+          latest: "2026-01-01",
+        },
+        meta: {},
+        daily: [
+          {
+            date: "2026-01-01",
+            kwh: 0.75,
+            source: "SIMULATED",
+            sourceDetail: "SIMULATED_TEST_DAY",
+          },
+        ],
+        monthly: [{ month: "2026-01", kwh: 0.75 }],
+        series: {},
+      },
+      intervalsCodec: "v1_delta_varint",
+      intervalsCompressed: Buffer.from("00", "hex"),
+    });
+
+    const out = await getSimulatedUsageForHouseScenario({
+      userId: "u1",
+      houseId: "h1",
+      scenarioId: "past-s1",
+      readMode: "artifact_only",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(getActualDailyKwhForLocalDateKeys).toHaveBeenCalledWith({
+      houseId: "h1",
+      esiid: "1044",
+      dateKeysLocal: ["2026-01-01"],
+      preferredSource: "SMT",
+    });
+  });
+
   it("allow_rebuild persists canonical excluded fingerprint metadata on saved shared artifact", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {

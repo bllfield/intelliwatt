@@ -373,10 +373,18 @@ async function getValidationActualDailyByDateForDataset(args: {
   }
 
   // Compare-only: fetch actual kWh for validation keys only (no full-year interval load).
+  const preferredActualSource =
+    args.dataset?.meta?.lockboxRunContext?.preferredActualSource === "SMT" ||
+    args.dataset?.meta?.lockboxRunContext?.preferredActualSource === "GREEN_BUTTON"
+      ? args.dataset.meta.lockboxRunContext.preferredActualSource
+      : args.dataset?.meta?.actualSource === "SMT" || args.dataset?.meta?.actualSource === "GREEN_BUTTON"
+        ? args.dataset.meta.actualSource
+        : null;
   const map = await getActualDailyKwhForLocalDateKeys({
     houseId: actualContextHouseId,
     esiid: actualContextEsiid,
     dateKeysLocal: validationKeys,
+    preferredSource: preferredActualSource,
   });
   return map.size > 0 ? map : null;
 }
@@ -1329,6 +1337,12 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
           .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
       : [];
   const prevMeta = dataset.meta && typeof dataset.meta === "object" ? { ...(dataset.meta as Record<string, unknown>) } : {};
+  const buildActualSource =
+    buildInputs &&
+    typeof buildInputs === "object" &&
+    (((buildInputs as any)?.snapshots?.actualSource === "SMT" || (buildInputs as any)?.snapshots?.actualSource === "GREEN_BUTTON")
+      ? (String((buildInputs as any).snapshots.actualSource) as "SMT" | "GREEN_BUTTON")
+      : null);
   const existing =
     Array.isArray((prevMeta as any).validationOnlyDateKeysLocal) &&
     (prevMeta as any).validationOnlyDateKeysLocal.length > 0
@@ -1338,8 +1352,11 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
       : [];
   if (existing.length === 0 && fromBuild.length > 0) {
     (prevMeta as any).validationOnlyDateKeysLocal = fromBuild;
-    dataset.meta = prevMeta;
   }
+  if (!((prevMeta as any).actualSource === "SMT" || (prevMeta as any).actualSource === "GREEN_BUTTON") && buildActualSource) {
+    (prevMeta as any).actualSource = buildActualSource;
+  }
+  dataset.meta = prevMeta;
 
   const rawKeys = Array.isArray((dataset as any)?.meta?.validationOnlyDateKeysLocal)
     ? ((dataset as any).meta.validationOnlyDateKeysLocal as unknown[])
