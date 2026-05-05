@@ -1019,6 +1019,43 @@ export function OnePathSimAdmin() {
     setBusy(true);
     setError(null);
     setStatus(`Running canonical ${mode} through the One Path-owned ${activePathLabel}...`);
+    const presetScenarioSelection =
+      selectedKnownScenario && runReason.startsWith("known_house:")
+        ? resolveKnownHouseScenarioSelection({
+            scenario: selectedKnownScenario,
+            lookup,
+          })
+        : null;
+    const currentSelectedScenarioName = String(
+      (lookup.scenarios ?? []).find((scenario) => String(scenario.id ?? "") === String(selectedScenarioId ?? ""))?.name ?? ""
+    )
+      .trim()
+      .toLowerCase();
+    const presetScenarioHint = String(selectedKnownScenario?.scenarioNameHint ?? "")
+      .trim()
+      .toLowerCase();
+    const selectedScenarioMatchesKnownPreset =
+      !presetScenarioSelection || !selectedKnownScenario
+        ? true
+        : selectedKnownScenario.scenarioSelectionStrategy === "baseline"
+          ? !selectedScenarioId
+          : selectedKnownScenario.scenarioSelectionStrategy === "scenario_id"
+            ? String(selectedScenarioId ?? "") === String(selectedKnownScenario.scenarioId ?? "")
+            : !presetScenarioHint ||
+                currentSelectedScenarioName === presetScenarioHint ||
+                currentSelectedScenarioName.includes(presetScenarioHint);
+    const shouldRealignKnownPresetScenario =
+      Boolean(presetScenarioSelection) &&
+      Boolean(selectedKnownScenario) &&
+      (selectedKnownScenario?.scenarioSelectionStrategy === "baseline"
+        ? Boolean(selectedScenarioId)
+        : Boolean(presetScenarioSelection?.selectedScenarioId) && !selectedScenarioMatchesKnownPreset);
+    const effectiveScenarioId = shouldRealignKnownPresetScenario
+      ? presetScenarioSelection?.selectedScenarioId ?? ""
+      : selectedScenarioId;
+    if (shouldRealignKnownPresetScenario && effectiveScenarioId !== selectedScenarioId) {
+      setSelectedScenarioId(effectiveScenarioId);
+    }
     const res = await fetch("/api/admin/tools/one-path-sim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1027,7 +1064,7 @@ export function OnePathSimAdmin() {
         email: lookup.email,
         sourceHouseId: effectiveHouseId,
         houseId: effectiveMutableHouseId,
-        scenarioId: selectedScenarioId || null,
+        scenarioId: effectiveScenarioId || null,
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
         preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
