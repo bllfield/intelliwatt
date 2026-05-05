@@ -1313,6 +1313,7 @@ function buildCanonicalEngineInput(args: {
   const actualSummaryEnd =
     typeof args.loaded.actualDataset?.summary?.end === "string" ? String(args.loaded.actualDataset.summary.end).slice(0, 10) : null;
   const usesGreenButtonAnchorWindow =
+    args.inputType !== "GREEN_BUTTON" &&
     isIntervalLikeInputType(args.inputType) &&
     actualMeta.actualSource === "GREEN_BUTTON" &&
     !!actualSummaryStart &&

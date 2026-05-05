@@ -222,6 +222,7 @@ describe("one path manual mode payload guards", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      smtSourceEsiid: null,
       seedIfMissing: false,
       preferredActualSource: "GREEN_BUTTON",
       skipLightweightInsightRecompute: true,
@@ -236,6 +237,8 @@ describe("one path manual mode payload guards", () => {
     expect(engineInput.actualMonthlyReference).toEqual({
       "2025-04": 10,
     });
+    expect(engineInput.coverageWindowStart).toBe("2025-05-01");
+    expect(engineInput.coverageWindowEnd).toBe("2026-04-30");
     expect(engineInput.weatherDaysReference).toBeNull();
     expect(engineInput.weatherEfficiencyDerivedInput).toBeNull();
   });
