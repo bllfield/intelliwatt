@@ -150,6 +150,60 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     expect(byDate["2020-06-02"].sourceDetail).toBe("SIMULATED_TEST_DAY");
   });
 
+  it("backfills trailing simulated display days from canonical artifact totals when decoded intervals stop early", () => {
+    const intervals = [
+      { timestamp: "2020-06-01T00:00:00.000Z", kwh: 10 },
+      { timestamp: "2020-06-02T00:00:00.000Z", kwh: 20 },
+    ];
+    const dataset: any = {
+      summary: { end: "2020-06-04" },
+      meta: {
+        simulatedSourceDetailByDate: {
+          "2020-06-03": "SIMULATED_INCOMPLETE_METER",
+          "2020-06-04": "SIMULATED_LEADING_MISSING",
+        },
+        canonicalArtifactSimulatedDayTotalsByDate: {
+          "2020-06-03": 30,
+          "2020-06-04": 40,
+        },
+      },
+      daily: [
+        { date: "2020-06-01", kwh: 10, source: "ACTUAL" },
+        { date: "2020-06-02", kwh: 20, source: "ACTUAL" },
+      ],
+      monthly: [],
+      series: { daily: [], monthly: [], annual: [] },
+      insights: { weekdayVsWeekend: { weekday: 0, weekend: 0 }, peakDay: null, stitchedMonth: null },
+      totals: {},
+    };
+
+    reconcileRestoredPastDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: intervals,
+      fallbackEndDate: "2020-06-04",
+    });
+
+    expect(dataset.daily.map((d: any) => d.date)).toEqual([
+      "2020-06-01",
+      "2020-06-02",
+      "2020-06-03",
+      "2020-06-04",
+    ]);
+    const byDate = Object.fromEntries(dataset.daily.map((d: any) => [d.date, d]));
+    expect(byDate["2020-06-03"]).toMatchObject({
+      kwh: 30,
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_INCOMPLETE_METER",
+    });
+    expect(byDate["2020-06-04"]).toMatchObject({
+      kwh: 40,
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_LEADING_MISSING",
+    });
+    expect(dataset.monthly).toEqual([{ month: "2020-06", kwh: 100 }]);
+    expect(dataset.series.daily).toHaveLength(4);
+  });
+
   it("readCanonicalSimulatedDateKeysFromDataset reads meta and root canonical maps", () => {
     const onlyMeta = readCanonicalSimulatedDateKeysFromDataset({
       meta: { canonicalArtifactSimulatedDayTotalsByDate: { "2020-01-01": 1, "2020-01-02": 2 } },

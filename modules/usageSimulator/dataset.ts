@@ -592,6 +592,52 @@ export function readCanonicalSimulatedDateKeysFromDataset(dataset: unknown): Set
   return out;
 }
 
+function readCanonicalArtifactSimulatedDayTotalsByDate(dataset: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  const addFrom = (raw: unknown) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+    for (const [rawKey, rawValue] of Object.entries(raw as Record<string, unknown>)) {
+      const dk = String(rawKey).slice(0, 10);
+      const kwh = Number(rawValue);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !Number.isFinite(kwh)) continue;
+      out[dk] = kwh;
+    }
+  };
+  if (!dataset || typeof dataset !== "object") return out;
+  const d = dataset as Record<string, unknown>;
+  const meta = d.meta;
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    addFrom((meta as Record<string, unknown>)[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY]);
+  }
+  addFrom(d[CANONICAL_ARTIFACT_SIMULATED_DAY_TOTALS_META_KEY]);
+  return out;
+}
+
+function maxDateKey(...values: Array<string | null | undefined>): string {
+  let best = "";
+  for (const value of values) {
+    const dk = String(value ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    if (!best || dk > best) best = dk;
+  }
+  return best;
+}
+
+function buildMonthlyFromDailyRows(
+  daily: Array<{ date: string; kwh: number }>
+): Array<{ month: string; kwh: number }> {
+  const monthlyTotals = new Map<string, number>();
+  for (const row of daily) {
+    const dk = String(row?.date ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    const month = dk.slice(0, 7);
+    monthlyTotals.set(month, (monthlyTotals.get(month) ?? 0) + (Number(row?.kwh) || 0));
+  }
+  return Array.from(monthlyTotals.entries())
+    .sort((left, right) => (left[0] < right[0] ? -1 : 1))
+    .map(([month, kwh]) => ({ month, kwh: round2(kwh) }));
+}
+
 /**
  * Simulated-day keys from persisted artifact meta (current-run truth). Prefer this over scanning
  * `dataset.daily` for SIMULATED rows so stale labels from an older save cannot leak into restore.
@@ -714,9 +760,8 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     return;
   }
   const lastDecodedTs = decodedIntervals[decodedIntervals.length - 1]?.timestamp;
-  const curveEnd =
-    (lastDecodedTs && String(lastDecodedTs).slice(0, 10)) ||
-    String((dataset as any)?.summary?.end ?? fallbackEndDate).slice(0, 10);
+  const summaryEnd = String((dataset as any)?.summary?.end ?? "").slice(0, 10);
+  const curveEnd = maxDateKey(lastDecodedTs ? String(lastDecodedTs).slice(0, 10) : "", summaryEnd, fallbackEndDate);
 
   const meta = (dataset as any)?.meta;
   const canonicalSimKeys = readCanonicalSimulatedDateKeysFromDataset(dataset);
@@ -738,14 +783,25 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     const dk = String((d as any)?.date ?? "").slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) legacyDailyByDate.set(dk, { sourceDetail: (d as any)?.sourceDetail });
   }
-  const enrichedDaily = enrichPastDailyRowsWithSourceDetailFromMeta(recomputed.daily, (dataset as any)?.meta, {
+  const canonicalSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  const mergedDaily = [...recomputed.daily];
+  const seenDailyDateKeys = new Set(mergedDaily.map((row) => String(row?.date ?? "").slice(0, 10)));
+  for (const [dk, kwh] of Object.entries(canonicalSimulatedDayTotalsByDate).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (seenDailyDateKeys.has(dk)) continue;
+    if (curveEnd && dk > curveEnd) continue;
+    mergedDaily.push({ date: dk, kwh: Number(kwh) || 0, source: "SIMULATED" });
+    seenDailyDateKeys.add(dk);
+  }
+  mergedDaily.sort((left, right) => (left.date < right.date ? -1 : 1));
+  const enrichedDaily = enrichPastDailyRowsWithSourceDetailFromMeta(mergedDaily, (dataset as any)?.meta, {
     legacyDailyByDate,
   });
+  const monthlyFromDaily = buildMonthlyFromDailyRows(enrichedDaily);
 
   (dataset as any).daily = enrichedDaily;
-  if (recomputed.monthly.length > 0) {
-    (dataset as any).monthly = recomputed.monthly;
-    (dataset as any).usageBucketsByMonth = recomputed.usageBucketsByMonth;
+  if (monthlyFromDaily.length > 0) {
+    (dataset as any).monthly = monthlyFromDaily;
+    (dataset as any).usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthlyFromDaily);
   }
 
   (dataset as any).series.daily = enrichedDaily.map((d) => ({
@@ -754,15 +810,15 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     source: d.source,
     sourceDetail: d.sourceDetail,
   }));
-  if (recomputed.monthly.length > 0) {
-    (dataset as any).series.monthly = recomputed.monthly.map((m) => ({
+  if (monthlyFromDaily.length > 0) {
+    (dataset as any).series.monthly = monthlyFromDaily.map((m) => ({
       timestamp: `${m.month}-01T00:00:00.000Z`,
       kwh: Number(m.kwh) || 0,
     }));
     (dataset as any).series.annual = [
       {
         timestamp: `${curveEnd.slice(0, 4)}-01-01T00:00:00.000Z`,
-        kwh: recomputed.monthlySumKwh,
+        kwh: round2(monthlyFromDaily.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)),
       },
     ];
   }

@@ -1413,6 +1413,7 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     });
   });
 
+
   it("allow_rebuild persists canonical excluded fingerprint metadata on saved shared artifact", async () => {
     usageSimulatorBuildFindUnique.mockResolvedValueOnce({
       buildInputs: {
