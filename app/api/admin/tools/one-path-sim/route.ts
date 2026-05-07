@@ -645,8 +645,73 @@ function enumerateDateKeysInclusive(startDate: string, endDate: string): string[
   return out;
 }
 
+function normalizeDateKeys(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").slice(0, 10))
+        .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    )
+  ).sort();
+}
+
+function jsonForLog(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function loadOnePathSmtDateCoverage(args: { esiid: string; dateKeys: string[] }) {
+  const dateKeys = normalizeDateKeys(args.dateKeys);
+  if (dateKeys.length === 0) {
+    return {
+      dateKeys,
+      countsByDate: {},
+      incompleteDateKeys: [],
+      ready: true,
+    };
+  }
+  const startDate = addDateKeyDays(dateKeys[0]!, -1);
+  const endDate = addDateKeyDays(dateKeys[dateKeys.length - 1]!, 1);
+  const rows = await prisma.smtInterval
+    .findMany({
+      where: {
+        esiid: args.esiid,
+        ts: {
+          gte: new Date(`${startDate}T00:00:00.000Z`),
+          lte: new Date(`${endDate}T23:59:59.999Z`),
+        },
+      },
+      select: { ts: true },
+      orderBy: { ts: "asc" },
+    })
+    .catch(() => []);
+  const requestedDateSet = new Set(dateKeys);
+  const uniqueTsByDate = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
+    const dateKey = smtCoverageDateKey(ts);
+    if (!dateKey || !requestedDateSet.has(dateKey) || !ts) continue;
+    const bucket = uniqueTsByDate.get(dateKey) ?? new Set<string>();
+    bucket.add(ts.toISOString());
+    uniqueTsByDate.set(dateKey, bucket);
+  }
+  const countsByDate = Object.fromEntries(dateKeys.map((dateKey) => [dateKey, uniqueTsByDate.get(dateKey)?.size ?? 0]));
+  const incompleteDateKeys = dateKeys.filter(
+    (dateKey) => (countsByDate[dateKey] ?? 0) < ONE_PATH_SMT_TAIL_REQUIRED_INTERVALS_PER_DAY
+  );
+  return {
+    dateKeys,
+    countsByDate,
+    incompleteDateKeys,
+    ready: incompleteDateKeys.length === 0,
+  };
 }
 
 async function loadOnePathSmtTailCoverage(args: { esiid: string; targetEndDate: string }) {
@@ -743,8 +808,8 @@ async function waitForOnePathSmtTailCoverage(args: {
     coverageEndUtcDate: latest.coverageEndUtcDate,
     tailStartDate: latest.tailStartDate,
     tailReady: latest.tailReady,
-    incompleteTailDateKeys: latest.incompleteTailDateKeys,
-    tailCountsByDate: latest.tailCountsByDate,
+    incompleteTailDateKeys: latest.incompleteTailDateKeys.join(","),
+    tailCountsByDate: jsonForLog(latest.tailCountsByDate),
     timedOut: !latest.tailReady,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
@@ -754,6 +819,47 @@ async function waitForOnePathSmtTailCoverage(args: {
     durationMs,
     attempts,
     timedOut: !latest.tailReady,
+  };
+}
+
+async function waitForOnePathSmtDateCoverage(args: {
+  esiid: string;
+  dateKeys: string[];
+  correlationId: string;
+  effectiveHouseId: string;
+  actualContextHouseId: string;
+  sourceUserId: string;
+}) {
+  const startedAt = Date.now();
+  let attempts = 0;
+  let latest = await loadOnePathSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
+  while (!latest.ready && Date.now() - startedAt < ONE_PATH_SMT_TAIL_WAIT_TIMEOUT_MS) {
+    attempts += 1;
+    await wait(ONE_PATH_SMT_TAIL_WAIT_INTERVAL_MS);
+    latest = await loadOnePathSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
+  }
+  const durationMs = Date.now() - startedAt;
+  logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_wait_complete", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: args.esiid,
+    durationMs,
+    attempts,
+    requestedDateKeys: latest.dateKeys.join(","),
+    incompleteDateKeys: latest.incompleteDateKeys.join(","),
+    countsByDate: jsonForLog(latest.countsByDate),
+    ready: latest.ready,
+    timedOut: !latest.ready,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  return {
+    ...latest,
+    durationMs,
+    attempts,
+    timedOut: !latest.ready,
   };
 }
 
@@ -793,8 +899,8 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     coverageEndUtcDate: initialCoverage.coverageEndUtcDate,
     targetEndDate,
     tailStartDate: initialCoverage.tailStartDate,
-    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys,
-    tailCountsByDate: initialCoverage.tailCountsByDate,
+    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys.join(","),
+    tailCountsByDate: jsonForLog(initialCoverage.tailCountsByDate),
     refreshNeeded: shouldRefresh,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
@@ -832,7 +938,7 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     coverageEndUtcDate: initialCoverage.coverageEndUtcDate,
     targetEndDate,
     tailStartDate: initialCoverage.tailStartDate,
-    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys,
+    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys.join(","),
     refreshOk: refreshResult.ok,
     refreshMessage: (refreshResult as any)?.message ?? (refreshResult as any)?.error ?? null,
     pullAttempted: Array.isArray((refreshResult as any)?.homes)
@@ -859,6 +965,107 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     wait: waitResult,
   };
 }
+
+function extractIncompleteMeterDateKeysFromDataset(dataset: unknown): string[] {
+  const record = asRecord(dataset);
+  const daily = Array.isArray(record?.daily) ? record.daily : [];
+  const seriesRecord = asRecord(record?.series);
+  const seriesDaily = Array.isArray(seriesRecord?.daily) ? seriesRecord.daily : [];
+  const metaRecord = asRecord(record?.meta);
+  const simulatedSourceDetailByDate = asRecord(metaRecord?.simulatedSourceDetailByDate);
+  const values: string[] = [];
+  for (const row of [...daily, ...seriesDaily]) {
+    const rowRecord = asRecord(row);
+    const sourceDetail = String(rowRecord?.sourceDetail ?? "").trim();
+    if (sourceDetail !== "SIMULATED_INCOMPLETE_METER") continue;
+    values.push(String(rowRecord?.date ?? rowRecord?.timestamp ?? "").slice(0, 10));
+  }
+  for (const [dateKey, sourceDetail] of Object.entries(simulatedSourceDetailByDate ?? {})) {
+    if (sourceDetail === "SIMULATED_INCOMPLETE_METER") values.push(dateKey);
+  }
+  return normalizeDateKeys(values);
+}
+
+async function maybeRetryOnePathIncompleteMeterBackfill(args: {
+  mode: CanonicalSimulationInputType;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  sourceUserId: string;
+  sourceHouseId: string;
+  sourceEsiid: string | null;
+  effectiveHouseId: string;
+  actualContextHouseId: string;
+  correlationId: string;
+  incompleteDateKeys: string[];
+}) {
+  if (args.mode !== "INTERVAL") return null;
+  if (args.preferredActualSource === "GREEN_BUTTON") return null;
+  const esiid = String(args.sourceEsiid ?? "").trim();
+  const incompleteDateKeys = normalizeDateKeys(args.incompleteDateKeys);
+  if (!esiid || incompleteDateKeys.length === 0) return null;
+
+  const initialCoverage = await loadOnePathSmtDateCoverage({ esiid, dateKeys: incompleteDateKeys });
+  logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_check", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: esiid,
+    requestedDateKeys: incompleteDateKeys.join(","),
+    incompleteDateKeys: initialCoverage.incompleteDateKeys.join(","),
+    countsByDate: jsonForLog(initialCoverage.countsByDate),
+    refreshNeeded: true,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+
+  const refreshResult = await requestUsageRefreshForUserHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+  }).catch((error) => ({
+    ok: false as const,
+    error: "refresh_failed" as const,
+    message: error instanceof Error ? error.message : String(error),
+  }));
+  logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: esiid,
+    requestedDateKeys: incompleteDateKeys.join(","),
+    initialIncompleteDateKeys: initialCoverage.incompleteDateKeys.join(","),
+    initialCountsByDate: jsonForLog(initialCoverage.countsByDate),
+    refreshOk: refreshResult.ok,
+    refreshMessage: (refreshResult as any)?.message ?? (refreshResult as any)?.error ?? null,
+    pullAttempted: Array.isArray((refreshResult as any)?.homes)
+      ? Boolean((refreshResult as any).homes.some((home: any) => home?.pull?.attempted))
+      : undefined,
+    backfillCount: Array.isArray((refreshResult as any)?.backfill) ? (refreshResult as any).backfill.length : undefined,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  const waitResult = await waitForOnePathSmtDateCoverage({
+    esiid,
+    dateKeys: incompleteDateKeys,
+    correlationId: args.correlationId,
+    effectiveHouseId: args.effectiveHouseId,
+    actualContextHouseId: args.actualContextHouseId,
+    sourceUserId: args.sourceUserId,
+  });
+  return {
+    attempted: true,
+    requestedDateKeys: incompleteDateKeys,
+    initial: initialCoverage,
+    result: refreshResult,
+    wait: waitResult,
+  };
+}
+
+type OnePathIncompleteMeterBackfillRetry = NonNullable<
+  Awaited<ReturnType<typeof maybeRetryOnePathIncompleteMeterBackfill>>
+> & {
+  postRetryIncompleteDateKeys?: string[];
+};
 
 async function resolveOnePathTestHomeState(args: {
   ownerUserId: string;
@@ -1169,19 +1376,6 @@ export async function POST(request: NextRequest) {
       actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
       correlationId,
     });
-    if (smtRefreshCheck?.wait?.timedOut) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "smt_backfill_pending",
-          message:
-            "One Path requested the SMT refresh, but the canonical tail is still incomplete. Retry after the SMT backfill finishes processing.",
-          correlationId,
-          smtRefreshCheck,
-        },
-        { status: 409 }
-      );
-    }
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await readOnePathSimulatedUsageScenario({
@@ -1246,7 +1440,7 @@ export async function POST(request: NextRequest) {
           readModel: null,
         });
       }
-      const engineInput =
+      let engineInput =
         mode === "INTERVAL"
           ? await adaptIntervalRawInput(effectiveRawInputBase)
           : mode === "GREEN_BUTTON"
@@ -1270,7 +1464,7 @@ export async function POST(request: NextRequest) {
                   ...effectiveRawInputBase,
                   manualUsagePayload: effectiveManualUsagePayload,
                 });
-      const slimEngineInput = buildSlimAdminEngineInput(engineInput);
+      let slimEngineInput = buildSlimAdminEngineInput(engineInput);
       if (mode === "GREEN_BUTTON" && !effectiveRawInputBase.scenarioId) {
         const baselineDataset = asRecord(
           await withAdminRouteStageTimeout({
@@ -1319,6 +1513,7 @@ export async function POST(request: NextRequest) {
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
           correlationId,
+          smtRefreshCheck,
           engineInput: slimEngineInput,
           manualStageOneView: null,
           runDisplayView: compactRunDisplayView,
@@ -1326,9 +1521,9 @@ export async function POST(request: NextRequest) {
           readModel: compactReadModel,
         });
       }
-      const artifact = await runSharedSimulation(engineInput);
-      const artifactDataset = asRecord(artifact.dataset);
-      const artifactDatasetMeta = asRecord(artifactDataset?.meta);
+      let artifact = await runSharedSimulation(engineInput);
+      let artifactDataset = asRecord(artifact.dataset);
+      let artifactDatasetMeta = asRecord(artifactDataset?.meta);
       const isGreenButtonBaselinePassthroughRun =
         mode === "GREEN_BUTTON" &&
         !effectiveRawInputBase.scenarioId &&
@@ -1360,6 +1555,7 @@ export async function POST(request: NextRequest) {
           ok: true,
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
+          smtRefreshCheck,
           engineInput: slimEngineInput,
           manualStageOneView: artifact.manualStageOneView ?? null,
           runDisplayView: compactRunDisplayView,
@@ -1367,7 +1563,31 @@ export async function POST(request: NextRequest) {
           readModel: compactReadModel,
         });
       }
-      const readModel = buildSharedSimulationReadModel(artifact);
+      let readModel = buildSharedSimulationReadModel(artifact);
+      let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null =
+        await maybeRetryOnePathIncompleteMeterBackfill({
+          mode,
+          preferredActualSource: effectiveRawInputBase.preferredActualSource,
+          sourceUserId: resolved.userId,
+          sourceHouseId: resolved.selectedHouse.id,
+          sourceEsiid: smtSourceEsiid,
+          effectiveHouseId,
+          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+          correlationId,
+          incompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(readModel.dataset ?? artifactDataset),
+        });
+      if (smtIncompleteMeterRetry?.attempted) {
+        engineInput = await adaptIntervalRawInput(effectiveRawInputBase);
+        slimEngineInput = buildSlimAdminEngineInput(engineInput);
+        artifact = await runSharedSimulation(engineInput);
+        artifactDataset = asRecord(artifact.dataset);
+        artifactDatasetMeta = asRecord(artifactDataset?.meta);
+        readModel = buildSharedSimulationReadModel(artifact);
+        smtIncompleteMeterRetry = {
+          ...smtIncompleteMeterRetry,
+          postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(readModel.dataset ?? artifactDataset),
+        };
+      }
       const actualDatasetForManualRun =
         isManualMode
           ? (
@@ -1426,6 +1646,8 @@ export async function POST(request: NextRequest) {
                 ? "BASELINE_PASSTHROUGH"
                 : "BASELINE_OR_UNSET",
           engineInput: slimEngineInput,
+          smtRefreshCheck,
+          smtIncompleteMeterRetry,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
           artifact: null,
@@ -1442,6 +1664,8 @@ export async function POST(request: NextRequest) {
               ? "BASELINE_PASSTHROUGH"
               : "BASELINE_OR_UNSET",
         engineInput: slimEngineInput,
+        smtRefreshCheck,
+        smtIncompleteMeterRetry,
         artifact,
         readModel,
         manualStageOneView: readModel.manualStageOneView ?? null,
