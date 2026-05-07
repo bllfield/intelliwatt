@@ -24,6 +24,14 @@ When this document conflicts with older planning or audit language, this documen
 - That internal seal does **not** mean cutover is complete. One Path may still depend on safe pure utilities and read-only data access outside `modules/onePathSim/**`, but it is not allowed to depend on live behavior owners.
 - This phase is about locking ownership and contracts so later cutover can happen without drift.
 
+## One Path admin operating rules
+
+- One Path Admin writes only to a dedicated reusable `ONE_PATH_LAB_TEST_HOME`. The selected source house stays read-only. Replacing the test home resets isolated mutable state, copies scenarios/manual payload context, repairs missing home/appliance profiles, and clones Green Button actual-usage records onto the test home so admin tuning stays sandboxed.
+- When the test home is pinned, actual usage still stays under shared usage ownership. `INTERVAL` / SMT runs may use the selected source house ESIID as the SMT identity fallback for the pinned actual-context house, while `GREEN_BUTTON` runs read persisted Green Button truth cloned onto the test home. Route code must not invent a private actual-usage source.
+- For non-baseline scenarios, canonical 365-day coverage ownership stays with `resolveCanonicalUsage365CoverageWindow()` and shared metadata-window helpers. `dataset.summary.start/end`, `dataset.meta.coverageStart/coverageEnd`, and bounded `excludedDateKeys*` metadata must stay aligned to that same shared coverage window.
+- One Path interval admin runs now treat SMT backfill as best-effort recovery, not a hard display gate. The route may request a refresh and wait for canonical tail coverage before the first run, but stale/incomplete tail coverage no longer returns `409`.
+- After the first interval simulation, if the dataset still marks any day as `SIMULATED_INCOMPLETE_METER`, the route requests SMT refresh once for those exact dates, rebuilds engine input, and reruns once. If some incomplete simulated days remain after that retry, the route still returns results with diagnostics instead of blocking.
+
 ## Non-negotiable upstream / downstream boundary
 
 ### Usage stays upstream
