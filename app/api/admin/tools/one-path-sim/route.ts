@@ -608,6 +608,10 @@ const smtCoverageDateFmt = new Intl.DateTimeFormat("en-CA", {
   month: "2-digit",
   day: "2-digit",
 });
+const ONE_PATH_SMT_TAIL_LOOKBACK_DAYS = 14;
+const ONE_PATH_SMT_TAIL_REQUIRED_INTERVALS_PER_DAY = 96;
+const ONE_PATH_SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
+const ONE_PATH_SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 
 function smtCoverageDateKey(date: Date | null | undefined): string | null {
   if (!date) return null;
@@ -616,6 +620,141 @@ function smtCoverageDateKey(date: Date | null | undefined): string | null {
   } catch {
     return date.toISOString().slice(0, 10);
   }
+}
+
+function smtUtcDateKey(date: Date | null | undefined): string | null {
+  if (!date) return null;
+  try {
+    return date.toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}
+
+function addDateKeyDays(dateKey: string, days: number): string {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function enumerateDateKeysInclusive(startDate: string, endDate: string): string[] {
+  const out: string[] = [];
+  for (let cursor = startDate; cursor <= endDate; cursor = addDateKeyDays(cursor, 1)) {
+    out.push(cursor);
+  }
+  return out;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function loadOnePathSmtTailCoverage(args: { esiid: string; targetEndDate: string }) {
+  const coverage = await prisma.smtInterval
+    .aggregate({
+      where: { esiid: args.esiid },
+      _count: { _all: true },
+      _min: { ts: true },
+      _max: { ts: true },
+    })
+    .catch(() => null);
+  const coverageEndDate = smtCoverageDateKey(coverage?._max?.ts ?? null);
+  const coverageStartDate = smtCoverageDateKey(coverage?._min?.ts ?? null);
+  const coverageEndUtcDate = smtUtcDateKey(coverage?._max?.ts ?? null);
+  const coverageStartUtcDate = smtUtcDateKey(coverage?._min?.ts ?? null);
+  const intervalCount = Number(coverage?._count?._all ?? 0) || 0;
+  const tailStartDate = addDateKeyDays(args.targetEndDate, -(ONE_PATH_SMT_TAIL_LOOKBACK_DAYS - 1));
+  const tailDateKeys = enumerateDateKeysInclusive(tailStartDate, args.targetEndDate);
+  const tailDateSet = new Set(tailDateKeys);
+  const tailStart = new Date(`${tailStartDate}T00:00:00.000Z`);
+  const tailEnd = new Date(`${args.targetEndDate}T23:59:59.999Z`);
+  const tailRows = await prisma.smtInterval
+    .findMany({
+      where: {
+        esiid: args.esiid,
+        ts: {
+          gte: tailStart,
+          lte: tailEnd,
+        },
+      },
+      select: { ts: true },
+      orderBy: { ts: "asc" },
+    })
+    .catch(() => []);
+  const uniqueTsByDate = new Map<string, Set<string>>();
+  for (const row of tailRows) {
+    const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
+    const dateKey = smtUtcDateKey(ts);
+    if (!dateKey || !tailDateSet.has(dateKey) || !ts) continue;
+    const bucket = uniqueTsByDate.get(dateKey) ?? new Set<string>();
+    bucket.add(ts.toISOString());
+    uniqueTsByDate.set(dateKey, bucket);
+  }
+  const tailCountsByDate = Object.fromEntries(
+    tailDateKeys.map((dateKey) => [dateKey, uniqueTsByDate.get(dateKey)?.size ?? 0])
+  );
+  const incompleteTailDateKeys = tailDateKeys.filter(
+    (dateKey) => (tailCountsByDate[dateKey] ?? 0) < ONE_PATH_SMT_TAIL_REQUIRED_INTERVALS_PER_DAY
+  );
+
+  return {
+    intervalCount,
+    coverageStartDate,
+    coverageEndDate,
+    coverageStartUtcDate,
+    coverageEndUtcDate,
+    targetEndDate: args.targetEndDate,
+    tailStartDate,
+    tailCountsByDate,
+    incompleteTailDateKeys,
+    tailReady: Boolean(coverageEndDate && coverageEndDate >= args.targetEndDate && incompleteTailDateKeys.length === 0),
+  };
+}
+
+async function waitForOnePathSmtTailCoverage(args: {
+  esiid: string;
+  targetEndDate: string;
+  correlationId: string;
+  effectiveHouseId: string;
+  actualContextHouseId: string;
+  sourceUserId: string;
+}) {
+  const startedAt = Date.now();
+  let attempts = 0;
+  let latest = await loadOnePathSmtTailCoverage({ esiid: args.esiid, targetEndDate: args.targetEndDate });
+  while (!latest.tailReady && Date.now() - startedAt < ONE_PATH_SMT_TAIL_WAIT_TIMEOUT_MS) {
+    attempts += 1;
+    await wait(ONE_PATH_SMT_TAIL_WAIT_INTERVAL_MS);
+    latest = await loadOnePathSmtTailCoverage({ esiid: args.esiid, targetEndDate: args.targetEndDate });
+  }
+  const durationMs = Date.now() - startedAt;
+  logSimPipelineEvent("one_path_smt_tail_backfill_wait_complete", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: args.esiid,
+    durationMs,
+    attempts,
+    targetEndDate: args.targetEndDate,
+    coverageStartDate: latest.coverageStartDate,
+    coverageEndDate: latest.coverageEndDate,
+    coverageStartUtcDate: latest.coverageStartUtcDate,
+    coverageEndUtcDate: latest.coverageEndUtcDate,
+    tailStartDate: latest.tailStartDate,
+    tailReady: latest.tailReady,
+    incompleteTailDateKeys: latest.incompleteTailDateKeys,
+    tailCountsByDate: latest.tailCountsByDate,
+    timedOut: !latest.tailReady,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  return {
+    ...latest,
+    durationMs,
+    attempts,
+    timedOut: !latest.tailReady,
+  };
 }
 
 async function maybeRefreshOnePathSmtTailCoverage(args: {
@@ -635,18 +774,11 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
 
   const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
   const targetEndDate = canonicalCoverage.endDate;
-  const coverage = await prisma.smtInterval
-    .aggregate({
-      where: { esiid },
-      _count: { _all: true },
-      _min: { ts: true },
-      _max: { ts: true },
-    })
-    .catch(() => null);
-  const coverageEndDate = smtCoverageDateKey(coverage?._max?.ts ?? null);
-  const coverageStartDate = smtCoverageDateKey(coverage?._min?.ts ?? null);
-  const intervalCount = Number(coverage?._count?._all ?? 0) || 0;
-  const shouldRefresh = !coverageEndDate || coverageEndDate < targetEndDate;
+  const initialCoverage = await loadOnePathSmtTailCoverage({ esiid, targetEndDate });
+  const shouldRefresh =
+    !initialCoverage.coverageEndDate ||
+    initialCoverage.coverageEndDate < targetEndDate ||
+    initialCoverage.incompleteTailDateKeys.length > 0;
 
   logSimPipelineEvent("one_path_smt_tail_backfill_check", {
     correlationId: args.correlationId,
@@ -654,10 +786,15 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
     sourceEsiid: esiid,
-    intervalCount,
-    coverageStartDate,
-    coverageEndDate,
+    intervalCount: initialCoverage.intervalCount,
+    coverageStartDate: initialCoverage.coverageStartDate,
+    coverageEndDate: initialCoverage.coverageEndDate,
+    coverageStartUtcDate: initialCoverage.coverageStartUtcDate,
+    coverageEndUtcDate: initialCoverage.coverageEndUtcDate,
     targetEndDate,
+    tailStartDate: initialCoverage.tailStartDate,
+    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys,
+    tailCountsByDate: initialCoverage.tailCountsByDate,
     refreshNeeded: shouldRefresh,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
@@ -667,9 +804,10 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     return {
       attempted: false,
       reason: "coverage_tail_current",
-      coverageStartDate,
-      coverageEndDate,
+      coverageStartDate: initialCoverage.coverageStartDate,
+      coverageEndDate: initialCoverage.coverageEndDate,
       targetEndDate,
+      wait: null,
     };
   }
 
@@ -687,10 +825,14 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
     sourceEsiid: esiid,
-    intervalCount,
-    coverageStartDate,
-    coverageEndDate,
+    intervalCount: initialCoverage.intervalCount,
+    coverageStartDate: initialCoverage.coverageStartDate,
+    coverageEndDate: initialCoverage.coverageEndDate,
+    coverageStartUtcDate: initialCoverage.coverageStartUtcDate,
+    coverageEndUtcDate: initialCoverage.coverageEndUtcDate,
     targetEndDate,
+    tailStartDate: initialCoverage.tailStartDate,
+    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys,
     refreshOk: refreshResult.ok,
     refreshMessage: (refreshResult as any)?.message ?? (refreshResult as any)?.error ?? null,
     pullAttempted: Array.isArray((refreshResult as any)?.homes)
@@ -700,12 +842,21 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
   });
+  const waitResult = await waitForOnePathSmtTailCoverage({
+    esiid,
+    targetEndDate,
+    correlationId: args.correlationId,
+    effectiveHouseId: args.effectiveHouseId,
+    actualContextHouseId: args.actualContextHouseId,
+    sourceUserId: args.sourceUserId,
+  });
   return {
     attempted: true,
-    coverageStartDate,
-    coverageEndDate,
+    coverageStartDate: initialCoverage.coverageStartDate,
+    coverageEndDate: initialCoverage.coverageEndDate,
     targetEndDate,
     result: refreshResult,
+    wait: waitResult,
   };
 }
 
@@ -1008,7 +1159,7 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    await maybeRefreshOnePathSmtTailCoverage({
+    const smtRefreshCheck = await maybeRefreshOnePathSmtTailCoverage({
       mode,
       preferredActualSource: effectiveRawInputBase.preferredActualSource,
       sourceUserId: resolved.userId,
@@ -1018,6 +1169,19 @@ export async function POST(request: NextRequest) {
       actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
       correlationId,
     });
+    if (smtRefreshCheck?.wait?.timedOut) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "smt_backfill_pending",
+          message:
+            "One Path requested the SMT refresh, but the canonical tail is still incomplete. Retry after the SMT backfill finishes processing.",
+          correlationId,
+          smtRefreshCheck,
+        },
+        { status: 409 }
+      );
+    }
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await readOnePathSimulatedUsageScenario({

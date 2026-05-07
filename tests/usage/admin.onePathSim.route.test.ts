@@ -10,7 +10,10 @@ const listScenarios = vi.fn();
 const prismaUserFindFirst = vi.fn();
 const prismaHouseAddressFindFirst = vi.fn();
 const prismaGreenButtonUploadFindFirst = vi.fn();
+const prismaSmtIntervalAggregate = vi.fn();
+const prismaSmtIntervalFindMany = vi.fn();
 const usageGreenButtonIntervalAggregate = vi.fn();
+const requestUsageRefreshForUserHouse = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const getHomeProfileSimulatedByUserHouse = vi.fn();
@@ -77,6 +80,10 @@ vi.mock("@/lib/db", () => ({
     greenButtonUpload: {
       findFirst: (...args: any[]) => prismaGreenButtonUploadFindFirst(...args),
     },
+    smtInterval: {
+      aggregate: (...args: any[]) => prismaSmtIntervalAggregate(...args),
+      findMany: (...args: any[]) => prismaSmtIntervalFindMany(...args),
+    },
   },
 }));
 
@@ -135,6 +142,10 @@ vi.mock("@/lib/usage/userUsageHouseContract", () => ({
   buildUserUsageHouseContract: (...args: any[]) => buildUserUsageHouseContract(...args),
 }));
 
+vi.mock("@/lib/usage/userUsageRefresh", () => ({
+  requestUsageRefreshForUserHouse: (...args: any[]) => requestUsageRefreshForUserHouse(...args),
+}));
+
 vi.mock("@/modules/onePathSim/onePathSim", () => ({
   adaptIntervalRawInput: (...args: any[]) => adaptIntervalRawInput(...args),
   adaptGreenButtonRawInput: (...args: any[]) => adaptGreenButtonRawInput(...args),
@@ -178,6 +189,16 @@ function buildDailyRows(startDate: string, endDate: string, kwh = 10) {
   return out;
 }
 
+function buildSmtIntervalRows(startDate: string, endDate: string) {
+  const out: Array<{ ts: Date }> = [];
+  const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
+  const end = new Date(`${endDate}T23:45:00.000Z`).getTime();
+  for (let cursor = start; cursor <= end; cursor += 15 * 60 * 1000) {
+    out.push({ ts: new Date(cursor) });
+  }
+  return out;
+}
+
 describe("admin one path sim route", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -189,6 +210,9 @@ describe("admin one path sim route", () => {
     prismaUserFindFirst.mockReset();
     prismaHouseAddressFindFirst.mockReset();
     prismaGreenButtonUploadFindFirst.mockReset();
+    prismaSmtIntervalAggregate.mockReset();
+    prismaSmtIntervalFindMany.mockReset();
+    requestUsageRefreshForUserHouse.mockReset();
     usageGreenButtonIntervalAggregate.mockReset();
     getManualUsageInputForUserHouse.mockReset();
     saveManualUsageInputForUserHouse.mockReset();
@@ -230,6 +254,13 @@ describe("admin one path sim route", () => {
       return { id: String(where.id), label: "Primary", esiid: "esiid-1" };
     });
     prismaGreenButtonUploadFindFirst.mockResolvedValue(null);
+    prismaSmtIntervalAggregate.mockResolvedValue({
+      _count: { _all: 1344 },
+      _min: { ts: new Date("2026-04-01T00:00:00.000Z") },
+      _max: { ts: new Date("2026-04-14T23:45:00.000Z") },
+    });
+    prismaSmtIntervalFindMany.mockResolvedValue(buildSmtIntervalRows("2026-04-01", "2026-04-14"));
+    requestUsageRefreshForUserHouse.mockResolvedValue({ ok: true, homes: [], backfill: [] });
     usageGreenButtonIntervalAggregate.mockResolvedValue(null);
     lookupAdminHousesByEmail.mockResolvedValue({
       ok: true,
@@ -1034,6 +1065,49 @@ describe("admin one path sim route", () => {
     expect(getTravelRangesFromDb).not.toHaveBeenCalled();
     expect(getSimulationVariablePolicy).not.toHaveBeenCalled();
     expect(buildUserUsageHouseContract).not.toHaveBeenCalled();
+  });
+
+  it("waits for stale SMT tail coverage and blocks display while backfill is still pending", async () => {
+    prismaSmtIntervalAggregate.mockResolvedValue({
+      _count: { _all: 960 },
+      _min: { ts: new Date("2026-04-01T00:00:00.000Z") },
+      _max: { ts: new Date("2026-04-10T23:45:00.000Z") },
+    });
+    prismaSmtIntervalFindMany.mockResolvedValue(buildSmtIntervalRows("2026-04-01", "2026-04-10"));
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const pending = POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+        includeDebugDiagnostics: true,
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(62_000);
+    const res = await pending;
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: "smt_backfill_pending",
+        smtRefreshCheck: expect.objectContaining({
+          attempted: true,
+          wait: expect.objectContaining({
+            timedOut: true,
+            incompleteTailDateKeys: expect.arrayContaining(["2026-04-14"]),
+          }),
+        }),
+      })
+    );
+    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(adaptIntervalRawInput).not.toHaveBeenCalled();
+    expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
   it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {
