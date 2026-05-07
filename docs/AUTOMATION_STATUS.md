@@ -7,8 +7,8 @@
 - **Vercel Scheduled Functions (Option A)** — *Active*
   - `/api/admin/rates/refresh` (2:00 AM UTC daily)
   - `/api/rates/efl-refresh` (3:00 AM UTC daily)
-  - `/api/admin/cron/normalize-smt` (every 5 minutes)
-  - `/api/admin/cron/normalize-smt-catch` (every 1 minute - catch-up sweep)
+  - `/api/admin/smt/cron/post-ingest` (every 5 minutes - drains deferred SMT post-ingest queue)
+  - `/api/admin/smt/cron/pull-sample` (every 5 minutes - time-gated monthly sample pull)
   - **Auth:** `x-vercel-cron` header required, optional `CRON_SECRET` supported (see below).
 
 - **Droplet systemd timers (Option B)** — *Planned/Potential*
@@ -21,17 +21,19 @@
 ### Vercel Cron Jobs
 
 **File**: `vercel.json`
-- Lists 4 cron paths/schedules:
+- Lists 5 cron paths/schedules:
   - `"/api/admin/rates/refresh"` → `"0 2 * * *"` (2:00 AM UTC daily)
   - `"/api/rates/efl-refresh"` → `"0 3 * * *"` (3:00 AM UTC daily)
-  - `"/api/admin/cron/normalize-smt"` → `"*/5 * * * *"` (every 5 minutes)
-  - `"/api/admin/cron/normalize-smt-catch"` → `"*/1 * * * *"` (every 1 minute)
+  - `"/api/admin/smt/cron/post-ingest"` → `"*/5 * * * *"` (every 5 minutes)
+  - `"/api/admin/wattbuy/cron/nightly"` → `"*/5 * * * *"` (every 5 minutes, internally time-gated)
+  - `"/api/admin/smt/cron/pull-sample"` → `"*/5 * * * *"` (every 5 minutes, internally time-gated)
 
 **Implementation**:
 - `app/api/admin/rates/refresh/route.ts` - Nightly rates discovery + EFL refresh (Texas TDSPs)
 - `app/api/rates/efl-refresh/route.ts` - Nightly EFL refresher to update RateConfig
-- `app/api/admin/cron/normalize-smt/route.ts` - 5-minute SMT normalization sweep (TODO: implement)
-- `app/api/admin/cron/normalize-smt-catch/route.ts` - 1-minute catch-up sweep (placeholder/no-op)
+- `app/api/admin/smt/cron/post-ingest/route.ts` - 5-minute deferred SMT post-ingest queue drainer
+- `app/api/admin/wattbuy/cron/nightly/route.ts` - 5-minute trigger with internal Chicago-time gating
+- `app/api/admin/smt/cron/pull-sample/route.ts` - 5-minute trigger with internal Chicago-time gating
 - All routes protected by `requireVercelCron()` from `lib/auth/cron.ts`
 
 **Authentication**:

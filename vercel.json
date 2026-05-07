@@ -13,6 +13,10 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "app/api/admin/smt/cron/post-ingest/route.ts": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
     "app/api/user/usage/route.ts": {
       "maxDuration": 120,
       "memory": 1024
@@ -41,6 +45,7 @@
   "crons": [
     { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" },
     { "path": "/api/admin/tdsp/ingest", "schedule": "15 9 * * *" },
+    { "path": "/api/admin/smt/cron/post-ingest", "schedule": "*/5 * * * *" },
     { "path": "/api/admin/wattbuy/cron/nightly", "schedule": "*/5 * * * *" },
     { "path": "/api/admin/smt/cron/pull-sample", "schedule": "*/5 * * * *" }
   ]
