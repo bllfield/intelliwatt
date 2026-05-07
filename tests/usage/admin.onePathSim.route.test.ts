@@ -1067,7 +1067,7 @@ describe("admin one path sim route", () => {
     expect(buildUserUsageHouseContract).not.toHaveBeenCalled();
   });
 
-  it("waits for stale SMT tail coverage and blocks display while backfill is still pending", async () => {
+  it("waits for stale SMT tail coverage but still shows results when backfill is still pending", async () => {
     prismaSmtIntervalAggregate.mockResolvedValue({
       _count: { _all: 960 },
       _min: { ts: new Date("2026-04-01T00:00:00.000Z") },
@@ -1091,11 +1091,10 @@ describe("admin one path sim route", () => {
     const res = await pending;
     const json = await res.json();
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     expect(json).toEqual(
       expect.objectContaining({
-        ok: false,
-        error: "smt_backfill_pending",
+        ok: true,
         smtRefreshCheck: expect.objectContaining({
           attempted: true,
           wait: expect.objectContaining({
@@ -1106,8 +1105,67 @@ describe("admin one path sim route", () => {
       })
     );
     expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
-    expect(adaptIntervalRawInput).not.toHaveBeenCalled();
-    expect(runSharedSimulation).not.toHaveBeenCalled();
+    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
+    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests a targeted SMT refresh and reruns once when the first result has incomplete meter days", async () => {
+    buildSharedSimulationReadModel
+      .mockReturnValueOnce({
+        runIdentity: { artifactId: "artifact-1" },
+        manualStageOneView: null,
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          meta: {
+            simulatedSourceDetailByDate: {
+              "2026-04-10": "SIMULATED_INCOMPLETE_METER",
+            },
+          },
+          daily: [
+            {
+              date: "2026-04-10",
+              kwh: 22,
+              source: "SIMULATED",
+              sourceDetail: "SIMULATED_INCOMPLETE_METER",
+            },
+          ],
+        },
+      })
+      .mockReturnValueOnce({
+        runIdentity: { artifactId: "artifact-2" },
+        manualStageOneView: null,
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          daily: [{ date: "2026-04-10", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+        },
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
+    expect(runSharedSimulation).toHaveBeenCalledTimes(2);
+    expect(buildSharedSimulationReadModel).toHaveBeenCalledTimes(2);
+    expect(json.smtIncompleteMeterRetry).toEqual(
+      expect.objectContaining({
+        attempted: true,
+        requestedDateKeys: ["2026-04-10"],
+        postRetryIncompleteDateKeys: [],
+      })
+    );
+    expect(json.readModel.runIdentity.artifactId).toBe("artifact-2");
   });
 
   it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {
