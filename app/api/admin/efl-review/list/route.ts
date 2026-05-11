@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
+import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,99 @@ function jsonError(status: number, error: string, details?: unknown) {
     },
     { status },
   );
+}
+
+async function hydrateMissingQueueEflUrls(items: any[]): Promise<any[]> {
+  const openParseItems = (Array.isArray(items) ? items : []).filter((it: any) => {
+    if (String(it?.kind ?? "") !== "EFL_PARSE") return false;
+    if (String(it?.eflUrl ?? "").trim()) return false;
+    return String(it?.offerId ?? "").trim().length > 0;
+  });
+  if (openParseItems.length === 0) return items;
+
+  const wantedOfferIds = new Set<string>(
+    openParseItems
+      .map((it: any) => String(it?.offerId ?? "").trim())
+      .filter(Boolean),
+  );
+  if (wantedOfferIds.size === 0) return items;
+
+  const foundByOfferId = new Map<string, any>();
+  try {
+    const snapRows = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findMany({
+      where: { endpoint: "OFFERS" },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+      select: { payloadJson: true },
+    });
+
+    for (const row of snapRows ?? []) {
+      if (wantedOfferIds.size === foundByOfferId.size) break;
+      const { offers } = normalizeOffers((row as any)?.payloadJson ?? {});
+      for (const offer of offers as any[]) {
+        const offerId = String((offer as any)?.offer_id ?? "").trim();
+        if (!offerId || !wantedOfferIds.has(offerId) || foundByOfferId.has(offerId)) continue;
+        const eflUrl = String((offer as any)?.docs?.efl ?? "").trim();
+        if (!eflUrl) continue;
+        foundByOfferId.set(offerId, offer);
+      }
+    }
+  } catch {
+    return items;
+  }
+
+  if (foundByOfferId.size === 0) return items;
+
+  const nextItems = [...items];
+  await Promise.all(
+    nextItems.map(async (it: any, idx: number) => {
+      const offerId = String(it?.offerId ?? "").trim();
+      if (!offerId || String(it?.eflUrl ?? "").trim()) return;
+      const hit = foundByOfferId.get(offerId);
+      if (!hit) return;
+
+      const eflUrl = String(hit?.docs?.efl ?? "").trim();
+      if (!eflUrl) return;
+
+      const supplier = hit?.supplier_name ?? it?.supplier ?? null;
+      const planName = hit?.plan_name ?? it?.planName ?? null;
+      const tdspName = hit?.distributor_name ?? it?.tdspName ?? null;
+      const termMonths =
+        typeof hit?.term_months === "number" && Number.isFinite(hit.term_months)
+          ? hit.term_months
+          : it?.termMonths ?? null;
+      const queueReason =
+        "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet.";
+
+      try {
+        const updated = await (prisma as any).eflParseReviewQueue.update({
+          where: { id: String(it.id) },
+          data: {
+            eflUrl,
+            supplier,
+            planName,
+            tdspName,
+            termMonths,
+            queueReason,
+            updatedAt: new Date(),
+          },
+        });
+        nextItems[idx] = updated;
+      } catch {
+        nextItems[idx] = {
+          ...it,
+          eflUrl,
+          supplier,
+          planName,
+          tdspName,
+          termMonths,
+          queueReason,
+        };
+      }
+    }),
+  );
+
+  return nextItems;
 }
 
 export async function GET(req: NextRequest) {
@@ -79,6 +174,10 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
       take: limit,
     });
+
+    if (where.resolvedAt === null) {
+      items = await hydrateMissingQueueEflUrls(items);
+    }
 
     let autoResolvedCount = 0;
     let autoDedupedCount = 0;
