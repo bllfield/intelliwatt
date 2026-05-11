@@ -156,7 +156,11 @@ function detectTdspPassThrough(rawText: string): boolean {
     /TDSP[\s\S]{0,80}Delivery[\s\S]{0,120}passed\s*through/i.test(t) ||
     /TDU[\s\S]{0,80}Delivery[\s\S]{0,120}passed\s*through/i.test(t) ||
     /passed\s*through[\s\S]{0,60}without\s*mark-?\s*up/i.test(t) ||
-    /without\s*mark-?\s*up[\s\S]{0,60}passed\s*through/i.test(t)
+    /without\s*mark-?\s*up[\s\S]{0,60}passed\s*through/i.test(t) ||
+    /(?:applicable|current|updated)?[\s\S]{0,40}(?:Transmission\s+and\s+Distribution\s+Service\s+Provider|TDU|TDSP)[\s\S]{0,120}tariff/i.test(
+      t,
+    ) ||
+    /(?:TDU|TDSP)[-\s]*pass[\s-]*through\s+charges?/i.test(t)
   );
 }
 
