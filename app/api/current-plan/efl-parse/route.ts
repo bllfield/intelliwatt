@@ -15,6 +15,7 @@ import { validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
+import { autoResolveCurrentPlanQueue } from "@/lib/current-plan/autoResolveCurrentPlanQueue";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 export const runtime = "nodejs";
@@ -1028,30 +1029,19 @@ export async function POST(req: NextRequest) {
       }
     } else {
       try {
-        const whereOr = [
-          det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
-          repPuctCertificateFromText && eflVersionCodeFromText
-            ? {
-                repPuctCertificate: repPuctCertificateFromText,
-                eflVersionCode: eflVersionCodeFromText,
-              }
-            : undefined,
-        ].filter(Boolean);
-        if (whereOr.length > 0) {
-          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
-            where: {
-              resolvedAt: null,
-              source: "current_plan_efl",
-              OR: whereOr,
-            },
-            data: {
-              resolvedAt: new Date(),
-              resolvedBy: "current_plan_efl_auto",
-              resolutionNotes: `AUTO_RESOLVED: current-plan EFL upload parsed successfully. parsedCurrentPlanId=${record?.id ?? "—"}`,
-            },
-          });
-          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
-        }
+        const resolved = await autoResolveCurrentPlanQueue({
+          sourceMode: "efl_only",
+          eflPdfSha256: det.eflPdfSha256 ?? null,
+          repPuctCertificate: repPuctCertificateFromText ?? null,
+          eflVersionCode: eflVersionCodeFromText ?? null,
+          providerName: entryData.providerName ?? null,
+          planName: entryData.planName ?? null,
+          termMonths: entryData.termMonths,
+          userEmail,
+          resolvedBy: "current_plan_efl_auto",
+          resolutionNotes: `AUTO_RESOLVED: current-plan EFL upload parsed successfully. parsedCurrentPlanId=${record?.id ?? "—"}`,
+        });
+        autoResolvedQueueCount = resolved.count;
       } catch {
         autoResolvedQueueCount = 0;
       }

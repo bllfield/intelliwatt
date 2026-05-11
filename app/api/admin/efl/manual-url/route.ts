@@ -7,6 +7,7 @@ import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistenc
 import { prisma } from "@/lib/db";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 import { adminPersistCurrentPlanFromEflPipeline } from "@/lib/current-plan/adminPersistCurrentPlanFromEflPipeline";
+import { autoResolveCurrentPlanQueue } from "@/lib/current-plan/autoResolveCurrentPlanQueue";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -222,22 +223,37 @@ export async function POST(req: NextRequest) {
           rep && ver ? { repPuctCertificate: rep, eflVersionCode: ver } : undefined,
         ].filter(Boolean);
         if (whereOr.length > 0) {
-          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
-            where: {
-              resolvedAt: null,
-              ...(target === "current_plan" ? { source: { startsWith: "current_plan" } } : {}),
-              OR: whereOr,
-            },
-            data: {
-              resolvedAt: now,
-              resolvedBy: target === "current_plan" ? "fact_cards_current_plan" : "manual_url",
-              resolutionNotes:
-                target === "current_plan"
-                  ? `AUTO_RESOLVED: current-plan template persisted via Fact Cards. parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`
-                  : `AUTO_RESOLVED: template persisted via Fact Cards. ratePlanId=${persistedRatePlanId ?? "—"}`,
-            },
-          });
-          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
+          if (target === "current_plan") {
+            const resolved = await autoResolveCurrentPlanQueue({
+              sourceMode: "all_current_plan",
+              eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
+              repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
+              eflVersionCode: pipelineResult.eflVersionCode ?? null,
+              providerName: currentPlanPersist?.providerName ?? null,
+              planName: currentPlanPersist?.planName ?? null,
+              termMonths:
+                typeof pipelineResult?.planRules?.termMonths === "number"
+                  ? pipelineResult.planRules.termMonths
+                  : null,
+              userEmail: usageEmail,
+              resolvedBy: "fact_cards_current_plan",
+              resolutionNotes: `AUTO_RESOLVED: current-plan template persisted via Fact Cards. parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`,
+            });
+            autoResolvedQueueCount = resolved.count;
+          } else {
+            const upd = await (prisma as any).eflParseReviewQueue.updateMany({
+              where: {
+                resolvedAt: null,
+                OR: whereOr,
+              },
+              data: {
+                resolvedAt: now,
+                resolvedBy: "manual_url",
+                resolutionNotes: `AUTO_RESOLVED: template persisted via Fact Cards. ratePlanId=${persistedRatePlanId ?? "—"}`,
+              },
+            });
+            autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
+          }
         }
       } catch {
         autoResolvedQueueCount = 0;
