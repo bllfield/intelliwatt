@@ -165,9 +165,11 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
         ? "AVAILABLE"
         : statusKind === "CALCULATING"
           ? "CALCULATING"
-          : isTemplateLookupError
+          : isUnsupported
+            ? "CANNOT CALCULATE"
+            : isTemplateLookupError
             ? "TEMPORARILY UNAVAILABLE"
-            : "NOT COMPUTABLE YET";
+            : "CALCULATION UNAVAILABLE";
 
   // tce already read above
   const showEstimateLine = tce?.status === "OK" || tce?.status === "APPROXIMATE";
@@ -189,7 +191,11 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
 
   return (
     <div
-      className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)] cursor-pointer"
+      className={`rounded-3xl border p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)] cursor-pointer ${
+        statusKind === "NOT_COMPUTABLE_YET"
+          ? "border-amber-400/25 bg-brand-navy/95"
+          : "border-brand-cyan/25 bg-brand-navy"
+      }`}
       role="button"
       tabIndex={0}
       onClick={() => router.push(`/dashboard/plans/${encodeURIComponent(offer.offerId)}`)}
@@ -360,6 +366,12 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
               {usageTag ? <span className="text-brand-cyan/60"> · {usageTag}</span> : null}
             </span>
           )}
+        </div>
+      ) : null}
+
+      {!showEstimateLine && statusKind === "NOT_COMPUTABLE_YET" ? (
+        <div className="mt-3 rounded-2xl border border-amber-400/25 bg-amber-500/5 p-3 text-xs text-amber-100/90">
+          This plan is still shown for comparison, but IntelliWatt cannot calculate it right now.
         </div>
       ) : null}
 

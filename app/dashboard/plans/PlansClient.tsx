@@ -870,6 +870,11 @@ export default function PlansClient() {
     return xs;
   }, [datasetMode, offersRaw, q, rateType, term, renewableMin, template, sort]);
 
+  const isCalculatedOffer = (offer: any) => {
+    const st = String(offer?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+    return st === "OK" || st === "APPROXIMATE";
+  };
+
   const total = offers.length;
   const totalPages = datasetMode ? (total === 0 ? 0 : 1) : Math.max(0, Math.ceil(total / Math.max(1, pageSize)));
   const safePage = datasetMode ? 1 : totalPages === 0 ? 1 : Math.min(page, totalPages);
@@ -884,9 +889,16 @@ export default function PlansClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalPages]);
 
-  // Universal truth: the customer UI never shows internal queue jargon (no "QUEUED").
-  const hasUnavailable = false;
   const availableFilterOn = template === "available";
+  const calculableOffers = useMemo(
+    () => (hasUsageForUi ? offers.filter((o: any) => isCalculatedOffer(o)) : offers),
+    [hasUsageForUi, offers],
+  );
+  const unavailableOffers = useMemo(
+    () => (hasUsageForUi ? offers.filter((o: any) => !isCalculatedOffer(o)) : []),
+    [hasUsageForUi, offers],
+  );
+  const hasUnavailable = !availableFilterOn && unavailableOffers.length > 0;
 
   // Default sort:
   // - if usage is present: "Best for you"
@@ -903,12 +915,12 @@ export default function PlansClient() {
     if (!hasUsage) return null;
     if (sort !== "best_for_you_proxy") return null;
     if (safePage !== 1) return null;
-    const first = offers?.[0] as any;
+    const first = calculableOffers?.[0] as any;
     if (!first?.offerId) return null;
     const tce = first?.intelliwatt?.trueCostEstimate;
     if (!tce || tce.status !== "OK") return null;
     return String(first.offerId);
-  }, [hasUsage, sort, safePage, offers]);
+  }, [hasUsage, sort, safePage, calculableOffers]);
 
   const queuedCount = useMemo(
     () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
@@ -1470,11 +1482,11 @@ export default function PlansClient() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-brand-white">
-                  Some plans are missing IntelliWatt templates
+                  Some plans can be shown but not calculated
                 </div>
                 <div className="mt-0.5 text-xs text-brand-cyan/70">
-                  You can still compare provider estimates, but IntelliWatt true-cost ranking requires a parsed EFL template.
-                  <span className="ml-2 text-brand-cyan/55">Templates are added continuously.</span>
+                  IntelliWatt calculations are shown first. Plans we cannot calculate still appear below for comparison so
+                  you can review every available option and open the EFL.
                 </div>
               </div>
               <button
@@ -1522,14 +1534,48 @@ export default function PlansClient() {
             No plans found for your current filters.
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {offers.map((o) => (
-              <OfferCard
-                key={o.offerId}
-                offer={o}
-                recommended={showRecommendedBadge ? o.offerId === recommendedOfferId : false}
-              />
-            ))}
+          <div className="space-y-6">
+            {calculableOffers.length > 0 ? (
+              <div>
+                {hasUnavailable ? (
+                  <div className="mb-3 text-sm font-semibold text-brand-navy">
+                    IntelliWatt calculated plans
+                  </div>
+                ) : null}
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {calculableOffers.map((o) => (
+                    <OfferCard
+                      key={o.offerId}
+                      offer={o}
+                      recommended={showRecommendedBadge ? o.offerId === recommendedOfferId : false}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {hasUnavailable ? (
+              <div>
+                <div className="mb-3 rounded-2xl border border-amber-400/20 bg-brand-navy px-4 py-3">
+                  <div className="text-sm font-semibold text-brand-white">
+                    Additional plans we cannot calculate yet
+                  </div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">
+                    These plans are still shown to comply with provider listing rules, but IntelliWatt could not produce
+                    a usage-based estimate for them.
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {unavailableOffers.map((o) => (
+                    <OfferCard
+                      key={o.offerId}
+                      offer={o}
+                      recommended={false}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 
