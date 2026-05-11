@@ -2771,15 +2771,7 @@ export default function FactCardOpsPage() {
                 const source = String(it?.source ?? "").trim();
                 const isCurrentPlanBill = source === "current_plan_bill";
                 const eflUrl = (it?.eflUrl ?? "").trim();
-                const runHref =
-                  isCurrentPlanBill
-                    ? "/admin/current-plan/bill-parser?prefill=local"
-                    : eflUrl
-                    ? `/admin/efl/fact-cards?${new URLSearchParams({
-                        eflUrl,
-                        ...(it?.offerId ? { offerId: String(it.offerId) } : {}),
-                      }).toString()}`
-                    : "";
+                const queueRawText = String(it?.rawText ?? "");
                 return (
                   <tr key={it.id} className="border-t h-12">
                     <td className="px-2 py-2">{it.supplier ?? "-"}</td>
@@ -2804,7 +2796,11 @@ export default function FactCardOpsPage() {
                               : loadIntoManual({
                                   eflUrl,
                                   offerId: it.offerId ?? null,
-                                  rawText: !eflUrl ? (it?.rawText ?? null) : null,
+                                  // Queue rows may already contain the raw EFL text from a prior
+                                  // batch/manual fetch. Keep passing it even when an eflUrl exists
+                                  // so the manual runner can fall back to stored text for hosts
+                                  // like Champion ExternalDocs that may not refetch reliably.
+                                  rawText: queueRawText || null,
                                 })
                           }
                           title={
@@ -2832,29 +2828,33 @@ export default function FactCardOpsPage() {
                             Open EFL
                           </a>
                         ) : null}
-                        {runHref ? (
-                          isCurrentPlanBill ? (
-                            <button
-                              className="px-2 py-1 rounded border hover:bg-gray-50"
-                              onClick={() =>
-                                loadIntoBillParser({
-                                  rawText: it?.rawText ?? null,
-                                  derivedForValidation: it?.derivedForValidation ?? null,
-                                })
-                              }
-                              title="Deep link: open the current-plan bill parser prefilled with this bill text"
-                            >
-                              Run bill parser
-                            </button>
-                          ) : (
-                            <a
-                              className="px-2 py-1 rounded border hover:bg-gray-50"
-                              href={runHref}
-                              title="Deep link: prefill the manual runner on this page"
-                            >
-                              Run manual
-                            </a>
-                          )
+                        {isCurrentPlanBill ? (
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            onClick={() =>
+                              loadIntoBillParser({
+                                rawText: it?.rawText ?? null,
+                                derivedForValidation: it?.derivedForValidation ?? null,
+                              })
+                            }
+                            title="Deep link: open the current-plan bill parser prefilled with this bill text"
+                          >
+                            Run bill parser
+                          </button>
+                        ) : eflUrl || queueRawText.trim() ? (
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            onClick={() =>
+                              loadIntoManual({
+                                eflUrl,
+                                offerId: it.offerId ?? null,
+                                rawText: queueRawText || null,
+                              })
+                            }
+                            title="Prefill the manual runner with the queue row URL and any stored raw text fallback"
+                          >
+                            Run manual
+                          </button>
                         ) : null}
                         {it?.offerId ? (
                           <a
@@ -2866,29 +2866,33 @@ export default function FactCardOpsPage() {
                           >
                             Details
                           </a>
-                        ) : runHref ? (
-                          isCurrentPlanBill ? (
-                            <button
-                              className="px-2 py-1 rounded border hover:bg-gray-50"
-                              onClick={() =>
-                                loadIntoBillParser({
-                                  rawText: it?.rawText ?? null,
-                                  derivedForValidation: it?.derivedForValidation ?? null,
-                                })
-                              }
-                              title="Details: open the current-plan bill parser prefilled with this bill text"
-                            >
-                              Details
-                            </button>
-                          ) : (
-                            <a
-                              className="px-2 py-1 rounded border hover:bg-gray-50"
-                              href={runHref}
-                              title="Details (no offerId): open the manual runner prefilled with this EFL"
-                            >
-                              Details
-                            </a>
-                          )
+                        ) : isCurrentPlanBill ? (
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            onClick={() =>
+                              loadIntoBillParser({
+                                rawText: it?.rawText ?? null,
+                                derivedForValidation: it?.derivedForValidation ?? null,
+                              })
+                            }
+                            title="Details: open the current-plan bill parser prefilled with this bill text"
+                          >
+                            Details
+                          </button>
+                        ) : eflUrl || queueRawText.trim() ? (
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            onClick={() =>
+                              loadIntoManual({
+                                eflUrl,
+                                offerId: it.offerId ?? null,
+                                rawText: queueRawText || null,
+                              })
+                            }
+                            title="Details (no offerId): open the manual runner prefilled with this queue row"
+                          >
+                            Details
+                          </button>
                         ) : (
                           <span
                             className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
