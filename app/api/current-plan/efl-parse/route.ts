@@ -347,47 +347,14 @@ export async function POST(req: NextRequest) {
     const templateMatched = Boolean(existingBillPlanTemplate?.id);
     const templateId: string | null = existingBillPlanTemplate?.id ? String(existingBillPlanTemplate.id) : null;
 
-    // IMPORTANT:
-    // Some "discount period" EFLs (like Summer Break) require the full EFL engine to model the discount
-    // and produce a computable RateStructure (month-scoped all-day TOU periods).
-    // A cached BillPlanTemplate may not contain enough fields to reproduce this deterministically.
-    const seasonalDiscountLike =
-      /\bdiscount\s+off\s+the\s+Energy\s+Charge\b/i.test(rawText) ||
-      /\bDiscount\s+Period\b/i.test(rawText) ||
-      /\bfrom\s+(?:June|July|August|September|October|November|December|January|February|March|April|May)\b[\s\S]{0,60}\bthrough\s+(?:June|July|August|September|October|November|December|January|February|March|April|May)\b/i.test(rawText);
-
-    const templateHasUsablePricing = (() => {
-      if (!templateMatched) return false;
-      const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
-      if (rt === "TIME_OF_USE") {
-        const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
-          ? existingBillPlanTemplate.timeOfUseConfigJson
-          : [];
-        return tiers.length > 0;
-      }
-      // Fixed/Variable: expect at least one energy tier AND a base charge.
-      const energy = Array.isArray(existingBillPlanTemplate?.energyRateTiersJson)
-        ? existingBillPlanTemplate.energyRateTiersJson
-        : [];
-      const hasEnergy = energy.length > 0;
-      const base = existingBillPlanTemplate?.baseChargeCentsPerMonth;
-      const hasBase = typeof base === "number" && Number.isFinite(base) && base >= 0;
-      return hasEnergy && hasBase;
-    })();
-
-    const templateHasSeasonalPeriods = (() => {
-      if (!templateMatched) return false;
-      const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
-      if (rt !== "TIME_OF_USE") return false;
-      const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
-        ? (existingBillPlanTemplate.timeOfUseConfigJson as any[])
-        : [];
-      if (!tiers.length) return false;
-      return tiers.some((t: any) => Array.isArray(t?.monthsOfYear) && t.monthsOfYear.length > 0);
-    })();
-
-    const shouldRunPipeline =
-      !templateMatched || !templateHasUsablePricing || (seasonalDiscountLike && !templateHasSeasonalPeriods);
+    // Always run the shared EFL pipeline for customer current-plan uploads.
+    // This keeps current-plan parsing in lockstep with offers/manual Fact Cards:
+    // every new parser/solver improvement is exercised here immediately, and any
+    // successful PASS+COMPUTABLE result refreshes the reusable BillPlanTemplate.
+    //
+    // We still keep the matched-template metadata for diagnostics and for edge-case
+    // fallback reads below, but uploads should not silently bypass newer parser logic.
+    const shouldRunPipeline = true;
 
     // Use the same EFL engine as Fact Cards (AI parse → avg-price validator → gap solver) when needed.
     const pipeline = shouldRunPipeline
@@ -999,6 +966,7 @@ export async function POST(req: NextRequest) {
     if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcReq.planCalcReasonCode}`);
 
     const needsReview = reasonParts.length > 0;
+    let autoResolvedQueueCount = 0;
     if (needsReview) {
       const queueReasonFromValidation = typeof validationForQueue?.queueReason === "string" ? validationForQueue.queueReason : null;
       const queueReason = `CURRENT_PLAN_EFL: ${reasonParts.join(", ")}`
@@ -1058,6 +1026,35 @@ export async function POST(req: NextRequest) {
       } catch {
         // Best-effort only; never break the customer flow.
       }
+    } else {
+      try {
+        const whereOr = [
+          det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
+          repPuctCertificateFromText && eflVersionCodeFromText
+            ? {
+                repPuctCertificate: repPuctCertificateFromText,
+                eflVersionCode: eflVersionCodeFromText,
+              }
+            : undefined,
+        ].filter(Boolean);
+        if (whereOr.length > 0) {
+          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
+            where: {
+              resolvedAt: null,
+              source: "current_plan_efl",
+              OR: whereOr,
+            },
+            data: {
+              resolvedAt: new Date(),
+              resolvedBy: "current_plan_efl_auto",
+              resolutionNotes: `AUTO_RESOLVED: current-plan EFL upload parsed successfully. parsedCurrentPlanId=${record?.id ?? "—"}`,
+            },
+          });
+          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
+        }
+      } catch {
+        autoResolvedQueueCount = 0;
+      }
     }
 
     const customerMessage = needsReview
@@ -1079,6 +1076,7 @@ export async function POST(req: NextRequest) {
         notes: ((pipeline as any)?.parseWarnings ?? []) as string[],
         rawTextPreview: rawText.slice(0, 5000),
         savedParsedCurrentPlanId: record?.id ?? null,
+        autoResolvedQueueCount,
         queuedForReview: needsReview,
         canComputeFromEfl: !needsReview,
         customerMessage,
