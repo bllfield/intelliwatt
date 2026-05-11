@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { requiresStrongTemplateMatchForQueueItem } from "@/lib/efl/reviewQueueAutoResolve";
+import {
+  blocksTemplateMatchAutoResolve,
+  requiresStrongTemplateMatchForQueueItem,
+} from "@/lib/efl/reviewQueueAutoResolve";
 
 describe("review queue auto-resolve guardrails", () => {
   test("requires a strong match for WattBuy fetch-failed rows with no parsed identity", () => {
@@ -32,5 +35,25 @@ describe("review queue auto-resolve guardrails", () => {
         eflVersionCode: "EFL_SAMPLE_20260101",
       }),
     ).toBe(false);
+  });
+
+  test("blocks auto-resolve for explicit FAIL validation rows", () => {
+    expect(
+      blocksTemplateMatchAutoResolve({
+        source: "wattbuy_batch",
+        finalStatus: "FAIL",
+        queueReason: "EFL average price table mismatch (modeled vs expected) — manual admin review required.",
+      }),
+    ).toBe(true);
+  });
+
+  test("blocks auto-resolve for parse-fail rows even without final FAIL", () => {
+    expect(
+      blocksTemplateMatchAutoResolve({
+        source: "wattbuy_batch",
+        finalStatus: "SKIP",
+        queueReason: "EFL rawText empty; cannot run EFL pipeline.",
+      }),
+    ).toBe(true);
   });
 });

@@ -21,3 +21,16 @@ export function requiresStrongTemplateMatchForQueueItem(item: any): boolean {
   // the row should stay OPEN until we can verify the actual EFL identity.
   return finalStatus === "SKIP" && !hasRawText && !hasRateStructure && !hasPlanRules && !hasRepAndVersion;
 }
+
+export function blocksTemplateMatchAutoResolve(item: any): boolean {
+  const src = String(item?.source ?? "").trim().toLowerCase();
+  const finalStatus = String(item?.finalStatus ?? "").trim().toUpperCase();
+  const queueReason = String(item?.queueReason ?? "").trim();
+
+  if (!src.startsWith("wattbuy")) return false;
+  if (finalStatus === "FAIL") return true;
+
+  return /rawtext empty|parse fail|pipeline exception|manual admin review required|average price table mismatch/i.test(
+    queueReason,
+  );
+}

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
-import { requiresStrongTemplateMatchForQueueItem } from "@/lib/efl/reviewQueueAutoResolve";
+import {
+  blocksTemplateMatchAutoResolve,
+  requiresStrongTemplateMatchForQueueItem,
+} from "@/lib/efl/reviewQueueAutoResolve";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
@@ -299,6 +302,7 @@ export async function GET(req: NextRequest) {
 
         const resolveIds: string[] = [];
         for (const it of openItems) {
+          if (blocksTemplateMatchAutoResolve(it)) continue;
           const sha = String(it?.eflPdfSha256 || "").trim();
           const url = String(it?.eflUrl || "").trim();
           const cert = String(it?.repPuctCertificate || "").trim();
