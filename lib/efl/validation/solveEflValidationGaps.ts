@@ -169,6 +169,25 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- Contract term fallback from EFL raw text ----------------
+  // AI failures can leave planRules null even when the Disclosure Chart still
+  // exposes a clear "Contract Term 24 MONTHS" line. Recover it here so solver-
+  // derived PASS results are also persistable as RatePlan templates.
+  if (derivedPlanRules) {
+    const fallbackTermMonths = extractContractTermMonthsFromEflText(rawText);
+    if (
+      typeof fallbackTermMonths === "number" &&
+      Number.isFinite(fallbackTermMonths) &&
+      typeof (derivedPlanRules as any).termMonths !== "number"
+    ) {
+      (derivedPlanRules as any).termMonths = fallbackTermMonths;
+      if (typeof (derivedPlanRules as any).contractTermMonths !== "number") {
+        (derivedPlanRules as any).contractTermMonths = fallbackTermMonths;
+      }
+      solverApplied.push("SYNC_CONTRACT_TERM_FROM_EFL_TEXT");
+    }
+  }
+
   // ---------------- TDSP gap heuristic (for observability only) ----------------
   const maskedTdsp =
     detectMaskedTdsp(rawText) &&
@@ -782,6 +801,17 @@ function normalizeAdditiveThresholdCreditsToSegments(
     });
   }
   return segments;
+}
+
+function extractContractTermMonthsFromEflText(rawText: string): number | null {
+  const t = String(rawText ?? "");
+  if (!t.trim()) return null;
+
+  const termMatch = t.match(/^\s*Contract\s*Term(?::|\s+)\s*(\d{1,3})\s*Month(?:s)?\b/im);
+  if (!termMatch?.[1]) return null;
+
+  const n = Number(termMatch[1]);
+  return Number.isFinite(n) ? n : null;
 }
 
 function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): number | null {

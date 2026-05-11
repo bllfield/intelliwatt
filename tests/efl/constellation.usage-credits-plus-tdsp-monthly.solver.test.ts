@@ -80,6 +80,8 @@ Electricity    TDU Delivery Charge*                          6.4665       ¢ per
 
 Residential Usage Credit                      35.00        $ per bill month if usage >= 1000kWh
 Additional Residential Usage Credit           15.00        $ per bill month if usage >= 2000kWh
+
+Contract Term                                     24 MONTHS
     `.trim();
 
     const solved = await solveEflValidationGaps({
@@ -91,11 +93,13 @@ Additional Residential Usage Credit           15.00        $ per bill month if u
 
     expect(solved.solverApplied).toContain("FALLBACK_FIXED_ENERGY_CHARGE_FROM_EFL_TEXT");
     expect(solved.solverApplied).toContain("SYNC_USAGE_BILL_CREDITS_THRESHOLD_MIN_FROM_EFL_TEXT");
+    expect(solved.solverApplied).toContain("SYNC_CONTRACT_TERM_FROM_EFL_TEXT");
     expect(solved.validationAfter?.status).toBe("PASS");
 
     expect(solved.derivedPlanRules).toMatchObject({
       planType: "flat",
       rateType: "FIXED",
+      termMonths: 24,
       defaultRateCentsPerKwh: 11.44,
       billCredits: [
         { creditDollars: 35, thresholdKwh: 1000, type: "THRESHOLD_MIN" },
