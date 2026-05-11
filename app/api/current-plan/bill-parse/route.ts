@@ -721,37 +721,55 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Queue if we failed to extract key fields (so admin can iterate on regex/templates).
-    const reasonParts: string[] = [];
+    // Bills are evidence for account/service identity, not the source of truth for reusable
+    // rate-plan modeling. Keep queue blockers focused on bill-useful fields, and surface
+    // plan/modeling gaps as warnings only.
+    const blockingReasonParts: string[] = [];
+    const advisoryReasonParts: string[] = [];
     const providerOk = typeof parsed?.providerName === 'string' && parsed.providerName.trim().length > 0;
-    const planOk = typeof parsed?.planName === 'string' && parsed.planName.trim().length > 0;
-    const rateTypeOk = typeof parsed?.rateType === 'string' && parsed.rateType.trim().length > 0;
     const esiidOk = typeof parsed?.esiid === 'string' && parsed.esiid.trim().length > 0;
     const meterOk = typeof parsed?.meterNumber === 'string' && parsed.meterNumber.trim().length > 0;
+    const accountOk = typeof parsed?.accountNumber === 'string' && parsed.accountNumber.trim().length > 0;
+    const addressLine1Ok =
+      typeof parsed?.serviceAddressLine1 === 'string' && parsed.serviceAddressLine1.trim().length > 0;
+    const cityOk =
+      typeof parsed?.serviceAddressCity === 'string' && parsed.serviceAddressCity.trim().length > 0;
+    const stateOk =
+      typeof parsed?.serviceAddressState === 'string' && parsed.serviceAddressState.trim().length > 0;
+    const billingWindowOk = Boolean(parsed?.billingPeriodStart) || Boolean(parsed?.billIssueDate);
+    const planOk = typeof parsed?.planName === 'string' && parsed.planName.trim().length > 0;
+    const rateTypeOk = typeof parsed?.rateType === 'string' && parsed.rateType.trim().length > 0;
 
-    if (!providerOk) reasonParts.push('missing_provider');
-    if (!planOk) reasonParts.push('missing_plan_name');
-    if (!rateTypeOk) reasonParts.push('missing_rate_type');
-    if (!esiidOk && !meterOk) reasonParts.push('missing_esiid_or_meter');
+    if (!providerOk) blockingReasonParts.push('missing_provider');
+    if (!addressLine1Ok) blockingReasonParts.push('missing_service_address_line1');
+    if (!cityOk || !stateOk) blockingReasonParts.push('missing_service_city_state');
+    if (!esiidOk && !meterOk) blockingReasonParts.push('missing_esiid_or_meter');
+    if (!accountOk) advisoryReasonParts.push('missing_account_number');
+    if (!billingWindowOk) advisoryReasonParts.push('missing_billing_dates');
+    if (!planOk) advisoryReasonParts.push('missing_plan_name');
+    if (!rateTypeOk) advisoryReasonParts.push('missing_rate_type');
 
-    // Fixed/Variable plans usually need a usable energy rate signal.
+    // Pricing/modeling gaps remain advisory for bill rows. Bills can help confirm current-cycle
+    // facts, but they are not the canonical source for reusable cross-usage rate plans.
     const rt = String(parsed?.rateType ?? '').toUpperCase();
     const hasEnergyTiers = Array.isArray(parsed?.energyRateTiers) && parsed.energyRateTiers.length > 0;
     const hasTou =
       parsed?.timeOfUse && Array.isArray((parsed.timeOfUse as any)?.periods) && (parsed.timeOfUse as any).periods.length > 0;
     if ((rt === 'FIXED' || rt === 'VARIABLE') && !hasEnergyTiers && !hasTou) {
-      reasonParts.push('missing_energy_pricing');
+      advisoryReasonParts.push('missing_energy_pricing');
     }
 
-    // If we built a rateStructure but it is still not computable, queue it for admin review.
+    // A non-computable inferred rate structure is informative, but should not keep an otherwise
+    // well-captured statement bill in the review queue.
     if (rateStructure && !isRateStructurePresent(rateStructure)) {
-      reasonParts.push('incomplete_rate_structure');
+      advisoryReasonParts.push('incomplete_rate_structure');
     }
 
-    const queuedForReview = reasonParts.length > 0;
+    const warnings = Array.from(new Set([...blockingReasonParts, ...advisoryReasonParts]));
+    const queuedForReview = blockingReasonParts.length > 0;
     let queueId: string | null = null;
     if (queuedForReview) {
-      const queueReason = `CURRENT_PLAN_BILL: ${reasonParts.join(', ')}`;
+      const queueReason = `CURRENT_PLAN_BILL: ${blockingReasonParts.join(', ')}`;
       try {
         const sha = debugBillSha ?? sha256Hex(`text:${String(text ?? '')}`);
         const upserted = await (prisma as any).eflParseReviewQueue.upsert({
@@ -819,6 +837,30 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.error('[current-plan/bill-parse] failed to enqueue bill parse review item', e);
       }
+    } else {
+      try {
+        const sha = debugBillSha ?? sha256Hex(`text:${String(text ?? '')}`);
+        const resolved = await (prisma as any).eflParseReviewQueue.updateMany({
+          where: {
+            source: 'current_plan_bill',
+            eflPdfSha256: sha,
+            resolvedAt: null,
+          },
+          data: {
+            resolvedAt: new Date(),
+            resolvedBy: 'AUTO_PASS_CURRENT_PLAN_BILL',
+            resolutionNotes:
+              warnings.length > 0
+                ? `Auto-resolved: bill captured required statement fields. Advisory warnings: ${warnings.join(', ')}`
+                : 'Auto-resolved: bill captured required statement fields.',
+          },
+        });
+        if ((Number(resolved?.count) || 0) > 0) {
+          queueId = null;
+        }
+      } catch (e) {
+        console.error('[current-plan/bill-parse] failed to auto-resolve satisfied bill review item', e);
+      }
     }
 
     const decimalToNumber = (value: unknown): number | null => {
@@ -870,7 +912,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       parsedPlan: serializedParsedPlan,
       eflVersionCode: parsed.eflVersionCode ?? null,
-      warnings: queuedForReview ? reasonParts : [],
+      warnings,
       queuedForReview,
       queueId,
     });
