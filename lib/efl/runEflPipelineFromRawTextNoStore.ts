@@ -1,4 +1,5 @@
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
+import { extractEflVersionCodeFromText } from "@/lib/efl/eflExtractor";
 import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 import type { RunEflPipelineNoStoreResult } from "@/lib/efl/runEflPipelineNoStore";
@@ -178,61 +179,5 @@ function extractRepPuctCertificateFromEflText(text: string): string | null {
 }
 
 function extractEflVersionCodeFromEflText(text: string): string | null {
-  const raw = String(text ?? "");
-  if (!raw.trim()) return null;
-
-  const lines = raw.split(/\r?\n/).map((l) => l.trim());
-
-  const normalizeToken = (s: string): string => {
-    // Keep characters commonly seen in EFL version codes.
-    return s
-      .replace(/\s+/g, " ")
-      .replace(/[^\w+\-./]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  };
-
-  // Common forms:
-  // - "Version # TXSUMBRK24ENRL_..."
-  // - "Ver. #: SOME_CODE"
-  // - "Version #:" on one line, code on the next.
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    if (!line) continue;
-
-    const mInline =
-      line.match(/\b(?:Version|Ver\.?)\s*#\s*:?\s*(.+)$/i) ??
-      line.match(/\bEFL\s*Ver\.?\s*#\s*:?\s*(.+)$/i);
-    if (mInline?.[1]) {
-      const token = normalizeToken(mInline[1]);
-      if (token) return token;
-    }
-
-    const isHeaderOnly =
-      /\b(?:Version|Ver\.?)\s*#\s*:?\s*$/i.test(line) ||
-      /\bEFL\s*Ver\.?\s*#\s*:?\s*$/i.test(line);
-    if (isHeaderOnly) {
-      const next = lines[i + 1] ?? "";
-      const token = normalizeToken(next);
-      if (token) return token;
-    }
-  }
-
-  // Fallback: some EFLs (notably certain REPs) do not include a "Version #"
-  // label, but do include a stable document/form identifier near the footer,
-  // e.g. "M1F00163039360A". Prefer this over returning null so the pipeline can
-  // persist the template deterministically (especially in raw-text-queue mode).
-  //
-  // Guardrails:
-  // - require a specific prefix (M1F) to avoid matching phone numbers / addresses.
-  // - require a substantial trailing payload.
-  {
-    const m1fAll = Array.from(raw.matchAll(/\bM1F[0-9A-Z]{8,24}\b/g));
-    if (m1fAll.length > 0) {
-      const token = normalizeToken(m1fAll[m1fAll.length - 1]?.[0] ?? "");
-      if (token) return token;
-    }
-  }
-
-  return null;
+  return extractEflVersionCodeFromText(text);
 }

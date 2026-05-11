@@ -47,7 +47,6 @@ describe("raw-text queue pipeline - Champion Champ Silver-24 on AI failure", () 
       rawText: CHAMP_SILVER_24_RAW_TEXT,
       eflPdfSha256: "fixture-champion-champ-silver-24-rawtext-queue",
       repPuctCertificate: "10098",
-      eflVersionCode: "FIXED-EFL-20251211",
       source: "queue_rawtext",
       offerMeta: {
         supplier: "Champion Energy Services",
@@ -61,6 +60,7 @@ describe("raw-text queue pipeline - Champion Champ Silver-24 on AI failure", () 
     expect(res.finalValidation?.status).toBe("PASS");
     expect(res.needsAdminReview).toBe(false);
     expect(res.passStrength).toBe("STRONG");
+    expect((res.deterministic as any)?.eflVersionCode).toBe("FIXED-EFL-20251211");
     expect(res.rateStructure).toBeTruthy();
     expect((res.planRules as any)?.defaultRateCentsPerKwh).toBeCloseTo(8.2, 6);
     expect(

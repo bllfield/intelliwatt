@@ -4,7 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getCurrentPlanPrisma } from "@/lib/prismaCurrentPlan";
-import { deterministicEflExtract, extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
+import {
+  deterministicEflExtract,
+  extractEflVersionCodeFromText,
+  extractProviderAndPlanNameFromEflText,
+} from "@/lib/efl/eflExtractor";
 import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 import { extractUsageChargeThresholdRule } from "@/lib/current-plan/factLabelUsageCharge";
 import { usagePrisma } from "@/lib/db/usageClient";
@@ -194,38 +198,7 @@ function extractRepPuctCertificateFromEflText(text: string): string | null {
 }
 
 function extractEflVersionCodeFromEflText(text: string): string | null {
-  const raw = String(text ?? "");
-  if (!raw.trim()) return null;
-
-  const lines = raw.split(/\r?\n/).map((l) => l.trim());
-  const normalizeToken = (s: string): string =>
-    s
-      .replace(/\s+/g, " ")
-      .replace(/[^\w+\-./]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    if (!line) continue;
-
-    const mInline =
-      line.match(/\b(?:Version|Ver\.?)\s*#\s*:?\s*(.+)$/i) ?? line.match(/\bEFL\s*Ver\.?\s*#\s*:?\s*(.+)$/i);
-    if (mInline?.[1]) {
-      const token = normalizeToken(mInline[1]);
-      if (token) return token;
-    }
-
-    const isHeaderOnly =
-      /\b(?:Version|Ver\.?)\s*#\s*:?\s*$/i.test(line) || /\bEFL\s*Ver\.?\s*#\s*:?\s*$/i.test(line);
-    if (isHeaderOnly) {
-      const next = lines[i + 1] ?? "";
-      const token = normalizeToken(next);
-      if (token) return token;
-    }
-  }
-
-  return null;
+  return extractEflVersionCodeFromText(text);
 }
 
 function lastNYearMonthsChicago(n: number): string[] {
