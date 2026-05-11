@@ -138,7 +138,7 @@ export default function PlansClient() {
   // Those warmups happen via the dashboard bootstrapper and admin tooling.
   // NOTE: We intentionally keep the warmups bounded + throttled; this flips cards from
   // CALCULATING → AVAILABLE as soon as the background pipeline materializes estimates.
-  const ENABLE_PLANS_AUTO_WARMUPS = false;
+  const ENABLE_PLANS_AUTO_WARMUPS = true;
 
   const [q, setQ] = useState("");
   const [rateType, setRateType] = useState<"all" | "fixed" | "variable" | "renewable" | "unknown">("all");
@@ -227,8 +227,8 @@ export default function PlansClient() {
       page === 1;
     // If the user explicitly changes sort, do not kick background work from this page.
     const userHasSorted = Boolean(userTouchedSortRef.current);
-    const userChangedPageSize = Boolean(userTouchedPageSizeRef.current);
-    return defaultFilters && !userHasSorted && !userChangedPageSize && !userTouchedSearchOrFilters;
+    // Page size changes are a display preference; they should not disable background progress updates.
+    return defaultFilters && !userHasSorted && !userTouchedSearchOrFilters;
   }, [q, rateType, term, renewableMin, template, page, pageSize, userTouchedSearchOrFilters]);
 
   // Server dataset identity: include only inputs that actually change the SERVER response.
@@ -506,9 +506,13 @@ export default function PlansClient() {
       else if (k === "CALCULATING") calculatingCount++;
       else unavailableCount++;
     }
-    setAutoPreparing(false);
+    setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
     if (allowWarmupInBackground && pending > 0) {
-      setPrefetchNote(`Preparing IntelliWatt calculations… (${pending} pending)`);
+      setPrefetchNote(
+        `IntelliWatt estimates: ${availableCount} available • ${pending} left to calculate${
+          unavailableCount > 0 ? ` • ${unavailableCount} cannot calculate` : ""
+        }. Results refresh automatically.`,
+      );
       return;
     }
 
@@ -768,7 +772,7 @@ export default function PlansClient() {
       };
 
       // Use interval scheduler, but tick() enforces inFlight + timeout.
-      pollTimerRef.current = window.setInterval(tick, 15_000);
+      pollTimerRef.current = window.setInterval(tick, 5_000);
       // Kick once immediately.
       tick();
     }
@@ -926,6 +930,12 @@ export default function PlansClient() {
     () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
     [offers],
   );
+  const availableEstimateCount = useMemo(() => {
+    return offers.filter((o: any) => {
+      const st = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      return st === "OK" || st === "APPROXIMATE";
+    }).length;
+  }, [offers]);
   const pendingCount = useMemo(() => {
     // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
     return offers.filter((o: any) => {
@@ -936,6 +946,11 @@ export default function PlansClient() {
       return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
   }, [offers]);
+  const estimateTargetCount = useMemo(() => availableEstimateCount + pendingCount, [availableEstimateCount, pendingCount]);
+  const progressPercent = useMemo(() => {
+    if (!estimateTargetCount) return 0;
+    return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
+  }, [availableEstimateCount, estimateTargetCount]);
   const isStillWorking = Boolean(loading || autoPreparing);
   const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
   const showCalcBot =
@@ -1505,6 +1520,30 @@ export default function PlansClient() {
       ) : null}
 
       <div className="mx-auto w-full max-w-5xl">
+        {estimateTargetCount > 0 && pendingCount > 0 ? (
+          <div className="mb-4 rounded-3xl border border-brand-cyan/20 bg-brand-navy px-5 py-4 text-brand-cyan/80 shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-brand-white">Calculating IntelliWatt estimates</div>
+                <div className="mt-1 text-xs text-brand-cyan/75">
+                  {availableEstimateCount} of {estimateTargetCount} plans ready. {pendingCount} left to calculate.
+                  Results refresh automatically as each plan becomes available.
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-lg font-semibold text-brand-white">{progressPercent}%</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-brand-cyan/60">complete</div>
+              </div>
+            </div>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-brand-white/10">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-brand-blue to-brand-cyan transition-all duration-500"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
         {isStillWorking ? (
           <div className="mb-4 rounded-3xl border border-brand-cyan/20 bg-brand-navy px-5 py-4 text-brand-cyan/80 shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
             <div className="flex items-start gap-3">
