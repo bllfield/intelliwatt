@@ -15,6 +15,17 @@ function pickRateTypeFromRateStructure(rs: any): "FIXED" | "VARIABLE" | "TIME_OF
   return "OTHER";
 }
 
+function hourNumberToHhMm(hour: number | null | undefined, isEnd = false): string | null {
+  if (typeof hour !== "number" || !Number.isFinite(hour)) return null;
+  if (hour === 24) return "24:00";
+  const whole = Math.max(0, Math.min(23, Math.floor(hour)));
+  const mins = isEnd && hour > whole ? Math.round((hour - whole) * 60) : Math.round((hour - whole) * 60);
+  if (whole === 23 && mins >= 60) return isEnd ? "24:00" : "23:59";
+  const hh = String(whole).padStart(2, "0");
+  const mm = String(Math.max(0, Math.min(59, mins))).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 export async function adminPersistCurrentPlanFromEflPipeline(args: {
   usageEmail: string;
   usageHomeId?: string | null;
@@ -102,7 +113,18 @@ export async function adminPersistCurrentPlanFromEflPipeline(args: {
       ? Math.round(planRules.baseChargePerMonthCents)
       : (typeof rs?.baseMonthlyFeeCents === "number" && Number.isFinite(rs.baseMonthlyFeeCents)
           ? Math.round(rs.baseMonthlyFeeCents)
-          : null);
+          : (() => {
+              const points = Array.isArray((args.pipelineResult.finalValidation as any)?.points)
+                ? ((args.pipelineResult.finalValidation as any).points as any[])
+                : [];
+              for (const p of points) {
+                const repBaseDollars = Number(p?.modeled?.repBaseDollars);
+                if (Number.isFinite(repBaseDollars) && repBaseDollars >= 0) {
+                  return Math.round(repBaseDollars * 100);
+                }
+              }
+              return null;
+            })());
 
   const energyRateCents =
     typeof rs?.energyRateCents === "number" && Number.isFinite(rs.energyRateCents)
@@ -161,15 +183,41 @@ export async function adminPersistCurrentPlanFromEflPipeline(args: {
   })();
 
   const timeOfUseConfigJson = (() => {
+    const periods = Array.isArray((rs as any)?.timeOfUsePeriods) ? (rs as any).timeOfUsePeriods : [];
     const tiers = Array.isArray((rs as any)?.tiers) ? (rs as any).tiers : [];
-    if (!tiers.length) return null;
-    const out = tiers
+    const rawWindows = periods.length > 0 ? periods : tiers;
+    if (!rawWindows.length) return null;
+    const out = rawWindows
       .map((t: any) => ({
         label: typeof t?.label === "string" ? t.label : null,
-        start: typeof t?.startTime === "string" ? t.startTime : null,
-        end: typeof t?.endTime === "string" ? t.endTime : null,
-        cents: typeof t?.priceCents === "number" && Number.isFinite(t.priceCents) ? Number(t.priceCents) : null,
-        monthsOfYear: Array.isArray(t?.monthsOfYear) ? t.monthsOfYear : null,
+        start:
+          typeof t?.startTime === "string"
+            ? t.startTime
+            : typeof t?.start === "string"
+              ? t.start
+              : hourNumberToHhMm(
+                  typeof t?.startHour === "number" && Number.isFinite(t.startHour) ? Number(t.startHour) : null,
+                ),
+        end:
+          typeof t?.endTime === "string"
+            ? t.endTime
+            : typeof t?.end === "string"
+              ? t.end
+              : hourNumberToHhMm(
+                  typeof t?.endHour === "number" && Number.isFinite(t.endHour) ? Number(t.endHour) : null,
+                  true,
+                ),
+        cents:
+          typeof t?.priceCents === "number" && Number.isFinite(t.priceCents)
+            ? Number(t.priceCents)
+            : typeof t?.rateCentsPerKwh === "number" && Number.isFinite(t.rateCentsPerKwh)
+              ? Number(t.rateCentsPerKwh)
+              : null,
+        monthsOfYear: Array.isArray(t?.monthsOfYear)
+          ? t.monthsOfYear
+          : Array.isArray(t?.months)
+            ? t.months
+            : null,
       }))
       .filter((x: any) => x.start && x.end && typeof x.cents === "number");
     return out.length ? out : null;

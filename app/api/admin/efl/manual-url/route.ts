@@ -244,6 +244,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const currentPlanResolved = target === "current_plan" && Boolean(currentPlanPersist?.ok);
+    const effectiveQueued = currentPlanResolved ? false : Boolean(pipelineResult.queued);
+    const effectiveQueueReason = currentPlanResolved ? null : (pipelineResult.queueReason ?? null);
+
     return NextResponse.json({
       ok: true,
       build: {
@@ -271,8 +275,8 @@ export async function POST(req: NextRequest) {
       passStrength: pipelineResult.passStrength ?? null,
       passStrengthReasons: pipelineResult.passStrengthReasons ?? [],
       passStrengthOffPointDiffs: pipelineResult.passStrengthOffPointDiffs ?? null,
-      queued: Boolean(pipelineResult.queued),
-      queueReason: pipelineResult.queueReason ?? null,
+      queued: effectiveQueued,
+      queueReason: effectiveQueueReason,
       planCalcStatus: pipelineResult.planCalcStatus ?? "UNKNOWN",
       planCalcReasonCode: String(pipelineResult.planCalcReasonCode ?? "UNKNOWN"),
       requiredBucketKeys: Array.isArray(pipelineResult.requiredBucketKeys)
@@ -284,7 +288,9 @@ export async function POST(req: NextRequest) {
       autoResolvedQueueCount,
       persistAttempted: true,
       persistUsedDerived: true,
-      persistNotes: pipelineResult.queued ? (pipelineResult.queueReason ?? null) : null,
+      persistNotes: currentPlanResolved
+        ? `Current-plan template persisted. parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`
+        : (pipelineResult.queued ? (pipelineResult.queueReason ?? null) : null),
       extractorMethod: pipelineResult.extractorMethod ?? "pdftotext",
       ai: {
         enabled: aiEnabled,

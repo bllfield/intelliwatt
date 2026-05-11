@@ -147,6 +147,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const currentPlanResolved = target === "current_plan" && Boolean(currentPlanPersist?.ok);
+    const effectiveQueued = currentPlanResolved ? false : Boolean(pipelineResult.queued);
+    const effectiveQueueReason = currentPlanResolved
+      ? null
+      : (pipelineResult.queueReason ?? null);
+
     return NextResponse.json({
       ok: true,
       eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
@@ -170,8 +176,8 @@ export async function POST(req: NextRequest) {
       passStrength: pipelineResult.passStrength ?? null,
       passStrengthReasons: pipelineResult.passStrengthReasons ?? [],
       passStrengthOffPointDiffs: pipelineResult.passStrengthOffPointDiffs ?? null,
-      queued: Boolean(pipelineResult.queued),
-      queueReason: pipelineResult.queueReason ?? null,
+      queued: effectiveQueued,
+      queueReason: effectiveQueueReason,
       planCalcStatus: pipelineResult.planCalcStatus ?? "UNKNOWN",
       planCalcReasonCode: String(pipelineResult.planCalcReasonCode ?? "UNKNOWN"),
       requiredBucketKeys: Array.isArray(pipelineResult.requiredBucketKeys)
@@ -184,9 +190,15 @@ export async function POST(req: NextRequest) {
         used: aiEnabled && hasKey,
       },
       dryRun: !canPersist,
+      templatePersisted: target === "offers" ? Boolean(pipelineResult.ratePlanId) : Boolean(currentPlanPersist?.ok),
       persistedRatePlanId: target === "offers" ? (pipelineResult.ratePlanId ?? null) : null,
       currentPlanPersist,
       autoResolvedQueueCount,
+      persistAttempted: target === "offers" ? !canPersist || Boolean(pipelineResult.ratePlanId) : canPersist,
+      persistUsedDerived: target === "offers" ? null : Boolean(pipelineResult.planRules || pipelineResult.rateStructure),
+      persistNotes: currentPlanResolved
+        ? `Current-plan template persisted. parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`
+        : (pipelineResult.queueReason ?? null),
       usageAudit,
       pipelineResult,
     });
