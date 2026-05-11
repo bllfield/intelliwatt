@@ -56,6 +56,57 @@ describe("eflValidator - PASS strength scoring", () => {
     expect(scored.strength).toBe("STRONG");
     expect(scored.reasons ?? []).not.toContain("OFFPOINT_DEVIATION");
   });
+
+  test("treats usage-charge waivers encoded in rateStructure billCredits as STRONG", async () => {
+    const planRules = {
+      rateType: "FIXED",
+      planType: "flat",
+      termMonths: 12,
+      defaultRateCentsPerKwh: 9.6136,
+      billCredits: [],
+      usageTiers: [],
+    };
+
+    const rateStructure = {
+      type: "FIXED",
+      energyRateCents: 9.6136,
+      baseMonthlyFeeCents: 995,
+      billCredits: {
+        hasBillCredit: true,
+        rules: [
+          {
+            label: "Usage charge waived at >= 1000 kWh (derived from Usage Charge < 1000)",
+            creditAmountCents: 995,
+            minUsageKWh: 1000,
+          },
+        ],
+      },
+      usageTiers: null,
+    };
+
+    const validation = {
+      status: "PASS",
+      assumptionsUsed: {
+        usedEngineTdspFallback: true,
+        tdspAppliedMode: "UTILITY_TABLE",
+      },
+      points: [
+        { usageKwh: 500, expectedAvgCentsPerKwh: 17.6, modeledAvgCentsPerKwh: 17.79 },
+        { usageKwh: 1000, expectedAvgCentsPerKwh: 15.2, modeledAvgCentsPerKwh: 15.2 },
+        { usageKwh: 2000, expectedAvgCentsPerKwh: 14.9, modeledAvgCentsPerKwh: 14.9 },
+      ],
+    };
+
+    const scored = await scoreEflPassStrength({
+      rawText: "Electricity Facts Label ... Usage Charge: $9.95 per billing cycle < 1,000 kWh",
+      validation,
+      planRules,
+      rateStructure,
+    });
+
+    expect(scored.strength).toBe("STRONG");
+    expect(scored.reasons ?? []).not.toContain("OFFPOINT_DEVIATION");
+  });
 });
 
 

@@ -2511,20 +2511,40 @@ export async function scoreEflPassStrength(args: {
     };
   }
 
-  // Plans with threshold-based bill credits (e.g., "credit applies <= 500 kWh")
-  // introduce a real discontinuity in the average-price curve at the threshold.
-  // A linear interpolation between the 500/1000/2000 anchor points is not a
-  // valid expectation model for off-point checks and will create false WEAKs.
-  const hasThresholdBillCredits = credits.some((c: any) => {
-    const t = String(c?.type ?? "").toUpperCase();
-    const thr = Number(c?.thresholdKwh);
-    return (
-      Number.isFinite(thr) &&
-      (t === "THRESHOLD_MAX" ||
-        t === "THRESHOLD_MIN" ||
-        t.includes("THRESHOLD"))
-    );
-  });
+  // Plans with threshold-based bill credits (e.g., "credit applies <= 500 kWh"
+  // or "usage charge waived at >= 1000 kWh") introduce a real discontinuity in
+  // the average-price curve at the threshold. A linear interpolation between the
+  // 500/1000/2000 anchor points is not a valid expectation model for these plans.
+  //
+  // Recognize both:
+  // - EFL/planRules credit shapes (`type` + `thresholdKwh`)
+  // - engine/rateStructure credit-rule shapes (`minUsageKWh` / `maxUsageKWh`)
+  const rsCreditRules: any[] =
+    Array.isArray((rateStructure as any)?.billCredits?.rules)
+      ? (rateStructure as any).billCredits.rules
+      : [];
+  const hasThresholdBillCredits =
+    credits.some((c: any) => {
+      const t = String(c?.type ?? "").toUpperCase();
+      const thr =
+        c?.thresholdKwh != null ? Number(c.thresholdKwh)
+        : c?.minUsageKWh != null ? Number(c.minUsageKWh)
+        : c?.maxUsageKWh != null ? Number(c.maxUsageKWh)
+        : NaN;
+      return (
+        Number.isFinite(thr) &&
+        (t === "THRESHOLD_MAX" ||
+          t === "THRESHOLD_MIN" ||
+          t.includes("THRESHOLD") ||
+          c?.minUsageKWh != null ||
+          c?.maxUsageKWh != null)
+      );
+    }) ||
+    rsCreditRules.some((r: any) => {
+      const minKwh = Number(r?.minUsageKWh);
+      const maxKwh = Number(r?.maxUsageKWh);
+      return Number.isFinite(minKwh) || Number.isFinite(maxKwh);
+    });
 
   if (hasThresholdBillCredits) {
     return {
