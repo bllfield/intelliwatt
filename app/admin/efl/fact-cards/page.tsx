@@ -497,6 +497,24 @@ export default function FactCardOpsPage() {
     }, 50);
   }
 
+  function loadIntoBillParser(args: { rawText?: string | null; derivedForValidation?: any | null }) {
+    const rawText = String(args.rawText ?? "");
+    if (!rawText.trim()) return;
+    try {
+      window.localStorage.setItem(
+        "iw_billparser_prefill_v1",
+        JSON.stringify({
+          t: Date.now(),
+          rawText,
+          derivedForValidation: args.derivedForValidation ?? null,
+        }),
+      );
+    } catch {
+      // ignore storage failures
+    }
+    window.location.href = "/admin/current-plan/bill-parser?prefill=local";
+  }
+
   // Deep-link prefill: /admin/efl/fact-cards?eflUrl=...&offerId=...
   // NOTE: Avoid next/navigation useSearchParams() here — it requires a Suspense boundary during prerender.
   // Since this page is client-only, we can safely read window.location after mount.
@@ -2741,9 +2759,13 @@ export default function FactCardOpsPage() {
             </thead>
             <tbody>
               {sortedQueueItems.map((it: any) => {
+                const source = String(it?.source ?? "").trim();
+                const isCurrentPlanBill = source === "current_plan_bill";
                 const eflUrl = (it?.eflUrl ?? "").trim();
                 const runHref =
-                  eflUrl
+                  isCurrentPlanBill
+                    ? "/admin/current-plan/bill-parser?prefill=local"
+                    : eflUrl
                     ? `/admin/efl/fact-cards?${new URLSearchParams({
                         eflUrl,
                         ...(it?.offerId ? { offerId: String(it.offerId) } : {}),
@@ -2763,16 +2785,25 @@ export default function FactCardOpsPage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
-                          disabled={!eflUrl && !String(it?.rawText ?? "").trim()}
+                          disabled={isCurrentPlanBill ? !String(it?.rawText ?? "").trim() : (!eflUrl && !String(it?.rawText ?? "").trim())}
                           onClick={() =>
-                            loadIntoManual({
-                              eflUrl,
-                              offerId: it.offerId ?? null,
-                              rawText: !eflUrl ? (it?.rawText ?? null) : null,
-                            })
+                            isCurrentPlanBill
+                              ? loadIntoBillParser({
+                                  rawText: it?.rawText ?? null,
+                                  derivedForValidation: it?.derivedForValidation ?? null,
+                                })
+                              : loadIntoManual({
+                                  eflUrl,
+                                  offerId: it.offerId ?? null,
+                                  rawText: !eflUrl ? (it?.rawText ?? null) : null,
+                                })
                           }
                           title={
-                            eflUrl
+                            isCurrentPlanBill
+                              ? String(it?.rawText ?? "").trim()
+                                ? "Load into current-plan bill parser"
+                                : "No bill text available"
+                              : eflUrl
                               ? "Load into manual runner (URL)"
                               : String(it?.rawText ?? "").trim()
                                 ? "Load into manual runner (raw text)"
@@ -2793,13 +2824,28 @@ export default function FactCardOpsPage() {
                           </a>
                         ) : null}
                         {runHref ? (
-                          <a
-                            className="px-2 py-1 rounded border hover:bg-gray-50"
-                            href={runHref}
-                            title="Deep link: prefill the manual runner on this page"
-                          >
-                            Run manual
-                          </a>
+                          isCurrentPlanBill ? (
+                            <button
+                              className="px-2 py-1 rounded border hover:bg-gray-50"
+                              onClick={() =>
+                                loadIntoBillParser({
+                                  rawText: it?.rawText ?? null,
+                                  derivedForValidation: it?.derivedForValidation ?? null,
+                                })
+                              }
+                              title="Deep link: open the current-plan bill parser prefilled with this bill text"
+                            >
+                              Run bill parser
+                            </button>
+                          ) : (
+                            <a
+                              className="px-2 py-1 rounded border hover:bg-gray-50"
+                              href={runHref}
+                              title="Deep link: prefill the manual runner on this page"
+                            >
+                              Run manual
+                            </a>
+                          )
                         ) : null}
                         {it?.offerId ? (
                           <a
@@ -2812,13 +2858,28 @@ export default function FactCardOpsPage() {
                             Details
                           </a>
                         ) : runHref ? (
-                          <a
-                            className="px-2 py-1 rounded border hover:bg-gray-50"
-                            href={runHref}
-                            title="Details (no offerId): open the manual runner prefilled with this EFL"
-                          >
-                            Details
-                          </a>
+                          isCurrentPlanBill ? (
+                            <button
+                              className="px-2 py-1 rounded border hover:bg-gray-50"
+                              onClick={() =>
+                                loadIntoBillParser({
+                                  rawText: it?.rawText ?? null,
+                                  derivedForValidation: it?.derivedForValidation ?? null,
+                                })
+                              }
+                              title="Details: open the current-plan bill parser prefilled with this bill text"
+                            >
+                              Details
+                            </button>
+                          ) : (
+                            <a
+                              className="px-2 py-1 rounded border hover:bg-gray-50"
+                              href={runHref}
+                              title="Details (no offerId): open the manual runner prefilled with this EFL"
+                            >
+                              Details
+                            </a>
+                          )
                         ) : (
                           <span
                             className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"

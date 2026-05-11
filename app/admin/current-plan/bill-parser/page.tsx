@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, ChangeEvent } from 'react';
 import type { ParsedCurrentPlanPayload as ParsedCurrentPlanPayloadBase } from '@/lib/billing/parseBillText';
 
 type ParsedCurrentPlanPayload = ParsedCurrentPlanPayloadBase;
+const BILL_PARSER_PREFILL_KEY = 'iw_billparser_prefill_v1';
 
 type BillParseResponse =
   | {
@@ -713,6 +714,30 @@ export default function CurrentPlanBillParserAdmin() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const prefillLocal = (sp.get('prefill') ?? '').trim().toLowerCase() === 'local';
+      if (!prefillLocal) return;
+      const raw = window.localStorage.getItem(BILL_PARSER_PREFILL_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as any;
+      const prefillText = typeof parsed?.rawText === 'string' ? parsed.rawText : '';
+      const baseline = parsed?.derivedForValidation?.baseline ?? null;
+      if (prefillText.trim()) {
+        setRawText(prefillText);
+      }
+      if (baseline?.esiid && typeof baseline.esiid === 'string') setEsiidHint(baseline.esiid);
+      if (baseline?.serviceAddressLine1 && typeof baseline.serviceAddressLine1 === 'string') setAddressHint(baseline.serviceAddressLine1);
+      if (baseline?.serviceAddressCity && typeof baseline.serviceAddressCity === 'string') setCityHint(baseline.serviceAddressCity);
+      if (baseline?.serviceAddressState && typeof baseline.serviceAddressState === 'string') setStateHint(baseline.serviceAddressState);
+      window.localStorage.removeItem(BILL_PARSER_PREFILL_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // When the filter toggles, refresh the list so the UI matches the setting.
   useEffect(() => {
