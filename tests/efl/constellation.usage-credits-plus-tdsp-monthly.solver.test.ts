@@ -65,5 +65,54 @@ Additional Residential Usage Credit           15.00        $ per bill month if u
     expect(rules[0]).toMatchObject({ creditAmountCents: 3500, minUsageKWh: 1000, maxUsageKWh: 2000 });
     expect(rules[1]).toMatchObject({ creditAmountCents: 5000, minUsageKWh: 2000 });
   });
+
+  it("derives additive usage credits even when base validation is missing", async () => {
+    const rawText = `
+Electricity Facts Label (EFL)
+
+Average Monthly Use               500kWh                    1,000kWh                    2,000kWh
+Average price per kWh              19.5¢                       15.2¢                         15.8¢
+
+Energy Charge                                 11.44        ¢ per kWh
+
+Electricity    TDU Delivery Charge*                          6.4665       ¢ per kWh
+  Price        TDU Delivery Charge*                          7.85         $ per bill month
+
+Residential Usage Credit                      35.00        $ per bill month if usage >= 1000kWh
+Additional Residential Usage Credit           15.00        $ per bill month if usage >= 2000kWh
+    `.trim();
+
+    const solved = await solveEflValidationGaps({
+      rawText,
+      planRules: null,
+      rateStructure: null,
+      validation: null,
+    });
+
+    expect(solved.solverApplied).toContain("FALLBACK_FIXED_ENERGY_CHARGE_FROM_EFL_TEXT");
+    expect(solved.solverApplied).toContain("SYNC_USAGE_BILL_CREDITS_THRESHOLD_MIN_FROM_EFL_TEXT");
+    expect(solved.validationAfter?.status).toBe("PASS");
+
+    expect(solved.derivedPlanRules).toMatchObject({
+      planType: "flat",
+      rateType: "FIXED",
+      defaultRateCentsPerKwh: 11.44,
+      billCredits: [
+        { creditDollars: 35, thresholdKwh: 1000, type: "THRESHOLD_MIN" },
+        { creditDollars: 15, thresholdKwh: 2000, type: "THRESHOLD_MIN" },
+      ],
+    });
+    expect(solved.derivedRateStructure).toMatchObject({
+      type: "FIXED",
+      energyRateCents: 11.44,
+      billCredits: {
+        hasBillCredit: true,
+        rules: [
+          { creditAmountCents: 3500, minUsageKWh: 1000, maxUsageKWh: 2000 },
+          { creditAmountCents: 5000, minUsageKWh: 2000 },
+        ],
+      },
+    });
+  });
 });
 

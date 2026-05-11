@@ -438,7 +438,7 @@ export async function solveEflValidationGaps(args: {
   //   (EFLs commonly state "prorated if under 30 days" and the disclosure table assumes 30 days).
   // - Convert "usage or less" monthly credits into a negative bill credit that applies
   //   when usage < (maxKwh+1). The validator already supports this semantics for negative credits.
-  if (validation?.status === "FAIL" && derivedPlanRules) {
+  if ((!validation || validation.status === "FAIL") && derivedPlanRules) {
     const daily = extractDailyCharge(rawText);
     const credit = extractMonthlyCreditMaxUsage(rawText);
 
@@ -486,7 +486,7 @@ export async function solveEflValidationGaps(args: {
   // usage ranges, so we normalize these into non-overlapping segments:
   //   [1000,2000) => $35
   //   [2000,∞)    => $50
-  if (validation?.status === "FAIL" && derivedPlanRules) {
+  if ((!validation || validation.status === "FAIL") && derivedPlanRules) {
     const existingRsRules: any[] =
       derivedRateStructure?.billCredits && Array.isArray((derivedRateStructure as any).billCredits?.rules)
         ? ((derivedRateStructure as any).billCredits.rules as any[])
