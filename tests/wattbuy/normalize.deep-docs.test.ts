@@ -57,6 +57,32 @@ describe("wattbuy normalizeOffer - deep doc URL discovery", () => {
     expect(n.docs.tos).toBe("https://bit.ly/3ZNResC");
     expect(n.docs.yrac).toBe("https://bit.ly/3IT2R7Z");
   });
+
+  it("keeps Companion hosted EFL URLs from offer_data", () => {
+    const raw = {
+      offer_id: "wbdb-zjanPnqv",
+      offer_name: "Companion + Benefits 12",
+      offer_data: {
+        supplier_name: "Companion Energy",
+        utility_name: "Oncor",
+        term: 12,
+        efl: "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=CEBENF12&tdspcode=ONCOR_ELEC",
+        tos: "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=TOS",
+        yrac: "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=YRAC",
+      },
+    };
+
+    const n = normalizeOffer(raw);
+    expect(n.docs.efl).toBe(
+      "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=CEBENF12&tdspcode=ONCOR_ELEC",
+    );
+    expect(n.docs.tos).toBe(
+      "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=TOS",
+    );
+    expect(n.docs.yrac).toBe(
+      "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=YRAC",
+    );
+  });
 });
 
 

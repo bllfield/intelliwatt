@@ -67,6 +67,10 @@ const DOC_HOST_ALLOWLIST = new Set<string>([
   'eflviewer.frontierutilities.com',
   'frontierutilities.com',
 
+  // Companion
+  'eflviewer.companionenergy.com',
+  'companionenergy.com',
+
   // Champion
   'docs.championenergyservices.com',
   'championenergyservices.com',
