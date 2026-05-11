@@ -762,6 +762,7 @@ export default function FactCardOpsPage() {
     "tdspName" | "supplier" | "planName" | "offerId" | "eflVersionCode" | "queueReason"
   >("supplier");
   const [queueSortDir, setQueueSortDir] = useState<SortDir>("asc");
+  const currentPlanQueueSelected = queueKind === "EFL_PARSE" && queueSource.trim() === "current_plan_efl";
 
   async function loadQueue() {
     if (!token) {
@@ -914,6 +915,79 @@ export default function FactCardOpsPage() {
       await loadTemplates();
     } catch (e: any) {
       setQueueErr(e?.message || "Failed to process open queue.");
+    } finally {
+      setQueueProcessLoading(false);
+    }
+  }
+
+  async function processOpenCurrentPlanQueue() {
+    if (!token) {
+      setQueueErr("Admin token required.");
+      return;
+    }
+    if (queueStatus !== "OPEN") {
+      setQueueErr("Switch to Open queue status first.");
+      return;
+    }
+    if (queueKind !== "EFL_PARSE") {
+      setQueueErr('This current-plan processor only applies to kind="EFL_PARSE".');
+      return;
+    }
+    if (queueSource.trim() !== "current_plan_efl") {
+      setQueueErr('Switch Source to "Current plan EFL" first.');
+      return;
+    }
+    setQueueProcessLoading(true);
+    setQueueProcessNote(null);
+    setQueueErr(null);
+    try {
+      let cursor: string | null = null;
+      let totalProcessed = 0;
+      let totalPersisted = 0;
+      let totalResolved = 0;
+      let totalSkipped = 0;
+
+      while (true) {
+        const res: Response = await fetch("/api/admin/efl-review/process-open-current-plan", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-token": token,
+          },
+          body: JSON.stringify({
+            cursor,
+            limit: 50,
+            timeBudgetMs: 240_000,
+            dryRun: false,
+            source: "current_plan_efl",
+            usageMonths: 12,
+          }),
+        });
+        const data: any = await res.json();
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+        totalProcessed += Number(data.processed ?? 0) || 0;
+        totalPersisted += Number(data.persisted ?? 0) || 0;
+        totalResolved += Number(data.resolved ?? 0) || 0;
+        totalSkipped += Number(data.skipped ?? 0) || 0;
+
+        setQueueProcessNote(
+          `Processed ${totalProcessed}. Persisted ${totalPersisted}. Resolved ${totalResolved}. Skipped ${totalSkipped}.` +
+            (data.truncated ? " Continuing…" : " Done."),
+        );
+
+        cursor =
+          typeof data.nextCursor === "string" && data.nextCursor.trim()
+            ? data.nextCursor
+            : null;
+        if (!data.truncated || !cursor) break;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      await loadQueue();
+      await loadCurrentPlanBillPlanTemplates();
+    } catch (e: any) {
+      setQueueErr(e?.message || "Failed to process open current-plan queue.");
     } finally {
       setQueueProcessLoading(false);
     }
@@ -2389,9 +2463,15 @@ export default function FactCardOpsPage() {
               {queueLoading ? "Loading…" : "Refresh"}
             </button>
             {queueKind === "EFL_PARSE" ? (
-              <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
-                {queueProcessLoading ? "Processing…" : "Process OPEN parse queue (auto)"}
-              </button>
+              currentPlanQueueSelected ? (
+                <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenCurrentPlanQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
+                  {queueProcessLoading ? "Processing…" : "Process OPEN current-plan queue (module)"}
+                </button>
+              ) : (
+                <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
+                  {queueProcessLoading ? "Processing…" : "Process OPEN parse queue (auto)"}
+                </button>
+              )
             ) : queueKind === "PLAN_CALC_QUARANTINE" ? (
               <>
                 <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQuarantineQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
@@ -2421,8 +2501,17 @@ export default function FactCardOpsPage() {
         <div className="text-xs text-gray-600">
           {queueKind === "EFL_PARSE" ? (
             <>
-              Auto processor runs the full EFL pipeline and persists templates on{" "}
-              <span className="font-medium">PASS + STRONG</span>. It also registers required bucket definitions. Home monthly bucket totals are created later (on-demand) when you run an estimate for a specific home.
+              {currentPlanQueueSelected ? (
+                <>
+                  Current-plan processor re-runs the raw-text EFL pipeline, recomputes home monthly bucket totals for the queued user, and persists the template into the{" "}
+                  <span className="font-medium">current-plan module DB</span>. It does not use the offers/RatePlan persistence path.
+                </>
+              ) : (
+                <>
+                  Auto processor runs the full EFL pipeline and persists templates on{" "}
+                  <span className="font-medium">PASS + STRONG</span>. It also registers required bucket definitions. Home monthly bucket totals are created later (on-demand) when you run an estimate for a specific home.
+                </>
+              )}
             </>
           ) : queueKind === "PLAN_CALC_QUARANTINE" ? (
             <>
@@ -2458,6 +2547,18 @@ export default function FactCardOpsPage() {
                 title="Show all sources"
               >
                 All
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm border-l ${queueSource.trim() === "current_plan_efl" ? "bg-gray-50 font-semibold" : "hover:bg-gray-50"}`}
+                onClick={() => {
+                  setQueueSource("current_plan_efl");
+                  if (queueKind === "ALL") setQueueKind("EFL_PARSE");
+                  if (queueStatus !== "OPEN") setQueueStatus("OPEN");
+                }}
+                title='Show only queued current-plan EFL items'
+              >
+                Current plan EFL
               </button>
               <button
                 type="button"
