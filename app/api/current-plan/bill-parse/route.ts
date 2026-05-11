@@ -268,10 +268,22 @@ export async function POST(request: NextRequest) {
     // a resolved house (e.g., initial current-plan dashboard uploads), we allow
     // houseId to be null and rely solely on the authenticated user.
     let effectiveHouseId: string | null = houseId;
+    let knownHouseAddress: {
+      addressLine1: string | null;
+      city: string | null;
+      state: string | null;
+      zip: string | null;
+    } | null = null;
     if (effectiveHouseId) {
       const ownsHouse = await prisma.houseAddress.findFirst({
         where: { id: effectiveHouseId, userId: user.id },
-        select: { id: true },
+        select: {
+          id: true,
+          addressLine1: true,
+          addressCity: true,
+          addressState: true,
+          addressZip5: true,
+        },
       });
 
       if (!ownsHouse) {
@@ -280,15 +292,35 @@ export async function POST(request: NextRequest) {
           { status: 403 },
         );
       }
+      knownHouseAddress = {
+        addressLine1: ownsHouse.addressLine1 ?? null,
+        city: ownsHouse.addressCity ?? null,
+        state: ownsHouse.addressState ?? null,
+        zip: ownsHouse.addressZip5 ?? null,
+      };
     } else {
       // Best-effort: attach bill-derived current-plan data to the user's primary (or most recent) house
       // so Current Rate + Compare can load it consistently.
       const bestHouse = await prisma.houseAddress.findFirst({
         where: { userId: user.id, archivedAt: null },
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
-        select: { id: true },
+        select: {
+          id: true,
+          addressLine1: true,
+          addressCity: true,
+          addressState: true,
+          addressZip5: true,
+        },
       });
       effectiveHouseId = bestHouse?.id ?? null;
+      knownHouseAddress = bestHouse
+        ? {
+            addressLine1: bestHouse.addressLine1 ?? null,
+            city: bestHouse.addressCity ?? null,
+            state: bestHouse.addressState ?? null,
+            zip: bestHouse.addressZip5 ?? null,
+          }
+        : null;
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();
@@ -739,6 +771,14 @@ export async function POST(request: NextRequest) {
     const billingWindowOk = Boolean(parsed?.billingPeriodStart) || Boolean(parsed?.billIssueDate);
     const planOk = typeof parsed?.planName === 'string' && parsed.planName.trim().length > 0;
     const rateTypeOk = typeof parsed?.rateType === 'string' && parsed.rateType.trim().length > 0;
+    const zipOk =
+      typeof parsed?.serviceAddressZip === 'string' && parsed.serviceAddressZip.trim().length > 0;
+    const knownAddressOk =
+      Boolean(knownHouseAddress?.addressLine1?.trim()) &&
+      Boolean(knownHouseAddress?.city?.trim()) &&
+      Boolean(knownHouseAddress?.state?.trim()) &&
+      Boolean(knownHouseAddress?.zip?.trim());
+    const parsedAddressOk = addressLine1Ok && cityOk && stateOk && zipOk;
 
     if (!providerOk) blockingReasonParts.push('missing_provider');
     if (!addressLine1Ok) blockingReasonParts.push('missing_service_address_line1');
@@ -767,6 +807,11 @@ export async function POST(request: NextRequest) {
 
     const warnings = Array.from(new Set([...blockingReasonParts, ...advisoryReasonParts]));
     const queuedForReview = blockingReasonParts.length > 0;
+    const customerBlockingReasonsForSmt: string[] = [];
+    if (!knownAddressOk && !parsedAddressOk) {
+      customerBlockingReasonsForSmt.push('missing_service_address');
+    }
+    const customerCanProceedForSmt = customerBlockingReasonsForSmt.length === 0;
     let queueId: string | null = null;
     if (queuedForReview) {
       const queueReason = `CURRENT_PLAN_BILL: ${blockingReasonParts.join(', ')}`;
@@ -915,6 +960,8 @@ export async function POST(request: NextRequest) {
       warnings,
       queuedForReview,
       queueId,
+      customerCanProceedForSmt,
+      customerBlockingReasonsForSmt,
     });
   } catch (error) {
     console.error('[current-plan/bill-parse] Failed to parse bill', error);

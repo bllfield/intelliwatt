@@ -1258,16 +1258,28 @@ export function CurrentRateDetailsForm({
         );
         return;
       }
+      if (json?.customerCanProceedForSmt === false) {
+        setPasteError(
+          "We couldn't capture enough from that bill to keep going. Make sure you pasted all bill pages, or enter the missing details manually.",
+        );
+        return;
+      }
 
       applyParsedPlanToForm(json?.parsedPlan ?? null);
       setShowPasteModal(false);
       setPastedBillText("");
       setPastedBillAttachments([]);
 
+      const warningCount = Array.isArray(json?.warnings) ? json.warnings.length : 0;
+
       setUploadStatus(
         uploadIds.length > 0
-          ? "Bill text parsed and the original bill files were attached for review. Your current plan details below have been refreshed—please double-check meter # and contract expiration."
-          : "Bill text parsed. Your current plan details below have been refreshed—please double-check meter # and contract expiration.",
+          ? warningCount > 0
+            ? "We filled what we could from your bill and attached the original files for review. Please review the prefilled fields and enter any remaining details manually."
+            : "Bill text parsed and the original bill files were attached for review. Your current plan details below have been refreshed—please double-check meter # and contract expiration."
+          : warningCount > 0
+            ? "We filled what we could from your bill. Please review the prefilled fields and enter any remaining details manually."
+            : "Bill text parsed. Your current plan details below have been refreshed—please double-check meter # and contract expiration.",
       );
       await refreshPlan();
     } catch (err: any) {
@@ -2348,6 +2360,11 @@ export function CurrentRateDetailsForm({
           </div>
           <p className="text-sm text-brand-slate">
             Most bills list these near the header or inside the Electricity Facts Label (EFL) section.
+          </p>
+          <p className="text-xs text-brand-slate">
+            Only the fields needed for your current-plan comparison are required. Fields labeled
+            <span className="font-semibold"> optional</span> are never required, and ESIID/meter are
+            only needed when Smart Meter Texas needs them.
           </p>
 
           {/* Always show plan variables used on the manual entry form too (not only in the saved snapshot). */}

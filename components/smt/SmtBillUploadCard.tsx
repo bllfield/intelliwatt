@@ -145,16 +145,27 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
         );
         return;
       }
+      if (json?.customerCanProceedForSmt === false) {
+        setPasteError(
+          "We couldn't capture enough from that bill to continue. Make sure you pasted all bill pages, or enter the missing details manually.",
+        );
+        return;
+      }
 
       setShowPasteModal(false);
       setPastedText("");
       setPastedAttachments([]);
+      const warningCount = Array.isArray(json?.warnings) ? json.warnings.length : 0;
 
       setUploaded(true);
       setStatus(
         uploadIds.length > 0
-          ? "Bill text parsed and the original bill files were attached for review. Your SMT details above will refresh shortly."
-          : "Bill text parsed. Your SMT details above will refresh shortly.",
+          ? warningCount > 0
+            ? "We filled what we could from your bill and attached the original files for review. Please review any missing details manually."
+            : "Bill text parsed and the original bill files were attached for review. Your SMT details above will refresh shortly."
+          : warningCount > 0
+            ? "We filled what we could from your bill. Please review any missing details manually."
+            : "Bill text parsed. Your SMT details above will refresh shortly.",
       );
 
       if (typeof window !== "undefined") {
