@@ -627,7 +627,10 @@ export default function CurrentPlanBillParserAdmin() {
     }
   }
 
-  async function resolveQueueItem(id: string) {
+  async function resolveQueueItem(
+    id: string,
+    action: 'promote_template_fix' | 'discard',
+  ) {
     if (!token.trim()) return;
     setQueueResolvingId(id);
     try {
@@ -637,7 +640,7 @@ export default function CurrentPlanBillParserAdmin() {
           'Content-Type': 'application/json',
           'x-admin-token': token.trim(),
         },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, action }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) {
@@ -990,8 +993,8 @@ export default function CurrentPlanBillParserAdmin() {
             <h2 className="font-medium">Bill Parse Review Queue</h2>
             <p className="text-sm text-gray-600">
               These are customer bill parses that did not extract the required fields. Use this queue to copy
-              the raw text + parser outputs for debugging, load the bill into the runner above, and mark items
-              resolved once fixed.
+              the raw text + parser outputs for debugging, load the bill into the runner above, then either
+              promote a real parser/template issue for follow-up or discard stale/no-action-needed artifacts.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1131,14 +1134,26 @@ export default function CurrentPlanBillParserAdmin() {
                             Load into parser
                           </button>
                           {queueStatus === 'OPEN' ? (
-                            <button
-                              type="button"
-                              className="px-2 py-1 rounded border border-emerald-500 bg-emerald-50 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
-                              disabled={queueResolvingId === id || !ready}
-                              onClick={() => resolveQueueItem(id)}
-                            >
-                              {queueResolvingId === id ? 'Resolving…' : 'Mark resolved'}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="px-2 py-1 rounded border border-blue-500 bg-blue-50 text-[11px] font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-60"
+                                disabled={queueResolvingId === id || !ready}
+                                onClick={() => resolveQueueItem(id, 'promote_template_fix')}
+                                title="Resolve this row as a confirmed parser/template follow-up item."
+                              >
+                                {queueResolvingId === id ? 'Saving…' : 'Promote to template fix'}
+                              </button>
+                              <button
+                                type="button"
+                                className="px-2 py-1 rounded border border-slate-400 bg-slate-50 text-[11px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                                disabled={queueResolvingId === id || !ready}
+                                onClick={() => resolveQueueItem(id, 'discard')}
+                                title="Resolve this row as stale, incomplete, or no action needed without changing shared templates."
+                              >
+                                {queueResolvingId === id ? 'Saving…' : 'Discard / stale / no action needed'}
+                              </button>
+                            </>
                           ) : null}
                           <details className="rounded border bg-white px-2 py-1">
                             <summary className="cursor-pointer text-[11px] font-medium text-gray-700">

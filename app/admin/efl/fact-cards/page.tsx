@@ -816,7 +816,10 @@ export default function FactCardOpsPage() {
     }
   }
 
-  async function resolveQueueItem(id: string) {
+  async function resolveQueueItem(
+    id: string,
+    action: "promote_template_fix" | "discard",
+  ) {
     if (!token) return;
     try {
       const res = await fetch("/api/admin/efl-review/resolve", {
@@ -825,7 +828,7 @@ export default function FactCardOpsPage() {
           "Content-Type": "application/json",
           "x-admin-token": token,
         },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, action }),
       });
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
@@ -2632,6 +2635,12 @@ export default function FactCardOpsPage() {
           ) : (
             <>Showing <span className="font-medium">ALL</span> kinds. Select a specific Kind to see processor instructions.</>
           )}
+          {queueStatus === "OPEN" ? (
+            <>
+              {" "}Use <span className="font-medium">Promote to template fix</span> when the row reveals a shared parser/template issue for future users; use{" "}
+              <span className="font-medium">Discard / stale / no action needed</span> when the item is only a one-off artifact, partial upload, or already-handled case.
+            </>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex items-center gap-2 text-sm">
@@ -2889,9 +2898,22 @@ export default function FactCardOpsPage() {
                           </span>
                         )}
                         {queueStatus === "OPEN" ? (
-                          <button className="px-2 py-1 rounded border hover:bg-gray-50" onClick={() => void resolveQueueItem(String(it.id))}>
-                            Resolve
-                          </button>
+                          <>
+                            <button
+                              className="px-2 py-1 rounded border border-blue-500 bg-blue-50 text-blue-800 hover:bg-blue-100"
+                              onClick={() => void resolveQueueItem(String(it.id), "promote_template_fix")}
+                              title="Resolve this row as a confirmed parser/template follow-up item."
+                            >
+                              Promote to template fix
+                            </button>
+                            <button
+                              className="px-2 py-1 rounded border border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                              onClick={() => void resolveQueueItem(String(it.id), "discard")}
+                              title="Resolve this row as stale, incomplete, or no action needed without changing shared templates."
+                            >
+                              Discard / stale / no action needed
+                            </button>
+                          </>
                         ) : null}
                       </div>
                     </td>

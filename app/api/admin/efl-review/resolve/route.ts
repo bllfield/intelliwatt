@@ -27,7 +27,12 @@ export async function POST(req: NextRequest) {
       return jsonError(401, "Unauthorized (invalid admin token)");
     }
 
-    let body: { id?: string; resolutionNotes?: string | null; resolvedBy?: string | null };
+    let body: {
+      id?: string;
+      resolutionNotes?: string | null;
+      resolvedBy?: string | null;
+      action?: string | null;
+    };
     try {
       body = (await req.json()) as typeof body;
     } catch {
@@ -41,16 +46,31 @@ export async function POST(req: NextRequest) {
 
     const resolutionNotes =
       typeof body.resolutionNotes === "string" ? body.resolutionNotes.trim() : null;
+    const action =
+      typeof body.action === "string" && body.action.trim().length > 0
+        ? body.action.trim().toLowerCase()
+        : null;
     const resolvedBy =
       typeof body.resolvedBy === "string" && body.resolvedBy.trim().length > 0
         ? body.resolvedBy.trim()
-        : "admin";
+        : action === "promote_template_fix"
+          ? "admin_promote_template_fix"
+          : action === "discard"
+            ? "admin_discard"
+            : "admin";
+    const effectiveResolutionNotes =
+      resolutionNotes ??
+      (action === "promote_template_fix"
+        ? "Admin promoted this review row to a parser/template follow-up. Shared template behavior should be updated only after source evidence is confirmed."
+        : action === "discard"
+          ? "Admin discarded this review row as stale, incomplete, or no-action-needed. No shared template change was applied."
+          : null);
 
     const updated = await (prisma as any).eflParseReviewQueue.update({
       where: { id },
       data: {
         resolvedAt: new Date(),
-        resolutionNotes,
+        resolutionNotes: effectiveResolutionNotes,
         resolvedBy,
       },
     });
