@@ -281,7 +281,7 @@ export async function POST(req: NextRequest) {
               resolvedNow,
               persistedCurrentPlan: resolvedNow,
               parsedCurrentPlanId: currentPlanPersist?.parsedCurrentPlanId ?? null,
-              usageEmail,
+              usageEmail: userEmail,
               note: resolvedNow
                 ? `parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`
                 : currentPlanPersist?.error ?? "persistence_failed",
