@@ -181,7 +181,7 @@ async function buildDeterministicOnlyParseResult(args: {
     | {
         weekdayRateCentsPerKwh: number;
         weekendRateCentsPerKwh: number;
-        baseChargePerMonthCents: number;
+        baseChargePerMonthCents: number | null;
         periods: any[];
       }
     | null;
