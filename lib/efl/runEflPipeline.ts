@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
@@ -295,13 +295,18 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       } else {
         const u = eflUrlCanonical;
         if (!u) return err("ACQUIRE", "PIPELINE_NO_INPUT", "Missing rawText/pdfBytes/eflUrl.");
-        const fetched = await fetchEflPdfFromUrl(u, { timeoutMs: 20_000 } as any);
+        const fetched = await fetchEflSourceFromUrl(u, { timeoutMs: 20_000 } as any);
         if (!(fetched as any)?.ok) {
           const msg = `PIPELINE_FETCH_FAIL: ${(fetched as any)?.error ?? "fetch failed"}`;
           return err("ACQUIRE", "PIPELINE_FETCH_FAIL", msg);
         }
-        fetchedUrl = String((fetched as any)?.pdfUrl ?? u);
-        pdfBytes = (fetched as any).pdfBytes as Buffer;
+        if ((fetched as any)?.kind === "raw_text") {
+          fetchedUrl = String((fetched as any)?.sourceUrl ?? u);
+          rawText = String((fetched as any)?.rawText ?? "").trim() || null;
+        } else {
+          fetchedUrl = String((fetched as any)?.pdfUrl ?? u);
+          pdfBytes = (fetched as any).pdfBytes as Buffer;
+        }
       }
     }
   } catch (e: any) {

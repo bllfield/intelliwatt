@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
-import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
@@ -597,7 +597,7 @@ export async function POST(req: NextRequest) {
       processedCount++;
 
       try {
-        const fetched = await fetchEflPdfFromUrl(eflSeedUrl);
+        const fetched = await fetchEflSourceFromUrl(eflSeedUrl);
         if (!fetched.ok) {
           // Ensure offers don't "disappear" from ops: if we can't even fetch the PDF,
           // queue a stable synthetic item keyed by URL + offer metadata.
@@ -675,14 +675,16 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const pdfBytes = fetched.pdfBytes;
-        const pdfSha256 = computePdfSha256(pdfBytes);
-        const resolvedPdfUrl = fetched.pdfUrl ?? eflSeedUrl;
+        const pdfBytes = fetched.kind === "pdf" ? fetched.pdfBytes : null;
+        const pdfSha256 = pdfBytes ? computePdfSha256(pdfBytes) : null;
+        const resolvedDocUrl =
+          fetched.kind === "pdf" ? (fetched.pdfUrl ?? eflSeedUrl) : (fetched.sourceUrl ?? eflSeedUrl);
+        const prefetchedRawText = fetched.kind === "raw_text" ? fetched.rawText : null;
 
         // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
         // this exact EFL fingerprint (and it doesn't require manual review),
         // skip running the expensive EFL pipeline entirely.
-        if (!forceReparseTemplates) {
+        if (!forceReparseTemplates && pdfSha256) {
           const existing = (await prisma.ratePlan.findFirst({
             where: { eflPdfSha256: pdfSha256 } as any,
           })) as any;
@@ -697,7 +699,7 @@ export async function POST(req: NextRequest) {
                     resolvedAt: null,
                     OR: [
                       { eflPdfSha256: pdfSha256 },
-                      { eflUrl: resolvedPdfUrl },
+                      { eflUrl: resolvedDocUrl },
                       { eflUrl: eflSeedUrl },
                       ...(existing.eflUrl ? [{ eflUrl: String(existing.eflUrl) }] : []),
                       ...(existing.eflSourceUrl
@@ -729,7 +731,7 @@ export async function POST(req: NextRequest) {
               planName,
               termMonths,
               tdspName,
-              eflUrl: resolvedPdfUrl,
+              eflUrl: resolvedDocUrl,
               eflPdfSha256: pdfSha256,
               repPuctCertificate: existing.repPuctCertificate ?? null,
               eflVersionCode: existing.eflVersionCode ?? null,
@@ -803,9 +805,10 @@ export async function POST(req: NextRequest) {
           actor: "system",
           dryRun: mode === "DRY_RUN",
           offerId,
-          eflUrl: resolvedPdfUrl,
+          eflUrl: resolvedDocUrl,
           eflSourceUrl: eflSeedUrl,
-          pdfBytes,
+          ...(pdfBytes ? { pdfBytes } : {}),
+          ...(prefetchedRawText ? { rawText: prefetchedRawText } : {}),
           offerMeta: {
             supplier,
             planName,
@@ -852,7 +855,7 @@ export async function POST(req: NextRequest) {
           termMonths,
           tdspName,
           tdspSlug,
-          eflUrl: resolvedPdfUrl,
+          eflUrl: resolvedDocUrl,
           eflPdfSha256: pipelineResult.eflPdfSha256 ?? pdfSha256,
           repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
           eflVersionCode: pipelineResult.eflVersionCode ?? null,

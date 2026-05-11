@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
-import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { prisma } from "@/lib/db";
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     const effectiveEflUrl = overridePdfUrl ?? eflUrl;
     const eflSourceUrl = eflUrl;
 
-    const fetched = await fetchEflPdfFromUrl(pdfFetchUrl);
+    const fetched = await fetchEflSourceFromUrl(pdfFetchUrl);
     if (!fetched.ok) {
       return NextResponse.json(
         {
@@ -88,8 +88,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const pdfBuffer = Buffer.from(fetched.pdfBytes);
-
     const pipelineResult = await runEflPipeline({
       source: "manual_url",
       actor: "admin",
@@ -99,7 +97,9 @@ export async function POST(req: NextRequest) {
       offerId: target === "offers" ? offerId : null,
       eflUrl: effectiveEflUrl,
       eflSourceUrl,
-      pdfBytes: pdfBuffer,
+      ...(fetched.kind === "pdf"
+        ? { pdfBytes: Buffer.from(fetched.pdfBytes) }
+        : { rawText: fetched.rawText }),
     });
 
     // Persist gating (admin-only). We do NOT allow writes without a valid admin token.

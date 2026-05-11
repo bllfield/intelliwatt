@@ -15,6 +15,30 @@ export type FetchEflPdfResult =
       notes: string[];
     };
 
+export type FetchEflSourceResult =
+  | {
+      ok: true;
+      kind: "pdf";
+      pdfUrl: string;
+      pdfBytes: Buffer;
+      source: "DIRECT_PDF" | "HTML_RESOLVED";
+      contentType: string | null;
+      notes: string[];
+    }
+  | {
+      ok: true;
+      kind: "raw_text";
+      sourceUrl: string;
+      rawText: string;
+      contentType: string | null;
+      notes: string[];
+    }
+  | {
+      ok: false;
+      error: string;
+      notes: string[];
+    };
+
 const PDF_HINT_RE = /\.pdf(?:$|\?)/i;
 
 /**
@@ -195,6 +219,42 @@ function looksLikeEflDocUrl(u: string): boolean {
     // SmartGridCIS/OhmConnect doc host uses a non-.pdf download endpoint.
     (s.includes("/documents/download.aspx") && s.includes("productdocumentid="))
   );
+}
+
+function htmlToVisibleText(html: string): string {
+  return decodeEntities(
+    html
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "\n")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "\n")
+      .replace(/<(br|hr)\b[^>]*\/?>/gi, "\n")
+      .replace(
+        /<\/(p|div|section|article|main|header|footer|aside|li|ul|ol|table|thead|tbody|tfoot|tr|td|th|h1|h2|h3|h4|h5|h6)\s*>/gi,
+        "\n",
+      )
+      .replace(/<\/?[^>]+>/g, " "),
+  )
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function looksLikeInlineEflText(text: string): boolean {
+  if (!text || text.length < 1200) return false;
+  let score = 0;
+  if (/electricity facts label/i.test(text)) score++;
+  if (/average monthly use/i.test(text)) score++;
+  if (/average price per kilowatt-hour|average price per kwh/i.test(text)) score++;
+  if (/other key terms and questions|disclosure chart/i.test(text)) score++;
+  if (/puct certificate number|version number/i.test(text)) score++;
+  return score >= 2;
+}
+
+export function __extractLikelyInlineEflTextForTest(html: string): string | null {
+  const text = htmlToVisibleText(html);
+  return looksLikeInlineEflText(text) ? text : null;
 }
 
 function pickEflPdfCandidateUrlsFromHtml(html: string, baseUrl: string): string[] {
@@ -675,10 +735,10 @@ async function fetchWithProfilesAndReferer(args: {
  * - Direct PDFs
  * - “Landing pages” (HTML) that contain an "Electricity Facts Label" link to the PDF
  */
-export async function fetchEflPdfFromUrl(
+export async function fetchEflSourceFromUrl(
   eflUrl: string,
   opts?: { timeoutMs?: number },
-): Promise<FetchEflPdfResult> {
+): Promise<FetchEflSourceResult> {
   const notes: string[] = [];
   const timeoutMs = opts?.timeoutMs ?? 20_000;
 
@@ -738,6 +798,7 @@ export async function fetchEflPdfFromUrl(
       }
       return {
         ok: true,
+        kind: "pdf",
         pdfUrl: res.url || fetchUrl,
         pdfBytes: Buffer.from(buf),
         source: "DIRECT_PDF",
@@ -755,6 +816,23 @@ export async function fetchEflPdfFromUrl(
     const finalUrl = res.url || fetchUrl;
     const candidates = pickEflPdfCandidateUrlsFromHtml(html, finalUrl);
     if (!candidates.length) {
+      const inlineEflText = __extractLikelyInlineEflTextForTest(html);
+      if (inlineEflText) {
+        return {
+          ok: true,
+          kind: "raw_text",
+          sourceUrl: finalUrl,
+          rawText: inlineEflText,
+          contentType,
+          notes: [
+            ...notes,
+            "inline_html_efl_text=1",
+            `contentType=${contentType ?? "unknown"}`,
+            `finalUrl=${finalUrl}`,
+            `rawTextLength=${inlineEflText.length}`,
+          ],
+        };
+      }
       return {
         ok: false,
         error:
@@ -833,6 +911,7 @@ export async function fetchEflPdfFromUrl(
         notes.push(`Resolved EFL PDF via candidate[${i}] from landing page.`);
         return {
           ok: true,
+          kind: "pdf",
           pdfUrl: second.res.url || candidateUrl,
           pdfBytes: Buffer.from(second.buf),
           source: "HTML_RESOLVED",
@@ -844,6 +923,25 @@ export async function fetchEflPdfFromUrl(
           `candidate[${i}] fetch failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
+    }
+
+    const inlineEflText = __extractLikelyInlineEflTextForTest(html);
+    if (inlineEflText) {
+      return {
+        ok: true,
+        kind: "raw_text",
+        sourceUrl: finalUrl,
+        rawText: inlineEflText,
+        contentType,
+        notes: [
+          ...notes,
+          "inline_html_efl_text=1",
+          `contentType=${contentType ?? "unknown"}`,
+          `finalUrl=${finalUrl}`,
+          `candidatesTried=${maxTries}`,
+          `rawTextLength=${inlineEflText.length}`,
+        ],
+      };
     }
 
     return {
@@ -865,6 +963,29 @@ export async function fetchEflPdfFromUrl(
       notes,
     };
   }
+}
+
+export async function fetchEflPdfFromUrl(
+  eflUrl: string,
+  opts?: { timeoutMs?: number },
+): Promise<FetchEflPdfResult> {
+  const res = await fetchEflSourceFromUrl(eflUrl, opts);
+  if (!res.ok) return res;
+  if (res.kind === "raw_text") {
+    return {
+      ok: false,
+      error: "EFL URL returned HTML text instead of a PDF.",
+      notes: [...res.notes, `rawTextLength=${res.rawText.length}`],
+    };
+  }
+  return {
+    ok: true,
+    pdfUrl: res.pdfUrl,
+    pdfBytes: res.pdfBytes,
+    source: res.source,
+    contentType: res.contentType,
+    notes: res.notes,
+  };
 }
 
 
