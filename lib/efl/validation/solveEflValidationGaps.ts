@@ -721,22 +721,41 @@ function extractThresholdMinUsageCreditsFromEflText(rawText: string): Array<{
 
   const out: Array<{ label: string; creditCents: number; minUsageKWh: number }> = [];
 
-  // Supports both "$35.00 per bill month" and "35.00 $ per bill month"
-  const re =
-    /\b(?:(Additional)\s+)?Residential\s+Usage\s+Credit\s+([0-9]+(?:\.[0-9]{1,2})?)\s*\$?\s*per\s*(?:bill\s*month|month|billing\s*cycle)[\s\S]{0,120}?\busage\s*>=\s*([0-9,]{1,6})\s*kwh\b/gi;
-
-  const matches = Array.from(t.matchAll(re));
-  for (const m of matches) {
-    const isAdditional = Boolean(m?.[1]);
-    const dollars = Number(m?.[2]);
-    const minKwh = Number(String(m?.[3] ?? "").replace(/,/g, ""));
-    if (!Number.isFinite(dollars) || dollars <= 0) continue;
-    if (!Number.isFinite(minKwh) || minKwh < 1) continue;
+  const pushMatch = (isAdditional: boolean, dollarsRaw: string | undefined, minKwhRaw: string | undefined) => {
+    const dollars = Number(dollarsRaw);
+    const minKwh = Number(String(minKwhRaw ?? "").replace(/,/g, ""));
+    if (!Number.isFinite(dollars) || dollars <= 0) return;
+    if (!Number.isFinite(minKwh) || minKwh < 1) return;
 
     const minUsageKWh = Math.floor(minKwh);
     const creditCents = Math.round(dollars * 100);
     const label = `${isAdditional ? "Additional " : ""}Residential Usage Credit $${dollars.toFixed(2)} applies >= ${minUsageKWh} kWh`;
     out.push({ label, creditCents, minUsageKWh });
+  };
+
+  const amountToken = String.raw`\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*\$?`;
+  const thresholdToken = String.raw`(?:usage(?:\s+on\s+this\s+plan)?(?:\s+is)?\s*\(?\s*>=\s*([0-9,]{1,6})\s*\)?\s*kwh|above\s+or\s+equal\s+to\s+([0-9,]{1,6})\s*kwh|([0-9,]{1,6})\s*kwh\s+or\s+more)`;
+  const patterns = [
+    // Tabular credit rows:
+    // - "Residential Usage Credit 35.00 $ per bill month if usage >= 1000kWh"
+    // - "Usage Credit $125.00 per billing cycle for usage (>=1000) kWh"
+    new RegExp(
+      String.raw`\b(?:(Additional)\s+)?(?:Residential\s+)?Usage\s+Credit\s+${amountToken}\s*per\s*(?:bill\s*month|month|billing\s*cycle)[\s\S]{0,140}?${thresholdToken}`,
+      "gi",
+    ),
+    // Prose fallback:
+    // "A Usage Credit of $125.00 will be included ... above or equal to 1000 kWh"
+    new RegExp(
+      String.raw`\b(?:(Additional)\s+)?(?:Residential\s+)?Usage\s+Credit(?:\s+of)?\s+${amountToken}[\s\S]{0,180}?${thresholdToken}`,
+      "gi",
+    ),
+  ];
+
+  for (const re of patterns) {
+    const matches = Array.from(t.matchAll(re));
+    for (const m of matches) {
+      pushMatch(Boolean(m?.[1]), m?.[2], m?.[3] ?? m?.[4] ?? m?.[5]);
+    }
   }
 
   // Dedupe exact duplicates (same threshold + same credit).

@@ -118,5 +118,54 @@ Contract Term                                     24 MONTHS
       },
     });
   });
+
+  it("derives generic usage credit wording used by Companion Energy", async () => {
+    const rawText = `
+Electricity Facts Label (EFL)
+
+Average Monthly Use               500kWh                    1,000kWh                    2,000kWh
+Average price per kWh              23.2¢                        9.9¢                        15.8¢
+
+Energy Charge                                 15.19        ¢ per kWh
+Usage Credit                                  $125.00      per billing cycle for usage (>=1000) kWh
+
+Electricity    TDU Delivery Charges                           $7.85 per billing cycle
+  Price        TDU Delivery Charges                           6.4665 ¢ per kWh
+
+Contract Term                                     12 MONTHS
+
+A Usage Credit of $125.00 will be included for each billing cycle when your usage on this
+plan is above or equal to 1000 kWh. There is no Usage Credit for a billing cycle when usage
+on this plan is below 1000 kWh.
+    `.trim();
+
+    const solved = await solveEflValidationGaps({
+      rawText,
+      planRules: null,
+      rateStructure: null,
+      validation: null,
+    });
+
+    expect(solved.solverApplied).toContain("FALLBACK_FIXED_ENERGY_CHARGE_FROM_EFL_TEXT");
+    expect(solved.solverApplied).toContain("SYNC_USAGE_BILL_CREDITS_THRESHOLD_MIN_FROM_EFL_TEXT");
+    expect(solved.solverApplied).toContain("SYNC_CONTRACT_TERM_FROM_EFL_TEXT");
+    expect(solved.validationAfter?.status).toBe("PASS");
+
+    expect(solved.derivedPlanRules).toMatchObject({
+      planType: "flat",
+      rateType: "FIXED",
+      termMonths: 12,
+      defaultRateCentsPerKwh: 15.19,
+      billCredits: [{ creditDollars: 125, thresholdKwh: 1000, type: "THRESHOLD_MIN" }],
+    });
+    expect(solved.derivedRateStructure).toMatchObject({
+      type: "FIXED",
+      energyRateCents: 15.19,
+      billCredits: {
+        hasBillCredit: true,
+        rules: [{ creditAmountCents: 12500, minUsageKWh: 1000 }],
+      },
+    });
+  });
 });
 
