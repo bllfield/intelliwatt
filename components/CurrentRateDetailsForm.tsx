@@ -306,6 +306,7 @@ export function CurrentRateDetailsForm({
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedBillText, setPastedBillText] = useState("");
+  const [pastedBillAttachments, setPastedBillAttachments] = useState<File[]>([]);
   const [pasteError, setPasteError] = useState<string | null>(null);
   // This is NOT a user choice. Default is "billed separately" unless the EFL/bill explicitly states delivery is included.
   const [deliveryIncluded, setDeliveryIncluded] = useState<boolean>(false);
@@ -1213,6 +1214,31 @@ export function CurrentRateDetailsForm({
     try {
       setIsParsingPaste(true);
       setPasteError(null);
+      let uploadIds: string[] = [];
+
+      if (pastedBillAttachments.length > 0) {
+        const formData = new FormData();
+        pastedBillAttachments.forEach((file) => formData.append("billFile", file));
+        formData.append("houseId", houseId);
+
+        const uploadRes = await fetch("/api/current-plan/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const uploadJson = await uploadRes.json().catch(() => null);
+        if (!uploadRes.ok) {
+          setPasteError(
+            uploadJson?.error ??
+              "We couldn't attach those bill files. Please use actual bill pages, not an app screenshot.",
+          );
+          return;
+        }
+        uploadIds = Array.isArray(uploadJson?.uploadIds)
+          ? uploadJson.uploadIds
+              .map((value: unknown) => (typeof value === "string" ? value.trim() : ""))
+              .filter(Boolean)
+          : [];
+      }
 
       const res = await fetch("/api/current-plan/bill-parse", {
         method: "POST",
@@ -1220,6 +1246,7 @@ export function CurrentRateDetailsForm({
         body: JSON.stringify({
           houseId,
           textOverride: pastedBillText.trim(),
+          ...(uploadIds.length > 0 ? { uploadIds } : {}),
         }),
       });
 
@@ -1235,8 +1262,13 @@ export function CurrentRateDetailsForm({
       applyParsedPlanToForm(json?.parsedPlan ?? null);
       setShowPasteModal(false);
       setPastedBillText("");
+      setPastedBillAttachments([]);
 
-      setUploadStatus("Bill text parsed. Your current plan details below have been refreshed—please double-check meter # and contract expiration.");
+      setUploadStatus(
+        uploadIds.length > 0
+          ? "Bill text parsed and the original bill files were attached for review. Your current plan details below have been refreshed—please double-check meter # and contract expiration."
+          : "Bill text parsed. Your current plan details below have been refreshed—please double-check meter # and contract expiration.",
+      );
       await refreshPlan();
     } catch (err: any) {
       setPasteError(
@@ -2084,14 +2116,18 @@ export function CurrentRateDetailsForm({
         >
           <h2 className="text-base font-semibold text-brand-navy">Option 1 · Upload your latest bill</h2>
           <p className="text-sm text-brand-slate">
-            Upload a recent PDF bill and we&apos;ll parse it to auto-fill your plan data. If you only
-            have a screenshot or image, you can paste the copied text instead.
+            PDF is preferred. Upload a recent PDF bill and we&apos;ll parse it to auto-fill your plan
+            data. If you only have a screenshot or image, you can paste the copied text instead and
+            attach the original bill pages or photos for review. Do not use an account-app summary
+            screenshot in place of the actual bill.
           </p>
           <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
             <span className="font-semibold">Drag your PDF here or click to browse</span>
             <span className="mt-1 text-xs text-brand-slate">
-              Accepted file: <span className="font-semibold">PDF only</span>. If your bill is an image or screenshot,
-              open it and use the paste link below to send us the visible text instead.
+              <span className="font-semibold">PDF is preferred</span>. If your bill is an image or
+              screenshot, open it and use the paste link below to send us the visible text instead.
+              Attach the original bill pages or photos if you have them, and do not use an
+              account-app summary screenshot.
             </span>
             <input
               type="file"
@@ -2184,10 +2220,11 @@ export function CurrentRateDetailsForm({
                     Paste bill text from an image or PDF
                   </h3>
                   <p className="mt-1 text-xs text-brand-slate">
-                    If your bill is a screenshot or scanned image, open it and copy the visible
-                    text (provider, plan name, service address, pricing rows) into the box below.
-                    We&apos;ll run the same parser used for PDF uploads and refresh your plan
-                    details.
+                    PDF is preferred. If your bill is a screenshot or scanned image, open it and copy
+                    the visible text (provider, plan name, service address, pricing rows) into the box
+                    below. We&apos;ll run the same parser used for PDF uploads and refresh your plan
+                    details. Attach the original bill pages or photos if you have them. Do not attach
+                    an account-app summary screenshot.
                   </p>
                 </div>
                 <button
@@ -2200,6 +2237,32 @@ export function CurrentRateDetailsForm({
               </div>
 
               <div className="mt-3 space-y-2">
+                <label className="block text-xs font-semibold text-brand-navy">
+                  Optional: attach the original bill pages or photos
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf,image/*"
+                  multiple
+                  className="block w-full text-xs text-brand-slate"
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.files ?? []);
+                    setPastedBillAttachments(selected);
+                  }}
+                />
+                <p className="text-[11px] text-brand-slate">
+                  Attach the real bill pages or photos you copied from so support can review them if
+                  any fields are missed. Do not attach a utility app/account screenshot.
+                </p>
+                {pastedBillAttachments.length > 0 ? (
+                  <ul className="rounded-lg border border-brand-blue/20 bg-brand-blue/5 px-3 py-2 text-[11px] text-brand-navy space-y-1">
+                    {pastedBillAttachments.map((file, index) => (
+                      <li key={`${file.name}-${file.size}-${index}`} className="break-all">
+                        {file.name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <textarea
                   className="h-40 w-full resize-none rounded-lg border border-brand-blue/30 px-3 py-2 text-xs font-mono text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
                   placeholder="Paste the text from your bill here..."

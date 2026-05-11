@@ -14,6 +14,7 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
   const [uploaded, setUploaded] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedText, setPastedText] = useState("");
+  const [pastedAttachments, setPastedAttachments] = useState<File[]>([]);
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [isParsingPaste, setIsParsingPaste] = useState(false);
 
@@ -100,6 +101,31 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
     try {
       setIsParsingPaste(true);
       setPasteError(null);
+      let uploadIds: string[] = [];
+
+      if (pastedAttachments.length > 0) {
+        const formData = new FormData();
+        pastedAttachments.forEach((file) => formData.append("billFile", file));
+        formData.append("houseId", houseId.trim());
+
+        const uploadRes = await fetch("/api/current-plan/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const uploadJson = await uploadRes.json().catch(() => null);
+        if (!uploadRes.ok) {
+          setPasteError(
+            uploadJson?.error ??
+              "We couldn't attach those bill files. Please use actual bill pages, not an app screenshot.",
+          );
+          return;
+        }
+        uploadIds = Array.isArray(uploadJson?.uploadIds)
+          ? uploadJson.uploadIds
+              .map((value: unknown) => (typeof value === "string" ? value.trim() : ""))
+              .filter(Boolean)
+          : [];
+      }
 
       const res = await fetch("/api/current-plan/bill-parse", {
         method: "POST",
@@ -107,6 +133,7 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
         body: JSON.stringify({
           houseId: houseId.trim(),
           textOverride: pastedText.trim(),
+          ...(uploadIds.length > 0 ? { uploadIds } : {}),
         }),
       });
 
@@ -121,9 +148,14 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
 
       setShowPasteModal(false);
       setPastedText("");
+      setPastedAttachments([]);
 
       setUploaded(true);
-      setStatus("Bill text parsed. Your SMT details above will refresh shortly.");
+      setStatus(
+        uploadIds.length > 0
+          ? "Bill text parsed and the original bill files were attached for review. Your SMT details above will refresh shortly."
+          : "Bill text parsed. Your SMT details above will refresh shortly.",
+      );
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("smt-init-updated"));
@@ -161,8 +193,10 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
         <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-5 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
           <span className="font-semibold">Drag your PDF here or click to browse</span>
           <span className="mt-1 text-xs text-brand-slate">
-            Accepted file: <span className="font-semibold">PDF only</span>. If your bill is an image,
-            open it and copy/paste the visible text into the text box instead.
+            <span className="font-semibold">PDF is preferred</span>. If your bill is an image or
+            screenshot, open it and copy/paste the visible text into the text box instead. If any
+            fields are missed, attach the original bill pages or photos so we can review the layout.
+            Do not use a utility app/account screenshot in place of the actual bill.
           </span>
           <input
             type="file"
@@ -243,9 +277,11 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
                   Paste bill text from an image or PDF
                 </h3>
                 <p className="mt-1 text-xs text-brand-slate">
-                  If you have a screenshot or scanned bill, open it and copy the visible text
-                  (provider, plan, address, ESIID, meter, pricing details) into the box below.{" "}
-                  We&apos;ll run the same parser used for PDF uploads and refresh your SMT details.
+                  PDF is preferred. If you only have a screenshot or scanned bill, open it and copy
+                  the visible text (provider, plan, address, ESIID, meter, pricing details) into the
+                  box below. We&apos;ll run the same parser used for PDF uploads and refresh your SMT
+                  details. Attach the original bill pages or photos if you have them. Do not attach a
+                  utility app/account screenshot.
                 </p>
               </div>
               <button
@@ -258,6 +294,31 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
             </div>
 
             <div className="mt-3 space-y-2">
+              <label className="block text-xs font-semibold text-brand-navy">
+                Optional: attach the original bill pages or photos
+              </label>
+              <input
+                type="file"
+                accept=".pdf,application/pdf,image/*"
+                multiple
+                className="block w-full text-xs text-brand-slate"
+                onChange={(e) => {
+                  setPastedAttachments(Array.from(e.target.files ?? []));
+                }}
+              />
+              <p className="text-[11px] text-brand-slate">
+                Attach the real bill pages or photos you copied from so support can review them if
+                any fields are missed. Do not attach a utility app/account screenshot.
+              </p>
+              {pastedAttachments.length > 0 ? (
+                <ul className="rounded-lg border border-brand-blue/20 bg-brand-blue/5 px-3 py-2 text-[11px] text-brand-navy space-y-1">
+                  {pastedAttachments.map((file, index) => (
+                    <li key={`${file.name}-${file.size}-${index}`} className="break-all">
+                      {file.name}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               <textarea
                 className="h-40 w-full resize-none rounded-lg border border-brand-blue/30 px-3 py-2 text-xs font-mono text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
                 placeholder="Paste the text from your bill here..."

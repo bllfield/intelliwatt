@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
         {
           ok: false,
           error:
-            'Only PDF bill uploads are allowed for admin text extraction. If your bill is an image or screenshot, open it and copy/paste the visible text instead.',
+            'PDF is preferred for admin bill text extraction. If your bill is an image or screenshot, open it, copy/paste the visible text instead, and keep the original image for review if any fields are missed.',
         },
         { status: 400 },
       );
@@ -75,7 +75,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'Could not extract text from PDF. Open the bill and copy/paste the visible text instead.',
+          error:
+            'Could not extract text from PDF. Open the bill, copy/paste the visible text instead, and keep the original image for review if anything is missed.',
         },
         { status: 422 },
       );

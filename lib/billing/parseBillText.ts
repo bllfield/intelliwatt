@@ -91,9 +91,233 @@ import { logOpenAIUsage } from '@/lib/admin/openaiUsage';
 // - "ESI: 1044..."
 // Accept all of the above.
 const ESIID_REGEX = /\b((?:ESI(?:[\s-]*ID)?)[\s:#]*)(\d{17,22})\b/i;
-const METER_REGEX = /\b(Meter(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/i;
-const PROVIDER_REGEX = /\b(?:Provider|Retail Electric Provider|REP)[:\s]+(.+?)\b/;
-const ACCOUNT_REGEX = /\b(Account(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/;
+const METER_INLINE_REGEX = /\bMeter(?:\s*Number)?[:\s#]*([A-Za-z0-9\-]{6,24})\b/i;
+const PROVIDER_REGEX = /\b(?:Provider|Retail Electric Provider|REP)[:\s]+([^\n]+)\b/i;
+const ACCOUNT_INLINE_REGEX =
+  /\bAccount(?:\s*(?:No\.?|Number))?[:\s#]*([A-Za-z0-9\-]{4,24})\b/i;
+const ADDRESS_INLINE_REGEX =
+  /\bAddress:\s*([^,\n]+),\s*([A-Za-z][A-Za-z.\s'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/i;
+const CITY_STATE_ZIP_REGEX =
+  /\b([A-Za-z][A-Za-z.\s'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/;
+const BILLING_PERIOD_REGEX =
+  /\bBilling Period:\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})\b/i;
+const INVOICE_DATE_REGEX = /\bInvoice date:\s*([A-Za-z]{3,9}\s+\d{1,2}\s+\d{4})\b/i;
+const DUE_DATE_INLINE_REGEX = /\bDue Date[:\s]*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})\b/i;
+const DUE_DATE_FALLBACK_REGEX =
+  /\b(?:if paid after|paid by due dat)\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})\b/i;
+const TOTAL_AMOUNT_DUE_REGEX =
+  /(?:^|\n)Total Amount Due(?! with)[^\n$]*\$\s*([0-9][0-9,]*\.\d{2})/im;
+const AMOUNT_DUE_REGEX = /\bAmount due[^\n$]*\$?\s*([0-9][0-9,]*\.\d{2})\b/i;
+const CONTRACT_END_DATE_REGEX =
+  /\bestimated contract end date is\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})\b/i;
+const PROVIDER_NAME_LINE_REGEX =
+  /^([A-Za-z][A-Za-z&.'-]*(?:\s+[A-Za-z&.'-]+){0,4}\s+(?:Energy|Electric|Power|Utilities|Utility))$/i;
+const STREET_LINE_REGEX =
+  /^\d{1,6}[A-Za-z]?(?:\s+[A-Za-z0-9.'#-]+){1,7}$/i;
+
+function normalizeWhitespace(value: string): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function toNormalizedLines(text: string): string[] {
+  return String(text ?? '')
+    .split(/\r?\n/)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean);
+}
+
+function normalizeStreetLine(value: string): string {
+  const trimmed = normalizeWhitespace(value).replace(/^Address:\s*/i, '');
+  return trimmed.replace(/^0(?=\d{3,5}\b)/, '');
+}
+
+function isIgnoredLabeledCandidate(value: string): boolean {
+  return /^(reading|information|summary|amount|date|usage|meter|account|invoice|current|previous|actual|multi|total|units|rate)$/i.test(
+    normalizeWhitespace(value),
+  );
+}
+
+function isLikelyMeterNumber(value: string): boolean {
+  const candidate = normalizeWhitespace(value);
+  if (!candidate || isIgnoredLabeledCandidate(candidate)) return false;
+  if (!/[0-9]/.test(candidate)) return false;
+  return /^[A-Za-z0-9-]{6,24}$/.test(candidate);
+}
+
+function isLikelyAccountNumber(value: string): boolean {
+  const candidate = normalizeWhitespace(value);
+  if (!candidate || isIgnoredLabeledCandidate(candidate)) return false;
+  if (!/[0-9]/.test(candidate)) return false;
+  return /^[A-Za-z0-9-]{4,24}$/.test(candidate);
+}
+
+function isLikelyStreetLine(value: string): boolean {
+  const candidate = normalizeStreetLine(value);
+  if (!candidate || !/[0-9]/.test(candidate)) return false;
+  if (/^(page|invoice|account|meter|electricity|important|customer service)\b/i.test(candidate)) {
+    return false;
+  }
+  return STREET_LINE_REGEX.test(candidate);
+}
+
+function titleCaseWords(value: string): string {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase());
+}
+
+function parseMonthName(monthToken: string): number | null {
+  const month = monthToken.toLowerCase();
+  const months = [
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
+  ];
+  const idx = months.findIndex((name) => name.startsWith(month));
+  return idx >= 0 ? idx + 1 : null;
+}
+
+function parseDateToIso(value: string): string | null {
+  const raw = normalizeWhitespace(value);
+  if (!raw) return null;
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const month = Number(slashMatch[1]);
+    const day = Number(slashMatch[2]);
+    const year = Number(slashMatch[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const monthMatch = raw.match(/^([A-Za-z]{3,9})\s+(\d{1,2})[,]?\s+(\d{4})$/);
+  if (monthMatch) {
+    const month = parseMonthName(monthMatch[1]);
+    const day = Number(monthMatch[2]);
+    const year = Number(monthMatch[3]);
+    if (month && day >= 1 && day <= 31) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
+
+function parseMoneyToCents(value: string): number | null {
+  const normalized = normalizeWhitespace(value).replace(/[$,]/g, '');
+  if (!/^-?\d+(?:\.\d{2})?$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount)) return null;
+  return Math.round(amount * 100);
+}
+
+function findValueAfterLabel(
+  lines: string[],
+  labelRegex: RegExp,
+  validator: (value: string) => boolean,
+  maxOffset = 3,
+): string | null {
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    if (!labelRegex.test(lines[idx] ?? '')) continue;
+    for (let offset = 1; offset <= maxOffset; offset += 1) {
+      const candidate = normalizeWhitespace(lines[idx + offset] ?? '');
+      if (!candidate) continue;
+      if (validator(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+function extractProviderName(text: string, lines: string[]): string | null {
+  const explicit = text.match(PROVIDER_REGEX)?.[1];
+  if (explicit) {
+    const candidate = normalizeWhitespace(explicit);
+    if (candidate && !isIgnoredLabeledCandidate(candidate)) return candidate;
+  }
+
+  for (const line of lines.slice(0, 20)) {
+    const candidate = normalizeWhitespace(line);
+    if (!candidate) continue;
+    if (/invoice|summary|details|usage|page \d/i.test(candidate)) continue;
+    if (PROVIDER_NAME_LINE_REGEX.test(candidate)) return titleCaseWords(candidate);
+  }
+
+  const puctMatch = text.match(/([A-Za-z][A-Za-z&.'-]*(?:\s+[A-Za-z&.'-]+){0,4}\s+(?:Energy|Electric|Power|Utilities|Utility))\s+PUCT Certificate/i);
+  if (puctMatch?.[1]) return titleCaseWords(puctMatch[1]);
+
+  const domainMatch = text.match(/\b(?:www\.)?([a-z]+)energy\.com\b/i);
+  if (domainMatch?.[1]) {
+    return `${titleCaseWords(domainMatch[1])} Energy`;
+  }
+
+  return null;
+}
+
+function extractAddress(lines: string[], text: string) {
+  const inlineMatch = text.match(ADDRESS_INLINE_REGEX);
+  let inlineAddress:
+    | {
+        line1: string | null;
+        city: string | null;
+        state: string | null;
+        zip: string | null;
+      }
+    | null = null;
+  if (inlineMatch) {
+    inlineAddress = {
+      line1: normalizeStreetLine(inlineMatch[1] ?? ''),
+      city: titleCaseWords(inlineMatch[2] ?? ''),
+      state: normalizeWhitespace(inlineMatch[3] ?? '').toUpperCase(),
+      zip: normalizeWhitespace(inlineMatch[4] ?? ''),
+    };
+  }
+
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const cityLine = normalizeWhitespace(lines[idx] ?? '');
+    const cityMatch = cityLine.match(CITY_STATE_ZIP_REGEX);
+    if (!cityMatch) continue;
+    const priorLine = normalizeWhitespace(lines[idx - 1] ?? '');
+    if (!isLikelyStreetLine(priorLine)) continue;
+    return {
+      line1: normalizeStreetLine(priorLine),
+      city: titleCaseWords(cityMatch[1] ?? ''),
+      state: normalizeWhitespace(cityMatch[2] ?? '').toUpperCase(),
+      zip: normalizeWhitespace(cityMatch[3] ?? ''),
+    };
+  }
+
+  return inlineAddress ?? {
+    line1: null,
+    city: null,
+    state: null,
+    zip: null,
+  };
+}
+
+function extractCustomerName(lines: string[]): string | null {
+  for (let idx = 1; idx < Math.min(lines.length, 12); idx += 1) {
+    const current = normalizeWhitespace(lines[idx] ?? '');
+    const next = normalizeWhitespace(lines[idx + 1] ?? '');
+    if (!current || !next) continue;
+    if (!isLikelyStreetLine(next)) continue;
+    if (!/^[A-Z][A-Z\s.'-]+$/.test(current)) continue;
+    if (/gexa|energy|invoice|summary|details/i.test(current)) continue;
+    return titleCaseWords(current);
+  }
+  return null;
+}
 
 function shouldDiscardLikelyCustomerServiceHoursTou(args: {
   rawText: string;
@@ -176,6 +400,7 @@ export function extractCurrentPlanFromBillText(
   hints: BillParseHints = {},
 ): ParsedCurrentPlanPayload {
   const text = rawText || '';
+  const lines = toNormalizedLines(text);
 
   // Basic ESIID
   let esiid: string | null = null;
@@ -187,25 +412,57 @@ export function extractCurrentPlanFromBillText(
   }
 
   // Basic meter number
-  let meterNumber: string | null = null;
-  const meterMatch = text.match(METER_REGEX);
-  if (meterMatch && meterMatch[2]) {
-    meterNumber = meterMatch[2].trim();
+  const inlineMeter = text.match(METER_INLINE_REGEX)?.[1] ?? null;
+  let meterNumber: string | null = isLikelyMeterNumber(inlineMeter ?? '')
+    ? normalizeWhitespace(inlineMeter ?? '')
+    : null;
+  if (!meterNumber) {
+    meterNumber = findValueAfterLabel(
+      lines,
+      /^Meter(?:\s*Number)?\.?$/i,
+      isLikelyMeterNumber,
+      2,
+    );
   }
 
-  // Basic provider name (best-effort; can improve later)
-  let providerName: string | null = null;
-  const providerMatch = text.match(PROVIDER_REGEX);
-  if (providerMatch && providerMatch[1]) {
-    providerName = providerMatch[1].trim();
-  }
+  // Basic provider name
+  const providerName = extractProviderName(text, lines);
 
   // Account number
-  let accountNumber: string | null = null;
-  const accountMatch = text.match(ACCOUNT_REGEX);
-  if (accountMatch && accountMatch[2]) {
-    accountNumber = accountMatch[2].trim();
+  const inlineAccount = text.match(ACCOUNT_INLINE_REGEX)?.[1] ?? null;
+  let accountNumber: string | null = isLikelyAccountNumber(inlineAccount ?? '')
+    ? normalizeWhitespace(inlineAccount ?? '')
+    : null;
+  if (!accountNumber) {
+    accountNumber = findValueAfterLabel(
+      lines,
+      /^Account(?:\s*(?:No\.?|Number))?\.?$/i,
+      isLikelyAccountNumber,
+      4,
+    );
   }
+
+  const address = extractAddress(lines, text);
+  const customerName = extractCustomerName(lines);
+
+  const billingPeriodMatch = text.match(BILLING_PERIOD_REGEX);
+  const billingPeriodStart = billingPeriodMatch?.[1]
+    ? parseDateToIso(billingPeriodMatch[1])
+    : null;
+  const billingPeriodEnd = billingPeriodMatch?.[2]
+    ? parseDateToIso(billingPeriodMatch[2])
+    : null;
+
+  const invoiceDateRaw = text.match(INVOICE_DATE_REGEX)?.[1] ?? null;
+  const dueDateRaw =
+    text.match(DUE_DATE_INLINE_REGEX)?.[1] ??
+    text.match(DUE_DATE_FALLBACK_REGEX)?.[1] ??
+    null;
+  const totalAmountDueRaw =
+    text.match(TOTAL_AMOUNT_DUE_REGEX)?.[1] ??
+    text.match(AMOUNT_DUE_REGEX)?.[1] ??
+    null;
+  const contractEndDateRaw = text.match(CONTRACT_END_DATE_REGEX)?.[1] ?? null;
 
   // TODO: add smarter parsing for tdspName, planName, TOU windows, bill credits, etc.
   // For now, we return nulls/placeholders so the form can still autofill what we do know.
@@ -224,19 +481,19 @@ export function extractCurrentPlanFromBillText(
     tdspName: null,
     accountNumber,
 
-    customerName: null,
-    serviceAddressLine1: hints.addressLine1Hint ?? null,
+    customerName,
+    serviceAddressLine1: address.line1 ?? hints.addressLine1Hint ?? null,
     serviceAddressLine2: null,
-    serviceAddressCity: hints.cityHint ?? null,
-    serviceAddressState: hints.stateHint ?? null,
-    serviceAddressZip: null,
+    serviceAddressCity: address.city ?? hints.cityHint ?? null,
+    serviceAddressState: address.state ?? hints.stateHint ?? null,
+    serviceAddressZip: address.zip,
 
     rateType: null,
     variableIndexType: null,
     planName: null,
     termMonths: null,
     contractStartDate: null,
-    contractEndDate: null,
+    contractEndDate: contractEndDateRaw ? parseDateToIso(contractEndDateRaw) : null,
     earlyTerminationFeeCents: null,
 
     baseChargeCentsPerMonth: null,
@@ -248,11 +505,11 @@ export function extractCurrentPlanFromBillText(
       rules: [],
     },
 
-    billingPeriodStart: null,
-    billingPeriodEnd: null,
-    billIssueDate: null,
-    billDueDate: null,
-    totalAmountDueCents: null,
+    billingPeriodStart,
+    billingPeriodEnd,
+    billIssueDate: invoiceDateRaw ? parseDateToIso(invoiceDateRaw) : null,
+    billDueDate: dueDateRaw ? parseDateToIso(dueDateRaw) : null,
+    totalAmountDueCents: totalAmountDueRaw ? parseMoneyToCents(totalAmountDueRaw) : null,
 
     rawText,
     eflVersionCode,

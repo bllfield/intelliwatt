@@ -7,6 +7,21 @@ import { ensureCurrentPlanEntry } from '@/lib/current-plan/ensureEntry';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
+function isSupportedBillAttachment(file: File): boolean {
+  const fileName = file.name?.toLowerCase?.() ?? '';
+  const fileType = file.type?.toLowerCase?.() ?? '';
+  if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) return true;
+  if (fileType.startsWith('image/')) return true;
+  return (
+    fileName.endsWith('.jpg') ||
+    fileName.endsWith('.jpeg') ||
+    fileName.endsWith('.png') ||
+    fileName.endsWith('.webp') ||
+    fileName.endsWith('.heic') ||
+    fileName.endsWith('.heif')
+  );
+}
+
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
@@ -62,19 +77,12 @@ export async function POST(request: NextRequest) {
     const uploadIds: string[] = [];
 
     for (const billFile of billFiles) {
-      const fileName = billFile.name?.toLowerCase?.() ?? '';
-      const fileType = billFile.type?.toLowerCase?.() ?? '';
-
-      const isPdf =
-        fileType === 'application/pdf' ||
-        fileName.endsWith('.pdf');
-
-      if (!isPdf) {
+      if (!isSupportedBillAttachment(billFile)) {
         return NextResponse.json(
           {
             ok: false,
             error:
-              'Only PDF bill uploads are allowed. If your bill is an image or screenshot, please open it and copy/paste the text instead of uploading the image.',
+              'Upload a real bill page as a PDF or image. Do not upload a utility app/account screenshot. If you only have bill images, copy/paste the visible bill text and attach the original bill pages for review.',
           },
           { status: 400 },
         );

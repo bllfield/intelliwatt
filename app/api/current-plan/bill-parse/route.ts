@@ -199,6 +199,7 @@ export async function POST(request: NextRequest) {
   let debugHouseId: string | null = null;
   let debugRawText: string | null = null;
   let debugBillSha: string | null = null;
+  let debugAttachments: Array<{ id: string; filename: string; mimeType: string }> = [];
   let debugParsed: any = null;
   let debugBaseline: any = null;
   let debugUsedAi = false;
@@ -228,7 +229,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = (await request.json().catch(() => null)) as
-      | { houseId?: unknown; uploadId?: unknown; textOverride?: unknown }
+      | { houseId?: unknown; uploadId?: unknown; uploadIds?: unknown; textOverride?: unknown }
       | null;
 
     if (!body) {
@@ -237,6 +238,7 @@ export async function POST(request: NextRequest) {
 
     const houseIdRaw = body.houseId;
     const uploadIdRaw = body.uploadId;
+    const uploadIdsRaw = body.uploadIds;
     const textOverride =
       typeof body.textOverride === 'string' && body.textOverride.trim().length > 0
         ? body.textOverride
@@ -246,6 +248,21 @@ export async function POST(request: NextRequest) {
       typeof houseIdRaw === 'string' && houseIdRaw.trim().length > 0
         ? houseIdRaw.trim()
         : null;
+    const requestedUploadIds = Array.from(
+      new Set(
+        [
+          ...(typeof uploadIdRaw === 'string' && uploadIdRaw.trim().length > 0
+            ? [uploadIdRaw.trim()]
+            : []),
+          ...(Array.isArray(uploadIdsRaw)
+            ? uploadIdsRaw
+                .filter((value): value is string => typeof value === 'string')
+                .map((value) => value.trim())
+                .filter(Boolean)
+            : []),
+        ],
+      ),
+    );
 
     // If a houseId is provided, verify ownership. For flows that do not yet have
     // a resolved house (e.g., initial current-plan dashboard uploads), we allow
@@ -275,23 +292,48 @@ export async function POST(request: NextRequest) {
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();
+    const billDelegate = currentPlanPrisma.currentPlanBillUpload as any;
 
     let uploadRecord:
-      | { id: string; filename: string; mimeType: string; billData: Buffer }
+      | { id: string; filename: string; mimeType: string; billData: Buffer; uploadedAt: Date }
       | null = null;
+    let attachmentRecords: Array<{
+      id: string;
+      filename: string;
+      mimeType: string;
+      billData: Buffer;
+      uploadedAt: Date;
+    }> = [];
+
+    if (requestedUploadIds.length > 0) {
+      const fetchedUploads = await billDelegate.findMany({
+        where: {
+          id: { in: requestedUploadIds },
+          userId: user.id,
+          ...(houseId ? { houseId } : {}),
+        },
+        select: { id: true, filename: true, mimeType: true, billData: true, uploadedAt: true },
+      });
+      const uploadsById = new Map(
+        (Array.isArray(fetchedUploads) ? fetchedUploads : []).map((row: any) => [String(row.id), row]),
+      );
+      attachmentRecords = requestedUploadIds
+        .map((id) => uploadsById.get(id))
+        .filter(Boolean);
+      uploadRecord = attachmentRecords[attachmentRecords.length - 1] ?? null;
+    }
 
     if (!textOverride) {
-      const billDelegate = currentPlanPrisma.currentPlanBillUpload as any;
-
-      if (uploadIdRaw && typeof uploadIdRaw === 'string' && uploadIdRaw.trim().length > 0) {
+      if (!uploadRecord && uploadIdRaw && typeof uploadIdRaw === 'string' && uploadIdRaw.trim().length > 0) {
         uploadRecord = await billDelegate.findFirst({
           where: {
             id: uploadIdRaw.trim(),
             userId: user.id,
             ...(houseId ? { houseId } : {}),
           },
-          select: { id: true, filename: true, mimeType: true, billData: true },
+          select: { id: true, filename: true, mimeType: true, billData: true, uploadedAt: true },
         });
+        attachmentRecords = uploadRecord ? [uploadRecord] : [];
 
         // Guardrail: this endpoint is a BILL parser. If the selected upload is actually an EFL,
         // fail fast with a clear message instead of parsing the wrong document.
@@ -320,8 +362,9 @@ export async function POST(request: NextRequest) {
             filename: { not: { startsWith: 'EFL:' } },
           },
           orderBy: { uploadedAt: 'desc' },
-          select: { id: true, filename: true, mimeType: true, billData: true },
+          select: { id: true, filename: true, mimeType: true, billData: true, uploadedAt: true },
         });
+        attachmentRecords = uploadRecord ? [uploadRecord] : [];
       }
 
       if (!uploadRecord) {
@@ -360,7 +403,18 @@ export async function POST(request: NextRequest) {
     debugHouseId = effectiveHouseId ?? null;
     debugUploadId = uploadRecord?.id ?? null;
     debugRawText = rawTextCapped;
-    debugBillSha = uploadRecord?.billData ? sha256Hex(uploadRecord.billData) : sha256Hex(`text:${rawTextCapped}`);
+    debugBillSha =
+      attachmentRecords.length > 0
+        ? sha256Hex(
+            Buffer.concat(
+              attachmentRecords.map((record) =>
+                Buffer.isBuffer(record.billData) ? record.billData : Buffer.from(record.billData),
+              ),
+            ),
+          )
+        : uploadRecord?.billData
+          ? sha256Hex(uploadRecord.billData)
+          : sha256Hex(`text:${rawTextCapped}`);
 
     // 1) Baseline parse (regex-only)
     const baseline = extractCurrentPlanFromBillText(rawTextCapped, {});
@@ -485,6 +539,12 @@ export async function POST(request: NextRequest) {
     };
 
     const rateStructure = buildRateStructureFromParsedBill(parsed);
+    const attachmentMeta = attachmentRecords.map((record) => ({
+      id: String(record.id),
+      filename: String(record.filename ?? ''),
+      mimeType: String(record.mimeType ?? ''),
+    }));
+    debugAttachments = attachmentMeta;
 
     const entryData: any = {
       userId: user.id,
@@ -713,6 +773,8 @@ export async function POST(request: NextRequest) {
             derivedForValidation: {
               userEmail,
               uploadId: debugUploadId,
+              uploadIds: debugAttachments.map((item) => item.id),
+              attachments: debugAttachments,
               houseId: debugHouseId,
               usedAi: debugUsedAi,
               baseline,
@@ -738,6 +800,8 @@ export async function POST(request: NextRequest) {
             derivedForValidation: {
               userEmail,
               uploadId: debugUploadId,
+              uploadIds: debugAttachments.map((item) => item.id),
+              attachments: debugAttachments,
               houseId: debugHouseId,
               usedAi: debugUsedAi,
               baseline,
@@ -830,6 +894,8 @@ export async function POST(request: NextRequest) {
             rawText: String(debugRawText).slice(0, 250_000),
             derivedForValidation: {
               uploadId: debugUploadId,
+              uploadIds: debugAttachments.map((item) => item.id),
+              attachments: debugAttachments,
               houseId: debugHouseId,
               usedAi: debugUsedAi,
               baseline: debugBaseline,
@@ -848,6 +914,8 @@ export async function POST(request: NextRequest) {
             rawText: String(debugRawText).slice(0, 250_000),
             derivedForValidation: {
               uploadId: debugUploadId,
+              uploadIds: debugAttachments.map((item) => item.id),
+              attachments: debugAttachments,
               houseId: debugHouseId,
               usedAi: debugUsedAi,
               baseline: debugBaseline,

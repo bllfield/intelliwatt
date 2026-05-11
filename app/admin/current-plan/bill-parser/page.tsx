@@ -49,6 +49,11 @@ type TemplatesResponse = {
 };
 
 type BillQueueItem = any;
+type BillAttachmentRef = {
+  id: string;
+  filename?: string | null;
+  mimeType?: string | null;
+};
 type BillPlanTemplateRow = {
   id: string;
   providerName: string | null;
@@ -93,6 +98,168 @@ function prettyJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function extractBillAttachmentRefs(derived: any): BillAttachmentRef[] {
+  const attachments = Array.isArray(derived?.attachments) ? derived.attachments : [];
+  if (attachments.length > 0) {
+    return attachments
+      .map((item: any) => {
+        const id = String(item?.id ?? '').trim();
+        if (!id) return null;
+        return {
+          id,
+          filename: typeof item?.filename === 'string' ? item.filename : null,
+          mimeType: typeof item?.mimeType === 'string' ? item.mimeType : null,
+        };
+      })
+      .filter(Boolean) as BillAttachmentRef[];
+  }
+
+  const uploadIds = Array.isArray(derived?.uploadIds) ? derived.uploadIds : [];
+  const fromUploadIds = uploadIds
+    .map((item: any) => String(item ?? '').trim())
+    .filter(Boolean)
+    .map((id: string) => ({ id, filename: null, mimeType: null }));
+  if (fromUploadIds.length > 0) return fromUploadIds;
+
+  const singleUploadId = String(derived?.uploadId ?? '').trim();
+  return singleUploadId ? [{ id: singleUploadId, filename: null, mimeType: null }] : [];
+}
+
+function decodeHeaderValue(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function StoredBillAttachmentPreview({
+  token,
+  attachments,
+}: {
+  token: string;
+  attachments: BillAttachmentRef[];
+}) {
+  const [items, setItems] = useState<
+    Array<BillAttachmentRef & { objectUrl: string | null; loadError: string | null }>
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+
+    async function load() {
+      if (!token.trim() || attachments.length === 0) {
+        setItems([]);
+        return;
+      }
+
+      const nextItems: Array<
+        BillAttachmentRef & { objectUrl: string | null; loadError: string | null }
+      > = [];
+
+      for (const attachment of attachments) {
+        try {
+          const res = await fetch(
+            `/api/admin/current-plan/uploads/${encodeURIComponent(attachment.id)}`,
+            {
+              headers: { 'x-admin-token': token.trim() },
+            },
+          );
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const blob = await res.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrls.push(objectUrl);
+          nextItems.push({
+            id: attachment.id,
+            filename:
+              attachment.filename ??
+              decodeHeaderValue(res.headers.get('x-upload-filename')) ??
+              'bill-upload',
+            mimeType:
+              attachment.mimeType ??
+              res.headers.get('x-upload-mime-type') ??
+              blob.type ??
+              null,
+            objectUrl,
+            loadError: null,
+          });
+        } catch (error: any) {
+          nextItems.push({
+            ...attachment,
+            objectUrl: null,
+            loadError: error?.message ?? 'Failed to load attachment.',
+          });
+        }
+      }
+
+      if (!cancelled) {
+        setItems(nextItems);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [attachments, token]);
+
+  if (attachments.length === 0) return null;
+
+  return (
+    <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-3">
+      <div>
+        <h3 className="text-sm font-medium text-slate-900">Attached Bill Files</h3>
+        <p className="text-xs text-slate-600">
+          Original customer bill uploads linked to this pasted-text review case.
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {items.map((item) => {
+          const mime = String(item.mimeType ?? '').toLowerCase();
+          const isImage = mime.startsWith('image/');
+          return (
+            <div key={item.id} className="rounded-lg border bg-white p-3 space-y-2">
+              <div className="text-xs">
+                <div className="font-medium text-slate-900 break-all">
+                  {item.filename ?? item.id}
+                </div>
+                <div className="text-slate-500">{item.mimeType ?? 'unknown type'}</div>
+              </div>
+              {item.objectUrl && isImage ? (
+                <img
+                  src={item.objectUrl}
+                  alt={item.filename ?? 'bill attachment'}
+                  className="max-h-80 w-full rounded border object-contain bg-slate-50"
+                />
+              ) : null}
+              {item.objectUrl ? (
+                <a
+                  href={item.objectUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                >
+                  {isImage ? 'Open full image' : 'Open attachment'}
+                </a>
+              ) : null}
+              {item.loadError ? (
+                <div className="text-xs text-red-700">Attachment unavailable: {item.loadError}</div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 async function copyToClipboard(text: string) {
@@ -405,6 +572,7 @@ export default function CurrentPlanBillParserAdmin() {
   const [parseStatus, setParseStatus] = useState<number | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [parseResult, setParseResult] = useState<BillParseResponse | null>(null);
+  const [linkedAttachments, setLinkedAttachments] = useState<BillAttachmentRef[]>([]);
 
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
@@ -506,7 +674,7 @@ export default function CurrentPlanBillParserAdmin() {
 
       if (!isPdf) {
         setFileError(
-          'Only PDF bill uploads are allowed. If your bill is an image or screenshot, open it and copy/paste the visible text into the textarea instead.',
+          'PDF is preferred for bill uploads. If your bill is an image or screenshot, open it, copy/paste the visible text into the textarea, and keep the original image for review if any fields are missed.',
         );
         return;
       }
@@ -534,7 +702,7 @@ export default function CurrentPlanBillParserAdmin() {
       if (!res.ok || !body.ok || !body.text) {
         setFileError(
           body.error ||
-            `Failed to extract text from PDF (status ${res.status}). Try opening the bill and copy/pasting the visible text instead.`,
+            `Failed to extract text from PDF (status ${res.status}). Try opening the bill, copy/pasting the visible text instead, and keep the original image for review if anything is missed.`,
         );
         return;
       }
@@ -545,7 +713,7 @@ export default function CurrentPlanBillParserAdmin() {
       console.error('[admin/bill-parser] failed to extract text from PDF', err);
       setFileError(
         err?.message ??
-          'Failed to extract text from PDF. Try opening the bill and copy/pasting the visible text instead.',
+          'Failed to extract text from PDF. Try opening the bill, copy/pasting the visible text instead, and keep the original image for review if anything is missed.',
       );
     } finally {
       setFileLoading(false);
@@ -726,6 +894,7 @@ export default function CurrentPlanBillParserAdmin() {
       const parsed = JSON.parse(raw) as any;
       const prefillText = typeof parsed?.rawText === 'string' ? parsed.rawText : '';
       const baseline = parsed?.derivedForValidation?.baseline ?? null;
+      setLinkedAttachments(extractBillAttachmentRefs(parsed?.derivedForValidation ?? null));
       if (prefillText.trim()) {
         setRawText(prefillText);
       }
@@ -891,6 +1060,7 @@ export default function CurrentPlanBillParserAdmin() {
                   const raw = typeof it.rawText === 'string' ? it.rawText : '';
                   const derived = it.derivedForValidation ?? null;
                   const solverApplied = it.solverApplied ?? null;
+                  const attachmentCount = extractBillAttachmentRefs(derived).length;
 
                   const debugBundle = {
                     source: it.source ?? null,
@@ -911,6 +1081,11 @@ export default function CurrentPlanBillParserAdmin() {
                       <td className="px-3 py-2 text-gray-800">{plan}</td>
                       <td className="px-3 py-2 text-gray-700 max-w-[320px]">
                         <div className="break-words">{String(reason)}</div>
+                        {attachmentCount > 0 ? (
+                          <div className="mt-1 text-[11px] text-amber-700">
+                            {attachmentCount} attached bill file{attachmentCount === 1 ? '' : 's'}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-gray-700 font-mono max-w-[220px]">
                         <div className="break-all">{sha.slice(0, 12)}…</div>
@@ -939,6 +1114,7 @@ export default function CurrentPlanBillParserAdmin() {
                             onClick={() => {
                               if (!raw) return;
                               setRawText(raw);
+                              setLinkedAttachments(extractBillAttachmentRefs(derived));
                               // Best-effort: prefill hints if present in derivedForValidation.
                               try {
                                 const baseline = (derived as any)?.baseline ?? null;
@@ -1025,10 +1201,11 @@ export default function CurrentPlanBillParserAdmin() {
             )}
           </div>
           <p className="text-xs text-gray-500">
-            This helper mirrors the production flow: it accepts <span className="font-semibold">PDF bills only</span>,
-            uses the same server-side PDF text extractor, and then runs the OpenAI-assisted parser on the
-            extracted text. For images or screenshots, open the bill and copy/paste the visible text into
-            the textarea instead.
+            This helper mirrors the production flow: <span className="font-semibold">PDF is preferred</span>.
+            We use the same server-side PDF text extractor and then run the OpenAI-assisted parser on the
+            extracted text. If the bill only exists as images or screenshots, open it, copy/paste the
+            visible text into the textarea, and keep the original images for review if any fields are
+            missed. Use the actual bill pages, not an account-app summary screenshot.
           </p>
           {fileError && (
             <div className="mt-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -1036,10 +1213,12 @@ export default function CurrentPlanBillParserAdmin() {
             </div>
           )}
         </div>
+        <StoredBillAttachmentPreview token={token} attachments={linkedAttachments} />
         <p className="text-sm text-gray-600">
-          Paste the raw text of a residential bill below. The admin endpoint will run the same
-          parsing logic used by the customer flow (regex + OpenAI), without writing anything to the
-          database.
+          Paste the raw text of a residential bill below. If the text came from screenshots or photos,
+          keep those original images with the review case so you can compare the OCR text against the
+          source layout. The admin endpoint will run the same parsing logic used by the customer flow
+          (regex + OpenAI), without writing anything to the database.
         </p>
         <textarea
           className="w-full min-h-[200px] rounded-lg border px-3 py-2 font-mono text-xs"
