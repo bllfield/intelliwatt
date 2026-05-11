@@ -201,7 +201,11 @@ export async function GET(req: NextRequest) {
           const src = String(it?.source ?? "");
           if (!src.startsWith("current_plan_")) return false;
           const fs = String(it?.finalStatus ?? "").toUpperCase();
-          return fs === "PASS";
+          if (fs !== "PASS") return false;
+          const qr = String(it?.queueReason ?? "");
+          if (/identity_missing_/i.test(qr)) return false;
+          if (/reviewType:\s*admin_identity_followup/i.test(qr)) return false;
+          return true;
         })
         .map((it: any) => String(it?.id))
         .filter(Boolean);

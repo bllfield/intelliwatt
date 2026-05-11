@@ -878,12 +878,13 @@ export async function POST(req: NextRequest) {
       ...(((pipeline?.parseWarnings ?? []) as any[]) ?? []).map((x) => String(x)),
     ].filter(Boolean);
 
-    const reasonParts: string[] = [];
-    if (!entryData.providerName) reasonParts.push("missing_provider");
-    if (!entryData.planName) reasonParts.push("missing_plan_name");
-    if (rateType !== "TIME_OF_USE" && flatEnergyRateCents == null) reasonParts.push("missing_flat_energy_rate");
+    const customerBlockingReasonParts: string[] = [];
+    const adminIdentityReasonParts: string[] = [];
+    if (!entryData.providerName) adminIdentityReasonParts.push("identity_missing_provider");
+    if (!entryData.planName) adminIdentityReasonParts.push("identity_missing_plan_name");
+    if (rateType !== "TIME_OF_USE" && flatEnergyRateCents == null) customerBlockingReasonParts.push("missing_flat_energy_rate");
     if (rateType === "TIME_OF_USE" && (!Array.isArray((rateStructure as any)?.tiers) || (rateStructure as any).tiers.length === 0)) {
-      reasonParts.push("missing_tou_tiers");
+      customerBlockingReasonParts.push("missing_tou_tiers");
     }
 
     // When we skipped the full pipeline, still run avg-table validation deterministically so the queue
@@ -963,14 +964,18 @@ export async function POST(req: NextRequest) {
     // - Plan is not computable.
     const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure });
     const planCalcStatus = planCalcReq.planCalcStatus;
-    if (!validationPass) reasonParts.push(`validation_${finalValidationStatus || "MISSING"}`);
-    if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcReq.planCalcReasonCode}`);
+    if (!validationPass) customerBlockingReasonParts.push(`validation_${finalValidationStatus || "MISSING"}`);
+    if (planCalcStatus && planCalcStatus !== "COMPUTABLE") customerBlockingReasonParts.push(`planCalc_${planCalcReq.planCalcReasonCode}`);
 
+    const customerCanComputeFromEfl = customerBlockingReasonParts.length === 0;
+    const reasonParts = [...customerBlockingReasonParts, ...adminIdentityReasonParts];
     const needsReview = reasonParts.length > 0;
     let autoResolvedQueueCount = 0;
     if (needsReview) {
       const queueReasonFromValidation = typeof validationForQueue?.queueReason === "string" ? validationForQueue.queueReason : null;
+      const reviewType = customerCanComputeFromEfl ? "admin_identity_followup" : "customer_blocking";
       const queueReason = `CURRENT_PLAN_EFL: ${reasonParts.join(", ")}`
+        + `\nreviewType: ${reviewType}`
         + (queueReasonFromValidation ? `\nvalidation: ${queueReasonFromValidation}` : "")
         + (warnings.length ? `\nwarnings: ${warnings.join(" | ")}` : "");
       try {
@@ -1047,7 +1052,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const customerMessage = needsReview
+    const customerMessage = customerCanComputeFromEfl
+      ? "EFL parsed successfully."
+      : needsReview
       ? "We uploaded your EFL, but we couldn't confidently calculate your current plan automatically. You'll still see the best available plans, but we can't show a savings comparison until you enter your current plan details manually below."
       : "EFL parsed successfully.";
 
@@ -1068,7 +1075,7 @@ export async function POST(req: NextRequest) {
         savedParsedCurrentPlanId: record?.id ?? null,
         autoResolvedQueueCount,
         queuedForReview: needsReview,
-        canComputeFromEfl: !needsReview,
+        canComputeFromEfl: customerCanComputeFromEfl,
         customerMessage,
         currentPlanEstimate,
         prefill: {
