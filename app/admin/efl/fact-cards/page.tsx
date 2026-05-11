@@ -869,50 +869,125 @@ export default function FactCardOpsPage() {
     setQueueProcessNote(null);
     setQueueErr(null);
     try {
-      let cursor: string | null = null;
-      let totalProcessed = 0;
-      let totalPersisted = 0;
-      let totalResolved = 0;
-      let totalFetchFailed = 0;
+      const runOfferProcessor = async (prefix = "") => {
+        let cursor: string | null = null;
+        let totalProcessed = 0;
+        let totalPersisted = 0;
+        let totalResolved = 0;
+        let totalFetchFailed = 0;
 
-      while (true) {
-        const res: Response = await fetch("/api/admin/efl-review/process-open", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-admin-token": token,
-          },
-          body: JSON.stringify({
-            cursor,
-            limit: 50,
-            timeBudgetMs: 240_000,
-            dryRun: false,
-            forceReparseTemplates,
-          }),
-        });
-        const data: any = await res.json();
-        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        while (true) {
+          const res: Response = await fetch("/api/admin/efl-review/process-open", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-admin-token": token,
+            },
+            body: JSON.stringify({
+              cursor,
+              limit: 50,
+              timeBudgetMs: 240_000,
+              dryRun: false,
+              forceReparseTemplates,
+              excludeCurrentPlanSources: true,
+            }),
+          });
+          const data: any = await res.json();
+          if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 
-        totalProcessed += Number(data.processed ?? 0) || 0;
-        totalPersisted += Number(data.persisted ?? 0) || 0;
-        totalResolved += Number(data.resolved ?? 0) || 0;
-        totalFetchFailed += Number(data.fetchFailed ?? 0) || 0;
+          totalProcessed += Number(data.processed ?? 0) || 0;
+          totalPersisted += Number(data.persisted ?? 0) || 0;
+          totalResolved += Number(data.resolved ?? 0) || 0;
+          totalFetchFailed += Number(data.fetchFailed ?? 0) || 0;
 
+          setQueueProcessNote(
+            `${prefix}Processed ${totalProcessed}. Persisted ${totalPersisted}. Resolved ${totalResolved}. Fetch failed ${totalFetchFailed}.` +
+              (data.truncated ? " Continuing…" : " Done."),
+          );
+
+          cursor =
+            typeof data.nextCursor === "string" && data.nextCursor.trim()
+              ? data.nextCursor
+              : null;
+          if (!data.truncated || !cursor) {
+            return {
+              processed: totalProcessed,
+              persisted: totalPersisted,
+              resolved: totalResolved,
+              fetchFailed: totalFetchFailed,
+            };
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      };
+
+      const runCurrentPlanProcessor = async (prefix = "") => {
+        let cursor: string | null = null;
+        let totalProcessed = 0;
+        let totalPersisted = 0;
+        let totalResolved = 0;
+        let totalSkipped = 0;
+
+        while (true) {
+          const res: Response = await fetch("/api/admin/efl-review/process-open-current-plan", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-admin-token": token,
+            },
+            body: JSON.stringify({
+              cursor,
+              limit: 50,
+              timeBudgetMs: 240_000,
+              dryRun: false,
+              source: "current_plan_efl",
+              usageMonths: 12,
+            }),
+          });
+          const data: any = await res.json();
+          if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+          totalProcessed += Number(data.processed ?? 0) || 0;
+          totalPersisted += Number(data.persisted ?? 0) || 0;
+          totalResolved += Number(data.resolved ?? 0) || 0;
+          totalSkipped += Number(data.skipped ?? 0) || 0;
+
+          setQueueProcessNote(
+            `${prefix}Processed ${totalProcessed}. Persisted ${totalPersisted}. Resolved ${totalResolved}. Skipped ${totalSkipped}.` +
+              (data.truncated ? " Continuing…" : " Done."),
+          );
+
+          cursor =
+            typeof data.nextCursor === "string" && data.nextCursor.trim()
+              ? data.nextCursor
+              : null;
+          if (!data.truncated || !cursor) {
+            return {
+              processed: totalProcessed,
+              persisted: totalPersisted,
+              resolved: totalResolved,
+              skipped: totalSkipped,
+            };
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      };
+
+      if (!queueSource.trim()) {
+        const currentPlan = await runCurrentPlanProcessor("Current plans: ");
+        const offers = await runOfferProcessor("Offers: ");
         setQueueProcessNote(
-          `Processed ${totalProcessed}. Persisted ${totalPersisted}. Resolved ${totalResolved}. Fetch failed ${totalFetchFailed}.` +
-            (data.truncated ? " Continuing…" : " Done."),
+          `All dispatcher complete. Current plans: processed ${currentPlan.processed}, persisted ${currentPlan.persisted}, resolved ${currentPlan.resolved}, skipped ${currentPlan.skipped}. ` +
+            `Offers: processed ${offers.processed}, persisted ${offers.persisted}, resolved ${offers.resolved}, fetch failed ${offers.fetchFailed}.`,
         );
-
-        cursor =
-          typeof data.nextCursor === "string" && data.nextCursor.trim()
-            ? data.nextCursor
-            : null;
-        if (!data.truncated || !cursor) break;
-        await new Promise((r) => setTimeout(r, 150));
+        await loadQueue();
+        await loadTemplates();
+        await loadCurrentPlanBillPlanTemplates();
+      } else {
+        await runOfferProcessor();
+        await loadQueue();
+        await loadTemplates();
       }
-
-      await loadQueue();
-      await loadTemplates();
     } catch (e: any) {
       setQueueErr(e?.message || "Failed to process open queue.");
     } finally {
@@ -2469,7 +2544,7 @@ export default function FactCardOpsPage() {
                 </button>
               ) : (
                 <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
-                  {queueProcessLoading ? "Processing…" : "Process OPEN parse queue (auto)"}
+                  {queueProcessLoading ? "Processing…" : !queueSource.trim() ? "Process OPEN parse queue (dispatch all)" : "Process OPEN parse queue (auto)"}
                 </button>
               )
             ) : queueKind === "PLAN_CALC_QUARANTINE" ? (
@@ -2505,6 +2580,11 @@ export default function FactCardOpsPage() {
                 <>
                   Current-plan processor re-runs the raw-text EFL pipeline, recomputes home monthly bucket totals for the queued user, and persists the template into the{" "}
                   <span className="font-medium">current-plan module DB</span>. It does not use the offers/RatePlan persistence path.
+                </>
+              ) : !queueSource.trim() ? (
+                <>
+                  All-source dispatcher first runs the <span className="font-medium">current-plan EFL</span> processor for module templates, then runs the{" "}
+                  <span className="font-medium">offers/RatePlan</span> processor for non-current-plan queue rows.
                 </>
               ) : (
                 <>

@@ -98,6 +98,7 @@ type Body = {
   timeBudgetMs?: number | null;
   dryRun?: boolean | null;
   forceReparseTemplates?: boolean | null;
+  excludeCurrentPlanSources?: boolean | null;
   /**
    * When true, keep paging and processing until timeBudgetMs is exhausted
    * (or the queue is empty), instead of returning after one page.
@@ -145,6 +146,7 @@ export async function POST(req: NextRequest) {
 
     const dryRun = body.dryRun === true;
     const forceReparseTemplates = body.forceReparseTemplates === true;
+    const excludeCurrentPlanSources = body.excludeCurrentPlanSources !== false;
     const drain = body.drain === true;
     const resultsLimitRaw = body.resultsLimit ?? 200;
     const resultsLimit = Math.max(
@@ -178,6 +180,11 @@ export async function POST(req: NextRequest) {
           // IMPORTANT: This endpoint is for the EFL_PARSE queue only.
           // PLAN_CALC_QUARANTINE is intentionally sticky and must not be auto-processed here.
           kind: "EFL_PARSE",
+          ...(excludeCurrentPlanSources
+            ? {
+                NOT: [{ source: { startsWith: "current_plan" } }],
+              }
+            : {}),
         },
         orderBy: { createdAt: "asc" },
         take: limit,
