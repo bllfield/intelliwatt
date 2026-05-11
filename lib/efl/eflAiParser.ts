@@ -171,6 +171,189 @@ function normalizeEflTextForAi(rawText: string): {
   };
 }
 
+async function buildDeterministicOnlyParseResult(args: {
+  rawText: string;
+  baseWarnings: string[];
+  deterministicBaseCents: number | null;
+  deterministicTiers: any[];
+  deterministicSingleEnergy: number | null;
+  deterministicTou:
+    | {
+        weekdayRateCentsPerKwh: number;
+        weekendRateCentsPerKwh: number;
+        baseChargePerMonthCents: number;
+        periods: any[];
+      }
+    | null;
+  deterministicTdspIncluded: boolean | null;
+}): Promise<EflAiParseResult> {
+  const {
+    rawText,
+    baseWarnings,
+    deterministicBaseCents,
+    deterministicTiers,
+    deterministicSingleEnergy,
+    deterministicTou,
+    deterministicTdspIncluded,
+  } = args;
+
+  const warnings: string[] = [...baseWarnings];
+
+  // Minimal deterministic-only PlanRules: base charge + usage tiers or a
+  // single fixed energy rate plus tdspDeliveryIncludedInEnergyCharge flag.
+  const planRules: any = {};
+
+  if (deterministicBaseCents != null) {
+    planRules.baseChargePerMonthCents = deterministicBaseCents;
+  }
+
+  if (deterministicTou) {
+    planRules.rateType = "TIME_OF_USE";
+    (planRules as any).planType =
+      deterministicTou.weekendRateCentsPerKwh === 0 ? "free-weekends" : "tou";
+    planRules.defaultRateCentsPerKwh = deterministicTou.weekdayRateCentsPerKwh;
+    planRules.timeOfUsePeriods = deterministicTou.periods;
+
+    if (planRules.baseChargePerMonthCents == null) {
+      planRules.baseChargePerMonthCents = deterministicTou.baseChargePerMonthCents;
+    }
+  } else if (deterministicTiers.length > 0) {
+    planRules.usageTiers = deterministicTiers;
+    planRules.rateType = planRules.rateType ?? "FIXED";
+    (planRules as any).planType = (planRules as any).planType ?? "flat";
+  } else if (deterministicSingleEnergy != null) {
+    planRules.rateType = planRules.rateType ?? "FIXED";
+    (planRules as any).planType = (planRules as any).planType ?? "flat";
+    planRules.defaultRateCentsPerKwh = deterministicSingleEnergy;
+    (planRules as any).currentBillEnergyRateCents = deterministicSingleEnergy;
+  }
+
+  // Seasonal percent discount (month-scoped all-day TOU), e.g. Summer Break plans.
+  // Apply this in deterministic-only mode too so validation can match EFL avg-price tables
+  // even when AI is disabled/missing.
+  if (
+    (!Array.isArray(planRules.timeOfUsePeriods) ||
+      planRules.timeOfUsePeriods.length === 0) &&
+    (!Array.isArray(planRules.usageTiers) || planRules.usageTiers.length === 0)
+  ) {
+    const seasonal = extractSeasonalEnergyDiscount(rawText);
+    const baseRate =
+      typeof planRules.defaultRateCentsPerKwh === "number" &&
+      Number.isFinite(planRules.defaultRateCentsPerKwh)
+        ? Number(planRules.defaultRateCentsPerKwh)
+        : null;
+
+    if (seasonal && baseRate != null && baseRate > 0) {
+      const discMonths = seasonal.months;
+      const otherMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter(
+        (m) => !discMonths.includes(m),
+      );
+      const discountedRate = baseRate * (1 - seasonal.discountPct);
+      if (Number.isFinite(discountedRate) && discountedRate >= 0) {
+        planRules.rateType = "TIME_OF_USE";
+        (planRules as any).planType = (planRules as any).planType ?? "tou";
+        planRules.timeOfUsePeriods = [
+          {
+            label: `Seasonal energy discount (${Math.round(
+              seasonal.discountPct * 100,
+            )}% off)`,
+            startHour: 0,
+            endHour: 24,
+            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+            months: otherMonths,
+            rateCentsPerKwh: baseRate,
+            isFree: false,
+          },
+          {
+            label: `Seasonal energy discount (${Math.round(
+              seasonal.discountPct * 100,
+            )}% off)`,
+            startHour: 0,
+            endHour: 24,
+            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+            months: discMonths,
+            rateCentsPerKwh: discountedRate,
+            isFree: false,
+          },
+        ];
+        warnings.push(
+          "Deterministic extract detected a seasonal % Energy Charge discount and mapped it to month-scoped TOU periods.",
+        );
+      }
+    }
+  }
+
+  // Even in deterministic-only mode, prefer the Disclosure Chart metadata when present.
+  // Many EFLs are column-aligned ("Type of Product   Variable Rate") with no colon.
+  const { rateType: fallbackRateType, termMonths: fallbackTerm } =
+    fallbackExtractRateTypeAndTerm(rawText);
+
+  if (
+    fallbackRateType &&
+    // Never downgrade explicit TOU classification.
+    planRules.rateType !== "TIME_OF_USE"
+  ) {
+    planRules.rateType = fallbackRateType;
+    warnings.push("Fallback filled rateType from 'Type of Product' line.");
+    if (
+      !(planRules as any).planType &&
+      (fallbackRateType === "FIXED" || fallbackRateType === "VARIABLE")
+    ) {
+      (planRules as any).planType = "flat";
+    }
+  }
+
+  if (fallbackTerm != null && typeof (planRules as any).termMonths !== "number") {
+    (planRules as any).termMonths = fallbackTerm;
+    warnings.push("Fallback filled contract term (months) from 'Contract Term' line.");
+  }
+
+  if (deterministicTdspIncluded != null) {
+    planRules.tdspDeliveryIncludedInEnergyCharge = deterministicTdspIncluded;
+  }
+
+  // Build a canonical RateStructure when we can, so validator + plan engine can run
+  // even without AI output.
+  let rateStructure: any = null;
+  try {
+    const prValidation = validatePlanRules(planRules as any);
+    if (prValidation?.requiresManualReview !== true) {
+      rateStructure = planRulesToRateStructure(planRules as any) as any;
+    }
+  } catch {
+    rateStructure = null;
+  }
+
+  let eflAvgPriceValidation: EflAvgPriceValidation | null = null;
+  try {
+    eflAvgPriceValidation = await validateEflAvgPriceTable({
+      rawText,
+      planRules,
+      rateStructure,
+    });
+  } catch (err) {
+    const msg =
+      err instanceof Error ? err.message : String(err ?? "unknown error");
+    eflAvgPriceValidation = {
+      status: "SKIP",
+      toleranceCentsPerKwh: 0.25,
+      points: [],
+      assumptionsUsed: {},
+      fail: false,
+      notes: [`Avg price validator error: ${msg}`],
+      avgTableFound: false,
+    };
+  }
+
+  return {
+    planRules: Object.keys(planRules).length > 0 ? planRules : null,
+    rateStructure,
+    parseConfidence: 0,
+    parseWarnings: warnings,
+    validation: eflAvgPriceValidation ? { eflAvgPriceValidation } : null,
+  };
+}
+
 export async function parseEflTextWithAi(opts: {
   rawText: string;
   eflPdfSha256: string;
@@ -209,163 +392,19 @@ export async function parseEflTextWithAi(opts: {
   // When AI is disabled via flag or missing key, we still want deterministic
   // extraction + validator to run, but we skip any OpenAI calls entirely.
   if (!aiEnabledFlag || !openaiClient) {
-    const warnings: string[] = [
+    return await buildDeterministicOnlyParseResult({
+      rawText,
       ...baseWarnings,
-      "AI_DISABLED_OR_MISSING_KEY: EFL AI text parser is disabled or missing OPENAI_API_KEY.",
-    ];
-
-    // Minimal deterministic-only PlanRules: base charge + usage tiers or a
-    // single fixed energy rate plus tdspDeliveryIncludedInEnergyCharge flag.
-    const planRules: any = {};
-
-    if (deterministicBaseCents != null) {
-      planRules.baseChargePerMonthCents = deterministicBaseCents;
-    }
-
-    if (deterministicTou) {
-      planRules.rateType = "TIME_OF_USE";
-      (planRules as any).planType =
-        deterministicTou.weekendRateCentsPerKwh === 0 ? "free-weekends" : "tou";
-      planRules.defaultRateCentsPerKwh = deterministicTou.weekdayRateCentsPerKwh;
-      planRules.timeOfUsePeriods = deterministicTou.periods;
-
-      if (planRules.baseChargePerMonthCents == null) {
-        planRules.baseChargePerMonthCents = deterministicTou.baseChargePerMonthCents;
-      }
-    } else if (deterministicTiers.length > 0) {
-      planRules.usageTiers = deterministicTiers;
-      planRules.rateType = planRules.rateType ?? "FIXED";
-      (planRules as any).planType = (planRules as any).planType ?? "flat";
-    } else if (deterministicSingleEnergy != null) {
-      planRules.rateType = planRules.rateType ?? "FIXED";
-      (planRules as any).planType = (planRules as any).planType ?? "flat";
-      planRules.defaultRateCentsPerKwh = deterministicSingleEnergy;
-      (planRules as any).currentBillEnergyRateCents = deterministicSingleEnergy;
-    }
-
-    // Seasonal percent discount (month-scoped all-day TOU), e.g. Summer Break plans.
-    // Apply this in deterministic-only mode too so validation can match EFL avg-price tables
-    // even when AI is disabled/missing.
-    if (
-      (!Array.isArray(planRules.timeOfUsePeriods) ||
-        planRules.timeOfUsePeriods.length === 0) &&
-      (!Array.isArray(planRules.usageTiers) || planRules.usageTiers.length === 0)
-    ) {
-      const seasonal = extractSeasonalEnergyDiscount(rawText);
-      const baseRate =
-        typeof planRules.defaultRateCentsPerKwh === "number" &&
-        Number.isFinite(planRules.defaultRateCentsPerKwh)
-          ? Number(planRules.defaultRateCentsPerKwh)
-          : null;
-
-      if (seasonal && baseRate != null && baseRate > 0) {
-        const discMonths = seasonal.months;
-        const otherMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter(
-          (m) => !discMonths.includes(m),
-        );
-        const discountedRate = baseRate * (1 - seasonal.discountPct);
-        if (Number.isFinite(discountedRate) && discountedRate >= 0) {
-          planRules.rateType = "TIME_OF_USE";
-          (planRules as any).planType = (planRules as any).planType ?? "tou";
-          planRules.timeOfUsePeriods = [
-            {
-              label: `Seasonal energy discount (${Math.round(
-                seasonal.discountPct * 100,
-              )}% off)`,
-              startHour: 0,
-              endHour: 24,
-              daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-              months: otherMonths,
-              rateCentsPerKwh: baseRate,
-              isFree: false,
-            },
-            {
-              label: `Seasonal energy discount (${Math.round(
-                seasonal.discountPct * 100,
-              )}% off)`,
-              startHour: 0,
-              endHour: 24,
-              daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-              months: discMonths,
-              rateCentsPerKwh: discountedRate,
-              isFree: false,
-            },
-          ];
-          warnings.push(
-            "Deterministic extract detected a seasonal % Energy Charge discount and mapped it to month-scoped TOU periods.",
-          );
-        }
-      }
-    }
-
-    // Even in deterministic-only mode, prefer the Disclosure Chart metadata when present.
-    // Many EFLs are column-aligned ("Type of Product   Variable Rate") with no colon.
-    const { rateType: fallbackRateType, termMonths: fallbackTerm } =
-      fallbackExtractRateTypeAndTerm(rawText);
-
-    if (
-      fallbackRateType &&
-      // Never downgrade explicit TOU classification.
-      planRules.rateType !== "TIME_OF_USE"
-    ) {
-      planRules.rateType = fallbackRateType;
-      warnings.push("Fallback filled rateType from 'Type of Product' line.");
-      if (!(planRules as any).planType && (fallbackRateType === "FIXED" || fallbackRateType === "VARIABLE")) {
-        (planRules as any).planType = "flat";
-      }
-    }
-
-    if (fallbackTerm != null && typeof (planRules as any).termMonths !== "number") {
-      (planRules as any).termMonths = fallbackTerm;
-      warnings.push("Fallback filled contract term (months) from 'Contract Term' line.");
-    }
-
-    if (deterministicTdspIncluded != null) {
-      planRules.tdspDeliveryIncludedInEnergyCharge = deterministicTdspIncluded;
-    }
-
-    // Build a canonical RateStructure when we can, so validator + plan engine can run
-    // even without AI output.
-    let rateStructure: any = null;
-    try {
-      const prValidation = validatePlanRules(planRules as any);
-      if (prValidation?.requiresManualReview !== true) {
-        rateStructure = planRulesToRateStructure(planRules as any) as any;
-      }
-    } catch {
-      rateStructure = null;
-    }
-
-    let eflAvgPriceValidation: EflAvgPriceValidation | null = null;
-    try {
-      eflAvgPriceValidation = await validateEflAvgPriceTable({
-        rawText,
-        planRules,
-        rateStructure,
-      });
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : String(err ?? "unknown error");
-      eflAvgPriceValidation = {
-        status: "SKIP",
-        toleranceCentsPerKwh: 0.25,
-        points: [],
-        assumptionsUsed: {},
-        fail: false,
-        notes: [`Avg price validator error: ${msg}`],
-        avgTableFound: false,
-      };
-    }
-
-    return {
-      planRules: Object.keys(planRules).length > 0 ? planRules : null,
-      rateStructure,
-      parseConfidence: 0,
-      parseWarnings: warnings,
-      validation: eflAvgPriceValidation
-        ? { eflAvgPriceValidation }
-        : null,
-    };
+      baseWarnings: [
+        ...baseWarnings,
+        "AI_DISABLED_OR_MISSING_KEY: EFL AI text parser is disabled or missing OPENAI_API_KEY.",
+      ],
+      deterministicBaseCents,
+      deterministicTiers,
+      deterministicSingleEnergy,
+      deterministicTou,
+      deterministicTdspIncluded,
+    });
   }
 
   const systemPrompt = `
@@ -473,16 +512,18 @@ OUTPUT CONTRACT:
       err?.message ??
       (typeof err === "object" ? JSON.stringify(err) : String(err));
 
-    return {
-      planRules: null,
-      rateStructure: null,
-      parseConfidence: 0,
-      // Infra/API error → do not filter; keep full message.
-      parseWarnings: [
+    return await buildDeterministicOnlyParseResult({
+      rawText,
+      baseWarnings: [
         ...baseWarnings,
         `EFL AI text call failed: ${msg}`,
       ],
-    };
+      deterministicBaseCents,
+      deterministicTiers,
+      deterministicSingleEnergy,
+      deterministicTou,
+      deterministicTdspIncluded,
+    });
   }
 
   let parsed: any;
