@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { requiresStrongTemplateMatchForQueueItem } from "@/lib/efl/reviewQueueAutoResolve";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
@@ -303,7 +304,15 @@ export async function GET(req: NextRequest) {
           const cert = String(it?.repPuctCertificate || "").trim();
           const ver = String(it?.eflVersionCode || "").trim();
           const cv = cert && ver ? `${cert}::${ver}` : "";
-          if ((sha && planShas.has(sha)) || (url && planUrls.has(url)) || (cv && planCertVer.has(cv))) {
+          const matchedBySha = sha && planShas.has(sha);
+          const matchedByUrl = url && planUrls.has(url);
+          const matchedByCertVer = cv && planCertVer.has(cv);
+          const needsStrongMatch = requiresStrongTemplateMatchForQueueItem(it);
+          const matched =
+            Boolean(matchedBySha) ||
+            Boolean(matchedByCertVer) ||
+            (!needsStrongMatch && Boolean(matchedByUrl));
+          if (matched) {
             if (it?.id) resolveIds.push(String(it.id));
           }
         }
