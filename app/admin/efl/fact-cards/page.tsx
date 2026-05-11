@@ -763,6 +763,7 @@ export default function FactCardOpsPage() {
   >("supplier");
   const [queueSortDir, setQueueSortDir] = useState<SortDir>("asc");
   const currentPlanQueueSelected = queueKind === "EFL_PARSE" && queueSource.trim() === "current_plan_efl";
+  const currentPlanBillQueueSelected = queueKind === "EFL_PARSE" && queueSource.trim() === "current_plan_bill";
 
   async function loadQueue() {
     if (!token) {
@@ -863,6 +864,10 @@ export default function FactCardOpsPage() {
     }
     if (queueKind !== "EFL_PARSE") {
       setQueueErr('This auto processor only applies to kind="EFL_PARSE". Switch Kind to EFL_PARSE, or use the quarantine processor.');
+      return;
+    }
+    if (queueSource.trim() === "current_plan_bill") {
+      setQueueErr("Current-plan bill rows do not use the EFL auto processor. Review them from the Current plan bills source or use the current-plan bill parser tools.");
       return;
     }
     setQueueProcessLoading(true);
@@ -2542,6 +2547,10 @@ export default function FactCardOpsPage() {
                 <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenCurrentPlanQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
                   {queueProcessLoading ? "Processing…" : "Process OPEN current-plan queue (module)"}
                 </button>
+              ) : currentPlanBillQueueSelected ? (
+                <button className="px-3 py-2 rounded-lg border disabled:opacity-60 text-gray-500 cursor-not-allowed" disabled title="Current-plan bill queue rows are review items from the bill parser, not EFL parser items.">
+                  No auto processor for current-plan bills
+                </button>
               ) : (
                 <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
                   {queueProcessLoading ? "Processing…" : !queueSource.trim() ? "Process OPEN parse queue (dispatch all)" : "Process OPEN parse queue (auto)"}
@@ -2580,6 +2589,10 @@ export default function FactCardOpsPage() {
                 <>
                   Current-plan processor re-runs the raw-text EFL pipeline, recomputes home monthly bucket totals for the queued user, and persists the template into the{" "}
                   <span className="font-medium">current-plan module DB</span>. It does not use the offers/RatePlan persistence path.
+                </>
+              ) : currentPlanBillQueueSelected ? (
+                <>
+                  Current-plan bill rows come from the <span className="font-medium">bill parser</span> review path. They are kept separate from EFL-card parsing and do not run through the EFL auto-processor.
                 </>
               ) : !queueSource.trim() ? (
                 <>
@@ -2639,6 +2652,18 @@ export default function FactCardOpsPage() {
                 title='Show only queued current-plan EFL items'
               >
                 Current plan EFL
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm border-l ${queueSource.trim() === "current_plan_bill" ? "bg-gray-50 font-semibold" : "hover:bg-gray-50"}`}
+                onClick={() => {
+                  setQueueSource("current_plan_bill");
+                  if (queueKind === "ALL") setQueueKind("EFL_PARSE");
+                  if (queueStatus !== "OPEN") setQueueStatus("OPEN");
+                }}
+                title='Show only queued current-plan bill parser review items'
+              >
+                Current plan bills
               </button>
               <button
                 type="button"

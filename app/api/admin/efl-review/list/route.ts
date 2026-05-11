@@ -168,6 +168,11 @@ export async function GET(req: NextRequest) {
       // needing a bespoke endpoint per module.
       where.source = { startsWith: sourcePrefix };
     }
+    if (kindParam === "EFL_PARSE" && !source && !sourcePrefix) {
+      // Keep bill-parse review rows out of the default "EFL_PARSE" bucket in Fact Cards.
+      // Those rows are current-plan bill parser issues, not EFL-card parsing issues.
+      where.NOT = [{ source: "current_plan_bill" }];
+    }
 
     let items = await (prisma as any).eflParseReviewQueue.findMany({
       where,
