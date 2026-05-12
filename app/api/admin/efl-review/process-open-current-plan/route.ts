@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
-import { runEflPipelineFromRawTextNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineFromRawTextNoStore";
+import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 import { adminPersistCurrentPlanFromEflPipeline } from "@/lib/current-plan/adminPersistCurrentPlanFromEflPipeline";
 
@@ -167,18 +167,21 @@ export async function POST(req: NextRequest) {
         let usageAudit: any = null;
         let currentPlanPersist: any = null;
         try {
-          pipeline = await runEflPipelineFromRawTextNoStore({
+          pipeline = await runEflPipeline({
+            source: "queue_open",
+            actor: "system",
+            dryRun: true,
             rawText,
-            eflPdfSha256,
-            repPuctCertificate,
-            eflVersionCode,
-            source: "queue_rawtext",
+            identity: {
+              eflPdfSha256,
+              repPuctCertificate,
+              eflVersionCode,
+            },
             offerMeta: {
               supplier: it?.supplier ?? null,
               planName: it?.planName ?? null,
               termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
               tdspName: it?.tdspName ?? null,
-              offerId: null,
             },
           });
 
@@ -198,19 +201,18 @@ export async function POST(req: NextRequest) {
               usageEmail: userEmail,
               usageHomeId: (usageAudit as any)?.usageContext?.homeId ?? null,
               pipelineResult: {
-                rawTextPreview: String(pipeline?.deterministic?.rawTextPreview ?? rawText),
-                rawTextLen: pipeline?.deterministic?.rawTextLength ?? rawText.length,
-                rawTextTruncated: Boolean(pipeline?.deterministic?.rawTextTruncated ?? false),
-                eflPdfSha256: pipeline?.deterministic?.eflPdfSha256 ?? eflPdfSha256,
-                repPuctCertificate:
-                  pipeline?.deterministic?.repPuctCertificate ?? repPuctCertificate,
-                eflVersionCode: pipeline?.deterministic?.eflVersionCode ?? eflVersionCode,
+                rawTextPreview: String(pipeline?.rawTextPreview ?? rawText),
+                rawTextLen: pipeline?.rawTextLen ?? rawText.length,
+                rawTextTruncated: Boolean(pipeline?.rawTextTruncated ?? false),
+                eflPdfSha256: pipeline?.eflPdfSha256 ?? eflPdfSha256,
+                repPuctCertificate: pipeline?.repPuctCertificate ?? repPuctCertificate,
+                eflVersionCode: pipeline?.eflVersionCode ?? eflVersionCode,
                 planRules: pipeline?.planRules ?? null,
                 rateStructure: pipeline?.rateStructure ?? null,
                 finalValidation: pipeline?.finalValidation ?? null,
                 passStrength: pipeline?.passStrength ?? null,
-                queued: pipeline?.needsAdminReview ?? false,
-                queueReason: pipeline?.finalValidation?.queueReason ?? null,
+                queued: pipeline?.queued ?? false,
+                queueReason: pipeline?.queueReason ?? pipeline?.finalValidation?.queueReason ?? null,
               },
             });
           }

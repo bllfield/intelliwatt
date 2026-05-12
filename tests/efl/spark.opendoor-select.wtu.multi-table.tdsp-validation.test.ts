@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { extractEflTdspCharges, validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
+import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
+import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
 const rawText = `
 Electricity Facts Label (EFL)
@@ -80,6 +83,90 @@ describe("Spark Opendoor Select WTU residential TDSP extraction", () => {
 
     expect(tdsp.monthlyCents).toBe(324);
     expect(tdsp.perKwhCents).toBeCloseTo(5.6677, 6);
+  });
+
+  it("raw-text pipeline carries the residential TDU per-kWh row through solver validation", async () => {
+    const result = await runEflPipelineFromRawTextNoStore({
+      rawText,
+      eflPdfSha256: "fixture-multi-table-tdsp-raw-text",
+      repPuctCertificate: "10046",
+      source: "queue_rawtext",
+      offerMeta: {
+        supplier: "Fixture REP",
+        planName: "Fixture Plan",
+        termMonths: 4,
+        tdspName: "AEP_NORTH",
+        offerId: "fixture-offer",
+      },
+    });
+
+    expect(result.finalValidation?.status).toBe("PASS");
+    expect(result.finalValidation?.assumptionsUsed?.tdspFromEfl?.perKwhCents).toBeCloseTo(5.6677, 6);
+    expect(result.finalValidation?.assumptionsUsed?.tdspFromEfl?.monthlyCents).toBe(324);
+  });
+
+  it("shared solver refreshes stale monthly-only TDSP validation even without rule edits", async () => {
+    const planRules = {
+      rateType: "FIXED",
+      planType: "flat",
+      termMonths: 4,
+      defaultRateCentsPerKwh: 22.99,
+      baseChargePerMonthCents: 0,
+      billCredits: [],
+      timeOfUsePeriods: [],
+    };
+    const rateStructure = {
+      type: "FIXED",
+      energyRateCents: 22.99,
+      baseMonthlyFeeCents: 0,
+      billCredits: { hasBillCredit: false, rules: [] },
+    };
+
+    const solved = await solveEflValidationGaps({
+      rawText,
+      planRules,
+      rateStructure,
+      validation: {
+        status: "FAIL",
+        assumptionsUsed: {
+          tdspFromEfl: {
+            monthlyCents: 324,
+            perKwhCents: null,
+          },
+        },
+        queueReason: "stale monthly-only validation fixture",
+      } as any,
+    });
+
+    expect(solved.solverApplied).toEqual([]);
+    expect(solved.validationAfter?.status).toBe("PASS");
+    expect(solved.validationAfter?.assumptionsUsed?.tdspFromEfl?.perKwhCents).toBeCloseTo(5.6677, 6);
+    expect(solved.validationAfter?.assumptionsUsed?.tdspFromEfl?.monthlyCents).toBe(324);
+  });
+
+  it("canonical orchestrator used by manual text stays out of queue for the same pattern", async () => {
+    const result = await runEflPipeline({
+      source: "manual_text",
+      actor: "admin",
+      dryRun: true,
+      rawText,
+      identity: {
+        eflPdfSha256: "fixture-canonical-orchestrator-multi-table-tdsp",
+        repPuctCertificate: "10046",
+      },
+      offerMeta: {
+        supplier: "Fixture REP",
+        planName: "Fixture Plan",
+        termMonths: 4,
+        tdspName: "AEP_NORTH",
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.queued).toBe(false);
+    expect(result.finalValidation?.status).toBe("PASS");
+    expect(result.finalValidation?.assumptionsUsed?.tdspFromEfl?.perKwhCents).toBeCloseTo(5.6677, 6);
+    expect(result.finalValidation?.assumptionsUsed?.tdspFromEfl?.monthlyCents).toBe(324);
   });
 });
 

@@ -61,6 +61,7 @@
 1) Canonical date/window logic:
    - `lib/time/chicago.ts`
    - `modules/usageSimulator/canonicalWindow.ts`
+
 2) Actual interval source selection/fetching:
    - `modules/realUsageAdapter/actual.ts`
    - `lib/usage/actualDatasetForHouse.ts`
@@ -85,6 +86,11 @@
 7) Monthly stitching/display totals:
    - `lib/usage/buildUsageBucketsForEstimate.ts`
    - `modules/usageSimulator/dataset.ts`
+
+8) Canonical EFL processing:
+   - Route-level offer/current-plan/manual/batch/auto-heal processing must enter through `runEflPipeline()`.
+   - `runEflPipelineNoStore()`, `runEflPipelineFromRawTextNoStore()`, and `solveEflValidationGaps()` are helper layers under that orchestrator, not app-level business paths.
+   - UI/detail APIs must not present stored queue/template validation evidence as fresh parser output unless they first rerun `runEflPipeline()` or clearly label the data as stored snapshot evidence.
 
 ========================================
 GAPFILL + SIM USAGE SHARED MODULES (CANONICAL)

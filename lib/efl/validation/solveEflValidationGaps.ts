@@ -669,16 +669,26 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
-  // If nothing was applied, return quickly with the original validation.
+  // Even if no shape changes were needed, refresh validation through the current
+  // shared validator. Cached queue/template rows may carry older validation
+  // evidence, and parser rule fixes must take effect from every caller.
   if (solverApplied.length === 0) {
+    const validationAfter = await validateEflAvgPriceTable({
+      rawText,
+      planRules: (derivedPlanRules as PlanRules) ?? (planRules as PlanRules),
+      rateStructure:
+        (derivedRateStructure as RateStructure) ?? (rateStructure as RateStructure),
+      toleranceCentsPerKwh: validation?.toleranceCentsPerKwh,
+    });
+
     return {
       derivedPlanRules,
       derivedRateStructure,
       solverApplied,
-      assumptionsUsed: validation?.assumptionsUsed ?? {},
-      validationAfter: validation,
+      assumptionsUsed: validationAfter.assumptionsUsed,
+      validationAfter,
       solveMode: "NONE",
-      queueReason: validation?.queueReason,
+      queueReason: validationAfter.queueReason,
     };
   }
 

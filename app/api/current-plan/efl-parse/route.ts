@@ -9,7 +9,7 @@ import {
   extractEflVersionCodeFromText,
   extractProviderAndPlanNameFromEflText,
 } from "@/lib/efl/eflExtractor";
-import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 import { extractUsageChargeThresholdRule } from "@/lib/current-plan/factLabelUsageCharge";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
@@ -330,18 +330,23 @@ export async function POST(req: NextRequest) {
     // fallback reads below, but uploads should not silently bypass newer parser logic.
     const shouldRunPipeline = true;
 
-    // Use the same EFL engine as Fact Cards (AI parse → avg-price validator → gap solver) when needed.
-    const pipeline = shouldRunPipeline
-      ? await runEflPipelineFromRawTextNoStore({
+    // Use the route-level shared EFL orchestrator as the authoritative business path.
+    const pipeline: any = shouldRunPipeline
+      ? await runEflPipeline({
+          source: "on_demand",
+          actor: "system",
+          dryRun: true,
           rawText,
-          eflPdfSha256: det.eflPdfSha256,
-          source: "manual",
+          identity: {
+            eflPdfSha256: det.eflPdfSha256,
+            repPuctCertificate: repPuctCertificateFromText,
+            eflVersionCode: eflVersionCodeFromText,
+          },
           offerMeta: {
             supplier: labels.providerName ?? null,
             planName: labels.planName ?? null,
             termMonths: null,
             tdspName: null,
-            offerId: null,
           },
         })
       : null;

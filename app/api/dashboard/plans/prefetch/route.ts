@@ -7,10 +7,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
-import { validatePlanRules } from "@/lib/plan-engine-next/efl/planEngine";
-import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
-import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { Prisma } from "@prisma/client";
 
@@ -324,10 +321,15 @@ export async function POST(req: NextRequest) {
       // Run full pipeline (deterministic extract -> AI parse -> validate -> solver -> pass strength)
       let pipeline: any = null;
       try {
-        pipeline = await runEflPipelineNoStore({
+        pipeline = await runEflPipeline({
+          source: "on_demand",
+          actor: "system",
+          dryRun: false,
+          offerId,
+          eflUrl: (pdf as any).pdfUrl ?? eflUrl,
+          eflSourceUrl: eflUrl,
           pdfBytes: pdf.pdfBytes,
-          source: "wattbuy",
-          offerMeta: { supplier, planName, termMonths, tdspName, offerId },
+          offerMeta: { supplier, planName, termMonths, tdspName },
         });
       } catch (e: any) {
         // Fail-soft: one bad EFL should not 500 the entire endpoint (this route is called from the customer dashboard).
@@ -382,231 +384,28 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const det = pipeline.deterministic;
-      const finalValidation = pipeline.finalValidation ?? null;
-      const finalStatus: string | null = finalValidation?.status ?? null;
-      const passStrength = (pipeline.passStrength ?? null) as any;
+      if (pipeline?.ratePlanId) {
+        createdOrLinked++;
+        results.push({ offerId, action: "LINKED", ratePlanId: pipeline.ratePlanId });
+        continue;
+      }
 
-      const canAutoTemplate =
-        finalStatus === "PASS" &&
-        passStrength === "STRONG" &&
-        det.eflPdfSha256 &&
-        pipeline.planRules &&
-        pipeline.rateStructure;
-
-      if (!canAutoTemplate) {
-        // Queue for manual admin review (either FAIL/SKIP, or PASS but WEAK/INVALID).
-        try {
-          const queueSha =
-            det.eflPdfSha256 ??
-            sha256Hex(["dashboard_prefetch", "PIPELINE_NO_TEMPLATE", offerId, pdf.pdfUrl].join("|"));
-          await upsertReviewQueueRowRespectingOpenUrl({
-            prismaClient: prisma as any,
-            where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
-            create: {
-              source: "dashboard_prefetch",
-              kind: "EFL_PARSE",
-              dedupeKey: offerId,
-              eflPdfSha256: queueSha,
-              repPuctCertificate: det.repPuctCertificate ?? null,
-              eflVersionCode: det.eflVersionCode ?? null,
-              offerId,
-              supplier,
-              planName,
-              eflUrl: pdf.pdfUrl ?? eflUrl,
-              tdspName,
-              termMonths,
-              rawText: det.rawText ?? null,
-              planRules: pipeline.planRules ?? null,
-              rateStructure: pipeline.rateStructure ?? null,
-              validation: pipeline.validation ?? null,
-              derivedForValidation: pipeline.derivedForValidation ?? null,
-              finalStatus: String(finalStatus ?? "FAIL"),
-              queueReason: String(finalValidation?.queueReason ?? "Not eligible for auto-templating (requires admin review)."),
-              solverApplied: pipeline.derivedForValidation?.solverApplied ?? null,
-            },
-            update: {
-              updatedAt: new Date(),
-              kind: "EFL_PARSE",
-              dedupeKey: offerId,
-              eflPdfSha256: queueSha,
-              repPuctCertificate: det.repPuctCertificate ?? null,
-              eflVersionCode: det.eflVersionCode ?? null,
-              offerId,
-              supplier,
-              planName,
-              eflUrl: pdf.pdfUrl ?? eflUrl,
-              tdspName,
-              termMonths,
-              rawText: det.rawText ?? null,
-              planRules: pipeline.planRules ?? null,
-              rateStructure: pipeline.rateStructure ?? null,
-              validation: pipeline.validation ?? null,
-              derivedForValidation: pipeline.derivedForValidation ?? null,
-              finalStatus: String(finalStatus ?? "FAIL"),
-              queueReason: String(finalValidation?.queueReason ?? "Not eligible for auto-templating (requires admin review)."),
-              solverApplied: pipeline.derivedForValidation?.solverApplied ?? null,
-              resolvedAt: null,
-              resolvedBy: null,
-              resolutionNotes: null,
-            },
-          });
-          queued++;
-        } catch {
-          // Best-effort.
-        }
+      if (pipeline?.queued) {
+        queued++;
         results.push({
           offerId,
           action: "QUEUED",
-          reason: finalStatus === "PASS" ? `PASS_${passStrength ?? "UNKNOWN"}` : `STATUS_${finalStatus ?? "UNKNOWN"}`,
+          reason: pipeline.queueReason ?? "EFL pipeline queued for review.",
         });
         continue;
       }
 
-      // Persist template and link offerId -> ratePlanId.
-      const points: any[] = Array.isArray(finalValidation?.points) ? finalValidation.points : [];
-      const pickExpected = (kwh: number): number | null => {
-        const p = points.find((x: any) => Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh);
-        const n = Number(p?.expectedAvgCentsPerKwh ?? p?.expectedAvgPriceCentsPerKwh);
-        return Number.isFinite(n) ? n : null;
-      };
-      const pickModeled = (kwh: number): number | null => {
-        const p = points.find((x: any) => Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh);
-        const n = Number(p?.modeledAvgCentsPerKwh ?? p?.modeledAvgPriceCentsPerKwh ?? p?.modeledCentsPerKwh);
-        return Number.isFinite(n) ? n : null;
-      };
-
-      const planRulesValidation = validatePlanRules(pipeline.planRules as any);
-      if (planRulesValidation?.requiresManualReview === true) {
-        // Treat as queue (we refuse to persist ambiguous templates).
-        results.push({ offerId, action: "QUEUED", reason: "PLANRULES_REQUIRES_MANUAL_REVIEW" });
-        continue;
-      }
-
-      const modeledAt = new Date();
-      const rsWithEvidence =
-        pipeline.rateStructure && typeof pipeline.rateStructure === "object"
-          ? ({
-              ...(pipeline.rateStructure as any),
-              __eflAvgPriceValidation: finalValidation ?? null,
-              __eflAvgPriceEvidence: {
-                computedAt: modeledAt.toISOString(),
-                source: "dashboard_prefetch",
-                passStrength: passStrength ?? null,
-                tdspAppliedMode: finalValidation?.assumptionsUsed?.tdspAppliedMode ?? null,
-              },
-            } as any)
-          : (pipeline.rateStructure as any);
-
-      const saved = await upsertRatePlanFromEfl({
-        mode: "live",
-        eflUrl: pdf.pdfUrl,
-        eflSourceUrl: eflUrl,
-        repPuctCertificate: det.repPuctCertificate ?? null,
-        eflVersionCode: det.eflVersionCode ?? null,
-        eflPdfSha256: String(det.eflPdfSha256),
-        utilityId: inferTdspTerritoryFromEflText(det.rawText) ?? null,
-        state: "TX",
-        termMonths,
-        rate500: pickExpected(500) ?? (typeof o.kwh500_cents === "number" ? o.kwh500_cents : null),
-        rate1000: pickExpected(1000) ?? (typeof o.kwh1000_cents === "number" ? o.kwh1000_cents : null),
-        rate2000: pickExpected(2000) ?? (typeof o.kwh2000_cents === "number" ? o.kwh2000_cents : null),
-        modeledRate500: pickModeled(500),
-        modeledRate1000: pickModeled(1000),
-        modeledRate2000: pickModeled(2000),
-        modeledEflAvgPriceValidation: finalValidation ?? null,
-        modeledComputedAt: modeledAt,
-        cancelFee: o.cancel_fee_text ?? null,
-        providerName: supplier,
-        planName,
-        planRules: pipeline.planRules as any,
-        rateStructure: rsWithEvidence as any,
-        validation: planRulesValidation as any,
+      results.push({
+        offerId,
+        action: "SKIPPED",
+        reason: pipeline?.errors?.[0]?.message ?? "EFL pipeline produced no template or queue action.",
       });
-
-      const templatePersisted = Boolean((saved as any)?.templatePersisted);
-      const ratePlanId = (saved as any)?.ratePlan?.id ? String((saved as any).ratePlan.id) : null;
-
-      if (templatePersisted && ratePlanId) {
-        try {
-          await (prisma as any).offerIdRatePlanMap.upsert({
-            where: { offerId },
-            create: {
-              offerId,
-              ratePlanId,
-              lastLinkedAt: new Date(),
-              linkedBy: "dashboard-prefetch",
-            },
-            update: {
-              ratePlanId,
-              lastLinkedAt: new Date(),
-              linkedBy: "dashboard-prefetch",
-            },
-          });
-        } catch {
-          // Best-effort.
-        }
-        try {
-          await (prisma as any).offerRateMap.updateMany({
-            where: { offerId },
-            data: { ratePlanId, lastSeenAt: new Date() },
-          });
-        } catch {
-          // Best-effort.
-        }
-        createdOrLinked++;
-        results.push({ offerId, action: "LINKED", ratePlanId });
-      } else {
-        // If template didn't persist due to missing fields, queue it.
-        try {
-          const queueSha = det.eflPdfSha256 ?? sha256Hex(["dashboard_prefetch", "TEMPLATE_NOT_PERSISTED", offerId, pdf.pdfUrl].join("|"));
-          const missing = Array.isArray((saved as any)?.missingTemplateFields)
-            ? ((saved as any).missingTemplateFields as string[])
-            : [];
-          await upsertReviewQueueRowRespectingOpenUrl({
-            prismaClient: prisma as any,
-            where: { eflPdfSha256: queueSha },
-            create: {
-              source: "dashboard_prefetch",
-              eflPdfSha256: queueSha,
-              repPuctCertificate: det.repPuctCertificate ?? null,
-              eflVersionCode: det.eflVersionCode ?? null,
-              offerId,
-              supplier,
-              planName,
-              eflUrl: pdf.pdfUrl ?? eflUrl,
-              tdspName,
-              termMonths,
-              rawText: det.rawText ?? null,
-              planRules: pipeline.planRules ?? null,
-              rateStructure: pipeline.rateStructure ?? null,
-              validation: pipeline.validation ?? null,
-              derivedForValidation: pipeline.derivedForValidation ?? null,
-              finalStatus: String(finalStatus ?? "FAIL"),
-              queueReason: missing.length ? `Template not persisted (missing fields): ${missing.join(", ")}` : "Template not persisted.",
-              solverApplied: pipeline.derivedForValidation?.solverApplied ?? null,
-            },
-            update: {
-              updatedAt: new Date(),
-              offerId,
-              supplier,
-              planName,
-              eflUrl: pdf.pdfUrl ?? eflUrl,
-              tdspName,
-              termMonths,
-              finalStatus: String(finalStatus ?? "FAIL"),
-              queueReason: missing.length ? `Template not persisted (missing fields): ${missing.join(", ")}` : "Template not persisted.",
-              resolvedAt: null,
-              resolvedBy: null,
-              resolutionNotes: null,
-            },
-          });
-          queued++;
-        } catch {
-          // Best-effort.
-        }
-        results.push({ offerId, action: "QUEUED", reason: "TEMPLATE_NOT_PERSISTED" });
-      }
+      continue;
     }
 
     const remaining = Math.max(0, candidates.length - processed);
