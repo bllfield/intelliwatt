@@ -238,7 +238,7 @@ function parseCentsPerKwhFromLine(line: string): number | null {
   const cleaned = line.replace(/,/g, "");
   const centsMatches = Array.from(
     // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
-    cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+    cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
   );
   if (centsMatches.length > 0) {
     // When a line contains both REP energy charges and TDSP delivery charges
@@ -345,7 +345,7 @@ function parseCentsPerKwhToken(s: string): number | null {
   {
     const m = cleaned.match(
       // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
-      /(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kwh|per\s*kwh)/i,
+      /(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kwh|per\s*kwh)/i,
     );
     if (m?.[1]) {
       const n = Number(m[1]);
@@ -403,7 +403,7 @@ function pickBestTdspPerKwhLine(
     if (!hasTdspContext) return false;
     // Accept either cents-form or dollars-form per-kWh tokens.
     const hasToken =
-      /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) ||
+      /(¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) ||
       /\$\s*[0-9]+(?:\.[0-9]+)?\s*(?:[\/⁄]\s*kWh|per\s*kWh)/i.test(l) ||
       /per\s*kWh[^0-9$]{0,20}\$?\s*[0-9]+(?:\.[0-9]+)?/i.test(l);
     if (!hasToken) return false;
@@ -411,7 +411,7 @@ function pickBestTdspPerKwhLine(
     // Avoid false positives where our joined-line window contains "TDU Delivery Charges"
     // but the only ¢/kWh token is actually the REP "Energy Charge".
     const tokenCount = Array.from(
-      l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+      l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
     ).length;
     if (/Energy\s*Charge/i.test(l) && tokenCount === 1) return false;
     return true;
@@ -423,20 +423,20 @@ function pickBestTdspPerKwhLine(
   const next = lines.find(
     (l) =>
       (/Delivery/i.test(l) || isUtilityChargesLine(l)) &&
-      /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
+      /(¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
       !(/Energy\s*Charge/i.test(l) &&
         Array.from(
-          l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+          l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
         ).length === 1),
   );
   if (next) return { value: parseCentsPerKwhFromLine(next), line: next };
 
   const any = lines.find((l) =>
     !(/Average\s+price\s+per\s*kWh/i.test(l) || /Average\s+monthly\s+use/i.test(l)) &&
-    /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
+    /(¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
     !(/Energy\s*Charge/i.test(l) &&
       Array.from(
-        l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+        l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
       ).length === 1),
   );
   if (any) return { value: parseCentsPerKwhFromLine(any), line: any };

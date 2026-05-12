@@ -1361,7 +1361,7 @@ function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-  const centsTokenRe = /(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i;
+  const centsTokenRe = /(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:\/\s*kwh|per\s*kwh)/i;
   const dollarTokenRe =
     /\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*kwh|per\s*kwh)/i;
   const dollarAfterHeaderRe =
@@ -1369,7 +1369,7 @@ function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
   const parseAllCentsTokens = (line: string): number[] => {
     const cleaned = line.replace(/,/g, "");
     const hits = Array.from(
-      cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/gi),
+      cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:\/\s*kwh|per\s*kwh)/gi),
     );
     return hits
       .map((h) => (h?.[1] ? Number(h[1]) : NaN))
@@ -1730,7 +1730,7 @@ function extractWeekdayWeekendTou(text: string): null | {
   // that actually contains weekday/weekend headers + ¢/kWh tokens.
   const lines = String(text ?? "").split(/\r?\n/);
   const tokenRe =
-    /([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/gi;
+    /([0-9]+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:\/\s*kwh|per\s*kwh)/gi;
 
   let bestWindow: string | null = null;
   for (let i = 0; i < lines.length; i++) {
@@ -1763,10 +1763,10 @@ function extractWeekdayWeekendTou(text: string): null | {
   const cleaned = String(line).replace(/\s+/g, " ");
 
   let weekdayMatch = cleaned.match(
-    /\bWeekdays?\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+    /\bWeekdays?\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:¢\s*)?(?:\/\s*kwh|per\s*kwh)/i,
   );
   let weekendMatch = cleaned.match(
-    /\bWeekends?\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+    /\bWeekends?\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:¢\s*)?(?:\/\s*kwh|per\s*kwh)/i,
   );
 
   // Table variant: some EFLs show "Weekdays / Weekends" as column headers on

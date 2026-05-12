@@ -893,7 +893,7 @@ function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): numbe
 
       // Cents form: "17.06¢ per kWh" / "17.06 ¢/kWh"
       const centsAll = Array.from(
-        line.matchAll(/([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/gi),
+        line.matchAll(/([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*¢\s*(?:¢\s*)?(?:\/\s*kwh|per\s*kwh)/gi),
       )
         .map((m) => Number(m?.[1]))
         .filter((n) => Number.isFinite(n));
