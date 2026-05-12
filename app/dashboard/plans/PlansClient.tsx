@@ -175,6 +175,7 @@ export default function PlansClient() {
   const pollTimerRef = useRef<number | null>(null);
   const pollStopTimerRef = useRef<number | null>(null);
   const pollInFlightRef = useRef(false);
+  const queuedRetryAttemptedRef = useRef(false);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -328,6 +329,7 @@ export default function PlansClient() {
     prefetchInFlightRef.current = false;
     setPrefetchNote(null);
     pipelineKickRef.current = false;
+    queuedRetryAttemptedRef.current = false;
     if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
     pollTimerRef.current = null;
     if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
@@ -638,7 +640,13 @@ export default function PlansClient() {
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const pendingCountNow = pendingCountFromResponse(resp);
-    if (pendingCountNow <= 0) return;
+    const queuedRetryCountNow = offersNow.filter((o: any) => {
+      if (String(o?.intelliwatt?.statusLabel ?? "").toUpperCase() !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      return tceStatus !== "OK" && tceStatus !== "APPROXIMATE";
+    }).length;
+    const needsRetryKick = pendingCountNow > 0 || queuedRetryCountNow > 0;
+    if (!needsRetryKick) return;
 
     // Warmups may only START from the default landing view.
     // If the user has interacted with sort/filter/search, we must not start any background work.
@@ -668,14 +676,24 @@ export default function PlansClient() {
     }
 
     // Re-kick at most once per ~75s while there are pending estimates.
-    // The pipeline is bounded (timeBudget + maxEstimatePlans) so it typically needs multiple runs.
-    const kickEligible = lastKickAt == null || now - lastKickAt >= 75_000;
+    // If there are no "pending" offers left but some rows are still QUEUED/non-available,
+    // force one pipeline retry on this page load before treating them as terminal.
+    const retryOnlyQueued = pendingCountNow <= 0 && queuedRetryCountNow > 0;
+    const kickEligible =
+      retryOnlyQueued
+        ? !queuedRetryAttemptedRef.current
+        : lastKickAt == null || now - lastKickAt >= 75_000;
     if (kickEligible && !prefetchInFlightRef.current && now - lastPipelineKickAtRef.current >= 30_000) {
       pipelineKickRef.current = true;
       lastPipelineKickAtRef.current = now;
+      if (retryOnlyQueued) queuedRetryAttemptedRef.current = true;
 
       prefetchInFlightRef.current = true;
-      setPrefetchNote(`Preparing IntelliWatt calculations… (${pendingCountNow} pending)`);
+      setPrefetchNote(
+        retryOnlyQueued
+          ? `Retrying IntelliWatt calculations… (${queuedRetryCountNow} queued)`
+          : `Preparing IntelliWatt calculations… (${pendingCountNow} pending)`,
+      );
       try {
         const params = new URLSearchParams();
         params.set("reason", "plans_fallback");
@@ -712,7 +730,13 @@ export default function PlansClient() {
               }
             } else {
               const why = typeof j?.reason === "string" && j.reason ? j.reason : typeof j?.error === "string" ? j.error : null;
-              if (why) setPrefetchNote(`Preparing IntelliWatt calculations… (${pendingCountNow} pending) · ${why}`);
+              if (why) {
+                setPrefetchNote(
+                  retryOnlyQueued
+                    ? `Retrying IntelliWatt calculations… (${queuedRetryCountNow} queued) · ${why}`
+                    : `Preparing IntelliWatt calculations… (${pendingCountNow} pending) · ${why}`,
+                );
+              }
             }
           } catch (e: any) {
             setLastPipelineKickResult({ ok: false, error: e?.message ?? String(e) });
