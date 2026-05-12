@@ -15,6 +15,44 @@ export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+async function backfillOfferTemplateLinks(args: {
+  offerId: string | null;
+  ratePlanId: string | null;
+}) {
+  const offerId = String(args.offerId ?? "").trim();
+  const ratePlanId = String(args.ratePlanId ?? "").trim();
+  if (!offerId || !ratePlanId) return;
+
+  try {
+    await (prisma as any).offerRateMap.updateMany({
+      where: { offerId },
+      data: { ratePlanId, lastSeenAt: new Date() },
+    });
+  } catch {
+    // ignore
+  }
+
+  try {
+    const now = new Date();
+    await (prisma as any).offerIdRatePlanMap.upsert({
+      where: { offerId },
+      create: {
+        offerId,
+        ratePlanId,
+        lastLinkedAt: now,
+        linkedBy: "process-quarantine",
+      },
+      update: {
+        ratePlanId,
+        lastLinkedAt: now,
+        linkedBy: "process-quarantine",
+      },
+    });
+  } catch {
+    // ignore
+  }
+}
+
 function normalizeUtilityId(x: unknown): string {
   return String(x ?? "").trim().toUpperCase();
 }
@@ -348,6 +386,14 @@ export async function POST(req: NextRequest) {
               persisted++;
               if (!dryRun) {
                 try {
+                  await backfillOfferTemplateLinks({
+                    offerId: it?.offerId ?? null,
+                    ratePlanId: persistedRatePlanId,
+                  });
+                } catch {
+                  // ignore
+                }
+                try {
                   const now = new Date();
                   await (prisma as any).eflParseReviewQueue.update({
                     where: { id },
@@ -559,6 +605,15 @@ export async function POST(req: NextRequest) {
                     if (keys.length > 0) {
                       await ensureBucketsExist({ bucketKeys: keys });
                     }
+                  } catch {
+                    // ignore
+                  }
+
+                  try {
+                    await backfillOfferTemplateLinks({
+                      offerId: it?.offerId ?? null,
+                      ratePlanId: persistedRatePlanId,
+                    });
                   } catch {
                     // ignore
                   }
