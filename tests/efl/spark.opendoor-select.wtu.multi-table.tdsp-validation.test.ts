@@ -69,5 +69,17 @@ describe("Spark Opendoor Select WTU residential TDSP extraction", () => {
     expect(validation.assumptionsUsed?.tdspFromEfl?.monthlyCents).toBe(324);
     expect(validation.assumptionsUsed?.tdspAppliedMode).toBe("ADDED_FROM_EFL");
   });
+
+  it("extracts a delivery cents row even when the per-kWh unit column is lost", () => {
+    const rawWithoutInlineUnit = rawText.replace(
+      "Electricity       TDU Delivery Charge                           5.66770¢                      ¢ per kWh",
+      "Electricity       TDU Delivery Charge                           5.66770¢",
+    );
+
+    const tdsp = extractEflTdspCharges(rawWithoutInlineUnit);
+
+    expect(tdsp.monthlyCents).toBe(324);
+    expect(tdsp.perKwhCents).toBeCloseTo(5.6677, 6);
+  });
 });
 

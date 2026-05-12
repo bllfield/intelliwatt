@@ -216,6 +216,7 @@
     - the row has explicit delivery context (`TDU Delivery Charge`, `TDSP Delivery Charge`, `Oncor Charges`, etc.), and
     - the numeric token appears as `N¢`, and
     - the unit may appear in an adjacent column as `¢ per kWh` rather than inline as `N¢ per kWh`.
+    - the unit column may be lost entirely by PDF text extraction, leaving a row like `TDU Delivery Charge 5.82720¢`.
   - Conceptual pattern:
     - `(<delivery context>).{0,80}(\d+(?:\.\d+)?)¢\s*(?:¢\s*)?(?:/ ?kWh|per ?kWh)`
 
@@ -228,6 +229,7 @@
   - Require clear TDSP/TDU/delivery context on the same logical line/window.
   - Exclude the `Average price per kWh` table as a TDSP source.
   - If a candidate line has TDSP context but does not actually parse to a numeric per-kWh charge, continue scanning later candidates instead of treating that candidate as authoritative.
+  - Only allow cents-only delivery rows when explicit `TDU`/`TDSP` and `Delivery Charge` context is present on the same line.
   - Do not treat a REP `Energy Charge` line as TDSP when it is the only cents-per-kWh token in the window.
 
 - **Known examples**

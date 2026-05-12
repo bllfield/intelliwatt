@@ -249,6 +249,22 @@ function parseCentsPerKwhFromLine(line: string): number | null {
     return Number.isFinite(v) ? v : null;
   }
 
+  // Split/lost-unit table pattern: a delivery row can render as
+  // "TDU Delivery Charge 5.82720¢" while the "¢ per kWh" unit is in a
+  // separate table column or lost by pdftotext. Only accept this when the same
+  // line has explicit TDSP/TDU delivery context, never from avg-price rows.
+  if (
+    !(/Average\s+price\s+per\s*kWh/i.test(cleaned) || /Average\s+monthly\s+use/i.test(cleaned)) &&
+    /\b(?:TDU|TDSP)\b[\s\S]{0,80}\bDelivery\s+Charge\b/i.test(cleaned)
+  ) {
+    const centsOnlyMatches = Array.from(cleaned.matchAll(/([0-9]+(?:\.[0-9]+)?)\s*¢/gi));
+    if (centsOnlyMatches.length > 0) {
+      const last = centsOnlyMatches[centsOnlyMatches.length - 1];
+      const v = Number(last?.[1]);
+      return Number.isFinite(v) ? v : null;
+    }
+  }
+
   // Some EFLs express delivery/energy rates as dollars per kWh:
   //   "per kWh $0.051248"
   //   "$0.051248 per kWh"
@@ -404,6 +420,7 @@ function pickBestTdspPerKwhLine(
     // Accept either cents-form or dollars-form per-kWh tokens.
     const hasToken =
       /(¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) ||
+      /\b(?:TDU|TDSP)\b[\s\S]{0,80}\bDelivery\s+Charge\b[\s\S]{0,80}[0-9]+(?:\.[0-9]+)?\s*¢/i.test(l) ||
       /\$\s*[0-9]+(?:\.[0-9]+)?\s*(?:[\/⁄]\s*kWh|per\s*kWh)/i.test(l) ||
       /per\s*kWh[^0-9$]{0,20}\$?\s*[0-9]+(?:\.[0-9]+)?/i.test(l);
     if (!hasToken) return false;
